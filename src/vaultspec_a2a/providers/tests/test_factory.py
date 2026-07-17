@@ -251,6 +251,39 @@ def test_provider_factory_zai_injects_configured_token() -> None:
         assert model.auth_mode == "none_detected"
 
 
+def test_provider_factory_kimi_creates_acp_on_kimi_agent() -> None:
+    """Kimi builds an AcpChatModel on the `kimi acp` command with the kimi family."""
+    import shutil
+
+    from ..factory import settings as factory_settings
+
+    if shutil.which("kimi") is None:
+        with pytest.raises(ValueError, match="Kimi CLI not resolvable"):
+            from ..factory import classify_provider_command
+
+            classify_provider_command(Provider.KIMI)
+        return
+    model = ProviderFactory().create(Provider.KIMI)
+    assert isinstance(model, AcpChatModel)
+    # Kimi drives its own agent, NOT the claude-agent-acp wrapper.
+    assert model.command[-1] == "acp"
+    assert "kimi" in model.command[0].lower()
+    assert model.provider == Provider.KIMI.value
+    # The backend family discriminator: kimi omits the Claude allowedTools _meta.
+    assert model.acp_family == "kimi"
+    assert model._config.acp_family == "kimi"
+    # Env passthrough uses the CLI's native unprefixed names; the key is a secret.
+    if factory_settings.kimi_api_key:
+        assert model.env_vars["KIMI_API_KEY"] == (
+            factory_settings.kimi_api_key.get_secret_value()
+        )
+        assert model.auth_mode == "kimi_api_key"
+        assert factory_settings.kimi_api_key.get_secret_value() not in repr(model)
+    else:
+        assert "KIMI_API_KEY" not in model.env_vars
+        assert model.auth_mode == "none_detected"
+
+
 def test_classify_provider_command_zai_returns_acp_meta() -> None:
     """Z.ai classifies to the same ACP wrapper command metadata as Claude."""
     if not _CLAUDE_ACP_JS.exists():

@@ -88,6 +88,29 @@ def _build_zai_env(
     return env_vars
 
 
+def _build_kimi_env(
+    kimi_api_key: str | None = None,
+    kimi_base_url: str | None = None,
+    kimi_model_name: str | None = None,
+) -> dict[str, str]:
+    """Return explicit Kimi auth/config env vars for the ``kimi acp`` subprocess.
+
+    The Kimi CLI reads its NATIVE unprefixed names directly from the process
+    environment (the Z.ai ``ANTHROPIC_*`` passthrough precedent): ``KIMI_API_KEY``
+    authenticates, ``KIMI_BASE_URL`` retargets the Moonshot endpoint, and
+    ``KIMI_MODEL_NAME`` selects the model. Only names with a value are injected;
+    the key is a secret, placed in the returned dict but never logged.
+    """
+    env_vars: dict[str, str] = {}
+    if kimi_api_key and kimi_api_key.strip():
+        env_vars["KIMI_API_KEY"] = kimi_api_key
+    if kimi_base_url and kimi_base_url.strip():
+        env_vars["KIMI_BASE_URL"] = kimi_base_url
+    if kimi_model_name and kimi_model_name.strip():
+        env_vars["KIMI_MODEL_NAME"] = kimi_model_name
+    return env_vars
+
+
 def _classify_gemini_command(
     model_name: str,
     *,
@@ -280,6 +303,33 @@ def _classify_codex_command() -> tuple[list[str], dict[str, str]]:
     }
 
 
+def _classify_kimi_command() -> tuple[list[str], dict[str, str]]:
+    """Return the ``kimi acp`` command plus bounded runtime metadata.
+
+    Kimi speaks ACP natively (``kimi acp`` is a stdio ACP server). Resolution
+    prefers the ``kimi`` executable on PATH (the ``uv tool install`` shim at
+    ``~/.local/bin/kimi``); the bare-name ``fallback_cli_name`` origin (no
+    resolved path) is what ``classify_provider_command`` treats as unresolvable,
+    matching the Codex/Gemini classifier convention.
+    """
+    system_kimi = shutil.which("kimi")
+    if system_kimi:
+        return [system_kimi, "acp"], {
+            "runtime_authority": "system_cli",
+            "command_origin": "system_path_executable",
+            "command_kind": "kimi_cli",
+            "command_executable": Path(system_kimi).name,
+            "command_target": system_kimi,
+        }
+    return ["kimi", "acp"], {
+        "runtime_authority": "system_cli",
+        "command_origin": "fallback_cli_name",
+        "command_kind": "kimi_cli",
+        "command_executable": "kimi",
+        "command_target": "kimi",
+    }
+
+
 def classify_provider_command(
     provider: Provider, *, backend: str | None = None
 ) -> dict[str, str]:
@@ -318,6 +368,11 @@ def classify_provider_command(
         _, meta = _classify_codex_command()
         if meta.get("command_origin") == "fallback_cli_name":
             raise ValueError("Codex CLI not resolvable: 'codex' not found on PATH.")
+        return meta
+    if provider == Provider.KIMI:
+        _, meta = _classify_kimi_command()
+        if meta.get("command_origin") == "fallback_cli_name":
+            raise ValueError("Kimi CLI not resolvable: 'kimi' not found on PATH.")
         return meta
     raise ValueError(f"provider {provider.value} has no subprocess command to classify")
 
@@ -360,6 +415,7 @@ class ProviderFactory:
             Provider.CODEX,
             Provider.DETERMINISTIC,
             Provider.GEMINI,
+            Provider.KIMI,
             Provider.MOCK,
             Provider.ZAI,
             Provider.ZHIPU,
@@ -524,6 +580,52 @@ class ProviderFactory:
                 auth_mode=(
                     "zai_auth_token"
                     if "ANTHROPIC_AUTH_TOKEN" in env_vars
+                    else "none_detected"
+                ),
+            )
+
+        if provider == Provider.KIMI:
+            # Kimi (Moonshot AI) drives its own `kimi acp` ACP agent, not the
+            # claude-agent-acp wrapper. It honors session-injected mcpServers, so
+            # its harness composition rides the existing with_mcp_servers ACP
+            # branch unchanged; the only conditioning is the backend family
+            # discriminator (acp_family="kimi"), which makes _acp_session OMIT the
+            # Claude-only allowedTools _meta while the terminal-auth handshake
+            # stays unconditional. Read-only discipline is enforced at the
+            # permission-RPC handler, not via a config allowlist (Kimi has none).
+            command, command_meta = _classify_kimi_command()
+            api_key = (
+                settings.kimi_api_key.get_secret_value()
+                if settings.kimi_api_key
+                else None
+            )
+            env_vars = _build_kimi_env(
+                kimi_api_key=api_key,
+                kimi_base_url=settings.kimi_base_url,
+                kimi_model_name=settings.kimi_model_name or model_name,
+            )
+            logger.debug(
+                "[%s] Instantiating Kimi ACP agent. API key present: %s",
+                provider,
+                "KIMI_API_KEY" in env_vars,
+            )
+
+            return AcpChatModel(
+                command=command,
+                env_vars=env_vars,
+                agent_config=agent_config,
+                workspace_root=str(workspace_root) if workspace_root else None,
+                provider=str(provider.value),
+                acp_family="kimi",
+                runtime_authority=command_meta["runtime_authority"],
+                command_origin=command_meta["command_origin"],
+                command_kind=command_meta["command_kind"],
+                command_executable=command_meta["command_executable"],
+                command_target=command_meta["command_target"],
+                acp_backend="kimi_cli",
+                auth_mode=(
+                    "kimi_api_key"
+                    if "KIMI_API_KEY" in env_vars
                     else "none_detected"
                 ),
             )

@@ -52,6 +52,13 @@ class _AcpModelConfig:
     # Empty for human-in-loop runs, which keep the default prompt.
     # Defaulted (trailing) so existing config constructions need no change.
     allowed_tools: list[str] = field(default_factory=list)
+    # Backend family discriminator selecting the ACP allowlist TRANSPORT only:
+    # "claude" (Claude/Z.ai) serializes allowed_tools into the Claude-CLI-only
+    # session/new _meta.claudeCode.options.allowedTools namespace; "kimi" omits
+    # that namespace (Kimi has no claudeCode analogue) and enforces read-only at
+    # the permission-RPC handler instead. Defaults to the incumbent claude family
+    # so existing constructions are unchanged.
+    acp_family: str = "claude"
 
 
 @dataclass

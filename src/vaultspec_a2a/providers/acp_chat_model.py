@@ -155,6 +155,14 @@ class AcpChatModel(BaseChatModel):
         default=None,
         description="ACP backend classification such as node, binary, or gemini-cli.",
     )
+    acp_family: str = Field(
+        default="claude",
+        description=(
+            "Backend family discriminator ('claude' or 'kimi') selecting the ACP "
+            "allowlist transport: the claude family emits the Claude-CLI-only "
+            "session/new allowedTools _meta; the kimi family omits it."
+        ),
+    )
     command_origin: str | None = Field(
         default=None,
         description="Bounded origin of the resolved ACP command.",
@@ -204,6 +212,7 @@ class AcpChatModel(BaseChatModel):
             provider=self.provider,
             runtime_authority=self.runtime_authority,
             acp_backend=self.acp_backend,
+            acp_family=self.acp_family,
             command_origin=self.command_origin,
             command_kind=self.command_kind,
             command_executable=self.command_executable,

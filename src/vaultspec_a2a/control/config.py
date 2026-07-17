@@ -11,7 +11,13 @@ a drop-in replacement for the former ``core.config.Settings``.
 from pathlib import Path
 from typing import Literal, Self
 
-from pydantic import AliasChoices, Field, field_validator, model_validator
+from pydantic import (
+    AliasChoices,
+    Field,
+    SecretStr,
+    field_validator,
+    model_validator,
+)
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from ..domain_config import DomainSettingsConfig
@@ -190,6 +196,27 @@ class InfraConfig(BaseSettings):
     codex_home: str | None = Field(
         default=None,
         validation_alias="CODEX_HOME",
+    )
+    # Kimi (Moonshot AI) drives its own `kimi acp` agent. The CLI reads these
+    # unprefixed names from its own environment (the Z.ai ANTHROPIC_* passthrough
+    # precedent), so the factory injects them verbatim: KIMI_API_KEY authenticates,
+    # KIMI_BASE_URL retargets the Moonshot endpoint (unset = the CLI's own default),
+    # KIMI_MODEL_NAME overrides the resolved model. The key is a SecretStr so its
+    # value never reaches a repr, log, or model_dump; the factory expands it via
+    # get_secret_value only into the subprocess env.
+    kimi_api_key: SecretStr | None = Field(
+        default=None,
+        validation_alias="KIMI_API_KEY",
+    )
+    kimi_base_url: str | None = Field(
+        default=None,
+        validation_alias="KIMI_BASE_URL",
+        description="Override base URL for the Kimi/Moonshot endpoint.",
+    )
+    kimi_model_name: str | None = Field(
+        default=None,
+        validation_alias="KIMI_MODEL_NAME",
+        description="Override model id passed to the Kimi CLI as KIMI_MODEL_NAME.",
     )
 
     host: str = Field(

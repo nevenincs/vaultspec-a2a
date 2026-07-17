@@ -362,15 +362,6 @@ def test_serve_env_injects_engine_service_json_only_when_set() -> None:
     assert _ENGINE_SERVICE_JSON_ENV not in without
 
 
-def test_engine_service_json_env_name_matches_the_discovery_contract() -> None:
-    # The lifecycle constant mirrors authoring.discovery.SERVICE_JSON_ENV across an
-    # intentional import boundary (lifecycle must not import the engine client); this
-    # sync test pins them equal so the two literals cannot drift.
-    from ...authoring.discovery import SERVICE_JSON_ENV
-
-    assert _ENGINE_SERVICE_JSON_ENV == SERVICE_JSON_ENV
-
-
 # A serve command that records the injected engine-discovery env var into a file,
 # then binds the port so serve_up sees a live listener - proving the var reached the
 # child process environment end to end.

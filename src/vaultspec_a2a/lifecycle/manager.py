@@ -25,8 +25,10 @@ import time
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from ..authoring.discovery import SERVICE_JSON_ENV as _ENGINE_SERVICE_JSON_ENV
 from .procs_config import ProcsConfig, ProcsConfigError, load_procs_config
 from .registry import (
+    NAME_ENV,
     PortReservation,
     ProcRecord,
     StalenessState,
@@ -69,11 +71,6 @@ __all__ = [
 ]
 
 _OWNER_ENV = "VAULTSPEC_PROCS_OWNER"
-_NAME_ENV = "VAULTSPEC_PROCS_NAME"
-# Mirrors authoring.discovery.SERVICE_JSON_ENV. Held as a local literal rather than
-# imported to keep lifecycle free of an authoring (engine-client) import edge; a
-# sync test pins the two equal so they cannot drift.
-_ENGINE_SERVICE_JSON_ENV = "VAULTSPEC_ENGINE_SERVICE_JSON"
 _KILL_POLL_INTERVAL = 0.1
 
 
@@ -449,7 +446,7 @@ def _serve_env(
     candidate), matching the prior behaviour for records that predate this field.
     """
     env = render_env(role_cfg.env, port=port, workspace=workspace)
-    env[_NAME_ENV] = name
+    env[NAME_ENV] = name
     env[_OWNER_ENV] = owner
     if engine_service_json:
         env[_ENGINE_SERVICE_JSON_ENV] = engine_service_json

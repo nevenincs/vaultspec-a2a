@@ -22,6 +22,7 @@ from typing import TYPE_CHECKING
 
 from .procs_config import ProcsConfigError, load_procs_config
 from .registry import (
+    NAME_ENV,
     ProcRecord,
     RegistryOwnershipError,
     now_ms,
@@ -42,8 +43,6 @@ __all__ = [
 ]
 
 logger = logging.getLogger(__name__)
-
-_NAME_ENV = "VAULTSPEC_PROCS_NAME"
 
 
 def _load_config() -> ProcsConfig | None:
@@ -81,7 +80,7 @@ def register_serve(
         return None
     from .manager import default_owner
 
-    resolved_name = name or os.environ.get(_NAME_ENV) or str(port)
+    resolved_name = name or os.environ.get(NAME_ENV) or str(port)
     stamp = now_ms()
     record = ProcRecord(
         name=resolved_name,

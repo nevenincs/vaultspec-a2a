@@ -33,6 +33,7 @@ if TYPE_CHECKING:
     from .procs_config import ProcsConfig, RoleConfig
 
 __all__ = [
+    "NAME_ENV",
     "PortReservation",
     "ProcRecord",
     "RegistryOwnershipError",
@@ -62,6 +63,11 @@ RESERVATION_TTL_MS = 300_000
 _RESERVATION_SUFFIX = ".reserved"
 
 _PROCS_HOME_ENV = "VAULTSPEC_PROCS_HOME"
+# The managed-process name env var: written into a self-registering child's
+# environment by the lifecycle serve path and read back by the registration path.
+# Single home here (both modules already import from registry) so writer and reader
+# never drift.
+NAME_ENV = "VAULTSPEC_PROCS_NAME"
 
 
 class RegistryOwnershipError(RuntimeError):

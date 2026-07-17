@@ -165,6 +165,42 @@ def test_cli_verbs_against_live_gateway(tmp_path: Any) -> None:
         assert missing.returncode == 1
 
 
+def test_doctor_flags_a_resident_missing_a_route(tmp_path: Any) -> None:
+    """A real server genuinely missing a route reads as a stale resident.
+
+    Simulates a resident gateway process started before ``run-stream``
+    landed by removing that route from the real, already-registered gateway
+    router (not a mock — a real route table with one fewer real entry,
+    exactly what an old process serves since there is no hot-reload) and
+    asserting doctor's diff against the installed source catches it. The
+    doctor CLI runs as a real subprocess with its own freshly-built app, so
+    its "expected" signature is unaffected by this process's mutation.
+
+    ``gateway_router`` is a module-level singleton every ``create_app()``
+    call shares, so the removed route is restored in a ``finally`` to avoid
+    leaking the mutation into other tests in this process.
+    """
+    from ...api.routes.gateway import router as gateway_router
+
+    stream_path = "/v1/runs/{run_id}/stream"
+    with _GatewayFixture(tmp_path) as gw:
+        stale_index = next(
+            i
+            for i, route in enumerate(gateway_router.routes)
+            if getattr(route, "path", None) == stream_path
+        )
+        stale_route = gateway_router.routes.pop(stale_index)
+        try:
+            with _ThreadedServer(gw.app) as srv:
+                doctor = _run_cli("doctor", "--url", srv.base)
+                assert doctor.returncode == 0, doctor.stderr
+                body = json.loads(doctor.stdout)
+                assert body["stale_resident"] is True
+                assert f"GET {stream_path}" in body["missing_routes"]
+        finally:
+            gateway_router.routes.insert(stale_index, stale_route)
+
+
 def test_cli_reports_unreachable_gateway_cleanly() -> None:
     """A dead gateway yields a clean error and a non-zero exit, not a traceback."""
     # Port 1 is not listening; the transport error must be handled, not raised.

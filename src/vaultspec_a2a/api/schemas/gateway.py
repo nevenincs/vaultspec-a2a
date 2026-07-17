@@ -290,3 +290,9 @@ class ServiceStateResponse(BaseModel):
     # Configured maximum concurrent runs this gateway admits.
     active_run_capacity: int | None = None
     degraded_reasons: list[str] = Field(default_factory=list)
+    # Sorted "METHOD path" signature of the live route table (see
+    # ``route_signature`` in ``api.routes.gateway``). The doctor CLI diffs this
+    # against the installed source's expected signature to catch a resident
+    # process started before a route landed - there is no hot-reload, so a
+    # stale resident silently 404s otherwise.
+    routes: list[str] = Field(default_factory=list)

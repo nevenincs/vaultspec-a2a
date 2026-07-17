@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import Any
 
 import httpx
-from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, FastAPI, Header, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -749,6 +749,26 @@ def _summarize_profiles(
 # ---------------------------------------------------------------------------
 
 
+def route_signature(app: FastAPI) -> list[str]:
+    """Return a sorted ``"METHOD path"`` signature from *app*'s OpenAPI schema.
+
+    FastAPI's OpenAPI generation is the one place that correctly flattens the
+    (internal, lazily-resolved) route table, so it is used here as the
+    public, stable source of truth instead of walking ``app.routes``
+    directly. Shared between the live endpoint (this process's app) and the
+    doctor CLI's locally-constructed expectation (``create_app()``) so the
+    two are comparable: a resident process started before a route landed
+    serves a signature missing that entry - detectable without depending on
+    a version string editable installs don't bump per-commit.
+    """
+    paths = app.openapi().get("paths", {})
+    return sorted(
+        f"{method.upper()} {path}"
+        for path, operations in paths.items()
+        for method in operations
+    )
+
+
 @router.get("/service", response_model=ServiceStateResponse)
 async def service_state_endpoint(
     request: Request,
@@ -813,6 +833,7 @@ async def service_state_endpoint(
         authoring_backend_reachable=probe_engine_discovery_freshness(),
         active_run_capacity=domain_config.max_concurrent_threads,
         degraded_reasons=degraded_reasons,
+        routes=route_signature(request.app),
     )
 
 

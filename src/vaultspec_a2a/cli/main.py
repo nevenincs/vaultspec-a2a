@@ -69,12 +69,49 @@ def serve() -> None:
     serve_gateway()
 
 
+def _expected_route_signature() -> list[str]:
+    """Return the route signature the installed source currently defines.
+
+    Constructs the FastAPI app without running its lifespan (no DB or process
+    I/O), so this is safe to call from a thin CLI command purely to read the
+    route table off the code on disk.
+    """
+    from ..api.app import create_app
+    from ..api.routes.gateway import route_signature
+
+    return route_signature(create_app())
+
+
 @main.command()
 @click.option("--url", default=None, help="Gateway base URL (default: local).")
 def doctor(url: str | None) -> None:
-    """Report gateway health via the service-state verb."""
+    """Report gateway health via the service-state verb.
+
+    Also flags a stale resident: a gateway process has no hot-reload, so a
+    process started before a route landed keeps serving the old route table
+    and silently 404s callers of the new one. Diffs the live ``routes``
+    signature against what the installed source on this machine expects and
+    adds ``stale_resident``/``missing_routes`` to the reported body. A
+    resident that predates this diagnostic itself (no ``routes`` key at all)
+    is reported stale outright.
+    """
     resp = _request("GET", f"{_base_url(url)}/v1/service", timeout=_CONNECT_TIMEOUT)
-    _emit(resp)
+    try:
+        body: Any = resp.json()
+    except ValueError:
+        body = None
+
+    if isinstance(body, dict):
+        expected = set(_expected_route_signature())
+        live = set(body["routes"]) if "routes" in body else set()
+        missing = sorted(expected - live) if "routes" in body else sorted(expected)
+        body["stale_resident"] = bool(missing)
+        body["missing_routes"] = missing
+        click.echo(json.dumps(body, indent=2, sort_keys=True))
+    else:
+        click.echo(resp.text)
+    if resp.is_error:
+        sys.exit(1)
 
 
 @main.command()

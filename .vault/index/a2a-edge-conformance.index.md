@@ -3,8 +3,8 @@ generated: true
 tags:
   - '#index'
   - '#a2a-edge-conformance'
-date: '2026-07-15'
-modified: '2026-07-15'
+date: '2026-07-17'
+modified: '2026-07-17'
 related:
   - '[[2026-07-14-a2a-edge-conformance-W01-P01-S01]]'
   - '[[2026-07-14-a2a-edge-conformance-W01-P01-S02]]'
@@ -42,6 +42,7 @@ related:
   - '[[2026-07-14-a2a-edge-conformance-W05-P13-S30]]'
   - '[[2026-07-14-a2a-edge-conformance-W05-P14-S31]]'
   - '[[2026-07-14-a2a-edge-conformance-W05-P14-S32]]'
+  - '[[2026-07-14-a2a-edge-conformance-W05-P16-S38]]'
   - '[[2026-07-14-a2a-edge-conformance-adr]]'
   - '[[2026-07-14-a2a-edge-conformance-deletion-manifest-reference]]'
   - '[[2026-07-14-a2a-edge-conformance-engine-wire-shapes-reference]]'
@@ -136,6 +137,7 @@ Auto-generated index of all documents tagged with `#a2a-edge-conformance`.
 - `2026-07-15-a2a-edge-conformance-P02-summary` - `a2a-edge-conformance` `P02` summary
 - `2026-07-15-a2a-edge-conformance-P03-S06` - Run the handover live evidence battery (refusal matrix, idempotent retry same-run, restart recovery, degraded service-state under dependency failures, SSE reconnect, engine pass-through) and document the verb-to-legacy-service mapping with an explicit legacy-route retirement path
 - `2026-07-15-a2a-edge-conformance-P03-summary` - `a2a-edge-conformance` `P03` summary
+- `2026-07-14-a2a-edge-conformance-W05-P16-S38` - Promote the current build to the machine-global :8000 discovery point (restart the resident gateway so its OpenAPI serves the run-stream route) and add a doctor staleness check that detects a resident serving an older route set than the installed source, so a stale resident is diagnosable instead of silently 404ing the engine relay
 
 ### plan
 

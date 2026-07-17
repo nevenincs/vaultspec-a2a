@@ -189,10 +189,22 @@ threaded at `codex_chat_model.py:304` is the architecturally clean seam for a
 per-run `config.toml`. Codex headless permissioning is blanket
 (`approval_policy: "never"`, `sandbox: "read-only"`,
 `codex_chat_model.py:354`) — the read-only sandbox aligns with the read-only
-mandate; whether a per-tool allowlist analogue exists is an open verification
-item, not asserted absent. Sources:
+mandate. A follow-up doc check CLOSED the per-tool allowlist question,
+positively: Codex `config.toml` supports per-server and per-tool granularity
+under `[mcp_servers.<name>]` — `enabled_tools` (allowlist), `disabled_tools`
+(denylist applied after), `default_tools_approval_mode`
+(auto|prompt|writes|approve), and per-tool `tools.<tool>.approval_mode`
+overrides — more expressive than Claude's flat `allowedTools`. Caveat pair for
+any implementation: `sandbox_mode` is documented as gating "filesystem and
+network access during command execution" (an exec-path jail), and its
+interaction with MCP tool invocation is inferred, not verbatim-documented;
+likewise how `approval_policy: "never"` composes with per-tool
+`approval_mode` is undocumented — a Codex live proof must verify MCP tool
+invocation under that composition. None of these keys are used anywhere in
+our tree today. Sources:
 https://github.com/openai/codex/blob/main/codex-rs/app-server/README.md,
-https://developers.openai.com/codex/mcp.
+https://developers.openai.com/codex/mcp,
+https://learn.chatgpt.com/docs/config-file/config-reference.
 
 Z.ai is the Claude ACP path by construction: same `AcpChatModel`, same spawned
 command; only env differs (`_build_zai_env`, `factory.py:69`, injecting
@@ -203,8 +215,7 @@ Identical surfacing behavior and pin; it re-arms exactly when Claude does.
 
 The untracked `.qdrant-initialized`, `scratchpad/`, and
 `vaultspec-adr-research-mock.toml`; live verification of native-tool fs
-behavior; the engine repository itself; a dedicated source check for a
-Codex per-tool allowlist mechanism; live compatibility of our ACP layer
+behavior; the engine repository itself; live compatibility of our ACP layer
 against `@agentclientprotocol/claude-agent-acp@0.59.0` (36-release jump —
 session/new shape, permission modes, mcp_servers key, capability flags all
 need regression verification before any migration lands).

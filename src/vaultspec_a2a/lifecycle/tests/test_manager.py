@@ -14,6 +14,7 @@ import socket
 import subprocess
 import sys
 import time
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -21,10 +22,13 @@ import pytest
 from ..discovery import is_pid_alive
 from ..manager import (
     LifecycleError,
+    _build_cwd_for,
+    _serve_cwd_for,
     _serve_env,
     attach,
     kill,
     reap,
+    rebuild,
     render_command,
     render_env,
     resolve,
@@ -345,5 +349,87 @@ def test_serve_up_injects_the_port_into_the_child_env(tmp_path) -> None:
     try:
         assert record.port in range(18996, 18998)
         assert attach("envboot", home=tmp_path).endpoint.endswith(str(record.port))
+    finally:
+        tree_kill(record.pid)
+
+
+def test_build_cwd_uses_build_repo_and_serve_cwd_ignores_it(tmp_path) -> None:
+    serve_dir = tmp_path / "serve"
+    build_dir = tmp_path / "build"
+    # Unset build_repo: build falls back to the serve repo (single-tree roles).
+    only_serve = _record(name="one", role="scratch", repo=str(serve_dir))
+    assert _build_cwd_for(only_serve) == serve_dir
+    assert _serve_cwd_for(only_serve) == serve_dir
+    # Distinct trees: build uses build_repo, serve keeps repo — the engine-dev split
+    # where cargo builds the dashboard workspace but the wrapper serves from a2a.
+    split = _record(
+        name="two", role="scratch", repo=str(serve_dir), build_repo=str(build_dir)
+    )
+    assert _build_cwd_for(split) == build_dir
+    assert _serve_cwd_for(split) == serve_dir
+
+
+def test_rebuild_runs_the_build_in_the_build_repo_not_the_serve_repo(tmp_path) -> None:
+    serve_dir = tmp_path / "serve"
+    build_dir = tmp_path / "build"
+    serve_dir.mkdir()
+    build_dir.mkdir()
+    home = tmp_path / "home"
+    # A real build command that writes its own cwd to a sentinel, proving where the
+    # subprocess actually ran — exactly what the single-repo record got wrong.
+    build = [
+        sys.executable,
+        "-c",
+        "import os, pathlib; pathlib.Path('where.txt').write_text(os.getcwd())",
+    ]
+    role = RoleConfig(
+        name="scratch",
+        band=PortBand(18900, 18999),
+        heartbeat=False,
+        staleness_ms=120000,
+        build=build,
+        serve=[],
+    )
+    config = ProcsConfig(resident={}, roles={"scratch": role})
+    write_record(
+        _record(
+            name="eng",
+            role="scratch",
+            pid=os.getpid(),
+            port=18900,
+            repo=str(serve_dir),
+            build_repo=str(build_dir),
+        ),
+        home=home,
+    )
+
+    rebuild("eng", home=home, config=config)
+
+    sentinel = build_dir / "where.txt"
+    assert sentinel.is_file()
+    assert Path(sentinel.read_text()).resolve() == build_dir.resolve()
+    assert not (serve_dir / "where.txt").exists()
+
+
+def test_serve_up_captures_build_repo_into_the_record(tmp_path) -> None:
+    serve = [sys.executable, "-c", _BIND_SERVE, "{port}"]
+    config = _serve_config(serve, band=(18990, 18992))
+    engine_repo = str(tmp_path / "engine")
+    record = serve_up(
+        "scratch",
+        "eng",
+        home=tmp_path,
+        config=config,
+        repo=str(tmp_path),
+        build_repo=engine_repo,
+        ready_timeout=15.0,
+    )
+    try:
+        # The distinct build tree is captured on the record and survives the
+        # write/read roundtrip, so rebuild/rerun later target it (not the serve repo).
+        assert record.build_repo == engine_repo
+        persisted = read_record(record_path("scratch", "eng", home=tmp_path))
+        assert persisted is not None
+        assert persisted.build_repo == engine_repo
     finally:
         tree_kill(record.pid)

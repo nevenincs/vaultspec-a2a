@@ -340,7 +340,7 @@ def rebuild(
         raise LifecycleError(
             f"role {record.role!r} declares no build command in procs.toml"
         )
-    cwd = _cwd_for(record)
+    cwd = _build_cwd_for(record)
     result = subprocess.run(role.build, cwd=str(cwd), check=False)
     if result.returncode != 0:
         raise LifecycleError(
@@ -386,7 +386,7 @@ def rerun(
     role = resolved_config.role(record.role)
     tree_kill(record.pid)
     if role.build:
-        cwd = _cwd_for(record)
+        cwd = _build_cwd_for(record)
         result = subprocess.run(role.build, cwd=str(cwd), check=False)
         if result.returncode != 0:
             raise LifecycleError(
@@ -441,6 +441,7 @@ def serve_up(
     *,
     workspace: str = "",
     repo: str = "",
+    build_repo: str = "",
     owner: str | None = None,
     log_path: str | None = None,
     ready_timeout: float = 20.0,
@@ -467,6 +468,9 @@ def serve_up(
         raise LifecycleError(f"role {role!r} declares no serve command in procs.toml")
     owner_label = owner if owner is not None else default_owner()
     cwd = _Path(repo) if repo else _default_repo()
+    # The build tree captured for rebuild/rerun; the boot build_sha reflects it, not
+    # the serve tree, when a role's build and serve repos differ (engine-dev).
+    build_cwd = _Path(build_repo) if build_repo else cwd
     max_attempts = role_cfg.band.end - role_cfg.band.start + 1
     held: list[PortReservation] = []
     try:
@@ -494,8 +498,9 @@ def serve_up(
                     pid=process.pid,
                     port=reservation.port,
                     repo=str(cwd) if repo else "",
+                    build_repo=build_repo,
                     workspace=workspace,
-                    build_sha=_build_sha(cwd),
+                    build_sha=_build_sha(build_cwd),
                     command=command,
                     started_at_ms=stamp,
                     last_seen_ms=stamp,
@@ -538,13 +543,28 @@ def _default_repo() -> Path:
     return settings.project_root
 
 
-def _cwd_for(record: ProcRecord) -> Path:
-    """The dir a role's build/serve runs in: the record's repo, else the root."""
+def _serve_cwd_for(record: ProcRecord) -> Path:
+    """The dir a role's SERVE command runs in: the record's repo, else the root."""
     from pathlib import Path as _Path
 
     if record.repo:
         return _Path(record.repo)
     return _default_repo()
+
+
+def _build_cwd_for(record: ProcRecord) -> Path:
+    """The dir a role's BUILD command runs in.
+
+    A role whose build tree differs from its serve tree (engine-dev builds the
+    cargo workspace in the dashboard repo but serves the wrapper script from the
+    a2a repo) captures the build tree in ``build_repo`` at boot; it falls back to
+    the serve repo when unset, so single-tree roles need no extra field.
+    """
+    from pathlib import Path as _Path
+
+    if record.build_repo:
+        return _Path(record.build_repo)
+    return _serve_cwd_for(record)
 
 
 def _start_from_record(
@@ -570,14 +590,14 @@ def _start_from_record(
         name=record.name,
         owner=record.owner or default_owner(),
     )
-    cwd = _cwd_for(record)
+    cwd = _serve_cwd_for(record)
     process = spawn(command, cwd=cwd, log_path=record.log_path or None, env=child_env)
     stamp = now_ms()
     updated = replace(
         record,
         pid=process.pid,
         command=command,
-        build_sha=_build_sha(cwd) or record.build_sha,
+        build_sha=_build_sha(_build_cwd_for(record)) or record.build_sha,
         started_at_ms=stamp,
         last_seen_ms=stamp,
     )

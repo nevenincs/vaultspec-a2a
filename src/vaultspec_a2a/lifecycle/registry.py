@@ -85,6 +85,11 @@ class ProcRecord:
     pid: int
     port: int
     repo: str = ""
+    # The build tree, when it differs from the serve tree (engine-dev builds the
+    # cargo workspace in the dashboard repo but serves the wrapper from the a2a
+    # repo). Captured into this machine-global record at boot so procs.toml carries
+    # no machine-specific path; empty means build and serve share ``repo``.
+    build_repo: str = ""
     workspace: str = ""
     build_sha: str | None = None
     command: list[str] = field(default_factory=list)
@@ -168,6 +173,7 @@ def _record_from_dict(data: dict[str, Any]) -> ProcRecord | None:
         pid=pid,
         port=port,
         repo=_opt_str("repo"),
+        build_repo=_opt_str("build_repo"),
         workspace=_opt_str("workspace"),
         build_sha=_opt_str_or_none("build_sha"),
         command=_coerce_command(data.get("command")),

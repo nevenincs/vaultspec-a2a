@@ -304,21 +304,42 @@ def procs_reap() -> None:
     "--repo", default="", help="Repo dir to serve from (default: project root)."
 )
 @click.option(
+    "--build-repo",
+    "build_repo",
+    default="",
+    help="Repo dir to build from when it differs from --repo (e.g. the engine "
+    "cargo workspace). Recorded per process; defaults to --repo.",
+)
+@click.option(
     "--log", "log_path", default=None, help="Append process output to this file."
 )
 def procs_up(
-    role: str, name: str, workspace: str, repo: str, log_path: str | None
+    role: str,
+    name: str,
+    workspace: str,
+    repo: str,
+    build_repo: str,
+    log_path: str | None,
 ) -> None:
     """Allocate a band port, boot the role's serve command, and register it.
 
     The race-free boot verb: reserves a band port, spawns ROLE's serve command
     from procs.toml, waits for a live listener, then registers the process. Two
-    concurrent same-band boots can never collide on a port.
+    concurrent same-band boots can never collide on a port. ``--build-repo``
+    captures a build tree distinct from the serve tree (engine-dev) into the
+    record so rebuild/rerun run cargo where the workspace actually lives.
     """
     from ..lifecycle.manager import endpoint_for, serve_up
 
     try:
-        record = serve_up(role, name, workspace=workspace, repo=repo, log_path=log_path)
+        record = serve_up(
+            role,
+            name,
+            workspace=workspace,
+            repo=repo,
+            build_repo=build_repo,
+            log_path=log_path,
+        )
     except Exception as exc:
         raise _lifecycle_error(exc) from exc
     click.echo(

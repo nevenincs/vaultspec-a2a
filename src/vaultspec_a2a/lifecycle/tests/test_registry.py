@@ -70,6 +70,17 @@ def test_write_then_read_roundtrips_at_the_named_path(tmp_path) -> None:
     assert back == record
 
 
+def test_build_repo_roundtrips_through_the_record_schema(tmp_path) -> None:
+    # A distinct build tree captured in the machine-global record (never in the
+    # committed procs.toml) must survive write -> read intact.
+    record = _record(build_repo="Z:/dashboard/main/engine")
+    path = write_record(record, home=tmp_path)
+    back = read_record(path)
+    assert back == record
+    assert back is not None
+    assert back.build_repo == "Z:/dashboard/main/engine"
+
+
 def test_list_enumerates_valid_and_skips_malformed(tmp_path) -> None:
     write_record(_record(name="alpha", port=18100), home=tmp_path)
     write_record(_record(name="beta", port=18101), home=tmp_path)

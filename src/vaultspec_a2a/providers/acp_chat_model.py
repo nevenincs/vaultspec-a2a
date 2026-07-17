@@ -48,6 +48,11 @@ from ..team.team_config import AgentConfig
 from ..utils.enums import AcpRequestId
 from ..workspace.environment import resolve_env_vars
 from ._acp_auth import authenticate_rpc, runtime_log_extra
+from ._acp_config_home import (
+    cleanup_isolated_config_home,
+    create_isolated_config_home,
+    should_isolate_config_home,
+)
 from ._acp_protocol import RpcHandlerMap, process_stdout_loop
 from ._acp_rpc_handlers import (
     on_fs_read_text_file,
@@ -285,6 +290,17 @@ class AcpChatModel(BaseChatModel):
         if self._config.allowed_tools:
             env["ENABLE_TOOL_SEARCH"] = "0"
 
+        # Redirect the Claude/Z.ai CLI to a per-run isolated config home so the
+        # worker's MCP surface is exactly the declared set: the operator's
+        # user-global mcpServers and connected account remote MCP are suppressed
+        # (agent-harness-provisioning ambient-MCP invariant). Auth rides the env
+        # token, so no credential file is written into the home. Cleaned up in the
+        # finally once the subprocess is reaped.
+        config_home: Path | None = None
+        if should_isolate_config_home(self.command, env):
+            config_home = create_isolated_config_home()
+            env["CLAUDE_CONFIG_DIR"] = str(config_home)
+
         if self.command and Path(self.command[0]).stem.lower() == "gemini":
             await refresh_gemini_token(env=env)
 
@@ -356,6 +372,7 @@ class AcpChatModel(BaseChatModel):
                 yield chunk
         finally:
             await self._cleanup_session(ctx, stdout_task, stderr_task)
+            cleanup_isolated_config_home(config_home)
 
     async def _yield_chunks(
         self,

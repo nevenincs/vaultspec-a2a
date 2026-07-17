@@ -217,6 +217,14 @@ def compose_harness_mcp_servers(
     prior ``attach(combined)`` gap where composed servers' tools were served but
     never joined the autonomous allowlist. Passing ``None`` (or an empty
     sequence) preserves the model's existing allowlist unchanged.
+
+    Provider dispatch: an ACP model (Claude/Z.ai) exposes ``with_mcp_servers`` and
+    takes the session-inject + allowlist path below; a Codex model exposes
+    ``with_harness_mcp_servers`` and takes the ``CODEX_HOME`` ``config.toml`` path
+    (``allowed_tools`` does not apply - the read-verb constraint is applied at
+    config.toml emission). ONLY a model with neither delivery mechanism (mock,
+    hosted API) is returned unchanged. A model that HAS a harness delivery
+    mechanism is never silently no-oped.
     """
     if not names:
         return model
@@ -227,6 +235,10 @@ def compose_harness_mcp_servers(
     resolved = resolve_harness_mcp_servers(names)
     attach = getattr(model, "with_mcp_servers", None)
     if attach is None:
+        # Codex lane: no ACP session surface, but its own config.toml delivery.
+        codex_attach = getattr(model, "with_harness_mcp_servers", None)
+        if codex_attach is not None:
+            return codex_attach(names)
         return model
     existing = list(getattr(model, "mcp_servers", []) or [])
     seen = {s.get("name") for s in existing}

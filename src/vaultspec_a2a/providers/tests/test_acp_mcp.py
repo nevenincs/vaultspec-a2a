@@ -91,6 +91,26 @@ def test_compose_advertises_the_declared_server() -> None:
     assert [s["name"] for s in composed.mcp_servers] == ["vaultspec-rag"]
 
 
+def test_compose_dispatches_to_codex_harness_delivery() -> None:
+    # A Codex model has no with_mcp_servers but DOES have a harness delivery
+    # mechanism (with_harness_mcp_servers); compose must thread the names to it,
+    # never silently no-op. This is the seam whose silent no-op dropped the
+    # preset's harness on the Codex lane.
+    from ..codex_chat_model import CodexChatModel
+
+    model = CodexChatModel(command=["codex", "app-server"])
+    composed = compose_harness_mcp_servers(model, ["vaultspec-rag"])
+    assert isinstance(composed, CodexChatModel)
+    assert composed.harness_mcp_servers == ["vaultspec-rag"]
+
+
+def test_compose_still_noops_only_for_genuinely_no_mcp_models() -> None:
+    # A model with NEITHER delivery mechanism (no with_mcp_servers, no
+    # with_harness_mcp_servers) is the only one returned unchanged.
+    model = FakeListChatModel(responses=["ok"])
+    assert compose_harness_mcp_servers(model, ["vaultspec-rag"]) is model
+
+
 def test_compose_is_add_only_union_with_existing_servers() -> None:
     # An existing (e.g. authoring) server must survive; the harness server is
     # added beside it, never replacing it.

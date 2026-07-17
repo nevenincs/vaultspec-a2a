@@ -52,6 +52,11 @@ def test_render_constrains_to_read_tools_auto_approved() -> None:
 def test_codex_model_defaults_keep_read_only_sandbox_defense_in_depth() -> None:
     # The enabled_tools allowlist composes WITH the headless sandbox, not instead
     # of it: the model keeps approval_policy=never + sandbox=read-only.
+    # NOTE: this sets harness_mcp_servers directly ON PURPOSE - it asserts only the
+    # sandbox/approval defaults, NOT the production wiring. The wiring (that the
+    # preset's harness actually REACHES the model through composition) is covered
+    # by test_composition_seam_threads_harness_into_codex_config_toml; do not read
+    # this direct-field construction as evidence the live path works.
     from ..codex_chat_model import CodexChatModel
 
     model = CodexChatModel(harness_mcp_servers=["vaultspec-rag"])
@@ -102,6 +107,43 @@ def test_copied_credential_is_owner_only_on_posix(tmp_path: Path) -> None:
         if os.name == "posix":
             assert stat.S_IMODE(auth.stat().st_mode) == 0o600
             assert stat.S_IMODE(home.stat().st_mode) == 0o700
+    finally:
+        cleanup_codex_config_home(home)
+
+
+def test_composition_seam_threads_harness_into_codex_config_toml(
+    tmp_path: Path,
+) -> None:
+    # KILLS THE MASKING GAP: build the model through the REAL production
+    # composition seam (compose_harness_mcp_servers), NOT by setting
+    # harness_mcp_servers directly, then assert the emitted config.toml carries
+    # vaultspec-rag. Before the fix, compose silently no-oped for Codex (no
+    # with_mcp_servers) and the config.toml was always emitted from an empty list.
+    import tomllib
+
+    from .._acp_mcp import compose_harness_mcp_servers
+    from ..codex_chat_model import CodexChatModel
+
+    base = tmp_path / "base"
+    base.mkdir()
+    (base / "auth.json").write_text("{}", encoding="utf-8")
+    model = CodexChatModel(command=["codex", "app-server"], codex_home=str(base))
+    assert model.harness_mcp_servers == []  # not wired yet
+
+    composed = compose_harness_mcp_servers(model, ["vaultspec-rag"])
+    assert isinstance(composed, CodexChatModel)
+    assert composed.harness_mcp_servers == ["vaultspec-rag"]
+
+    home = composed._build_codex_config_home()
+    assert home is not None
+    try:
+        cfg = tomllib.loads((home / "config.toml").read_text(encoding="utf-8"))
+        assert set(cfg["mcp_servers"]) == {"vaultspec-rag"}
+        assert cfg["mcp_servers"]["vaultspec-rag"]["enabled_tools"] == [
+            "search_vault",
+            "search_codebase",
+            "get_code_file",
+        ]
     finally:
         cleanup_codex_config_home(home)
 

@@ -18,7 +18,7 @@ the ChatGPT-session auth mode.
 import asyncio
 import json
 import logging
-from collections.abc import AsyncIterator, Mapping
+from collections.abc import AsyncIterator, Mapping, Sequence
 from contextlib import suppress
 from pathlib import Path
 from typing import Any, override
@@ -262,6 +262,35 @@ class CodexChatModel(BaseChatModel):
     def _llm_type(self) -> str:
         return "codex-chat-model"
 
+    def with_harness_mcp_servers(self, names: Sequence[str]) -> "CodexChatModel":
+        """Return a copy that delivers the declared harness servers to Codex.
+
+        Codex's harness-delivery mechanism, parallel to ``AcpChatModel.with_mcp_
+        servers`` on the ACP lane: it records the declared server NAMES, which
+        ``_astream`` serializes into the per-run ``CODEX_HOME`` ``config.toml``
+        (the read-verb constraint is applied there). ``compose_harness_mcp_servers``
+        dispatches to this method, so the preset's ``[team.harness]`` declaration
+        reaches Codex through the same composition seam as the ACP providers rather
+        than being silently dropped.
+        """
+        return self.model_copy(update={"harness_mcp_servers": list(names)})
+
+    def _build_codex_config_home(self) -> Path | None:
+        """Build the per-run CODEX_HOME for the declared harness servers, or None.
+
+        Returns the home path (whose ``config.toml`` carries the declared read-only
+        servers and whose ``auth.json`` is copied from the base home) when harness
+        servers are declared; the caller sets ``CODEX_HOME`` to it and cleans it up
+        after reap. Extracted from ``_astream`` so the composition-to-emission path
+        is testable without a live Codex turn.
+        """
+        if not self.harness_mcp_servers:
+            return None
+        specs = codex_mcp_server_specs(self.harness_mcp_servers)
+        base = self.codex_home or settings.codex_home
+        base_home = Path(base) if base else Path.home() / ".codex"
+        return build_codex_config_home(specs, base_home)
+
     def _generate(
         self,
         messages: list[BaseMessage],
@@ -334,11 +363,8 @@ class CodexChatModel(BaseChatModel):
         codex_config_home: Path | None = None
         client: _CodexAppServerClient | None = None
         try:
-            if self.harness_mcp_servers:
-                specs = codex_mcp_server_specs(self.harness_mcp_servers)
-                base = self.codex_home or settings.codex_home
-                base_home = Path(base) if base else Path.home() / ".codex"
-                codex_config_home = build_codex_config_home(specs, base_home)
+            codex_config_home = self._build_codex_config_home()
+            if codex_config_home is not None:
                 env["CODEX_HOME"] = str(codex_config_home)
             metadata = {
                 "provider": self.provider,

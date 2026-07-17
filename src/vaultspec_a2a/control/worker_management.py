@@ -22,6 +22,7 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from pathlib import Path
 
+from ..utils import kill_pid_tree_async
 from .config import settings
 
 __all__ = [
@@ -279,31 +280,9 @@ async def _shutdown_worker_process(
         "Shutting down worker process (PID %d)",
         process.pid,
     )
-    if sys.platform == "win32":
-        try:
-            await asyncio.to_thread(
-                subprocess.run,
-                [
-                    "taskkill",
-                    "/T",
-                    "/F",
-                    "/PID",
-                    str(process.pid),
-                ],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                check=False,
-            )
-        except Exception:
-            with contextlib.suppress(OSError):
-                process.kill()
-    else:
-        process.terminate()
-        try:
-            await asyncio.to_thread(process.wait, 10.0)
-        except subprocess.TimeoutExpired:
-            logger.warning("Worker did not exit in 10s, killing")
-            process.kill()
+    # Shared async tree-kill (Windows taskkill /T /F, POSIX SIGTERM->SIGKILL); the
+    # Popen handle is reaped here since the primitive works by pid.
+    await kill_pid_tree_async(process.pid, term_timeout=10.0, kill_timeout=5.0)
     with contextlib.suppress(Exception):
         await asyncio.to_thread(process.wait, 5.0)
     logger.info("Worker process stopped")

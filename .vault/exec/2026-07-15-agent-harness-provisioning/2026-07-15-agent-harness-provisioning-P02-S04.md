@@ -9,12 +9,6 @@ related:
   - "[[2026-07-15-agent-harness-provisioning-plan]]"
 ---
 
-
-
-
-
-
-
 # Prove it live: an unprovisioned workspace is refused with the harness reason at discovery and run-start, a provisioned run passes with agents demonstrably reading templates and rules, and the skills surface is present and consulted per the persona directives
 
 ## Scope
@@ -38,5 +32,3 @@ related:
 - Registry-allocated-port live stacks were not booted: there is no standalone `procs allocate`/spawn CLI verb (the registry allocates into bands on spawn), no engine is currently running, and the LLM quota is exhausted for the week. The route-level proof uses a real uvicorn socket, which exercises the same gateway app a booted stack would, so the refuse/serve behaviour is genuinely proven against a live server - only the LLM-authoring tail is deferred.
 - Committed on branch `fanout/agent-harness-provisioning-p02`: route proof `01b511a`, service-fixture proof `216615f`.
 - The S04 box is held pending the reviewer's verdict and a team-lead ruling on whether the deferred live-authoring re-drive is required for S04 sign-off or tracked forward.
-
-

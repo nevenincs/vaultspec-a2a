@@ -124,17 +124,18 @@ def _vault_write_denial(rpc_id: int | str, path: str) -> dict[str, object]:
     }
 
 
-# Kimi's native READ-ONLY tools, enumerated from the installed kimi-cli 1.49.0
-# source (tools/file/__init__.py: ReadFile/Grep/Glob/ReadMediaFile; the exact
-# `name` attrs on each CallableTool). The write tools WriteFile/StrReplaceFile,
-# the bash/shell exec tool, and every plan/dmail/agent/todo mutator are NOT
-# listed and are therefore rejected in autonomous mode. The web tools
-# FetchURL/SearchWeb are deliberately EXCLUDED: they are read-only but add
-# network egress, which is not part of the workspace/.vault grounding floor -
-# excluding them is the more conservative read-only posture.
-_KIMI_NATIVE_READ_TOOLS: frozenset[str] = frozenset(
-    {"ReadFile", "Grep", "Glob", "ReadMediaFile"}
-)
+# Kimi's native READ tools that mirror the tool-cores read floor (Claude's
+# Read/Grep/Glob), enumerated from the installed kimi-cli 1.49.0 source and
+# cross-checked against executor-service's P04.S15 verification:
+#   ReadFile (tools/file/read.py:64), Grep (tools/file/grep_local.py:386),
+#   Glob (tools/file/glob.py:56)
+# NOTE the name divergence from Claude: Kimi's read tool is `ReadFile`, not `Read`.
+# The write tools WriteFile/StrReplaceFile, the bash/shell exec tool, and every
+# plan/dmail/agent/todo mutator are NOT listed and are rejected in autonomous mode.
+# `ReadMediaFile` (image reads) and the web tools FetchURL/SearchWeb are read-only
+# but DELIBERATELY EXCLUDED: neither is part of the text-grounding floor (Kimi has
+# no Claude-floor analogue for them), so the conservative posture omits them.
+_KIMI_NATIVE_READ_TOOLS: frozenset[str] = frozenset({"ReadFile", "Grep", "Glob"})
 
 
 def _strip_mcp_prefix(tool_name: str) -> str:

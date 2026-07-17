@@ -22,7 +22,7 @@ related:
 
 ## Outcome
 
-Both branches of the Kimi read-only enforcement are deterministically proven, plus the supervised-unchanged guarantee. The autonomous auto-approve set admits EXACTLY the composed rag reads (`search_vault`/`search_codebase`/`get_code_file`, matched against Kimi's raw MCP tool names) and the native reads (`ReadFile`/`Grep`/`Glob`/`ReadMediaFile`), and rejects everything else - including the native writes `WriteFile`/`StrReplaceFile`, the `bash` shell, the web tools `SearchWeb`/`FetchURL`, and `Agent`/`EnterPlanMode`/`SendDMail`/unknown tools. Supervised mode (a `permission_callback` present) never falls through to the auto-approve branch: a callback that rejects a `ReadFile` (which the autonomous set WOULD approve) wins, proving the human gate is preserved. Gate: ruff clean, ty clean, 18 tests pass.
+Both branches of the Kimi read-only enforcement are deterministically proven, plus the supervised-unchanged guarantee. The autonomous auto-approve set admits EXACTLY the composed rag reads (`search_vault`/`search_codebase`/`get_code_file`, matched against Kimi's raw MCP tool names) and the native reads (`ReadFile`/`Grep`/`Glob`), and rejects everything else - including the native writes `WriteFile`/`StrReplaceFile`, the `bash` shell, `ReadMediaFile` (image reads, outside the text-grounding floor), the web tools `SearchWeb`/`FetchURL`, and `Agent`/`EnterPlanMode`/`SendDMail`/unknown tools. Supervised mode (a `permission_callback` present) never falls through to the auto-approve branch: a callback that rejects a `ReadFile` (which the autonomous set WOULD approve) wins, proving the human gate is preserved. Gate: ruff clean, ty clean, 18 tests pass.
 
 ## Notes
 

@@ -53,8 +53,8 @@ Deliver vaultspec-rag to Claude and Z.ai document roles with read-only disciplin
 
 Deliver vaultspec-rag to Codex through a per-run CODEX_HOME config.toml built from the same registry, read-only, and prove both floor and semantic grounding under the read-only sandbox.
 
-- [ ] `P04.S18` - Emit a per-run CODEX_HOME config.toml carrying the shared _KNOWN_MCP_SERVERS entries as mcp_servers blocks in the Codex config shape, one registry across two transports (executor-core); `src/vaultspec_a2a/providers/codex_chat_model.py`.
-- [ ] `P04.S19` - Constrain the Codex MCP surface to read verbs via enabled_tools with approval_mode auto for reads, keeping the read-only sandbox as defense-in-depth (executor-core); `src/vaultspec_a2a/providers/codex_chat_model.py`.
+- [x] `P04.S18` - Emit a per-run CODEX_HOME config.toml carrying the shared _KNOWN_MCP_SERVERS entries as mcp_servers blocks in the Codex config shape, one registry across two transports (executor-core); `src/vaultspec_a2a/providers/codex_chat_model.py`.
+- [x] `P04.S19` - Constrain the Codex MCP surface to read verbs via enabled_tools with approval_mode auto for reads, keeping the read-only sandbox as defense-in-depth (executor-core); `src/vaultspec_a2a/providers/codex_chat_model.py`.
 - [ ] `P04.S20` - Prove live on the Codex lane that a document agent reads a named .vault ADR via read-only sandbox filesystem access mid-turn and cites it, real run with no mocks and zero .vault writes (executor-service); `src/vaultspec_a2a/service_tests/`.
 - [ ] `P04.S21` - Prove live that a Codex document agent invokes vaultspec-rag search mid-turn under approval-policy never and sandbox read-only, capturing the tool-call trace and confirming citations resolve, real run with no mocks (executor-service); `src/vaultspec_a2a/service_tests/`.
 

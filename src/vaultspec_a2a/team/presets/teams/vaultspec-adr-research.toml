@@ -170,3 +170,26 @@ provider = "zai"
 
 [team.profiles.zai.roles.vaultspec-adr-author]
 provider = "zai"
+
+# `kimi` is the Kimi (Moonshot AI) provider-axis lane. Credential-gated on
+# KIMI_API_KEY: the harness skips this lane loudly (naming the missing key) when
+# the key is absent from the environment, and never fakes it. The three
+# research/authoring roles run on `kimi` while the doc-reviewer keeps the team
+# default (claude).
+[team.profiles.kimi]
+display_name = "Kimi (mixed)"
+description  = """
+Mixed-provider provider-axis lane routing the researcher fan-out, the synthesist,
+and the ADR author to the Kimi (Moonshot AI) provider; the inner doc-reviewer
+keeps the team default (claude). Requires a configured Kimi API key; the harness
+skips this lane with a truthful reason when the credential is absent.
+"""
+
+[team.profiles.kimi.roles.vaultspec-researcher]
+provider = "kimi"
+
+[team.profiles.kimi.roles.vaultspec-synthesist]
+provider = "kimi"
+
+[team.profiles.kimi.roles.vaultspec-adr-author]
+provider = "kimi"

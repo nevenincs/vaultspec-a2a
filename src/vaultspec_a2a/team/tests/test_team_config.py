@@ -931,6 +931,30 @@ class TestModelProfiles:
         assert "vaultspec-synthesist" not in fast.roles
         assert "vaultspec-adr-author" not in fast.roles
 
+    def test_bundled_adr_research_exposes_kimi_profile(self) -> None:
+        """The `kimi` provider-axis profile routes the three authoring roles to Kimi.
+
+        Mirrors the `zai` precedent (P04.S14): the overlay sets only the per-role
+        provider for the researcher fan-out, synthesist, and ADR author; the inner
+        doc-reviewer is absent and keeps the team default (claude). The skip-loudly
+        credential gate is enforced at run-start eligibility on ``KIMI_API_KEY``
+        readiness, not in the profile TOML. That the TOML ``provider = "kimi"``
+        resolves to ``Provider.KIMI`` also confirms the P01 enum member is present.
+        """
+        cfg = load_team_config("vaultspec-adr-research")
+        assert "kimi" in cfg.profiles
+        kimi = cfg.profiles["kimi"]
+        assert kimi.display_name == "Kimi (mixed)"
+        assert set(kimi.roles) == {
+            "vaultspec-researcher",
+            "vaultspec-synthesist",
+            "vaultspec-adr-author",
+        }
+        for role in kimi.roles.values():
+            assert role.provider == Provider.KIMI
+        # The inner doc-reviewer is absent from the overlay - it keeps the team default.
+        assert "vaultspec-doc-reviewer" not in kimi.roles
+
     def test_effective_profiles_injects_implicit_team_defaults(self) -> None:
         cfg = load_team_config("vaultspec-adr-research")
         effective = cfg.effective_profiles()

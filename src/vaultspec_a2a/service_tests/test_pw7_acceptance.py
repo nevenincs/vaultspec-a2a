@@ -254,6 +254,20 @@ CASE_ZAI = _research_adr_case(
 _ALL_CASES = (CASE_AUTO, CASE_HUMAN, CASE_MIXED, CASE_LIVE_MIXED, CASE_CODEX, CASE_ZAI)
 
 
+def _is_live_lane(case: AcceptanceCase) -> bool:
+    """Whether a lane authors with a real provider (the LIVE preset), not the instant
+    deterministic one - the single source for every live/deterministic branch."""
+    return case.preset == _PRESET_LIVE
+
+
+def _poll_seconds_for(case: AcceptanceCase) -> float:
+    """Status-poll cadence per lane: a real-provider lane authors in minutes/turn so
+    a slow 5s poll is fine; a deterministic lane resolves each transition in well
+    under a second, so a 1s poll reclaims the ~4s/transition of pure wait a 5s
+    cadence adds without any coverage loss."""
+    return 5.0 if _is_live_lane(case) else 1.0
+
+
 def _runtime_budget_for(case: AcceptanceCase) -> float:
     """The per-lane deadline scaled to gate count/policy, not one global default.
 
@@ -268,7 +282,7 @@ def _runtime_budget_for(case: AcceptanceCase) -> float:
     per_gate = {POLICY_HUMAN: 600.0, POLICY_AUTO: 240.0}
     base = 180.0
     budget = base + sum(per_gate.get(p, 300.0) for p in case.gate_policy.values())
-    return budget * (4.0 if case.preset == _PRESET_LIVE else 1.0)
+    return budget * (4.0 if _is_live_lane(case) else 1.0)
 
 
 def _case_param(case: AcceptanceCase) -> ParameterSet:
@@ -281,7 +295,7 @@ def _case_param(case: AcceptanceCase) -> ParameterSet:
     the global for exactly the LIVE cases; the deterministic lanes keep the 300s
     global so a genuine hang there is still detected fast.
     """
-    if case.preset == _PRESET_LIVE:
+    if _is_live_lane(case):
         return pytest.param(
             case,
             marks=pytest.mark.timeout(_runtime_budget_for(case)),
@@ -301,7 +315,7 @@ def test_live_lane_timeout_marker_matches_runtime_budget() -> None:
     """
     for case in _ALL_CASES:
         timeout_marks = [m for m in _case_param(case).marks if m.name == "timeout"]
-        if case.preset == _PRESET_LIVE:
+        if _is_live_lane(case):
             assert timeout_marks, f"LIVE lane {case.label!r} needs a timeout marker"
             armed = timeout_marks[0].args[0]
             assert armed == _runtime_budget_for(case)
@@ -315,6 +329,17 @@ def test_live_lane_timeout_marker_matches_runtime_budget() -> None:
 def test_live_mixed_runtime_budget_is_the_specified_value() -> None:
     """The live-mixed lane budgets to (180 + AUTO 240 + HUMAN 600) x4 = 4080s."""
     assert _runtime_budget_for(CASE_LIVE_MIXED) == pytest.approx(4080.0)
+
+
+def test_deterministic_lanes_poll_fast_and_live_lanes_poll_slow() -> None:
+    """The instant-provider deterministic lanes poll at 1s (reclaiming the ~4s/
+    transition a 5s cadence wastes); the real-provider LIVE lanes keep 5s."""
+    assert _poll_seconds_for(CASE_AUTO) == 1.0
+    assert _poll_seconds_for(CASE_HUMAN) == 1.0
+    assert _poll_seconds_for(CASE_MIXED) == 1.0
+    assert _poll_seconds_for(CASE_LIVE_MIXED) == 5.0
+    assert _poll_seconds_for(CASE_CODEX) == 5.0
+    assert _poll_seconds_for(CASE_ZAI) == 5.0
     # Same gate shape at the deterministic preset is x1 - well under 4080s.
     assert _runtime_budget_for(CASE_MIXED) == pytest.approx(1020.0)
 
@@ -1157,12 +1182,14 @@ class AcceptanceHarness:
         return _runtime_budget_for(self.case)
 
     async def run(
-        self, *, timeout_seconds: float | None = None, poll_seconds: float = 5.0
+        self, *, timeout_seconds: float | None = None, poll_seconds: float | None = None
     ) -> list[str]:
         """Drive the full loop; return the ordered list of gates driven."""
         gate_names = list(self.case.gate_policy) or ["gate"]
         if timeout_seconds is None:
             timeout_seconds = self._runtime_budget()
+        if poll_seconds is None:
+            poll_seconds = _poll_seconds_for(self.case)
         deadline = time.monotonic() + timeout_seconds
         async with _ResilientAuthoringClient(
             self.engine_base_url, self.engine_bearer

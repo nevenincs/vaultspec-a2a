@@ -19,6 +19,8 @@ from typing import TYPE_CHECKING, Any, cast
 if TYPE_CHECKING:
     from collections.abc import Hashable
 
+    from vaultspec_a2a.authoring import FeedbackContextReader
+
 from langchain_core.language_models import BaseChatModel
 from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.errors import GraphRecursionError
@@ -335,6 +337,7 @@ def compile_team_graph(
     feature_tag: str | None = None,
     task_queue_port: TaskQueuePort | None = None,
     proposal_submitter: DocumentProposalSubmitter | None = None,
+    feedback_reader: "FeedbackContextReader | None" = None,
     model_assignment: dict[str, dict[str, Any]] | None = None,
 ) -> CompiledStateGraph:
     """Compile the LangGraph orchestration engine from a TeamConfig.
@@ -437,6 +440,7 @@ def compile_team_graph(
             workspace_root=workspace_root,
             autonomous=autonomous,
             proposal_submitter=proposal_submitter,
+            feedback_reader=feedback_reader,
             frozen_assignment=model_assignment,
         )
     else:
@@ -1100,6 +1104,7 @@ def _compile_research_adr(
     workspace_root: Path | None = None,
     autonomous: bool = False,
     proposal_submitter: DocumentProposalSubmitter | None,
+    feedback_reader: "FeedbackContextReader | None" = None,
     frozen_assignment: dict[str, dict[str, Any]] | None = None,
 ) -> None:
     """Wire the research_adr document phase machine.
@@ -1174,6 +1179,9 @@ def _compile_research_adr(
             workspace_root=workspace_root,
             role="synthesist",
             harness_mcp_servers=harness_mcp_servers,
+            # Feedback-loop grounding: the research-doc writer revises against the
+            # reviewer's batch when a revision run carries a feedback_batch_id.
+            feedback_reader=feedback_reader,
         ),
         retry_policy=_NODE_RETRY_POLICY,
     )
@@ -1200,6 +1208,9 @@ def _compile_research_adr(
             workspace_root=workspace_root,
             role="adr-author",
             harness_mcp_servers=harness_mcp_servers,
+            # Feedback-loop grounding: the ADR writer revises against the
+            # reviewer's batch when a revision run carries a feedback_batch_id.
+            feedback_reader=feedback_reader,
         ),
         retry_policy=_NODE_RETRY_POLICY,
     )

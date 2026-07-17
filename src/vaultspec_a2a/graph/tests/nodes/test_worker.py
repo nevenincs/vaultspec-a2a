@@ -107,6 +107,58 @@ def test_build_worker_messages_adds_rejection_revision_instruction() -> None:
     )
 
 
+def _minimal_state(**overrides: object) -> TeamState:
+    base: TeamState = {
+        "messages": [HumanMessage(content="Revise the research document.")],
+        "active_agent": "vaultspec-synthesist",
+        "artifacts": [],
+        "current_plan": [],
+        "thread_id": "thread-feedback",
+        "token_usage": {},
+        "next": "",
+        "active_feature": "edge-feature",
+    }
+    base.update(overrides)  # type: ignore[typeddict-item]
+    return base
+
+
+def test_build_worker_messages_grounds_feedback_when_present() -> None:
+    """A revision run's feedback grounding rides as a labelled SystemMessage."""
+    grounding = "- Overview: tighten the scope\n- Risks: add a fallback"
+    messages = _build_worker_messages(
+        state=_minimal_state(),
+        system_prompt="You are the synthesist.",
+        workspace_root=None,
+        role="synthesist",
+        feedback_grounding=grounding,
+    )
+    feedback_msgs = [
+        m
+        for m in messages
+        if isinstance(m, SystemMessage)
+        and "Reviewer feedback to address" in str(m.content)
+    ]
+    assert len(feedback_msgs) == 1
+    assert grounding in str(feedback_msgs[0].content)
+
+
+def test_build_worker_messages_has_no_feedback_block_when_absent() -> None:
+    """Absent feedback grounding adds no block (zero behaviour change)."""
+    for grounding in (None, ""):
+        messages = _build_worker_messages(
+            state=_minimal_state(),
+            system_prompt="You are the synthesist.",
+            workspace_root=None,
+            role="synthesist",
+            feedback_grounding=grounding,
+        )
+        assert not any(
+            isinstance(m, SystemMessage)
+            and "Reviewer feedback to address" in str(m.content)
+            for m in messages
+        )
+
+
 def test_build_worker_messages_scopes_document_role_not_coder(tmp_path) -> None:
     """A document role gets role-scoped rules; a coder role gets the whole corpus.
 

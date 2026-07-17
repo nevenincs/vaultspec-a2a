@@ -24,7 +24,7 @@ from ..thread.errors import AgentConfigNotFoundError, TeamConfigNotFoundError
 if TYPE_CHECKING:
     from langgraph.graph.state import CompiledStateGraph
 
-    from ..authoring import DocumentProposalSubmitter
+    from ..authoring import DocumentProposalSubmitter, FeedbackContextReader
     from ..database.checkpoints import Checkpointer
     from ..ipc.schemas import DispatchRequest
     from ..streaming.aggregator import EventAggregator, StreamableGraph
@@ -256,10 +256,14 @@ class GraphLifecycleManager:
 
         # Document-phase topologies author through the engine; build the
         # production submitter here, the single construction site, and fail closed
-        # at build time when the run cannot author (so it never starts vague).
+        # at build time when the run cannot author (so it never starts vague). The
+        # feedback reader is the read-path companion (best-effort, not fail-closed):
+        # it grounds the document writers on a revision run's reviewer batch.
         proposal_submitter = None
+        feedback_reader = None
         if team_config.topology.type == "research_adr":
             proposal_submitter = self._build_proposal_submitter()
+            feedback_reader = self._build_feedback_reader()
 
         return compile_team_graph(
             team_config=team_config,
@@ -275,6 +279,7 @@ class GraphLifecycleManager:
             task_queue_port=self._task_queue_port,
             provider_factory=self._provider_factory,
             proposal_submitter=proposal_submitter,
+            feedback_reader=feedback_reader,
             # Compile against the run's frozen effective assignment so a
             # restart reproduces the exact launched models.
             model_assignment=req.model_assignment,
@@ -333,6 +338,29 @@ class GraphLifecycleManager:
                     completion_sentinel="ADR READY",
                 ),
             },
+        )
+
+    def _build_feedback_reader(self) -> FeedbackContextReader | None:
+        """Construct the feedback-batch reader for a research_adr run, or None.
+
+        The read-path companion to the submitter (edge ADR D5, feedback-loop D4):
+        on a revision run it retrieves the reviewer's batch by id to ground the
+        document writers. Unlike the submitter it is NOT fail-closed - a run
+        without a reachable engine simply grounds nothing (best-effort), because a
+        run can proceed without feedback grounding even though it cannot AUTHOR
+        without the engine. The batch read is capability-by-id, so it presents the
+        synthesist role's actor token (a document-authoring role always provisioned
+        for a research_adr run); the id, not the role, is the capability.
+        """
+        from ..authoring import FeedbackContextReader, resolve_engine
+
+        engine = resolve_engine()
+        if engine is None:
+            return None
+        return FeedbackContextReader(
+            engine_base_url=engine.base_url,
+            token_store=self._token_store,
+            read_role="vaultspec-synthesist",
         )
 
     # ------------------------------------------------------------------

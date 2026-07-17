@@ -24,6 +24,7 @@ from ..tools.task_queue import create_mark_task_complete_tool
 if TYPE_CHECKING:
     from langchain_core.tools import BaseTool
 
+    from vaultspec_a2a.authoring import FeedbackContextReader
     from vaultspec_a2a.providers._acp_authoring import AuthoringToolBinding
 
 _logger = logging.getLogger(__name__)
@@ -54,6 +55,7 @@ def _build_worker_messages(
     system_prompt: str,
     workspace_root: Path | None,
     role: str | None = None,
+    feedback_grounding: str | None = None,
 ) -> list[BaseMessage]:
     """Build the worker prompt/message list before model invocation.
 
@@ -91,6 +93,16 @@ def _build_worker_messages(
     mounted = state.get("mounted_context")
     if mounted:
         messages.append(SystemMessage(content=mounted))
+    # Feedback-loop grounding (ADR D4): on a revision run the writer sees the
+    # reviewer's authoritative comments, retrieved by id from the engine and
+    # rendered upstream. Placed after the mounted corpus so the revision
+    # instruction is the last grounding the writer reads before the turn history.
+    if feedback_grounding:
+        messages.append(
+            SystemMessage(
+                content=f"## Reviewer feedback to address\n\n{feedback_grounding}"
+            )
+        )
     messages.extend(working_state["messages"])
     routing_error = state.get("routing_error")
     if (
@@ -482,6 +494,7 @@ def create_worker_node(
     authoring_binding: "AuthoringToolBinding | None" = None,
     role: str | None = None,
     harness_mcp_servers: list[str] | None = None,
+    feedback_reader: "FeedbackContextReader | None" = None,
 ) -> WorkerNode:
     """Create a LangGraph worker node with a specific role and model.
 
@@ -522,11 +535,24 @@ def create_worker_node(
             if thread_id:
                 queue_tool = create_mark_task_complete_tool(task_queue_port, thread_id)
 
+        # Feedback-loop grounding (ADR D4): a revision run carries an opaque
+        # feedback_batch_id in state; retrieve the reviewer's comments by id from
+        # the engine and ground the writer on them. Best-effort and read-path-only
+        # (edge ADR D5) - an unavailable batch degrades to no grounding rather than
+        # failing the turn. Absent id or reader = no grounding, zero behaviour change.
+        feedback_grounding: str | None = None
+        if feedback_reader is not None:
+            batch_id = state.get("feedback_batch_id")
+            thread_id = state.get("thread_id")
+            if batch_id and isinstance(thread_id, str) and thread_id:
+                feedback_grounding = await feedback_reader.read(thread_id, batch_id)
+
         messages = _build_worker_messages(
             state=state,
             system_prompt=system_prompt,
             workspace_root=workspace_root,
             role=role,
+            feedback_grounding=feedback_grounding,
         )
         compacted = should_compact(state, domain_config.context_limit_tokens)
         effective_model = _resolve_effective_worker_model(

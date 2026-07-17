@@ -156,10 +156,11 @@ async def test_stdio_binding_wires_stdio_server_to_real_subprocess(
     """A stdio binding makes session/new advertise the spawn-a-bridge entry.
 
     When the binding carries the engine transport (engine_base_url + run_id) the
-    worker prefers stdio (the CLI surfaces stdio MCP tools reliably where it does
-    not surface loopback HTTP MCP tools). The session/new the real CLI receives
-    must carry a stdio server entry (command + args, no url/type) whose env
-    carries the run's engine facts — proving the wiring reaches a subprocess.
+    worker prefers the stdio bridge (a spawned subprocess). Neither session-injected
+    transport surfaces to the model per the S20 registration-scope matrix, so this
+    is a transport-mechanics choice, not a surfacing one. The session/new the real
+    CLI receives must carry a stdio server entry (command + args, no url/type) whose
+    env carries the run's engine facts — proving the wiring reaches a subprocess.
     """
     from vaultspec_a2a.providers._acp_authoring import AUTHORING_MCP_SERVER_NAME
     from vaultspec_a2a.providers.acp_chat_model import AcpChatModel

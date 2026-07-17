@@ -302,6 +302,11 @@ class AcpChatModel(BaseChatModel):
             # P03.S14: the P02 re-probe recorded session-injected servers do NOT
             # surface, so the declared read-only harness servers are ALSO written
             # into the isolated home as user-global config, which does surface.
+            # The session-injected copy in ``mcp_servers`` is deliberately kept, not
+            # trimmed (P05.S22): it is the SOURCE this line reads to populate the
+            # home, and it is the honest upstream re-arm channel — if a future CLI
+            # surfaces session-injected servers, that path lights up with no code
+            # change here. Its only cost is a redundant connect the CLI ignores.
             surfacing_servers = config_home_mcp_servers(self._config.mcp_servers)
             config_home = create_isolated_config_home(surfacing_servers)
             env["CLAUDE_CONFIG_DIR"] = str(config_home)

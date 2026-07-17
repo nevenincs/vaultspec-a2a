@@ -2,12 +2,14 @@
 
 Spawned by the CLI as ``python -m vaultspec_a2a.protocols.mcp.authoring_stdio``.
 The process reconstructs the run's engine dispatch from its environment and
-serves the bridged propose/read tools over stdio — the transport the pinned CLI
-surfaces reliably, where the loopback HTTP MCP bridge
-(``build_authoring_mcp_servers``) connects but is not surfaced to the model. The
-engine edge is unchanged: this process still speaks to the engine over loopback
-HTTP via :class:`AuthoringClient` under the calling role's actor token, so it is
-an orchestration-internal transport swap, not an engine-contract change.
+serves the bridged propose/read tools over stdio. Neither session-injected
+transport surfaces to the model on the current stack — the S20 registration-scope
+matrix found only user-global home-config servers surface, over both stdio and
+the loopback HTTP bridge (``build_authoring_mcp_servers``) — so stdio here is the
+bridge's spawned-subprocess transport, not a surfacing lever. The engine edge is
+unchanged: this process still speaks to the engine over loopback HTTP via
+:class:`AuthoringClient` under the calling role's actor token, so it is an
+orchestration-internal transport swap, not an engine-contract change.
 
 Token hygiene: the machine bearer and actor token arrive by environment,
 are held only for this process's lifetime, and are NEVER written to stdout (the

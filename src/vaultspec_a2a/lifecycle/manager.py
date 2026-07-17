@@ -387,6 +387,10 @@ def rerun(
     record = resolve(name, home=home)
     resolved_config = config if config is not None else load_procs_config()
     role = resolved_config.role(record.role)
+    # Refuse a data-seating role with no explicit repo BEFORE any side effect, so a
+    # rerun cannot kill the running process and then decline to restart it - serve_up
+    # and resume both guard before acting, and rerun must match that ordering.
+    _ensure_explicit_repo(role, record.repo, f"{record.role}-{record.name}")
     tree_kill(record.pid)
     if role.build:
         cwd = _build_cwd_for(record)

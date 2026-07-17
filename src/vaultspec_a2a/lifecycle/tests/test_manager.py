@@ -32,6 +32,7 @@ from ..manager import (
     rebuild,
     render_command,
     render_env,
+    rerun,
     resolve,
     resume,
     serve_up,
@@ -551,6 +552,27 @@ def test_serve_up_allows_a_require_repo_role_with_an_explicit_repo(tmp_path) -> 
         assert record.repo == str(tmp_path)
     finally:
         tree_kill(record.pid)
+
+
+def test_rerun_refuses_require_repo_role_before_killing(tmp_path) -> None:
+    # A real live process behind a require_repo record with an empty repo: rerun must
+    # refuse at entry (like serve_up/resume) WITHOUT first killing it - a lifecycle
+    # verb that fells the process and then declines to restart it is the bug.
+    child = _sleeper()
+    try:
+        config = _require_repo_config(
+            [sys.executable, "-c", "import time; time.sleep(60)"], band=(18990, 18992)
+        )
+        write_record(
+            _record(name="rr", role="scratch", pid=child.pid, port=18990, repo=""),
+            home=tmp_path,
+        )
+        with pytest.raises(LifecycleError, match="requires an explicit repo"):
+            rerun("rr", home=tmp_path, config=config)
+        # The refusal happened before tree_kill: the process is still alive.
+        assert is_pid_alive(child.pid)
+    finally:
+        tree_kill(child.pid)
 
 
 def test_resume_refuses_a_require_repo_role_without_an_explicit_repo(tmp_path) -> None:

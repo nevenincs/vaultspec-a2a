@@ -988,6 +988,8 @@ def _make_research_producer(
     system_prompt: str,
     workspace_root: Path | None = None,
     harness_mcp_servers: list[str] | None = None,
+    *,
+    autonomous: bool = False,
 ) -> ResearchFindingProducer:
     """Bridge a researcher model into a ResearchFindingProducer.
 
@@ -1037,9 +1039,21 @@ def _make_research_producer(
         messages.extend(state.get("messages", []))
         effective_model = model
         if harness_mcp_servers:
-            from vaultspec_a2a.providers._acp_mcp import compose_harness_mcp_servers
+            from vaultspec_a2a.providers._acp_mcp import (
+                compose_harness_mcp_servers,
+                harness_allowed_tool_names,
+            )
 
-            effective_model = compose_harness_mcp_servers(model, harness_mcp_servers)
+            # Headless only: auto-permit the composed read tools so a surfaced rag
+            # tool is not blocked by a prompt, parallel to the worker composition
+            # site. The researcher producer is the primary target of the grounding
+            # feature, so its wiring must match the worker's.
+            harness_allowed = (
+                harness_allowed_tool_names(harness_mcp_servers) if autonomous else None
+            )
+            effective_model = compose_harness_mcp_servers(
+                model, harness_mcp_servers, allowed_tools=harness_allowed
+            )
         response = await effective_model.ainvoke(messages)
         return {
             "claim": str(response.content),
@@ -1139,6 +1153,7 @@ def _compile_research_adr(
         _agent_system_prompt(team_config, agent_configs, "researcher"),
         workspace_root=workspace_root,
         harness_mcp_servers=harness_mcp_servers,
+        autonomous=autonomous,
     )
 
     _wire_diverge_stage(

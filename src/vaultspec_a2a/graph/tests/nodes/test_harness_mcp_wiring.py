@@ -171,6 +171,51 @@ async def test_supervised_worker_does_not_auto_permit_harness_tools(
 
 
 @pytest.mark.asyncio
+async def test_autonomous_researcher_producer_auto_permits_rag_read_tools(
+    tmp_path: Path,
+) -> None:
+    """The researcher producer path auto-permits the composed rag read tools too.
+
+    Wiring parity with the worker: the researcher is the primary target of the
+    grounding feature, so its headless composition must join the same three read
+    tool names to allowedTools - otherwise a surfaced rag tool would stall on a
+    permission prompt exactly where the feature is meant to work.
+    """
+    record_file = tmp_path / "researcher_autonomous_session_new.json"
+    producer = _make_research_producer(
+        _recording_model(record_file, tmp_path),
+        "You are the researcher.",
+        harness_mcp_servers=["vaultspec-rag"],
+        autonomous=True,
+    )
+
+    await producer(_state(), {"thread_id": "t1", "topic": "x", "instructions": ""})
+    allowed = _allowed_tools(record_file)
+    assert "mcp__vaultspec-rag__search_vault" in allowed
+    assert "mcp__vaultspec-rag__search_codebase" in allowed
+    assert "mcp__vaultspec-rag__get_code_file" in allowed
+    assert not any("reindex" in t for t in allowed)
+
+
+@pytest.mark.asyncio
+async def test_supervised_researcher_producer_does_not_auto_permit(
+    tmp_path: Path,
+) -> None:
+    """Without autonomous, the researcher producer keeps the permission prompt."""
+    record_file = tmp_path / "researcher_supervised_session_new.json"
+    producer = _make_research_producer(
+        _recording_model(record_file, tmp_path),
+        "You are the researcher.",
+        harness_mcp_servers=["vaultspec-rag"],
+        autonomous=False,
+    )
+
+    await producer(_state(), {"thread_id": "t1", "topic": "x", "instructions": ""})
+    assert "vaultspec-rag" in _server_names(record_file)
+    assert not any("vaultspec-rag" in t for t in _allowed_tools(record_file))
+
+
+@pytest.mark.asyncio
 async def test_no_harness_declaration_advertises_no_extra_server(
     tmp_path: Path,
 ) -> None:

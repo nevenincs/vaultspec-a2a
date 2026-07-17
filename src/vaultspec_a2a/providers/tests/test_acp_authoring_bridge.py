@@ -32,6 +32,7 @@ from ...control.config import settings
 from ...workspace.environment import resolve_env_vars
 from .._subprocess import kill_process_tree, spawn_acp_process
 from ..factory import _classify_acp_command
+from ._acp_frames import read_acp_frame
 
 try:
     from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
@@ -131,22 +132,6 @@ async def authoring_http() -> AsyncIterator[_AuthoringHttpServer]:
         await server.stop()
 
 
-async def _read_frame(
-    stdout: asyncio.StreamReader, want_id: int, timeout: float
-) -> dict:
-    for _ in range(40):
-        raw = await asyncio.wait_for(stdout.readline(), timeout=timeout)
-        if not raw:
-            break
-        try:
-            frame = json.loads(raw.decode("utf-8").strip())
-        except json.JSONDecodeError:
-            continue
-        if frame.get("id") == want_id:
-            return frame
-    raise AssertionError(f"no frame with id {want_id}")
-
-
 @pytest.mark.service
 @pytest.mark.skipif(not _MCP_AVAILABLE, reason="mcp streamable-http unavailable")
 @pytest.mark.asyncio
@@ -185,7 +170,7 @@ async def test_real_agent_connects_to_authoring_bridge(
         }
         proc.stdin.write(json.dumps(init).encode("utf-8") + b"\n")
         await proc.stdin.drain()
-        init_frame = await _read_frame(proc.stdout, 0, 20.0)
+        init_frame = await read_acp_frame(proc.stdout, 0, 20.0)
         assert "result" in init_frame
 
         binding = AuthoringToolBinding(
@@ -205,7 +190,7 @@ async def test_real_agent_connects_to_authoring_bridge(
         }
         proc.stdin.write(json.dumps(new).encode("utf-8") + b"\n")
         await proc.stdin.drain()
-        new_frame = await _read_frame(proc.stdout, 1, 30.0)
+        new_frame = await read_acp_frame(proc.stdout, 1, 30.0)
         # The real agent accepted the authoring mcpServers config.
         assert "result" in new_frame, new_frame.get("error")
 

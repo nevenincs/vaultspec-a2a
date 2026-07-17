@@ -21,7 +21,6 @@ Skips with a pointer when the Claude CLI entry point is unavailable (an infra ga
 
 from __future__ import annotations
 
-import asyncio
 import json
 import shutil
 from pathlib import Path
@@ -32,22 +31,7 @@ from ...control.config import settings
 from ...workspace.environment import resolve_env_vars
 from .._subprocess import kill_process_tree, spawn_acp_process
 from ..factory import _CLAUDE_ACP_JS, _classify_acp_command
-
-
-async def _read_frame(
-    stdout: asyncio.StreamReader, want_id: int, timeout: float
-) -> dict:
-    for _ in range(60):
-        raw = await asyncio.wait_for(stdout.readline(), timeout=timeout)
-        if not raw:
-            break
-        try:
-            frame = json.loads(raw.decode("utf-8").strip())
-        except json.JSONDecodeError:
-            continue
-        if frame.get("id") == want_id:
-            return frame
-    raise AssertionError(f"no frame with id {want_id}")
+from ._acp_frames import read_acp_frame
 
 
 @pytest.mark.service
@@ -90,7 +74,7 @@ async def test_migrated_adapter_preserves_handshake_surface() -> None:
         }
         proc.stdin.write(json.dumps(init).encode("utf-8") + b"\n")
         await proc.stdin.drain()
-        init_frame = await _read_frame(proc.stdout, 0, 30.0)
+        init_frame = await read_acp_frame(proc.stdout, 0, 30.0)
         assert "result" in init_frame, init_frame.get("error")
         init_res = init_frame["result"]
 
@@ -119,7 +103,7 @@ async def test_migrated_adapter_preserves_handshake_surface() -> None:
         }
         proc.stdin.write(json.dumps(new).encode("utf-8") + b"\n")
         await proc.stdin.drain()
-        new_frame = await _read_frame(proc.stdout, 1, 40.0)
+        new_frame = await read_acp_frame(proc.stdout, 1, 40.0)
         assert "result" in new_frame, new_frame.get("error")
         new_res = new_frame["result"]
 

@@ -57,6 +57,20 @@ class TestRenderFeedbackBatch:
         }
         assert render_feedback_batch(data) == "- Scope: real note"
 
+    def test_unwraps_the_engine_read_nesting_under_batch(self) -> None:
+        # The engine read route nests the batch under a "batch" key (and names the
+        # id feedback_batch_id); the renderer tolerates that shape as well as flat.
+        data = {
+            "batch": {
+                "feedback_batch_id": "feedback-batch:abc",
+                "instruction": "Address all comments.",
+                "items": [_item("c1", "tighten the scope", ["Overview"])],
+            }
+        }
+        assert render_feedback_batch(data) == (
+            "Address all comments.\n- Overview: tighten the scope"
+        )
+
     def test_returns_none_for_an_empty_or_malformed_batch(self) -> None:
         assert render_feedback_batch({"items": []}) is None
         assert render_feedback_batch({"items": [{"comment_id": "c1"}]}) is None

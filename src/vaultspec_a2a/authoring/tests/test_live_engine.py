@@ -30,7 +30,7 @@ import pytest_asyncio
 
 from .. import AuthoringClient, AuthoringSession, mint_actor_token
 from .._envelope import AuthoringResponse
-from .._errors import AuthoringTransportError
+from .._errors import AuthoringError, AuthoringTransportError
 from ..catalog import CATALOG_SCHEMA_VERSION, execute_agent_tool, fetch_catalog
 
 _STALE_MS = 120_000
@@ -270,6 +270,78 @@ async def test_run_scoped_execute_of_read_tool(client: AuthoringClient) -> None:
     assert result.data.get("disposition") == "dispatched"
     assert result.data.get("eligibility", {}).get("allowed") is True
     assert result.data.get("tool") == "search_graph"
+
+
+@pytest.mark.service
+@pytest.mark.asyncio
+async def test_get_feedback_batch_reads_back_a_created_batch(
+    client: AuthoringClient,
+) -> None:
+    """The a2a read path retrieves a feedback batch by id, verbatim (S11).
+
+    The dashboard creates the batch; the a2a worker consumes it read-path-only via
+    ``AuthoringClient.get_feedback_batch`` (edge ADR D5). This drives the real
+    create + read round-trip over the wire: freeze a batch, then read it back by
+    its content-addressed id and assert the served items match.
+    """
+    run_id = f"s11-{uuid.uuid4().hex[:8]}"
+    session = await _authenticated_session(client, run_id)
+    created = await client.post_command(
+        "/v1/feedback-batches",
+        "create_feedback_batch",
+        {
+            "session_id": session.session_id,
+            "source_document": f"node:doc-{run_id}",
+            "source_revision": f"blob-{run_id}",
+            "items": [
+                {
+                    "comment_id": f"c1-{run_id}",
+                    "body": "tighten the scope",
+                    "anchor": {
+                        "heading_path": ["Overview"],
+                        "content_start": 0,
+                        "content_end": 5,
+                    },
+                }
+            ],
+        },
+        idempotency_key=f"idk-fb-{run_id}",
+    )
+    assert isinstance(created, AuthoringResponse)
+    assert isinstance(created.data, dict)
+    batch_id = created.data["batch_id"]
+    assert isinstance(batch_id, str) and batch_id.startswith("feedback-batch:")
+
+    # The a2a read path reads the immutable batch back by id, verbatim. The engine
+    # nests the batch under "batch" and names the id feedback_batch_id; the reader
+    # tolerates that shape (render_feedback_batch unwraps it).
+    read = await client.get_feedback_batch(batch_id)
+    assert isinstance(read.data, dict)
+    batch = read.data.get("batch")
+    assert isinstance(batch, dict), read.data
+    assert batch["feedback_batch_id"] == batch_id
+    assert batch["source_document"] == f"node:doc-{run_id}"
+    items = batch["items"]
+    assert isinstance(items, list) and len(items) == 1
+    assert items[0]["comment_id"] == f"c1-{run_id}"
+    assert items[0]["body"] == "tighten the scope"
+    assert items[0]["anchor"]["heading_path"] == ["Overview"]
+
+    # The reader's pure render unwraps the nested batch into grounding text.
+    from ..feedback_reader import render_feedback_batch
+
+    grounding = render_feedback_batch(read.data)
+    assert grounding is not None
+    assert "Overview: tighten the scope" in grounding
+
+
+@pytest.mark.service
+@pytest.mark.asyncio
+async def test_get_feedback_batch_unknown_id_faults(client: AuthoringClient) -> None:
+    """An unknown batch id faults on the read (404), never a fabricated empty."""
+    run_id = f"s11-{uuid.uuid4().hex[:8]}"
+    with pytest.raises((AuthoringError, AuthoringTransportError)):
+        await client.get_feedback_batch(f"feedback-batch:does-not-exist-{run_id}")
 
 
 @pytest.mark.service

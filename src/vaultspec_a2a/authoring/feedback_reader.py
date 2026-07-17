@@ -39,12 +39,18 @@ def render_feedback_batch(data: Any) -> str | None:
     """
     if not isinstance(data, dict):
         return None
-    items = data.get("items")
+    # The engine read route nests the batch under a "batch" key (data.batch);
+    # tolerate both that and a flat batch payload so the reader is robust to the
+    # served envelope shape (the id field is likewise feedback_batch_id or
+    # batch_id - not read here, only the items/instruction ground the writer).
+    inner = data.get("batch")
+    batch = inner if isinstance(inner, dict) else data
+    items = batch.get("items")
     if not isinstance(items, list):
         return None
 
     lines: list[str] = []
-    instruction = data.get("instruction")
+    instruction = batch.get("instruction")
     if isinstance(instruction, str) and instruction.strip():
         lines.append(instruction.strip())
 

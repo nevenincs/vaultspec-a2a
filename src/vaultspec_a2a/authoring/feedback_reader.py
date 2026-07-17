@@ -28,23 +28,26 @@ __all__ = ["FeedbackContextReader", "render_feedback_batch"]
 
 
 def render_feedback_batch(data: Any) -> str | None:
-    """Render an engine feedback-batch snapshot into a grounding text block.
+    """Render an engine feedback-batch READ record into a grounding text block.
 
-    Pure and exported so the rendering is unit-tested directly. Reads only the
-    stable served fields (``items[].anchor.heading_path`` / ``body`` and the
-    optional whole-batch ``instruction``); an item without a body is skipped and
-    an empty batch yields ``None`` (nothing to ground on). Never raises on a
-    malformed shape - a non-conforming payload renders whatever it can and falls
-    back to ``None`` when nothing usable remains.
+    Pure and exported so the rendering is unit-tested directly. Expects the served
+    read shape: the batch record nested under ``data.batch`` (the canonical
+    receipt-vs-record split). Reads only the stable fields
+    (``batch.items[].anchor.heading_path`` / ``body`` and the optional whole-batch
+    ``instruction``); an item without a body is skipped and an empty or non-nested
+    payload yields ``None`` (nothing to ground on). Never raises on a malformed
+    shape - it returns ``None`` when nothing usable remains.
     """
     if not isinstance(data, dict):
         return None
-    # The engine read route nests the batch under a "batch" key (data.batch);
-    # tolerate both that and a flat batch payload so the reader is robust to the
-    # served envelope shape (the id field is likewise feedback_batch_id or
-    # batch_id - not read here, only the items/instruction ground the writer).
-    inner = data.get("batch")
-    batch = inner if isinstance(inner, dict) else data
+    # The engine read route serves the batch RECORD nested under "batch" (the
+    # canonical receipt-vs-record split: create returns a flat batch_id receipt,
+    # read returns data.batch.{feedback_batch_id, items, ...}). Target that shape
+    # exactly - it is the single served shape, regression-locked by the engine's
+    # own route test; only items/instruction ground the writer.
+    batch = data.get("batch")
+    if not isinstance(batch, dict):
+        return None
     items = batch.get("items")
     if not isinstance(items, list):
         return None

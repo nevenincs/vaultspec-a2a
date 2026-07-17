@@ -7,6 +7,7 @@ date: '2026-07-17'
 modified: '2026-07-17'
 related:
   - '[[2026-07-17-kimi-provider-adr]]'
+  - '[[2026-07-17-kimi-provider-plan]]'
   - '[[2026-07-17-kimi-provider-research]]'
 ---
 
@@ -19,6 +20,10 @@ Auto-generated index of all documents tagged with `#kimi-provider`.
 ### adr
 
 - `2026-07-17-kimi-provider-adr` - `kimi-provider` adr: `the kimi moonshot provider lane: native ACP reuse with per-backend conditioning and permission-RPC read-only enforcement` | (**status:** `accepted`)
+
+### plan
+
+- `2026-07-17-kimi-provider-plan` - `kimi-provider` plan
 
 ### research
 

@@ -56,6 +56,11 @@ class ThreadMetadata(BaseModel):
     # --- SDD Pipeline Context ---
     feature_tag: str = ""
     context_refs: list[ContextRef] = Field(default_factory=list)
+    # feedback-loop: an OPAQUE engine feedback-batch id for a revision run,
+    # persisted so a worker restart re-retrieves the same batch. a2a transports
+    # the id only and never owns batch content (edge ADR D5); empty when the run
+    # is not feedback-driven.
+    feedback_batch_id: str = ""
 
     @field_validator("nickname")
     @classmethod

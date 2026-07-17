@@ -71,6 +71,11 @@ class RunStartRequest(BaseModel):
     # team-defaults profile (the team's normal resolution). An unknown or
     # ineligible profile is refused before dispatch - never silently replaced.
     profile_id: str = Field(default="team-defaults", min_length=1, max_length=64)
+    # feedback-loop: an OPAQUE engine feedback-batch id for a revision run. a2a
+    # never parses or owns batch content (edge ADR D5); it transports only the id
+    # and the worker retrieves the authoritative feedback context from the engine
+    # batch read route. Bounded; content-addressed ("feedback-batch:<digest>").
+    feedback_batch_id: str | None = Field(default=None, min_length=1, max_length=256)
 
     @field_validator("message")
     @classmethod

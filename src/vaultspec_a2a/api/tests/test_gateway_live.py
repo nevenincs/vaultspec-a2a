@@ -407,6 +407,64 @@ async def test_presets_list_discloses_workspace_profile_origin(
 
 
 @pytest.mark.asyncio(loop_scope="function")
+async def test_run_start_threads_feedback_batch_id_to_worker(
+    session_factory, checkpointer, tmp_path
+) -> None:
+    """The opaque feedback_batch_id threads run-start -> metadata -> worker dispatch.
+
+    Feedback-loop carrier (edge ADR D5): a2a transports the opaque id only. The
+    run-start body carries it, the gateway folds it onto the run metadata, and the
+    dispatch the worker receives carries it verbatim - the same path active_feature
+    rides. a2a never parses the id; retrieval is the worker's engine read.
+    """
+    app, _agg, worker, _cp = make_app(session_factory, checkpointer)
+    async with (
+        _live_server(app) as base,
+        httpx.AsyncClient(base_url=base, timeout=10.0) as client,
+    ):
+        start = await client.post(
+            "/v1/runs",
+            json={
+                "team_preset": _PRESET,
+                "message": "revise the draft",
+                "autonomous": True,
+                "feedback_batch_id": "feedback-batch:deadbeefcafe",
+                "metadata": {"workspace_root": str(tmp_path)},
+            },
+        )
+        assert start.status_code == 201, start.text
+        # The dispatch the worker received carries the opaque id verbatim.
+        assert worker.dispatches, "run-start must dispatch to the worker"
+        assert (
+            worker.dispatches[-1]["feedback_batch_id"] == "feedback-batch:deadbeefcafe"
+        )
+
+
+@pytest.mark.asyncio(loop_scope="function")
+async def test_run_start_without_feedback_batch_id_dispatches_none(
+    session_factory, checkpointer, tmp_path
+) -> None:
+    """A run with no feedback batch dispatches a null id (non-feedback run)."""
+    app, _agg, worker, _cp = make_app(session_factory, checkpointer)
+    async with (
+        _live_server(app) as base,
+        httpx.AsyncClient(base_url=base, timeout=10.0) as client,
+    ):
+        start = await client.post(
+            "/v1/runs",
+            json={
+                "team_preset": _PRESET,
+                "message": "build it",
+                "autonomous": True,
+                "metadata": {"workspace_root": str(tmp_path)},
+            },
+        )
+        assert start.status_code == 201, start.text
+        assert worker.dispatches
+        assert worker.dispatches[-1]["feedback_batch_id"] is None
+
+
+@pytest.mark.asyncio(loop_scope="function")
 async def test_run_start_refusals_over_live_socket(
     session_factory, checkpointer
 ) -> None:

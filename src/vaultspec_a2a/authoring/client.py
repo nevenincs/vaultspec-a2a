@@ -14,6 +14,7 @@ Token hygiene: tokens are never logged and never rendered in
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
+from urllib.parse import quote
 
 import httpx
 
@@ -360,6 +361,21 @@ class AuthoringClient:
         if run_id is not None:
             params["run_id"] = run_id
         return await self.get("/v1/recovery", params=params)
+
+    async def get_feedback_batch(self, batch_id: str) -> AuthoringResponse:
+        """Read one engine feedback batch by its opaque id (feedback-loop ADR D4).
+
+        ``GET /authoring/v1/feedback-batches/{batch_id}`` is the a2a edge's read
+        path for the authoritative feedback context: the worker holds only the
+        opaque, content-addressed id (``feedback-batch:<digest>``) forwarded on
+        run-start and retrieves the batch here. The route is app-bearer-gated
+        capability-by-id — the unguessable id IS the capability, not a session
+        binding — so no per-actor token is sent. An unknown id is a 404 the
+        transport surfaces as a typed :class:`AuthoringError`. a2a treats the
+        returned batch as opaque grounding context (edge ADR D5); it never parses
+        or owns the comment content.
+        """
+        return await self.get(f"/v1/feedback-batches/{quote(batch_id, safe='')}")
 
     # ------------------------------------------------------------------
     # Decoding

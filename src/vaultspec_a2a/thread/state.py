@@ -155,6 +155,11 @@ class TeamState(TypedDict):
 
     # --- SDD blackboard awareness ---
     active_feature: NotRequired[str | None]
+    # feedback-loop: the OPAQUE engine feedback-batch id for a revision run. Carried
+    # as an identifier only (edge ADR D5); the authoritative comment content is
+    # retrieved from the engine batch read route, never owned in this state. None
+    # when the run is not feedback-driven.
+    feedback_batch_id: NotRequired[str | None]
     pipeline_phase: NotRequired[str | None]
     vault_index: NotRequired[Annotated[dict[str, list[str]], _merge_vault_index]]
     validation_errors: NotRequired[Annotated[list[str], _append_validation_errors]]

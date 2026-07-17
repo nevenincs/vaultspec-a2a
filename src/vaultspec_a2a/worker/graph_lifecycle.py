@@ -382,6 +382,8 @@ class GraphLifecycleManager:
             # so vault context reaches the graph on initial thread creation.
             if req.active_feature:
                 graph_input["active_feature"] = req.active_feature
+            if req.feedback_batch_id:
+                graph_input["feedback_batch_id"] = req.feedback_batch_id
             if req.pipeline_phase:
                 graph_input["pipeline_phase"] = req.pipeline_phase
             if req.vault_index:

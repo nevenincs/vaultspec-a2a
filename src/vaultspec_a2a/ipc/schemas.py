@@ -45,6 +45,11 @@ class DispatchRequest(BaseModel):
     recursion_limit: int
     # SDD blackboard fields
     active_feature: str | None = None
+    # feedback-loop: the OPAQUE engine feedback-batch id for a revision run,
+    # forwarded to the worker so it retrieves the authoritative batch from the
+    # engine read route. a2a never parses it (edge ADR D5); None when not
+    # feedback-driven.
+    feedback_batch_id: str | None = None
     pipeline_phase: str | None = None
     vault_index: dict[str, list[str]] = Field(default_factory=dict)
     validation_errors: list[str] = Field(default_factory=list)

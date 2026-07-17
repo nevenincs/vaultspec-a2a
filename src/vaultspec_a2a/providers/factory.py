@@ -24,7 +24,7 @@ logger = logging.getLogger(__name__)
 _CLAUDE_ACP_JS = (
     settings.project_root
     / "node_modules"
-    / "@zed-industries"
+    / "@agentclientprotocol"
     / "claude-agent-acp"
     / "dist"
     / "index.js"
@@ -236,7 +236,7 @@ def _classify_acp_command(backend: str) -> tuple[list[str], dict[str, str]]:
     if not _CLAUDE_ACP_JS.exists():
         raise ConfigError(
             f"Claude ACP entry point not found: {_CLAUDE_ACP_JS}. "
-            "Run 'npm install' to install @zed-industries/claude-agent-acp."
+            "Run 'npm install' to install @agentclientprotocol/claude-agent-acp."
         )
     return ["node", str(_CLAUDE_ACP_JS)], {
         "runtime_authority": "project_local",

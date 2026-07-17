@@ -8,7 +8,7 @@
 # ── Stage 1: ACP runtime node deps (pure JS, portable) ──────────────────────
 FROM node:22-alpine AS node-deps
 
-# Install root node_modules (contains @zed-industries/claude-agent-acp).
+# Install root node_modules (contains @agentclientprotocol/claude-agent-acp).
 # node_modules are pure JavaScript — portable from Alpine to any OS.
 WORKDIR /app
 COPY package*.json ./

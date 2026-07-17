@@ -126,7 +126,7 @@ files reference these Dockerfiles directly for clarity and consistency.
   `.vaultspec/runtime/`.
 - Provider/runtime note:
   - the worker image now includes the Node.js runtime and
-    `@zed-industries/claude-agent-acp` package needed for the Node-backed Claude
+    `@agentclientprotocol/claude-agent-acp` package needed for the Node-backed Claude
     ACP adapter path
   - the worker image now also includes the official pinned Gemini CLI package
     and runs it via the package `dist/index.js` entrypoint under Node

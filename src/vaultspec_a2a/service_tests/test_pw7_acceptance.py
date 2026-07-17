@@ -63,6 +63,7 @@ local ``vaultspec serve --no-seat`` engine plus the a2a gateway/worker with
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import itertools
 import json
 import logging
@@ -85,6 +86,26 @@ from ..authoring import AuthoringClient, mint_actor_token
 from ..authoring._envelope import AuthoringResponse, Denial
 from ..authoring._errors import AuthoringTransportError
 from ..authoring.discovery import SERVICE_JSON_ENV, resolve_engine
+from ..graph.enums import PermissionOptionKind, ToolKind
+
+# A doc-authoring role may only ever need read-only research tools; any other
+# tool-permission request (a write/execute/unclassified kind) is a real acceptance
+# failure, never allow_alwayed. Keyed on the ACP ToolKind the engine tags each
+# permission with.
+_READ_ONLY_TOOL_KINDS = frozenset(
+    {ToolKind.READ, ToolKind.SEARCH, ToolKind.FETCH, ToolKind.THINK}
+)
+
+
+def _option_id_for(options: list[dict], kind: str) -> str | None:
+    """Return the option_id of the first permission option of *kind*, or None."""
+    for option in options:
+        if option.get("kind") == kind:
+            option_id = option.get("option_id")
+            if isinstance(option_id, str):
+                return option_id
+    return None
+
 
 logger = logging.getLogger(__name__)
 
@@ -370,6 +391,29 @@ def test_deterministic_lanes_poll_fast_and_live_lanes_poll_slow() -> None:
     assert _poll_seconds_for(CASE_LIVE_MIXED) == 5.0
     assert _poll_seconds_for(CASE_CODEX) == 5.0
     assert _poll_seconds_for(CASE_ZAI) == 5.0
+
+
+def test_read_only_tool_kinds_are_allowlisted_and_writes_are_not() -> None:
+    """Read-only research tool kinds are allow-listed; write/execute kinds are not -
+    membership holds on the raw string value the engine tags each permission with."""
+    for allowed in (ToolKind.READ, ToolKind.SEARCH, ToolKind.FETCH, ToolKind.THINK):
+        assert allowed in _READ_ONLY_TOOL_KINDS
+    for denied in (ToolKind.EDIT, ToolKind.DELETE, ToolKind.MOVE, ToolKind.EXECUTE):
+        assert denied not in _READ_ONLY_TOOL_KINDS
+    assert "search" in _READ_ONLY_TOOL_KINDS
+    assert "edit" not in _READ_ONLY_TOOL_KINDS
+
+
+def test_option_id_for_selects_the_option_of_the_requested_kind() -> None:
+    options = [
+        {"option_id": "opt-once", "name": "Allow once", "kind": "allow_once"},
+        {"option_id": "opt-always", "name": "Allow always", "kind": "allow_always"},
+        {"option_id": "opt-deny", "name": "Deny", "kind": "reject_always"},
+    ]
+    assert _option_id_for(options, PermissionOptionKind.ALLOW_ALWAYS) == "opt-always"
+    assert _option_id_for(options, PermissionOptionKind.REJECT_ALWAYS) == "opt-deny"
+    assert _option_id_for(options, PermissionOptionKind.ALLOW_ONCE) == "opt-once"
+    assert _option_id_for([], PermissionOptionKind.ALLOW_ALWAYS) is None
     # Same gate shape at the deterministic preset is x1 - well under 4080s.
     assert _runtime_budget_for(CASE_MIXED) == pytest.approx(1020.0)
 
@@ -798,6 +842,8 @@ class AcceptanceHarness:
     feature: str = ""
     _idk_counter: itertools.count = field(default_factory=lambda: itertools.count())
     _current_mode: str | None = None
+    _answered_permissions: set[str] = field(default_factory=set)
+    _permission_violations: list[str] = field(default_factory=list)
 
     def __post_init__(self) -> None:
         # A UNIQUE per-run feature tag: the engine's create refuses to overwrite an
@@ -1182,6 +1228,56 @@ class AcceptanceHarness:
             Materialization(gate=gate, source="auto", changeset_id=changeset_id)
         )
 
+    async def _respond_permission(
+        self, hc: httpx.AsyncClient, request_id: str, option_id: str
+    ) -> None:
+        """POST a permission response (best-effort; retried on the next poll)."""
+        with contextlib.suppress(httpx.HTTPError):
+            await hc.post(
+                f"{self.gateway_url}/api/permissions/{request_id}/respond",
+                json={"option_id": option_id},
+                timeout=30.0,
+            )
+
+    async def _answer_pending_permissions(self, hc: httpx.AsyncClient) -> None:
+        """Answer outstanding tool-permission interrupts for a non-autonomous live run.
+
+        A live researcher's read-only tool request (WebSearch etc.) interrupts the run
+        by design; without an answer it parks forever. Read-only research tools get
+        ``allow_always`` so the run progresses; any other kind is denied AND recorded
+        as a violation (a doc-authoring role must never need a write/execute tool),
+        which fails the lane at the end. Best-effort per poll: a transient state-read
+        error is retried on the next tick.
+        """
+        try:
+            resp = await hc.get(
+                f"{self.gateway_url}/api/threads/{self.run_id}/state", timeout=10.0
+            )
+        except httpx.HTTPError:
+            return
+        if resp.status_code != 200:
+            return
+        for perm in resp.json().get("pending_permissions", []):
+            request_id = perm.get("request_id")
+            if not isinstance(request_id, str):
+                continue
+            if request_id in self._answered_permissions:
+                continue
+            self._answered_permissions.add(request_id)
+            options = perm.get("options", [])
+            tool_kind = perm.get("tool_kind")
+            if tool_kind in _READ_ONLY_TOOL_KINDS:
+                option_id = _option_id_for(options, PermissionOptionKind.ALLOW_ALWAYS)
+                if option_id is not None:
+                    await self._respond_permission(hc, request_id, option_id)
+            else:
+                self._permission_violations.append(
+                    f"{tool_kind!r}: {perm.get('description', '')}"
+                )
+                deny_id = _option_id_for(options, PermissionOptionKind.REJECT_ALWAYS)
+                if deny_id is not None:
+                    await self._respond_permission(hc, request_id, deny_id)
+
     async def _await(
         self,
         find,
@@ -1193,8 +1289,14 @@ class AcceptanceHarness:
     ) -> dict:
         """Poll *find* until it yields an item, watching for a terminal run."""
         started = time.monotonic()
+        # A non-autonomous live run can interrupt on a tool-permission request while
+        # we wait for a gate; answer read-only ones inline so it progresses. Skipped
+        # for deterministic/autonomous lanes (they never interrupt) to keep them fast.
+        answer_permissions = _is_live_lane(self.case) and not self.case.autonomous
         while time.monotonic() < deadline:
             await self._assert_not_terminal(hc)
+            if answer_permissions:
+                await self._answer_pending_permissions(hc)
             found = await find()
             if found is not None:
                 # Per-transition wall time - the harness's own runtime profile.
@@ -1331,6 +1433,11 @@ class AcceptanceHarness:
                                 f"AUTO gate {gate!r} marker no longer applied after "
                                 f"the mode downgrade: {applied_changeset}"
                             )
+                # A doc-authoring role must never have needed a non-read-only tool.
+                assert not self._permission_violations, (
+                    "non-read-only tool-permission request(s) by a doc-authoring "
+                    f"role: {self._permission_violations}"
+                )
                 return gates_done
 
     def materialized(self) -> dict[str, list[Path]]:

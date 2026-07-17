@@ -92,6 +92,21 @@ def test_engine_service_json_roundtrips_through_the_record_schema(tmp_path) -> N
     assert back.engine_service_json == "C:/dashboard/main/engine-service.json"
 
 
+def test_pairing_fields_roundtrip_through_the_record_schema(tmp_path) -> None:
+    # The token-FILE path (never the token) and the paired gateway URL are
+    # non-secret references the record may carry; they must survive write -> read.
+    record = _record(
+        internal_token_file="C:/machine/internal-token",
+        gateway_url="http://127.0.0.1:18100",
+    )
+    path = write_record(record, home=tmp_path)
+    back = read_record(path)
+    assert back == record
+    assert back is not None
+    assert back.internal_token_file == "C:/machine/internal-token"
+    assert back.gateway_url == "http://127.0.0.1:18100"
+
+
 def test_list_enumerates_valid_and_skips_malformed(tmp_path) -> None:
     write_record(_record(name="alpha", port=18100), home=tmp_path)
     write_record(_record(name="beta", port=18101), home=tmp_path)

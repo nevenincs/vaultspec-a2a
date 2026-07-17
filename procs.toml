@@ -39,7 +39,9 @@ staleness_ms = 120000
 [roles.gateway-dev]
 band = [18100, 18109]
 build = []
-env = { VAULTSPEC_PORT = "{port}" }
+# AUTO_SPAWN_WORKER=false: a procs-managed gateway-dev attaches to the separately
+# procs-managed worker-dev instead of spawning (and restart-thrashing) its own.
+env = { VAULTSPEC_PORT = "{port}", VAULTSPEC_AUTO_SPAWN_WORKER = "false" }
 heartbeat = true
 serve = ["{python}", "-m", "vaultspec_a2a.cli.main", "serve"]
 staleness_ms = 120000

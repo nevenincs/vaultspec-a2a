@@ -44,8 +44,16 @@ _BARE_KEY = re.compile(r"^[A-Za-z0-9_-]+$")
 
 
 def _toml_str(value: str) -> str:
-    """Return a TOML basic string. JSON string escaping is a valid TOML subset
-    for these values (double-quoted, backslash escapes for quotes/backslashes)."""
+    """Return a TOML basic string via ``json.dumps``.
+
+    TOML basic strings and JSON strings share the same double-quote delimiter and
+    the same backslash escapes for ``"``, ``\\``, and the C0 controls these values
+    can contain (tab/newline), so ``json.dumps`` output is a valid TOML basic
+    string for the registry-controlled ASCII values here (server names, uvx args,
+    tool names). It is NOT a general TOML serializer - it holds because the inputs
+    are constrained; every emitted document is asserted parseable via ``tomllib``
+    in the tests as the backstop.
+    """
     return json.dumps(value)
 
 

@@ -145,6 +145,35 @@ def test_build_self_cleans_on_copy_failure(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
+async def test_spawn_failure_cleans_credential_home(tmp_path: Path) -> None:
+    # The exact HIGH-1 scenario: the credential home is built, then the subprocess
+    # SPAWN itself raises (here an invalid cwd) before a client exists. The home
+    # must still be cleaned - exercising the `client is None` finally branch.
+    import glob
+    import tempfile
+
+    from langchain_core.messages import HumanMessage
+
+    from ..codex_chat_model import CodexChatModel
+
+    base = tmp_path / "base"
+    base.mkdir()
+    (base / "auth.json").write_text("{}", encoding="utf-8")
+    model = CodexChatModel(
+        command=[sys.executable, "-c", "pass"],
+        harness_mcp_servers=["vaultspec-rag"],
+        codex_home=str(base),
+        workspace_root=str(tmp_path / "no-such-workspace-dir"),
+    )
+    pattern = os.path.join(tempfile.gettempdir(), "vaultspec-codex-home-*")
+    before = set(glob.glob(pattern))
+    with pytest.raises(OSError):
+        async for _ in model.astream([HumanMessage(content="hi")]):
+            pass
+    assert set(glob.glob(pattern)) <= before  # credential home cleaned
+
+
+@pytest.mark.asyncio
 async def test_turn_failure_after_build_cleans_credential_home(
     tmp_path: Path,
 ) -> None:

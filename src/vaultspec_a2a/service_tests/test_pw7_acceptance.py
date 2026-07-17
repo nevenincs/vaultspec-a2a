@@ -65,6 +65,7 @@ from __future__ import annotations
 import asyncio
 import itertools
 import json
+import logging
 import os
 import random
 import time
@@ -84,6 +85,8 @@ from ..authoring import AuthoringClient, mint_actor_token
 from ..authoring._envelope import AuthoringResponse, Denial
 from ..authoring._errors import AuthoringTransportError
 from ..authoring.discovery import SERVICE_JSON_ENV, resolve_engine
+
+logger = logging.getLogger(__name__)
 
 _GATEWAY_URL = os.environ.get("VAULTSPEC_GATEWAY_URL", "http://127.0.0.1:18100")
 _RESEARCH_ADR_ROLES = (
@@ -1189,10 +1192,22 @@ class AcceptanceHarness:
         what: str,
     ) -> dict:
         """Poll *find* until it yields an item, watching for a terminal run."""
+        started = time.monotonic()
         while time.monotonic() < deadline:
             await self._assert_not_terminal(hc)
             found = await find()
             if found is not None:
+                # Per-transition wall time - the harness's own runtime profile.
+                # A throwaway overlay of this line attributed the 300-900s lane
+                # runtimes to since-fixed stalls (the healthy mixed lane runs in
+                # ~8s); keeping it at debug makes the next regression visible
+                # per-phase instead of as an opaque slow test.
+                logger.debug(
+                    "pw7 await %s: %.2fs (poll=%.1fs)",
+                    what,
+                    time.monotonic() - started,
+                    poll_seconds,
+                )
                 return found
             await asyncio.sleep(poll_seconds)
         raise AssertionError(f"timed out waiting for {what}; phases={self.phases_seen}")

@@ -136,11 +136,17 @@ async def setup_session(
     working_dir = config.workspace_root or config.cwd or str(Path.cwd())
     method = "session/new"
     params: dict[str, object] = {"cwd": working_dir, "mcpServers": config.mcp_servers}
-    if config.allowed_tools:
-        # Headless: auto-permit exactly the bridged authoring tools so
-        # the CLI can invoke them without a local prompt. This is a recorded
-        # approval policy, not a bypass — the real human gate is the engine
-        # review lane, and the .vault deny policy still blocks fs writes.
+    if config.allowed_tools and config.acp_family == "claude":
+        # Claude family only (Claude/Z.ai): serialize the headless auto-permit
+        # allowlist into the Claude-CLI-specific claudeCode namespace so the CLI
+        # can invoke the composed tools without a local prompt. This is a recorded
+        # approval policy, not a bypass — the real human gate is the engine review
+        # lane, and the .vault deny policy still blocks fs writes.
+        #
+        # The kimi family OMITS this _meta: Kimi has no claudeCode/allowedTools
+        # analogue, so the SAME composed names (still carried in
+        # config.allowed_tools) are enforced at our session/request_permission
+        # handler as an exact-name auto-approve set (P03.S10) instead.
         params["_meta"] = {
             "claudeCode": {"options": {"allowedTools": list(config.allowed_tools)}}
         }

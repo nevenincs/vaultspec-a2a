@@ -308,6 +308,14 @@ def _classify_codex_command() -> tuple[list[str], dict[str, str]]:
 # below, mirroring the _classify_acp_command "Run 'npm install' ..." pattern.
 _KIMI_CLI_PIN = "1.49.0"
 _KIMI_INSTALL_HINT = f"uv tool install kimi-cli=={_KIMI_CLI_PIN}"
+# Per-run config isolation: the inline `--config` global flag REPLACES the
+# operator's ~/.kimi/config.toml for this launch (kimi --help: "override ... set
+# in config file"), so any ambient Kimi MCP the operator has configured is
+# suppressed. An explicit empty mcpServers documents the intent. Auth rides the
+# KIMI_API_KEY env and the harness rides session-injected mcpServers, both
+# independent of this file, so nothing the run needs is lost. Inline text carries
+# NO file, so there is no per-run temp file to create or clean up.
+_KIMI_ISOLATION_CONFIG = '{"mcpServers": {}}'
 # The Kimi CLI's Windows shell backend is Git Bash; it resolves bash.exe via the
 # KIMI_CLI_GIT_BASH_PATH env override, then `git` on PATH, then standard install
 # paths, and exits at startup if none resolve (kimi-cli 1.49.0 CHANGELOG). NOTE:
@@ -631,7 +639,19 @@ class ProviderFactory:
             # Claude-only allowedTools _meta while the terminal-auth handshake
             # stays unconditional. Read-only discipline is enforced at the
             # permission-RPC handler, not via a config allowlist (Kimi has none).
-            command, command_meta = _classify_kimi_command()
+            #
+            # Per-run isolation: inject the inline `--config` global flag before
+            # the `acp` subcommand so this launch loads ONLY the run's config,
+            # excluding the operator's ~/.kimi/config.toml and thereby suppressing
+            # any ambient Kimi MCP (the same per-run-config isolation as the Codex
+            # CODEX_HOME and the Claude isolated home).
+            base_command, command_meta = _classify_kimi_command()
+            command = [
+                base_command[0],
+                "--config",
+                _KIMI_ISOLATION_CONFIG,
+                *base_command[1:],
+            ]
             api_key = (
                 settings.kimi_api_key.get_secret_value()
                 if settings.kimi_api_key

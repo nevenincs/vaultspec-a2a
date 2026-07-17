@@ -32,6 +32,7 @@ import threading
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from .manager import render_command
 from .procs_config import load_procs_config
 from .registration import (
     deregister_serve,
@@ -87,15 +88,16 @@ def resolve_data_seat(raw: str) -> str:
 def engine_command(port: int, workspace: str) -> list[str]:
     """The engine launch command with ``{port}``/``{workspace}`` substituted.
 
-    Threading ``{workspace}`` lets a ``VAULTSPEC_ENGINE_SERVE_CMD`` template seat
-    the data store explicitly (``--data-dir {workspace}/engine-data``) instead of
-    relying on cwd alone.
+    Shell-splits the ``VAULTSPEC_ENGINE_SERVE_CMD`` template, then delegates token
+    substitution to the lifecycle's :func:`render_command` (the single substitution
+    implementation - no parallel copy). Threading ``{workspace}`` lets a template
+    seat the data store explicitly (``--scope {workspace}`` /
+    ``--data-dir {workspace}/engine-data``) instead of relying on cwd alone; the
+    ``{python}`` token render_command also resolves is simply absent from engine
+    templates.
     """
     template = os.environ.get(_SERVE_CMD_ENV) or _DEFAULT_SERVE_CMD
-    return [
-        part.replace("{port}", str(port)).replace("{workspace}", workspace)
-        for part in shlex.split(template)
-    ]
+    return render_command(shlex.split(template), port=port, workspace=workspace)
 
 
 def _heartbeat(record: ProcRecord | None, stop: threading.Event) -> None:

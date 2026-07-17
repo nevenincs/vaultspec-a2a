@@ -25,6 +25,7 @@ if TYPE_CHECKING:
 
 __all__ = ["DispatchPairingStatus", "verify_dispatch_pairing"]
 
+_GATEWAY_ROLE = "gateway-dev"
 _WORKER_ROLE = "worker-dev"
 
 
@@ -44,16 +45,24 @@ def _worker_port(worker_url: str) -> int | None:
 
 
 def verify_dispatch_pairing(
-    worker_url: str, *, home: Path | None = None, config: ProcsConfig | None = None
+    worker_url: str,
+    gateway_port: int,
+    *,
+    home: Path | None = None,
+    config: ProcsConfig | None = None,
 ) -> tuple[DispatchPairingStatus, str]:
     """Classify a band gateway's dispatch target against the worker-dev band.
 
-    ``OK`` when the gateway dispatches to a worker-dev band port (or there is nothing
-    to check - no worker-dev role, or an unparseable url). ``MISPAIRED`` when it
-    targets a port OUTSIDE the band while a live band worker record exists (the
-    master-bug misconfiguration; the caller must refuse to boot). ``UNPAIRED`` when it
-    targets outside the band and no band worker is running (plausible dev intent -
-    warn only). The returned message is operator-actionable.
+    Computes condition (a) - "is this a band dev gateway" - from *gateway_port* vs
+    the gateway-dev band, so the caller can run this BEFORE self-registration and
+    refuse with zero registry residue. A resident/out-of-band gateway is exempt.
+
+    ``OK`` when the gateway is out-of-band, dispatches to a worker-dev band port, or
+    there is nothing to check (missing role, unparseable url). ``MISPAIRED`` when a
+    band gateway targets a port OUTSIDE the worker band while a LIVE band worker
+    record exists (the master-bug misconfiguration; the caller must refuse to boot).
+    ``UNPAIRED`` when a band gateway targets outside the band and no live band worker
+    is running (plausible dev intent - warn only). The message is operator-actionable.
     """
     resolved_config = config
     if resolved_config is None:
@@ -61,6 +70,9 @@ def verify_dispatch_pairing(
             resolved_config = load_procs_config()
         except ProcsConfigError:
             return DispatchPairingStatus.OK, ""
+    gateway_role = resolved_config.roles.get(_GATEWAY_ROLE)
+    if gateway_role is None or gateway_port not in gateway_role.band:
+        return DispatchPairingStatus.OK, ""
     worker_role = resolved_config.roles.get(_WORKER_ROLE)
     if worker_role is None:
         return DispatchPairingStatus.OK, ""

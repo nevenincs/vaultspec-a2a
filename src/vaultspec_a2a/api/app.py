@@ -252,6 +252,25 @@ async def _lifespan(app: FastAPI) -> AsyncGenerator[None]:
             pid=discovery_pid,
             service_token=settings.internal_token,
         )
+        # Master-bug guard (BEFORE registration so a refusal leaves zero residue): a
+        # band gateway-dev whose dispatch target is outside the worker-dev band while
+        # a live band worker exists is mis-paired - refuse to boot rather than
+        # silently dispatch into the owner's resident worker. When no band worker
+        # exists the mismatch is a plausible dev intent, so warn only.
+        from ..lifecycle.pairing import (
+            DispatchPairingStatus,
+            verify_dispatch_pairing,
+        )
+
+        pairing_status, pairing_message = verify_dispatch_pairing(
+            settings.worker_url, settings.port
+        )
+        if pairing_status is DispatchPairingStatus.MISPAIRED:
+            raise RuntimeError(pairing_message)
+        if pairing_status is DispatchPairingStatus.UNPAIRED:
+            logger.warning("Dispatch pairing: %s", pairing_message)
+            app.state.dispatch_pairing_warning = pairing_message
+
         # A gateway booted on a band port (gateway-dev)
         # self-registers so `procs` can enumerate/attach/reap it; a resident
         # gateway on its fixed out-of-band port registers nothing (returns None).
@@ -261,24 +280,6 @@ async def _lifespan(app: FastAPI) -> AsyncGenerator[None]:
             workspace=str(settings.workspace_root),
             command=["vaultspec-a2a", "serve", "--port", str(settings.port)],
         )
-        # Master-bug guard: a band gateway-dev whose dispatch target is outside the
-        # worker-dev band while a live band worker exists is mis-paired - refuse to
-        # boot rather than silently dispatch into the owner's resident worker. When
-        # no band worker exists the mismatch is a plausible dev intent, so warn only.
-        if serve_record is not None:
-            from ..lifecycle.pairing import (
-                DispatchPairingStatus,
-                verify_dispatch_pairing,
-            )
-
-            pairing_status, pairing_message = verify_dispatch_pairing(
-                settings.worker_url
-            )
-            if pairing_status is DispatchPairingStatus.MISPAIRED:
-                raise RuntimeError(pairing_message)
-            if pairing_status is DispatchPairingStatus.UNPAIRED:
-                logger.warning("Dispatch pairing: %s", pairing_message)
-                app.state.dispatch_pairing_warning = pairing_message
         discovery_task = asyncio.create_task(
             _discovery_heartbeat(
                 discovery_path,

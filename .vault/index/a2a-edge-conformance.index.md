@@ -44,7 +44,9 @@ related:
   - '[[2026-07-14-a2a-edge-conformance-W05-P14-S32]]'
   - '[[2026-07-14-a2a-edge-conformance-W05-P16-S37]]'
   - '[[2026-07-14-a2a-edge-conformance-W05-P16-S38]]'
+  - '[[2026-07-14-a2a-edge-conformance-W05-P16-S39]]'
   - '[[2026-07-14-a2a-edge-conformance-W05-P16-S40]]'
+  - '[[2026-07-14-a2a-edge-conformance-W05-P16-S41]]'
   - '[[2026-07-14-a2a-edge-conformance-adr]]'
   - '[[2026-07-14-a2a-edge-conformance-deletion-manifest-reference]]'
   - '[[2026-07-14-a2a-edge-conformance-engine-wire-shapes-reference]]'
@@ -143,7 +145,9 @@ Auto-generated index of all documents tagged with `#a2a-edge-conformance`.
 - `2026-07-15-a2a-edge-conformance-P03-summary` - `a2a-edge-conformance` `P03` summary
 - `2026-07-14-a2a-edge-conformance-W05-P16-S37` - Diagnose and fix the worker-gateway-authoring wiring defect where workers heartbeat a dead gateway port and authoring_backend_reachable is false, causing WorkerExecutionError at graph ingest (httpx.ConnectError) and INGEST_ERROR terminal frames on every run. Ground rag-first in worker_management spawn-env propagation, lifecycle manager env overlay, and registry ProcRecord re-injection. Prove with a live mock-autonomous run that reaches terminal completed while emitting token, tool_call, and agent_status frames
 - `2026-07-14-a2a-edge-conformance-W05-P16-S38` - Promote the current build to the machine-global :8000 discovery point (restart the resident gateway so its OpenAPI serves the run-stream route) and add a doctor staleness check that detects a resident serving an older route set than the installed source, so a stale resident is diagnosable instead of silently 404ing the engine relay
+- `2026-07-14-a2a-edge-conformance-W05-P16-S39` - Run the end-to-end D3 relay proof through the engine pass-through stream against the healthy resident stack, capture contract-correct frame evidence (envelope fields, sequence, replay) in the step record, and raise the cross-repo re-arm event to the dashboard team mirroring the S32 pattern
 - `2026-07-14-a2a-edge-conformance-W05-P16-S40` - Fix the startup-reconciliation recovery-epoch bug: the paused_resumable repair outcome path never increments threads.recovery_epoch (unlike checkpoint_unavailable), so any subsequent boot re-derives the same startup-repair idempotency key and crashes the whole app with an IntegrityError on the control_actions insert. Increment the epoch on every applied repair outcome and make the idempotency-key insert conflict-tolerant (an already-applied repair replays as a no-op, honoring idempotency semantics instead of crashing). Prove with a live boot-reboot cycle over a thread in paused_resumable state
+- `2026-07-14-a2a-edge-conformance-W05-P16-S41` - Close the two non-blocking re-review follow-ups: reconcile watchdog worker state for adopted (externally-managed) workers so plain health readiness stops reporting a healthy adopted worker as down (relax the spawned gate to reach the non-owned reconciliation branch, or set the status from the adoption probe), and harden get_or_create_control_action to an atomic on-conflict-do-nothing insert so the helper name matches its guarantee under concurrent boots. Prove with live tests covering an adopted worker reaching status up and readiness true
 
 ### plan
 

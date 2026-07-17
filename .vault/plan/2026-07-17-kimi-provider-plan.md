@@ -65,7 +65,7 @@ Dead-code and dedup sweep, mandatory review gate, and plan-exec reconciliation.
 
 - [x] `P06.S19` - Sweep the codebase and vault via rag for dead or duplicate kimi-lane paths and reconcile any found (executor-service); `src/vaultspec_a2a/`.
 - [x] `P06.S20` - Run the mandatory code-review gate over all landed kimi-provider changes for safety and intent, which must return PASS before close-out (vaultspec-code-reviewer); `.vault/audit/`.
-- [ ] `P06.S21` - Reconcile the plan and exec records against what actually landed, ensuring every Step has its exec record and the Verification criteria are honestly closed (executor-service); `.vault/exec/`.
+- [x] `P06.S21` - Reconcile the plan and exec records against what actually landed, ensuring every Step has its exec record and the Verification criteria are honestly closed (executor-service); `.vault/exec/`.
 
 ## Description
 

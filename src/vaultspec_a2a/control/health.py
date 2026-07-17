@@ -196,6 +196,11 @@ def assemble_health_status(
         app_state, "sqlite_fallback_diagnostics", None
     )
 
+    # A band gateway dispatching outside the worker-dev band with no band worker
+    # present (the non-fatal half of the dispatch-pairing guard) surfaces here so an
+    # operator sees the mis-target without reading logs.
+    dispatch_pairing_warning = getattr(app_state, "dispatch_pairing_warning", None)
+
     return {
         "circuit_breaker": cb_state,
         "worker_connected": worker_connected,
@@ -217,6 +222,7 @@ def assemble_health_status(
         "paused_resumable": repair_summary.get("paused_resumable", 0),
         "checkpoint_unavailable": repair_summary.get("checkpoint_unavailable", 0),
         "sqlite_fallback": sqlite_fallback_diagnostics,
+        "dispatch_pairing_warning": dispatch_pairing_warning,
     }
 
 

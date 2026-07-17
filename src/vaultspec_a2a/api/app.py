@@ -261,6 +261,24 @@ async def _lifespan(app: FastAPI) -> AsyncGenerator[None]:
             workspace=str(settings.workspace_root),
             command=["vaultspec-a2a", "serve", "--port", str(settings.port)],
         )
+        # Master-bug guard: a band gateway-dev whose dispatch target is outside the
+        # worker-dev band while a live band worker exists is mis-paired - refuse to
+        # boot rather than silently dispatch into the owner's resident worker. When
+        # no band worker exists the mismatch is a plausible dev intent, so warn only.
+        if serve_record is not None:
+            from ..lifecycle.pairing import (
+                DispatchPairingStatus,
+                verify_dispatch_pairing,
+            )
+
+            pairing_status, pairing_message = verify_dispatch_pairing(
+                settings.worker_url
+            )
+            if pairing_status is DispatchPairingStatus.MISPAIRED:
+                raise RuntimeError(pairing_message)
+            if pairing_status is DispatchPairingStatus.UNPAIRED:
+                logger.warning("Dispatch pairing: %s", pairing_message)
+                app.state.dispatch_pairing_warning = pairing_message
         discovery_task = asyncio.create_task(
             _discovery_heartbeat(
                 discovery_path,

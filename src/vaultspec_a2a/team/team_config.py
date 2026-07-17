@@ -352,6 +352,17 @@ class TeamHarnessConfig(BaseModel):
     )
     role_skills: dict[str, list[str]] = Field(default_factory=dict)
     mcp_servers: list[str] = Field(default_factory=list)
+    authoring_bridge: bool = False
+    """Arm the per-run engine authoring bridge for this preset's CLI-coder agents.
+
+    When ``true`` the run builds an :class:`AuthoringToolBinding` per worker and
+    surfaces the engine's propose/read tools through the same isolated config
+    home the declared ``mcp_servers`` ride (S18 admission channel). It is the
+    agent-INITIATED authoring path for CLI-coder presets; document-authoring
+    topologies (``research_adr``) author through the in-process graph submitter
+    and must NOT set it — that contradiction is rejected in
+    :meth:`TeamConfig` validation.
+    """
 
     @model_validator(mode="after")
     def validate_surfaces(self) -> "TeamHarnessConfig":
@@ -555,6 +566,15 @@ class TeamConfig(BaseModel):
                     f"role {role_key!r}; declared team workers are "
                     f"{sorted(worker_ids)!r}."
                 )
+        if self.harness.authoring_bridge and self.is_document_authoring:
+            raise ConfigError(
+                f"Harness in team {self.id!r} sets authoring_bridge=true on a "
+                f"document-authoring topology ({self.topology.type.value!r}); the "
+                "engine authoring bridge is the agent-initiated path for CLI-coder "
+                "presets, while document-authoring topologies author through the "
+                "in-process graph submitter. Remove authoring_bridge or use a "
+                "coding topology."
+            )
         return self
 
     @property

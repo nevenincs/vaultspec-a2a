@@ -37,5 +37,13 @@ You are the Vaultspec-Orchestrator, overseeing a single, un-supervised coding ag
 step_timeout_seconds = 120
 recursion_limit      = 10
 
+# Arm the per-run engine authoring bridge: the coder gets the engine's propose/read
+# tools surfaced through the isolated config home (S18 admission channel). No
+# workspace authoring surfaces are required - the bridge routes authoring through
+# the engine, not the local .vault - so required_surfaces is empty.
+[team.harness]
+required_surfaces = []
+authoring_bridge  = true
+
 [[team.workers]]
 agent_id = "vaultspec-coder"

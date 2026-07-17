@@ -70,7 +70,10 @@ AUTHORING_MCP_SERVER_NAME = "vaultspec-authoring"
 
 # The stdio bridge entry module, spawned by the CLI as `python -m <module>`. The
 # subprocess reconstructs the run's dispatch against the engine and serves the
-# bridged tools over stdio (the surfacing-reliable transport).
+# bridged tools over stdio. On the pinned stack, session-injected MCP servers do
+# not surface to the model over either transport (S20 registration-scope matrix:
+# only user-global home-config servers surface); the stdio shape is a spawn
+# mechanism, not a surfacing one.
 AUTHORING_STDIO_MODULE = "vaultspec_a2a.protocols.mcp.authoring_stdio"
 
 # Env var names the spawned stdio bridge reads are imported from the bridge
@@ -109,8 +112,11 @@ class AuthoringToolBinding:
     the HTTP bridge (``server_url``, when the orchestrator stands up a loopback
     MCP server) or the stdio bridge (``engine_base_url`` + ``run_id``, when the
     CLI spawns our per-run stdio bridge subprocess). At least one transport's
-    fields must be present; both may coexist. Both transports are supported,
-    with stdio preferred while the CLI defers HTTP MCP tool surfacing.
+    fields must be present; both may coexist. Both transports are supported;
+    when both are present the stdio bridge is chosen. On the pinned stack,
+    neither transport surfaces a session-injected server to the model (S20
+    registration-scope matrix: only user-global home-config servers surface), so
+    the transport choice is a spawn/wiring detail, not a surfacing one.
 
     Parameters
     ----------
@@ -237,8 +243,10 @@ def build_authoring_stdio_mcp_servers(
     env}``) that runs ``python -m <AUTHORING_STDIO_MODULE>``. The engine origin,
     run id, and tokens travel to the subprocess by env — never argv — so a
     process listing never exposes them (R7); the subprocess reconstructs the
-    run's dispatch and serves the bridged tools over stdio, the transport the
-    CLI surfaces reliably (R4 amendment).
+    run's dispatch and serves the bridged tools over stdio. Whether those tools
+    surface to the model is governed by registration scope, not transport: on the
+    pinned stack the S20 matrix found session-injected servers do not surface
+    over stdio or HTTP (only user-global home-config servers do).
 
     ``python_executable`` defaults to the current interpreter (``sys.executable``),
     which in a deployed run is the venv python carrying the installed package.

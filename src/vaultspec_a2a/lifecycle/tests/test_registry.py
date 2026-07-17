@@ -81,6 +81,17 @@ def test_build_repo_roundtrips_through_the_record_schema(tmp_path) -> None:
     assert back.build_repo == "Z:/dashboard/main/engine"
 
 
+def test_engine_service_json_roundtrips_through_the_record_schema(tmp_path) -> None:
+    # The recorded engine-discovery path (machine-specific, never in procs.toml) must
+    # survive write -> read so resume/rerun can re-inject it.
+    record = _record(engine_service_json="C:/dashboard/main/engine-service.json")
+    path = write_record(record, home=tmp_path)
+    back = read_record(path)
+    assert back == record
+    assert back is not None
+    assert back.engine_service_json == "C:/dashboard/main/engine-service.json"
+
+
 def test_list_enumerates_valid_and_skips_malformed(tmp_path) -> None:
     write_record(_record(name="alpha", port=18100), home=tmp_path)
     write_record(_record(name="beta", port=18101), home=tmp_path)

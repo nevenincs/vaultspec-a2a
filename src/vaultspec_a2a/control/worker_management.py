@@ -22,6 +22,7 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from pathlib import Path
 
+from ..utils import kill_pid_tree_async
 from .config import settings
 
 __all__ = [
@@ -279,31 +280,9 @@ async def _shutdown_worker_process(
         "Shutting down worker process (PID %d)",
         process.pid,
     )
-    if sys.platform == "win32":
-        try:
-            await asyncio.to_thread(
-                subprocess.run,
-                [
-                    "taskkill",
-                    "/T",
-                    "/F",
-                    "/PID",
-                    str(process.pid),
-                ],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                check=False,
-            )
-        except Exception:
-            with contextlib.suppress(OSError):
-                process.kill()
-    else:
-        process.terminate()
-        try:
-            await asyncio.to_thread(process.wait, 10.0)
-        except subprocess.TimeoutExpired:
-            logger.warning("Worker did not exit in 10s, killing")
-            process.kill()
+    # Shared async tree-kill (Windows taskkill /T /F, POSIX SIGTERM->SIGKILL); the
+    # Popen handle is reaped here since the primitive works by pid.
+    await kill_pid_tree_async(process.pid, term_timeout=10.0, kill_timeout=5.0)
     with contextlib.suppress(Exception):
         await asyncio.to_thread(process.wait, 5.0)
     logger.info("Worker process stopped")
@@ -396,6 +375,16 @@ class LazyWorkerSpawner:
                 )
 
     @property
+    def auto_spawn(self) -> bool:
+        """Whether this gateway is configured to spawn/respawn the worker itself.
+
+        ``False`` means the worker is externally managed: the gateway attaches to a
+        running worker but must never spawn or restart it (that belongs to whoever
+        owns it, e.g. the dev-process registry).
+        """
+        return self._auto_spawn
+
+    @property
     def worker_url(self) -> str:
         """The worker's base URL."""
         return self._worker_url
@@ -449,6 +438,9 @@ class WorkerWatchdog:
         self._cb = circuit_breaker
         self._worker_state = worker_state
         self._app_state = app_state
+        # Monotonic timestamp of the last restart CYCLE (not attempt), for the
+        # global inter-cycle cooldown that rate-limits a persistent crash signal.
+        self._last_restart_cycle_ts: float | None = None
         # Initialise worker state
         self._worker_state.worker_status = "pending"
         self._worker_state.worker_restart_count = 0
@@ -500,75 +492,126 @@ class WorkerWatchdog:
         """Probe the worker HTTP health endpoint for status promotion checks."""
         return await _check_worker_health(self._spawner.worker_url)
 
+    @staticmethod
+    def _needs_recovery(*, crashed: bool, stale: bool, http_ready: bool) -> bool:
+        """Whether the worker genuinely needs recovery.
+
+        A worker answering ``GET /health`` is alive, so heartbeat-PUSH staleness
+        alone (with a healthy HTTP endpoint) is degraded telemetry, not a crash -
+        treating it as one is what made the watchdog thrash against a healthy,
+        externally-managed worker whose heartbeats were failing (e.g. auth). Only a
+        crashed process, or staleness AND an unreachable endpoint, is a real crash.
+        """
+        return crashed or (stale and not http_ready)
+
+    def _owns_worker(self) -> bool:
+        """Whether this gateway may restart the worker (it spawned the process).
+
+        The watchdog must never force the breaker open or spawn a competitor for a
+        worker it does not own: an externally-managed worker (``process is None``)
+        or a gateway configured not to auto-spawn is reconciled from its HTTP probe
+        and its lifecycle left to whoever owns it (the dev-process registry).
+        """
+        return self._spawner.process is not None and self._spawner.auto_spawn
+
+    def _restart_cooldown_elapsed(self, *, now: float | None = None) -> bool:
+        """Whether enough time has passed since the last restart cycle to start one."""
+        if self._last_restart_cycle_ts is None:
+            return True
+        current = now if now is not None else time.monotonic()
+        return (
+            current - self._last_restart_cycle_ts
+        ) >= settings.watchdog_restart_cooldown_seconds
+
     async def run(self) -> None:
         """Main watchdog loop — runs until cancelled."""
         try:
             while True:
                 await asyncio.sleep(settings.watchdog_poll_interval_seconds)
-
-                # Don't monitor before first dispatch triggers a spawn.
-                if not self._spawner.spawned:
-                    continue
-
-                # --- Crash detection ---
-                http_ready = await self._probe_worker_ready()
-                crashed = self._process_crashed()
-                stale = self._heartbeat_stale()
-
-                # Promote to "up" only after a positive worker health probe.
-                if self._worker_state.worker_status == "pending":
-                    if http_ready and not stale and not crashed:
-                        self._worker_state.worker_status = "up"
-                        continue
-                    if not crashed and not stale:
-                        continue
-
-                if not crashed and not stale:
-                    # Healthy — ensure status reflects it.
-                    if self._worker_state.worker_status == "up":
-                        continue
-                    # Recovered from a transient state.
-                    if self._worker_state.worker_status != "down":
-                        self._worker_state.worker_status = "up"
-                    continue
-
-                # --- Crash detected ---
-                reason = "process_exited" if crashed else "heartbeat_stale"
-                proc = self._spawner.process
-                detail = None
-                if crashed and proc is not None:
-                    detail = _build_worker_restart_detail(
-                        returncode=proc.returncode,
-                        stderr_log_path=self._spawner.stderr_log_path,
-                    )
-                logger.error(
-                    "Worker crash detected: %s%s — initiating restart",
-                    reason,
-                    f" ({detail})" if detail else "",
-                )
-                self._worker_state.worker_status = "restarting"
-                self._mark_restart_started(reason, detail)
-
-                # Force circuit breaker open so dispatches return 503.
-                self._cb.force_open()
-
-                # --- Restart with exponential backoff ---
-                restarted, attempts = await self._attempt_restart()
-                self._mark_restart_finished(restarted, attempts)
-                if restarted:
-                    self._cb.record_success()
-                    self._worker_state.worker_status = "up"
-                    logger.info("Worker restarted successfully")
-                else:
-                    self._worker_state.worker_status = "down"
-                    logger.critical(
-                        "Worker restart failed after %d attempts — "
-                        "manual intervention required. "
-                        "Run: uv run vaultspec service start",
-                        settings.watchdog_max_retries,
-                    )
+                await self._tick()
         except asyncio.CancelledError:
             logger.info("Worker watchdog stopped")
+
+    async def _tick(self) -> None:
+        """One watchdog poll: detect, reconcile status, and restart only when owned."""
+        # Don't monitor before first dispatch triggers a spawn.
+        if not self._spawner.spawned:
+            return
+
+        # --- Detection ---
+        http_ready = await self._probe_worker_ready()
+        crashed = self._process_crashed()
+        stale = self._heartbeat_stale()
+        needs_recovery = self._needs_recovery(
+            crashed=crashed, stale=stale, http_ready=http_ready
+        )
+
+        # Promote to "up" only after a positive worker health probe.
+        if self._worker_state.worker_status == "pending":
+            if http_ready and not needs_recovery:
+                self._worker_state.worker_status = "up"
+                return
+            if not needs_recovery:
+                return
+
+        # --- Healthy / degraded-but-alive: reconcile status, never restart ---
+        if not needs_recovery:
+            if self._worker_state.worker_status == "up":
+                return
+            # Recovered from a transient state (a "down" worker stays down until a
+            # real recovery flips it).
+            if self._worker_state.worker_status != "down":
+                self._worker_state.worker_status = "up"
+            return
+
+        # --- Needs recovery ---
+        # The gateway only restarts a worker it OWNS. For an external/adopted worker
+        # (or a no-auto-spawn deployment) it reports the truth and leaves recovery to
+        # the owner - never force-opening the breaker or spawning a competitor.
+        if not self._owns_worker():
+            self._worker_state.worker_status = "up" if http_ready else "down"
+            return
+
+        # Global inter-cycle cooldown: a persistent crash signal cannot spin restart
+        # cycles faster than the configured cooldown.
+        if not self._restart_cooldown_elapsed():
+            return
+
+        reason = "process_exited" if crashed else "heartbeat_stale"
+        proc = self._spawner.process
+        detail = None
+        if crashed and proc is not None:
+            detail = _build_worker_restart_detail(
+                returncode=proc.returncode,
+                stderr_log_path=self._spawner.stderr_log_path,
+            )
+        logger.error(
+            "Worker crash detected: %s%s — initiating restart",
+            reason,
+            f" ({detail})" if detail else "",
+        )
+        self._worker_state.worker_status = "restarting"
+        self._mark_restart_started(reason, detail)
+
+        # Force circuit breaker open so dispatches return 503.
+        self._cb.force_open()
+
+        # --- Restart with exponential backoff ---
+        restarted, attempts = await self._attempt_restart()
+        self._last_restart_cycle_ts = time.monotonic()
+        self._mark_restart_finished(restarted, attempts)
+        if restarted:
+            self._cb.record_success()
+            self._worker_state.worker_status = "up"
+            logger.info("Worker restarted successfully")
+        else:
+            self._worker_state.worker_status = "down"
+            logger.critical(
+                "Worker restart failed after %d attempts — "
+                "manual intervention required. "
+                "Run: uv run vaultspec service start",
+                settings.watchdog_max_retries,
+            )
 
     async def _attempt_restart(self) -> tuple[bool, int]:
         """Try to restart the worker with exponential backoff.

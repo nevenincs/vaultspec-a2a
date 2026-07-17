@@ -19,6 +19,9 @@ def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
             # so it is middleware on the layer axis and still ``unit`` on purity.
             item.add_marker(pytest.mark.middleware)
             item.add_marker(pytest.mark.unit)
+        elif item.path.name == "test_process.py":
+            # Real subprocess I/O — middleware on the layer axis, not a unit test.
+            item.add_marker(pytest.mark.middleware)
         else:
             item.add_marker(pytest.mark.core)
             item.add_marker(pytest.mark.unit)

@@ -13,6 +13,8 @@ import sys
 from contextlib import suppress
 from typing import TYPE_CHECKING, Any
 
+from ..utils import kill_pid_tree_async
+
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
@@ -136,37 +138,12 @@ async def kill_process_tree(
         }
     )
     logger.info("ACP subprocess termination starting", extra=log_extra)
-    if sys.platform == "win32":
-        try:
-            killer = await asyncio.create_subprocess_exec(
-                "taskkill",
-                "/T",
-                "/F",
-                "/PID",
-                str(process.pid),
-                stdout=asyncio.subprocess.DEVNULL,
-                stderr=asyncio.subprocess.DEVNULL,
-            )
-            await asyncio.wait_for(killer.wait(), timeout=5.0)
-        except Exception:
-            with suppress(OSError):
-                process.kill()
-        with suppress(Exception):
-            await asyncio.wait_for(process.wait(), timeout=5.0)
-    else:
-        with suppress(OSError):
-            process.terminate()
-        try:
-            await asyncio.wait_for(process.wait(), timeout=5.0)
-        except TimeoutError:
-            logger.warning(
-                "ACP process %s did not exit after SIGTERM; escalating to SIGKILL",
-                process.pid,
-                extra=log_extra,
-            )
-            with suppress(OSError):
-                process.kill()
-            await process.wait()
+    # Shared async tree-kill (Windows taskkill /T /F, POSIX SIGTERM->SIGKILL). The
+    # asyncio Process is then waited/reaped here, and its transport closed below to
+    # avoid an OS handle leak when the loop finalizer runs (cpython#114177).
+    await kill_pid_tree_async(process.pid, term_timeout=5.0, kill_timeout=5.0)
+    with suppress(Exception):
+        await asyncio.wait_for(process.wait(), timeout=5.0)
 
     transport = getattr(process, "_transport", None)
     if transport is not None:

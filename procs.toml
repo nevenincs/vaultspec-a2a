@@ -27,7 +27,10 @@ gateway = 8000
 band = [18760, 18769]
 build = ["cargo", "build", "--release", "-p", "vaultspec-cli"]
 heartbeat = true
-serve = ["{python}", "scripts/engine_serve.py", "--port", "{port}"]
+# {workspace} is the engine's explicit data seat: the wrapper launches the engine
+# with its cwd there so the cwd-relative data store never lands in the a2a project
+# root shared with the resident engine. It is required - an unset seat is refused.
+serve = ["{python}", "scripts/engine_serve.py", "--port", "{port}", "--workspace", "{workspace}"]
 staleness_ms = 120000
 
 [roles.gateway-dev]

@@ -30,6 +30,9 @@ def test_committed_procs_toml_matches_the_adr_bands() -> None:
     assert engine.heartbeat is True
     assert engine.staleness_ms == 120000
     assert engine.serve and "{port}" in engine.serve
+    # The engine seats its data store relative to cwd, so the serve template must
+    # thread {workspace} through to the wrapper's explicit, validated data seat.
+    assert "{workspace}" in engine.serve
 
     # Serve templates resolve the interpreter via {python}, never a bare `python`.
     for role in ("engine-dev", "gateway-dev", "worker-dev"):

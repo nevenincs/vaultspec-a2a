@@ -25,6 +25,8 @@ related:
   - '[[2026-07-17-tool-cores-P03-S17]]'
   - '[[2026-07-17-tool-cores-P04-S18]]'
   - '[[2026-07-17-tool-cores-P04-S19]]'
+  - '[[2026-07-17-tool-cores-P04-S20]]'
+  - '[[2026-07-17-tool-cores-P04-S21]]'
   - '[[2026-07-17-tool-cores-P05-S22]]'
   - '[[2026-07-17-tool-cores-adr]]'
   - '[[2026-07-17-tool-cores-audit]]'
@@ -67,6 +69,8 @@ Auto-generated index of all documents tagged with `#tool-cores`.
 - `2026-07-17-tool-cores-P03-S17` - Prove live that a Z.ai document agent invokes vaultspec-rag search mid-turn, capturing the tool-call trace and confirming citations resolve to real locations, real run with no mocks and zero .vault writes (executor-service)
 - `2026-07-17-tool-cores-P04-S18` - Emit a per-run CODEX_HOME config.toml carrying the shared _KNOWN_MCP_SERVERS entries as mcp_servers blocks in the Codex config shape, one registry across two transports (executor-core)
 - `2026-07-17-tool-cores-P04-S19` - Constrain the Codex MCP surface to read verbs via enabled_tools with approval_mode auto for reads, keeping the read-only sandbox as defense-in-depth (executor-core)
+- `2026-07-17-tool-cores-P04-S20` - Prove live on the Codex lane that a document agent reads a named .vault ADR via read-only sandbox filesystem access mid-turn and cites it, real run with no mocks and zero .vault writes (executor-service)
+- `2026-07-17-tool-cores-P04-S21` - Prove live that a Codex document agent invokes vaultspec-rag search mid-turn under approval-policy never and sandbox read-only, capturing the tool-call trace and confirming citations resolve, real run with no mocks (executor-service)
 - `2026-07-17-tool-cores-P05-S22` - Remove the superseded allowlist-less attach-combined path and any other code the landed composition mechanism supersedes (executor-core)
 
 ### plan

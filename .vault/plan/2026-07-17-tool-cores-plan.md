@@ -25,7 +25,7 @@ lanes, executing the accepted `2026-07-17-tool-cores-adr`.
 - [x] `P01.S02` - Re-express the researcher persona to name the native Read, Grep, and Glob grounding tools and remove the terminal-false-unexecutable vaultspec-core and rag CLI invocations, claiming P03.S05 of the graph-agent-framework-harness plan, with the rag MCP tool names added later once surfacing is confirmed (executor-service); `src/vaultspec_a2a/team/presets/agents/vaultspec-researcher.toml`.
 - [x] `P01.S03` - Correct the falsified stdio-surfaces-reliably docstring to the S20 registration-scope truth (executor-core); `src/vaultspec_a2a/graph/nodes/worker.py`.
 - [x] `P01.S04` - Correct the falsified stdio-surfaces-reliably docstring to the S20 registration-scope truth (executor-core); `src/vaultspec_a2a/providers/_acp_authoring.py`.
-- [ ] `P01.S05` - Prove live on the Claude lane that a document agent reads a named .vault ADR mid-turn and cites it, real run against the live engine with no mocks and zero .vault writes (executor-service); `src/vaultspec_a2a/service_tests/`.
+- [x] `P01.S05` - Prove live on the Claude lane that a document agent reads a named .vault ADR mid-turn and cites it, real run against the live engine with no mocks and zero .vault writes (executor-service); `src/vaultspec_a2a/service_tests/`.
 
 ### Phase `P02` - Adapter migration and surfacing re-probe
 
@@ -46,7 +46,7 @@ Deliver vaultspec-rag to Claude and Z.ai document roles with read-only disciplin
 - [x] `P03.S13` - Build the worker-owned isolated CLI config home that excludes the operator writable user-global MCP, delivering the harness ambient-MCP suppression required regardless of the re-probe outcome (executor-core); `src/vaultspec_a2a/providers/acp_chat_model.py`.
 - [x] `P03.S14` - If the P02 exec record shows session-injected servers do not surface, additionally populate the isolated config home with the declared read-only servers so they surface as user-global config (executor-core); `src/vaultspec_a2a/providers/acp_chat_model.py`.
 - [x] `P03.S15` - Add the rag search MCP tool name to the researcher persona grounding instructions once surfacing is confirmed by the P02 outcome (executor-service); `src/vaultspec_a2a/team/presets/agents/vaultspec-researcher.toml`.
-- [ ] `P03.S16` - Prove live that a Claude document agent invokes vaultspec-rag search mid-turn, capturing the tool-call trace and confirming citations resolve to real locations, real run with no mocks and zero .vault writes (executor-service); `src/vaultspec_a2a/service_tests/`.
+- [x] `P03.S16` - Prove live that a Claude document agent invokes vaultspec-rag search mid-turn, capturing the tool-call trace and confirming citations resolve to real locations, real run with no mocks and zero .vault writes (executor-service); `src/vaultspec_a2a/service_tests/`.
 - [x] `P03.S17` - Prove live that a Z.ai document agent invokes vaultspec-rag search mid-turn, capturing the tool-call trace and confirming citations resolve to real locations, real run with no mocks and zero .vault writes (executor-service); `src/vaultspec_a2a/service_tests/`.
 
 ### Phase `P04` - Codex semantic grounding

@@ -198,6 +198,33 @@ def test_config_home_servers_empty_when_none_registry_known() -> None:
     assert config_home_mcp_servers(session) == {}
 
 
+def test_every_registry_entry_is_marked_read_only() -> None:
+    # Trust-root invariant: only read-only servers exist in the registry, so a
+    # drifted write-capable entry fails at test time before it can ever surface.
+    from .._acp_mcp import _KNOWN_MCP_SERVERS
+
+    for name, entry in _KNOWN_MCP_SERVERS.items():
+        assert entry.get("read_only") is True, name
+
+
+def test_config_home_refuses_a_non_read_only_registry_entry() -> None:
+    # Runtime fail-loud guard: even if a non-read-only entry drifts into the
+    # registry, config_home_mcp_servers refuses to write it into the surfacing
+    # home rather than silently exposing a write-capable server.
+    from .. import _acp_mcp
+
+    _acp_mcp._KNOWN_MCP_SERVERS["danger-writer"] = {
+        "name": "danger-writer",
+        "command": "x",
+        "tools": ("write_thing",),
+    }
+    try:
+        with pytest.raises(ConfigError):
+            config_home_mcp_servers([{"name": "danger-writer", "command": "x"}])
+    finally:
+        del _acp_mcp._KNOWN_MCP_SERVERS["danger-writer"]
+
+
 def test_compose_unknown_name_raises() -> None:
     model = AcpChatModel(command=["echo"], env_vars={})
     with pytest.raises(ConfigError):

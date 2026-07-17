@@ -39,6 +39,11 @@ __all__ = [
 # ``resolve_harness_mcp_servers`` so it never leaks into the session payload. The
 # write verbs the rag server also exposes (``reindex_vault``/``reindex_codebase``)
 # are deliberately omitted, honoring the read-only composition boundary.
+# ``read_only`` is the registry's trust-root marker: only an entry explicitly
+# flagged read-only may ever be written into the surfacing config home. It is
+# asserted fail-loud at :func:`config_home_mcp_servers` build time so a future
+# drifted or write-capable entry cannot be silently surfaced. The default is
+# unsafe-by-omission (a missing/false flag fails), never silently permissive.
 _LAUNCH_SPEC_KEYS = ("name", "command", "args", "env")
 _KNOWN_MCP_SERVERS: dict[str, dict[str, Any]] = {
     "vaultspec-rag": {
@@ -46,6 +51,7 @@ _KNOWN_MCP_SERVERS: dict[str, dict[str, Any]] = {
         "command": "uvx",
         "args": ["--from", "vaultspec-rag", "vaultspec-search-mcp"],
         "tools": ("search_vault", "search_codebase", "get_code_file"),
+        "read_only": True,
     },
 }
 
@@ -127,6 +133,14 @@ def config_home_mcp_servers(
         name = spec.get("name")
         if name not in _KNOWN_MCP_SERVERS:
             continue
+        # Trust-root guard: refuse to write any server not explicitly marked
+        # read-only into the surfacing config home, fail-loud so registry drift
+        # (a write-capable entry) can never be silently surfaced.
+        if not _KNOWN_MCP_SERVERS[name].get("read_only"):
+            raise ConfigError(
+                f"refusing to surface non-read-only harness server {name!r} in the "
+                "isolated config home; only read-only servers may be composed"
+            )
         entry: dict[str, Any] = {"type": "stdio", "command": spec["command"]}
         if spec.get("args"):
             entry["args"] = list(spec["args"])

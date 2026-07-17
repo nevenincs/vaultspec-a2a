@@ -57,6 +57,10 @@ def test_created_home_carries_onboarding_flags_and_no_servers() -> None:
         assert cfg["hasCompletedOnboarding"] is True
         # Suppression: the isolated home carries NO inherited/declared servers.
         assert "mcpServers" not in cfg
+        # Security contract: NO credential file, and the home is EXACTLY the
+        # config file - nothing that could leak auth or ambient config.
+        assert not (home / ".credentials.json").exists()
+        assert {p.name for p in home.iterdir()} == {".claude.json"}
     finally:
         cleanup_isolated_config_home(home)
         assert not home.exists()
@@ -76,6 +80,10 @@ def test_created_home_surfaces_given_servers() -> None:
         # Onboarding flags AND the declared server, so it surfaces as user-global.
         assert cfg["hasCompletedOnboarding"] is True
         assert cfg["mcpServers"] == servers
+        # Security contract holds even when populated: no credential file, and
+        # the home is EXACTLY the config file.
+        assert not (home / ".credentials.json").exists()
+        assert {p.name for p in home.iterdir()} == {".claude.json"}
     finally:
         cleanup_isolated_config_home(home)
 

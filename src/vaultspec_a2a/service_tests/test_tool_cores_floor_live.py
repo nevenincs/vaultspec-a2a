@@ -311,6 +311,201 @@ async def test_document_agent_reads_named_adr_midturn_and_cites() -> None:
     )
 
 
+# --- Semantic tier (P03.S16 Claude / S17 Z.ai): agent invokes vaultspec-rag -------
+
+# The rag MCP search tools the semantic tier surfaces (P03.S12 preset opt-in + S15
+# persona). The prompt directs the document agent to invoke them so the proof observes
+# a real mid-turn rag invocation, not a native read.
+_RAG_TOOLS = (
+    "mcp__vaultspec-rag__search_codebase",
+    "mcp__vaultspec-rag__search_vault",
+)
+_RAG_SERVICE_DOWN = "service is not running"
+_CITATION_RE = re.compile(r"([A-Za-z0-9_][\w./\\-]*\.(?:py|md|toml)):(\d+)")
+
+
+def _rag_case(feature: str) -> AcceptanceCase:
+    """The semantic case: a prompt that directs the agent to invoke the rag tools."""
+    return AcceptanceCase(
+        label="tool-cores-semantic-live",
+        preset=_PRESET_LIVE,
+        feature=feature,
+        prompt=(
+            "Ground this research with the vaultspec-rag semantic search tools. "
+            "Call mcp__vaultspec-rag__search_codebase for 'compose harness mcp "
+            "servers allowlist' and mcp__vaultspec-rag__search_vault for 'tool-cores "
+            "read-only grounding decision'. Report the top file:line locations each "
+            "search returns and cite them verbatim before anything else."
+        ),
+        roles=_RESEARCH_ADR_ROLES,
+        expected_doc_kinds=(),
+        profile_id=_PROFILE_ID,
+    )
+
+
+def _resolving_citations(output: str, workspace_root: Path) -> list[str]:
+    """Return output ``file:line`` citations whose path resolves under the workspace.
+
+    A citation the agent could only produce from a real rag result pointing at a real
+    indexed file - the load-bearing "citations resolve to real locations" evidence.
+    Resolution is checked against the engine-scoped workspace the rag search was
+    project-scoped to.
+    """
+    resolving: list[str] = []
+    for match in _CITATION_RE.finditer(output):
+        rel = match.group(1).replace("\\", "/")
+        if (workspace_root / rel).is_file():
+            resolving.append(match.group(0))
+    return resolving
+
+
+@pytest.mark.service
+@pytest.mark.asyncio
+async def test_document_agent_invokes_rag_search_midturn_and_cites() -> None:
+    """Live: a document agent invokes vaultspec-rag search mid-turn; citations resolve.
+
+    The semantic-tier proof (P03.S16 Claude / S17 Z.ai, selected by ``S05_PROFILE``).
+    The agent invokes the surfaced ``mcp__vaultspec-rag__search_*`` tools, receives REAL
+    results (never the "service not running" error), and its cited file:line locations
+    resolve to real files in the engine-scoped, rag-indexed workspace. Zero document-dir
+    writes: observed over the SSE stream and cancelled before any gate applies.
+
+    Corroborating live evidence (recorded in the exec record, not asserted here - the
+    daemon log is not a test surface): the rag service's access log shows the run's
+    ``POST /search`` hitting :8766, a request native Read/Grep can never make.
+
+    Pre-flight (see the S17 exec record): the :8766 service must be discoverable
+    (``~/.vaultspec-rag/service.json`` present) and the engine-scoped workspace must be
+    indexed on it, or the search returns no hits / the service-down error and the
+    assertions fail loud.
+    """
+    stack = _reachable_stack()
+    if stack is None:
+        pytest.skip(
+            "no reachable loopback stack; boot a workspace-local `vaultspec serve "
+            "--no-seat` engine plus the a2a gateway/worker with "
+            "VAULTSPEC_AUTHORING_SUBSCRIBER_ENABLED=true (runbook), then set "
+            "VAULTSPEC_ENGINE_SERVICE_JSON and select -m service"
+        )
+    engine_base_url, engine_bearer, vault_root = stack
+    workspace_root = vault_root.parent
+
+    feature = f"tool-cores-semantic-{int(time.time())}"
+    case = _rag_case(feature)
+    harness = AcceptanceHarness(
+        case=case,
+        engine_base_url=engine_base_url,
+        engine_bearer=engine_bearer,
+        vault_root=vault_root,
+    )
+
+    before = _snapshot_vault(vault_root)
+    output_parts: list[str] = []
+    rag_invoked = False
+    service_down = False
+    resolving: list[str] = []
+
+    from .test_pw7_acceptance import _ResilientAuthoringClient
+
+    async with _ResilientAuthoringClient(engine_base_url, engine_bearer) as ec:
+        run_tokens = {
+            role: await harness._mint(ec, f"agent:{harness.run_id}:{role}", "agent")
+            for role in case.roles
+        }
+        async with httpx.AsyncClient() as hc:
+            await harness._run_start(
+                hc,
+                run_id=harness.run_id,
+                tokens=run_tokens,
+                feature=feature,
+                expect=201,
+            )
+            deadline = time.monotonic() + _OBSERVE_DEADLINE_SECONDS
+            try:
+                async with hc.stream(
+                    "GET",
+                    f"{harness.gateway_url}/v1/runs/{harness.run_id}/stream",
+                    timeout=httpx.Timeout(_OBSERVE_DEADLINE_SECONDS, connect=10.0),
+                ) as response:
+                    response.raise_for_status()
+                    async for raw_line in response.aiter_lines():
+                        line = raw_line.strip()
+                        if not line.startswith("data:"):
+                            continue
+                        body = line[len("data:") :].strip()
+                        if not body:
+                            continue
+                        try:
+                            payload = json.loads(body)
+                        except json.JSONDecodeError:
+                            continue
+                        if not isinstance(payload, dict):
+                            continue
+                        content = _message_content(payload)
+                        if content:
+                            output_parts.append(content)
+                            joined = "".join(output_parts)
+                            if any(tool in joined for tool in _RAG_TOOLS):
+                                rag_invoked = True
+                            if _RAG_SERVICE_DOWN in joined.lower():
+                                service_down = True
+                            resolving = _resolving_citations(joined, workspace_root)
+                        if payload.get("type") == "thread_terminal":
+                            break
+                        if (rag_invoked and resolving) or time.monotonic() > deadline:
+                            break
+            finally:
+                await hc.post(
+                    f"{harness.gateway_url}/v1/runs/{harness.run_id}/cancel",
+                    timeout=30.0,
+                )
+
+    after = _snapshot_vault(vault_root)
+    delta = _vault_write_delta(before, after)
+
+    assert not service_down, (
+        "the rag search returned the service-not-running error (run "
+        f"{harness.run_id}); the :8766 service was undiscoverable/unreachable from the "
+        "spawned agent env"
+    )
+    assert rag_invoked, (
+        f"no document agent invoked a vaultspec-rag search tool {_RAG_TOOLS} in its "
+        f"message stream within {_OBSERVE_DEADLINE_SECONDS:.0f}s (run {harness.run_id})"
+    )
+    assert resolving, (
+        "the agent invoked rag search but cited no file:line that resolves under the "
+        f"indexed workspace {workspace_root}; citations did not resolve to real "
+        f"locations (run {harness.run_id})"
+    )
+    assert delta == {"created": [], "modified": [], "deleted": []}, (
+        f"the semantic proof must not write to .vault, but the run changed it: {delta}"
+    )
+
+
+def test_rag_case_prompt_names_the_search_tools() -> None:
+    """Stack-free guard: the semantic case names the rag tools and is well-posed."""
+    case = _rag_case("tool-cores-semantic-guard")
+    assert "mcp__vaultspec-rag__search_codebase" in case.prompt
+    assert "mcp__vaultspec-rag__search_vault" in case.prompt
+    assert case.preset == _PRESET_LIVE
+    assert case.gate_policy == {}
+    assert case.expected_doc_kinds == ()
+
+
+def test_resolving_citations_returns_only_real_paths(tmp_path: Path) -> None:
+    """Stack-free guard: citation resolution accepts real paths, rejects fake ones.
+
+    A resolution check that returned a hallucinated path would make the "citations
+    resolve" assertion meaningless, so this pins that only on-disk paths count.
+    """
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src" / "mod.py").write_text("x = 1\n", encoding="utf-8")
+    output = "hits: src/mod.py:12, src/ghost.py:3, docs/missing.md:7"
+    resolving = _resolving_citations(output, tmp_path)
+    assert "src/mod.py:12" in resolving
+    assert not any("ghost" in cite or "missing" in cite for cite in resolving)
+
+
 def test_floor_case_names_the_target_adr_in_its_prompt() -> None:
     """Stack-free guard: the case prompt names the ADR and yields read evidence.
 

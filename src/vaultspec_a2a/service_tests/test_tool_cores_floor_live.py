@@ -121,6 +121,22 @@ def _distinctive_tokens(adr_text: str, prompt: str, *, limit: int = 60) -> list[
     return list(tokens)
 
 
+def _cites_named_adr(output: str, adr_name: str, adr_stem: str) -> bool:
+    """True if *output* cites the target ADR by its filename OR its bare stem.
+
+    A document agent naming the ADR by its ``.md`` filename or by its stem (the
+    filename without the extension - e.g. ``2026-02-25-...-adr`` instead of
+    ``2026-02-25-...-adr.md``) is the same citation; live agents (Claude in
+    particular) paraphrase the extension away, so keying only on the ``.md``
+    filename made this check phrasing-sensitive. Accepting the stem too keeps the
+    citation robust across providers. Hallucination-resistance is UNAFFECTED: the
+    stem is still the prompt-provided identifier, and the load-bearing proof that
+    the file was actually read remains the separate distinctive-interior-token
+    assertion, not this reference check.
+    """
+    return adr_name in output or adr_stem in output
+
+
 # The vaultspec DOCUMENT surface - the directories an agent-authored document would
 # materialize under. The engine's own runtime tree (``.vault/data``: its sqlite DBs,
 # WAL files, graph cache, and the heartbeat ``service.json``) churns continuously and
@@ -216,6 +232,7 @@ async def test_document_agent_reads_named_adr_midturn_and_cites() -> None:
             "read-a-named-ADR floor proof needs at least one existing ADR to read"
         )
     adr_name = target_adr.name
+    adr_stem = target_adr.stem
     adr_text = target_adr.read_text(encoding="utf-8", errors="replace")
 
     feature = f"tool-cores-floor-{int(time.time())}"
@@ -277,11 +294,10 @@ async def test_document_agent_reads_named_adr_midturn_and_cites() -> None:
                         content = _message_content(payload)
                         if content:
                             output_parts.append(content)
-                            if adr_name in content:
+                            joined = "".join(output_parts)
+                            if _cites_named_adr(joined, adr_name, adr_stem):
                                 cited = True
-                            matched_tokens = [
-                                t for t in tokens if t in "".join(output_parts)
-                            ]
+                            matched_tokens = [t for t in tokens if t in joined]
                         if payload.get("type") == "thread_terminal":
                             break
                         if (cited and matched_tokens) or time.monotonic() > deadline:
@@ -296,9 +312,9 @@ async def test_document_agent_reads_named_adr_midturn_and_cites() -> None:
     delta = _vault_write_delta(before, after)
 
     assert cited, (
-        f"no document agent cited {adr_name!r} in its message stream within "
-        f"{_OBSERVE_DEADLINE_SECONDS:.0f}s (run {harness.run_id}); the floor was not "
-        "exercised live"
+        f"no document agent cited {adr_name!r} (or its stem {adr_stem!r}) in its "
+        f"message stream within {_OBSERVE_DEADLINE_SECONDS:.0f}s (run "
+        f"{harness.run_id}); the floor was not exercised live"
     )
     assert matched_tokens, (
         f"the agent cited {adr_name!r} but reproduced none of its distinctive "
@@ -532,3 +548,29 @@ def test_floor_case_names_the_target_adr_in_its_prompt() -> None:
     # prompt would falsely pass the read assertion).
     assert all(tok not in case.prompt for tok in tokens)
     assert "_KNOWN_MCP_SERVERS" in tokens
+
+
+def test_cites_named_adr_accepts_filename_and_stem() -> None:
+    """Stack-free guard: the citation check accepts the .md filename OR the stem.
+
+    Pins the reviewer-tracked hardening: a live agent that names the ADR by its stem
+    (dropping the ``.md`` extension) cites it just as much as one that echoes the full
+    filename. An unrelated document name must not register as a citation, so the check
+    stays a genuine reference test - the hallucination-resistance still lives in the
+    separate interior-token assertion, not here.
+    """
+    name = "2026-02-25-llm-context-provider-abstraction-adr.md"
+    stem = "2026-02-25-llm-context-provider-abstraction-adr"
+    # Full .md filename cited.
+    assert _cites_named_adr(f"EVIDENCE: `{name}` (Problem Statement)", name, stem)
+    # Bare stem cited (the paraphrase that broke the first Claude S05 run).
+    assert _cites_named_adr(
+        "grounding in the llm-context-provider-abstraction ADR "
+        f"({stem}) as decided",
+        name,
+        stem,
+    )
+    # An unrelated ADR name is NOT a citation of the target.
+    assert not _cites_named_adr(
+        "see 2026-07-17-tool-cores-adr.md for the grounding decision", name, stem
+    )

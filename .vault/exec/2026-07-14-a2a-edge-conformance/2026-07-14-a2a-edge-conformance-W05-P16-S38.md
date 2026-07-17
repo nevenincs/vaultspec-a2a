@@ -64,3 +64,13 @@ Also re-did the `:8000` restart-promotion cleanly against the current tree (now 
 - Confirmed provenance end to end: `GET :8001/health` → `{"status":"ok","service":"worker","gateway_url":"http://127.0.0.1:8000",...}`.
 - Re-ran the full evidence bundle against the new pids: `GET :8000/health` → `200`; `GET :8000/openapi.json` paths include `/v1/runs/{run_id}/stream`; `~/.vaultspec-a2a/service.json` → fresh pid 3264; `doctor --url http://127.0.0.1:8000` → `stale_resident: false`, `missing_routes: []`, exit code `0`.
 - The two-row `recovery_epoch` repair from the first promotion attempt remains in place (belt-and-braces, per team-lead); this boot did not need to re-derive those idempotency keys since the affected threads already carry the corrected epoch, and S40 additionally makes the boot tolerant of either state going forward.
+
+## Final bounce (onto `9556117`, shutdown-auth revision)
+
+Team-lead asked me to confirm whether the pid-3264 resident's boot included `9556117` (`fix(worker): authenticate /admin/shutdown and correct hard-kill wording`, S37's HIGH/MEDIUM review revisions) and bounce again if not.
+
+I first tried a behavioral probe (tokenless `POST /admin/shutdown`) rather than reading git history directly, which was the wrong test: this dev deployment has no `VAULTSPEC_INTERNAL_TOKEN` configured, and `verify_internal_bearer` (`src/vaultspec_a2a/utils/ipc_auth.py`) intentionally returns `OK` - auth disabled - whenever the token is unset in `DEVELOPMENT`, regardless of whether `9556117`'s dependency guard is wired in. Both probes "succeeded" (killed the process) purely because of that documented dev bypass, not because the code predated the fix; the probe cost two extra restarts (of the still-old-code gateway/worker, and of a still-old auto-respawned worker) before I recognized the flaw. The reliable check is git history plus fresh-process semantics: every `git log --oneline -1` before each boot in this record confirmed `9556117` already present on disk, and a new OS process always imports Python source fresh at start (no cross-process module caching), so a boot invoked after that confirmation is running the reviewed code regardless of any dev-mode auth bypass.
+
+Final clean boot: gateway pid 51964, gateway-owned worker pid 15036, `worker_status: "up"` on first cycle (no restart churn).
+
+Evidence: `GET :8000/health` → `200` (pid 51964); `GET :8000/openapi.json` paths include `/v1/runs/{run_id}/stream`; `~/.vaultspec-a2a/service.json` → fresh pid 51964; `GET :8001/health` → `{"gateway_url":"http://127.0.0.1:8000",...}`; `doctor --url http://127.0.0.1:8000` → `stale_resident: false`, `missing_routes: []`, exit code `0`. This is the resident's end state for this step - no further bounce pending.

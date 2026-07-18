@@ -138,10 +138,21 @@ async def test_dispatch_injects_and_sanitizes_the_proposal_lifecycle(
             },
         )
         await dispatch("validate_proposal", {"summary": "validate please"})
+        # append keys on changeset_id + expected_revision and must NOT carry
+        # session_id (no symmetry with create); a forged session_id is stripped.
+        await dispatch(
+            "propose_changeset",
+            {
+                "operation": "append",
+                "summary": "more content",
+                "operations": [],
+                "session_id": "FORGED",
+            },
+        )
 
     inputs = _execute_inputs(state)
-    assert len(inputs) == 2
-    create, validate = inputs
+    assert len(inputs) == 3
+    create, validate, append = inputs
 
     # create: injected session + generated changeset (HACKED overwritten), content kept.
     assert create["session_id"] == "sess:loop"
@@ -155,6 +166,13 @@ async def test_dispatch_injects_and_sanitizes_the_proposal_lifecycle(
     assert validate["expected_revision"] == "rev-9"
     assert validate["summary"] == "validate please"
 
-    # Exactly ONE session was ensured across both proposal calls.
+    # append: changeset_id + expected_revision injected; session_id NOT present
+    # (engine ProposeChangesetInput::Append rejects it), forged value stripped.
+    assert append["changeset_id"] == create["changeset_id"]
+    assert append["expected_revision"] == "rev-9"
+    assert "session_id" not in append
+    assert append["summary"] == "more content"
+
+    # Exactly ONE session was ensured across all proposal calls.
     session_posts = [r for r in state.requests if r["path"].endswith("/v1/sessions")]
     assert len(session_posts) == 1

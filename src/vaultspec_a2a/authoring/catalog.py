@@ -295,18 +295,25 @@ def make_tool_dispatch(
                 session_id=session_id,
                 changeset_id=lifecycle["changeset_id"],
             )
-        elif command in ("append_draft", "replace_draft"):
-            session_id = await _ensure_session_id()
-            _inject(
-                arguments,
-                session_id=session_id,
-                changeset_id=lifecycle["changeset_id"],
-            )
-        elif command in ("validate_proposal", "submit_for_review", "cancel_proposal"):
+        elif command in (
+            "append_draft",
+            "replace_draft",
+            "validate_proposal",
+            "submit_for_review",
+            "cancel_proposal",
+        ):
+            # Verified against engine ProposeChangesetInput::Append/Replace and
+            # ValidateProposalToolInput / RequestApprovalToolInput / Cancel(proposal):
+            # each keys on {changeset_id, expected_revision} and does NOT accept
+            # session_id (deny_unknown_fields would 400). No symmetry with create,
+            # which is the only session_id-bearing command. session_id=None strips
+            # any stray/forged model-supplied session_id (sanitize, never inject it
+            # here).
             _inject(
                 arguments,
                 changeset_id=lifecycle["changeset_id"],
                 expected_revision=lifecycle["revision"],
+                session_id=None,
             )
         elif command == "request_apply":
             _inject(

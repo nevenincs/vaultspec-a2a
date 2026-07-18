@@ -3,7 +3,7 @@ tags:
   - '#exec'
   - '#a2a-edge-conformance'
 date: '2026-07-15'
-modified: '2026-07-15'
+modified: '2026-07-19'
 step_id: 'S31'
 related:
   - "[[2026-07-14-a2a-edge-conformance-plan]]"
@@ -73,3 +73,36 @@ Graceful removal is unit-proven in S28. The multi-role graph here is a
 hand-built two-node graph rather than a preset-compiled team, because a
 preset-driven agent turn needs a chat model (VidaiMock/Docker) that is
 unavailable; the composing two-agent run is the evidence carried to S32.
+
+## CLOSURE (2026-07-19) - multi-role kill/restart drill GREEN; program complete
+
+Drill executed on the S20 handover stack (engine catalog branch tip
+`2e7980ce8c`, a2a `catalog-inline-a2a`, preset `vaultspec-adr-research`,
+autonomous op-mode), engine-side evidence throughout:
+
+- Multi-role composition through the engine pass-through: the SSE composition
+  trail captured the genuine phase machine - research_dispatch (Ground) ->
+  research_dispatch_researcher_00 (Diverge fan-out) -> synthesis (Synthesize).
+  These are the multiagent-composition events for the S32 cross-repo re-arm
+  trail.
+- Kill honesty (tiers, not silence): worker-kill flips gateway /api/health to
+  status=degraded with an explicit worker probe error - and the gateway then
+  TRANSPARENTLY RESPAWNED the worker (pid 63348 -> 61512) and the run advanced
+  to synthesis, resilience beyond the criterion. Full a2a kill: run-status
+  honestly unreachable (connection error, no stale-healthy), engine stayed
+  200 and isolated.
+- Restart recovery from run-status: startup repair applied on the killed-mid-
+  run thread (control_actions: repair_started with recovery_epoch incremented
+  -> repair_finished, no IntegrityError - the S40 recovery-epoch fix proven
+  live); run-status then served the reconciled snapshot truthfully
+  (checkpoint-derived terminal status, repair_status=healthy, proposal_ids=[]
+  honestly conveying zero output).
+- Zero `.vault` writes; teardown by PID; no code changes (drill only).
+
+Carry-forward (recorded, not chased): the reconciliation labels a
+worker-disrupted zero-output run "completed" because the persisted checkpoint
+reached END - the recovery-read contract holds, but whether
+"completed" is the ideal terminal label for an interrupted zero-output run is
+a reconciliation-semantics refinement for a future pass.
+
+With this step the a2a-edge-conformance plan stands 41/41.

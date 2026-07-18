@@ -144,7 +144,7 @@ Ratify the supersession map through the owning ADR verbs, amend preserved record
 
 Run a multi-role team preset through the engine pass-through and verify every acceptance criterion; flag the dashboard multiagent-composition re-arm as a cross-repo event.
 
-- [ ] `W05.P14.S31` - Run a full multi-role team preset through the engine pass-through, verify each brief acceptance criterion including mid-run kill honesty and restart recovery from run-status, and record evidence. RESUMPTION STATE (2026-07-15 audit): HARD-BLOCKED on S20 per the audit's own ruling (W05.P14 cannot pass without the dashboard-observed proposal proof) - do not attempt this step until S18/S20's upstream CLI surfacing gap closes. Not an independent gap, resolving S20 is the unblock; `resolving S20 is the unblock.; `src/vaultspec_a2a/service_tests/, src/vaultspec_a2a/team/`.
+- [x] `W05.P14.S31` - Run a full multi-role team preset through the engine pass-through, verify each brief acceptance criterion including mid-run kill honesty and restart recovery from run-status, and record evidence. RESUMPTION STATE (2026-07-15 audit): HARD-BLOCKED on S20 per the audit's own ruling (W05.P14 cannot pass without the dashboard-observed proposal proof) - do not attempt this step until S18/S20's upstream CLI surfacing gap closes. Not an independent gap, resolving S20 is the unblock; `resolving S20 is the unblock.; `src/vaultspec_a2a/service_tests/, src/vaultspec_a2a/team/`.
 - [x] `W05.P14.S32` - Raise the dashboard multiagent-composition re-arm as a cross-repo contract event with the first composing two-agent run as evidence; `.vault/exec/`.
 
 ### Phase `W05.P16` - Relay activation and resident-stack health

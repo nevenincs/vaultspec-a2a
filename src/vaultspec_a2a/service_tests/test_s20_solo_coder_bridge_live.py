@@ -9,35 +9,34 @@ tool mid-turn - the agent-initiated authoring path the whole bridge exists for.
 
 Route (see the S20 exec record): the run-start bundle is minted per-agent_id and
 supplied at the GATEWAY seam (the pw7 pattern), keyed by ``vaultspec-coder``, so
-it satisfies the new run_start coverage gate without depending on the engine's
+it satisfies the run_start coverage gate without depending on the engine's
 role-key minting (the dashboard role-key fix is unmerged at authoring time).
 
-Observation surface, consistent with the floor/rag proofs (S05/S17): the tool
-invocation surfaces in the agent's ``message_chunk`` narration, not a
-``tool_call_start`` frame. The load-bearing assertions are: an
-``mcp__vaultspec-authoring__`` tool name appears in the agent's stream, and zero
-agent-origin ``.vault`` document-dir writes occur (the proposal is submitted to
-the engine review lane, never materialized). Proposal/changeset ids and dashboard
-review-lane visibility are captured engine-side in the exec record (the review API
-is the same surface the dashboard reads), not asserted here.
+Proof surface - UNFORGEABLE engine-side corroboration, not narration:
+
+The load-bearing assertion is that a changeset scoped to THIS run
+(``cs:<run_id>:*``) lands in the engine's authoring plane
+(``GET /authoring/v1/proposals``). Only a real ``propose_changeset`` tool call
+that the bridge forwards to the engine creates such a changeset - the agent cannot
+fabricate one by talking about it. Paired with the zero-``.vault``-writes snapshot
+(the proposal lands in the review lane, never materialized to disk here), this pins
+the native surfacing->invocation->engine-effect path end to end.
+
+Why the earlier revision of this driver false-greened (both now guarded): it
+detected "invocation" by substring-matching ``mcp__vaultspec-authoring__`` in the
+agent's ``message_chunk`` narration, but those exact tool names are ALSO in this
+driver's own prompt - so a prompt-echo (the agent merely NAMING the tools, or
+reporting they were unavailable) tripped the match without any real call. And its
+zero-writes check only held because it CANCELLED the run at the first narration
+match (~13s), before a fallback direct write could complete. This revision asserts
+only the engine changeset and does NOT cancel before verification; the narration
+scan is retained solely as a diagnostic (never asserted).
 
 Infrastructure gate, not a masked failure: when no loopback stack is reachable,
 or the run's provider is credential/usage gated, the test skips with a runbook
-pointer. When the stack IS present the assertions are fail-loud.
-
-KNOWN INSUFFICIENCY (2026-07-18 live finding, DO NOT trust a green from this test
-yet): the current assertion matches an ``mcp__vaultspec-authoring__`` tool NAME in
-the agent's narration, which a model can emit while explicitly LACKING the tool
-(the S18 GLM-confab pattern). A live Z.ai/GLM-5 run reproduced exactly that: the
-coder said "I don't see mcp__vaultspec-authoring__* in my tool list" and used the
-workspace's ambient ``mcp__vaultspec-core__*`` MCP instead, writing a real .vault
-doc. Root cause that run: the isolated config home never triggered
-(``should_isolate_config_home`` False -> zero homes -> bridge session-injected,
-not surfaced; ambient MCP unsuppressed). Before this test can certify S20 it MUST
-be hardened to require UNFORGEABLE engine-side corroboration of a real tool
-execute (a ``POST /v1/runs/{run_id}/agent-tools/execute`` observed engine-side, or
-the tool's real engine result echoed), AND the should_isolate-on-the-worker-path
-gap must be fixed so the bridge actually surfaces. Tracked as S20 follow-up.
+pointer. When the stack IS present the assertion is fail-loud - and it stays red
+until the bridge tools actually surface to the coder at runtime (the S18/S20
+surfacing work), which is the honest state of the proof.
 """
 
 from __future__ import annotations
@@ -45,6 +44,7 @@ from __future__ import annotations
 import json
 import os
 import time
+from typing import TYPE_CHECKING
 
 import httpx
 import pytest
@@ -53,6 +53,8 @@ from ..api.schemas.enums import ServerEventType
 from .test_pw7_acceptance import (
     AcceptanceCase,
     AcceptanceHarness,
+    _dig,
+    _items,
     _reachable_stack,
 )
 from .test_tool_cores_floor_live import (
@@ -61,10 +63,15 @@ from .test_tool_cores_floor_live import (
     _vault_write_delta,
 )
 
+if TYPE_CHECKING:
+    from ..authoring import AuthoringClient
+
 _MESSAGE_FRAMES = frozenset(
     {ServerEventType.MESSAGE_CHUNK.value, ServerEventType.THOUGHT_CHUNK.value}
 )
 _OBSERVE_DEADLINE_SECONDS = 900.0
+# Cadence for polling the engine authoring plane for this run's changeset.
+_ENGINE_POLL_SECONDS = 4.0
 _PROFILE_ID = os.environ.get("S05_PROFILE", "team-defaults")
 
 # The bridged authoring tools the solo-coder should reach. Any one invoked
@@ -101,15 +108,42 @@ def _solo_coder_case(feature: str) -> AcceptanceCase:
     )
 
 
+async def _run_changeset_ids(ec: AuthoringClient, run_id: str) -> set[str]:
+    """Return this run's changeset ids present in the engine authoring plane.
+
+    A changeset id embeds the run id (``cs:<run_id>:<phase>-r<cycle>``), so a match
+    is unforgeable proof the bridge forwarded a real ``propose_changeset`` to the
+    engine. Scans every lane ``GET /authoring/v1/proposals`` exposes (the default
+    ``items`` plus the ``applied_under_policy`` projection) so a proposal is found
+    whatever verdict state it has reached.
+    """
+    resp = await ec.get("/v1/proposals", with_actor=False)
+    data = resp.data if isinstance(resp.data, dict) else {}
+    found: set[str] = set()
+    lanes: list[object] = [data]
+    applied = data.get("applied_under_policy")
+    if isinstance(applied, dict):
+        lanes.append(applied)
+    for lane in lanes:
+        for item in _items(lane):
+            changeset = _dig(item, "changeset_id") or ""
+            if run_id in changeset:
+                found.add(changeset)
+    return found
+
+
 @pytest.mark.service
 @pytest.mark.asyncio
 async def test_solo_coder_invokes_bridged_authoring_tool_midturn() -> None:
     """Live: a solo-coder natively invokes a bridged authoring tool mid-turn.
 
-    Zero .vault writes: the run is observed over its SSE stream and cancelled
-    before any review gate applies; a before/after document-dir snapshot asserts
-    no file changed. The proposal lands in the engine review lane (captured in the
-    exec record), never materialized to disk here.
+    Proven by an engine-side changeset scoped to this run
+    (``cs:<run_id>:*`` in ``GET /authoring/v1/proposals``) - only a real
+    ``propose_changeset`` the bridge forwards creates one. The run is observed over
+    its SSE stream WITHOUT an early cancel; the engine is polled for the changeset
+    until it appears, the run terminates, or the deadline elapses. A before/after
+    document-dir snapshot asserts zero ``.vault`` writes: the proposal lands in the
+    engine review lane, never materialized to disk here.
     """
     stack = _reachable_stack()
     if stack is None:
@@ -132,8 +166,11 @@ async def test_solo_coder_invokes_bridged_authoring_tool_midturn() -> None:
 
     before = _snapshot_vault(vault_root)
     output_parts: list[str] = []
-    bridge_tool_invoked = False
-    invoked_tool_names: set[str] = set()
+    run_changesets: set[str] = set()
+    # Diagnostic only (NEVER asserted): the bridge tool names that appear in the
+    # agent's narration. Retained to surface prompt-echo vs. real invocation when
+    # reading a failure, but proof rests solely on the engine changeset below.
+    narrated_bridge_names: set[str] = set()
 
     from .test_pw7_acceptance import _ResilientAuthoringClient
 
@@ -154,6 +191,7 @@ async def test_solo_coder_invokes_bridged_authoring_tool_midturn() -> None:
                 expect=201,
             )
             deadline = time.monotonic() + _OBSERVE_DEADLINE_SECONDS
+            last_engine_poll = 0.0
             try:
                 async with hc.stream(
                     "GET",
@@ -163,28 +201,32 @@ async def test_solo_coder_invokes_bridged_authoring_tool_midturn() -> None:
                     response.raise_for_status()
                     async for raw_line in response.aiter_lines():
                         line = raw_line.strip()
-                        if not line.startswith("data:"):
-                            continue
-                        body = line[len("data:") :].strip()
-                        if not body:
-                            continue
-                        try:
-                            payload = json.loads(body)
-                        except json.JSONDecodeError:
-                            continue
-                        if not isinstance(payload, dict):
-                            continue
-                        content = _message_content(payload)
-                        if content:
-                            output_parts.append(content)
-                            joined = "".join(output_parts)
-                            for tok in _extract_bridge_tools(joined):
-                                invoked_tool_names.add(tok)
-                            if invoked_tool_names:
-                                bridge_tool_invoked = True
-                        if payload.get("type") == "thread_terminal":
+                        terminal = False
+                        if line.startswith("data:"):
+                            payload = _parse_event(line[len("data:") :].strip())
+                            if payload is not None:
+                                content = _message_content(payload)
+                                if content:
+                                    output_parts.append(content)
+                                    narrated_bridge_names.update(
+                                        _extract_bridge_tools("".join(output_parts))
+                                    )
+                                terminal = payload.get("type") == "thread_terminal"
+                        now = time.monotonic()
+                        # Poll the engine (not the narration) for this run's
+                        # changeset - the unforgeable proof of a real invocation.
+                        if now - last_engine_poll >= _ENGINE_POLL_SECONDS:
+                            last_engine_poll = now
+                            run_changesets = await _run_changeset_ids(
+                                ec, harness.run_id
+                            )
+                        if run_changesets or now > deadline:
                             break
-                        if bridge_tool_invoked or time.monotonic() > deadline:
+                        if terminal:
+                            # Final authoritative check after the run settles.
+                            run_changesets = await _run_changeset_ids(
+                                ec, harness.run_id
+                            )
                             break
             finally:
                 await hc.post(
@@ -195,15 +237,27 @@ async def test_solo_coder_invokes_bridged_authoring_tool_midturn() -> None:
     after = _snapshot_vault(vault_root)
     delta = _vault_write_delta(before, after)
 
-    assert bridge_tool_invoked, (
-        "the solo-coder did not invoke any "
-        f"{_BRIDGE_TOOL_PREFIX}* tool in its message stream within "
-        f"{_OBSERVE_DEADLINE_SECONDS:.0f}s (run {harness.run_id}); the bridged "
-        "authoring path was not exercised live"
+    assert run_changesets, (
+        "the solo-coder did not create any engine changeset scoped to run "
+        f"{harness.run_id} within {_OBSERVE_DEADLINE_SECONDS:.0f}s "
+        f"(cs:{harness.run_id}:* absent from /authoring/v1/proposals); the bridged "
+        "authoring path was not exercised live. Narrated bridge names seen "
+        f"(diagnostic, not proof): {sorted(narrated_bridge_names)}"
     )
     assert delta == {"created": [], "modified": [], "deleted": []}, (
         f"the S20 proof must not write to .vault, but the run changed it: {delta}"
     )
+
+
+def _parse_event(body: str) -> dict | None:
+    """Parse one SSE ``data:`` payload into a dict, or None if not a JSON object."""
+    if not body:
+        return None
+    try:
+        payload = json.loads(body)
+    except json.JSONDecodeError:
+        return None
+    return payload if isinstance(payload, dict) else None
 
 
 def _extract_bridge_tools(output: str) -> set[str]:

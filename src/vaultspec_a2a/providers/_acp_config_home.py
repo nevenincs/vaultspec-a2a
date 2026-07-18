@@ -34,6 +34,8 @@ from pathlib import Path
 __all__ = [
     "cleanup_isolated_config_home",
     "create_isolated_config_home",
+    "enumerate_workspace_mcp_names",
+    "isolation_required_but_absent",
     "should_isolate_config_home",
 ]
 
@@ -53,6 +55,40 @@ _ONBOARDING_FLAGS: dict[str, object] = {
 _ENV_AUTH_KEYS = ("CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_AUTH_TOKEN")
 
 
+def enumerate_workspace_mcp_names(workspace_root: Path | str | None) -> list[str]:
+    """Return the MCP server names declared in the workspace's ``.mcp.json``.
+
+    The pinned CLI auto-discovers project-scoped MCP servers from a ``.mcp.json``
+    at the workspace root (distinct from the operator's user-global home the
+    config-home redirect already suppresses). Those names must be pinned OUT of an
+    armed run's isolated home so a stray or unowned workspace ``.mcp.json`` cannot
+    inject a server into the declared surface (the S20 leak vector).
+
+    Best-effort and side-effect-free: a missing workspace, missing file, unreadable
+    file, or malformed JSON yields an empty list rather than raising, so isolation
+    setup never fails on a workspace artifact. Returns the server names sorted for
+    deterministic settings output.
+    """
+    if workspace_root is None:
+        return []
+    mcp_path = Path(workspace_root) / ".mcp.json"
+    try:
+        raw = mcp_path.read_text(encoding="utf-8")
+    except OSError:
+        return []
+    try:
+        parsed = json.loads(raw)
+    except (ValueError, TypeError):
+        logger.warning(
+            "workspace .mcp.json at %s is not valid JSON; ignoring", mcp_path
+        )
+        return []
+    servers = parsed.get("mcpServers") if isinstance(parsed, dict) else None
+    if not isinstance(servers, dict):
+        return []
+    return sorted(str(name) for name in servers)
+
+
 def should_isolate_config_home(command: list[str], env: dict[str, str]) -> bool:
     """Return whether this spawn should get an isolated CLI config home.
 
@@ -69,8 +105,37 @@ def should_isolate_config_home(command: list[str], env: dict[str, str]) -> bool:
     return any(env.get(key, "").strip() for key in _ENV_AUTH_KEYS)
 
 
+def isolation_required_but_absent(
+    *,
+    acp_family: str | None,
+    command: list[str],
+    mcp_servers: object,
+    config_home: Path | None,
+) -> bool:
+    """Return True when an armed Claude/Z.ai run reached spawn without isolation.
+
+    A harness-armed run (``mcp_servers`` non-empty) on the ``CLAUDE_CONFIG_DIR``
+    isolation path (the ``claude`` acp family - Claude and Z.ai; Kimi has its own
+    inline ``--config`` isolation, Gemini its own home) MUST spawn inside an
+    isolated config home. Reaching spawn with ``config_home is None`` means the
+    isolation was never established - almost always because ``auth_mode`` resolved
+    to ``none_detected`` so :func:`should_isolate_config_home` declined - and the
+    agent would inherit the operator's ambient MCP and auto-load the workspace
+    ``.mcp.json``. The caller fails loud on a True return rather than launching an
+    agent with an unbounded MCP surface. Pure predicate, no I/O, so the fail-loud
+    decision is deterministically unit-testable.
+    """
+    uses_config_home_isolation = (
+        acp_family == "claude"
+        and bool(command)
+        and Path(command[0]).stem.lower() != "gemini"
+    )
+    return uses_config_home_isolation and bool(mcp_servers) and config_home is None
+
+
 def create_isolated_config_home(
     mcp_servers: dict[str, dict[str, object]] | None = None,
+    workspace_root: Path | str | None = None,
 ) -> Path:
     """Create and return a fresh per-run ``CLAUDE_CONFIG_DIR``.
 
@@ -82,16 +147,29 @@ def create_isolated_config_home(
     own authoring bridge entry (S18, ``config_home_authoring_entry``); a server's
     ``env`` value may be a ``${VAR}`` placeholder the CLI expands from its process
     environment at parse time, which is how the bridge keeps its real tokens off
-    disk. Empty/None writes no servers, so the home performs suppression only. The
-    caller sets ``CLAUDE_CONFIG_DIR`` to the returned path and MUST call
+    disk. Empty/None writes no servers, so the home performs suppression only.
+
+    The home also always carries a ``settings.json`` that pins the workspace's
+    project-scoped MCP OUT of the surface: the CLI never auto-enables any
+    ``.mcp.json`` server, and each server declared in the run workspace's
+    ``.mcp.json`` (enumerated from *workspace_root*) is both disabled and
+    tool-denied. This closes the S20 declared-surface leak - config-home redirect
+    alone suppresses only the operator's user-global/account MCP, not the
+    project-scope registration the CLI reads from the workspace.
+
+    The caller sets ``CLAUDE_CONFIG_DIR`` to the returned path and MUST call
     :func:`cleanup_isolated_config_home` after the subprocess is reaped.
     """
     home = Path(tempfile.mkdtemp(prefix="vaultspec-acp-home-"))
     _write_config(home, mcp_servers=mcp_servers)
+    denied = enumerate_workspace_mcp_names(workspace_root)
+    _write_settings(home, denied)
     logger.debug(
-        "ACP isolated config home created at %s (surfacing %d server(s))",
+        "ACP isolated config home created at %s (surfacing %d server(s), "
+        "pinning out %d workspace MCP server(s))",
         home,
         len(mcp_servers or {}),
+        len(denied),
     )
     return home
 
@@ -102,6 +180,27 @@ def _write_config(home: Path, mcp_servers: dict[str, dict[str, object]] | None) 
     if mcp_servers:
         config["mcpServers"] = mcp_servers
     (home / ".claude.json").write_text(json.dumps(config, indent=2), encoding="utf-8")
+
+
+def _write_settings(home: Path, disabled_server_names: list[str]) -> None:
+    """Write the home's ``settings.json`` pinning workspace project MCP OUT.
+
+    Defense in depth, three overlapping controls: never auto-enable ANY project
+    ``.mcp.json`` server (``enableAllProjectMcpServers`` false, always written so a
+    workspace ``.mcp.json`` that appears after enumeration still cannot
+    auto-enable), name each discovered workspace server in
+    ``disabledMcpjsonServers``, and deny every tool from each via
+    ``permissions.deny`` (``mcp__<name>`` denies the whole server).
+    """
+    settings: dict[str, object] = {"enableAllProjectMcpServers": False}
+    if disabled_server_names:
+        settings["disabledMcpjsonServers"] = list(disabled_server_names)
+        settings["permissions"] = {
+            "deny": [f"mcp__{name}" for name in disabled_server_names]
+        }
+    (home / "settings.json").write_text(
+        json.dumps(settings, indent=2), encoding="utf-8"
+    )
 
 
 def cleanup_isolated_config_home(home: Path | None) -> None:

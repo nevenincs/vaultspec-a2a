@@ -52,6 +52,7 @@ from ._acp_authoring import config_home_authoring_entry
 from ._acp_config_home import (
     cleanup_isolated_config_home,
     create_isolated_config_home,
+    isolation_required_but_absent,
     should_isolate_config_home,
 )
 from ._acp_mcp import config_home_mcp_servers
@@ -74,6 +75,7 @@ from .acp_exceptions import (
     AcpError,
     AcpErrorCode,
     AcpPromptError,
+    IsolationRequiredError,
 )
 from .gemini_auth import refresh_gemini_token
 
@@ -329,11 +331,35 @@ class AcpChatModel(BaseChatModel):
             )
             surfacing_servers.update(bridge_entry)
             env.update(bridge_env)
-            config_home = create_isolated_config_home(surfacing_servers)
+            config_home = create_isolated_config_home(
+                surfacing_servers,
+                workspace_root=self.workspace_root or self.cwd,
+            )
             env["CLAUDE_CONFIG_DIR"] = str(config_home)
 
         if self.command and Path(self.command[0]).stem.lower() == "gemini":
             await refresh_gemini_token(env=env)
+
+        # Fail loud: a harness-armed run on the Claude/Z.ai config-home path MUST
+        # spawn with an isolated CLI config home. Reaching spawn armed but without
+        # one means the isolation was never applied - almost always because
+        # auth_mode == "none_detected" (no env token, so should_isolate_config_home
+        # declined) - and the agent would inherit the operator's ambient user-global
+        # MCP and auto-load the workspace's project .mcp.json, the exact
+        # declared-surface leak the agent-harness-provisioning ADR forbids. Refuse
+        # here rather than launch an agent with an unbounded MCP surface.
+        if isolation_required_but_absent(
+            acp_family=self._config.acp_family,
+            command=self.command,
+            mcp_servers=self._config.mcp_servers,
+            config_home=config_home,
+        ):
+            raise IsolationRequiredError(
+                f"harness-armed {self._config.provider!r} run reached spawn without "
+                f"an isolated CLI config home (auth_mode={self._config.auth_mode!r}); "
+                "refusing to launch with an unbounded MCP surface",
+                code=AcpErrorCode.UNAUTHENTICATED,
+            )
 
         process = await _spawn_acp_process(
             self.command,

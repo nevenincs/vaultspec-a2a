@@ -8,6 +8,7 @@ the P03.S14 exec record; these assert the isolation logic the harness relies on.
 from __future__ import annotations
 
 import json
+from typing import TYPE_CHECKING
 
 from ...authoring import AgentTool, CatalogSnapshot
 from .._acp_authoring import (
@@ -18,9 +19,14 @@ from .._acp_authoring import (
 from .._acp_config_home import (
     cleanup_isolated_config_home,
     create_isolated_config_home,
+    enumerate_workspace_mcp_names,
+    isolation_required_but_absent,
     should_isolate_config_home,
 )
 from .._acp_mcp import config_home_mcp_servers
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 _CLAUDE_NODE_CMD = [
     "node",
@@ -67,7 +73,7 @@ def test_created_home_carries_onboarding_flags_and_no_servers() -> None:
         # Security contract: NO credential file, and the home is EXACTLY the
         # config file - nothing that could leak auth or ambient config.
         assert not (home / ".credentials.json").exists()
-        assert {p.name for p in home.iterdir()} == {".claude.json"}
+        assert {p.name for p in home.iterdir()} == {".claude.json", "settings.json"}
     finally:
         cleanup_isolated_config_home(home)
         assert not home.exists()
@@ -90,7 +96,7 @@ def test_created_home_surfaces_given_servers() -> None:
         # Security contract holds even when populated: no credential file, and
         # the home is EXACTLY the config file.
         assert not (home / ".credentials.json").exists()
-        assert {p.name for p in home.iterdir()} == {".claude.json"}
+        assert {p.name for p in home.iterdir()} == {".claude.json", "settings.json"}
     finally:
         cleanup_isolated_config_home(home)
 
@@ -150,9 +156,107 @@ def test_authoring_bridge_home_is_placeholder_only_no_secret_on_disk() -> None:
         assert bridge_env["VAULTSPEC_AUTHORING_ACTOR_TOKEN"] == actor
         # Home is exactly the config file: no credential/ambient leak.
         assert not (home / ".credentials.json").exists()
-        assert {p.name for p in home.iterdir()} == {".claude.json"}
+        assert {p.name for p in home.iterdir()} == {".claude.json", "settings.json"}
     finally:
         cleanup_isolated_config_home(home)
+
+
+def test_enumerate_workspace_mcp_names_reads_and_sorts_servers(tmp_path: Path) -> None:
+    (tmp_path / ".mcp.json").write_text(
+        json.dumps({"mcpServers": {"zeta": {}, "alpha": {}}}), encoding="utf-8"
+    )
+    assert enumerate_workspace_mcp_names(tmp_path) == ["alpha", "zeta"]
+
+
+def test_enumerate_workspace_mcp_names_best_effort(tmp_path: Path) -> None:
+    # No workspace, no file, malformed JSON, and a file lacking mcpServers all
+    # yield [] rather than raising - isolation setup never fails on a workspace
+    # artifact.
+    assert enumerate_workspace_mcp_names(None) == []
+    assert enumerate_workspace_mcp_names(tmp_path) == []
+    (tmp_path / ".mcp.json").write_text("{not valid json", encoding="utf-8")
+    assert enumerate_workspace_mcp_names(tmp_path) == []
+    (tmp_path / ".mcp.json").write_text(json.dumps({"other": 1}), encoding="utf-8")
+    assert enumerate_workspace_mcp_names(tmp_path) == []
+
+
+def test_settings_always_disables_project_mcp_autoload() -> None:
+    # Even with no workspace .mcp.json, the home refuses to auto-enable any
+    # project-scoped server, so a workspace file that appears after enumeration
+    # still cannot auto-load (TOCTOU-safe).
+    home = create_isolated_config_home()
+    try:
+        settings = json.loads((home / "settings.json").read_text(encoding="utf-8"))
+        assert settings["enableAllProjectMcpServers"] is False
+        assert "disabledMcpjsonServers" not in settings
+    finally:
+        cleanup_isolated_config_home(home)
+
+
+def test_settings_pins_out_workspace_mcp(tmp_path: Path) -> None:
+    # A workspace .mcp.json (e.g. a stray vaultspec-core install, the S20 vector)
+    # is pinned OUT three ways: no autoload, disabled by name, and tool-denied.
+    (tmp_path / ".mcp.json").write_text(
+        json.dumps({"mcpServers": {"vaultspec-core": {}, "evil": {}}}),
+        encoding="utf-8",
+    )
+    home = create_isolated_config_home(workspace_root=tmp_path)
+    try:
+        settings = json.loads((home / "settings.json").read_text(encoding="utf-8"))
+        assert settings["enableAllProjectMcpServers"] is False
+        assert settings["disabledMcpjsonServers"] == ["evil", "vaultspec-core"]
+        deny = settings["permissions"]["deny"]
+        assert "mcp__evil" in deny
+        assert "mcp__vaultspec-core" in deny
+    finally:
+        cleanup_isolated_config_home(home)
+
+
+def test_fail_loud_armed_claude_without_isolated_home() -> None:
+    # The S20/none_detected case: an armed Claude/Z.ai run that reached spawn with
+    # no isolated home must fail loud.
+    assert isolation_required_but_absent(
+        acp_family="claude",
+        command=_CLAUDE_NODE_CMD,
+        mcp_servers=[{"name": "vaultspec-rag"}],
+        config_home=None,
+    )
+
+
+def test_no_fail_loud_when_isolated_home_present(tmp_path: Path) -> None:
+    assert not isolation_required_but_absent(
+        acp_family="claude",
+        command=_CLAUDE_NODE_CMD,
+        mcp_servers=[{"name": "vaultspec-rag"}],
+        config_home=tmp_path,
+    )
+
+
+def test_no_fail_loud_when_not_armed() -> None:
+    # A non-harness run carries no MCP surface to protect; isolation is optional.
+    assert not isolation_required_but_absent(
+        acp_family="claude",
+        command=_CLAUDE_NODE_CMD,
+        mcp_servers=[],
+        config_home=None,
+    )
+
+
+def test_no_fail_loud_for_kimi_or_gemini_channel() -> None:
+    # Kimi (inline --config isolation) and Gemini (own home) are out of the
+    # CLAUDE_CONFIG_DIR channel, so the config-home fail-loud does not apply.
+    assert not isolation_required_but_absent(
+        acp_family="kimi",
+        command=["kimi", "acp"],
+        mcp_servers=[{"name": "x"}],
+        config_home=None,
+    )
+    assert not isolation_required_but_absent(
+        acp_family="claude",
+        command=_GEMINI_CMD,
+        mcp_servers=[{"name": "x"}],
+        config_home=None,
+    )
 
 
 def test_cleanup_is_idempotent_and_none_safe() -> None:

@@ -3,7 +3,7 @@ tags:
   - '#adr'
   - '#tool-cores'
 date: '2026-07-17'
-modified: '2026-07-17'
+modified: '2026-07-18'
 related:
   - "[[2026-07-17-tool-cores-research]]"
   - "[[2026-07-15-agent-harness-provisioning-adr]]"
@@ -257,3 +257,5 @@ contract is asserted by test. This amendment rescopes the surfacing invariant fr
 surfaces exactly the declared read-only harness set" to "the home surfaces exactly the
 declared read-only harness set PLUS at most the run's own authoring bridge, admitted through
 its guarded channel"; the session-injected copy remains the upstream re-arm channel (P05.S22).
+
+Amendment (2026-07-18, third S20 live drive): the isolated-config-home surfacing finding is refined by a decisive adapter-path discriminator. With everything a2a-side provably correct (should_isolate true, home written, ENABLE_TOOL_SEARCH=0, allowed_tools complete, bridge serving), the declared servers STILL did not surface to the model through the ACP-adapter path (`claude-agent-acp@0.59.0` -> `claude-agent-sdk` sdk.mjs spawning `claude` with `--mcp-config` + `--setting-sources`), while the SAME home config surfaces fine via a direct `claude -p`. The adapter path honours a different registration scope than the CLI's own user-scope home read: session/`--mcp-config` servers CONNECT but do not surface, and the user-global `CLAUDE_CONFIG_DIR` home is NOT honoured for tool surfacing - but PROJECT-scope `.mcp.json` (collected from every ancestor directory of the run cwd, `${VAR}`-expanded from the process environment - binary-verified - and auto-approved non-interactively) DOES surface. The surfacing invariant is therefore refined: on the adapter path the isolated home's proven function is SUPPRESSION, not surfacing; surfacing is delivered by PROJECTING the declared set (harness servers + the run's authoring bridge, same placeholder-env specs) into the run workspace's own `.mcp.json`, guarded by a signature marker (never clobber a foreign file). The home's role is refined to a per-scope governor: `enabledMcpjsonServers` pins the projected declared set ON, `enableAllProjectMcpServers:false` plus an ANCESTOR-WALKING `disabledMcpjsonServers`/`permissions.deny` (walking `.mcp.json` to the FILESYSTEM ROOT, minus the declared set) pins every other project-scope server OFF - closing the confirmed repo-root ancestor leak (a `vaultspec-core` `.mcp.json` above the run workspace granted the coder real write tools). The zero-secret-on-disk and read-only-write-path invariants are unchanged: the projected file carries only `${VAR}` placeholders, and no write-capable server is ever projected. Implemented as `2026-07-18` task #43 (branch `mcp-projection`); the live channel proof and the per-scope `--debug` forensic probe are owed follow-ups.

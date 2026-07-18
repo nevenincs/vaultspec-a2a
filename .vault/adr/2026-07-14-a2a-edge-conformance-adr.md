@@ -12,7 +12,7 @@ supersedes:
   - '2026-02-28-react-tailwind-figma-migration-adr'
   - '2026-02-26-frontend-backend-contract-adr'
   - '2026-04-05-contract-validation-adr'
-modified: '2026-07-17'
+modified: '2026-07-18'
 ---
 # `a2a-edge-conformance` adr: `adopting the dashboard edge contract under a salvage-and-verify posture` | (**status:** `accepted`)
 
@@ -211,7 +211,7 @@ restated):
   SUBSTANCE of the brief's first acceptance criterion; the S20
   solo-coder MCP-bridge proof narrows from program-blocking gate to
   upstream watch item (re-run the matrix probe on CLI/adapter releases;
-  close S20 when surfacing lands). **Update (2026-07-17, tool-cores):** the matrix was re-probed on the migrated adapter `@agentclientprotocol/claude-agent-acp@0.59.0` / SDK `0.3.207` and the gate HELD - session-injected MCP still does not surface (tool-cores `P02.S09`, commit `d977c28`). Grounding was instead delivered by the tool-cores isolated-config-home decision (`2026-07-17-tool-cores-adr`, live-verified SURFACES at `P03.S14`, commit `8e15441`), so the S20 watch no longer blocks grounding; it remains only as the optional upstream re-arm for retiring the config-home indirection if a future release surfaces session injection.
+  close S20 when surfacing lands). **Update (2026-07-17, tool-cores):** the matrix was re-probed on the migrated adapter `@agentclientprotocol/claude-agent-acp@0.59.0` / SDK `0.3.207` and the gate HELD - session-injected MCP still does not surface (tool-cores `P02.S09`, commit `d977c28`). Grounding was instead delivered by the tool-cores isolated-config-home decision (`2026-07-17-tool-cores-adr`, live-verified SURFACES at `P03.S14`, commit `8e15441`), so the S20 watch no longer blocks grounding; it remains only as the optional upstream re-arm for retiring the config-home indirection if a future release surfaces session injection. **Update (2026-07-18, mcp-projection):** the third S20 live drive found the config-home does NOT surface through the ACP-adapter path either (only PROJECT-scope `.mcp.json` does); surfacing is now delivered by projecting the declared set into the run-workspace `.mcp.json`, with an ancestor-walking deny closing the confirmed repo-root leak - see the `2026-07-17-tool-cores-adr` 2026-07-18 amendment (task #43, branch `mcp-projection`; live proof owed).
 - **R5 - Task queue leaves the vault.** The worker task queue is
   orchestration state (dashboard D5: ours), so its storage moves from the
   bespoke markdown table under `.vault/plan/` into A2A's own database

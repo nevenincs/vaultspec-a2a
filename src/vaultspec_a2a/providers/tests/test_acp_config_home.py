@@ -19,7 +19,6 @@ from .._acp_authoring import (
 from .._acp_config_home import (
     cleanup_isolated_config_home,
     create_isolated_config_home,
-    enumerate_workspace_mcp_names,
     isolation_required_but_absent,
     should_isolate_config_home,
 )
@@ -161,25 +160,6 @@ def test_authoring_bridge_home_is_placeholder_only_no_secret_on_disk() -> None:
         cleanup_isolated_config_home(home)
 
 
-def test_enumerate_workspace_mcp_names_reads_and_sorts_servers(tmp_path: Path) -> None:
-    (tmp_path / ".mcp.json").write_text(
-        json.dumps({"mcpServers": {"zeta": {}, "alpha": {}}}), encoding="utf-8"
-    )
-    assert enumerate_workspace_mcp_names(tmp_path) == ["alpha", "zeta"]
-
-
-def test_enumerate_workspace_mcp_names_best_effort(tmp_path: Path) -> None:
-    # No workspace, no file, malformed JSON, and a file lacking mcpServers all
-    # yield [] rather than raising - isolation setup never fails on a workspace
-    # artifact.
-    assert enumerate_workspace_mcp_names(None) == []
-    assert enumerate_workspace_mcp_names(tmp_path) == []
-    (tmp_path / ".mcp.json").write_text("{not valid json", encoding="utf-8")
-    assert enumerate_workspace_mcp_names(tmp_path) == []
-    (tmp_path / ".mcp.json").write_text(json.dumps({"other": 1}), encoding="utf-8")
-    assert enumerate_workspace_mcp_names(tmp_path) == []
-
-
 def test_settings_always_disables_project_mcp_autoload() -> None:
     # Even with no workspace .mcp.json, the home refuses to auto-enable any
     # project-scoped server, so a workspace file that appears after enumeration
@@ -189,25 +169,52 @@ def test_settings_always_disables_project_mcp_autoload() -> None:
         settings = json.loads((home / "settings.json").read_text(encoding="utf-8"))
         assert settings["enableAllProjectMcpServers"] is False
         assert "disabledMcpjsonServers" not in settings
+        assert "enabledMcpjsonServers" not in settings
     finally:
         cleanup_isolated_config_home(home)
 
 
-def test_settings_pins_out_workspace_mcp(tmp_path: Path) -> None:
-    # A workspace .mcp.json (e.g. a stray vaultspec-core install, the S20 vector)
-    # is pinned OUT three ways: no autoload, disabled by name, and tool-denied.
+def test_settings_pins_out_ancestor_mcp(tmp_path: Path) -> None:
+    # An ancestor .mcp.json (the S20 repo-root leak vector) is pinned OUT three
+    # ways: no wholesale autoload, disabled by name, and tool-denied. The deny is
+    # ancestor-walking, so a file ABOVE the run workspace is caught.
     (tmp_path / ".mcp.json").write_text(
         json.dumps({"mcpServers": {"vaultspec-core": {}, "evil": {}}}),
         encoding="utf-8",
     )
-    home = create_isolated_config_home(workspace_root=tmp_path)
+    run_ws = tmp_path / "run"
+    run_ws.mkdir()
+    home = create_isolated_config_home(workspace_root=run_ws)
     try:
         settings = json.loads((home / "settings.json").read_text(encoding="utf-8"))
         assert settings["enableAllProjectMcpServers"] is False
-        assert settings["disabledMcpjsonServers"] == ["evil", "vaultspec-core"]
+        assert "evil" in settings["disabledMcpjsonServers"]
+        assert "vaultspec-core" in settings["disabledMcpjsonServers"]
         deny = settings["permissions"]["deny"]
         assert "mcp__evil" in deny
         assert "mcp__vaultspec-core" in deny
+    finally:
+        cleanup_isolated_config_home(home)
+
+
+def test_settings_enables_declared_and_never_denies_it(tmp_path: Path) -> None:
+    # The declared (projected) set is explicitly enabled and must NEVER appear in
+    # the deny/disabled lists, even when an ancestor .mcp.json also names it.
+    (tmp_path / ".mcp.json").write_text(
+        json.dumps({"mcpServers": {"vaultspec-rag": {}, "evil": {}}}),
+        encoding="utf-8",
+    )
+    run_ws = tmp_path / "run"
+    run_ws.mkdir()
+    declared = {"vaultspec-rag": {"type": "stdio", "command": "uvx"}}
+    home = create_isolated_config_home(declared, workspace_root=run_ws)
+    try:
+        settings = json.loads((home / "settings.json").read_text(encoding="utf-8"))
+        assert settings["enabledMcpjsonServers"] == ["vaultspec-rag"]
+        # Declared name is surfaced, never pinned out; the foreign one still is.
+        assert "vaultspec-rag" not in settings.get("disabledMcpjsonServers", [])
+        assert "mcp__vaultspec-rag" not in settings["permissions"]["deny"]
+        assert "evil" in settings["disabledMcpjsonServers"]
     finally:
         cleanup_isolated_config_home(home)
 

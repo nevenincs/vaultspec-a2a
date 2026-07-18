@@ -13,12 +13,13 @@ NON-armed run does not trip) is covered by the pure-predicate tests in
 
 from __future__ import annotations
 
+import json
 from typing import TYPE_CHECKING
 
 import pytest
 from langchain_core.messages import HumanMessage
 
-from ...thread.errors import IsolationRequiredError
+from ...thread.errors import IsolationRequiredError, ProjectionRefusedError
 from ..acp_chat_model import AcpChatModel
 
 if TYPE_CHECKING:
@@ -52,3 +53,30 @@ async def test_armed_run_without_token_raises_isolation_required(
     with pytest.raises(IsolationRequiredError):
         async for _ in model._astream([HumanMessage(content="hi")]):
             pass
+
+
+@pytest.mark.asyncio
+async def test_armed_run_refuses_foreign_workspace_mcp_json(tmp_path: Path) -> None:
+    # Isolation engages (token present), so the projection channel runs; a foreign
+    # .mcp.json already in the run workspace must make _astream raise
+    # ProjectionRefusedError BEFORE spawning, rather than clobber it.
+    foreign = {"mcpServers": {"user-srv": {"type": "stdio", "command": "x"}}}
+    (tmp_path / ".mcp.json").write_text(json.dumps(foreign), encoding="utf-8")
+    model = AcpChatModel(
+        command=_CLAUDE_CMD,
+        env_vars={"ANTHROPIC_AUTH_TOKEN": "env-auth-token"},  # isolation engages
+        mcp_servers=[
+            {
+                "name": "vaultspec-rag",
+                "type": "stdio",
+                "command": "uvx",
+                "args": ["--from", "vaultspec-rag", "vaultspec-search-mcp"],
+            }
+        ],
+        workspace_root=str(tmp_path),
+    )
+    with pytest.raises(ProjectionRefusedError):
+        async for _ in model._astream([HumanMessage(content="hi")]):
+            pass
+    # The foreign file is left intact (never clobbered).
+    assert json.loads((tmp_path / ".mcp.json").read_text(encoding="utf-8")) == foreign

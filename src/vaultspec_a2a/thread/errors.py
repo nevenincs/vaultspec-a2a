@@ -95,6 +95,21 @@ class WorkspaceError(VaultspecError):
     recovery_action = RecoveryAction.ESCALATE_TO_USER
 
 
+class ProjectionRefusedError(ConfigError):
+    """Raised when the run workspace cannot host a projected ``.mcp.json``.
+
+    The surfacing channel projects the declared MCP set into the run workspace's
+    ``.mcp.json`` (the only scope the adapter path surfaces). A pre-existing
+    ``.mcp.json`` without our signature marker is a foreign (user or crashed-run)
+    file; refusing to overwrite it is fail-loud rather than silently destroying
+    real project config. A sibling of :class:`IsolationRequiredError`: both mean
+    the run cannot establish its declared, bounded MCP surface, so it must not
+    launch.
+    """
+
+    __slots__ = ()
+
+
 class IsolationRequiredError(ConfigError):
     """Raised when a harness-armed run cannot get its required CLI isolation.
 
@@ -326,6 +341,7 @@ __all__ = [
     "MergeConflictError",
     "NicknameConflictError",
     "PermissionDeniedError",
+    "ProjectionRefusedError",
     "ProtocolError",
     "ProviderSessionError",
     "RecoveryAction",

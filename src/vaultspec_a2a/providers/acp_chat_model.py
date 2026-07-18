@@ -45,7 +45,7 @@ from pydantic import Field, PrivateAttr
 
 from ..control.config import settings
 from ..team.team_config import AgentConfig
-from ..thread.errors import IsolationRequiredError
+from ..thread.errors import IsolationRequiredError, ProjectionRefusedError
 from ..utils.enums import AcpRequestId
 from ..workspace.environment import resolve_env_vars
 from ._acp_auth import authenticate_rpc, runtime_log_extra
@@ -57,6 +57,7 @@ from ._acp_config_home import (
     should_isolate_config_home,
 )
 from ._acp_mcp import config_home_mcp_servers
+from ._acp_project_mcp import cleanup_projected_mcp, project_declared_mcp
 from ._acp_protocol import RpcHandlerMap, process_stdout_loop
 from ._acp_rpc_handlers import (
     on_fs_read_text_file,
@@ -310,6 +311,7 @@ class AcpChatModel(BaseChatModel):
         # token, so no credential file is written into the home. Cleaned up in the
         # finally once the subprocess is reaped.
         config_home: Path | None = None
+        projected_mcp: Path | None = None
         if should_isolate_config_home(self.command, env):
             # Two admission channels populate the isolated home, which is the only
             # surface the pinned CLI actually surfaces to the model:
@@ -333,9 +335,26 @@ class AcpChatModel(BaseChatModel):
             env.update(bridge_env)
             config_home = create_isolated_config_home(
                 surfacing_servers,
-                workspace_root=self.workspace_root or self.cwd,
+                workspace_root=_ws_path,
             )
             env["CLAUDE_CONFIG_DIR"] = str(config_home)
+            # Surfacing channel (S20): the adapter path does NOT surface the home's
+            # user-scope mcpServers to the model, but it DOES surface a PROJECT-scope
+            # .mcp.json. Project the declared set into the run workspace so it
+            # actually reaches the model; the home's enabledMcpjsonServers pins it ON
+            # and the ancestor-walking deny keys pin everything else OFF. The bridge
+            # env placeholders were already hoisted above, so the projected file
+            # carries only ${VAR} references. Raises ProjectionRefusedError (fail
+            # loud) on a foreign .mcp.json - clean the home we just created on that
+            # path so the refusal does not leak it; a successful projection is
+            # removed in the finally with the home.
+            try:
+                projected_mcp = project_declared_mcp(
+                    _ws_path, self._config.mcp_servers
+                )
+            except ProjectionRefusedError:
+                cleanup_isolated_config_home(config_home)
+                raise
 
         if self.command and Path(self.command[0]).stem.lower() == "gemini":
             await refresh_gemini_token(env=env)
@@ -429,6 +448,7 @@ class AcpChatModel(BaseChatModel):
         finally:
             await self._cleanup_session(ctx, stdout_task, stderr_task)
             cleanup_isolated_config_home(config_home)
+            cleanup_projected_mcp(projected_mcp)
 
     async def _yield_chunks(
         self,

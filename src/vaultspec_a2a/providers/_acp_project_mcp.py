@@ -29,6 +29,7 @@ import logging
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from ..thread.errors import ProjectionRefusedError
 from ._acp_authoring import config_home_authoring_entry
 from ._acp_mcp import config_home_mcp_servers
 
@@ -51,15 +52,6 @@ logger = logging.getLogger(__name__)
 # file we must never clobber. A ``.mcp.json`` schema reader consumes ``mcpServers``
 # and ignores unknown top-level keys, so the marker is inert to the CLI.
 PROJECTION_MARKER_KEY = "_vaultspec_projection"
-
-
-class ProjectionRefusedError(RuntimeError):
-    """Raised when the run workspace cannot host a projected ``.mcp.json``.
-
-    A pre-existing ``.mcp.json`` without our signature marker is a foreign (user
-    or crashed-run) file; refusing to overwrite it is fail-loud rather than
-    silently destroying real project config.
-    """
 
 
 def _mcp_names(mcp_path: Path) -> set[str]:

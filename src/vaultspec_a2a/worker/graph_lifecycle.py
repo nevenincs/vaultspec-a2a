@@ -15,11 +15,16 @@ from typing import TYPE_CHECKING, Any, cast
 from langchain_core.messages import HumanMessage, SystemMessage
 
 from ..domain_config import domain_config
-from ..graph.compiler import compile_team_graph
+from ..graph.compiler import _resolve_model_for_worker, compile_team_graph
+from ..graph.enums import Provider
 from ..team.team_config import AgentConfig, load_agent_config, load_team_config
 from ..telemetry import ws_span
 from ..thread.constants import DEFAULT_SUPERVISOR_ID
-from ..thread.errors import AgentConfigNotFoundError, TeamConfigNotFoundError
+from ..thread.errors import (
+    AgentConfigNotFoundError,
+    IsolationRequiredError,
+    TeamConfigNotFoundError,
+)
 
 if TYPE_CHECKING:
     from langgraph.graph.state import CompiledStateGraph
@@ -44,6 +49,79 @@ logger = logging.getLogger(__name__)
 
 # Type alias for the graph cache key.
 _CacheKey = tuple[str, str | None, bool]
+
+# Provider families whose per-run isolation IS the CLAUDE_CONFIG_DIR config home
+# (Claude and Z.ai share the claude-agent-acp wrapper), mapped to the env
+# variable names that carry their lane auth. An armed run on one of these lanes
+# with no token resolves to auth_mode "none_detected" and would spawn unisolated.
+# Kimi rides its own inline --config isolation and Gemini its own home, so they
+# are deliberately absent - a none_detected resolution there is not the
+# config-home isolation breach this gate guards. Extend per family as lanes grow.
+_CONFIG_HOME_LANE_AUTH_ENV_VARS: dict[Provider, tuple[str, ...]] = {
+    Provider.CLAUDE: ("CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_AUTH_TOKEN"),
+    Provider.ZAI: ("ZAI_AUTH_TOKEN",),
+}
+
+
+def assert_armed_lanes_authenticated(
+    team_config: Any,
+    agent_configs: dict[str, AgentConfig],
+    ws_root: Path | None,
+    *,
+    provider_factory: Any,
+) -> None:
+    """Refuse an armed preset whose config-home lane has no auth token.
+
+    Resolves each worker's model through the real provider factory (cheap - no
+    subprocess spawn) and reads the authoritative ``auth_mode`` the factory stamps
+    from the environment. When a worker's lane is a config-home isolation family
+    (Claude/Z.ai) and resolves to ``none_detected``, the run could not establish
+    the per-run isolated home its declared MCP surface requires, so it is refused
+    with an :class:`IsolationRequiredError` - the message names the missing env
+    VARIABLE for the lane, never a value. Kimi/Gemini/Codex ride other isolation
+    paths and are absent from the lane map, so they never trip this gate.
+
+    ``provider_factory`` is injected (not read off a manager) so the gate is a
+    pure, deterministically-testable seam - the same dependency-injection shape as
+    :func:`compile_team_graph`.
+    """
+    missing: dict[str, tuple[str, ...]] = {}
+    for worker_ref in team_config.workers:
+        agent_config = agent_configs.get(worker_ref.agent_id)
+        if agent_config is None:
+            continue
+        try:
+            model = _resolve_model_for_worker(
+                worker_ref,
+                agent_config,
+                team_config,
+                ws_root,
+                provider_factory=provider_factory,
+            )
+        except ValueError:
+            # Provider exhaustion is a distinct failure surfaced by compile.
+            continue
+        provider_value = getattr(model, "provider", None)
+        if not provider_value:
+            continue
+        try:
+            provider = Provider(provider_value)
+        except ValueError:
+            continue
+        env_vars = _CONFIG_HOME_LANE_AUTH_ENV_VARS.get(provider)
+        if env_vars and getattr(model, "auth_mode", None) == "none_detected":
+            missing[provider.value] = env_vars
+    if missing:
+        lanes = "; ".join(
+            f"{lane} (set one of: {', '.join(env_vars)})"
+            for lane, env_vars in sorted(missing.items())
+        )
+        raise IsolationRequiredError(
+            f"harness-armed preset {team_config.id!r} cannot establish the "
+            "config-home isolation its declared MCP surface requires: no provider "
+            f"auth token for lane(s): {lanes}. Provide the lane token or select a "
+            "preset with no harness/bridge."
+        )
 
 
 class GraphLifecycleManager:
@@ -280,6 +358,27 @@ class GraphLifecycleManager:
         harness = team_config.effective_harness()
         if harness is not None and harness.authoring_bridge:
             authoring_binding_provider = self._build_authoring_binding_provider()
+
+        # Compile gate (agent-harness-provisioning isolation invariant): an ARMED
+        # preset - one declaring the authoring bridge OR harness MCP servers - can
+        # only bind its declared MCP surface if the run spawns inside an isolated
+        # CLI config home, and that isolation is established from an env-carried
+        # provider token. If an armed worker's config-home lane resolves to
+        # auth_mode "none_detected" the run would spawn UNISOLATED and inherit
+        # ambient + workspace .mcp.json (the S20 leak), so refuse here - the outer
+        # compile wrapper turns this into a GraphCompilationError. The predicate
+        # matches authoring_bridge presets (e.g. vaultspec-solo-coder, which may
+        # declare no harness mcp_servers yet is exactly the leak surface).
+        armed = harness is not None and (
+            harness.authoring_bridge or bool(harness.mcp_servers)
+        )
+        if armed:
+            assert_armed_lanes_authenticated(
+                team_config,
+                agent_configs,
+                ws_root,
+                provider_factory=self._provider_factory,
+            )
 
         return compile_team_graph(
             team_config=team_config,

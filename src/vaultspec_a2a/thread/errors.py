@@ -95,6 +95,23 @@ class WorkspaceError(VaultspecError):
     recovery_action = RecoveryAction.ESCALATE_TO_USER
 
 
+class IsolationRequiredError(ConfigError):
+    """Raised when a harness-armed run cannot get its required CLI isolation.
+
+    The agent-harness-provisioning ADR binds a spawned agent's MCP surface to an
+    allowlist equal to the declared harness; enforcing that requires a per-run
+    isolated ``CLAUDE_CONFIG_DIR`` established from an env-carried provider token.
+    An armed run that resolves to ``auth_mode == "none_detected"`` (refused at
+    compile) or that reaches the ACP spawn without an isolated home (refused at
+    the spawn seam) must fail loud here rather than launch an agent with an
+    unbounded MCP surface that inherits ambient and workspace ``.mcp.json``
+    servers. A ``ConfigError`` so the compile path wraps it as a
+    ``GraphCompilationError`` and it carries the abort recovery action.
+    """
+
+    __slots__ = ()
+
+
 # ---------------------------------------------------------------------------
 # Agent execution
 # ---------------------------------------------------------------------------
@@ -305,6 +322,7 @@ __all__ = [
     "ErrorSeverity",
     "EventAggregatorError",
     "GitWorkspaceError",
+    "IsolationRequiredError",
     "MergeConflictError",
     "NicknameConflictError",
     "PermissionDeniedError",

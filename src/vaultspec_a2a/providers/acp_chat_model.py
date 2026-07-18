@@ -45,6 +45,7 @@ from pydantic import Field, PrivateAttr
 
 from ..control.config import settings
 from ..team.team_config import AgentConfig
+from ..thread.errors import IsolationRequiredError
 from ..utils.enums import AcpRequestId
 from ..workspace.environment import resolve_env_vars
 from ._acp_auth import authenticate_rpc, runtime_log_extra
@@ -75,7 +76,6 @@ from .acp_exceptions import (
     AcpError,
     AcpErrorCode,
     AcpPromptError,
-    IsolationRequiredError,
 )
 from .gemini_auth import refresh_gemini_token
 

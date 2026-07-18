@@ -12,7 +12,6 @@ __all__ = [
     "AcpPromptError",
     "AcpProtocolError",
     "AcpSessionError",
-    "IsolationRequiredError",
 ]
 
 
@@ -88,21 +87,5 @@ class AcpPromptError(AcpError):
 
 class AcpAuthError(AcpError):
     """Raised when authentication challenges fail."""
-
-    __slots__ = ()
-
-
-class IsolationRequiredError(AcpError):
-    """Raised when an armed run would spawn without CLI config-home isolation.
-
-    The agent-harness-provisioning ADR binds the spawned agent's MCP surface to
-    an allowlist equal to the declared harness servers; enforcing that requires a
-    per-run isolated ``CLAUDE_CONFIG_DIR`` (which suppresses the operator's
-    ambient user-global MCP and pins out the workspace's project ``.mcp.json``).
-    A harness-armed preset that reaches the spawn without that isolation - or that
-    resolves to ``auth_mode == "none_detected"`` so isolation cannot be
-    established from an env-carried token - must fail loud here rather than launch
-    an agent with an unbounded MCP surface.
-    """
 
     __slots__ = ()

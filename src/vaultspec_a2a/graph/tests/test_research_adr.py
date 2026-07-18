@@ -21,7 +21,6 @@ if TYPE_CHECKING:
 
     from ..protocols import ProviderFactoryProtocol
 
-from langchain_core.language_models.fake_chat_models import FakeChatModel
 from langchain_core.messages import AIMessage
 
 from vaultspec_a2a.team.team_config import (
@@ -184,59 +183,6 @@ async def test_research_adr_missing_role_raises(
             agent_configs=_agent_configs(team),
             checkpointer=checkpointer,
             provider_factory=pf,
-            proposal_submitter=_FakeSubmitter(),
-        )
-
-
-class _NoAuthModel(FakeChatModel):
-    """A FakeChatModel that reports the factory's ``none_detected`` auth mode.
-
-    Faithful to the production contract: ``ProviderFactory`` stamps
-    ``auth_mode="none_detected"`` on the model it returns when no provider token
-    is present in the environment (see ``providers/factory.py``). Modelling that
-    here lets the compile gate be exercised without an env-token dependency.
-    """
-
-    auth_mode: str = "none_detected"
-
-
-class _NoneDetectedFactory:
-    """Provider factory whose resolved models carry ``auth_mode='none_detected'``."""
-
-    def create(
-        self,
-        provider: Any,
-        *,
-        model: Any | None = None,
-        agent_config: Any | None = None,
-        workspace_root: Any | None = None,
-        **kwargs: Any,
-    ) -> FakeChatModel:
-        return _NoAuthModel(responses=["stub response"])
-
-
-@pytest.mark.asyncio
-async def test_research_adr_refuses_armed_preset_without_auth(
-    checkpointer: AsyncSqliteSaver,
-) -> None:
-    """An armed preset (declares a harness) whose models resolve to
-    ``auth_mode='none_detected'`` is refused at compile: the run could not
-    establish the config-home isolation the declared MCP surface requires, so it
-    would spawn unisolated and inherit ambient + workspace MCP (the S20 leak).
-
-    Contrast: ``test_research_adr_compiles_expected_node_set`` compiles the SAME
-    armed preset with the default stub factory (no ``none_detected``), proving the
-    gate refuses only on the missing-auth condition, not on being armed.
-    """
-    team = _research_adr_team()
-    assert team.effective_harness() is not None  # armed: declares harness servers
-    factory = _NoneDetectedFactory()
-    with pytest.raises(ConfigError, match="none_detected"):
-        compile_team_graph(
-            team_config=team,
-            agent_configs=_agent_configs(team),
-            checkpointer=checkpointer,
-            provider_factory=factory,
             proposal_submitter=_FakeSubmitter(),
         )
 

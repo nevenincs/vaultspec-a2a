@@ -1160,30 +1160,6 @@ def _compile_research_adr(
     harness = team_config.effective_harness()
     harness_mcp_servers = list(harness.mcp_servers) if harness is not None else []
 
-    # Compile gate (agent-harness-provisioning isolation invariant): an armed
-    # preset - one that declares harness MCP servers - can only bind its declared
-    # MCP surface if the run spawns inside an isolated CLI config home, and that
-    # isolation is established from an env-carried provider token
-    # (should_isolate_config_home). A resolved model whose auth_mode is
-    # "none_detected" has no such token, so the run would spawn UNISOLATED and
-    # inherit the operator's ambient MCP plus the workspace .mcp.json - the S20
-    # declared-surface leak. Refuse at compile rather than let the per-worker
-    # fail-loud (IsolationRequiredError) fire mid-run at spawn.
-    if harness_mcp_servers:
-        unauthed_roles = sorted(
-            role
-            for role, model in models.items()
-            if getattr(model, "auth_mode", None) == "none_detected"
-        )
-        if unauthed_roles:
-            raise ConfigError(
-                f"harness-armed preset {team_config.id!r} resolved "
-                f"auth_mode='none_detected' for role(s) {unauthed_roles}: the run "
-                "cannot establish the config-home isolation the declared MCP "
-                "harness requires without an env-carried provider token. Provide "
-                "the provider auth token or select a preset with no harness."
-            )
-
     specs: list[dict[str, Any]] = [
         spec.model_dump() for spec in team_config.topology.research_threads
     ] or [{"thread_id": "primary", "topic": "", "instructions": ""}]

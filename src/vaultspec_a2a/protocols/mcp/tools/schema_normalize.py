@@ -45,14 +45,16 @@ def _permissive_field() -> dict[str, Any]:
     return {"type": "string"}
 
 
-def _str_list(value: object) -> list[str]:
-    """Return the string members of *value* when it is a list, else ``[]``."""
+def _str_list(value: object, exclude: frozenset[str] = frozenset()) -> list[str]:
+    """Return the string members of *value* (a list), minus any in *exclude*."""
     if not isinstance(value, list):
         return []
-    return [item for item in value if isinstance(item, str)]
+    return [item for item in value if isinstance(item, str) and item not in exclude]
 
 
-def normalize_tool_input_schema(raw: object) -> tuple[dict[str, Any], str]:
+def normalize_tool_input_schema(
+    raw: object, injected: frozenset[str] = frozenset()
+) -> tuple[dict[str, Any], str]:
     """Translate one catalog ``input_schema`` to ``(json_schema, guidance)``.
 
     ``json_schema`` is always a valid JSON Schema object (``type: object``,
@@ -60,6 +62,13 @@ def normalize_tool_input_schema(raw: object) -> tuple[dict[str, Any], str]:
     intersection is non-empty). ``guidance`` is prose the caller appends to the
     tool description so the per-branch requirements, bounds, and dropped engine
     keywords still reach the model. A non-dict input yields a bare object schema.
+
+    *injected* names the fields the dispatcher owns and injects run-scoped
+    (session_id / changeset_id / expected_revision / approval_id for a proposal
+    command). They are removed from properties, required, and the branch guidance
+    so they never appear in the model's contract - the model must not, and cannot,
+    supply them. Read tools pass an empty set, keeping their target ids
+    model-owned.
     """
     if not isinstance(raw, dict):
         return {"type": "object"}, ""
@@ -83,8 +92,8 @@ def normalize_tool_input_schema(raw: object) -> tuple[dict[str, Any], str]:
         for branch in branches:
             if not isinstance(branch, dict):
                 continue
-            b_required = _str_list(branch.get("required"))
-            b_optional = _str_list(branch.get("optional"))
+            b_required = _str_list(branch.get("required"), injected)
+            b_optional = _str_list(branch.get("optional"), injected)
             for field in (*b_required, *b_optional):
                 properties.setdefault(field, _permissive_field())
             required_sets.append(set(b_required))
@@ -122,8 +131,8 @@ def normalize_tool_input_schema(raw: object) -> tuple[dict[str, Any], str]:
         if branch_notes:
             guidance_parts.append("One of: " + "; ".join(branch_notes) + ".")
     else:
-        b_required = _str_list(raw.get("required"))
-        b_optional = _str_list(raw.get("optional"))
+        b_required = _str_list(raw.get("required"), injected)
+        b_optional = _str_list(raw.get("optional"), injected)
         for field in (*b_required, *b_optional):
             properties.setdefault(field, _permissive_field())
         required = sorted(b_required)

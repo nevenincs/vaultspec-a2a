@@ -235,13 +235,104 @@ def make_tool_dispatch(
     execute, and returns the engine ``data`` payload (or a denial rendered as a
     value). Idempotency keys are derived from stable run-local material so a
     replayed call dedupes at the engine. Unknown tools fail loudly.
+
+    Proposal-lifecycle injection: the model never sees ``session_id`` /
+    ``changeset_id`` / ``expected_revision`` / ``approval_id`` (they are absent
+    from the normalized tool schemas). The dispatcher owns them run-scoped and
+    injects them per command, sanitizing (overwriting) any the model supplied so a
+    stray value cannot 400 against the engine's ``deny_unknown_fields``:
+
+    - It lazily ensures ONE engine session per run on the first proposal call,
+      using the SAME constant ``create_session`` idempotency key the graph
+      submitter uses (``run_id = thread_id``), so bridge-path and submitter-path
+      runs converge on one session and the executor's ``authoring_session_id``
+      close-out stays coherent.
+    - It generates the run's ``changeset_id`` once (create_proposal) and threads it
+      plus the response ``changeset_revision`` / ``approval_id`` into the
+      dependent commands, per the engine request types verified in
+      ``authoring/api/mod.rs`` (CreateProposalRequest: session_id + changeset_id;
+      validate/submit/cancel: changeset_id + expected_revision; apply: changeset_id
+      + approval_id). Read tools (read_context, search_graph) and cancel_run carry
+      no injection - their ids are model-owned.
     """
+    from .session import AuthoringSession
+
+    session = AuthoringSession(client, run_id)
+    lifecycle: dict[str, str | None] = {
+        "changeset_id": None,
+        "revision": None,
+        "approval_id": None,
+    }
+
+    async def _ensure_session_id() -> str:
+        if session.session_id is None:
+            created = await session.create_session(
+                scope="repo",
+                title=f"{run_id} bridged authoring",
+                idempotency_key=derive_idempotency_key(run_id, "create_session"),
+            )
+            if not isinstance(created, AuthoringResponse) or session.session_id is None:
+                raise ValueError(
+                    f"could not ensure an engine authoring session for run {run_id!r}"
+                )
+        return session.session_id
+
+    def _inject(arguments: dict[str, Any], **fields: str | None) -> None:
+        # Sanitize-overwrite: strip any model-supplied value, then set the
+        # dispatcher-owned one (skipping None, e.g. a not-yet-known revision).
+        for key, value in fields.items():
+            arguments.pop(key, None)
+            if value is not None:
+                arguments[key] = value
+
+    async def _apply_injection(command: str, arguments: dict[str, Any]) -> None:
+        if command == "create_proposal":
+            session_id = await _ensure_session_id()
+            if lifecycle["changeset_id"] is None:
+                lifecycle["changeset_id"] = session.new_changeset_id("bridge")
+            _inject(
+                arguments,
+                session_id=session_id,
+                changeset_id=lifecycle["changeset_id"],
+            )
+        elif command in ("append_draft", "replace_draft"):
+            session_id = await _ensure_session_id()
+            _inject(
+                arguments,
+                session_id=session_id,
+                changeset_id=lifecycle["changeset_id"],
+            )
+        elif command in ("validate_proposal", "submit_for_review", "cancel_proposal"):
+            _inject(
+                arguments,
+                changeset_id=lifecycle["changeset_id"],
+                expected_revision=lifecycle["revision"],
+            )
+        elif command == "request_apply":
+            _inject(
+                arguments,
+                changeset_id=lifecycle["changeset_id"],
+                approval_id=lifecycle["approval_id"],
+            )
+
+    def _track(result: AuthoringResponse) -> None:
+        data = result.data
+        if not isinstance(data, dict):
+            return
+        revision = data.get("changeset_revision")
+        if isinstance(revision, str) and revision:
+            lifecycle["revision"] = revision
+        approval_id = data.get("approval_id")
+        if isinstance(approval_id, str) and approval_id:
+            lifecycle["approval_id"] = approval_id
 
     async def dispatch(name: str, arguments: dict[str, Any]) -> dict[str, Any]:
         tool = snapshot.get(name)
         if tool is None:
             raise ValueError(f"tool {name!r} is not in the run's catalog snapshot")
         command = resolve_tool_command(tool, arguments)
+        arguments = dict(arguments)  # never mutate the caller's dict
+        await _apply_injection(command, arguments)
         idempotency_key = derive_idempotency_key(run_id, command, uuid4().hex)
         result = await execute_agent_tool(
             client,
@@ -254,6 +345,7 @@ def make_tool_dispatch(
             actor_token=actor_token,
         )
         if isinstance(result, AuthoringResponse):
+            _track(result)
             data = result.data
             return data if isinstance(data, dict) else {"result": data}
         return {

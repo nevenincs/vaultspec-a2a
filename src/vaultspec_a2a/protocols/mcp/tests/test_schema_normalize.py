@@ -104,6 +104,7 @@ def test_search_graph_bounds_go_to_guidance_not_schema() -> None:
 def test_unknown_dsl_keywords_are_dropped_and_summarized() -> None:
     # validate_proposal carries alias_of + backend_derived: neither is JSON Schema,
     # so both are dropped from the schema and summarized into guidance instead.
+    # (No injection here - the raw keyword-dropping behavior.)
     schema, guidance = normalize_tool_input_schema(_schema_for("validate_proposal"))
     assert schema["type"] == "object"
     assert "alias_of" not in schema
@@ -112,6 +113,33 @@ def test_unknown_dsl_keywords_are_dropped_and_summarized() -> None:
     assert schema["required"] == ["changeset_id", "expected_revision", "summary"]
     assert "alias_of" in guidance
     assert "backend_derived" in guidance
+
+
+def test_injected_fields_hidden_from_schema_and_guidance() -> None:
+    # The dispatcher owns changeset_id + expected_revision for validate; they must
+    # vanish from the model's contract, leaving only the model-owned summary.
+    injected = frozenset({"changeset_id", "expected_revision"})
+    schema, _guidance = normalize_tool_input_schema(
+        _schema_for("validate_proposal"), injected
+    )
+    assert set(schema["properties"]) == {"summary"}
+    assert schema["required"] == ["summary"]
+    assert "changeset_id" not in schema["properties"]
+    assert "expected_revision" not in schema["properties"]
+
+
+def test_served_injected_tools_hide_owned_ids() -> None:
+    # Through the real serving seam (map applied), the proposal-lifecycle tools do
+    # not expose the dispatcher-owned ids; read_context keeps its model-owned ones.
+    by_name = {s["name"]: s for s in build_tool_specs(parse_catalog(_CATALOG))}
+    validate_props = by_name["validate_proposal"]["inputSchema"]["properties"]
+    assert "changeset_id" not in validate_props
+    assert "expected_revision" not in validate_props
+    assert "summary" in validate_props
+    # read_context is a read tool: its target ids stay model-owned.
+    read_props = by_name["read_context"]["inputSchema"]["properties"]
+    assert "changeset_id" in read_props
+    assert "session_id" in read_props
 
 
 def test_non_dict_schema_yields_bare_object() -> None:

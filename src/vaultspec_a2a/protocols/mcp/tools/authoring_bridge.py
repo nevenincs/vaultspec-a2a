@@ -37,6 +37,19 @@ __all__ = [
 # An MCP tool specification: the minimal advertised shape an MCP client reads.
 McpToolSpec = dict[str, Any]
 
+# Fields the run dispatcher injects run-scoped (make_tool_dispatch), hidden from
+# each tool's advertised schema/guidance so the model never sees them - it must
+# not, and cannot, supply an id the dispatcher owns. Keyed by semantic tool name;
+# MUST stay consistent with the dispatcher's per-command injection map. Read tools
+# (read_context, search_graph) are absent: their target ids are model-owned.
+_INJECTED_FIELDS_BY_TOOL: dict[str, frozenset[str]] = {
+    "propose_changeset": frozenset({"session_id", "changeset_id"}),
+    "validate_proposal": frozenset({"changeset_id", "expected_revision"}),
+    "request_approval": frozenset({"changeset_id", "expected_revision"}),
+    "cancel": frozenset({"changeset_id", "expected_revision"}),
+    "request_apply": frozenset({"changeset_id", "approval_id"}),
+}
+
 
 def build_tool_specs(snapshot: CatalogSnapshot) -> list[McpToolSpec]:
     """Map a catalog snapshot to MCP tool specifications in catalog order.
@@ -44,8 +57,9 @@ def build_tool_specs(snapshot: CatalogSnapshot) -> list[McpToolSpec]:
     Each spec carries the engine ``name`` (the higher-level semantic vocabulary,
     not a wire route), its ``description``, and the ``input_schema`` NORMALIZED to
     valid MCP JSON Schema as the ``inputSchema``. The catalog's schema is a custom
-    DSL the pinned CLI would reject and silently drop; :func:`normalize_tool_input_schema`
-    translates it to a registerable, guiding JSON Schema object while the engine
+    DSL the pinned CLI would reject and silently drop;
+    ``normalize_tool_input_schema`` translates it to a registerable, guiding JSON
+    Schema object (hiding the dispatcher-injected id fields) while the engine
     stays the execution authority, and any per-branch/bounds/dropped-keyword
     guidance is appended to the tool description so the model still sees it. The
     catalog snapshot is never mutated - normalization happens here, at serving
@@ -59,7 +73,10 @@ def build_tool_specs(snapshot: CatalogSnapshot) -> list[McpToolSpec]:
     """
     specs: list[McpToolSpec] = []
     for tool in snapshot.tools:
-        input_schema, guidance = normalize_tool_input_schema(tool.input_schema)
+        injected = _INJECTED_FIELDS_BY_TOOL.get(tool.name, frozenset())
+        input_schema, guidance = normalize_tool_input_schema(
+            tool.input_schema, injected
+        )
         description = tool.description
         if guidance:
             description = f"{description}\n\n{guidance}" if description else guidance

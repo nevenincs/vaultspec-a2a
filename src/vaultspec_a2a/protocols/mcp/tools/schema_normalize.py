@@ -52,6 +52,25 @@ def _str_list(value: object, exclude: frozenset[str] = frozenset()) -> list[str]
     return [item for item in value if isinstance(item, str) and item not in exclude]
 
 
+def _merge_properties(
+    target: dict[str, Any], provided: object, injected: frozenset[str]
+) -> None:
+    """Merge a schema's own ``properties`` into *target*, minus injected fields.
+
+    When the engine inlines model-owned content as JSON Schema (e.g. the
+    create branch's ``operations`` array), that nested structure is preserved
+    VERBATIM rather than collapsed to a permissive field - so the model sees the
+    real shape it must construct. Injected (dispatcher-owned) names are dropped.
+    """
+    if not isinstance(provided, dict):
+        return
+    for name, subschema in provided.items():
+        if not isinstance(name, str) or name in injected:
+            continue
+        if isinstance(subschema, dict):
+            target[name] = subschema
+
+
 def normalize_tool_input_schema(
     raw: object, injected: frozenset[str] = frozenset()
 ) -> tuple[dict[str, Any], str]:
@@ -73,7 +92,7 @@ def normalize_tool_input_schema(
     if not isinstance(raw, dict):
         return {"type": "object"}, ""
 
-    properties: dict[str, dict[str, Any]] = {}
+    properties: dict[str, Any] = {}
     required: list[str] = []
     guidance_parts: list[str] = []
     # A tool/branch carrying an opaque ``payload`` type (or aliasing another
@@ -96,6 +115,10 @@ def normalize_tool_input_schema(
             b_optional = _str_list(branch.get("optional"), injected)
             for field in (*b_required, *b_optional):
                 properties.setdefault(field, _permissive_field())
+            # A branch that inlines its own JSON-Schema properties (engine content
+            # inlining) contributes them verbatim, overriding the permissive
+            # placeholders above with the real nested shape.
+            _merge_properties(properties, branch.get("properties"), injected)
             required_sets.append(set(b_required))
             payload = branch.get("payload")
             alias_of = branch.get("alias_of")
@@ -135,6 +158,7 @@ def normalize_tool_input_schema(
         b_optional = _str_list(raw.get("optional"), injected)
         for field in (*b_required, *b_optional):
             properties.setdefault(field, _permissive_field())
+        _merge_properties(properties, raw.get("properties"), injected)
         required = sorted(b_required)
         # A top-level opaque payload (e.g. request_apply -> ApplyRequest) has no
         # enumerated fields, so the schema must stay open for the model to send it.

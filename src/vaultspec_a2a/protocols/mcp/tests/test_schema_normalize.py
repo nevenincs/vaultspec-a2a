@@ -67,21 +67,45 @@ def test_read_context_translates_to_documented_shape() -> None:
     assert "target='document' requires document" in guidance
 
 
-def test_propose_changeset_payload_is_sendable_and_named() -> None:
+def test_propose_changeset_inlines_operations_content() -> None:
     # The mutating tool S20 must invoke: the operation discriminator is enumerated,
-    # the schema stays OPEN so the engine-flattened payload can be sent, and the
-    # guidance names the payload type / aliases instead of a misleading "requires
-    # none".
-    schema, guidance = normalize_tool_input_schema(_schema_for("propose_changeset"))
-    assert schema["type"] == "object"
-    assert schema["properties"]["operation"] == {
+    # and the engine-inlined operations content is PRESERVED (nested) so the model
+    # can construct it - not collapsed to a permissive field. Injected ids stay
+    # hidden; append/replace keep the schema open with aliases named in guidance.
+    injected = frozenset({"session_id", "changeset_id"})
+    schema, guidance = normalize_tool_input_schema(
+        _schema_for("propose_changeset"), injected
+    )
+    props = schema["properties"]
+    assert props["operation"] == {
         "type": "string",
         "enum": ["create", "append", "replace"],
     }
+    assert props["summary"] == {"type": "string"}
+    ops = props["operations"]
+    assert ops["type"] == "array"
+    item = ops["items"]["properties"]
+    assert "child_key" in item
+    assert "create_document" in item["operation"]["enum"]
+    document = item["target"]["properties"]["document"]["properties"]
+    assert "collision_status" in document
+    assert "provisional_doc_id" in document
+    assert "body" in item["draft"]["properties"]
+    # Dispatcher-injected ids never appear; schema stays open for append/replace.
+    assert "session_id" not in props
+    assert "changeset_id" not in props
     assert "additionalProperties" not in schema
-    assert "CreateProposalRequest" in guidance
     assert "append_draft" in guidance
-    assert "requires none" not in guidance
+
+
+def test_served_propose_changeset_surfaces_operations_shape() -> None:
+    # Contract check: through the real serving seam (build_tool_specs applies the
+    # per-tool injected map), the model sees the nested operations schema it must
+    # build - proving a2a consumes what the engine now serves.
+    by_name = {s["name"]: s for s in build_tool_specs(parse_catalog(_CATALOG))}
+    ops = by_name["propose_changeset"]["inputSchema"]["properties"]["operations"]
+    assert ops["type"] == "array"
+    assert "child_key" in ops["items"]["properties"]
 
 
 def test_request_apply_payload_is_sendable_and_named() -> None:

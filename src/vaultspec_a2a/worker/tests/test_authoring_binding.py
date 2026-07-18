@@ -195,3 +195,50 @@ async def test_binding_for_fetches_catalog_once_per_run_live() -> None:
     assert second.snapshot is cached
     if os.environ.get("VAULTSPEC_DEBUG_CATALOG"):  # pragma: no cover - diagnostic
         print(f"catalog tools={list(first.tool_names)}")
+
+
+@pytest.mark.service
+@pytest.mark.asyncio
+async def test_binding_for_concurrent_fetches_share_one_snapshot_live() -> None:
+    """Live: concurrent binding_for on an empty cache fetches once (per-thread lock).
+
+    Without the lock the two workers would each fetch and the second register would
+    overwrite the first, handing them DIFFERENT snapshot objects; the lock makes
+    both share the one cached snapshot - the star-fan-out double-fetch guard.
+    """
+    import asyncio as _asyncio
+
+    endpoint = resolve_engine()
+    if endpoint is None:
+        pytest.skip("no reachable authoring engine")
+    run_id = f"binding-conc-{uuid.uuid4().hex[:8]}"
+    from ...authoring import AuthoringClient, AuthoringResponse, mint_actor_token
+
+    async with AuthoringClient(endpoint.base_url, endpoint.bearer_token) as client:
+        minted = await mint_actor_token(
+            client, actor_id=f"agent:{run_id}", kind="agent"
+        )
+        assert isinstance(minted, AuthoringResponse) and isinstance(minted.data, dict)
+        raw_token = minted.data["raw_token"]
+
+    token_store = RunTokenStore()
+    token_store.register(
+        run_id,
+        ActorTokenBundle(
+            tokens={"vaultspec-coder": raw_token},
+            engine_bearer=endpoint.bearer_token,
+        ),
+    )
+    catalog_store = RunCatalogStore()
+    provider = AuthoringBindingProvider(
+        engine_base_url=endpoint.base_url,
+        token_store=token_store,
+        catalog_store=catalog_store,
+    )
+    first, second = await _asyncio.gather(
+        provider.binding_for(run_id, "vaultspec-coder"),
+        provider.binding_for(run_id, "vaultspec-coder"),
+    )
+    assert first is not None and second is not None
+    assert first.snapshot is second.snapshot
+    assert catalog_store.active_run_count() == 1

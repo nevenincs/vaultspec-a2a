@@ -23,6 +23,7 @@ of its own.
 
 from __future__ import annotations
 
+import asyncio
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -46,6 +47,10 @@ class AuthoringBindingProvider:
         self._engine_base_url = engine_base_url
         self._token_store = token_store
         self._catalog_store = catalog_store
+        # Per-thread fetch locks so concurrent workers under a star fan-out do not
+        # each fetch the catalog on a check-then-act race; the first fetches and
+        # caches, the rest await and read the cache.
+        self._fetch_locks: dict[str, asyncio.Lock] = {}
 
     async def binding_for(
         self, thread_id: str, agent_id: str
@@ -66,8 +71,18 @@ class AuthoringBindingProvider:
 
         snapshot = self._catalog_store.get(thread_id)
         if snapshot is None:
-            snapshot = await self._fetch_catalog(bearer, actor_token)
-            self._catalog_store.register(thread_id, snapshot)
+            # Double-checked under a per-thread lock: the first concurrent worker
+            # fetches and caches; the rest re-read the cache after awaiting it.
+            lock = self._fetch_locks.setdefault(thread_id, asyncio.Lock())
+            async with lock:
+                snapshot = self._catalog_store.get(thread_id)
+                if snapshot is None:
+                    snapshot = await self._fetch_catalog(bearer, actor_token)
+                    self._catalog_store.register(thread_id, snapshot)
+            # Once cached, the lock is spent for this run; drop it so the map does
+            # not accumulate one entry per thread over a long-lived worker. Waiters
+            # already hold their own reference and complete on the cached read.
+            self._fetch_locks.pop(thread_id, None)
 
         from ..providers._acp_authoring import AuthoringToolBinding
 

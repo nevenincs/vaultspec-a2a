@@ -11,6 +11,7 @@ No mock libraries.  No tautological tests.
 from __future__ import annotations
 
 import logging
+import os
 from typing import Any, cast
 
 import httpx
@@ -716,5 +717,50 @@ class TestShutdown:
                 executor = Executor(checkpointer=cp, bridge=bridge)
                 await executor.shutdown()
                 await executor.shutdown()
+            finally:
+                await bridge.close()
+
+
+class TestAuthoringBridgeFailClosed:
+    """An armed authoring_bridge run fails closed when no engine is reachable.
+
+    Mirrors the submitter's fail-closed contract: the per-run binding provider is
+    built at compile time, and a run that cannot reach the engine to fetch its
+    catalog must never start vague - the typed EngineUnavailableError is what the
+    compile guard turns into a GraphCompilationError.
+    """
+
+    @pytest.mark.asyncio(loop_scope="function")
+    async def test_build_provider_raises_without_reachable_engine(
+        self, tmp_path: Any
+    ) -> None:
+        from ...authoring import EngineUnavailableError
+
+        async with AsyncSqliteSaver.from_conn_string(":memory:") as cp:
+            await cp.setup()
+            bridge = _make_bridge()
+            try:
+                manager = Executor(checkpointer=cp, bridge=bridge)._graph_lifecycle
+                # Deterministic no-engine via the discovery contract's own env: a
+                # bogus explicit service.json path plus an empty HOME so the
+                # ~/.vaultspec/service.json fallback resolves nothing either.
+                empty_home = tmp_path / "home"
+                empty_home.mkdir()
+                keys = ("VAULTSPEC_ENGINE_SERVICE_JSON", "USERPROFILE", "HOME")
+                saved = {k: os.environ.get(k) for k in keys}
+                os.environ["VAULTSPEC_ENGINE_SERVICE_JSON"] = str(
+                    tmp_path / "nope.json"
+                )
+                os.environ["USERPROFILE"] = str(empty_home)
+                os.environ["HOME"] = str(empty_home)
+                try:
+                    with pytest.raises(EngineUnavailableError):
+                        manager._build_authoring_binding_provider()
+                finally:
+                    for k, v in saved.items():
+                        if v is None:
+                            os.environ.pop(k, None)
+                        else:
+                            os.environ[k] = v
             finally:
                 await bridge.close()

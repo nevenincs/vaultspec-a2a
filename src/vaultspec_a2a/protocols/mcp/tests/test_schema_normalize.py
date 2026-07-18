@@ -67,35 +67,131 @@ def test_read_context_translates_to_documented_shape() -> None:
     assert "target='document' requires document" in guidance
 
 
-def test_propose_changeset_inlines_operations_content() -> None:
-    # The mutating tool S20 must invoke: the operation discriminator is enumerated,
-    # and the engine-inlined operations content is PRESERVED (nested) so the model
-    # can construct it - not collapsed to a permissive field. Injected ids stay
-    # hidden; append/replace keep the schema open with aliases named in guidance.
+def test_propose_changeset_passes_through_valid_engine_schema() -> None:
+    # The newer engine serves propose_changeset as a valid JSON Schema; the
+    # normalizer detects that and passes the model-owned content through VERBATIM
+    # (nested operations preserved), stripping only the dispatcher-injected ids.
+    raw = _schema_for("propose_changeset")
     injected = frozenset({"session_id", "changeset_id"})
-    schema, guidance = normalize_tool_input_schema(
-        _schema_for("propose_changeset"), injected
-    )
+    schema, guidance = normalize_tool_input_schema(raw, injected)
     props = schema["properties"]
     assert props["operation"] == {
         "type": "string",
         "enum": ["create", "append", "replace"],
     }
-    assert props["summary"] == {"type": "string"}
     ops = props["operations"]
     assert ops["type"] == "array"
     item = ops["items"]["properties"]
     assert "child_key" in item
     assert "create_document" in item["operation"]["enum"]
     document = item["target"]["properties"]["document"]["properties"]
+    # Both DocumentRef variants ride through: ProvisionalCreate + Existing.
     assert "collision_status" in document
     assert "provisional_doc_id" in document
+    assert "node_id" in document
     assert "body" in item["draft"]["properties"]
-    # Dispatcher-injected ids never appear; schema stays open for append/replace.
+    # Verbatim: the nested operations shape is byte-identical to what the engine
+    # served (the engine advertises no injected ids there, so nothing changes).
+    assert ops == raw["properties"]["operations"]
+    # The engine's scoped-follow-up description rides through untouched.
+    assert schema["description"] == raw["description"]
+    # Dispatcher-injected ids are absent; guidance names them as withheld.
     assert "session_id" not in props
     assert "changeset_id" not in props
-    assert "additionalProperties" not in schema
+    assert "session_id" in guidance
+    assert "changeset_id" in guidance
+
+
+def test_deep_strips_injected_ids_wherever_they_appear() -> None:
+    # A valid schema that (wrongly) advertises an injected id at the top level AND
+    # nested must have it removed from every properties map and required list -
+    # the model must never see a dispatcher-owned id. A non-injected sibling and
+    # the source schema both survive intact.
+    raw = {
+        "type": "object",
+        "properties": {
+            "changeset_id": {"type": "string"},
+            "summary": {"type": "string"},
+            "nested": {
+                "type": "object",
+                "properties": {
+                    "changeset_id": {"type": "string"},
+                    "keep": {"type": "string"},
+                },
+                "required": ["changeset_id", "keep"],
+            },
+        },
+        "required": ["changeset_id", "summary"],
+    }
+    schema, _guidance = normalize_tool_input_schema(raw, frozenset({"changeset_id"}))
+    assert "changeset_id" not in schema["properties"]
+    assert "summary" in schema["properties"]
+    assert schema["required"] == ["summary"]
+    nested = schema["properties"]["nested"]
+    assert "changeset_id" not in nested["properties"]
+    assert "keep" in nested["properties"]
+    assert nested["required"] == ["keep"]
+    # Source untouched: normalization happens on a copy at serving time only.
+    assert "changeset_id" in raw["properties"]
+    assert raw["required"] == ["changeset_id", "summary"]
+
+
+def test_dsl_fallback_translates_older_engine_propose_schema() -> None:
+    # Version skew: an older engine serves propose_changeset as the custom DSL
+    # (oneOf branches, no top-level type/properties), some carrying inlined
+    # properties. The fallback path still yields a valid JSON Schema object - the
+    # operation discriminator enumerated, the inlined operations content merged
+    # verbatim, injected ids stripped, aliases named in guidance.
+    dsl = {
+        "oneOf": [
+            {
+                "operation": "create",
+                "properties": {
+                    "summary": {"type": "string"},
+                    "operations": {"type": "array", "items": {"type": "object"}},
+                },
+                "required": ["summary", "operations"],
+            },
+            {"operation": "append", "alias_of": "append_draft"},
+        ],
+        "additionalProperties": False,
+    }
+    schema, guidance = normalize_tool_input_schema(
+        dsl, frozenset({"session_id", "changeset_id"})
+    )
+    assert schema["type"] == "object"
+    props = schema["properties"]
+    assert props["operation"] == {"type": "string", "enum": ["create", "append"]}
+    # Inlined DSL-branch content is preserved verbatim by the fallback path too.
+    assert props["operations"] == {"type": "array", "items": {"type": "object"}}
+    assert "session_id" not in props
     assert "append_draft" in guidance
+
+
+def test_mixed_catalog_routes_each_tool_through_the_right_path() -> None:
+    # A catalog with one valid-schema tool (propose, pass-through) and one DSL
+    # tool (read_context, translated) - the normalizer handles both in one sweep.
+    mixed = {
+        "schema_version": _CATALOG["schema_version"],
+        "tools": [
+            next(t for t in _CATALOG["tools"] if t["name"] == "propose_changeset"),
+            next(t for t in _CATALOG["tools"] if t["name"] == "read_context"),
+        ],
+    }
+    by_name = {s["name"]: s for s in build_tool_specs(parse_catalog(mixed))}
+    # propose was passed through verbatim: its rich nested operations shape stays.
+    propose = by_name["propose_changeset"]["inputSchema"]
+    assert "child_key" in propose["properties"]["operations"]["items"]["properties"]
+    # read_context was DSL-translated: its oneOf branches collapsed to a target
+    # discriminator enum with permissive fields (a shape the DSL never had).
+    read = by_name["read_context"]["inputSchema"]
+    assert read["properties"]["target"]["enum"] == [
+        "document",
+        "proposal",
+        "session",
+        "document_list",
+    ]
+    assert read["properties"]["document"] == {"type": "string"}
 
 
 def test_served_propose_changeset_surfaces_operations_shape() -> None:

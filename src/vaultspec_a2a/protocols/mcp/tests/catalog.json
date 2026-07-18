@@ -45,77 +45,77 @@
       "idempotency_required": true,
       "commands": ["create_proposal", "append_draft", "replace_draft"],
       "input_schema": {
-        "oneOf": [
-          {
-            "operation": "create",
-            "properties": {
-              "summary": {"type": "string"},
-              "operations": {
-                "type": "array",
-                "items": {
+        "type": "object",
+        "description": "Propose a changeset. Injected below the model and NOT supplied here: session_id, changeset_id, expected_revision. Scoped follow-up (enum-vocabulary only, not field-expanded): the rename/section_edit/set_plan_step_state per-kind draft fields (new_stem, section_selector, plan_step) and the rename_target/materialized_result document variants.",
+        "properties": {
+          "operation": {"type": "string", "enum": ["create", "append", "replace"]},
+          "summary": {"type": "string"},
+          "operations": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "child_key": {"type": "string"},
+                "operation": {
+                  "type": "string",
+                  "enum": [
+                    "create_document", "replace_body", "append_body",
+                    "edit_frontmatter", "rename", "archive", "unarchive",
+                    "link", "section_edit", "set_plan_step_state"
+                  ]
+                },
+                "target": {
                   "type": "object",
                   "properties": {
-                    "child_key": {"type": "string"},
-                    "operation": {
-                      "type": "string",
-                      "enum": [
-                        "create_document", "replace_body", "append_body",
-                        "edit_frontmatter", "rename", "archive", "unarchive",
-                        "link", "section_edit", "set_plan_step_state"
-                      ]
-                    },
-                    "target": {
+                    "document": {
                       "type": "object",
                       "properties": {
-                        "document": {
-                          "type": "object",
-                          "properties": {
-                            "kind": {
-                              "type": "string",
-                              "enum": ["existing", "provisional_create", "rename_target", "materialized_result"]
-                            },
-                            "provisional_doc_id": {"type": "string"},
-                            "doc_type": {"type": "string"},
-                            "feature": {"type": "string"},
-                            "title": {"type": "string"},
-                            "collision_status": {"type": "string", "enum": ["unknown", "available", "conflicting"]},
-                            "proposed_stem": {"type": "string"},
-                            "related": {"type": "array", "items": {"type": "string"}}
-                          },
-                          "required": ["kind"]
+                        "kind": {
+                          "type": "string",
+                          "enum": ["existing", "provisional_create", "rename_target", "materialized_result"]
                         },
+                        "scope": {"type": "string"},
+                        "node_id": {"type": "string"},
+                        "stem": {"type": "string"},
+                        "path": {"type": "string"},
                         "base_revision": {"type": "string"},
-                        "current_revision": {"type": "string"}
+                        "provisional_doc_id": {"type": "string"},
+                        "doc_type": {"type": "string"},
+                        "feature": {"type": "string"},
+                        "title": {"type": "string"},
+                        "collision_status": {"type": "string", "enum": ["unknown", "available", "conflicting"]},
+                        "proposed_stem": {"type": "string"},
+                        "related": {"type": "array", "items": {"type": "string"}}
                       },
-                      "required": ["document"]
+                      "required": ["kind"]
                     },
-                    "draft": {
+                    "base_revision": {"type": "string"},
+                    "current_revision": {"type": "string"}
+                  },
+                  "required": ["document"]
+                },
+                "draft": {
+                  "type": "object",
+                  "properties": {
+                    "mode": {"type": "string", "enum": ["whole_document", "append", "section_scoped"]},
+                    "body": {"type": "string"},
+                    "frontmatter": {
                       "type": "object",
                       "properties": {
-                        "mode": {"type": "string", "enum": ["whole_document", "append", "section_scoped"]},
-                        "body": {"type": "string"},
-                        "frontmatter": {
-                          "type": "object",
-                          "properties": {
-                            "date": {"type": "string"},
-                            "tags": {"type": "array", "items": {"type": "string"}},
-                            "related": {"type": "array", "items": {"type": "string"}}
-                          }
-                        }
-                      },
-                      "required": ["mode", "body"]
+                        "date": {"type": "string"},
+                        "tags": {"type": "array", "items": {"type": "string"}},
+                        "related": {"type": "array", "items": {"type": "string"}}
+                      }
                     }
                   },
-                  "required": ["child_key", "operation", "target", "draft"]
+                  "required": ["mode", "body"]
                 }
-              }
-            },
-            "required": ["summary", "operations"]
-          },
-          {"operation": "append", "alias_of": "append_draft"},
-          {"operation": "replace", "alias_of": "replace_draft"}
-        ],
-        "additionalProperties": false
+              },
+              "required": ["child_key", "operation", "target", "draft"]
+            }
+          }
+        },
+        "required": ["operation", "summary", "operations"]
       }
     },
     {

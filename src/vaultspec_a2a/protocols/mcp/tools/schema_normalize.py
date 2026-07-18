@@ -1,23 +1,35 @@
-"""Normalize the engine catalog's input-schema DSL to valid MCP JSON Schema.
+"""Normalize the engine catalog's input schema to valid MCP JSON Schema.
 
-The engine catalog's ``input_schema`` is a custom DSL, not JSON Schema: it has no
-top-level ``type: object`` / ``properties`` and invents keywords (``oneOf``
-branches carrying ``target`` / ``operation`` / ``required`` / ``optional``,
-``bounds``, ``alias_of``, ``backend_derived``, ``payload``, ``composes``). The
-pinned CLI validates a tool's ``inputSchema`` as JSON Schema and SILENTLY DROPS
-non-conforming tools after connecting - the S20 "connected but not exposed"
-root cause. This module translates each catalog schema into a valid JSON Schema
-object at the bridge serving boundary.
+The pinned CLI validates a tool's ``inputSchema`` as JSON Schema and SILENTLY
+DROPS non-conforming tools after connecting - the S20 "connected but not
+exposed" root cause. This module guarantees a valid JSON Schema object at the
+bridge serving boundary, handling BOTH engine generations without knowing which
+one it is talking to (version skew):
+
+- **Valid-schema pass-through.** A newer engine serves the model-owned content as
+  standard, valid JSON Schema (top-level ``type: object`` with a ``properties``
+  map). Detection is STRUCTURAL - validate the shape, do not guess from the tool
+  name. Such a schema is passed through VERBATIM, save for two adjustments: the
+  dispatcher-injected id fields are stripped wherever they appear (nested
+  included), and guidance is appended.
+- **DSL translation (fallback).** An older engine serves a custom DSL, not JSON
+  Schema: no top-level ``type: object`` / ``properties`` and invented keywords
+  (``oneOf`` branches carrying ``target`` / ``operation`` / ``required`` /
+  ``optional``, ``bounds``, ``alias_of``, ``backend_derived``, ``payload``,
+  ``composes``). Each such schema is translated into a valid JSON Schema object,
+  its per-branch requirements / bounds / dropped keywords summarized into
+  guidance.
 
 Design posture: the ENGINE remains the execution-time authority (server-side
 validation + human-approval gating). The normalized schema's job is to REGISTER
 the tool (so the CLI keeps it) and GUIDE the model (field names, discriminators,
-bounds as prose) - NOT to enforce the DSL's full semantics. The original catalog
-schema is never mutated; normalization happens only at serving time.
+bounds as prose) - NOT to enforce the schema's full semantics. The original
+catalog schema is never mutated; normalization happens only at serving time.
 """
 
 from __future__ import annotations
 
+import copy
 from typing import Any
 
 __all__ = ["normalize_tool_input_schema"]
@@ -52,6 +64,76 @@ def _str_list(value: object, exclude: frozenset[str] = frozenset()) -> list[str]
     return [item for item in value if isinstance(item, str) and item not in exclude]
 
 
+def _looks_like_json_schema(raw: dict[Any, Any]) -> bool:
+    """Whether *raw* is ALREADY a valid JSON Schema object.
+
+    A newer engine serves the model-owned content as standard JSON Schema
+    (top-level ``type: object`` with a ``properties`` map); an older engine
+    serves the custom DSL (``oneOf`` / ``required`` / ``bounds`` with no top-level
+    ``type``). This structural test - not the tool name - selects the
+    pass-through path over the DSL translation, so version skew is handled
+    without knowing which engine served the catalog.
+    """
+    return raw.get("type") == "object" and isinstance(raw.get("properties"), dict)
+
+
+def _deep_strip_injected(node: Any, injected: frozenset[str]) -> None:
+    """Remove *injected* names from every ``properties`` map and ``required`` list.
+
+    The dispatcher owns these ids and injects them below the model, so they must
+    never reach the model's contract - wherever they appear in a passed-through
+    engine schema (top level or nested under ``properties`` / ``items`` /
+    ``oneOf`` / ``anyOf`` / ``allOf``). Mutates *node* in place; callers pass a
+    deep copy so the source schema is never touched.
+    """
+    if isinstance(node, dict):
+        properties = node.get("properties")
+        if isinstance(properties, dict):
+            for name in list(properties):
+                if name in injected:
+                    del properties[name]
+                else:
+                    _deep_strip_injected(properties[name], injected)
+        required = node.get("required")
+        if isinstance(required, list):
+            node["required"] = [item for item in required if item not in injected]
+        for key in ("items", "additionalProperties"):
+            if isinstance(node.get(key), (dict, list)):
+                _deep_strip_injected(node[key], injected)
+        for key in ("oneOf", "anyOf", "allOf"):
+            branches = node.get(key)
+            if isinstance(branches, list):
+                for branch in branches:
+                    _deep_strip_injected(branch, injected)
+    elif isinstance(node, list):
+        for item in node:
+            _deep_strip_injected(item, injected)
+
+
+def _passthrough_valid_schema(
+    raw: dict[Any, Any], injected: frozenset[str]
+) -> tuple[dict[str, Any], str]:
+    """Pass an already-valid engine schema through, minus the injected ids.
+
+    The schema is preserved VERBATIM (nested shape intact - the model sees the
+    real structure it must construct) except that the dispatcher-injected id
+    fields are stripped wherever they appear. Guidance names the withheld fields
+    so the model's contract records why they are absent; the schema's own
+    ``description`` (e.g. the engine's scoped-follow-up note) rides through
+    verbatim and is not duplicated here.
+    """
+    schema = copy.deepcopy(raw)
+    _deep_strip_injected(schema, injected)
+    guidance = ""
+    if injected:
+        guidance = (
+            "Injected below the model by the dispatcher (do not supply): "
+            + ", ".join(sorted(injected))
+            + "."
+        )
+    return schema, guidance
+
+
 def _merge_properties(
     target: dict[str, Any], provided: object, injected: frozenset[str]
 ) -> None:
@@ -74,13 +156,15 @@ def _merge_properties(
 def normalize_tool_input_schema(
     raw: object, injected: frozenset[str] = frozenset()
 ) -> tuple[dict[str, Any], str]:
-    """Translate one catalog ``input_schema`` to ``(json_schema, guidance)``.
+    """Normalize one catalog ``input_schema`` to ``(json_schema, guidance)``.
 
-    ``json_schema`` is always a valid JSON Schema object (``type: object``,
-    ``properties``, ``additionalProperties: false``, and ``required`` when the
-    intersection is non-empty). ``guidance`` is prose the caller appends to the
-    tool description so the per-branch requirements, bounds, and dropped engine
-    keywords still reach the model. A non-dict input yields a bare object schema.
+    ``json_schema`` is always a valid JSON Schema object. When *raw* is already a
+    valid JSON Schema (top-level ``type: object`` with ``properties``, the newer
+    engine), it is passed through verbatim minus the injected ids; otherwise the
+    custom DSL is translated (the fallback for an older engine). ``guidance`` is
+    prose the caller appends to the tool description so the withheld ids,
+    per-branch requirements, bounds, and dropped engine keywords still reach the
+    model. A non-dict input yields a bare object schema.
 
     *injected* names the fields the dispatcher owns and injects run-scoped
     (session_id / changeset_id / expected_revision / approval_id for a proposal
@@ -91,6 +175,9 @@ def normalize_tool_input_schema(
     """
     if not isinstance(raw, dict):
         return {"type": "object"}, ""
+
+    if _looks_like_json_schema(raw):
+        return _passthrough_valid_schema(raw, injected)
 
     properties: dict[str, Any] = {}
     required: list[str] = []

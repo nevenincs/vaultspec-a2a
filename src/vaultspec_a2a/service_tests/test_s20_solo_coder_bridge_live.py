@@ -24,6 +24,20 @@ is the same surface the dashboard reads), not asserted here.
 Infrastructure gate, not a masked failure: when no loopback stack is reachable,
 or the run's provider is credential/usage gated, the test skips with a runbook
 pointer. When the stack IS present the assertions are fail-loud.
+
+KNOWN INSUFFICIENCY (2026-07-18 live finding, DO NOT trust a green from this test
+yet): the current assertion matches an ``mcp__vaultspec-authoring__`` tool NAME in
+the agent's narration, which a model can emit while explicitly LACKING the tool
+(the S18 GLM-confab pattern). A live Z.ai/GLM-5 run reproduced exactly that: the
+coder said "I don't see mcp__vaultspec-authoring__* in my tool list" and used the
+workspace's ambient ``mcp__vaultspec-core__*`` MCP instead, writing a real .vault
+doc. Root cause that run: the isolated config home never triggered
+(``should_isolate_config_home`` False -> zero homes -> bridge session-injected,
+not surfaced; ambient MCP unsuppressed). Before this test can certify S20 it MUST
+be hardened to require UNFORGEABLE engine-side corroboration of a real tool
+execute (a ``POST /v1/runs/{run_id}/agent-tools/execute`` observed engine-side, or
+the tool's real engine result echoed), AND the should_isolate-on-the-worker-path
+gap must be fixed so the bridge actually surfaces. Tracked as S20 follow-up.
 """
 
 from __future__ import annotations

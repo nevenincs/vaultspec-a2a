@@ -67,6 +67,13 @@ def normalize_tool_input_schema(raw: object) -> tuple[dict[str, Any], str]:
     properties: dict[str, dict[str, Any]] = {}
     required: list[str] = []
     guidance_parts: list[str] = []
+    # A tool/branch carrying an opaque ``payload`` type (or aliasing another
+    # tool's input) whose fields the DSL does NOT enumerate cannot be a closed
+    # schema: the engine flattens the payload at the top level
+    # (``#[serde(tag=..., flatten)]``), so the model must be able to send those
+    # fields. Leave such schemas open (no ``additionalProperties: false``); the
+    # engine deserializes and validates the real shape.
+    open_schema = False
 
     branches = raw.get("oneOf")
     if isinstance(branches, list) and branches:
@@ -81,16 +88,31 @@ def normalize_tool_input_schema(raw: object) -> tuple[dict[str, Any], str]:
             for field in (*b_required, *b_optional):
                 properties.setdefault(field, _permissive_field())
             required_sets.append(set(b_required))
+            payload = branch.get("payload")
+            alias_of = branch.get("alias_of")
+            note_parts: list[str] = []
+            if b_required:
+                note_parts.append("requires " + ", ".join(b_required))
+            if isinstance(payload, str):
+                open_schema = True
+                note_parts.append(f"sends payload {payload}")
+            if isinstance(alias_of, str) and not (b_required or b_optional):
+                # An alias with no enumerated fields is an opaque input shape.
+                open_schema = True
+                note_parts.append(f"input aliases {alias_of}")
+            discriminator: tuple[str, str] | None = None
             for key in _DISCRIMINATOR_KEYS:
                 value = branch.get(key)
-                if not isinstance(value, str):
-                    continue
-                values = enum_values.setdefault(key, [])
-                if value not in values:
-                    values.append(value)
-                req_txt = ", ".join(b_required) if b_required else "none"
-                branch_notes.append(f"{key}={value!r} requires {req_txt}")
-                break
+                if isinstance(value, str):
+                    values = enum_values.setdefault(key, [])
+                    if value not in values:
+                        values.append(value)
+                    discriminator = (key, value)
+                    break
+            if discriminator is not None:
+                key, value = discriminator
+                detail = "; ".join(note_parts) if note_parts else "no fields"
+                branch_notes.append(f"{key}={value!r} {detail}")
         for disc_key, values in enum_values.items():
             properties[disc_key] = {"type": "string", "enum": values}
         # Per-branch required sets differ, so the top-level guarantee is their
@@ -105,6 +127,10 @@ def normalize_tool_input_schema(raw: object) -> tuple[dict[str, Any], str]:
         for field in (*b_required, *b_optional):
             properties.setdefault(field, _permissive_field())
         required = sorted(b_required)
+        # A top-level opaque payload (e.g. request_apply -> ApplyRequest) has no
+        # enumerated fields, so the schema must stay open for the model to send it.
+        if isinstance(raw.get("payload"), str):
+            open_schema = True
 
     bounds = raw.get("bounds")
     if isinstance(bounds, dict) and bounds:
@@ -118,11 +144,12 @@ def normalize_tool_input_schema(raw: object) -> tuple[dict[str, Any], str]:
             "Engine: " + "; ".join(f"{k}={v}" for k, v in unknown.items()) + "."
         )
 
-    schema: dict[str, Any] = {
-        "type": "object",
-        "properties": properties,
-        "additionalProperties": False,
-    }
+    schema: dict[str, Any] = {"type": "object", "properties": properties}
+    # A tool carrying an opaque payload must stay OPEN so the model can send the
+    # engine-flattened payload fields the DSL does not enumerate; only tools whose
+    # fields are fully enumerated get the closed guarantee.
+    if not open_schema:
+        schema["additionalProperties"] = False
     if required:
         schema["required"] = required
     return schema, " ".join(guidance_parts)

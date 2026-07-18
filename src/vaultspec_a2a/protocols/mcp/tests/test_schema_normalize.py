@@ -35,9 +35,12 @@ def test_every_real_catalog_tool_normalizes_to_json_schema_object() -> None:
     assert specs, "fixture catalog is non-empty"
     for spec in specs:
         schema = spec["inputSchema"]
+        # The load-bearing invariant: a JSON Schema object the CLI keeps rather
+        # than silently drops. (additionalProperties is closed for fully-enumerated
+        # tools and open for payload-carrying ones - asserted per tool below.)
         assert schema["type"] == "object", spec["name"]
         assert isinstance(schema["properties"], dict), spec["name"]
-        assert schema["additionalProperties"] is False, spec["name"]
+        assert schema.get("additionalProperties", False) in (False, True), spec["name"]
 
 
 def test_read_context_translates_to_documented_shape() -> None:
@@ -62,6 +65,31 @@ def test_read_context_translates_to_documented_shape() -> None:
         # no top-level required is emitted; the requirements ride the guidance.
     }
     assert "target='document' requires document" in guidance
+
+
+def test_propose_changeset_payload_is_sendable_and_named() -> None:
+    # The mutating tool S20 must invoke: the operation discriminator is enumerated,
+    # the schema stays OPEN so the engine-flattened payload can be sent, and the
+    # guidance names the payload type / aliases instead of a misleading "requires
+    # none".
+    schema, guidance = normalize_tool_input_schema(_schema_for("propose_changeset"))
+    assert schema["type"] == "object"
+    assert schema["properties"]["operation"] == {
+        "type": "string",
+        "enum": ["create", "append", "replace"],
+    }
+    assert "additionalProperties" not in schema
+    assert "CreateProposalRequest" in guidance
+    assert "append_draft" in guidance
+    assert "requires none" not in guidance
+
+
+def test_request_apply_payload_is_sendable_and_named() -> None:
+    schema, guidance = normalize_tool_input_schema(_schema_for("request_apply"))
+    assert schema["type"] == "object"
+    # Open so the model can send the opaque ApplyRequest payload; named in guidance.
+    assert "additionalProperties" not in schema
+    assert "ApplyRequest" in guidance
 
 
 def test_search_graph_bounds_go_to_guidance_not_schema() -> None:

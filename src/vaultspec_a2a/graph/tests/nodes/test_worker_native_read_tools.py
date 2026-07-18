@@ -59,7 +59,10 @@ def _model(record_file: Path, tmp_path: Path):
             "--record-session-new",
             str(record_file),
         ],
-        env_vars={},
+        # Armed run: an env auth token so config-home isolation engages, which the
+        # harness-armed spawn assertion now requires. Production-faithful - a real
+        # armed run always carries its lane token.
+        env_vars={"ANTHROPIC_AUTH_TOKEN": "env-auth-token"},
         workspace_root=str(tmp_path),
     )
 

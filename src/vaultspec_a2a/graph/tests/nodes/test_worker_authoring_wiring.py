@@ -134,7 +134,11 @@ async def test_binding_surfaces_authoring_server_to_real_subprocess(
             "--record-session-new",
             str(record_file),
         ],
-        env_vars={},
+        # Armed run: an env auth token so config-home isolation engages (matching
+        # test_stdio_binding_surfaces_bridge_into_isolated_home), which the
+        # harness-armed spawn assertion now requires. Production-faithful: a real
+        # armed run always carries its lane token.
+        env_vars={"ANTHROPIC_AUTH_TOKEN": "env-auth-token"},
         workspace_root=str(tmp_path),
     )
     node = create_worker_node(
@@ -210,7 +214,11 @@ async def test_stdio_binding_wires_stdio_server_to_real_subprocess(
             "--record-session-new",
             str(record_file),
         ],
-        env_vars={},
+        # Armed run: an env auth token so config-home isolation engages (matching
+        # test_stdio_binding_surfaces_bridge_into_isolated_home), which the
+        # harness-armed spawn assertion now requires. Production-faithful: a real
+        # armed run always carries its lane token.
+        env_vars={"ANTHROPIC_AUTH_TOKEN": "env-auth-token"},
         workspace_root=str(tmp_path),
     )
     node = create_worker_node(

@@ -357,8 +357,7 @@ class AcpChatModel(BaseChatModel):
             raise IsolationRequiredError(
                 f"harness-armed {self._config.provider!r} run reached spawn without "
                 f"an isolated CLI config home (auth_mode={self._config.auth_mode!r}); "
-                "refusing to launch with an unbounded MCP surface",
-                code=AcpErrorCode.UNAUTHENTICATED,
+                "refusing to launch with an unbounded MCP surface"
             )
 
         process = await _spawn_acp_process(

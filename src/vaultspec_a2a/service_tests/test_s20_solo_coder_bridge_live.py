@@ -51,6 +51,7 @@ import pytest
 
 from ..api.schemas.enums import ServerEventType
 from .test_pw7_acceptance import (
+    _MODE_AUTONOMOUS,
     AcceptanceCase,
     AcceptanceHarness,
     _dig,
@@ -182,6 +183,20 @@ async def test_solo_coder_invokes_bridged_authoring_tool_midturn() -> None:
             role: await harness._mint(ec, f"agent:{harness.run_id}:{role}", "agent")
             for role in case.roles
         }
+        # Operation-mode = autonomous BEFORE run-start, so the engine's authoring
+        # eligibility layer AUTO-APPROVES the mutating propose_changeset INTO the
+        # review lane instead of gating it as ``awaiting_permission``. This is the
+        # declared run mode reaching the engine's approval layer, NOT a bypass:
+        # autonomous runs auto-approve mutating ops into the review lane, where the
+        # human apply-gate still lives. Replicates the pw7 acceptance AUTO lane's
+        # device verbatim (``AcceptanceHarness._set_mode`` -> POST /v1/mode
+        # ``set_operation_mode``; see the AUTO gate mechanics in
+        # ``test_pw7_acceptance``). A distinct human principal is the mode-policy
+        # setter (mode-set requires a human/system actor, clearing the
+        # self-approval ban). The mode must be live before the run submits the
+        # gated op.
+        mode_setter = await harness._mint(ec, f"mode-setter:{harness.run_id}", "human")
+        await harness._set_mode(ec, _MODE_AUTONOMOUS, setter_token=mode_setter)
         async with httpx.AsyncClient() as hc:
             await harness._run_start(
                 hc,

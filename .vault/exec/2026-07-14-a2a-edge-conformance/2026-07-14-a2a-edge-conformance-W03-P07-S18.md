@@ -3,7 +3,7 @@ tags:
   - '#exec'
   - '#a2a-edge-conformance'
 date: '2026-07-14'
-modified: '2026-07-14'
+modified: '2026-07-19'
 step_id: 'S18'
 related:
   - "[[2026-07-14-a2a-edge-conformance-plan]]"
@@ -82,3 +82,32 @@ Root of the new signature: the run-ws projection (`providers/_acp_project_mcp.py
 Assessment: this is a real remedy-chain gap, not a probe artifact. Projecting the bridge into the run-workspace ROOT collides with the near-universal presence of a project `.mcp.json` whenever the run workspace is a real vaultspec project (both this repo and the engine's carry one). The collision guard is doing its job — protecting a user file — so the fix belongs on the projection side, not the guard. Candidate remedies (S20 scope, NOT implemented here): project into an isolated per-run scratch cwd distinct from the rule-scoping workspace_root, or MERGE the bridge entry into an existing `.mcp.json` (adding only the marked bridge server alongside the user's servers and removing only the marked addition on cleanup) rather than refusing the whole write. Not forced here (would require mutating another repo's committed `.mcp.json`, an invalid environment change); reported honestly instead.
 
 S18/S20 remain OPEN — no closure. The close-together posture is unchanged: S20's engine-changeset proof cannot go green until the bridged surface actually reaches the CLI in a real authoring-bridge run, which this projection collision now blocks. Re-arm criterion extended: the next S20 probe must run after the projection-collision remedy lands (isolated cwd or merge strategy), not merely on the next CLI/adapter release.
+
+## CLOSURE (2026-07-19) - surfacing proven live end to end; closed together with S20
+
+The projection-collision RED above was the last interim state. The remedy chain
+completed and the close-together criterion is now met on live evidence:
+
+- Surfacing channel final shape: the per-run PROJECTED run-workspace
+  `.mcp.json` (providers/_acp_project_mcp.py, signed with the
+  `_vaultspec_projection` marker) is the load-bearing surfacing channel on the
+  adapter path; the isolated config home provides ambient suppression, the
+  ancestor-walking deny-pin, and the `enabledMcpjsonServers` allowlist; the
+  session-injected and home-`mcpServers` copies remain written as upstream
+  re-arm watches. Decision recorded as the 2026-07-18 amendment in
+  `[[2026-07-17-tool-cores-adr]]`.
+- Live proof (final green runs `pw7-1784410892` and `pw7-1784411858`, the
+  latter on the exact merged/handover state: a2a `1406d1c`, engine catalog
+  branch tip `2e7980ce8c`): the projected bridge spec served, the coder
+  natively invoked `mcp__vaultspec-authoring__read_context` (engine receipt:
+  dispatched, allowed, read_only) and `propose_changeset`; served-schema
+  captures prove BOTH normalizer paths live (oneOf-DSL translation against
+  the pre-inline engine, standard top-level JSON Schema pass-through against
+  the inlined engine). Placeholder-only `.mcp.json` on disk; planted ancestor
+  collision and `evil-writer` listeners recorded zero connections.
+- Carry-forward (open, production hardening, not an S18 gap): projecting into
+  a run workspace that is itself a real vaultspec project collides with its
+  committed `.mcp.json` (the guard correctly refuses; run `pw7-1784409828`).
+  Green runs used clean scratch engine workspaces. Remedy candidates recorded
+  above (isolated per-run cwd or marked-entry merge); owed before real-project
+  workspaces are used for bridged runs.

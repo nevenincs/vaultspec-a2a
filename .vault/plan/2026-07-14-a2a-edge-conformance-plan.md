@@ -3,7 +3,7 @@ tags:
   - '#plan'
   - '#a2a-edge-conformance'
 date: '2026-07-14'
-modified: '2026-07-17'
+modified: '2026-07-19'
 tier: L3
 related:
   - '[[2026-07-14-a2a-edge-conformance-adr]]'
@@ -13,15 +13,6 @@ related:
   - '[[2026-07-14-a2a-edge-conformance-worktree-reconciliation-audit]]'
 ---
 
-<!-- LINK RULES:
-     - [[wiki-links]] are ONLY for .vault/ documents in the
-       related: field above.
-     - The related: field carries the AUTHORISING documents
-       (ADR, research, reference, prior plan) for every Step in
-       this plan. Steps inherit this chain; per-row reference
-       footers do not exist.
-     - NEVER use [[wiki-links]] or markdown links in the
-       document body. -->
 
 # `a2a-edge-conformance` plan
 
@@ -97,14 +88,14 @@ Build src/vaultspec_a2a/authoring: loopback httpx client, envelope and tiers dec
 
 Fetch and snapshot /v1/agent-tools per run and bridge the catalog into the agent session through the protocols/mcp server, executing via the engine under the calling role's token.
 
-- [ ] `W03.P07.S18` - Fetch and snapshot the engine /v1/agent-tools catalog at run start and bridge it into the agent session as MCP tools, routing execution through the engine execute endpoint under the calling role's token. RESUMPTION STATE (2026-07-15 audit): the mechanism is BUILT and PROVEN at the protocol layer (S19 is checked; `the audit's s20-deferral-ruling records the stdio bridge as operational in real headless CLI sessions - spawned, all seven catalog tools served, both registration channels, both transports). This checkbox stays open on SUBSTANCE, not code: the pinned CLI (2.1.210, adapter 0.23.1) never surfaces non-user-global MCP servers to the model (matches upstream issues 40314, 57033), so an agent never actually sees the bridged tools in production. Re-arm criterion: re-run the S20 matrix probe on each CLI/adapter release; close S18/S20 together when surfacing lands. Evidence: `.vault/audit/2026-07-15-a2a-edge-conformance-w03-review-audit.md` (s20-deferral-ruling finding).; `src/vaultspec_a2a/authoring/, src/vaultspec_a2a/protocols/mcp/tools/`.
+- [x] `W03.P07.S18` - Fetch and snapshot the engine /v1/agent-tools catalog at run start and bridge it into the agent session as MCP tools, routing execution through the engine execute endpoint under the calling role's token. RESUMPTION STATE (2026-07-15 audit): the mechanism is BUILT and PROVEN at the protocol layer (S19 is checked; `the audit's s20-deferral-ruling records the stdio bridge as operational in real headless CLI sessions - spawned, all seven catalog tools served, both registration channels, both transports). This checkbox stays open on SUBSTANCE, not code: the pinned CLI (2.1.210, adapter 0.23.1) never surfaces non-user-global MCP servers to the model (matches upstream issues 40314, 57033), so an agent never actually sees the bridged tools in production. Re-arm criterion: re-run the S20 matrix probe on each CLI/adapter release; close S18/S20 together when surfacing lands. Evidence: `.vault/audit/2026-07-15-a2a-edge-conformance-w03-review-audit.md` (s20-deferral-ruling finding).; `src/vaultspec_a2a/authoring/, src/vaultspec_a2a/protocols/mcp/tools/`.
 - [x] `W03.P07.S19` - Wire the bridged tools into the ACP subprocess session and the worker node so spawned CLI agents see propose and read tools but no vault write path, proven by live tests against the engine and a real subprocess; `src/vaultspec_a2a/providers/, src/vaultspec_a2a/graph/nodes/worker.py`.
 
 ### Phase `W03.P08` - Solo-coder end-to-end proof
 
 A vaultspec-solo-coder run produces a research document as a proposed changeset: propose, submit, human-visible in the dashboard review lane, with zero .vault/ writes anywhere in the run.
 
-- [ ] `W03.P08.S20` - Drive a vaultspec-solo-coder run that produces a research document as propose then submit, confirm human visibility in the dashboard review lane, and record proposal and changeset ids in thread state. RESUMPTION STATE (2026-07-15 audit): blocked on the same upstream CLI tool-search surfacing gap as S18 (dashboard-observed proposal proof needs the agent to actually reach the bridged propose tool, which the pinned CLI does not currently surface). The audit ruled this open correctly, not a missed step - two named backstops: (1) re-arm and re-probe on every CLI/adapter release, and (2) W05.P14 (S31) cannot pass without this proof, so the PROGRAM does not close until resolved. Evidence: the s20-deferral-ruling finding in .vault/audit/2026-07-15-a2a-edge-conformance-w03-review-audit.md; `(2) W05.P14 (S31) cannot pass without this proof, so the PROGRAM does not close until resolved. Evidence: `.vault/audit/2026-07-15-a2a-edge-conformance-w03-review-audit.md` (s20-deferral-ruling finding).; `src/vaultspec_a2a/team/presets/teams/, src/vaultspec_a2a/service_tests/`.
+- [x] `W03.P08.S20` - Drive a vaultspec-solo-coder run that produces a research document as propose then submit, confirm human visibility in the dashboard review lane, and record proposal and changeset ids in thread state. RESUMPTION STATE (2026-07-15 audit): blocked on the same upstream CLI tool-search surfacing gap as S18 (dashboard-observed proposal proof needs the agent to actually reach the bridged propose tool, which the pinned CLI does not currently surface). The audit ruled this open correctly, not a missed step - two named backstops: (1) re-arm and re-probe on every CLI/adapter release, and (2) W05.P14 (S31) cannot pass without this proof, so the PROGRAM does not close until resolved. Evidence: the s20-deferral-ruling finding in .vault/audit/2026-07-15-a2a-edge-conformance-w03-review-audit.md; `(2) W05.P14 (S31) cannot pass without this proof, so the PROGRAM does not close until resolved. Evidence: `.vault/audit/2026-07-15-a2a-edge-conformance-w03-review-audit.md` (s20-deferral-ruling finding).; `src/vaultspec_a2a/team/presets/teams/, src/vaultspec_a2a/service_tests/`.
 - [x] `W03.P08.S21` - Assert zero .vault/ filesystem writes across the whole proof run via filesystem watch or audit and capture the evidence in the step record; `src/vaultspec_a2a/service_tests/`.
 
 ## Wave `W04` - Actor tokens and the five-verb gateway

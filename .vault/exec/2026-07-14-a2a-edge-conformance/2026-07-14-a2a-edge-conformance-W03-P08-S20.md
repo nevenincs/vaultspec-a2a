@@ -3,7 +3,7 @@ tags:
   - '#exec'
   - '#a2a-edge-conformance'
 date: '2026-07-15'
-modified: '2026-07-15'
+modified: '2026-07-19'
 step_id: 'S20'
 related:
   - "[[2026-07-14-a2a-edge-conformance-plan]]"
@@ -37,3 +37,38 @@ Token hygiene held throughout: the workspace config file carried only environmen
 - Root cause is an external CLI or adapter limitation, not this repository's code; it persists on the latest CLI and adapter. The differentiator is user-global registration scope, not transport, not session versus config, and not tool search.
 - A debug-gated startup marker was left in the bridge module; it is inert unless an environment variable points it at a writable path and it never emits tokens.
 - The implementation, its unit tests, two live service tests, and the adapter version bump live on branch feature/stdio-authoring-bridge (commits edacf1f, d9c8f99, b3748c4). Merge-back and the final done-or-defer disposition are owner decisions.
+
+## CLOSURE (2026-07-19) - agent-authored changeset proven live; closed together with S18
+
+The deferred end-to-end proof is now GREEN, deterministic, on the canonical
+driver `service_tests/test_s20_solo_coder_bridge_live.py` (engine-side
+unforgeable assertion; narration never asserted). Final runs `pw7-1784410892`
+and `pw7-1784411858` (the latter on the merged/handover state: a2a `1406d1c`
+= dual-path normalizer + driver op-mode; engine catalog branch tip
+`2e7980ce8c`):
+
+- `cs:<run_id>:bridge` changeset landed WITH real content in
+  `/authoring/v1/proposals`, status=draft (the human-visible review lane),
+  operation_count>0, session_id set - the coder constructed a valid
+  `create_proposal` (create_document / provisional_create / whole_document)
+  from the engine-inlined served schema, including the correct
+  `kind=provisional_create` selection and `collision_status` enum.
+- The full chain this run exercises, each layer previously proven in
+  isolation: DSL-to-JSON-Schema normalization (registration), run-ws
+  projection (surfacing), ancestor-walking deny-pin (ambient-leak closure,
+  listener-grade zero connections), dispatch-side proposal-lifecycle id
+  injection (one engine session per run via the submitter's constant
+  create_session key; session_id/changeset_id/expected_revision never in the
+  model contract), engine catalog content inlining (task #44 both halves),
+  and the declared-mode handshake (driver sets engine
+  operation-mode=autonomous per the pw7 AUTO-lane precedent, so the mutating
+  propose auto-approves INTO review while apply stays human-gated).
+- Zero `.vault` filesystem writes (driver before/after snapshot delta empty);
+  placeholder-only projected `.mcp.json`; real-engine `deny_unknown_fields`
+  validation enforced and satisfied.
+- Follow-ups recorded, not blockers: production autonomous dispatch should
+  set the engine operation-mode at run start when `req.autonomous`
+  (architect question); the engine catalog branch (`engine-catalog-inline`
+  through `2e7980ce8c`) and the role-key fix (`412519a59d`) are owed a
+  dashboard-side landing; projection-collision remedy for real-project run
+  workspaces (see the S18 record closure).

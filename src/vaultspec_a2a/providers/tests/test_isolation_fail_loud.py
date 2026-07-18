@@ -14,16 +14,14 @@ NON-armed run does not trip) is covered by the pure-predicate tests in
 from __future__ import annotations
 
 import json
-from typing import TYPE_CHECKING
+import tempfile
+from pathlib import Path
 
 import pytest
 from langchain_core.messages import HumanMessage
 
 from ...thread.errors import IsolationRequiredError, ProjectionRefusedError
 from ..acp_chat_model import AcpChatModel
-
-if TYPE_CHECKING:
-    from pathlib import Path
 
 # A claude-family ACP command (node adapter). The raise fires before any spawn,
 # so this process is never actually launched.
@@ -80,3 +78,33 @@ async def test_armed_run_refuses_foreign_workspace_mcp_json(tmp_path: Path) -> N
             pass
     # The foreign file is left intact (never clobbered).
     assert json.loads((tmp_path / ".mcp.json").read_text(encoding="utf-8")) == foreign
+
+
+@pytest.mark.asyncio
+async def test_spawn_failure_cleans_home_and_projection(tmp_path: Path) -> None:
+    # A spawn-time raise (nonexistent binary through the real spawn path) must not
+    # orphan the isolated config home OR the projected run-ws .mcp.json: the
+    # finally is the single cleanup path for both.
+    home_prefix = "vaultspec-acp-home-"
+    tmp_root = Path(tempfile.gettempdir())
+    homes_before = set(tmp_root.glob(home_prefix + "*"))
+    model = AcpChatModel(
+        command=["vaultspec-nonexistent-acp-binary-zzz"],
+        env_vars={"ANTHROPIC_AUTH_TOKEN": "env-auth-token"},  # isolation engages
+        use_exec=True,  # exec path -> a missing binary raises at spawn, not at shell
+        mcp_servers=[
+            {
+                "name": "vaultspec-rag",
+                "type": "stdio",
+                "command": "uvx",
+                "args": ["--from", "vaultspec-rag", "vaultspec-search-mcp"],
+            }
+        ],
+        workspace_root=str(tmp_path),
+    )
+    with pytest.raises(FileNotFoundError):
+        async for _ in model._astream([HumanMessage(content="hi")]):
+            pass
+    # Both artifacts are cleaned despite the spawn-time raise.
+    assert not (tmp_path / ".mcp.json").exists()
+    assert set(tmp_root.glob(home_prefix + "*")) == homes_before

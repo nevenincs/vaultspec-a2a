@@ -379,50 +379,59 @@ class AcpChatModel(BaseChatModel):
                 "refusing to launch with an unbounded MCP surface"
             )
 
-        process = await _spawn_acp_process(
-            self.command,
-            env,
-            self.workspace_root or self.cwd or str(Path.cwd()),
-            use_exec=self.use_exec,
-            metadata=runtime_log_extra(
-                self._config,
-                handshake_step="spawn",
-                timeout_seconds=settings.acp_startup_timeout_seconds,
-            ),
-        )
-
-        if process.stdin is None or process.stdout is None:
-            raise RuntimeError("ACP subprocess failed to open stdio pipes")
-        ctx = _AcpSessionContext(
-            process=process,
-            stdin=process.stdin,
-            stdout=process.stdout,
-            response_futures={},
-            chunk_queue=asyncio.Queue(maxsize=settings.acp_chunk_queue_maxsize),
-            prompt_done=asyncio.Event(),
-            prompt_id_ref=[],
-            interrupt_exc=[],
-            tool_calls={},
-            agent_modes={},
-            last_auth_url=None,
-        )
-
-        stderr_task = asyncio.create_task(self._read_stderr_loop(ctx))
-        rpc_map: RpcHandlerMap = {
-            "session/request_permission": on_request_permission,
-            "fs/read_text_file": on_fs_read_text_file,
-            "fs/write_text_file": on_fs_write_text_file,
-            "terminal/create": on_terminal_create,
-            "terminal/kill": on_terminal_kill,
-            "terminal/output": on_terminal_output,
-            "terminal/wait_for_exit": on_terminal_wait_for_exit,
-            "terminal/release": on_terminal_release,
-        }
-        stdout_task = asyncio.create_task(
-            process_stdout_loop(ctx, self._config, rpc_map)
-        )
-
+        # The spawn and session setup run INSIDE the try so the finally below is
+        # the single cleanup path for BOTH the isolated config home and the
+        # projected .mcp.json: a spawn-time raise (missing binary, startup
+        # timeout) or a stdio-pipe failure must not orphan either artifact. ctx and
+        # the reader tasks are created here too, so the finally guards on their
+        # presence before touching the session.
+        ctx: _AcpSessionContext | None = None
+        stdout_task: asyncio.Task[None] | None = None
+        stderr_task: asyncio.Task[None] | None = None
         try:
+            process = await _spawn_acp_process(
+                self.command,
+                env,
+                self.workspace_root or self.cwd or str(Path.cwd()),
+                use_exec=self.use_exec,
+                metadata=runtime_log_extra(
+                    self._config,
+                    handshake_step="spawn",
+                    timeout_seconds=settings.acp_startup_timeout_seconds,
+                ),
+            )
+
+            if process.stdin is None or process.stdout is None:
+                raise RuntimeError("ACP subprocess failed to open stdio pipes")
+            ctx = _AcpSessionContext(
+                process=process,
+                stdin=process.stdin,
+                stdout=process.stdout,
+                response_futures={},
+                chunk_queue=asyncio.Queue(maxsize=settings.acp_chunk_queue_maxsize),
+                prompt_done=asyncio.Event(),
+                prompt_id_ref=[],
+                interrupt_exc=[],
+                tool_calls={},
+                agent_modes={},
+                last_auth_url=None,
+            )
+
+            stderr_task = asyncio.create_task(self._read_stderr_loop(ctx))
+            rpc_map: RpcHandlerMap = {
+                "session/request_permission": on_request_permission,
+                "fs/read_text_file": on_fs_read_text_file,
+                "fs/write_text_file": on_fs_write_text_file,
+                "terminal/create": on_terminal_create,
+                "terminal/kill": on_terminal_kill,
+                "terminal/output": on_terminal_output,
+                "terminal/wait_for_exit": on_terminal_wait_for_exit,
+                "terminal/release": on_terminal_release,
+            }
+            stdout_task = asyncio.create_task(
+                process_stdout_loop(ctx, self._config, rpc_map)
+            )
+
             init_result = await initialize_session(ctx, self._config)
             self._auth_methods = init_result.auth_methods
             result = await setup_session(
@@ -446,7 +455,8 @@ class AcpChatModel(BaseChatModel):
             async for chunk in self._yield_chunks(ctx, prompt_future, run_manager):
                 yield chunk
         finally:
-            await self._cleanup_session(ctx, stdout_task, stderr_task)
+            if ctx is not None and stdout_task is not None and stderr_task is not None:
+                await self._cleanup_session(ctx, stdout_task, stderr_task)
             cleanup_isolated_config_home(config_home)
             cleanup_projected_mcp(projected_mcp)
 

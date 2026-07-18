@@ -1,0 +1,114 @@
+{
+  "schema_version": "authoring.semantic_tools.v1",
+  "tools": [
+    {
+      "name": "read_context",
+      "description": "Read bounded authoring context.",
+      "permission_requirement": "auto_permitted",
+      "risk_tier": "read_only",
+      "idempotency_required": false,
+      "commands": ["read_context"],
+      "input_schema": {
+        "oneOf": [
+          {"target": "document", "required": ["document"], "optional": ["revision", "max_bytes"]},
+          {"target": "proposal", "required": ["changeset_id"], "optional": ["max_bytes"]},
+          {"target": "session", "required": ["session_id"], "optional": ["max_bytes"]},
+          {"target": "document_list", "optional": ["cursor", "cap"]}
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "search_graph",
+      "description": "Search the bounded project graph.",
+      "permission_requirement": "auto_permitted",
+      "risk_tier": "read_only",
+      "idempotency_required": false,
+      "commands": ["search_graph"],
+      "input_schema": {
+        "required": ["query"],
+        "optional": ["scope", "type", "max_results"],
+        "bounds": {
+          "query_chars_max": 512,
+          "scope_chars_max": 256,
+          "max_results": 50,
+          "target": ["vault", "code"]
+        },
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "propose_changeset",
+      "description": "Create a proposal changeset.",
+      "permission_requirement": "human_approval_required",
+      "risk_tier": "mutating",
+      "idempotency_required": true,
+      "commands": ["create_proposal", "append_draft", "replace_draft"],
+      "input_schema": {
+        "oneOf": [
+          {"operation": "create", "payload": "CreateProposalRequest"},
+          {"operation": "append", "alias_of": "append_draft"},
+          {"operation": "replace", "alias_of": "replace_draft"}
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "validate_proposal",
+      "description": "Request backend validation.",
+      "permission_requirement": "human_approval_required",
+      "risk_tier": "mutating",
+      "idempotency_required": true,
+      "commands": ["validate_proposal"],
+      "input_schema": {
+        "alias_of": "validate_proposal",
+        "required": ["changeset_id", "expected_revision", "summary"],
+        "backend_derived": ["current_revisions", "chunk_evidence"],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "request_approval",
+      "description": "Submit a validated proposal into review.",
+      "permission_requirement": "human_approval_required",
+      "risk_tier": "mutating",
+      "idempotency_required": true,
+      "commands": ["submit_for_review"],
+      "input_schema": {
+        "alias_of": "submit_for_review",
+        "required": ["changeset_id", "expected_revision", "summary"],
+        "payload": "RequestApprovalToolInput",
+        "composes": ["validate_proposal", "submit_for_review", "open_approval"],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "cancel",
+      "description": "Cancel a proposal or run.",
+      "permission_requirement": "human_approval_required",
+      "risk_tier": "mutating",
+      "idempotency_required": true,
+      "commands": ["cancel_proposal", "cancel_run"],
+      "input_schema": {
+        "oneOf": [
+          {"target": "proposal", "required": ["changeset_id", "expected_revision", "summary"]},
+          {"target": "run", "required": ["run_id", "reason"]}
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "request_apply",
+      "description": "Request application of an approved proposal.",
+      "permission_requirement": "human_approval_required",
+      "risk_tier": "dangerous",
+      "idempotency_required": true,
+      "commands": ["request_apply"],
+      "input_schema": {
+        "alias_of": "request_apply",
+        "payload": "ApplyRequest",
+        "additionalProperties": false
+      }
+    }
+  ]
+}

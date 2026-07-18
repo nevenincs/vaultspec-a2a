@@ -21,6 +21,8 @@ from typing import TYPE_CHECKING, Any
 import mcp.types as types
 from mcp.server import Server
 
+from .schema_normalize import normalize_tool_input_schema
+
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
 
@@ -40,18 +42,32 @@ def build_tool_specs(snapshot: CatalogSnapshot) -> list[McpToolSpec]:
     """Map a catalog snapshot to MCP tool specifications in catalog order.
 
     Each spec carries the engine ``name`` (the higher-level semantic vocabulary,
-    not a wire route), its ``description``, and the ``input_schema`` as the MCP
-    ``inputSchema``. Risk tier and permission requirement are preserved under an
+    not a wire route), its ``description``, and the ``input_schema`` NORMALIZED to
+    valid MCP JSON Schema as the ``inputSchema``. The catalog's schema is a custom
+    DSL the pinned CLI would reject and silently drop; :func:`normalize_tool_input_schema`
+    translates it to a registerable, guiding JSON Schema object while the engine
+    stays the execution authority, and any per-branch/bounds/dropped-keyword
+    guidance is appended to the tool description so the model still sees it. The
+    catalog snapshot is never mutated - normalization happens here, at serving
+    time, only. Risk tier and permission requirement are preserved under an
     ``_engine`` annotation so the session wiring can honour approval gating
     without a second catalog read.
+
+    This is the single normalization seam: :func:`build_authoring_mcp_server`
+    advertises the same specs, so the live stdio bridge and the spec path serve
+    identical schemas.
     """
     specs: list[McpToolSpec] = []
     for tool in snapshot.tools:
+        input_schema, guidance = normalize_tool_input_schema(tool.input_schema)
+        description = tool.description
+        if guidance:
+            description = f"{description}\n\n{guidance}" if description else guidance
         specs.append(
             {
                 "name": tool.name,
-                "description": tool.description,
-                "inputSchema": tool.input_schema,
+                "description": description,
+                "inputSchema": input_schema,
                 "_engine": {
                     "risk_tier": tool.risk_tier,
                     "permission_requirement": tool.permission_requirement,
@@ -70,19 +86,21 @@ def build_authoring_mcp_server(
 ) -> Server:
     """Build a live MCP server advertising the snapshot's tools.
 
-    ``list_tools`` advertises exactly the catalog's tools with their engine
-    input schemas — no filesystem-write tool is present, by construction.
+    ``list_tools`` advertises exactly the catalog's tools with their input schemas
+    NORMALIZED to valid JSON Schema through :func:`build_tool_specs` (the single
+    seam) — so the live bridge serves schemas the pinned CLI keeps rather than
+    silently drops. No filesystem-write tool is present, by construction.
     ``call_tool`` routes to ``dispatch`` and returns the engine result as JSON
     text content; an unknown tool name is a hard error, never a silent no-op.
     """
     server: Server = Server(server_name)
     tools = [
         types.Tool(
-            name=tool.name,
-            description=tool.description,
-            inputSchema=tool.input_schema or {"type": "object"},
+            name=spec["name"],
+            description=spec["description"],
+            inputSchema=spec["inputSchema"],
         )
-        for tool in snapshot.tools
+        for spec in build_tool_specs(snapshot)
     ]
     known = {tool.name for tool in snapshot.tools}
 

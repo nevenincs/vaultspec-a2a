@@ -122,7 +122,14 @@ class TestBuildToolSpecs:
         assert [spec["name"] for spec in specs] == ["read_context", "propose_changeset"]
         read_spec = specs[0]
         assert read_spec["description"] == "Read bounded authoring context."
-        assert read_spec["inputSchema"] == {"additionalProperties": False}
+        # The catalog schema is normalized to a valid JSON Schema object at the
+        # serving seam (a bare {"additionalProperties": false} becomes a proper
+        # object schema the CLI keeps rather than silently drops).
+        assert read_spec["inputSchema"] == {
+            "type": "object",
+            "properties": {},
+            "additionalProperties": False,
+        }
         assert read_spec["_engine"]["risk_tier"] == "read_only"
         assert read_spec["_engine"]["permission_requirement"] == "auto_permitted"
 

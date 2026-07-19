@@ -6,6 +6,7 @@ tags:
 date: '2026-07-19'
 modified: '2026-07-19'
 related:
+  - '[[2026-07-19-codebase-health-W01-P01-S01]]'
   - '[[2026-07-19-codebase-health-adr]]'
   - '[[2026-07-19-codebase-health-audit]]'
   - '[[2026-07-19-codebase-health-plan]]'
@@ -25,6 +26,10 @@ Auto-generated index of all documents tagged with `#codebase-health`.
 ### audit
 
 - `2026-07-19-codebase-health-audit` - `codebase-health` audit: `repository-wide health and dashboard contract`
+
+### exec
+
+- `2026-07-19-codebase-health-W01-P01-S01` - Curate the service-lifecycle supersession chain so the product lifecycle and tooling decisions have non-conflicting authority
 
 ### plan
 

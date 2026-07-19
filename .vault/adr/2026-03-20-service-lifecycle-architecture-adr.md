@@ -8,10 +8,11 @@ related:
   - "[[2026-03-19-control-layer-cli-justfile-separation-adr]]"
   - "[[2026-02-28-containerization-strategy-adr]]"
   - "[[2026-03-31-docs-vault-migration-research]]"
-superseded_by: '2026-07-19-repository-tooling-hardening-adr'
+  - '[[2026-07-15-dev-process-registry-adr]]'
+  - '[[2026-07-19-repository-tooling-hardening-adr]]'
 modified: '2026-07-19'
 ---
-# `service-lifecycle-architecture` adr: `adr-039` | (**status:** `superseded`)
+# `service-lifecycle-architecture` adr: `adr-039` | (**status:** `accepted`)
 
 ## Migration Note
 
@@ -20,6 +21,24 @@ This ADR was migrated from the legacy pre-pipeline documentation tree during the
 - Original ADR number: `ADR-039`
 - Original title: `Service Lifecycle Architecture — Container-First with Dev Shim`
 - Legacy status at migration time: `Accepted`
+
+## Current authority
+
+This record remains accepted for the Compose server product topology, profile
+boundaries, service separation, health model, and the decision not to build a
+custom product supervisor or operating-system service.
+
+Its historical development commands, foreground-only launch requirement, and
+rejection of a process registry no longer govern named host processes.
+`2026-07-15-dev-process-registry-adr` owns their identity, port bands,
+registration, and lifecycle verbs.
+`2026-07-19-repository-tooling-hardening-adr` owns the `just` command surface
+that delegates to those verbs.
+
+The dev-process-registry decision refines this development boundary. The
+repository-tooling decision supplies only the delegating command surface.
+Neither decision supersedes this record's Compose or product-lifecycle
+decisions.
 
 ## Original ADR
 

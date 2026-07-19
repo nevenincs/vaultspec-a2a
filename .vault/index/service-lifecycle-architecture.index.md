@@ -17,4 +17,4 @@ Auto-generated index of all documents tagged with `#service-lifecycle-architectu
 
 ### adr
 
-- `2026-03-20-service-lifecycle-architecture-adr` - `service-lifecycle-architecture` adr: `adr-039` | (**status:** `superseded`)
+- `2026-03-20-service-lifecycle-architecture-adr` - `service-lifecycle-architecture` adr: `adr-039` | (**status:** `accepted`)

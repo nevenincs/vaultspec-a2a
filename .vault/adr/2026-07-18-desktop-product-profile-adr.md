@@ -3,7 +3,7 @@ tags:
   - '#adr'
   - '#desktop-product-profile'
 date: '2026-07-18'
-modified: '2026-07-18'
+modified: '2026-07-19'
 related:
   - "[[2026-07-18-desktop-product-profile-research]]"
   - "[[2026-07-18-desktop-product-profile-reference]]"
@@ -12,6 +12,8 @@ related:
   - "[[2026-07-14-a2a-edge-conformance-adr]]"
   - "[[2026-02-28-dependency-hygiene-cli-entry-point-adr]]"
   - "[[2026-03-31-database-migration-framework-adr]]"
+  - '[[2026-07-15-dev-process-registry-adr]]'
+  - '[[2026-07-19-repository-tooling-hardening-adr]]'
 ---
 
 # `desktop-product-profile` adr: `a dashboard-managed companion profile alongside Compose` | (**status:** `accepted`)
@@ -84,7 +86,13 @@ dashboard's composite distribution.
 - The gateway acquires a lifetime runtime singleton before bind and discovery.
   A distinct, short-lived installation lock serializes product mutation. A
   non-owner may attach to a compatible service but cannot mutate its lifecycle.
-- The existing Compose topology and foreground development workflow are stable parent features and remain authoritative for their profiles. Gateway-worker separation and Alembic are also retained. Desktop packaging, discovery, readiness, and lifecycle behavior are not stable enough to inherit unchanged and are governed by this record.
+- The existing Compose topology is a stable parent and remains authoritative for
+  the server profile. Named host-process development lifecycle is governed by
+  `2026-07-15-dev-process-registry-adr`, with its repository command surface
+  governed by `2026-07-19-repository-tooling-hardening-adr`. Gateway-worker
+  separation and Alembic are also retained. Desktop packaging, discovery,
+  readiness, and lifecycle behavior are not stable enough to inherit unchanged
+  and are governed by this record.
 - Verification may not use fakes, mocks, stubs, patches, monkeypatches, skipped tests, or expected failures as evidence for product lifecycle behavior.
 
 ## Implementation
@@ -233,8 +241,8 @@ wholesale.
 For the desktop profile only, this record overrides Compose as the sole
 production deployment. It also overrides the accepted absence of a desktop
 experience in `2026-03-20-service-lifecycle-architecture-adr`. Docker Compose
-remains production for servers. The foreground development shim, no-freezer,
-and no-system-service clauses remain in force.
+remains production for servers. The no-freezer and no-system-service clauses
+remain in force.
 
 It narrows the auto-spawn clause in
 `2026-03-04-worker-process-architecture-adr`. Desktop ownership remains

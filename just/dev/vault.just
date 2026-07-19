@@ -2,15 +2,16 @@ set working-directory := "../.."
 set windows-shell := ["powershell.exe", "-NoLogo", "-NoProfile", "-Command"]
 
 core := "uv run --no-sync --frozen --no-default-groups --group tooling vaultspec-core"
+core_install := "uv run --no-sync --frozen --no-default-groups --group tooling python scripts/vaultspec_install.py"
 
 # Resolve locked tooling and enroll the workspace through Vaultspec Core.
 setup:
     uv sync --locked --no-default-groups --group tooling
-    {{ core }} install all --mode dev
+    {{ core_install }} install all --mode dev --force
 
 # Enroll the workspace after the tooling profile has already been synchronized.
 install:
-    {{ core }} install all --mode dev
+    {{ core_install }} install all --mode dev
 
 # Preview Core-owned enrollment and Git-ignore reconciliation.
 install-dry-run:
@@ -29,7 +30,7 @@ upgrade:
     uv lock --upgrade-package vaultspec-core
     uv sync --locked --no-default-groups --group tooling
     {{ core }} --version
-    {{ core }} install all --mode dev --upgrade --force
+    {{ core_install }} install all --mode dev --upgrade --force
     uv lock --check
 
 # Diagnose framework, provider, projection, configuration, and Git-ignore state.

@@ -145,8 +145,8 @@ def test_non_regular_descriptor_is_rejected(tmp_path: Path) -> None:
         load_transaction_descriptor(descriptor_path)
 
 
-def test_single_use_marker_blocks_replay(tmp_path: Path) -> None:
-    """Once consumed, the same descriptor cannot be validated again."""
+def test_consumed_transaction_cannot_be_revalidated(tmp_path: Path) -> None:
+    """Once consumed, reloading the same descriptor is rejected as already spent."""
     app_home = tmp_path / "app"
     descriptor_path = _write(tmp_path / "txn.json", _descriptor_dict(app_home))
 

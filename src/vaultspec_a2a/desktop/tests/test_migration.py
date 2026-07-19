@@ -153,3 +153,45 @@ class TestRefusals:
         assert result.status == "failed"
         assert result.failed_stage is MigrationStage.DESCRIPTOR
         assert result.error_class == "TransactionDescriptorError"
+
+    @pytest.mark.asyncio
+    async def test_post_mutation_consume_failure_is_bounded(
+        self, tmp_path: Path
+    ) -> None:
+        """A consume failure after the mutations returns a bounded result.
+
+        The stores are already migrated when the transaction is marked consumed,
+        so a failure there must not escape as a traceback (which would break the
+        CLI's JSON contract) but must surface as a bounded CONSUME-stage result.
+        """
+        home = tmp_path / "app"
+        descriptor = _write_descriptor(tmp_path / "txn.json", home)
+        state = derive_state_paths(home)
+        packaged = package_migration_range()
+
+        # Pre-create the receipts directory as a regular file. Descriptor
+        # validation still passes (the marker itself does not exist) and both
+        # stores migrate, but the post-mutation consume mkdir hits a real
+        # filesystem error, forcing the CONSUME exit path.
+        state.receipts_dir.parent.mkdir(parents=True, exist_ok=True)
+        state.receipts_dir.write_text("not a directory", encoding="utf-8")
+
+        result = await run_staged_migration(descriptor)
+
+        assert result.status == "failed"
+        assert result.failed_stage is MigrationStage.CONSUME
+        # A real OSError-family class name, proving no traceback escaped.
+        assert result.error_class
+        assert {outcome.store for outcome in result.stores} == {
+            StoreName.PRIMARY,
+            StoreName.CHECKPOINT,
+            StoreName.SDD,
+        }
+        # The failure is genuinely post-mutation: the primary store reached head.
+        version = (
+            sqlite3.connect(str(state.database_path))
+            .execute("SELECT version_num FROM alembic_version")
+            .fetchone()
+        )
+        assert version is not None
+        assert version[0] == packaged.head

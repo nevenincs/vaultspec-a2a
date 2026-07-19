@@ -23,7 +23,6 @@ from typing import TYPE_CHECKING, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from ..database.compatibility import supported_migration_head
 from ..database.migrate import run_migrations
 from ..database.migrations import backfill_teamstate_sdd_fields
 from .transaction import (
@@ -72,6 +71,7 @@ class MigrationStage(StrEnum):
     PRIMARY = "primary"
     CHECKPOINT = "checkpoint"
     SDD = "sdd"
+    CONSUME = "consume"
 
 
 class StoreLockedError(RuntimeError):
@@ -165,14 +165,13 @@ def _ensure_unlocked(db_path: Path) -> None:
         conn.execute("PRAGMA busy_timeout=0")
         conn.execute("BEGIN IMMEDIATE")
         conn.execute("ROLLBACK")
-    except sqlite3.OperationalError as exc:
-        message = str(exc).lower()
-        if "locked" in message or "busy" in message:
-            raise StoreLockedError(
-                f"store {db_path} is live or locked; drain and stop the gateway "
-                "before staging a migration."
-            ) from exc
-        raise
+    except sqlite3.Error as exc:
+        # Fail closed: a held lock, or any inability to acquire the immediate write
+        # lock, means the store cannot be proven safe to migrate. Both refuse.
+        raise StoreLockedError(
+            f"store {db_path} could not be confirmed free (it is live, locked, or "
+            "unreadable); drain and stop the gateway before staging a migration."
+        ) from exc
     finally:
         conn.close()
 
@@ -246,42 +245,75 @@ async def run_staged_migration(descriptor_path: Path) -> MigrationResult:
     """
     started = time.monotonic()
 
+    def _failed(
+        stage: MigrationStage,
+        error_class: str,
+        *,
+        transaction_id: str | None = None,
+        target_head: str | None = None,
+        stores: tuple[StoreOutcome, ...] = (),
+    ) -> MigrationResult:
+        return MigrationResult(
+            status="failed",
+            transaction_id=transaction_id,
+            target_head=target_head,
+            stores=stores,
+            duration_seconds=time.monotonic() - started,
+            failed_stage=stage,
+            error_class=error_class,
+        )
+
     try:
         transaction = load_transaction_descriptor(descriptor_path)
     except TransactionDescriptorError as exc:
-        return MigrationResult(
-            status="failed",
-            duration_seconds=time.monotonic() - started,
-            failed_stage=MigrationStage.DESCRIPTOR,
-            error_class=type(exc).__name__,
-        )
+        return _failed(MigrationStage.DESCRIPTOR, type(exc).__name__)
 
     transaction_id = transaction.descriptor.transaction_id
-    database_url = f"sqlite+aiosqlite:///{transaction.state.database_path.as_posix()}"
-    target_head = supported_migration_head(database_url)
+    # The descriptor's claimed head is validated equal to the packaged Alembic head
+    # at load time, so it is authoritative here without re-reading the migration
+    # graph (which would be an unguarded pre-mutation failure path).
+    target_head = transaction.descriptor.migration_range.head
 
     try:
         stores = await _execute(transaction, target_head)
     except StoreLockedError as exc:
-        return MigrationResult(
-            status="failed",
+        return _failed(
+            MigrationStage.LOCK,
+            type(exc).__name__,
             transaction_id=transaction_id,
             target_head=target_head,
-            duration_seconds=time.monotonic() - started,
-            failed_stage=MigrationStage.LOCK,
-            error_class=type(exc).__name__,
         )
     except _StageError as exc:
-        return MigrationResult(
-            status="failed",
+        return _failed(
+            exc.stage,
+            exc.error_class,
             transaction_id=transaction_id,
             target_head=target_head,
-            duration_seconds=time.monotonic() - started,
-            failed_stage=exc.stage,
-            error_class=exc.error_class,
+        )
+    except Exception as exc:
+        # Safety net: no unexpected mutation-phase error escapes as a traceback;
+        # the entrypoint's result contract holds on every path.
+        return _failed(
+            MigrationStage.PRIMARY,
+            type(exc).__name__,
+            transaction_id=transaction_id,
+            target_head=target_head,
         )
 
-    mark_transaction_consumed(transaction)
+    # The stores are mutated; a consume failure (concurrent double-consume or a
+    # marker-directory OS error) must still return a bounded result, not a
+    # traceback. The mutations are idempotent, so the transaction can be retried.
+    try:
+        mark_transaction_consumed(transaction)
+    except Exception as exc:
+        return _failed(
+            MigrationStage.CONSUME,
+            type(exc).__name__,
+            transaction_id=transaction_id,
+            target_head=target_head,
+            stores=stores,
+        )
+
     return MigrationResult(
         status="succeeded",
         transaction_id=transaction_id,

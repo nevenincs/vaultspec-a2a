@@ -1,0 +1,84 @@
+---
+tags:
+  - '#exec'
+  - '#desktop-product-profile'
+date: '2026-07-19'
+modified: '2026-07-19'
+step_id: 'S51'
+related:
+  - "[[2026-07-18-desktop-product-profile-plan]]"
+---
+
+<!-- FRONTMATTER RULES:
+     tags: one directory tag (hardcoded #exec) and one feature tag.
+     Replace desktop-product-profile with a kebab-case feature tag, e.g. #foo-bar.
+     Additional tags may be appended below the required pair.
+
+     modified: CLI-maintained last-modified stamp; set at scaffold time,
+     refreshed by mutating CLI verbs and vault check fix; never hand-edit.
+
+     step_id is the originating Step's canonical identifier, e.g. S01.
+     The S51 and 2026-07-18-desktop-product-profile-plan placeholders are machine-filled by
+     `vaultspec-core vault add exec`; do not fill them by hand.
+
+     Related: use wiki-links as '[[yyyy-mm-dd-foo-bar-plan]]' and link the
+     parent plan.
+
+     DO NOT add fields beyond those scaffolded; metadata lives
+     only in the frontmatter. -->
+
+<!-- LINK RULES:
+     - [[wiki-links]] are ONLY for .vault/ documents in the related: field above.
+     - NEVER use [[wiki-links]] or markdown links in the document body.
+     - NEVER reference file paths in the body. If you must name a source file,
+       class, or function, use inline backtick code: `src/module.py`. -->
+
+<!-- STEP RECORD:
+     This file represents one Step from the originating plan. Identified
+     by its canonical leaf identifier (S##) and ancestor display path.
+     The Prove unauthenticated HTTP liveness exposes only the minimal alive or not-alive signal and authenticated readiness responses carry process and product identity plus cold-to-execution state and ## Scope
+
+- `src/vaultspec_a2a/desktop_tests/test_readiness_model.py` placeholders below are machine-filled
+     by `vaultspec-core vault add exec` from the originating Step row;
+     do not fill them by hand. -->
+
+# Prove unauthenticated HTTP liveness exposes only the minimal alive or not-alive signal and authenticated readiness responses carry process and product identity plus cold-to-execution state
+
+## Scope
+
+- `src/vaultspec_a2a/desktop_tests/test_readiness_model.py`
+
+## Description
+
+- Certify the readiness model end to end against a real armed gateway over real
+  loopback HTTP. Seed the dashboard-created attach and ownership credential files,
+  seat a valid database through the real migration entrypoint in a separate
+  process, then boot the production gateway armed over that app home with the
+  worker held cold.
+- Assert the unauthenticated liveness body byte-for-byte as the minimal alive
+  signal and confirm no process, product, or state token leaks across the
+  unauthenticated boundary.
+- Assert the readiness facts are reachable only with the attach credential, that
+  the authenticated projection carries process and product identity, and that a
+  cold, startable worker reads as gateway-ready with run admission deferred - the
+  cold rung of the cold-to-execution ladder - on both the authenticated liveness
+  surface and the service-state verb, with a consistent process identity across
+  both.
+
+## Outcome
+
+`ruff` and `ty` pass on the test. The certification passes: 1 passed. It drives
+real subprocesses and real HTTP with no mock, monkeypatch, stub, skip, or expected
+failure. The desktop baseline passes with the new test included: 338 passed, 1
+skipped. The api suite (321 passed) and control suite (97 passed) remain green from
+the preceding Steps and are unaffected by this test-only addition.
+
+## Notes
+
+No incidents. The gateway process identity is asserted present and consistent
+across both authenticated surfaces rather than equal to the spawn handle: a Windows
+virtual environment interpreter is a launcher stub whose real child process carries
+a different identifier, so binding the assertion to the launcher handle would be
+false. The one baseline skip is a POSIX-only credential permission case owned by a
+separate Step, not introduced here. All five readiness facts are served from the
+single authority; this Step adds only the certifying test.

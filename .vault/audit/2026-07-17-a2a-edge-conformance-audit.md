@@ -3,12 +3,13 @@ tags:
   - '#audit'
   - '#a2a-edge-conformance'
 date: '2026-07-17'
-modified: '2026-07-17'
+modified: '2026-07-19'
 related:
   - '[[2026-07-14-a2a-edge-conformance-plan]]'
   - '[[2026-07-14-a2a-edge-conformance-W05-P16-S37]]'
   - '[[2026-07-14-a2a-edge-conformance-W05-P16-S38]]'
   - '[[2026-07-14-a2a-edge-conformance-W05-P16-S40]]'
+  - '[[2026-07-14-a2a-edge-conformance-W05-P16-S41]]'
 ---
 
 # `a2a-edge-conformance` audit: `w05-p16 review`
@@ -218,6 +219,49 @@ remain: the get-or-create conflict-tolerance hardening (low) and the
 adopted-worker status reconciliation (medium, pre-existing, currently
 unexercised at the promoted resident). No critical, no open high — the
 W05.P16 commit set (ee2cdc5, 9556117, 7e308cf, e47c882, 7a6975c) is clear.
+
+### adopted-worker-status-not-reconciled-resolved | resolved | Watchdog now reconciles an adopted worker's status from the live probe
+
+Verified closed in 823fa8d. The watchdog tick adds, after detection and before
+the owned-worker state machine, a pure probe-driven reconcile for workers with
+no owned process handle (adopted/externally-managed), bypassing the sticky-down
+guard that froze a healthy adopted worker at down. No regression for owned
+workers: a crashed owned worker retains its process handle, so the new branch
+is skipped and the restart/breaker path still runs; the early return also
+means an adopted worker is never restarted or breaker-forced. The companion
+readiness fix scopes the heartbeat-freshness gate to owned workers while the
+down/restarting disqualifier still applies to every worker, so owned-worker
+readiness truth is unchanged. Tests are real-seam and fail pre-fix: a real
+watchdog tick against a real loopback health server recovers an adoption-shaped
+latched-down worker to up with zero restarts and a closed breaker, and the real
+ASGI gateway reports ready true for an adopted worker without heartbeats.
+Residual, accepted and informational: plain health readiness for an adopted
+worker now rests on HTTP reachability alone — an adopted worker answering 200
+while internally broken would read ready there; heartbeat freshness genuinely
+cannot apply to a worker that pushes no heartbeats this gateway accepts, and
+the richer service-verb worker-ready signal remains authoritative for
+dispatch readiness.
+
+### s40-get-or-create-toctou-resolved | resolved | Get-or-create is now atomic via a nested savepoint
+
+Verified closed in 823fa8d. The insert runs inside a nested savepoint; on
+integrity error only the savepoint rolls back (outer transaction stays
+usable) and the committed row is re-read and returned as a replay; a re-read
+returning nothing re-raises, so a non-conflict integrity error is not
+swallowed. The lookup-then-insert window is closed and the helper's name
+matches its guarantee; savepoint support holds on both backends. Test note:
+sequential replay across two real committed sessions is proven (one row,
+created true then false); the savepoint-rollback branch under genuine
+write-write concurrency is not directly exercised by a deterministic test —
+correct by construction, low residual, non-blocking.
+
+## S41 status (2026-07-17 review, recorded 2026-07-19)
+
+**Status: PASS.** S41 (823fa8d) resolves both non-blocking follow-ups from the
+W05.P16 re-review — the adopted-worker status reconciliation (was medium) and
+the get-or-create atomicity (was low) — each with a real-seam,
+non-tautological test that fails pre-fix. No new findings. W05.P16's code
+trail is clean end to end.
 
 ## Recommendations
 

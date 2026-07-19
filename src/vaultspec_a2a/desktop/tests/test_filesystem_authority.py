@@ -19,7 +19,7 @@ if TYPE_CHECKING:
 
 if os.name == "posix":
 
-    def test_named_file_publication_consumes_source(tmp_path: Path) -> None:
+    def test_named_file_publication_fails_closed(tmp_path: Path) -> None:
         authority = resolve_directory_authority(tmp_path)
         with (
             directory_lease(authority) as lease,
@@ -28,17 +28,19 @@ if os.name == "posix":
             source.write(b"capsule")
             source.flush()
             os.fsync(source.fileno())
-            publish_no_replace(
-                lease,
-                "private",
-                "published",
-                source_fd=source.fileno(),
-            )
+            with pytest.raises(OSError) as raised:
+                publish_no_replace(
+                    lease,
+                    "private",
+                    "published",
+                    source_fd=source.fileno(),
+                )
 
-        assert not (tmp_path / "private").exists()
-        assert (tmp_path / "published").read_bytes() == b"capsule"
+        assert raised.value.errno == errno.ENOSYS
+        assert (tmp_path / "private").read_bytes() == b"capsule"
+        assert not (tmp_path / "published").exists()
 
-    def test_named_file_publication_rejects_changed_source_identity(
+    def test_named_file_publication_rejects_changed_source_without_lookup(
         tmp_path: Path,
     ) -> None:
         authority = resolve_directory_authority(tmp_path)
@@ -64,12 +66,12 @@ if os.name == "posix":
                     source_fd=source.fileno(),
                 )
 
-        assert raised.value.errno == errno.ESTALE
+        assert raised.value.errno == errno.ENOSYS
         assert not (tmp_path / "published").exists()
         assert (tmp_path / "private").read_bytes() == b"replacement"
         assert (tmp_path / "displaced").read_bytes() == b"held"
 
-    def test_directory_publication_consumes_source_without_replacement(
+    def test_directory_publication_fails_closed(
         tmp_path: Path,
     ) -> None:
         source_path = tmp_path / "private"
@@ -81,6 +83,7 @@ if os.name == "posix":
         with (
             directory_lease(root_authority) as root_lease,
             directory_lease(source_authority, publication=True) as source_lease,
+            pytest.raises(OSError) as raised,
         ):
             publish_no_replace(
                 root_lease,
@@ -89,8 +92,9 @@ if os.name == "posix":
                 source_authority=source_lease,
             )
 
-        assert not source_path.exists()
-        assert (tmp_path / "published" / "payload").read_bytes() == b"capsule"
+        assert raised.value.errno == errno.ENOSYS
+        assert (source_path / "payload").read_bytes() == b"capsule"
+        assert not (tmp_path / "published").exists()
 
     def test_directory_publication_refuses_existing_destination(
         tmp_path: Path,
@@ -106,7 +110,7 @@ if os.name == "posix":
         with (
             directory_lease(root_authority) as root_lease,
             directory_lease(source_authority, publication=True) as source_lease,
-            pytest.raises(FileExistsError),
+            pytest.raises(OSError) as raised,
         ):
             publish_no_replace(
                 root_lease,
@@ -115,5 +119,6 @@ if os.name == "posix":
                 source_authority=source_lease,
             )
 
+        assert raised.value.errno == errno.ENOSYS
         assert source_path.is_dir()
         assert (destination_path / "existing").read_bytes() == b"preserved"

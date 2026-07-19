@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import errno
 import hashlib
 import json
 import os
 import re
 import stat
+import sys
 import time
 import unicodedata
 import zipfile
@@ -239,14 +241,26 @@ def _archive_quarantine(
     output_authority: _DirectoryAuthority,
     output_name: str,
 ) -> Iterator[tuple[Path | None, BinaryIO]]:
-    """Create anonymous POSIX staging or one bounded Windows private slot."""
+    """Create Linux anonymous staging or one bounded named private slot."""
     raw_output: BinaryIO | None = None
     temporary_path: Path | None = None
+    succeeded = False
     try:
-        if os.name != "nt":
-            raw_output = _create_anonymous_file(output_authority)
-            yield None, raw_output
-            return
+        if sys.platform.startswith("linux"):
+            try:
+                raw_output = _create_anonymous_file(output_authority)
+            except OSError as error:
+                unsupported = {
+                    errno.EINVAL,
+                    errno.EISDIR,
+                    errno.ENOSYS,
+                    errno.EOPNOTSUPP,
+                }
+                if error.errno not in unsupported:
+                    raise
+            else:
+                yield None, raw_output
+                return
         for index in range(_MAX_ARCHIVE_QUARANTINES):
             name = f".{output_name}.{index:02d}.tmp"
             try:
@@ -258,9 +272,15 @@ def _archive_quarantine(
         else:
             raise CapsuleAssemblyError("capsule archive quarantine bound is exhausted")
         yield temporary_path, raw_output
+        succeeded = True
     finally:
         if raw_output is not None:
-            raw_output.close()
+            try:
+                if temporary_path is not None and not succeeded:
+                    os.ftruncate(raw_output.fileno(), 0)
+                    os.fsync(raw_output.fileno())
+            finally:
+                raw_output.close()
 
 
 def _stat_authority_child(
@@ -305,6 +325,18 @@ def _relative_directory_descriptor(
             os.close(descriptor)
 
 
+def _bounded_directory_names(
+    directory: int | Path,
+    remaining: int,
+) -> tuple[str, ...]:
+    """Enumerate at most the remaining global budget before sorting names."""
+    with os.scandir(directory) as entries:
+        names = tuple(islice((entry.name for entry in entries), remaining + 1))
+    if len(names) > remaining:
+        raise CapsuleAssemblyError("capsule tree exceeds its entry-count bound")
+    return tuple(sorted(names))
+
+
 def _capsule_files(
     root_authority: _DirectoryAuthority,
     root_descriptor: int | None,
@@ -321,8 +353,10 @@ def _capsule_files(
                 with _relative_directory_descriptor(
                     root_descriptor, components
                 ) as directory_descriptor:
-                    with os.scandir(directory_descriptor) as entries:
-                        names = sorted(entry.name for entry in entries)
+                    names = _bounded_directory_names(
+                        directory_descriptor,
+                        _MAX_PROJECTED_FILES - entries_seen,
+                    )
                     metadata = {
                         name: os.stat(
                             name,
@@ -336,8 +370,10 @@ def _capsule_files(
                 directory_authority = _resolve_directory_authority(directory)
                 with _directory_lease(directory_authority) as directory_lease:
                     _assert_directory_authority(root_authority)
-                    with os.scandir(directory_authority.path) as entries:
-                        names = sorted(entry.name for entry in entries)
+                    names = _bounded_directory_names(
+                        directory_authority.path,
+                        _MAX_PROJECTED_FILES - entries_seen,
+                    )
                     metadata = {
                         name: (directory_authority.path / name).stat(
                             follow_symlinks=False
@@ -345,12 +381,8 @@ def _capsule_files(
                         for name in names
                     }
                     _assert_directory_authority(directory_lease)
+            entries_seen += len(names)
             for name in names:
-                entries_seen += 1
-                if entries_seen > _MAX_PROJECTED_FILES:
-                    raise CapsuleAssemblyError(
-                        "capsule tree exceeds its entry-count bound"
-                    )
                 relative_components = (*components, name)
                 relative = "/".join(relative_components)
                 inspected = metadata[name]
@@ -459,11 +491,13 @@ def write_deterministic_capsule_zip(
 ) -> tuple[str, tuple[ProjectedFile, ...]]:
     """Atomically publish one byte-stable ZIP from a private staging file.
 
-    Windows uses atomically claimed fixed staging slots; Linux uses an anonymous
-    staging file. Failed Windows attempts can leave their fixed slot quarantined
-    beside ``output_path``. Platforms without a native atomic no-replace primitive
-    fail closed. Quarantines are capped, and callers may remove them only while
-    holding exclusive authority over that directory.
+    Linux publishes anonymous ``O_TMPFILE`` staging through descriptor-bound
+    ``linkat``. Windows publishes an atomically claimed fixed slot through its
+    exact open handle. When Linux anonymous staging is unavailable, or on other
+    POSIX hosts, named staging fails closed because publication cannot remain
+    identity-bound. Failed named attempts can leave their fixed slot quarantined
+    beside ``output_path``. Quarantines are capped, and callers may remove them
+    only while holding exclusive authority over that directory.
     """
     if not isinstance(capsule_root, Path) or not isinstance(output_path, Path):
         raise CapsuleAssemblyError("capsule archive paths are invalid")

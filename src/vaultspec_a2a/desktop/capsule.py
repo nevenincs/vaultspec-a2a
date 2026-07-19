@@ -15,7 +15,7 @@ import shutil
 import stat
 import tarfile
 import zipfile
-from contextlib import ExitStack, suppress
+from contextlib import ExitStack, contextmanager, suppress
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, BinaryIO, Final, cast
@@ -70,7 +70,7 @@ from .capsule_evidence import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping, Sequence
+    from collections.abc import Iterator, Mapping, Sequence
 
 __all__ = [
     "ArchiveProjectionSource",
@@ -158,9 +158,16 @@ def _create_projection_quarantine(
 
 
 def _clear_failed_projection(
+    root_authority: _DirectoryAuthority,
     authority: _DirectoryAuthority,
 ) -> None:
-    """Remove owned bytes safely, retaining at most an empty Windows quarantine."""
+    """Clear owned bytes and reclaim an empty POSIX quarantine slot.
+
+    POSIX has no portable conditional rmdir-by-descriptor operation. A same-user
+    actor able to replace the now-empty name between identity validation and
+    ``rmdir`` can substitute another empty directory; callers therefore retain
+    exclusive mutation authority over the leased parent during cleanup.
+    """
     try:
         with _directory_lease(authority) as lease:
             if lease.dir_fd is not None:
@@ -176,6 +183,24 @@ def _clear_failed_projection(
                         shutil.rmtree(name, dir_fd=lease.dir_fd)
                     else:
                         os.unlink(name, dir_fd=lease.dir_fd)
+                with os.scandir(lease.dir_fd) as remaining:
+                    if next(remaining, None) is not None:
+                        return
+                if root_authority.dir_fd is None:
+                    return
+                _assert_directory_authority(root_authority)
+                opened = os.fstat(lease.dir_fd)
+                named = os.stat(
+                    authority.path.name,
+                    dir_fd=root_authority.dir_fd,
+                    follow_symlinks=False,
+                )
+                if not stat.S_ISDIR(named.st_mode) or (
+                    opened.st_dev,
+                    opened.st_ino,
+                ) != (named.st_dev, named.st_ino):
+                    return
+                os.rmdir(authority.path.name, dir_fd=root_authority.dir_fd)
                 return
             with suppress(PermissionError):
                 shutil.rmtree(authority.path)
@@ -233,7 +258,10 @@ def _preflight_destinations(
             raise CapsuleAssemblyError("capsule projection refuses to overwrite a path")
 
 
-def _prepare_destination_parent(root: Path, parent: Path) -> _DirectoryAuthority:
+def _prepare_windows_destination_parent(
+    root: Path,
+    parent: Path,
+) -> _DirectoryAuthority:
     try:
         relative = parent.relative_to(root)
     except ValueError:
@@ -258,11 +286,81 @@ def _prepare_destination_parent(root: Path, parent: Path) -> _DirectoryAuthority
     return authority
 
 
+@contextmanager
+def _destination_parent_lease(
+    root: Path,
+    root_lease: _DirectoryAuthority,
+    parent: Path,
+) -> Iterator[_DirectoryAuthority]:
+    try:
+        relative = parent.relative_to(root)
+    except ValueError:
+        raise CapsuleAssemblyError("capsule destination escapes its root") from None
+    if root_lease.dir_fd is None:
+        if os.name != "nt":
+            raise CapsuleAssemblyError(
+                "POSIX capsule destination authority is not descriptor-backed"
+            )
+        if parent == root:
+            yield root_lease
+            return
+        authority = _prepare_windows_destination_parent(root, parent)
+        with _directory_lease(authority) as leased:
+            yield leased
+        return
+
+    if not hasattr(os, "O_DIRECTORY") or not hasattr(os, "O_NOFOLLOW"):
+        raise CapsuleAssemblyError(
+            "POSIX capsule destination authority lacks safe directory-open flags"
+        )
+    flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+    flags |= getattr(os, "O_CLOEXEC", 0)
+    descriptor = os.dup(root_lease.dir_fd)
+    try:
+        for part in relative.parts:
+            with suppress(FileExistsError):
+                os.mkdir(part, mode=0o700, dir_fd=descriptor)
+            child_descriptor = os.open(part, flags, dir_fd=descriptor)
+            try:
+                opened = os.fstat(child_descriptor)
+                named = os.stat(part, dir_fd=descriptor, follow_symlinks=False)
+                if not stat.S_ISDIR(opened.st_mode) or (
+                    opened.st_dev,
+                    opened.st_ino,
+                ) != (named.st_dev, named.st_ino):
+                    raise CapsuleAssemblyError(
+                        "capsule destination parent changed identity"
+                    )
+            except BaseException:
+                os.close(child_descriptor)
+                raise
+            os.close(descriptor)
+            descriptor = child_descriptor
+        opened = os.fstat(descriptor)
+        if not stat.S_ISDIR(opened.st_mode):
+            raise CapsuleAssemblyError("capsule destination parent is not a directory")
+        leased = _DirectoryAuthority(
+            path=parent,
+            identity=(opened.st_dev, opened.st_ino),
+            dir_fd=descriptor,
+        )
+        yield leased
+        after = os.fstat(descriptor)
+        if (
+            not stat.S_ISDIR(after.st_mode)
+            or (after.st_dev, after.st_ino) != leased.identity
+        ):
+            raise CapsuleAssemblyError("capsule destination parent changed identity")
+    finally:
+        os.close(descriptor)
+
+
 def _write_member(
     source: BinaryIO,
     destination: Path,
     *,
     destination_root: Path,
+    destination_authority: _DirectoryAuthority,
     expected_size: int,
     mode: int,
     source_date_epoch: int,
@@ -271,10 +369,11 @@ def _write_member(
     consumed = 0
     descriptor = -1
     try:
-        parent_authority = _prepare_destination_parent(
-            destination_root, destination.parent
-        )
-        with _directory_lease(parent_authority) as parent_lease:
+        with _destination_parent_lease(
+            destination_root,
+            destination_authority,
+            destination.parent,
+        ) as parent_lease:
             flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
             flags |= getattr(os, "O_BINARY", 0) | getattr(os, "O_CLOEXEC", 0)
             flags |= getattr(os, "O_NOFOLLOW", 0)
@@ -331,7 +430,6 @@ def _write_member(
                 after.st_size,
             ):
                 raise CapsuleAssemblyError("archive member changed while writing")
-            _assert_directory_authority(parent_lease)
     except CapsuleAssemblyError:
         raise
     except OSError:
@@ -352,6 +450,7 @@ def _zip_projection(
     *,
     archive_root: str,
     destination_root: Path,
+    destination_authority: _DirectoryAuthority,
     destination_prefix: str,
     materialization_prefix: str | None = None,
     source_date_epoch: int,
@@ -417,6 +516,7 @@ def _zip_projection(
                     cast("BinaryIO", source),
                     destination,
                     destination_root=destination_root,
+                    destination_authority=destination_authority,
                     expected_size=plan.size,
                     mode=plan.mode,
                     source_date_epoch=source_date_epoch,
@@ -441,6 +541,7 @@ def _tar_projection(
     *,
     archive_root: str,
     destination_root: Path,
+    destination_authority: _DirectoryAuthority,
     destination_prefix: str,
     materialization_prefix: str | None = None,
     source_date_epoch: int,
@@ -508,6 +609,7 @@ def _tar_projection(
                 cast("BinaryIO", extracted),
                 destination,
                 destination_root=destination_root,
+                destination_authority=destination_authority,
                 expected_size=plan.size,
                 mode=plan.mode,
                 source_date_epoch=source_date_epoch,
@@ -535,11 +637,14 @@ def project_archive(
     Use the existing, real, caller-controlled ``destination_root`` as the staging
     authority. ``destination_prefix`` must be one absent, portable top-level
     component. Members are materialized in one atomically claimed fixed private slot
-    beneath ``destination_root``. The completed prefix is then consumed by one native
-    no-replace rename. Returned :class:`ProjectedFile` paths use the final prefix.
+    beneath ``destination_root``. On Windows, the completed prefix is consumed by
+    one exact-handle no-replace rename. POSIX directory publication fails closed
+    because its native rename primitives would re-resolve a mutable source name.
+    Returned :class:`ProjectedFile` paths use the final prefix.
 
-    Atomicity is limited to single native no-replace visibility; unsupported hosts
-    fail closed. It does not imply durability or transactionality across projections.
+    Atomicity is limited to single native no-replace visibility on supported hosts;
+    unsupported publication fails closed. It does not imply durability or
+    transactionality across projections.
     A failed projection clears owned bytes through the leased authority; Windows can
     retain an empty fixed quarantine because its native lease intentionally blocks
     removal. Quarantines are capped, and callers may remove them only while holding
@@ -570,12 +675,15 @@ def project_archive(
         destination = root / validated_prefix
         if destination.exists() or _path_is_link_like(destination):
             raise CapsuleAssemblyError("capsule projection refuses to overwrite a path")
+    except CapsuleAssemblyError:
+        raise
     except (OSError, RuntimeError, ValueError):
         raise CapsuleAssemblyError(
             "capsule staging root or prefix is invalid"
         ) from None
 
     authority_stack = ExitStack()
+    private_stack = ExitStack()
     private_root: Path | None = None
     private_authority: _DirectoryAuthority | None = None
     root_lease: _DirectoryAuthority | None = None
@@ -585,6 +693,9 @@ def project_archive(
         _assert_directory_authority(root_lease)
         private_authority = _create_projection_quarantine(root, root_lease)
         private_root = private_authority.path
+        private_lease = private_stack.enter_context(
+            _directory_lease(private_authority, publication=True)
+        )
         _assert_directory_authority(root_lease)
         with _snapshot_source(source) as snapshot:
             kind = source.archive_kind
@@ -595,6 +706,7 @@ def project_archive(
                         archive,
                         archive_root=archive_root,
                         destination_root=private_root,
+                        destination_authority=private_lease,
                         destination_prefix=validated_prefix,
                         materialization_prefix="",
                         source_date_epoch=source_date_epoch,
@@ -608,23 +720,20 @@ def project_archive(
                         archive,
                         archive_root=archive_root,
                         destination_root=private_root,
+                        destination_authority=private_lease,
                         destination_prefix=validated_prefix,
                         materialization_prefix="",
                         source_date_epoch=source_date_epoch,
                     )
-        _assert_directory_authority(private_authority)
+        _assert_directory_authority(private_lease)
         _assert_directory_authority(root_lease)
         try:
-            with _directory_lease(
-                private_authority,
-                publication=True,
-            ) as private_lease:
-                _publish_no_replace(
-                    root_lease,
-                    private_root.name,
-                    destination.name,
-                    source_authority=private_lease,
-                )
+            _publish_no_replace(
+                root_lease,
+                private_root.name,
+                destination.name,
+                source_authority=private_lease,
+            )
         except FileExistsError:
             raise CapsuleAssemblyError(
                 "capsule projection refuses to overwrite a path"
@@ -637,8 +746,15 @@ def project_archive(
         raise CapsuleAssemblyError("cannot publish capsule projection") from None
     finally:
         try:
-            if not published and private_authority is not None:
-                _clear_failed_projection(private_authority)
+            try:
+                private_stack.close()
+            finally:
+                if (
+                    not published
+                    and private_authority is not None
+                    and root_lease is not None
+                ):
+                    _clear_failed_projection(root_lease, private_authority)
         finally:
             authority_stack.close()
 

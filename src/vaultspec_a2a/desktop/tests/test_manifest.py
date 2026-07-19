@@ -159,7 +159,7 @@ def test_emitter_derives_identity_entrypoints_and_digest_from_exact_built_wheel(
     assert manifest.identity.name == built_wheel.project["name"]
     assert manifest.identity.version == built_wheel.project["version"]
     assert manifest.compatibility.migration_range.base == "0001"
-    assert manifest.compatibility.migration_range.head == "0007"
+    assert manifest.compatibility.migration_range.head == "0008"
     assert manifest.entrypoints.gateway == GatewayEntrypoint(
         kind=EntrypointKind.GATEWAY,
         console_script="vaultspec-a2a",

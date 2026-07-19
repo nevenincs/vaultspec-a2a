@@ -5,6 +5,7 @@ import hashlib
 import importlib
 import io
 import lzma
+import os
 import stat
 import tarfile
 import threading
@@ -14,6 +15,10 @@ from typing import TYPE_CHECKING, Protocol, cast
 
 import pytest
 
+from vaultspec_a2a.desktop._filesystem_authority import (
+    directory_lease,
+    resolve_directory_authority,
+)
 from vaultspec_a2a.desktop.artifacts import ArchiveKind
 from vaultspec_a2a.desktop.capsule import (
     ArchiveProjectionSource,
@@ -23,6 +28,10 @@ from vaultspec_a2a.desktop.capsule import (
     project_archive,
     read_archive_members,
     write_deterministic_capsule_zip,
+)
+from vaultspec_a2a.desktop.capsule_evidence import (
+    _archive_quarantine,
+    _bounded_directory_names,
 )
 
 if TYPE_CHECKING:
@@ -572,6 +581,50 @@ def test_installed_tree_evidence_stops_at_its_cardinality_bound() -> None:
     assert consumed == 80_001
 
 
+def test_capsule_entry_enumeration_caps_before_sorting_and_metadata(
+    tmp_path: Path,
+) -> None:
+    for name in ("zeta", "alpha", "middle"):
+        (tmp_path / name).write_bytes(name.encode("ascii"))
+
+    with pytest.raises(CapsuleAssemblyError, match="entry-count bound"):
+        _bounded_directory_names(tmp_path, 2)
+    assert _bounded_directory_names(tmp_path, 3) == ("alpha", "middle", "zeta")
+
+    if os.name == "posix":
+        descriptor = os.open(
+            tmp_path,
+            os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW,
+        )
+        try:
+            with pytest.raises(CapsuleAssemblyError, match="entry-count bound"):
+                _bounded_directory_names(descriptor, 2)
+        finally:
+            os.close(descriptor)
+
+
+def test_failed_named_archive_staging_is_truncated_before_close(
+    tmp_path: Path,
+) -> None:
+    authority = resolve_directory_authority(tmp_path)
+    with (
+        directory_lease(authority) as lease,
+        pytest.raises(CapsuleAssemblyError, match="late archive failure"),
+        _archive_quarantine(
+            tmp_path,
+            lease,
+            "failed.zip",
+        ) as (temporary_path, raw_output),
+    ):
+        raw_output.write(b"failed-archive-bytes" * (1 << 18))
+        raise CapsuleAssemblyError("late archive failure")
+
+    assert raw_output is not None and raw_output.closed
+    if temporary_path is not None:
+        assert temporary_path.is_file()
+        assert temporary_path.stat().st_size == 0
+
+
 def test_projection_publishes_no_partial_tree_when_a_late_member_is_corrupt(
     tmp_path: Path,
 ) -> None:
@@ -600,7 +653,10 @@ def test_projection_publishes_no_partial_tree_when_a_late_member_is_corrupt(
             source_date_epoch=_SOURCE_DATE_EPOCH,
         )
 
-    _assert_no_published_projection(output)
+    if os.name == "posix":
+        assert tuple(output.iterdir()) == ()
+    else:
+        _assert_no_published_projection(output)
 
 
 def test_projection_symlink_churn_cannot_redirect_published_bytes(

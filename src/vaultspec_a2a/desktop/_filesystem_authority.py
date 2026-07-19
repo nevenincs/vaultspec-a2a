@@ -17,6 +17,7 @@ if TYPE_CHECKING:
 
 
 _FILE_READ_ATTRIBUTES = 0x00000080
+_FILE_TRAVERSE = 0x00000020
 _FILE_GENERIC_READ = 0x80000000
 _FILE_GENERIC_WRITE = 0x40000000
 _DELETE = 0x00010000
@@ -28,9 +29,7 @@ _FILE_ATTRIBUTE_NORMAL = 0x00000080
 _FILE_ATTRIBUTE_DIRECTORY = 0x00000010
 _FILE_FLAG_BACKUP_SEMANTICS = 0x02000000
 _FILE_FLAG_OPEN_REPARSE_POINT = 0x00200000
-_RENAME_NOREPLACE = 1
-_RENAME_EXCL = 0x4
-_FILE_RENAME_INFO_CLASS = 3
+_FILE_RENAME_INFORMATION_CLASS = 10
 _AT_FDCWD = -100
 _AT_EMPTY_PATH = 0x1000
 _AT_SYMLINK_FOLLOW = 0x400
@@ -47,7 +46,11 @@ class _WindowsLibrary(Protocol):
     CreateFileW: _NativeFunction
     CloseHandle: _NativeFunction
     GetFileInformationByHandle: _NativeFunction
-    SetFileInformationByHandle: _NativeFunction
+
+
+class _WindowsNativeLibrary(Protocol):
+    NtSetInformationFile: _NativeFunction
+    RtlNtStatusToDosError: _NativeFunction
 
 
 class _ByHandleFileInformation(ctypes.Structure):
@@ -71,6 +74,13 @@ class _FileRenameInformation(ctypes.Structure):
         ("root_directory", ctypes.c_void_p),
         ("file_name_length", ctypes.c_uint32),
         ("file_name", ctypes.c_wchar * 1),
+    ]
+
+
+class _IoStatusBlock(ctypes.Structure):
+    _fields_ = [
+        ("status_or_pointer", ctypes.c_void_p),
+        ("information", ctypes.c_size_t),
     ]
 
 
@@ -115,6 +125,13 @@ def _windows_library() -> _WindowsLibrary:
     return cast(
         "_WindowsLibrary",
         ctypes.WinDLL("kernel32", use_last_error=True),
+    )
+
+
+def _windows_native_library() -> _WindowsNativeLibrary:
+    return cast(
+        "_WindowsNativeLibrary",
+        ctypes.WinDLL("ntdll"),
     )
 
 
@@ -202,7 +219,7 @@ def _windows_directory_lease(
     create_file.restype = ctypes.c_void_p
     handle_value = create_file(
         str(authority.path),
-        _FILE_READ_ATTRIBUTES | (_DELETE if publication else 0),
+        _FILE_READ_ATTRIBUTES | _FILE_TRAVERSE | (_DELETE if publication else 0),
         _FILE_SHARE_READ | _FILE_SHARE_WRITE,
         None,
         _OPEN_EXISTING,
@@ -240,8 +257,13 @@ def directory_lease(
         with _windows_directory_lease(authority, publication=publication) as leased:
             yield leased
         return
-    flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0)
-    flags |= getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
+    if not hasattr(os, "O_DIRECTORY") or not hasattr(os, "O_NOFOLLOW"):
+        raise OSError(
+            errno.ENOSYS,
+            "POSIX directory leases require O_DIRECTORY and O_NOFOLLOW",
+        )
+    flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+    flags |= getattr(os, "O_CLOEXEC", 0)
     descriptor = os.open(authority.path, flags)
     leased = replace(authority, dir_fd=descriptor)
     try:
@@ -319,24 +341,26 @@ def create_private_file(authority: DirectoryAuthority, name: str) -> BinaryIO:
             close_handle(handle)
             raise
         try:
-            return os.fdopen(descriptor, "w+b", closefd=True)
+            return os.fdopen(descriptor, "w+b", buffering=0, closefd=True)
         except BaseException:
             os.close(descriptor)
             raise
     if authority.dir_fd is None or authority.native_handle is not None:
         raise OSError(errno.EBADF, "POSIX file authority is not leased")
+    if not hasattr(os, "O_NOFOLLOW"):
+        raise OSError(errno.ENOSYS, "POSIX private files require O_NOFOLLOW")
     descriptor = os.open(
         name,
         os.O_RDWR
         | os.O_CREAT
         | os.O_EXCL
         | getattr(os, "O_CLOEXEC", 0)
-        | getattr(os, "O_NOFOLLOW", 0),
+        | os.O_NOFOLLOW,
         0o600,
         dir_fd=authority.dir_fd,
     )
     try:
-        return os.fdopen(descriptor, "w+b", closefd=True)
+        return os.fdopen(descriptor, "w+b", buffering=0, closefd=True)
     except BaseException:
         os.close(descriptor)
         raise
@@ -359,7 +383,7 @@ def create_anonymous_file(authority: DirectoryAuthority) -> BinaryIO:
         dir_fd=authority.dir_fd,
     )
     try:
-        return os.fdopen(descriptor, "w+b", closefd=True)
+        return os.fdopen(descriptor, "w+b", buffering=0, closefd=True)
     except BaseException:
         os.close(descriptor)
         raise
@@ -378,43 +402,60 @@ def _windows_publish_handle(
     source_handle: int,
     destination_name: str,
 ) -> None:
-    encoded_name = str(authority.path / destination_name).encode("utf-16-le")
+    if authority.native_handle is None:
+        raise OSError(errno.EBADF, "Windows publication authority is not leased")
+    encoded_name = destination_name.encode("utf-16-le")
     name_offset = _FileRenameInformation.file_name.offset
     buffer = ctypes.create_string_buffer(
-        name_offset + len(encoded_name) + ctypes.sizeof(ctypes.c_wchar)
+        ctypes.sizeof(_FileRenameInformation) + len(encoded_name)
     )
     information = _FileRenameInformation.from_buffer(buffer)
     information.replace_if_exists = 0
-    information.root_directory = None
+    information.root_directory = authority.native_handle
     information.file_name_length = len(encoded_name)
     ctypes.memmove(
         ctypes.addressof(buffer) + name_offset,
         encoded_name,
         len(encoded_name),
     )
-    library = _windows_library()
-    set_information = library.SetFileInformationByHandle
+    library = _windows_native_library()
+    set_information = library.NtSetInformationFile
     set_information.argtypes = (
         ctypes.c_void_p,
-        ctypes.c_int,
+        ctypes.c_void_p,
         ctypes.c_void_p,
         ctypes.c_uint32,
+        ctypes.c_int,
     )
-    set_information.restype = ctypes.c_int
-    if not set_information(
-        source_handle,
-        _FILE_RENAME_INFO_CLASS,
-        buffer,
-        len(buffer),
-    ):
-        error = int(ctypes.get_last_error())
-        if error in {80, 183}:
-            raise FileExistsError(
-                errno.EEXIST,
-                "publication destination exists",
-                authority.path / destination_name,
-            )
-        raise _last_windows_error(authority.path / destination_name)
+    set_information.restype = ctypes.c_long
+    io_status = _IoStatusBlock()
+    status = cast(
+        "int",
+        set_information(
+            source_handle,
+            ctypes.byref(io_status),
+            buffer,
+            len(buffer),
+            _FILE_RENAME_INFORMATION_CLASS,
+        ),
+    )
+    if status >= 0:
+        return
+    status_to_error = library.RtlNtStatusToDosError
+    status_to_error.argtypes = (ctypes.c_long,)
+    status_to_error.restype = ctypes.c_ulong
+    error = cast("int", status_to_error(status))
+    if error in {80, 183}:
+        raise FileExistsError(
+            errno.EEXIST,
+            "publication destination exists",
+            authority.path / destination_name,
+        )
+    raise OSError(
+        error,
+        ctypes.FormatError(error),
+        authority.path / destination_name,
+    )
 
 
 def _posix_link_fd_no_replace(
@@ -456,92 +497,6 @@ def _posix_link_fd_no_replace(
     )
 
 
-def _posix_rename_primitive() -> tuple[_NativeFunction, int]:
-    if sys.platform.startswith("linux"):
-        function = _posix_function("renameat2")
-        flags = _RENAME_NOREPLACE
-    elif sys.platform == "darwin":
-        function = _posix_function("renameatx_np")
-        flags = _RENAME_EXCL
-    else:
-        raise OSError(
-            errno.ENOSYS,
-            "native atomic no-replace rename is unavailable on this POSIX platform",
-        )
-    function.argtypes = (
-        ctypes.c_int,
-        ctypes.c_char_p,
-        ctypes.c_int,
-        ctypes.c_char_p,
-        ctypes.c_uint,
-    )
-    function.restype = ctypes.c_int
-    return function, flags
-
-
-def _assert_posix_named_source_identity(
-    authority: DirectoryAuthority,
-    source_bytes: bytes,
-    opened: os.stat_result,
-) -> None:
-    if authority.dir_fd is None:
-        raise OSError(errno.EBADF, "POSIX publication authority is not leased")
-    try:
-        named = os.stat(
-            source_bytes,
-            dir_fd=authority.dir_fd,
-            follow_symlinks=False,
-        )
-    except FileNotFoundError:
-        raise OSError(
-            errno.ESTALE,
-            "publication source name no longer identifies the held source",
-            authority.path / os.fsdecode(source_bytes),
-        ) from None
-    if (named.st_dev, named.st_ino) != (opened.st_dev, opened.st_ino):
-        raise OSError(
-            errno.ESTALE,
-            "publication source identity changed",
-            authority.path / os.fsdecode(source_bytes),
-        )
-
-
-def _posix_rename_no_replace(
-    authority: DirectoryAuthority,
-    source_bytes: bytes,
-    destination_bytes: bytes,
-    opened: os.stat_result,
-) -> None:
-    if authority.dir_fd is None:
-        raise OSError(errno.EBADF, "POSIX publication authority is not leased")
-    rename, flags = _posix_rename_primitive()
-    _assert_posix_named_source_identity(authority, source_bytes, opened)
-    ctypes.set_errno(0)
-    if (
-        rename(
-            authority.dir_fd,
-            source_bytes,
-            authority.dir_fd,
-            destination_bytes,
-            flags,
-        )
-        == 0
-    ):
-        return
-    error = ctypes.get_errno()
-    if error == errno.EEXIST:
-        raise FileExistsError(
-            errno.EEXIST,
-            "publication destination exists",
-            authority.path / os.fsdecode(destination_bytes),
-        )
-    raise OSError(
-        error,
-        os.strerror(error),
-        authority.path / os.fsdecode(destination_bytes),
-    )
-
-
 def publish_no_replace(
     authority: DirectoryAuthority,
     source_name: str,
@@ -552,12 +507,10 @@ def publish_no_replace(
 ) -> None:
     """Publish a held source without replacing an existing destination.
 
-    Windows renames the exact held handle, and Linux can link an anonymous file
-    by its exact descriptor. Native POSIX rename APIs accept a source name, not
-    a source descriptor, so named sources are identity-checked immediately
-    before rename. A same-user actor with mutation authority over the staging
-    parent can still swap that name in the remaining check-to-rename interval;
-    callers must provide exclusive authority when that threat is in scope.
+    Windows renames the exact held handle. Linux can link an anonymous file by
+    its exact descriptor. Named POSIX sources and POSIX directories fail closed
+    because native rename APIs would re-resolve the source name after authority
+    validation and could therefore publish a swapped object.
     """
     source_bytes = _validate_relative_name(source_name)
     destination_bytes = _validate_relative_name(destination_name)
@@ -593,13 +546,10 @@ def publish_no_replace(
         if opened.st_nlink == 0:
             _posix_link_fd_no_replace(authority, source_fd, destination_bytes)
             return
-        _posix_rename_no_replace(
-            authority,
-            source_bytes,
-            destination_bytes,
-            opened,
+        raise OSError(
+            errno.ENOSYS,
+            "named POSIX file publication is not identity-bound",
         )
-        return
     assert source_authority is not None
     assert_directory_authority(source_authority)
     if source_authority.dir_fd is None or source_authority.native_handle is not None:
@@ -607,9 +557,7 @@ def publish_no_replace(
     opened = os.fstat(source_authority.dir_fd)
     if not stat.S_ISDIR(opened.st_mode):
         raise OSError(errno.EINVAL, "directory publication source is not a directory")
-    _posix_rename_no_replace(
-        authority,
-        source_bytes,
-        destination_bytes,
-        opened,
+    raise OSError(
+        errno.ENOSYS,
+        "POSIX directory publication is not identity-bound",
     )

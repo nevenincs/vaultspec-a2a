@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import multiprocessing
+import os
 import stat
 import time
 import zipfile
@@ -128,7 +129,7 @@ def test_concurrent_archive_publishers_cannot_delete_the_winner(tmp_path: Path) 
         assert archive.read("capsule/payload.bin") == b"capsule-bytes\n" * 4096
     quarantines = tuple(tmp_path.glob(".published.zip.*.tmp"))
     assert len(quarantines) <= 1
-    assert all(_sha256(quarantine) == winner for quarantine in quarantines)
+    assert all(quarantine.stat().st_size == 0 for quarantine in quarantines)
 
 
 def test_concurrent_directory_projectors_cannot_replace_the_winner(
@@ -164,8 +165,11 @@ def test_concurrent_directory_projectors_cannot_replace_the_winner(
     assert "refuses to overwrite" in error
     assert (output / "runtime/data.bin").read_bytes() == payload
     quarantines = tuple(output.glob(".vaultspec-projection-*"))
-    assert len(quarantines) <= 1
-    assert all(
-        quarantine.is_dir() and not any(quarantine.iterdir())
-        for quarantine in quarantines
-    )
+    if os.name == "posix":
+        assert quarantines == ()
+    else:
+        assert len(quarantines) <= 1
+        assert all(
+            quarantine.is_dir() and not any(quarantine.iterdir())
+            for quarantine in quarantines
+        )

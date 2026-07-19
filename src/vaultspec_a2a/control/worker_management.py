@@ -175,6 +175,18 @@ async def _tcp_port_ready(host: str, port: int) -> bool:
     return True
 
 
+def _internal_auth_headers() -> dict[str, str] | None:
+    """Return the worker-IPC bearer header when the internal token is configured.
+
+    The gateway-worker pair authenticates every probe and command with the shared
+    worker interprocess-communication credential; a DEVELOPMENT gateway with no
+    token sends none, matching the bearer rule the worker enforces.
+    """
+    if settings.internal_token is None:
+        return None
+    return {"Authorization": f"Bearer {settings.internal_token}"}
+
+
 async def _check_worker_health(
     url: str,
     timeout: float = 2.0,
@@ -185,10 +197,12 @@ async def _check_worker_health(
 
     The single worker-health primitive for every caller - the boot/spawn paths,
     the watchdog's authoritative crash check, and ``/api/health``. Request-path
-    callers pass the app-pooled *client* to reuse its connection pool; the watchdog
-    and boot paths pass none and get a self-contained one-shot client. "Healthy" is
-    an exact ``200`` for all of them, so ``/api/health`` can never silently disagree
-    with the watchdog's restart decision (a ``204`` fails both, not one).
+    callers pass the app-pooled *client* to reuse its connection pool (already
+    carrying the worker IPC bearer); the watchdog and boot paths pass none and get
+    a self-contained one-shot client that presents the same bearer, so a worker
+    that enforces the credential on ``/health`` still answers its owner. "Healthy"
+    is an exact ``200`` for all of them, so ``/api/health`` can never silently
+    disagree with the watchdog's restart decision (a ``204`` fails both, not one).
     """
     import httpx
 
@@ -199,7 +213,7 @@ async def _check_worker_health(
     try:
         if client is not None:
             return await _probe(client)
-        async with httpx.AsyncClient() as owned:
+        async with httpx.AsyncClient(headers=_internal_auth_headers()) as owned:
             return await _probe(owned)
     except Exception:
         return False
@@ -219,7 +233,7 @@ async def _fetch_worker_health(
     import httpx
 
     try:
-        async with httpx.AsyncClient() as client:
+        async with httpx.AsyncClient(headers=_internal_auth_headers()) as client:
             resp = await client.get(f"{url}/health", timeout=timeout)
             if resp.status_code != 200:
                 return None
@@ -261,15 +275,12 @@ async def _evict_stale_worker(
     """
     import httpx
 
-    headers = (
-        {"Authorization": f"Bearer {settings.internal_token}"}
-        if settings.internal_token is not None
-        else None
-    )
     with contextlib.suppress(Exception):
         async with httpx.AsyncClient() as client:
             await client.post(
-                f"{worker_url}/admin/shutdown", headers=headers, timeout=2.0
+                f"{worker_url}/admin/shutdown",
+                headers=_internal_auth_headers(),
+                timeout=2.0,
             )
 
     deadline = asyncio.get_event_loop().time() + timeout

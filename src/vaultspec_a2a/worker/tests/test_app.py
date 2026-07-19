@@ -137,3 +137,63 @@ def test_admin_shutdown_rejects_invalid_internal_token() -> None:
 
     assert resp.status_code == 401
     assert resp.json()["detail"] == "Invalid internal token"
+
+
+def test_health_rejects_missing_internal_token() -> None:
+    """Worker /health requires the worker IPC credential when one is configured."""
+    app = _make_app_without_lifespan()
+    with (
+        _SettingsOverride(
+            environment=Environment.TESTING, internal_token="secret-token"
+        ),
+        TestClient(app, raise_server_exceptions=False) as client,
+    ):
+        resp = client.get("/health")
+
+    assert resp.status_code == 401
+    assert resp.json()["detail"] == "Invalid internal token"
+
+
+def test_health_rejects_invalid_internal_token() -> None:
+    """Worker /health rejects a wrong worker IPC bearer."""
+    app = _make_app_without_lifespan()
+    with (
+        _SettingsOverride(
+            environment=Environment.DEVELOPMENT, internal_token="secret-token"
+        ),
+        TestClient(app, raise_server_exceptions=False) as client,
+    ):
+        resp = client.get("/health", headers={"Authorization": "Bearer wrong-token"})
+
+    assert resp.status_code == 401
+
+
+def test_health_accepts_valid_internal_token() -> None:
+    """The paired gateway's bearer passes the worker /health gate."""
+    app = _make_app_without_lifespan()
+    with (
+        _SettingsOverride(
+            environment=Environment.DEVELOPMENT, internal_token="secret-token"
+        ),
+        TestClient(app, raise_server_exceptions=False) as client,
+    ):
+        resp = client.get(
+            "/health", headers={"Authorization": "Bearer secret-token"}
+        )
+
+    assert resp.status_code == 200
+    assert resp.json()["service"] == "worker"
+
+
+def test_health_open_in_development_without_token() -> None:
+    """A DEVELOPMENT worker with no token leaves /health open (bearer rule)."""
+    app = _make_app_without_lifespan()
+    with (
+        _SettingsOverride(
+            environment=Environment.DEVELOPMENT, internal_token=None
+        ),
+        TestClient(app, raise_server_exceptions=False) as client,
+    ):
+        resp = client.get("/health")
+
+    assert resp.status_code == 200

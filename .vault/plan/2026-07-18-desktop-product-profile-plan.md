@@ -181,7 +181,7 @@ Protect versioned product APIs and administrative operations with distinct owner
 - [x] `W03.P08.S40` - Require attach authentication on dashboard product APIs while leaving minimal liveness ungated; `src/vaultspec_a2a/api/routes/__init__.py`.
 - [x] `W03.P08.S41` - Require attach authentication before accepting desktop event WebSockets; `src/vaultspec_a2a/api/app.py`.
 - [x] `W03.P08.S42` - Require both authenticated runtime control and receipt ownership for administrative shutdown; `src/vaultspec_a2a/api/routes/admin.py`.
-- [ ] `W03.P08.S43` - Enforce the worker IPC credential on dispatch events heartbeats health and administration; `src/vaultspec_a2a/worker/app.py`.
+- [x] `W03.P08.S43` - Enforce the worker IPC credential on dispatch events heartbeats health and administration; `src/vaultspec_a2a/worker/app.py`.
 - [ ] `W03.P08.S44` - Use only the worker IPC credential for gateway-facing event heartbeat and health traffic; `src/vaultspec_a2a/api/internal.py`.
 - [ ] `W03.P08.S45` - Read owner-scoped credential files for operator calls without accepting secret command-line arguments; `src/vaultspec_a2a/cli/main.py`.
 - [ ] `W03.P08.S46` - Prove attach-control worker IPC and lifecycle credentials are non-interchangeable rejected outside their planes and absent from discovery logs and responses; `src/vaultspec_a2a/desktop_tests/test_credential_boundaries.py`.

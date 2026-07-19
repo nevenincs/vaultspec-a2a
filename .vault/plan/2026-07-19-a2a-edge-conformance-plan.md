@@ -22,7 +22,7 @@ This L1 successor executes the accepted edge-conformance decision after the dash
 ## Steps
 
 - [x] `S01` - Add the durable active-run discovery projection and metadata filters; `src/vaultspec_a2a/database/thread_repository.py, src/vaultspec_a2a/control/run_discovery_service.py`.
-- [ ] `S02` - Serve the bounded v1 collection read and prove reload discovery over live HTTP; `src/vaultspec_a2a/api/schemas/gateway.py, src/vaultspec_a2a/api/routes/gateway.py, src/vaultspec_a2a/api/tests/test_active_run_discovery_live.py`.
+- [x] `S02` - Serve the bounded v1 collection read and prove reload discovery over live HTTP; `src/vaultspec_a2a/api/schemas/gateway.py, src/vaultspec_a2a/api/routes/gateway.py, src/vaultspec_a2a/api/tests/test_active_run_discovery_live.py`.
 ## Parallelization
 
 The Steps are sequential: `S02` consumes the repository/service projection delivered by `S01`. No sub-agent parallelism is useful for this two-seam change.

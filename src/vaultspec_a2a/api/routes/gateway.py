@@ -1,7 +1,8 @@
-"""The versioned five-verb gateway surface.
+"""The versioned gateway surface.
 
 Mounts ``run-start``, ``run-status``, ``run-cancel``, ``presets-list``, and
-``service-state`` under ``/v1`` as the engine-facing edge, plus ``run-stream``
+``service-state`` under ``/v1`` as the engine-facing edge, plus bounded active
+run discovery and ``run-stream``
 (GET ``/runs/{run_id}/stream``) - the droppable SSE progress companion to the
 authoritative ``run-status`` snapshot. Each verb reshapes an existing service
 rather than reinventing it, so there is a single code path: the richer internal
@@ -12,7 +13,7 @@ import asyncio
 import logging
 import os
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import httpx
 from fastapi import APIRouter, Depends, FastAPI, Header, HTTPException, Query, Request
@@ -23,6 +24,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ...control.cancel_service import cancel_thread
 from ...control.config import settings
 from ...control.health import build_full_health, probe_engine_discovery_freshness
+from ...control.run_discovery_service import discover_active_runs
 from ...control.run_start_policy import evaluate_run_start_eligibility
 from ...control.thread_service import (
     ThreadCreationRequest,
@@ -54,6 +56,8 @@ from ..dependencies import (
     get_worker_spawner,
 )
 from ..schemas.gateway import (
+    ActiveRunRecord,
+    ActiveRunsResponse,
     PresetsListResponse,
     PresetSummary,
     ProfileSummary,
@@ -396,6 +400,44 @@ def _raise_for_dispatch_failure(
         raise HTTPException(
             status_code=502, detail=detail or "Worker dispatch rejected"
         )
+
+
+# ---------------------------------------------------------------------------
+# active-run discovery
+# ---------------------------------------------------------------------------
+
+
+@router.get("/runs", response_model=ActiveRunsResponse)
+async def active_runs_endpoint(
+    state: Literal["active"] = Query(default="active"),
+    workspace_root: str | None = Query(default=None, min_length=1, max_length=4096),
+    feature_tag: str | None = Query(default=None, min_length=1, max_length=128),
+    limit: int = Query(default=50, ge=1, le=100),
+    db: AsyncSession = Depends(get_db),
+) -> ActiveRunsResponse:
+    """Return a capped identity projection for durable non-terminal runs."""
+    workspace = Path(workspace_root) if workspace_root is not None else None
+    if workspace is not None and not workspace.is_absolute():
+        raise HTTPException(status_code=422, detail="workspace_root must be absolute")
+
+    result = await discover_active_runs(
+        db,
+        workspace_root=workspace,
+        feature_tag=feature_tag,
+        limit=limit,
+    )
+    return ActiveRunsResponse(
+        state=state,
+        runs=[
+            ActiveRunRecord(
+                run_id=run.run_id,
+                status=run.status,
+                feature_tag=run.feature_tag,
+            )
+            for run in result.runs
+        ],
+        truncated=result.truncated,
+    )
 
 
 # ---------------------------------------------------------------------------

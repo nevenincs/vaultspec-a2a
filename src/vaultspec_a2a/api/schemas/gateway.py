@@ -1,12 +1,10 @@
-"""Versioned five-verb gateway wire models.
+"""Versioned gateway wire models.
 
-The engine pass-through forwards exactly five verbs across the frozen edge:
-``run-start``, ``run-status``, ``run-cancel``, ``presets-list``, and
-``service-state``. These models are the versioned, bounded, self-describing
-shapes those verbs speak. Every response carries an explicit ``api_version`` so
-the engine can wrap it verbatim inside its own tiers envelope and fence event
-shape drift; every field is bounded so a response is always safe to wrap under
-the engine's 8 MiB / 120 s caps.
+The engine pass-through forwards versioned, bounded, self-describing run and
+service operations across the edge. Every response carries an explicit
+``api_version`` so the engine can wrap it verbatim inside its own tiers envelope
+and fence event-shape drift; every field is bounded so a response is always safe
+to wrap under the engine's 8 MiB / 120 s caps.
 
 The verbs reshape the existing service surface rather than reinventing it:
 ``run-start`` delegates to the same thread-create/dispatch flow the internal
@@ -25,6 +23,8 @@ from ...thread.actor_tokens import ActorTokenBundle
 from ...thread.enums import ThreadStatus
 
 __all__ = [
+    "ActiveRunRecord",
+    "ActiveRunsResponse",
     "PresetSummary",
     "PresetsListResponse",
     "ProfileSummary",
@@ -104,6 +104,23 @@ class RunStartResponse(BaseModel):
     # path where the response is reconstructed from the existing run row.
     profile_id: str | None = None
     assignments: list[RoleAssignmentSummary] = Field(default_factory=list)
+
+
+class ActiveRunRecord(BaseModel):
+    """Minimal durable run identity used to recover a viewing binding."""
+
+    run_id: str = Field(min_length=1, max_length=128)
+    status: ThreadStatus
+    feature_tag: str | None = Field(default=None, max_length=128)
+
+
+class ActiveRunsResponse(BaseModel):
+    """Bounded, non-authoritative discovery result for active runs."""
+
+    api_version: Literal["v1"] = _API_VERSION
+    state: Literal["active"] = "active"
+    runs: list[ActiveRunRecord] = Field(default_factory=list, max_length=100)
+    truncated: bool = False
 
 
 class TopologyPosition(BaseModel):

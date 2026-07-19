@@ -22,6 +22,9 @@ __all__ = [
 ]
 
 _MAX_DISCOVERY_RESULTS = 100
+_MAX_FEATURE_TAG_LENGTH = 128
+_MAX_RUN_ID_LENGTH = 128
+_MAX_WORKSPACE_ROOT_LENGTH = 4096
 
 
 @dataclass(frozen=True, slots=True)
@@ -63,6 +66,10 @@ def _metadata_selectors(raw_json: str | None) -> tuple[str | None, str | None] |
         return None
     if feature_tag is not None and not isinstance(feature_tag, str):
         return None
+    if workspace_root and len(workspace_root) > _MAX_WORKSPACE_ROOT_LENGTH:
+        return None
+    if feature_tag and len(feature_tag) > _MAX_FEATURE_TAG_LENGTH:
+        return None
     return workspace_root or None, feature_tag or None
 
 
@@ -86,6 +93,12 @@ async def discover_active_runs(
     )
     matches: list[ActiveRunSummary] = []
     for thread in await list_active_threads(db):
+        if not 1 <= len(thread.id) <= _MAX_RUN_ID_LENGTH:
+            continue
+        try:
+            status = ThreadStatus(thread.status)
+        except ValueError:
+            continue
         selectors = _metadata_selectors(thread.thread_metadata)
         if selectors is None:
             continue
@@ -101,7 +114,7 @@ async def discover_active_runs(
         matches.append(
             ActiveRunSummary(
                 run_id=thread.id,
-                status=ThreadStatus(thread.status),
+                status=status,
                 feature_tag=run_feature,
             )
         )

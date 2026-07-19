@@ -222,6 +222,13 @@ class ConnectionManager:
             # Remove connection and error sequence counter
             self._connections.pop(client_id, None)
             self._error_sequences.pop(client_id, None)
+            # A disconnected client can never send another heartbeat, so it
+            # must not linger in the failing-clients ladder set: left in
+            # place, it would grow the set unboundedly across connection
+            # churn, get named as "currently failing" forever, and block
+            # "recovered for all clients" from ever firing again once any
+            # failed client disconnects rather than recovers.
+            self._failing_client_ids.discard(client_id)
 
         logger.info(
             "WebSocket client %s disconnected",

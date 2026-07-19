@@ -94,3 +94,19 @@ roots. The Windows assign-after-spawn micro-window is safe because the worker
 spawns no descendant until its event loop and single-flight startup complete,
 well after assignment. POSIX containment is correct by construction but
 unexercised on this Windows host (reported honestly); it is covered on POSIX CI.
+
+REVIEW REMEDIATION (P11 MEDIUM-1): the Windows assign-after-spawn window is now
+documented precisely at the `assign()` seam rather than left implicit. Choice:
+DOCUMENT the bound, not a structural fix. Rationale - every structural close is
+disproportionate or unsound through stdlib here: the OS-native atomic path
+(create the process already in the job via `PROC_THREAD_ATTRIBUTE_JOB_LIST` in a
+`STARTUPINFOEX` attribute list) cannot be passed through stdlib `subprocess`;
+`CREATE_SUSPENDED` + resume needs a thread handle `Popen` does not expose (or the
+undocumented `NtResumeProcess`); a stdin-gated trampoline that `execv`s the real
+command escapes the job on Windows (no true `execv`), and one that spawns it as a
+child would need a full stdio proxy for the ACP provider. Boot/init latency
+covers the window for every owned root (worker loop startup, provider Node/ACP
+init, a terminal command's non-microsecond first act), `KILL_ON_JOB_CLOSE` reaps
+everything that did join the job, and the per-pid fallback backstops a wholly
+failed assignment. The reviewer's observation is captured as a comment at the
+seam.

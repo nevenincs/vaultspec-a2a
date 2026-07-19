@@ -276,6 +276,24 @@ class ProcessContainment:
 
         if self._job is None:
             raise ProcessContainmentError("Windows containment has no job object")
+        # Assign-after-spawn window (documented reliance, not silence): the root is
+        # created, then opened and assigned here, so a descendant the root forks in
+        # the microseconds between CreateProcess and AssignProcessToJobObject would
+        # not join the job. In practice the owned roots never fork that fast: the
+        # worker assigns nothing until its asyncio loop and single-flight startup
+        # run (seconds later); the provider CLI does Node/handshake init before it
+        # launches an MCP server; a terminal command's first act is not a
+        # microsecond-latency grandchild. Boot/init latency covers the window.
+        # The structural close is the OS-native atomic path - creating the process
+        # already in the job (PROC_THREAD_ATTRIBUTE_JOB_LIST via a STARTUPINFOEX
+        # attribute list) - which stdlib ``subprocess`` cannot pass. The considered
+        # alternatives are disproportionate or unsound here: CREATE_SUSPENDED plus
+        # resume needs a thread handle ``Popen`` does not expose (or the
+        # undocumented ``NtResumeProcess``); a stdin-gated trampoline that ``execv``s
+        # the real command escapes the job on Windows (which has no true ``execv``),
+        # and one that spawns it as a child would need a full stdio proxy for the
+        # ACP provider. KILL_ON_JOB_CLOSE still reaps everything that did join the
+        # job, and the per-pid fallback backstops a wholly failed assignment.
         kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
         kernel32.OpenProcess.restype = wintypes.HANDLE
         kernel32.OpenProcess.argtypes = (wintypes.DWORD, wintypes.BOOL, wintypes.DWORD)

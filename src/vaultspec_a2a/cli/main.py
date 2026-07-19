@@ -19,6 +19,7 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 import click
 import httpx
@@ -54,9 +55,32 @@ def _emit(response: httpx.Response) -> None:
 
 
 def _request(method: str, url: str, **kwargs: Any) -> httpx.Response:
-    """Issue one gateway request, turning transport errors into a clean exit."""
+    """Issue one authenticated gateway request or report a transport failure.
+
+    A directly configured token is authoritative. Otherwise a local request may
+    reuse the fresh resident discovery token, but only when the URL's loopback
+    port matches that discovery record; a user-supplied remote URL never receives
+    a machine-local discovery credential.
+    """
+    token = settings.internal_token
+    if token is None:
+        parsed = urlsplit(url)
+        if parsed.hostname in {"127.0.0.1", "localhost", "::1"}:
+            from ..lifecycle.discovery import DiscoveryState, read_resident_service
+
+            state, info = read_resident_service(settings.a2a_home)
+            if (
+                state is DiscoveryState.FRESH
+                and info is not None
+                and info.port == parsed.port
+            ):
+                token = info.service_token
+
+    headers = dict(kwargs.pop("headers", {}))
+    if token is not None:
+        headers.setdefault("Authorization", f"Bearer {token}")
     try:
-        return httpx.request(method, url, **kwargs)
+        return httpx.request(method, url, headers=headers, **kwargs)
     except httpx.HTTPError as exc:
         raise click.ClickException(
             f"could not reach the gateway at {url}: {exc}"
@@ -164,6 +188,33 @@ def desktop_serve(
 
     os.environ.update(plan.env)
     os.execv(plan.argv[0], plan.argv)
+
+
+@main.command("desktop-migrate")
+@click.option(
+    "--descriptor",
+    required=True,
+    type=click.Path(path_type=Path),
+    help="Path to the one-time migration transaction descriptor JSON.",
+)
+def desktop_migrate(descriptor: Path) -> None:
+    """Run the staged-generation desktop migration authorised by a descriptor.
+
+    Internal external-updater command: it applies the packaged Alembic upgrade,
+    checkpointer setup, and state-driven-development backfill against the
+    descriptor's own stores, then prints the bounded machine-readable result as
+    JSON to stdout. This lifecycle verb is deliberately CLI-only and is never
+    exposed on the run-control HTTP API; the exit status is zero only when the
+    migration succeeds.
+    """
+    import asyncio
+
+    from ..desktop.migration import run_staged_migration
+
+    result = asyncio.run(run_staged_migration(descriptor))
+    click.echo(json.dumps(result.model_dump(mode="json"), indent=2, sort_keys=True))
+    if result.status != "succeeded":
+        sys.exit(1)
 
 
 def _expected_route_signature() -> list[str]:

@@ -14,66 +14,84 @@ related:
 ## Scope
 
 - `src/vaultspec_a2a/providers/factory.py`
+- `src/vaultspec_a2a/providers/tests/test_capsule_acp_resolution.py`
 
 ## Description
 
 - Add a `capsule_assets_root` settings field bound to the `VAULTSPEC_CAPSULE_ASSETS`
   environment variable, defaulting to unset.
-- Add capsule Node executable and ACP entry path resolvers plus a capsule
-  classifier that resolves both strictly from capsule assets and fails loud.
-- Extend `_classify_acp_command` with an optional `capsule_assets_root` seam that,
-  when a root is in force, resolves the default Node backend only from the capsule.
-- Add a real-seam test module exercising resolution, fail-loud, and unchanged
-  paths against a temporary on-disk capsule layout.
+- Define the platform-relative Node executable and ACP entry identities once in
+  production-owned constants and path functions.
+- Normalize the capsule assets root to an absolute canonical directory, resolve
+  both required assets canonically, and reject a file whose resolved path escapes
+  that root through a symbolic link or junction.
+- Distinguish an omitted `capsule_assets_root` argument, which consults settings,
+  from explicit `None`, which selects the existing Compose/project-local path.
+- Exercise the real classifier with on-disk assets, escaping symbolic links, a
+  relative root, and a clean child process with a configured capsule root.
 
 ## Outcome
 
-The provider factory now has an explicit capsule-assets authority. A new
+The provider factory now has an explicit capsule-assets authority. The
 `capsule_assets_root` setting (environment variable `VAULTSPEC_CAPSULE_ASSETS`,
 typed `Path | None`, default unset) declares the desktop capsule's owned runtime
-asset root. `_classify_acp_command` gained an optional `capsule_assets_root`
-keyword; when it is not passed, the configured setting is consulted, so the
-production callers activate capsule resolution purely from configuration.
+asset root. `_classify_acp_command` uses a private omission sentinel: an omitted
+keyword consults the configured setting, while explicit `None` deterministically
+forces the existing Compose/project-local behavior.
 
 When a capsule root is in force, the default Node backend resolves its executable
-and ACP entry ONLY from capsule-owned assets. The Node executable resolves at the
-platform-standard capsule layout (`node/node.exe` on Windows, `node/bin/node` on
-POSIX) and the ACP entry at the mirrored `node_modules/@agentclientprotocol/
-claude-agent-acp/dist/index.js` path. There is no checkout fallback and no PATH
-`node` fallback: a missing Node executable or ACP entry raises a `ConfigError`
-naming the exact missing path. The returned metadata reports `runtime_authority`
-and `command_origin` as `capsule`. When no root is configured, the Node backend
-keeps its existing checkout-relative `project_local` behavior byte-for-byte, and
-the experimental Bun binary backend — already package-owned — is untouched.
+and ACP entry only from capsule-owned assets. Production owns both relative layout
+identities: `node/node.exe` on Windows or `node/bin/node` on POSIX, plus the ACP
+entry under `node_modules/@agentclientprotocol/claude-agent-acp/dist/index.js`.
+The root and both command paths become absolute canonical paths. A missing root,
+missing asset, non-file asset, resolution failure, or asset resolving outside the
+canonical root raises an actionable `ConfigError`. There is no checkout or PATH
+fallback while capsule authority is armed. Returned metadata reports
+`runtime_authority` and `command_origin` as `capsule`; the experimental Bun binary
+backend remains unchanged.
 
 This Step implements only the provider resolution seam. The desktop profile
 module that will bind `capsule_assets_root` in production is the declared job of
 `W02.P04.S16` and was not implemented here.
 
+## Review findings and remediation
+
+- **High — tests mirrored production layout policy.** The original tests repeated
+  the operating-system branch and ACP path assembly. Production now owns the
+  relative identities, and tests import its path authorities to create real
+  filesystem layouts without reproducing those conditions.
+- **High — capsule ownership was lexical rather than canonical.** A relative root
+  remained relative and a required asset could escape through a symbolic link or
+  junction. The classifier now canonicalizes the root and each asset and rejects
+  every resolved asset outside the canonical root.
+- **Medium — explicit `None` was indistinguishable from omission.** A private
+  sentinel now reserves omission for settings lookup. A clean child interpreter
+  proves that omission uses its configured empty capsule and fails there, while
+  explicit `None` in the same process selects project-local behavior.
+- **Medium — POSIX executable-mode certification remains deferred.** S09
+  establishes path identity, canonical ownership, file presence, and no-fallback
+  behavior only. Executable-mode and runnable-artifact verification remain
+  assigned to `W01.P03.S14`; this record makes no provider-readiness or
+  successful-launch claim.
+
 ## Tests
 
 - `uv run --no-sync pytest
-  src/vaultspec_a2a/providers/tests/test_capsule_acp_resolution.py -q` reported 5
-  passed. The tests build a real temporary capsule on disk and drive the real
-  `_classify_acp_command` seam: capsule resolution returns the capsule Node
-  executable and ACP entry with `capsule` metadata; a missing Node executable and
-  a missing ACP entry each raise `ConfigError` naming the path; an empty capsule
-  never falls back; and, with no root configured, the Node backend keeps its
-  checkout-relative behavior.
-- `uv run --no-sync pytest src/vaultspec_a2a/providers/tests -q` reported 336
-  passed, 8 deselected — the existing classify paths are unregressed.
+  src/vaultspec_a2a/providers/tests/test_capsule_acp_resolution.py -q` reported 10
+  passed. Real files and links prove canonical capsule resolution, actionable
+  root and missing-asset errors (including an unresolvable user root), no armed
+  fallback, relative-root normalization, separate Node and ACP escape rejection,
+  and configured-root versus explicit-`None` behavior in an isolated child
+  interpreter.
+- `uv run --no-sync pytest src/vaultspec_a2a/providers/tests -q` reported 340
+  passed, 8 deselected; the wider provider paths remain green.
 - `uv run --no-sync pytest src/vaultspec_a2a/control/tests -q` reported 82 passed,
   6 deselected, covering the changed settings module.
-- `uv run --no-sync pytest src/vaultspec_a2a/desktop_tests -q` reported 5 passed,
-  keeping the S05 dependency-closure gate green.
-- Ruff check and format, and scoped `ty check`, passed for the factory, settings,
-  and test modules.
+- Ruff check and format and scoped `ty check` passed for the factory and focused
+  test module.
 
 ## Notes
 
-The test injects the capsule root through the explicit `_classify_acp_command`
-keyword — the same seam production binds through `settings.capsule_assets_root` —
-so no monkeypatch, settings mutation, mock, stub, or skip was used. The capsule
-directory layout (`node/` executable tree and mirrored `node_modules` ACP entry)
-is a resolution convention introduced here and encoded independently in the test,
-not copied from the implementation. No mock, stub, patch, or skip was introduced.
+The repair introduces no mock, stub, fake, patch, monkeypatch, skip, or expected
+failure. It does not modify the plan checkbox, stage files, create a commit, or
+claim the executable-mode verification reserved for S14.

@@ -270,3 +270,34 @@ actual boundary: the desktop wheel excludes certification resources, while the
 loader reads whatever valid inventory its installed package contains. S12 must
 retain this clean-installed inventory proof. No unresolved critical, high, or
 medium issue remains.
+
+## `W01 P02 S09` capsule-owned provider asset review
+
+Status: PASS
+
+The default Node-backed ACP classifier now has one explicit capsule-assets
+authority. When configured, it resolves production-owned Node and ACP relative
+identities into absolute canonical files and never falls back to the checkout
+or `PATH`. Omitted capsule-root selection consults settings; explicit `None`
+retains the Compose and project-local classifier. The later desktop profile step
+remains responsible for activating this seam.
+
+Initial review found three high-severity boundary defects: relative roots yielded
+working-directory-sensitive commands, file symlinks or directory junctions
+could escape the lexical capsule root, and tests duplicated the production
+platform/layout rules. It also found an error-contract gap where unknown-user
+expansion could leak `RuntimeError`. The repair moves all layout identities into
+production, canonicalizes the root and files, rejects resolved files outside the
+canonical authority, distinguishes omission from explicit `None`, and guards
+both user expansion and strict resolution behind actionable `ConfigError`.
+
+Independent follow-up reproduced real Windows file-symlink and directory-junction
+escape rejection and found no unresolved critical, high, or medium issue. Ten
+focused real-filesystem tests, the 340-test provider suite, the 82-test control
+suite, Ruff, formatting, scoped type checking, and diff checks pass without
+fakes, mocks, stubs, patches, monkeypatches, skips, or expected failures.
+
+S09 proves canonical path identity, ownership, presence, and armed no-fallback
+behavior. It deliberately makes no readiness or successful-launch claim.
+Executable-mode and runnable-artifact certification remains assigned to S14,
+which precedes S16 desktop-profile activation.

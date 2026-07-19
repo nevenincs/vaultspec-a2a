@@ -38,6 +38,25 @@ _bin_candidates = list(_BIN_DIR.glob("claude-agent-acp*")) if _BIN_DIR.is_dir() 
 _BIN_PATH: Path | None = _bin_candidates[0] if _bin_candidates else None
 
 
+class _CapsuleAssetsRootOmitted:
+    """Marker for callers that delegate capsule-root selection to settings."""
+
+    __slots__ = ()
+
+
+_CAPSULE_ASSETS_ROOT_OMITTED = _CapsuleAssetsRootOmitted()
+_CAPSULE_NODE_RELATIVE_PATH = (
+    Path("node") / "node.exe" if os.name == "nt" else Path("node") / "bin" / "node"
+)
+_CAPSULE_ACP_RELATIVE_PATH = (
+    Path("node_modules")
+    / "@agentclientprotocol"
+    / "claude-agent-acp"
+    / "dist"
+    / "index.js"
+)
+
+
 def _build_gemini_env(
     gemini_api_key: str | None = None,
     google_api_key: str | None = None,
@@ -233,9 +252,7 @@ def _capsule_node_executable(capsule_assets_root: Path) -> Path:
     on Windows and ``node/bin/node`` on POSIX. The desktop capsule carries that
     tree verbatim under its assets root.
     """
-    if os.name == "nt":
-        return capsule_assets_root / "node" / "node.exe"
-    return capsule_assets_root / "node" / "bin" / "node"
+    return capsule_assets_root / _CAPSULE_NODE_RELATIVE_PATH
 
 
 def _capsule_acp_entry(capsule_assets_root: Path) -> Path:
@@ -244,14 +261,61 @@ def _capsule_acp_entry(capsule_assets_root: Path) -> Path:
     Mirrors the checkout ``node_modules`` layout so the same installed adapter
     resolves from capsule assets.
     """
-    return (
-        capsule_assets_root
-        / "node_modules"
-        / "@agentclientprotocol"
-        / "claude-agent-acp"
-        / "dist"
-        / "index.js"
-    )
+    return capsule_assets_root / _CAPSULE_ACP_RELATIVE_PATH
+
+
+def _canonical_capsule_assets_root(capsule_assets_root: Path) -> Path:
+    """Return the absolute canonical directory that owns capsule assets."""
+    try:
+        requested_root = capsule_assets_root.expanduser()
+        canonical_root = requested_root.resolve(strict=True)
+    except (OSError, RuntimeError) as exc:
+        raise ConfigError(
+            f"Desktop capsule assets root cannot be resolved: {capsule_assets_root}. "
+            "Install or repair the desktop capsule before starting the provider."
+        ) from exc
+    if not canonical_root.is_dir():
+        raise ConfigError(
+            f"Desktop capsule assets root is not a directory: {canonical_root}. "
+            "Install or repair the desktop capsule before starting the provider."
+        )
+    return canonical_root
+
+
+def _resolve_capsule_asset(
+    capsule_assets_root: Path,
+    relative_path: Path,
+    *,
+    asset_name: str,
+    repair_hint: str,
+) -> Path:
+    """Resolve one required file without allowing it to escape capsule ownership."""
+    candidate = capsule_assets_root / relative_path
+    try:
+        canonical_asset = candidate.resolve(strict=True)
+    except FileNotFoundError as exc:
+        raise ConfigError(
+            f"Desktop capsule {asset_name} not found: {candidate}. "
+            f"The capsule assets root {capsule_assets_root} must carry {repair_hint}."
+        ) from exc
+    except (OSError, RuntimeError) as exc:
+        raise ConfigError(
+            f"Desktop capsule {asset_name} cannot be resolved: {candidate}. "
+            "Install or repair the desktop capsule before starting the provider."
+        ) from exc
+
+    if not canonical_asset.is_relative_to(capsule_assets_root):
+        raise ConfigError(
+            f"Desktop capsule {asset_name} escapes its assets root: {candidate} "
+            f"resolves to {canonical_asset}, outside {capsule_assets_root}. "
+            "Install or repair the desktop capsule before starting the provider."
+        )
+    if not canonical_asset.is_file():
+        raise ConfigError(
+            f"Desktop capsule {asset_name} is not a file: {canonical_asset}. "
+            "Install or repair the desktop capsule before starting the provider."
+        )
+    return canonical_asset
 
 
 def _classify_capsule_acp_command(
@@ -266,20 +330,19 @@ def _classify_capsule_acp_command(
     Raises:
         ConfigError: If the capsule Node executable or ACP entry is absent.
     """
-    node_executable = _capsule_node_executable(capsule_assets_root)
-    if not node_executable.is_file():
-        raise ConfigError(
-            f"Desktop capsule Node executable not found: {node_executable}. "
-            f"The capsule assets root {capsule_assets_root} must carry the "
-            "bundled Node.js runtime."
-        )
-    acp_entry = _capsule_acp_entry(capsule_assets_root)
-    if not acp_entry.is_file():
-        raise ConfigError(
-            f"Desktop capsule Claude ACP entry point not found: {acp_entry}. "
-            f"The capsule assets root {capsule_assets_root} must carry the "
-            "bundled @agentclientprotocol/claude-agent-acp adapter."
-        )
+    canonical_root = _canonical_capsule_assets_root(capsule_assets_root)
+    node_executable = _resolve_capsule_asset(
+        canonical_root,
+        _CAPSULE_NODE_RELATIVE_PATH,
+        asset_name="Node executable",
+        repair_hint="the bundled Node.js runtime",
+    )
+    acp_entry = _resolve_capsule_asset(
+        canonical_root,
+        _CAPSULE_ACP_RELATIVE_PATH,
+        asset_name="Claude ACP entry point",
+        repair_hint="the bundled @agentclientprotocol/claude-agent-acp adapter",
+    )
     return [str(node_executable), str(acp_entry)], {
         "runtime_authority": "capsule",
         "command_origin": "capsule",
@@ -293,19 +356,22 @@ def _classify_capsule_acp_command(
 def _classify_acp_command(
     backend: str,
     *,
-    capsule_assets_root: Path | None = None,
+    capsule_assets_root: Path | None | _CapsuleAssetsRootOmitted = (
+        _CAPSULE_ASSETS_ROOT_OMITTED
+    ),
 ) -> tuple[list[str], dict[str, str]]:
     """Return the ACP gateway subprocess command for the given backend.
 
     Args:
         backend: ``"node"`` for the npm-installed JS entry point (default),
             ``"binary"`` for the precompiled Bun executable in bin/.
-        capsule_assets_root: Explicit desktop capsule assets root. When ``None``
-            (the default), the configured ``settings.capsule_assets_root`` is
-            consulted. When a root is in force, the default Node backend resolves
-            its executable and ACP entry ONLY from capsule assets — no checkout or
-            PATH fallback. The experimental binary backend is already package-owned
-            and is unaffected.
+        capsule_assets_root: Explicit desktop capsule assets root. When omitted,
+            the configured ``settings.capsule_assets_root`` is consulted. Explicit
+            ``None`` forces Compose/project-local resolution even when a capsule
+            root is configured. When a root is in force, the default Node backend
+            resolves its executable and ACP entry ONLY from capsule assets — no
+            checkout or PATH fallback. The experimental binary backend is already
+            package-owned and is unaffected.
 
     Raises:
         ConfigError: If the resolved entry point does not exist.
@@ -331,9 +397,9 @@ def _classify_acp_command(
         }
     # default: "node"
     root = (
-        capsule_assets_root
-        if capsule_assets_root is not None
-        else settings.capsule_assets_root
+        settings.capsule_assets_root
+        if isinstance(capsule_assets_root, _CapsuleAssetsRootOmitted)
+        else capsule_assets_root
     )
     if root is not None:
         return _classify_capsule_acp_command(root)

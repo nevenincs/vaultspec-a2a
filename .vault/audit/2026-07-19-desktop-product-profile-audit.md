@@ -578,3 +578,29 @@ Type: documentation accuracy. Release notes called the ZIP deterministic and
 said it contained the locked dependency closure. S13 records differing archive
 bytes and ships only a root wheel plus a lock recipe. Status: resolved by
 removing release publication and its unsupported notes.
+
+## Uncommitted capsule-foundation candidate review
+
+Status: REVISION REQUIRED; candidate files remain uncommitted.
+
+The candidate descriptor and archive primitives pass Ruff, formatting, Ty,
+lock consistency, and 19 real-file tests. They are not safe to preserve as a
+standalone foundation commit until the following findings are repaired.
+
+### capsule-tar-unselected-expansion-unbounded | medium | Compressed members outside the selected root bypass effective bounds
+
+Type: input safety. Gzip and XZ tar projection enumerates members before
+enforcing meaningful decompression bounds, then counts only members selected
+under the declared archive root. A large unselected compressed member can
+consume unbounded decompression time and resources while bypassing the stated
+expanded-size limit. Bound the complete decompressed stream and every member,
+including unselected members, before projection.
+
+### capsule-projection-parent-symlink-race | medium | A parent swap can redirect file materialization outside staging
+
+Type: filesystem safety. Destination containment is checked during preflight,
+but later directory creation, temporary-file placement, and final hard-linking
+resolve paths again. A concurrent parent replacement with a symbolic link can
+redirect writes outside the staging root. Use descriptor-relative,
+no-follow filesystem operations or revalidate opened parent identities through
+the final link, and add a real race-oriented rejection test.

@@ -1018,6 +1018,54 @@ clean but still reports template annotations, execution-record whitespace, and
 a stale ``desktop-product-profile`` feature index. These warnings do not alter
 the capsule safety disposition and remain visible for the next curation pass.
 
+## `W02.P06.S26` mutable-store manifest review
+
+Formal review of commit ``901da93f`` required revisions. The focused tests
+passed, but the exported manifest does not satisfy the approved store
+schema-version and single-authority contract. Step ``S26`` is reopened.
+
+### s26-schema-version-absent | high | The checkpoint store binds an authority label but no semantic version
+
+Type: contract completeness. ``MutableStore`` carries ``kind``, ``derivable``,
+and ``schema_authority`` only. ``checkpointer-schema`` is a label, not a
+version. Add a bounded semantic schema version for every store. Derive the
+primary value from the packaged Alembic head. Define and enforce a project-owned
+checkpoint schema version against the real required schema. Never use SQLite's
+mutable ``PRAGMA schema_version`` cookie as release metadata.
+
+### s26-membership-authority-duplicated | high | Contract and snapshot modules independently declare the store closure
+
+Type: architecture ownership. ``snapshot.consistency_group_members`` claims
+single authority, but ``contract.DESKTOP_CONSISTENCY_GROUP`` repeats both store
+kinds and both non-derivable values. The reconciliation test then mirrors the
+enum translation. Make ``snapshot.consistency_group_members`` the only
+production declaration. Make runtime store setup and manifest generation
+consume it.
+
+### s26-minor-version-compatibility-broken | high | Required 1.1 data contradicts the directional parser rule
+
+Type: versioned compatibility. A valid 1.0 manifest lacks the required
+``consistency_group`` field, yet ``contract_versions_compatible("1.0",
+"1.1")`` still claims a 1.1 consumer can read it. Increment the major contract
+version, or make the 1.1 parser accept valid 1.0 manifests. Reject updater
+operations that require ``consistency_group`` when the manifest lacks it.
+
+### s26-generated-schema-underconstrained | high | Dashboard schema validation can accept incomplete or duplicate membership
+
+Type: cross-repository validation. Pydantic rejects missing and duplicate store
+kinds, but the exported JSON Schema Draft 2020-12 definition permits arrays
+containing one or two items. Require exactly one primary and one checkpoint
+store with unique ``kind`` values. Prove both invalid cases fail through the
+real validator.
+
+### s26-derivability-unproved | high | A Boolean can authorize omission without reconstruction evidence
+
+Type: integrity contract. Any candidate manifest can set ``derivable=true``
+without naming a reconstruction authority or proof. Constrain every current
+member to ``derivable=false``. Before permitting ``true``, replace the Boolean
+with a tagged object that identifies the reconstruction mechanism and carries a
+size-limited proof reference.
+
 ## Architecture-owner disposition after outer-generation mapping
 
 Status: INNER PUBLICATION SAFETY PASS; END-TO-END PRODUCT ACTIVATION FAIL.

@@ -150,7 +150,7 @@ Keep ordinary desktop gateway boot non-mutating while exposing one package-local
 Capture and restore primary, checkpoint, and declared schema-bearing stores as one receipt-verifiable group after quiescence.
 
 - [x] `W02.P06.S25` - Create temp-fsynced atomic snapshot descriptors and quiesced restore markers for every declared consistency-group store; `src/vaultspec_a2a/desktop/snapshot.py`.
-- [x] `W02.P06.S26` - Bind mutable-store membership derivability and schema versions into the component manifest; `src/vaultspec_a2a/desktop/manifest.py`.
+- [ ] `W02.P06.S26` - Bind single-authority mutable-store membership, explicit schema versions, derivability evidence, compatibility rules, and exact generated-schema constraints into the component manifest; `src/vaultspec_a2a/desktop/snapshot.py, src/vaultspec_a2a/desktop/contract.py, src/vaultspec_a2a/desktop/manifest.py, src/vaultspec_a2a/desktop/migration.py, src/vaultspec_a2a/database/compatibility.py, schemas/desktop-capsule-manifest.json, and direct contract, manifest, migration, compatibility, and generated-schema tests`.
 - [x] `W02.P06.S27` - Expose bounded snapshot inspect and restore commands for the external updater transaction; `src/vaultspec_a2a/cli/main.py`.
 - [x] `W02.P06.S28` - Prove primary and checkpoint databases restore together from a real consistency group; `src/vaultspec_a2a/desktop_tests/test_snapshot_group.py`.
 - [x] `W02.P06.S29` - Prove interrupted snapshot or restore never exposes a partially committed group; `src/vaultspec_a2a/desktop_tests/test_snapshot_recovery.py`.

@@ -178,6 +178,42 @@ current wheel; excluding it is explicitly owned by S06 and must be verified
 from the built artifact by S12. Because the probe imports only installed
 production modules, that later exclusion will not weaken this regression gate.
 
+## `W01 P02 S06` production wheel-shape review
+
+Status: PASS
+
+The repaired Hatch target packages the production Python tree and its required
+resources while excluding every ordinary test tree, `desktop_tests`,
+`service_tests`, package-level `conftest.py`, VidaiMock tapes, mock agent and
+team presets, and the deterministic ADR acceptance preset. A clean commit
+archive produces a 228-entry wheel with 224 package entries while retaining all
+11 migration assets, nine production agent presets, two production team
+presets, and the bundled context rule.
+
+Initial architecture review found a high-severity closure and evidence defect.
+The first exclusion list missed the root pytest configuration and 13
+`service_tests` files, while its archive check only searched literal `tests`
+and `desktop_tests` paths. Its recorded counts also came from a dirty worktree
+that contributed an untracked preset, so the claimed 269-entry artifact was not
+the committed source artifact. Review additionally found certification-only
+mock and deterministic resources in the desktop product wheel.
+
+The target now states Hatch's actual behavior: every non-excluded file below
+the package root can enter the artifact, including untracked files in a dirty
+build. Verification therefore builds from a clean commit archive. Product
+packaging excludes certification resources without deleting them or changing
+source and Compose workflows. The installed desktop preset inventory is the
+curated artifact inventory; S08 owns only the package-resource loading seam,
+and S12 must enforce the exact installed production discovery set as part of
+its clean-artifact contract.
+
+Independent follow-up review reproduced the clean counts and found no remaining
+critical, high, or medium issues. The S05 real-wheel dependency gate remains
+five-for-five, TOML parsing confirms the exact 14 exclusions, Ruff and lock
+checks pass, and the required migration, production-preset, and context assets
+remain present. S10 must move or force-include its repository-root schema, and
+S12 must reject dirty or forbidden archive content by exact identity.
+
 ## `W01 P02 S07` package-owned migration review
 
 Status: PASS

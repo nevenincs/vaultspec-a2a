@@ -80,28 +80,35 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/vaultspec_a2a"]
-# The desktop capsule ships a deliberately shaped wheel: every capsule-owned
-# runtime asset is package data, and no in-package test tree is carried.
+# Hatch packages every non-excluded file below the declared package root. A
+# dirty build can therefore capture untracked files; release verification must
+# build from a clean commit archive rather than the working tree.
 #
-# Included (hatchling default-includes all tracked files under the package, so
-# these ride in without an allowlist that would risk dropping production
-# modules):
+# Production package data retained by this denylist:
 #   - database/migrations/**  — Alembic scripts, env.py, and script.py.mako
 #     resolved from installed package resources (see database/migrate.py).
-#   - team/presets/**  — bundled agent and team TOML presets, including the
-#     mock-* presets that the /v1/presets discovery surface globs and filters
-#     via is_mock_preset (team/team_config.py); excluding them would change the
-#     installed discovery contract.
+#   - team/presets/{agents,teams}/**  — product agent and team presets; mock and
+#     deterministic certification variants remain available only in source and
+#     Compose certification environments.
 #   - context/presets/**  — bundled authoring rule corpus.
 #
-# Excluded: the rust-style per-module `tests/` trees and the `desktop_tests/`
-# certification package. These are source-tree-only (pytest testpaths point at
-# the checkout), so their removal cannot weaken any gate that runs from source.
+# Excluded: all test harnesses and certification-only preset assets. Source-run
+# and Compose certification still use these files from the checkout.
 exclude = [
   "**/tests",
   "**/tests/**",
+  "src/vaultspec_a2a/conftest.py",
   "src/vaultspec_a2a/desktop_tests",
   "src/vaultspec_a2a/desktop_tests/**",
+  "src/vaultspec_a2a/service_tests",
+  "src/vaultspec_a2a/service_tests/**",
+  "src/vaultspec_a2a/team/presets/mock",
+  "src/vaultspec_a2a/team/presets/mock/**",
+  "src/vaultspec_a2a/team/presets/agents/mock-*.toml",
+  "src/vaultspec_a2a/team/presets/agents/*-mock.toml",
+  "src/vaultspec_a2a/team/presets/teams/mock-*.toml",
+  "src/vaultspec_a2a/team/presets/teams/*-mock.toml",
+  "src/vaultspec_a2a/team/presets/teams/vaultspec-adr-research-deterministic.toml",
 ]
 
 [tool.pytest.ini_options]

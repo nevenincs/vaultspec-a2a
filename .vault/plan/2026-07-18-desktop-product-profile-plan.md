@@ -191,7 +191,7 @@ Protect versioned product APIs and administrative operations with distinct owner
 
 Expose liveness, gateway readiness, worker state, provider eligibility, and run admission as separate bounded facts shared by discovery and service-state consumers.
 
-- [ ] `W03.P09.S47` - Define separate liveness gateway readiness worker state provider eligibility and run-admission fields; `src/vaultspec_a2a/api/schemas/gateway.py`.
+- [x] `W03.P09.S47` - Define separate liveness gateway readiness worker state provider eligibility and run-admission fields; `src/vaultspec_a2a/api/schemas/gateway.py`.
 - [ ] `W03.P09.S48` - Make a valid desktop database with a cold startable worker gateway-ready without claiming execution readiness; `src/vaultspec_a2a/control/health.py`.
 - [ ] `W03.P09.S49` - Return only a minimal alive or not-alive signal from unauthenticated HTTP liveness and return process and product identity plus state only from authenticated readiness responses; `src/vaultspec_a2a/api/app.py`.
 - [ ] `W03.P09.S50` - Serve the same authenticated readiness facts through service-state and discovery probes; `src/vaultspec_a2a/api/routes/gateway.py`.

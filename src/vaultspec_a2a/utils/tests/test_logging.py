@@ -1,9 +1,12 @@
-"""Tests for the logging utility."""
+"""Tests for the logging utility — per-kind lane contracts, real seams, no mocks."""
 
 import io
 import json
 import logging
+import logging.handlers
+import sys
 from collections.abc import Generator
+from pathlib import Path
 
 import pytest
 from opentelemetry.sdk.resources import Resource
@@ -11,55 +14,142 @@ from opentelemetry.sdk.trace import TracerProvider
 
 from ...control.config import Settings
 from ..enums import Environment, LogLevel
-from ..logging import JSONFormatter, OTelCorrelationFilter, setup_logging
+from ..logging import (
+    JSONFormatter,
+    OTelCorrelationFilter,
+    _assert_no_stdout_handler,
+    configure_logging,
+    reconfigure_console_utf8,
+)
 
 
 @pytest.fixture(autouse=True)
 def _clean_root_logger() -> Generator[None]:
-    """Remove all root logger handlers before and after each test.
+    """Close and remove all root handlers before and after each test.
 
-    Prevents cross-test pollution from setup_logging adding handlers
-    that accumulate across tests (H29 fix).
+    Closing (not just clearing) releases any RotatingFileHandler's file so a
+    Windows tmp_path teardown does not fail on an open handle.
     """
-    root = logging.getLogger()
-    root.handlers.clear()
+
+    def _reset() -> None:
+        root = logging.getLogger()
+        for handler in list(root.handlers):
+            root.removeHandler(handler)
+            handler.close()
+
+    _reset()
     yield
-    root.handlers.clear()
+    _reset()
 
 
-def test_setup_logging_json_format_in_production() -> None:
-    """In production, even if interactive, we should force JSON output."""
-    settings_override = Settings(
-        environment=Environment.PRODUCTION, log_level=LogLevel.DEBUG
+def _settings(*, env: Environment, level: LogLevel, home: Path) -> Settings:
+    # a2a_home is keyed by its explicit alias, so it must be passed by alias.
+    return Settings(environment=env, log_level=level, VAULTSPEC_A2A_HOME=home)
+
+
+# --- service kind ----------------------------------------------------------
+
+
+def test_service_kind_json_to_stderr_and_rotating_file(tmp_path: Path) -> None:
+    settings = _settings(
+        env=Environment.PRODUCTION, level=LogLevel.DEBUG, home=tmp_path
     )
+    configure_logging("service", service_name="gateway", settings_override=settings)
 
-    setup_logging(settings_override=settings_override)  # ty: ignore[invalid-argument-type]
-
-    root_logger = logging.getLogger()
-    assert root_logger.level == logging.DEBUG
-
-    # Verify we got a stream handler with JSONFormatter
-    # since ci_mode / force_json activates
-    handlers = root_logger.handlers
-    assert len(handlers) == 1
-    assert isinstance(handlers[0], logging.StreamHandler)
-    assert isinstance(handlers[0].formatter, JSONFormatter)
-
-
-def test_setup_logging_respects_settings_override() -> None:
-    """Ensure logging captures settings correctly."""
-    settings_override = Settings(
-        environment=Environment.DEVELOPMENT, log_level=LogLevel.ERROR
+    root = logging.getLogger()
+    assert root.level == logging.DEBUG
+    stream_handlers = [h for h in root.handlers if isinstance(h, logging.StreamHandler)]
+    file_handlers = [
+        h for h in root.handlers if isinstance(h, logging.handlers.RotatingFileHandler)
+    ]
+    assert file_handlers, "service kind must attach a rotating file lane"
+    # A stderr JSON stream lane exists; NO handler writes to stdout.
+    assert any(
+        getattr(h, "stream", None) is sys.stderr
+        and isinstance(h.formatter, JSONFormatter)
+        for h in stream_handlers
     )
+    assert not any(getattr(h, "stream", None) is sys.stdout for h in root.handlers)
+    # The file lane exists on disk under the runtime dir.
+    assert (tmp_path / "runtime" / "gateway.log").exists()
 
-    setup_logging(settings_override=settings_override)  # ty: ignore[invalid-argument-type]
 
-    root_logger = logging.getLogger()
-    assert root_logger.level == logging.ERROR
+def test_service_kind_honors_log_level(tmp_path: Path) -> None:
+    settings = _settings(
+        env=Environment.DEVELOPMENT, level=LogLevel.ERROR, home=tmp_path
+    )
+    configure_logging("service", service_name="worker", settings_override=settings)
+    assert logging.getLogger().level == logging.ERROR
+
+
+def test_service_kind_attaches_correlation_filter(tmp_path: Path) -> None:
+    settings = _settings(env=Environment.PRODUCTION, level=LogLevel.INFO, home=tmp_path)
+    configure_logging("service", service_name="gateway", settings_override=settings)
+    for handler in logging.getLogger().handlers:
+        assert any(isinstance(f, OTelCorrelationFilter) for f in handler.filters)
+
+
+# --- cli kind --------------------------------------------------------------
+
+
+def test_cli_kind_stderr_warning_no_stdout(tmp_path: Path) -> None:
+    settings = _settings(
+        env=Environment.PRODUCTION, level=LogLevel.DEBUG, home=tmp_path
+    )
+    # Production/non-interactive -> plain stderr StreamHandler at WARNING.
+    configure_logging("cli", settings_override=settings)
+    root = logging.getLogger()
+    assert root.level == logging.WARNING
+    assert not any(getattr(h, "stream", None) is sys.stdout for h in root.handlers)
+    assert any(getattr(h, "stream", None) is sys.stderr for h in root.handlers)
+
+
+# --- protocol kind ---------------------------------------------------------
+
+
+def test_protocol_kind_is_stderr_only(tmp_path: Path) -> None:
+    settings = _settings(
+        env=Environment.PRODUCTION, level=LogLevel.DEBUG, home=tmp_path
+    )
+    configure_logging("protocol", settings_override=settings)
+    root = logging.getLogger()
+    assert root.level == logging.WARNING
+    assert root.handlers, "protocol kind must attach a stderr handler"
+    assert all(getattr(h, "stream", None) is sys.stderr for h in root.handlers)
+    assert not any(getattr(h, "stream", None) is sys.stdout for h in root.handlers)
+
+
+def test_protocol_no_stdout_assertion_fires() -> None:
+    # The construction-time guard must reject a stdout handler on the root.
+    root = logging.getLogger()
+    root.addHandler(logging.StreamHandler(sys.stdout))
+    with pytest.raises(AssertionError, match="stdout"):
+        _assert_no_stdout_handler(root)
+
+
+# --- library kind ----------------------------------------------------------
+
+
+def test_library_kind_is_noop() -> None:
+    sentinel = logging.StreamHandler(io.StringIO())
+    root = logging.getLogger()
+    root.addHandler(sentinel)
+    configure_logging("library")
+    assert sentinel in root.handlers  # untouched
+
+
+# --- utf-8 guard -----------------------------------------------------------
+
+
+def test_reconfigure_console_utf8_never_raises() -> None:
+    # Under pytest capture the streams may not be reconfigurable; must not raise.
+    reconfigure_console_utf8()
+
+
+# --- OTel correlation + JSON formatter (unchanged behaviour) ---------------
 
 
 def test_otel_correlation_filter_injects_active_span_fields() -> None:
-    """The correlation filter injects OTel IDs from the active span."""
     provider = TracerProvider(resource=Resource.create({"service.name": "svc-test"}))
     tracer = provider.get_tracer(__name__)
     record = logging.LogRecord(
@@ -71,10 +161,8 @@ def test_otel_correlation_filter_injects_active_span_fields() -> None:
         args=(),
         exc_info=None,
     )
-
     with tracer.start_as_current_span("span"):
         kept = OTelCorrelationFilter().filter(record)
-
     assert kept is True
     assert len(record.__dict__["trace_id"]) == 32
     assert len(record.__dict__["span_id"]) == 16
@@ -83,7 +171,6 @@ def test_otel_correlation_filter_injects_active_span_fields() -> None:
 
 
 def test_otel_correlation_filter_preserves_existing_fields() -> None:
-    """Caller-provided correlation fields must not be overwritten."""
     provider = TracerProvider(resource=Resource.create({"service.name": "svc-test"}))
     tracer = provider.get_tracer(__name__)
     record = logging.LogRecord(
@@ -99,10 +186,8 @@ def test_otel_correlation_filter_preserves_existing_fields() -> None:
     record.span_id = "existing-span-id"
     record.trace_sampled = "existing-sampled"
     record.service_name = "existing-service"
-
     with tracer.start_as_current_span("span"):
         kept = OTelCorrelationFilter().filter(record)
-
     assert kept is True
     assert record.__dict__["trace_id"] == "existing-trace-id"
     assert record.__dict__["span_id"] == "existing-span-id"
@@ -111,7 +196,6 @@ def test_otel_correlation_filter_preserves_existing_fields() -> None:
 
 
 def test_json_formatter_outputs_correlation_fields_from_filter() -> None:
-    """JSON logging includes auto-injected correlation fields and extras."""
     provider = TracerProvider(resource=Resource.create({"service.name": "svc-test"}))
     tracer = provider.get_tracer(__name__)
     stream = io.StringIO()
@@ -119,15 +203,12 @@ def test_json_formatter_outputs_correlation_fields_from_filter() -> None:
     logger.handlers.clear()
     logger.setLevel(logging.INFO)
     logger.propagate = False
-
     handler = logging.StreamHandler(stream)
     handler.setFormatter(JSONFormatter())
     handler.addFilter(OTelCorrelationFilter())
     logger.addHandler(handler)
-
     with tracer.start_as_current_span("span"):
         logger.info("hello", extra={"thread_id": "thread-123"})
-
     payload = json.loads(stream.getvalue())
     assert payload["message"] == "hello"
     assert payload["thread_id"] == "thread-123"
@@ -135,12 +216,10 @@ def test_json_formatter_outputs_correlation_fields_from_filter() -> None:
     assert len(payload["trace_id"]) == 32
     assert len(payload["span_id"]) == 16
     assert payload["trace_sampled"] is True
-
     logger.handlers.clear()
 
 
 def test_otel_correlation_filter_leaves_record_clean_without_active_span() -> None:
-    """No active span means no auto-injected correlation fields."""
     record = logging.LogRecord(
         name="test.logger",
         level=logging.INFO,
@@ -150,46 +229,9 @@ def test_otel_correlation_filter_leaves_record_clean_without_active_span() -> No
         args=(),
         exc_info=None,
     )
-
     kept = OTelCorrelationFilter().filter(record)
-
     assert kept is True
     assert "trace_id" not in record.__dict__
     assert "span_id" not in record.__dict__
     assert "trace_sampled" not in record.__dict__
     assert "service_name" not in record.__dict__
-
-
-def test_setup_logging_attaches_correlation_filter_json_path() -> None:
-    """Production-shaped setup attaches the correlation filter to JSON logging."""
-    settings_override = Settings(
-        environment=Environment.PRODUCTION, log_level=LogLevel.DEBUG
-    )
-
-    setup_logging(settings_override=settings_override)  # ty: ignore[invalid-argument-type]
-
-    handler = logging.getLogger().handlers[0]
-    assert any(isinstance(f, OTelCorrelationFilter) for f in handler.filters)
-
-
-def test_setup_logging_attaches_correlation_filter_rich_path() -> None:
-    """Interactive dev setup attaches the correlation filter to Rich logging.
-
-    The interactive path is selected through the real ``force_interactive`` API
-    input rather than by patching ``sys.stdout.isatty`` — the parameter exists so
-    a caller can deterministically choose the Rich handler regardless of the
-    attached streams (e.g. under a test runner that captures stdout).
-    """
-    settings_override = Settings(
-        environment=Environment.DEVELOPMENT,
-        log_level=LogLevel.DEBUG,
-    )
-
-    setup_logging(
-        settings_override=settings_override,  # ty: ignore[invalid-argument-type]
-        force_interactive=True,
-    )
-
-    handler = logging.getLogger().handlers[0]
-    assert handler.__class__.__name__ == "RichHandler"
-    assert any(isinstance(f, OTelCorrelationFilter) for f in handler.filters)

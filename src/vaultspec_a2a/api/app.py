@@ -23,7 +23,7 @@ from typing import Any, cast
 
 import httpx
 import uvicorn
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from opentelemetry import metrics, trace
 from starlette.websockets import WebSocket
@@ -32,7 +32,11 @@ from ..authoring import resolve_engine
 from ..control.circuit_breaker import WorkerCircuitBreaker
 from ..control.config import settings
 from ..control.dispatch import redispatch_reconciling_threads
-from ..control.health import assemble_health_status, build_sqlite_fallback_diagnostics
+from ..control.health import (
+    assemble_desktop_readiness,
+    assemble_health_status,
+    build_sqlite_fallback_diagnostics,
+)
 from ..control.verdict_subscriber import VerdictSubscriber
 from ..control.worker_management import (
     LazyWorkerSpawner,
@@ -69,6 +73,7 @@ from ..utils.asyncio_compat import configure_asyncio_runtime
 from ._utils import trace_headers
 from .internal import internal_router
 from .routes import register_routes
+from .schemas.gateway import LivenessResponse
 from .websocket import ConnectionManager
 from .ws_dispatch import (
     create_dispatch_control_handler,
@@ -180,6 +185,25 @@ def _load_desktop_credentials(app: FastAPI) -> None:
     app.state.v1_service_token = load_attach_credential(credentials_dir)
     app.state.lifecycle_capability = load_ownership_capability(credentials_dir)
     settings.internal_token = create_worker_ipc_credential(credentials_dir)
+
+
+def _http_attach_authorized(request: Request, app: FastAPI) -> bool:
+    """Return whether an HTTP request presents a valid attach credential.
+
+    The liveness surface answers every caller, but only a caller that proves the
+    attach credential in constant time is disclosed the readiness projection. This
+    mirrors the WebSocket attach check exactly, so the liveness boundary cannot
+    weaken the P08 attach gate: the explicit test-only bypass short-circuits for
+    route-behaviour tests, and corrupted runtime state with no token discloses
+    nothing.
+    """
+    if bool(getattr(app.state, "allow_unauthenticated_v1_for_testing", False)):
+        return True
+    expected = getattr(app.state, "v1_service_token", None)
+    if not isinstance(expected, str) or not expected:
+        return False
+    supplied = request.headers.get("authorization", "").encode("utf-8")
+    return hmac.compare_digest(supplied, f"Bearer {expected}".encode())
 
 
 def _websocket_attach_authorized(websocket: WebSocket, app: FastAPI) -> bool:
@@ -585,12 +609,21 @@ def create_app(
     app.include_router(internal_router)
 
     @app.get("/health")
-    async def health_endpoint() -> dict[str, object]:
+    async def health_endpoint(request: Request) -> dict[str, object]:
         """Top-level liveness check for external probes.
 
-        `/health` stays green when the gateway process is alive. Aggregate
-        dependency readiness is exposed separately via `/api/health`.
+        Under the armed desktop profile the unauthenticated boundary discloses
+        only the minimal liveness fact - no process identity, product identity, or
+        product state - while an attach-authenticated caller additionally receives
+        the readiness projection from the single readiness authority. The Compose
+        and development profiles retain the legacy aggregate liveness body their
+        probes already consume; readiness there stays on `/api/health`.
         """
+        if settings.desktop_profile_armed:
+            if _http_attach_authorized(request, app):
+                readiness = assemble_desktop_readiness(app_state=app.state)
+                return readiness.model_dump(mode="json")
+            return LivenessResponse().model_dump(mode="json")
         shared = assemble_health_status(app_state=app.state)
         # The heartbeat-push freshness gate (worker_connected) is authoritative only
         # for a worker this gateway OWNS (holds the process handle). An adopted /

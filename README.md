@@ -4,6 +4,7 @@ Headless agent-to-agent orchestration.
 
 [![Tests](https://github.com/nevenincs/vaultspec-a2a/actions/workflows/test.yml/badge.svg)](https://github.com/nevenincs/vaultspec-a2a/actions/workflows/test.yml)
 [![Python 3.13+](https://img.shields.io/badge/python-3.13%2B-blue.svg)](https://www.python.org/)
+[![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![Status: Beta](https://img.shields.io/badge/status-beta-blue.svg)](#status-and-license)
 
 [What it does](#what-it-does) ·
@@ -114,8 +115,7 @@ vaultspec-a2a is one project in a family built around one shared vault:
 may change without notice. The project is usable and under active development;
 support is best-effort.
 
-License: not yet declared. The distribution carries no SPDX license in its
-metadata pending an owner decision.
+Licensed under the [MIT License](LICENSE).
 
 ---
 

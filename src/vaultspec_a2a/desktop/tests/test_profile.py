@@ -47,10 +47,10 @@ def test_derive_state_paths_are_absolute_and_seated_under_app_home(
         state.database_path,
         state.checkpoint_path,
         state.logs_dir,
-        state.credentials_dir,
-        state.discovery_dir,
-        state.receipts_dir,
+        state.discovery_path,
         state.workspaces_root,
+        state.credentials_dir,
+        state.receipts_dir,
         state.temp_homes_dir,
         state.snapshots_dir,
     ):
@@ -60,6 +60,11 @@ def test_derive_state_paths_are_absolute_and_seated_under_app_home(
     # Database and checkpoint are distinct files under the same state directory.
     assert state.database_path != state.checkpoint_path
     assert state.database_path.parent == state.checkpoint_path.parent
+
+    # Seated paths mirror the operative a2a_home conventions: runtime logs and the
+    # discovery service.json at the application-home root.
+    assert state.logs_dir == app_home / "runtime"
+    assert state.discovery_path == app_home / "service.json"
 
 
 def test_derive_state_paths_rejects_relative_app_home() -> None:
@@ -142,13 +147,26 @@ def test_resolve_accepts_creatable_but_absent_app_home(tmp_path: Path) -> None:
     assert profile.app_home == absent_home
 
 
-def test_ensure_materialises_every_state_directory(tmp_path: Path) -> None:
-    """``ensure`` creates each mutable-state directory idempotently."""
+def test_ensure_materialises_only_provisioned_directories(tmp_path: Path) -> None:
+    """``ensure`` creates the consumed directories and leaves reserved ones alone."""
     capsule = _build_capsule(tmp_path / "capsule")
     profile = DesktopProfile.resolve(tmp_path / "app", capsule)
+    state = profile.state
 
     profile.ensure()
     profile.ensure()  # idempotent second pass must not raise.
 
-    for directory in profile.state.directories:
+    for directory in state.provisioned_directories:
         assert directory.is_dir()
+
+    # Reserved directories have no consumer yet and must not be seeded empty.
+    for reserved in (
+        state.credentials_dir,
+        state.receipts_dir,
+        state.temp_homes_dir,
+        state.snapshots_dir,
+    ):
+        assert not reserved.exists()
+
+    # Discovery is a file written by the discovery authority, never pre-created.
+    assert not state.discovery_path.exists()

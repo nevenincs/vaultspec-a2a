@@ -50,47 +50,73 @@ class DesktopProfileError(ValueError):
 class DesktopStatePaths:
     """The explicit mutable-state sub-paths derived from an application home.
 
-    Every field is an absolute path beneath the application home. Database and
-    checkpoint entries are files; the remainder are directories. None of these
-    paths is created by derivation; :meth:`DesktopProfile.ensure` materialises
-    the directories when a profile is armed.
+    Every field is an absolute path beneath the application home. The fields fall
+    into two groups. The *seated* paths describe where live runtime state already
+    lands once the application home is bound: ``database_path`` and
+    ``checkpoint_path`` are the SQLite files the settings profile derives;
+    ``workspaces_root`` is the workspace tree; ``logs_dir`` is the runtime log
+    directory (``a2a_home/runtime``, matching the gateway and worker logging
+    convention); and ``discovery_path`` is the gateway discovery ``service.json``
+    file at the application-home root (the location owned by
+    ``lifecycle.discovery.service_json_path``). These mirror the operative
+    ``a2a_home`` derivation rather than inventing a parallel layout.
+
+    The *reserved* paths — ``credentials_dir``, ``receipts_dir``,
+    ``temp_homes_dir``, and ``snapshots_dir`` — are declared here so the
+    consuming phases (the consistency-group snapshots of ``W02.P06`` and the
+    split credentials of ``W03.P08``) bind one agreed layout. They have no
+    consumer yet and are therefore not materialised by :meth:`DesktopProfile.ensure`.
     """
 
     app_home: Path
     database_path: Path
     checkpoint_path: Path
     logs_dir: Path
-    credentials_dir: Path
-    discovery_dir: Path
-    receipts_dir: Path
+    discovery_path: Path
     workspaces_root: Path
+    credentials_dir: Path
+    receipts_dir: Path
     temp_homes_dir: Path
     snapshots_dir: Path
 
     @property
-    def directories(self) -> tuple[Path, ...]:
-        """Return the directories a materialised application home must contain."""
+    def provisioned_directories(self) -> tuple[Path, ...]:
+        """Return the directories with a live consumer that ``ensure`` creates.
+
+        Only the seated directories are materialised. ``discovery_path`` is a file
+        written by the discovery authority and its parent is the application home;
+        the reserved directories are omitted until their phases consume them.
+        """
         return (
             self.app_home,
             self.database_path.parent,
             self.checkpoint_path.parent,
             self.logs_dir,
-            self.credentials_dir,
-            self.discovery_dir,
-            self.receipts_dir,
             self.workspaces_root,
-            self.temp_homes_dir,
-            self.snapshots_dir,
         )
+
+
+def _discovery_path(app_home: Path) -> Path:
+    """Return the gateway discovery record path for ``app_home``.
+
+    Delegates to the discovery authority so the ``service.json`` name and its
+    application-home-root placement have exactly one definition. Imported lazily
+    to keep this module's import surface free of the lifecycle/HTTP stack.
+    """
+    from ..lifecycle.discovery import service_json_path
+
+    return service_json_path(app_home)
 
 
 def derive_state_paths(app_home: Path) -> DesktopStatePaths:
     """Derive the explicit mutable-state layout from an explicit application home.
 
-    This is pure path math and performs no filesystem access; it is the single
-    authority for the desktop application-home layout. ``app_home`` must be an
-    absolute path so that no mutable path can resolve relative to the launch
-    directory.
+    This is the single authority for the desktop application-home layout. The
+    seated paths mirror the operative ``a2a_home`` derivation (runtime logs under
+    ``a2a_home/runtime``, the discovery ``service.json`` at the root) so the
+    profile describes where state actually lands; the reserved paths fix the
+    layout their future consumers will bind. ``app_home`` must be an absolute path
+    so that no mutable path can resolve relative to the launch directory.
 
     Raises:
         DesktopProfileError: If ``app_home`` is not absolute.
@@ -106,11 +132,11 @@ def derive_state_paths(app_home: Path) -> DesktopStatePaths:
         app_home=home,
         database_path=state / "vaultspec.db",
         checkpoint_path=state / "checkpoints.db",
-        logs_dir=home / "logs",
-        credentials_dir=home / "credentials",
-        discovery_dir=home / "discovery",
-        receipts_dir=home / "receipts",
+        logs_dir=home / "runtime",
+        discovery_path=_discovery_path(home),
         workspaces_root=home / "workspaces",
+        credentials_dir=home / "credentials",
+        receipts_dir=home / "receipts",
         temp_homes_dir=home / "tmp" / "homes",
         snapshots_dir=home / "snapshots",
     )
@@ -229,10 +255,12 @@ class DesktopProfile:
         return self.capsule_root
 
     def ensure(self) -> None:
-        """Create every mutable-state directory beneath the application home.
+        """Create the provisioned mutable-state directories beneath the app home.
 
-        Idempotent: existing directories are left untouched. Called once the
-        profile is armed and about to seat live state.
+        Idempotent: existing directories are left untouched. Only directories with
+        a live consumer are created; the reserved directories are left for their
+        consuming phases so ``ensure`` never seeds dead empty state. Called once
+        the profile is armed and about to seat live state.
         """
-        for directory in self.state.directories:
+        for directory in self.state.provisioned_directories:
             directory.mkdir(parents=True, exist_ok=True)

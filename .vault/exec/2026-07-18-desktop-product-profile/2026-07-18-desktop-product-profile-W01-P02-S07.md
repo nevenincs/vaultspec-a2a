@@ -57,16 +57,51 @@ SQLite database through the package-resolved scripts and asserts the recorded
 
 ## Tests
 
-- `uv run --no-sync pytest src/vaultspec_a2a/database/tests/test_migrations.py -q`
-  reported 11 passed, covering the retained `alembic.ini` developer-CLI tests,
-  the two new package-resolution tests, and two real programmatic upgrades.
-- `uv run --no-sync pytest src/vaultspec_a2a/database/tests -q` reported 114
-  passed, confirming the migrate rewrite did not regress the session, checkpoint,
+- `.venv/Scripts/python.exe -m pytest src/vaultspec_a2a/database/tests/test_migrations.py -q`
+  reported 15 passed after remediation, covering the retained `alembic.ini`
+  developer-CLI tests, package resolution, exact percent-encoded URL round
+  trips, three real programmatic upgrades, and concurrent upgrades of two
+  distinct databases.
+- `.venv/Scripts/python.exe -m pytest src/vaultspec_a2a/database/tests -q`
+  reported 118 passed after remediation; the earlier implementation run
+  reported 114. The migration changes did not regress the session, checkpoint,
   or reconciliation suites that depend on `run_migrations`.
 - `uv run --no-sync pytest src/vaultspec_a2a/desktop_tests -q` reported 5 passed,
   keeping the S05 dependency-closure gate green.
 - Ruff check and format, and scoped `ty check`, passed for the migration runner,
   the test module, and the database facade.
+
+## Reopened review finding and remediation
+
+The post-implementation review found a high-severity correctness defect in the
+programmatic configuration: Alembic stores main options in an interpolating
+parser, so raw percent signs in `script_location` or `sqlalchemy.url` were not
+valid option values. This prevented legitimate percent-encoded database URLs
+and installation paths from being read back or used for an upgrade.
+
+The review also found a high-severity concurrency defect. Alembic's command and
+environment proxy state is process-global, so concurrent upgrades dispatched to
+different worker threads could cross-wire their configurations, fail with
+proxy-state errors, or leave one database only partially migrated.
+
+Both values are now escaped for Alembic when written. Alembic removes that
+storage escape when read, so `get_main_option` returns the original package path
+and database URL. `build_migration_config` is also included in the migration
+module's declared public API. Missing or incomplete migration package data now
+raises a stable, actionable `FileNotFoundError` that recommends reinstalling a
+complete distribution without exposing an installation path or database URL.
+The synchronous Alembic upgrade is now serialized under a process-wide lock
+that is acquired inside the worker thread. Concurrent async callers therefore
+remain non-blocking to the event loop while Alembic's global command context is
+protected.
+
+The regression coverage constructs real configurations for a Windows-style
+SQLite URL and a percent-encoded PostgreSQL URL, asserting exact round trips.
+It also performs a real SQLite upgrade where the database lives below a
+directory containing a literal percent sign and verifies that Alembic reaches
+the current head revision. A real `asyncio.gather` regression upgrades two
+distinct SQLite databases concurrently and verifies that both contain the
+current revision and the complete application table set.
 
 ## Notes
 

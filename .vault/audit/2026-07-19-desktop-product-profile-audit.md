@@ -177,3 +177,36 @@ suite, Ruff, formatting, scoped type checking, focused dependency lint, and
 current wheel; excluding it is explicitly owned by S06 and must be verified
 from the built artifact by S12. Because the probe imports only installed
 production modules, that later exclusion will not weaken this regression gate.
+
+## `W01 P02 S07` package-owned migration review
+
+Status: PASS
+
+The runtime migration configuration now resolves Alembic's `env.py`, revision
+scripts, and template from the installed `vaultspec_a2a.database.migrations`
+package. It attaches no checkout-level `alembic.ini`, preserves the existing
+developer CLI configuration separately, and completes a clean-wheel migration
+from an unrelated working directory through revision `0007`.
+
+Initial independent review found two high-severity defects. Alembic stores main
+options through an interpolating parser, so a literal percent sign in either the
+installed script path or database URL failed before startup. In addition,
+concurrent async callers dispatched Alembic into separate threads even though
+its command proxy is process-global; real two-database probes cross-wired the
+contexts and left missing or partially stamped databases. Review also found a
+medium error-contract gap for missing package resources.
+
+Both configuration values are now escaped only for Alembic storage and round
+trip to their original values. The synchronous command is serialized by a
+process-wide lock acquired inside the worker thread, preserving event-loop
+responsiveness while protecting Alembic's global context. Missing or incomplete
+package resources produce a stable, path-safe `FileNotFoundError`, and the new
+configuration builder is included in the module's public API.
+
+Follow-up review found no unresolved critical, high, or medium issues. Fifteen
+focused migration tests and all 118 database tests pass, including a real
+SQLite database beneath a percent-containing directory, encoded SQLite and
+PostgreSQL configuration round trips, and concurrent upgrades of two distinct
+databases. Ruff, formatting, and scoped type checking pass. The tests import
+production code and exercise real package resources and databases without
+fakes, mocks, stubs, patches, skips, or mirrored migration logic.

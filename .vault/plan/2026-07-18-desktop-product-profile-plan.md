@@ -11,16 +11,6 @@ related:
   - '[[2026-07-18-desktop-product-profile-reference]]'
 ---
 
-<!-- LINK RULES:
-     - [[wiki-links]] are ONLY for .vault/ documents in the
-       related: field above.
-     - The related: field carries the AUTHORISING documents
-       (ADR, research, reference, prior plan) for every Step in
-       this plan. Steps inherit this chain; per-row reference
-       footers do not exist.
-     - NEVER use [[wiki-links]] or markdown links in the
-       document body. -->
-
 <!-- RETIRED: P15, S88 -->
 
 # `desktop-product-profile` plan
@@ -102,10 +92,10 @@ Make the desktop runtime closure explicit, target-resolvable, and free of runtim
 
 Move migrations, presets, Node.js adapter resolution, and component metadata behind installed package or capsule authorities.
 
-- [x] `W01.P02.S06` - Declare migrations presets and desktop runtime metadata as explicit wheel package data; `pyproject.toml`.
+- [ ] `W01.P02.S06` - Declare migrations presets and desktop runtime metadata as explicit wheel package data; `pyproject.toml`.
 - [x] `W01.P02.S07` - Resolve Alembic configuration and migration scripts from installed package resources; `src/vaultspec_a2a/database/migrate.py`.
 - [x] `W01.P02.S08` - Load bundled agent and team presets through package-owned resource paths; `src/vaultspec_a2a/team/team_config.py`.
-- [x] `W01.P02.S09` - Resolve the default Node and ACP adapter only from capsule-owned assets in the desktop profile; `src/vaultspec_a2a/providers/factory.py`.
+- [ ] `W01.P02.S09` - Resolve the default Node and ACP adapter only from capsule-owned assets in the desktop profile; `src/vaultspec_a2a/providers/factory.py`.
 - [ ] `W01.P02.S10` - Define the versioned desktop component manifest contract consumed by dashboard packaging; `schemas/desktop-capsule-manifest.json`.
 - [ ] `W01.P02.S11` - Emit pinned component identity target compatibility gateway and standalone MCP entrypoints digests assets licenses and dependency-lock identity; `src/vaultspec_a2a/desktop/manifest.py`.
 - [ ] `W01.P02.S12` - Prove a clean built wheel contains package assets excludes tests and satisfies a real dashboard release-manifest fixture by pinned identity; `src/vaultspec_a2a/desktop_tests/test_component_contract.py`.

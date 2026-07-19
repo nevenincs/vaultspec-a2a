@@ -13,6 +13,10 @@ related:
   - '[[2026-07-18-desktop-product-profile-W01-P01-S05]]'
   - '[[2026-07-18-desktop-product-profile-W01-P01-S93]]'
   - '[[2026-07-18-desktop-product-profile-W01-P01-summary]]'
+  - '[[2026-07-18-desktop-product-profile-W01-P02-S06]]'
+  - '[[2026-07-18-desktop-product-profile-W01-P02-S07]]'
+  - '[[2026-07-18-desktop-product-profile-W01-P02-S08]]'
+  - '[[2026-07-18-desktop-product-profile-W01-P02-S09]]'
   - '[[2026-07-18-desktop-product-profile-adr]]'
   - '[[2026-07-18-desktop-product-profile-plan]]'
   - '[[2026-07-18-desktop-product-profile-reference]]'
@@ -43,6 +47,10 @@ Auto-generated index of all documents tagged with `#desktop-product-profile`.
 - `2026-07-18-desktop-product-profile-W01-P01-S05` - Prove installed desktop metadata excludes Torch and RAG while optional profiles remain resolvable
 - `2026-07-18-desktop-product-profile-W01-P01-S93` - Guard optional OTLP exporter detection so the desktop base initializes gateway and worker telemetry without server extras and prove it from a clean base installation
 - `2026-07-18-desktop-product-profile-W01-P01-summary` - `desktop-product-profile` `W01.P01` summary
+- `2026-07-18-desktop-product-profile-W01-P02-S06` - Declare migrations presets and desktop runtime metadata as explicit wheel package data
+- `2026-07-18-desktop-product-profile-W01-P02-S07` - Resolve Alembic configuration and migration scripts from installed package resources
+- `2026-07-18-desktop-product-profile-W01-P02-S08` - Load bundled agent and team presets through package-owned resource paths
+- `2026-07-18-desktop-product-profile-W01-P02-S09` - Resolve the default Node and ACP adapter only from capsule-owned assets in the desktop profile
 
 ### plan
 

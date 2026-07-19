@@ -8,6 +8,7 @@ Verifies:
 5. (Postgres) upgrade/downgrade/column/data-migration on a real Postgres instance
 """
 
+import asyncio
 import sqlite3
 from pathlib import Path
 
@@ -237,11 +238,30 @@ class TestPackageResourceResolution:
         assert cfg.config_file_name is None
         script_location = cfg.get_main_option("script_location")
         assert script_location is not None
-        assert (
-            Path(script_location).resolve() == migration_script_location().resolve()
-        )
+        assert Path(script_location).resolve() == migration_script_location().resolve()
         assert cfg.get_main_option("sqlalchemy.url") == (
             "sqlite+aiosqlite:///runtime.db"
+        )
+
+    @pytest.mark.parametrize(
+        "database_url",
+        [
+            "sqlite+aiosqlite:///C:/Vault%20Spec/runtime%25.db",
+            (
+                "postgresql+asyncpg://operator:p%40ss@localhost/vaultspec"
+                "?application_name=desktop%25capsule"
+            ),
+        ],
+    )
+    def test_runtime_config_preserves_percent_encoded_urls(
+        self, database_url: str
+    ) -> None:
+        """Alembic interpolation preserves Windows and PostgreSQL URL escapes."""
+        cfg = build_migration_config(database_url)
+
+        assert cfg.get_main_option("sqlalchemy.url") == database_url
+        assert cfg.get_main_option("script_location") == str(
+            migration_script_location()
         )
 
 
@@ -272,3 +292,50 @@ class TestRunMigrations:
 
         assert version is not None
         assert version[0] == "0007"
+
+    @pytest.mark.asyncio
+    async def test_run_migrations_with_percent_directory_reaches_head(
+        self, runtime_dir: Path
+    ) -> None:
+        """A real SQLite migration accepts a literal percent in its directory."""
+        percent_dir = runtime_dir / "capsule%runtime"
+        percent_dir.mkdir()
+        db = percent_dir / "vaultspec.db"
+
+        await run_migrations(f"sqlite+aiosqlite:///{db}")
+
+        conn = sqlite3.connect(str(db))
+        try:
+            version = conn.execute("SELECT version_num FROM alembic_version").fetchone()
+        finally:
+            conn.close()
+
+        assert version is not None
+        assert version[0] == "0007"
+
+    @pytest.mark.asyncio
+    async def test_concurrent_run_migrations_upgrades_both_databases(
+        self, runtime_dir: Path
+    ) -> None:
+        """Concurrent callers cannot cross-wire Alembic's global command context."""
+        databases = [runtime_dir / "first.db", runtime_dir / "second.db"]
+
+        await asyncio.gather(
+            *(
+                run_migrations(f"sqlite+aiosqlite:///{database}")
+                for database in databases
+            )
+        )
+
+        for database in databases:
+            conn = sqlite3.connect(str(database))
+            try:
+                version = conn.execute(
+                    "SELECT version_num FROM alembic_version"
+                ).fetchone()
+            finally:
+                conn.close()
+
+            assert version is not None
+            assert version[0] == "0007"
+            assert _get_tables(database) >= _APP_TABLES

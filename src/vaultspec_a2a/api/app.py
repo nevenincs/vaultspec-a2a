@@ -379,7 +379,7 @@ async def _lifespan(app: FastAPI) -> AsyncGenerator[None]:
             # Hand the spawner the event it fires once the first demand-driven
             # single-flight worker start reaches readiness; the parked
             # reconciliation above then wakes.
-            cast("Any", worker_spawner).demand_ready_event = worker_demand_ready
+            worker_spawner.demand_ready_event = worker_demand_ready
             reconcile_task = asyncio.create_task(_deferred_reconcile())
         else:
             reconcile_task = asyncio.create_task(

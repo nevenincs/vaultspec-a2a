@@ -2,16 +2,20 @@ set working-directory := "../.."
 set windows-shell := ["powershell.exe", "-NoLogo", "-NoProfile", "-Command"]
 
 core := "uv run --no-sync --frozen --no-default-groups --group tooling vaultspec-core"
-core_install := "uv run --no-sync --frozen --no-default-groups --group tooling python scripts/vaultspec_install.py"
+
+# Refuse broad Core reconciliation when its tracked surfaces carry local edits.
+_require-clean-core:
+    git diff --quiet -- .vaultspec .claude .gemini .agents .codex CLAUDE.md GEMINI.md AGENTS.md .gitattributes .gitignore prek.toml
+    git diff --cached --quiet -- .vaultspec .claude .gemini .agents .codex CLAUDE.md GEMINI.md AGENTS.md .gitattributes .gitignore prek.toml
 
 # Resolve locked tooling and enroll the workspace through Vaultspec Core.
-setup:
+setup: _require-clean-core
     uv sync --locked --no-default-groups --group tooling
-    {{ core_install }} install all --mode dev --force
+    {{ core }} install all --mode dev --force
 
 # Enroll the workspace after the tooling profile has already been synchronized.
-install:
-    {{ core_install }} install all --mode dev
+install: _require-clean-core
+    {{ core }} install all --mode dev --force
 
 # Preview Core-owned enrollment and Git-ignore reconciliation.
 install-dry-run:
@@ -26,11 +30,11 @@ sync-dry-run:
     {{ core }} sync all --dry-run
 
 # Deliberately refresh Core inside its declared compatibility range and converge the workspace.
-upgrade:
+upgrade: _require-clean-core
     uv lock --upgrade-package vaultspec-core
     uv sync --locked --no-default-groups --group tooling
     {{ core }} --version
-    {{ core_install }} install all --mode dev --upgrade --force
+    {{ core }} install all --mode dev --upgrade --force
     uv lock --check
 
 # Diagnose framework, provider, projection, configuration, and Git-ignore state.

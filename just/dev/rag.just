@@ -6,11 +6,14 @@ rag_cli := "uv run --no-sync --frozen --no-default-groups --extra rag vaultspec-
 # Resolve locked RAG dependencies and enroll the workspace without external provisioning.
 setup:
     uv sync --locked --no-default-groups --extra rag
-    {{ rag_cli }} install --mode dependency --no-mcp --no-provision --no-torch-config --yes
+    {{ rag_cli }} --version
+    {{ rag_cli }} status
 
 # Enroll RAG after its profile has already been synchronized; do not download models or Qdrant.
 install:
-    {{ rag_cli }} install --mode dependency --no-mcp --no-provision --no-torch-config --yes
+    uv sync --locked --no-default-groups --extra rag
+    {{ rag_cli }} --version
+    {{ rag_cli }} status
 
 # Preview non-provisioning workspace enrollment.
 install-dry-run:
@@ -18,10 +21,10 @@ install-dry-run:
 
 # Deliberately refresh RAG inside its declared compatibility range.
 upgrade:
-    uv lock --upgrade-package vaultspec-rag --upgrade-package vaultspec-core
+    uv lock --upgrade-package vaultspec-rag
     uv sync --locked --no-default-groups --extra rag
-    {{ rag_cli }} install --mode dependency --upgrade --no-mcp --no-provision --no-torch-config --yes
     {{ rag_cli }} --version
+    {{ rag_cli }} status
     uv lock --check
 
 # Build or update both document and source indexes.

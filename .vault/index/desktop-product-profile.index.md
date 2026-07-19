@@ -20,11 +20,16 @@ related:
   - '[[2026-07-18-desktop-product-profile-W01-P02-S10]]'
   - '[[2026-07-18-desktop-product-profile-W01-P02-S11]]'
   - '[[2026-07-18-desktop-product-profile-W01-P02-S12]]'
+  - '[[2026-07-18-desktop-product-profile-W01-P02-summary]]'
+  - '[[2026-07-18-desktop-product-profile-W01-P03-S13]]'
+  - '[[2026-07-18-desktop-product-profile-W01-P03-S14]]'
+  - '[[2026-07-18-desktop-product-profile-W01-P03-S15]]'
   - '[[2026-07-18-desktop-product-profile-adr]]'
   - '[[2026-07-18-desktop-product-profile-plan]]'
   - '[[2026-07-18-desktop-product-profile-reference]]'
   - '[[2026-07-18-desktop-product-profile-research]]'
   - '[[2026-07-19-desktop-product-profile-audit]]'
+  - '[[2026-07-19-desktop-product-profile-w01-p03-capsule-review-audit]]'
 ---
 
 # `desktop-product-profile` feature index
@@ -40,6 +45,7 @@ Auto-generated index of all documents tagged with `#desktop-product-profile`.
 ### audit
 
 - `2026-07-19-desktop-product-profile-audit` - `desktop-product-profile` audit: `W01 P01 S01 dependency profile review`
+- `2026-07-19-desktop-product-profile-w01-p03-capsule-review-audit` - `desktop-product-profile` audit: `w01 p03 capsule review`
 
 ### exec
 
@@ -57,6 +63,10 @@ Auto-generated index of all documents tagged with `#desktop-product-profile`.
 - `2026-07-18-desktop-product-profile-W01-P02-S10` - Define the versioned desktop component manifest contract consumed by dashboard packaging
 - `2026-07-18-desktop-product-profile-W01-P02-S11` - Emit pinned component identity target compatibility gateway and standalone MCP entrypoints digests assets licenses and dependency-lock identity
 - `2026-07-18-desktop-product-profile-W01-P02-S12` - Prove a clean built wheel contains package assets excludes tests and satisfies a real dashboard release-manifest fixture by pinned identity
+- `2026-07-18-desktop-product-profile-W01-P02-summary` - `desktop-product-profile` `W01.P02` summary
+- `2026-07-18-desktop-product-profile-W01-P03-S13` - Assemble a deterministic target capsule from pinned Python Node ACP and package-owned inputs
+- `2026-07-18-desktop-product-profile-W01-P03-S14` - Verify capsule identity target closure entrypoints digests licenses and software bill of materials without a source checkout
+- `2026-07-18-desktop-product-profile-W01-P03-S15` - Create the artifact workflow that publishes deterministic component archives and manifests for dashboard consumption
 
 ### plan
 

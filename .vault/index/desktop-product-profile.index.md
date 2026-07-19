@@ -26,6 +26,7 @@ related:
   - '[[2026-07-18-desktop-product-profile-W01-P03-S15]]'
   - '[[2026-07-18-desktop-product-profile-W01-P03-S94]]'
   - '[[2026-07-18-desktop-product-profile-W01-P03-S95]]'
+  - '[[2026-07-18-desktop-product-profile-W01-P03-S96]]'
   - '[[2026-07-18-desktop-product-profile-W01-P03-S97]]'
   - '[[2026-07-18-desktop-product-profile-W02-P04-S16]]'
   - '[[2026-07-18-desktop-product-profile-W02-P04-S17]]'
@@ -96,6 +97,7 @@ Auto-generated index of all documents tagged with `#desktop-product-profile`.
 - `2026-07-18-desktop-product-profile-W01-P03-S15` - Create the artifact workflow that publishes deterministic component archives and manifests for dashboard consumption
 - `2026-07-18-desktop-product-profile-W01-P03-S94` - Project archive payloads directly into one exclusively claimed prefix of a caller-owned unpublished generation through continuously leased descriptor or handle authority and return deterministic evidence without inner rename or cleanup
 - `2026-07-18-desktop-product-profile-W01-P03-S95` - Write deterministic capsule archives through one exact create-new file inside a caller-owned unpublished generation while sharing the bounded emitter and retaining fail-closed legacy publication behavior
+- `2026-07-18-desktop-product-profile-W01-P03-S96` - Prove direct-generation projection and archive writing with real files and competing processes including collisions source and parent swaps partial failure evidence bounds and unchanged POSIX legacy-publication refusal
 - `2026-07-18-desktop-product-profile-W01-P03-S97` - Lease one empty unpublished-generation child before any write
 - `2026-07-18-desktop-product-profile-W02-P04-S16` - Define the desktop profile and validate explicit immutable and mutable product roots
 - `2026-07-18-desktop-product-profile-W02-P04-S17` - Derive database checkpoint log credential discovery receipt workspace temporary-home and snapshot paths only from the explicit desktop app home

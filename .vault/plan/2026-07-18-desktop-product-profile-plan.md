@@ -119,7 +119,7 @@ Produce reproducible component artifacts for each accepted target triple with di
 - [ ] `W01.P03.S15` - Publish only target-native unpublished generations and component evidence that passed producer verification for dashboard consumption; `.github/workflows/desktop-capsule.yml`.
 - [x] `W01.P03.S94` - Project archive payloads directly into one exclusively claimed prefix of a caller-owned unpublished generation through continuously leased descriptor or handle authority and return deterministic evidence without inner rename or cleanup; `src/vaultspec_a2a/desktop/capsule.py`.
 - [x] `W01.P03.S95` - Write deterministic capsule archives through one exact create-new file inside a caller-owned unpublished generation while sharing the bounded emitter and retaining fail-closed legacy publication behavior; `src/vaultspec_a2a/desktop/capsule_evidence.py, src/vaultspec_a2a/desktop/tests/test_unpublished_generation.py`.
-- [ ] `W01.P03.S96` - Prove direct-generation projection and archive writing with real files and competing processes including collisions source and parent swaps partial failure evidence bounds and unchanged POSIX legacy-publication refusal; `src/vaultspec_a2a/desktop/tests/test_unpublished_generation.py`.
+- [x] `W01.P03.S96` - Prove direct-generation projection and archive writing with real files and competing processes including collisions source and parent swaps partial failure evidence bounds and unchanged POSIX legacy-publication refusal; `src/vaultspec_a2a/desktop/tests/test_unpublished_generation.py, src/vaultspec_a2a/desktop/tests/test_capsule_archives.py, src/vaultspec_a2a/desktop/tests/test_capsule_publication_races.py`.
 - [x] `W01.P03.S97` - Atomically require one absent child name then acquire and continuously retain a no-follow exact lease of the current empty child before any write while leaving every failed or pre-lease-substituted unpublished generation inert for complete verification instead of cleanup or publication; `src/vaultspec_a2a/desktop/_filesystem_authority.py`.
 
 ## Wave `W02` - establish transactional desktop state
@@ -185,6 +185,7 @@ Protect versioned product APIs and administrative operations with distinct owner
 - [ ] `W03.P08.S44` - Use only the worker IPC credential for gateway-facing event heartbeat and health traffic; `src/vaultspec_a2a/api/internal.py`.
 - [ ] `W03.P08.S45` - Read owner-scoped credential files for operator calls without accepting secret command-line arguments; `src/vaultspec_a2a/cli/main.py`.
 - [ ] `W03.P08.S46` - Prove attach-control worker IPC and lifecycle credentials are non-interchangeable rejected outside their planes and absent from discovery logs and responses; `src/vaultspec_a2a/desktop_tests/test_credential_boundaries.py`.
+- [ ] `W03.P08.S98` - Replace platform-skipped credential permission and link tests with real host-native assertions that never skip or xfail; `src/vaultspec_a2a/desktop/tests/test_credentials.py`.
 
 ### Phase `W03.P09` - serve one desktop readiness model
 

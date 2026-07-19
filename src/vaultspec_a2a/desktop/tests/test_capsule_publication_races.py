@@ -4,6 +4,7 @@ import hashlib
 import multiprocessing
 import os
 import stat
+import sys
 import time
 import zipfile
 from typing import TYPE_CHECKING
@@ -116,6 +117,14 @@ def test_concurrent_archive_publishers_cannot_delete_the_winner(tmp_path: Path) 
     assert all(not publisher.is_alive() for publisher in publishers)
     assert [publisher.exitcode for publisher in publishers] == [0, 0]
     results = tuple(path.read_text(encoding="utf-8") for path in result_paths)
+    if os.name == "posix" and not sys.platform.startswith("linux"):
+        assert all(result.startswith("error:") for result in results)
+        assert all("cannot write or atomically publish" in result for result in results)
+        assert not output.exists()
+        quarantines = tuple(tmp_path.glob(".published.zip.*.tmp"))
+        assert len(quarantines) <= 2
+        assert all(quarantine.stat().st_size == 0 for quarantine in quarantines)
+        return
     assert len(tuple(result for result in results if result.startswith("ok:"))) == 1
     assert len(tuple(result for result in results if result.startswith("error:"))) == 1
     error = next(result for result in results if result.startswith("error:"))
@@ -159,17 +168,20 @@ def test_concurrent_directory_projectors_cannot_replace_the_winner(
     assert all(not projector.is_alive() for projector in projectors)
     assert [projector.exitcode for projector in projectors] == [0, 0]
     results = tuple(path.read_text(encoding="utf-8") for path in result_paths)
+    if os.name == "posix":
+        assert all(result.startswith("error:") for result in results)
+        assert all("cannot publish" in result for result in results)
+        assert not (output / "runtime").exists()
+        assert tuple(output.glob(".vaultspec-projection-*")) == ()
+        return
     assert len(tuple(result for result in results if result.startswith("ok:"))) == 1
     assert len(tuple(result for result in results if result.startswith("error:"))) == 1
     error = next(result for result in results if result.startswith("error:"))
     assert "refuses to overwrite" in error
     assert (output / "runtime/data.bin").read_bytes() == payload
     quarantines = tuple(output.glob(".vaultspec-projection-*"))
-    if os.name == "posix":
-        assert quarantines == ()
-    else:
-        assert len(quarantines) <= 1
-        assert all(
-            quarantine.is_dir() and not any(quarantine.iterdir())
-            for quarantine in quarantines
-        )
+    assert len(quarantines) <= 1
+    assert all(
+        quarantine.is_dir() and not any(quarantine.iterdir())
+        for quarantine in quarantines
+    )

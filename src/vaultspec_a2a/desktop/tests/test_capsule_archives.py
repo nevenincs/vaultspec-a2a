@@ -26,12 +26,14 @@ from vaultspec_a2a.desktop.capsule import (
     ProjectedFile,
     deterministic_tree_digest,
     project_archive,
+    project_archive_into_unpublished_generation,
     read_archive_members,
     write_deterministic_capsule_zip,
 )
 from vaultspec_a2a.desktop.capsule_evidence import (
     _archive_quarantine,
     _bounded_directory_names,
+    write_deterministic_capsule_zip_into_unpublished_generation,
 )
 
 if TYPE_CHECKING:
@@ -85,6 +87,21 @@ def _source(
         archive_kind=kind,
         archive_root=root,
     )
+
+
+def _project_direct(
+    source: ArchiveProjectionSource,
+    *,
+    destination_root: Path,
+    destination_prefix: str,
+) -> tuple[ProjectedFile, ...]:
+    with directory_lease(resolve_directory_authority(destination_root)) as authority:
+        return project_archive_into_unpublished_generation(
+            source,
+            generation_authority=authority,
+            destination_prefix=destination_prefix,
+            source_date_epoch=_SOURCE_DATE_EPOCH,
+        )
 
 
 def _zip_member(
@@ -152,6 +169,8 @@ def _churn_directory_after_authority_lease(
             path.symlink_to(outside, target_is_directory=True)
             swapped.set()
             time.sleep(0.001)
+        except FileExistsError:
+            pass
         except OSError as error:
             errors.append(error)
         finally:
@@ -187,17 +206,15 @@ def test_real_zip_projection_and_archive_emission_are_byte_stable(
     first_root.mkdir()
     second_root.mkdir()
 
-    first_projection = project_archive(
+    first_projection = _project_direct(
         source,
         destination_root=first_root,
         destination_prefix="assets",
-        source_date_epoch=_SOURCE_DATE_EPOCH,
     )
-    second_projection = project_archive(
+    second_projection = _project_direct(
         source,
         destination_root=second_root,
         destination_prefix="assets",
-        source_date_epoch=_SOURCE_DATE_EPOCH,
     )
 
     assert first_projection == second_projection
@@ -211,26 +228,55 @@ def test_real_zip_projection_and_archive_emission_are_byte_stable(
         "payload/LICENSE": b"license-bytes\n"
     }
 
-    first_archive = tmp_path / "first-capsule.zip"
-    second_archive = tmp_path / "second-capsule.zip"
-    first_digest, first_inventory = write_deterministic_capsule_zip(
-        first_root, first_archive, source_date_epoch=_SOURCE_DATE_EPOCH
-    )
-    second_digest, second_inventory = write_deterministic_capsule_zip(
-        second_root, second_archive, source_date_epoch=_SOURCE_DATE_EPOCH
-    )
+    first_generation = tmp_path / "first-generation"
+    second_generation = tmp_path / "second-generation"
+    first_generation.mkdir()
+    second_generation.mkdir()
+    with directory_lease(
+        resolve_directory_authority(first_generation)
+    ) as first_authority:
+        first_digest, first_inventory = (
+            write_deterministic_capsule_zip_into_unpublished_generation(
+                first_root,
+                generation_authority=first_authority,
+                output_name="capsule.zip",
+                source_date_epoch=_SOURCE_DATE_EPOCH,
+            )
+        )
+    with directory_lease(
+        resolve_directory_authority(second_generation)
+    ) as second_authority:
+        second_digest, second_inventory = (
+            write_deterministic_capsule_zip_into_unpublished_generation(
+                second_root,
+                generation_authority=second_authority,
+                output_name="capsule.zip",
+                source_date_epoch=_SOURCE_DATE_EPOCH,
+            )
+        )
+    first_archive = first_generation / "capsule.zip"
+    second_archive = second_generation / "capsule.zip"
 
     assert first_digest == second_digest
     assert first_archive.read_bytes() == second_archive.read_bytes()
     assert first_inventory == second_inventory
     with zipfile.ZipFile(first_archive) as archive:
         assert all(member.extract_version >= 45 for member in archive.infolist())
-    with pytest.raises(CapsuleAssemblyError, match="already exists"):
-        write_deterministic_capsule_zip(
-            first_root, first_archive, source_date_epoch=_SOURCE_DATE_EPOCH
+    with (
+        directory_lease(
+            resolve_directory_authority(first_generation)
+        ) as first_authority,
+        pytest.raises(CapsuleAssemblyError, match="already exists"),
+    ):
+        write_deterministic_capsule_zip_into_unpublished_generation(
+            first_root,
+            generation_authority=first_authority,
+            output_name="capsule.zip",
+            source_date_epoch=_SOURCE_DATE_EPOCH,
         )
     assert first_archive.read_bytes() == second_archive.read_bytes()
-    assert not tuple(tmp_path.glob(".*-capsule.zip.*.tmp"))
+    assert tuple(first_generation.iterdir()) == (first_archive,)
+    assert tuple(second_generation.iterdir()) == (second_archive,)
 
 
 def test_empty_capsule_tree_is_rejected_without_publishing_output(
@@ -265,11 +311,10 @@ def test_tar_file_symlink_materializes_only_inside_declared_root(
     output = tmp_path / "output"
     output.mkdir()
 
-    projected = project_archive(
+    projected = _project_direct(
         _source(source_path, ArchiveKind.TAR),
         destination_root=output,
         destination_prefix="runtime",
-        source_date_epoch=_SOURCE_DATE_EPOCH,
     )
 
     assert (output / "runtime/bin/tool").read_bytes() == b"real-tool\n"
@@ -349,11 +394,10 @@ def test_zstd_tar_projection_uses_the_same_bounded_authority(tmp_path: Path) -> 
     output = tmp_path / "output"
     output.mkdir()
 
-    projected = project_archive(
+    projected = _project_direct(
         _source(source_path, ArchiveKind.TAR_ZSTD),
         destination_root=output,
         destination_prefix="runtime",
-        source_date_epoch=_SOURCE_DATE_EPOCH,
     )
 
     assert projected[0].relative_path == "runtime/bin/tool"
@@ -433,11 +477,10 @@ def test_zip_projection_accepts_zip64_local_header_with_ordinary_directory(
     output = tmp_path / "output"
     output.mkdir()
 
-    projected = project_archive(
+    projected = _project_direct(
         _source(source_path, ArchiveKind.ZIP),
         destination_root=output,
         destination_prefix="runtime",
-        source_date_epoch=_SOURCE_DATE_EPOCH,
     )
 
     assert [file.relative_path for file in projected] == ["runtime/file"]

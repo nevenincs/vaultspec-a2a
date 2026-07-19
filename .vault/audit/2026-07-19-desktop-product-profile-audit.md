@@ -1483,3 +1483,118 @@ winner rather than producing a duplicate or 500 response.
 The gateway credential-separation, loopback-only exposure, invalid-legacy discovery,
 and bounded-selector checks are covered by the same real production-process campaign.
 No finding from this active-run review remains unqueued.
+
+## `W01.P03.S96` direct-generation process and substitution review
+
+Status: PASS AFTER MULTI-PLATFORM REVIEW AND REMEDIATION.
+
+The final matrix uses only production imports, real files, real archive bytes, live
+directory authorities, and spawned processes. Windows proves native handle behavior;
+Linux under WSL proves descriptor-relative writes, real rename substitution, and the
+intentional POSIX legacy refusal. The tests never use a fake, mock, stub, patch,
+monkeypatch, `skip`, or `xfail`.
+
+### direct-projector-permanent-coverage-gap | high | Resolved
+
+The S94 direct projector initially had no permanent public-boundary test. S96 now
+proves deterministic projection into separate generations, exact evidence, collision
+preservation, path-only authority rejection, partial poison, cardinality refusal, and
+substitution safety.
+
+### legacy-posix-directory-test-drift | high | Resolved
+
+Older portable-success and race tests contradicted the production contract that named
+POSIX directory publication is not identity-bound. Portable success moved to the
+direct projector, while the legacy race now requires POSIX refusal and no published
+prefix. Windows retains its native one-winner expectation.
+
+### direct-process-collision-gap | high | Resolved
+
+Sequential collision checks did not prove the exact create-new boundary under process
+competition. Distinct spawned contenders now race both a shared projection prefix and
+one final ZIP name; each result identifies its contender, exactly one succeeds, and
+the surviving bytes match that reported winner.
+
+### direct-source-and-parent-substitution-gap | high | Resolved
+
+Legacy thread churn did not prove the new authority lifetimes. Spawned processes now
+attack the live generation name, a nested destination parent, the capsule source root,
+the source-archive parent throughout snapshotting, and a late source file. Confirmed
+substitution must fail with poison; an operating-system-blocked swap must produce the
+complete trusted result. Outside sentinels and replacement bytes remain untouched.
+
+### direct-partial-poison-proof-weak | medium | Resolved
+
+The only direct writer failure had retained an empty file. A real late file replacement
+now proves a non-empty exact-name ZIP remains inert after failure, while a corrupted
+late projection member retains the already-written prefix member without cleanup.
+
+### direct-evidence-and-authority-boundaries | medium | Resolved
+
+The first matrix under-asserted archive evidence and omitted the direct writer's tree
+bound. Both projection and archive evidence now independently match source path, size,
+SHA-256, mode, ordering, and outer ZIP digest. Public calls reject path-only authority,
+and real limit-plus-one archives and source trees leave bounded inert poison.
+
+### swap-outcome-correlation-and-timing | high | Resolved
+
+Early revisions allowed success or failure without binding it to whether a swap landed,
+and the generation-name swap completed before the API call. Production-created path
+and size barriers now force in-call attacks. Swapped and blocked outcomes are correlated
+with failure or exact success, and source-parent churn continues until API completion.
+
+### collision-provenance-and-limit-mirroring | medium | Resolved
+
+Early contenders used indistinguishable payloads and one test copied the 80,000 limit
+as a literal. Contenders now report identities and carry distinct bytes; boundary
+inputs derive directly from the production constants instead of mirroring business
+logic in tests.
+
+### windows-symlink-capability-assumption | low | Resolved
+
+Unconditional symlink creation depended on Windows developer privileges. File and
+directory collisions remain universal, while link-like collision coverage runs on the
+POSIX campaign where the capability is native and was exercised successfully.
+
+### non-linux-posix-legacy-zip-drift | high | Resolved
+
+Two legacy ZIP tests still required publication on macOS even though named POSIX file
+publication deliberately fails closed. Portable deterministic success now uses the
+direct writer. The legacy race retains Windows and Linux success but requires two
+errors, no output, and only bounded zero-byte quarantines on non-Linux POSIX.
+
+### stale-residue-and-unreachable-platform-assertions | low | Resolved
+
+Review found a stale top-level quarantine glob after direct migration and an unreachable
+POSIX branch after an earlier return. Each direct generation must now contain exactly
+its final ZIP, and the remaining legacy branch expresses only its reachable host.
+
+### transient-ready-state-flake | medium | Resolved
+
+A full-suite run missed the worker's transient literal `ready` state and timed out even
+though the worker had started. Readiness now accepts any non-empty worker status;
+terminal outcomes remain gated by production-created path or size thresholds and are
+still validated with process exit codes and final security assertions.
+
+### legacy-churn-safe-collision-misclassified | medium | Resolved
+
+A native Linux rerun showed that production can recreate the legacy output-parent name
+between the attacker's rename and symlink. The harness treated the resulting
+`FileExistsError` as a failure even though it means substitution was blocked. The helper
+now classifies that exact collision as safe while retaining outside-sentinel, process,
+authority, and residue assertions; three repeated Linux probes and the complete focused
+Linux campaign pass.
+
+### credential-tests-use-prohibited-skips | high | Open; queued as `W03.P08.S98`
+
+The full desktop campaign exposed existing POSIX `skipif`, capability `skipif`, and
+runtime `pytest.skip` branches in `test_credentials.py`, contrary to repository test
+policy. This is not a capsule-authority defect. S98 now owns replacement with real
+host-native assertions that never skip or xfail.
+
+This closes only S96. S14 must verify complete unpublished generations, and dashboard
+receipt-bound installed-byte verification and activation remain mandatory. The open
+credential-test policy finding, target-native release evidence, and legal/provenance
+gates continue to block release authorization. The final exact-source Windows desktop
+campaign passed 290 tests with 26 deselected; its single pre-existing skip is the
+credential-policy finding queued as S98 above.

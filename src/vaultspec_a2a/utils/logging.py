@@ -185,10 +185,17 @@ def _numeric_level(level: Any) -> int:
 
 
 def _reset_root() -> logging.Logger:
-    """Clear the root logger's handlers so re-configuration never duplicates lanes."""
+    """Clear the root logger's handlers so re-configuration never duplicates lanes.
+
+    Each removed handler is ``close()``d: a ``RotatingFileHandler`` left dangling on
+    a reconfigure would leak its open file handle (on Windows the file then cannot be
+    rotated or the tmp dir removed). ``StreamHandler.close()`` does not close the
+    underlying ``stderr``/``stdout`` stream, so this is safe for the console lanes.
+    """
     root = logging.getLogger()
     for handler in list(root.handlers):
         root.removeHandler(handler)
+        handler.close()
     return root
 
 

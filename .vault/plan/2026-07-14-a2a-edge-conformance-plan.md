@@ -13,6 +13,16 @@ related:
   - '[[2026-07-14-a2a-edge-conformance-worktree-reconciliation-audit]]'
 ---
 
+<!-- LINK RULES:
+     - [[wiki-links]] are ONLY for .vault/ documents in the
+       related: field above.
+     - The related: field carries the AUTHORISING documents
+       (ADR, research, reference, prior plan) for every Step in
+       this plan. Steps inherit this chain; per-row reference
+       footers do not exist.
+     - NEVER use [[wiki-links]] or markdown links in the
+       document body. -->
+
 # `a2a-edge-conformance` plan
 
 ## Wave `W01` - Salvage verification and hygiene
@@ -162,6 +172,7 @@ Implement the accepted real-project-root mcp projection decision (2026-07-19 ADR
 
 - [x] `W05.P17.S42` - Implement marked-entry merge projection per the 2026-07-19 real-project-root mcp projection ADR: merge declared surfacing entries into an existing foreign .mcp.json with an added-keys marker, loud refusal only on name collision or unparseable file, cleanup inverting exactly the marker's entry list (foreign and mid-run user entries never touched), idempotent crash-residue re-projection, legacy whole-file marker honored for one transition release. Live real-seam tests for merge, create, collision, crash-residue, and mid-run-edit cases; `src/vaultspec_a2a/providers/_acp_project_mcp.py, src/vaultspec_a2a/providers/tests/`.
 - [x] `W05.P17.S43` - Re-run the S20 solo-coder exposure probe with the run workspace pinned to a REAL project root carrying its own git-tracked .mcp.json, prove the agent sees both the project's servers and the bridged authoring tools (engine-side cs:<run_id> changeset, zero .vault writes, original .mcp.json bytes restored after cleanup), and record the closure in the S18/S20 records; `src/vaultspec_a2a/service_tests/, .vault/exec/`.
+- [ ] `W05.P17.S44` - Close the two projection review LOWs: enforce the marker base_fingerprint at cleanup (on mismatch, skip inversion and log the desync instead of removing entries a hand-edited marker names), and add the reserved-name mid-run-edit test covering a user entry created mid-run under a projected name. Real-filesystem tests, no mocks; `src/vaultspec_a2a/providers/_acp_project_mcp.py, src/vaultspec_a2a/providers/tests/test_acp_project_mcp.py`.
 
 ## Description
 

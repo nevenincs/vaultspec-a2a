@@ -17,6 +17,7 @@ related:
   - '[[2026-07-19-repository-tooling-hardening-W03-P05-S09]]'
   - '[[2026-07-19-repository-tooling-hardening-W03-P05-summary]]'
   - '[[2026-07-19-repository-tooling-hardening-W03-P06-S10]]'
+  - '[[2026-07-19-repository-tooling-hardening-W04-P07-S11]]'
   - '[[2026-07-19-repository-tooling-hardening-adr]]'
   - '[[2026-07-19-repository-tooling-hardening-audit]]'
   - '[[2026-07-19-repository-tooling-hardening-plan]]'
@@ -51,6 +52,7 @@ Auto-generated index of all documents tagged with `#repository-tooling-hardening
 - `2026-07-19-repository-tooling-hardening-W03-P05-S09` - Remediate formatter, typing, dependency, and test-selection debt without suppressive shortcuts
 - `2026-07-19-repository-tooling-hardening-W03-P05-summary` - `repository-tooling-hardening` `W03.P05` summary
 - `2026-07-19-repository-tooling-hardening-W03-P06-S10` - Invoke canonical CI, pin actions, minimize permissions, and authorize self-hosted dispatch before secrets
+- `2026-07-19-repository-tooling-hardening-W04-P07-S11` - Rewrite onboarding and add separated setup, command, operating-model, and vocabulary documentation through the documentation pipeline
 
 ### plan
 

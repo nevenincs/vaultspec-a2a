@@ -449,6 +449,82 @@ Docker support, and provide platform-appropriate installation links. Native
 Windows execution, formatting, listing, dry-runs, and static Unix branch
 presence pass; Unix live execution remains S12 acceptance evidence.
 
+### s11-feature-label-contract | medium | Feature form requested a label absent from the repository
+
+Type: repository health configuration. The feature form requested the
+`enhancement` label while the live repository exposes `feature`. Status:
+resolved by aligning the form with the existing `feature` label.
+
+### s11-security-question-route | medium | Security guidance pointed to a disabled public issue path
+
+Type: support routing. The security policy sent non-sensitive questions to
+GitHub Issues while blank issues were disabled and no question form existed.
+Status: resolved by enabling blank issues while retaining the private
+vulnerability-reporting contact for sensitive reports.
+
+### s11-provisioning-vocabulary | medium | Glossary collapsed workspace and external-resource provisioning
+
+Type: architecture terminology. Provisioning was defined only as model or
+Qdrant acquisition even though the accepted harness contract also provisions a
+workspace through Core installation, synchronization, and verification.
+Status: resolved by defining both workspace and external RAG provisioning.
+
+### s11-agent-harness-vocabulary | medium | Glossary omitted required harness surfaces
+
+Type: architecture terminology. The agent-harness definition omitted personas
+and command-line or MCP tools required by the accepted harness decision.
+Status: resolved by restoring those surfaces and stating the harness purpose.
+
+### s11-preset-command-semantics | low | Operator reference overstated the presets command
+
+Type: command accuracy. The operator reference described generic preset
+operations, while the live product command only lists available team presets.
+Status: resolved by documenting the exact listing behavior.
+
+### s11-editorial-native-command-boundary | high | Wrapper and native CLI inventories were ambiguous
+
+Type: editorial architecture. The operator guide blurred the complete native
+product command inventory, the intentionally shorter Just wrapper set, and the
+separate MCP entry point. Status: resolved by naming the native inventory and
+distinguishing wrapper and MCP routes explicitly.
+
+### s11-editorial-owner-taxonomy | high | Issue forms used a taxonomy inconsistent with architecture ownership
+
+Type: editorial architecture. Bug and feature forms classified affected
+surfaces differently from the accepted single-owner model. Status: resolved by
+using the same product CLI, gateway, worker, Just, registry, Compose, Core/RAG,
+and documentation areas in both forms.
+
+### s11-editorial-harness-definition | high | Harness inventory buried the term's purpose
+
+Type: editorial comprehension. The glossary led with a long inventory instead
+of explaining what the agent harness accomplishes. Status: resolved by stating
+the repository-workflow purpose before its component inventory.
+
+### s11-editorial-clarity-cluster | medium | Eight passages obscured standalone technical meaning
+
+Type: editorial clarity. Review found a vague shared sync/reconciliation
+definition, an overcompressed README ownership paragraph, ambiguous engine and
+authoring-client phrasing, duplicated development diagnostics, unexpanded
+acronyms in standalone documents and forms, an unnumbered Compose sequence with
+an unclear antecedent, inconsistent `split-brain` jargon, and dense wording for
+the warning-fatal Sphinx contract. Status: resolved across the glossary,
+README, development and operations guides, architecture page, and issue forms.
+
+### s11-editorial-consistency-cluster | low | Four style inconsistencies remained after technical review
+
+Type: editorial consistency. Review found inconsistent `not run` terminology,
+an unnatural pull-request checklist phrase, terse punctuated Ty and Deptry table
+items, and excessive uncontracted negative constructions. Status: resolved by
+normalizing terminology, checklist language, table phrasing, and contractions.
+
+### s11-private-vulnerability-reporting | low | External confidential-reporting route required verification
+
+Type: external repository configuration. The security policy and issue forms
+route sensitive reports to GitHub private vulnerability reporting. Status:
+verified enabled through the repository API on 2026-07-19; public issue forms
+also warn against submitting credentials or vulnerability details.
+
 ## Recommendations
 
 No open task remains for S01, S02, or the S03 implementation. Preserve the two
@@ -492,3 +568,8 @@ decide whether repository policy should require SHA-pinned Actions globally.
 Preserve S11's platform-specific doctor variants as one public command contract.
 Exercise the Unix branch on a real Unix host during S12 before declaring the
 clone-to-CI portability matrix complete.
+
+Preserve S11's separated onboarding, contributor, operator, architecture,
+glossary, security, and contribution surfaces. Keep issue-form taxonomies and
+labels aligned with live repository configuration, and repeat the private
+reporting API check during security-policy changes.

@@ -87,7 +87,7 @@ Publish the executable contract, exercise it end to end, and close the mandated 
 
 Ship separated onboarding, how-to, reference, and explanation surfaces that match executable commands.
 
-- [ ] `W04.P07.S11` - Rewrite onboarding and add separated setup, command, operating-model, and vocabulary documentation through the documentation pipeline; `README.md, docs`.
+- [x] `W04.P07.S11` - Rewrite onboarding and add separated setup, command, operating-model, and vocabulary documentation through the documentation pipeline; `README.md, docs`.
 
 ### Phase `W04.P08` - acceptance and audit closure
 

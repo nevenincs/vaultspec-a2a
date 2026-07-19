@@ -1,0 +1,76 @@
+name: Feature request
+description: Suggest an improvement or new capability.
+title: "[Feature]: "
+labels: ["feature"]
+assignees: []
+
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Don't report vulnerabilities here. Use [private vulnerability reporting](https://github.com/nevenincs/vaultspec-a2a/security/advisories/new).
+
+        Implementation proposals must respect single-owner boundaries and the rolling audit workflow.
+
+  - type: checkboxes
+    id: searched
+    attributes:
+      label: Existing issues
+      options:
+        - label: I searched existing issues and found no matching request.
+          required: true
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: Describe the problem or limitation this feature should address.
+    validations:
+      required: true
+
+  - type: textarea
+    id: desired_outcome
+    attributes:
+      label: Desired outcome
+      description: Describe the expected result and who benefits.
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposed_approach
+    attributes:
+      label: Proposed approach
+      description: Describe a possible solution and its ownership boundary.
+    validations:
+      required: true
+
+  - type: dropdown
+    id: affected_area
+    attributes:
+      label: Affected area
+      options:
+        - Product CLI
+        - Gateway
+        - Worker
+        - Just facade
+        - Process registry
+        - Compose stack
+        - Vaultspec Core or RAG tooling
+        - Documentation
+        - Other or unsure
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives
+      description: Describe alternatives or workarounds you considered.
+    validations:
+      required: true
+
+  - type: textarea
+    id: additional_context
+    attributes:
+      label: Additional context
+      description: Add examples, links, screenshots, or other relevant details.

@@ -1257,3 +1257,58 @@ through classification.
 
 Classification: security / filesystem authority. No lower-severity findings
 remain from this review pass.
+
+## `W01.P03.S94` direct unpublished-generation projection review
+
+Status: PASS AFTER THREE REVIEW/REMEDIATION ROUNDS.
+
+The accepted additive APIs take the caller's already-live generation authority,
+require exclusive mutation authority while acquiring one absent prefix, snapshot
+the exact trusted source before mutation, and keep both the generation and current
+empty prefix child leased across planning and every member write. ZIP and tar share
+the same bounded emitter and return the existing deterministic prefixed path, mode,
+size, and SHA-256 evidence. The direct path contains no inner rename, cleanup,
+publication, activation, or outer-generation lifecycle operation. A failure leaves
+the unreceipted generation poisoned for complete verification and owner-side discard.
+
+### direct-projector-legacy-api-regression | high | Resolved
+
+The first concurrent implementation replaced the established `project_archive` and
+`project_source_archive` signatures and later left their legacy quarantine helpers
+undefined. Existing callers and competing-process tests failed. The final design is
+additive: the direct APIs have explicit unpublished-generation names, while legacy
+path-based staging and native no-replace publication retain their previous signatures
+and behavior through the shared bounded emitter.
+
+### direct-projector-public-surface | medium | Resolved
+
+An intermediate revision omitted the new direct APIs from `capsule.__all__`. Both
+archive and verified-source adapters are now explicitly exported without widening the
+desktop package root.
+
+### direct-projector-collision-classification | medium | Resolved
+
+An existing-prefix `FileExistsError` was initially thrown through the source-snapshot
+context manager and mislabeled as a snapshot failure. Snapshot ownership is now held
+by a separate exit stack: trusted bytes are still validated before prefix mutation,
+while collision refusal remains deterministic and the snapshot always closes.
+
+### production-docstring-plan-metadata | high | Resolved
+
+Editorial review rejected a public docstring that named a plan Step. Production text
+now describes the absent-child authority contract without repository process metadata.
+
+Independent final review reported no remaining critical, high, medium, or low finding
+for source hash
+``9DE4B05ABB637D40CB74E18C544A835E66C523C40E49A645E9EFAB3081883E47``.
+The Windows desktop suite passed 235 tests; focused archive, publication-race, and
+child-authority coverage passed 36 tests; and a real caller-leased ZIP probe proved
+direct bytes, deterministic evidence paths, and collision preservation. Ruff,
+formatting, Ty, and diff hygiene passed.
+
+This closes only S94. S95 must add exact create-new archive writing, S96 must prove the
+direct process and substitution matrix, and S14 must verify the complete generation.
+Dashboard-owned final-name generation creation, installed-byte verification, durable
+receipt selection, and the real producer-consumer workflow remain mandatory before
+activation. Target-native and legal/provenance blockers remain unchanged, and no
+release is authorized.

@@ -47,7 +47,6 @@ from ...thread.dispatch_policy import FailureType
 from ...thread.enums import ThreadStatus
 from ...thread.errors import NicknameConflictError
 from .._utils import mark_worker_connected, trace_headers
-from ..auth import authenticate_request
 from ..dependencies import (
     get_aggregator,
     get_checkpointer,
@@ -55,6 +54,7 @@ from ..dependencies import (
     get_services,
     get_worker_client,
     get_worker_spawner,
+    require_attach,
 )
 from ..schemas.gateway import (
     ActiveRunRecord,
@@ -76,7 +76,7 @@ from .thread_stream import build_thread_stream_response
 
 router = APIRouter(
     prefix="/v1",
-    dependencies=[Depends(authenticate_request)],
+    dependencies=[Depends(require_attach)],
 )
 logger = logging.getLogger(__name__)
 

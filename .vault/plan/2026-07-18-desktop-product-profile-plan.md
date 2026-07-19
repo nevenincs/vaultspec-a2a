@@ -177,7 +177,7 @@ Protect versioned product APIs and administrative operations with distinct owner
 - [x] `W03.P08.S36` - Validate dashboard-created attach and ownership files and create a distinct gateway-owned worker IPC credential with platform ACL checks; `src/vaultspec_a2a/desktop/credentials.py`.
 - [x] `W03.P08.S37` - Model distinct attach credential worker IPC credential and receipt-bound lifecycle capability references; `src/vaultspec_a2a/control/config.py`.
 - [x] `W03.P08.S38` - Implement constant-time attach and lifecycle capability dependencies with redacted failures; `src/vaultspec_a2a/api/dependencies.py`.
-- [ ] `W03.P08.S39` - Require the attach credential on the versioned six-member whitelist (five run-control verbs plus bounded active-run discovery) without expanding it; `src/vaultspec_a2a/api/routes/gateway.py`.
+- [x] `W03.P08.S39` - Require the attach credential on the versioned six-member whitelist (five run-control verbs plus bounded active-run discovery) without expanding it; `src/vaultspec_a2a/api/routes/gateway.py`.
 - [ ] `W03.P08.S40` - Require attach authentication on dashboard product APIs while leaving minimal liveness ungated; `src/vaultspec_a2a/api/routes/__init__.py`.
 - [ ] `W03.P08.S41` - Require attach authentication before accepting desktop event WebSockets; `src/vaultspec_a2a/api/app.py`.
 - [ ] `W03.P08.S42` - Require both authenticated runtime control and receipt ownership for administrative shutdown; `src/vaultspec_a2a/api/routes/admin.py`.

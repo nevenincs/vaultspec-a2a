@@ -1,7 +1,7 @@
 [project]
 name = "vaultspec-a2a"
 version = "0.1.0"
-description = "Headless A2A agent orchestration for the vaultspec workflow (gateway + worker, engine-facing five-verb edge)"
+description = "Headless A2A agent orchestration for the vaultspec workflow (gateway + worker, engine-facing six-member whitelist)"
 requires-python = ">=3.13"
 license = "MIT"
 license-files = ["LICENSE"]

@@ -253,7 +253,7 @@ class InfraConfig(BaseSettings):
     )
 
     host: str = Field(
-        default="0.0.0.0",
+        default="127.0.0.1",
         description="Bind host for the uvicorn server (VAULTSPEC_HOST).",
     )
     port: int = Field(
@@ -319,7 +319,9 @@ class InfraConfig(BaseSettings):
         default=None,
         alias=INTERNAL_TOKEN_ENV,
         description=(
-            "Bearer token for worker<->control IPC. None disables auth (dev mode)."
+            "Bearer token for worker<->control IPC and the engine-facing /v1 "
+            "gateway. A tokenless /v1 gateway fails closed except in the explicit "
+            "application test mode."
         ),
     )
     auto_spawn_worker: bool = Field(

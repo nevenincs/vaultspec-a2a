@@ -47,6 +47,7 @@ from ...thread.dispatch_policy import FailureType
 from ...thread.enums import ThreadStatus
 from ...thread.errors import NicknameConflictError
 from .._utils import mark_worker_connected, trace_headers
+from ..auth import authenticate_request
 from ..dependencies import (
     get_aggregator,
     get_checkpointer,
@@ -72,7 +73,10 @@ from ..schemas.gateway import (
 )
 from .thread_stream import build_thread_stream_response
 
-router = APIRouter(prefix="/v1")
+router = APIRouter(
+    prefix="/v1",
+    dependencies=[Depends(authenticate_request)],
+)
 logger = logging.getLogger(__name__)
 
 # Health-check statuses that represent a genuine dependency failure (as opposed

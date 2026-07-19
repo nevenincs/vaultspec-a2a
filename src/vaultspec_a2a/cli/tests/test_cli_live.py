@@ -1,8 +1,8 @@
 """Live coverage of the operator CLI against a real gateway.
 
-The CLI is a thin HTTP client of the five-verb surface, so it is proven the only
-honest way: run the real gateway app on a real socket (uvicorn in a background
-thread) and invoke the CLI as a real subprocess (``python -m
+The CLI is a thin HTTP client of the six-member gateway whitelist, so it is
+proven the only honest way: run the real gateway app on a real socket (uvicorn
+in a background thread) and invoke the CLI as a real subprocess (``python -m
 vaultspec_a2a.cli.main``) pointed at it. The subprocess exercises the actual
 console-script entry point end to end and issues real ``httpx`` requests to the
 running server — no mocks, no in-process capture shims. It also confirms there is
@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import subprocess
 import sys
 import threading
@@ -30,6 +31,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from ...api.tests.conftest import make_app
 from ...database.models import Base
+from ...lifecycle.discovery import service_json_path, write_service_json
 
 if TYPE_CHECKING:
     from types import TracebackType
@@ -110,15 +112,43 @@ class _GatewayFixture:
         return engine
 
 
-def _run_cli(*args: str) -> subprocess.CompletedProcess[str]:
+def _run_cli(
+    *args: str,
+    env: dict[str, str] | None = None,
+) -> subprocess.CompletedProcess[str]:
     """Invoke the operator CLI as a real child process."""
     return subprocess.run(
         [sys.executable, "-m", _MODULE, *args],
+        env=env,
         capture_output=True,
         text=True,
         timeout=30,
         check=False,
     )
+
+
+def test_cli_uses_matching_loopback_discovery_token(tmp_path: Any) -> None:
+    """A separate CLI process authenticates from the resident service record."""
+    token = "cli-discovery-token"
+    with _GatewayFixture(tmp_path) as gw:
+        gw.app.state.v1_service_token = token
+        gw.app.state.allow_unauthenticated_v1_for_testing = False
+        with _ThreadedServer(gw.app) as srv:
+            port = int(srv.base.rsplit(":", 1)[1])
+            a2a_home = tmp_path / "cli-a2a-home"
+            write_service_json(
+                service_json_path(a2a_home),
+                port=port,
+                pid=os.getpid(),
+                service_token=token,
+            )
+            environment = os.environ.copy()
+            environment.pop("VAULTSPEC_INTERNAL_TOKEN", None)
+            environment["VAULTSPEC_A2A_HOME"] = str(a2a_home)
+            result = _run_cli("presets", "--url", srv.base, env=environment)
+
+    assert result.returncode == 0, result.stderr
+    assert json.loads(result.stdout)["api_version"] == "v1"
 
 
 def test_cli_verbs_against_live_gateway(tmp_path: Any) -> None:

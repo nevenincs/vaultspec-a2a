@@ -104,6 +104,16 @@ def upgrade() -> None:
         ],
     )
     op.create_index(
+        "ix_threads_active_feature_order",
+        "threads",
+        [
+            "is_active",
+            "feature_tag",
+            sa.text("created_at DESC"),
+            sa.text("id DESC"),
+        ],
+    )
+    op.create_index(
         "ix_threads_active_workspace_feature_order",
         "threads",
         [
@@ -119,6 +129,7 @@ def upgrade() -> None:
 def downgrade() -> None:
     """Remove active-run selector indexes and projection columns."""
     op.drop_index("ix_threads_active_workspace_feature_order", table_name="threads")
+    op.drop_index("ix_threads_active_feature_order", table_name="threads")
     op.drop_index("ix_threads_active_workspace_order", table_name="threads")
     op.drop_index("ix_threads_active_order", table_name="threads")
     op.drop_column("threads", "is_active")

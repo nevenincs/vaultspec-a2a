@@ -412,12 +412,18 @@ def main() -> None:
 
 def create_app(
     lifespan: Any | None = None,
+    *,
+    allow_unauthenticated_v1_for_testing: bool = False,
 ) -> FastAPI:
     """Create and configure the FastAPI application.
 
     Args:
         lifespan: Optional lifespan override for testing. When ``None``
             the production ``_lifespan`` is used.
+        allow_unauthenticated_v1_for_testing: Explicit test-only escape hatch
+            for legacy route-behaviour tests. Production callers must leave it
+            false; an absent service token then fails closed on every ``/v1``
+            request while ``/health`` remains available.
 
     Returns:
         A fully configured ``FastAPI`` instance ready for ``uvicorn.run()``.
@@ -426,6 +432,12 @@ def create_app(
         title="Vaultspec A2A Orchestrator",
         version=package_version(),
         lifespan=lifespan or _lifespan,
+    )
+    # Snapshot the exact token published by the production lifespan's discovery
+    # record. It is immutable for this app generation and never logged.
+    app.state.v1_service_token = settings.internal_token
+    app.state.allow_unauthenticated_v1_for_testing = (
+        allow_unauthenticated_v1_for_testing
     )
 
     cors_origins: list[str] = list(settings.cors_allowed_origins)

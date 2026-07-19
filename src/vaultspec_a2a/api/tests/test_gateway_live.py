@@ -1,4 +1,4 @@
-"""Live gateway coverage for the five verbs and the SSE stream.
+"""Live gateway coverage for the six-member whitelist and separate SSE stream.
 
 Replaces the deleted UI contract coverage: the browser SPA was the only
 end-to-end exerciser of the gateway edge, and it is gone. These tests drive the

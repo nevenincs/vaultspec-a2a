@@ -99,6 +99,13 @@ class ThreadModel(Base):
             "id",
         ),
         Index(
+            "ix_threads_active_feature_order",
+            "is_active",
+            "feature_tag",
+            "created_at",
+            "id",
+        ),
+        Index(
             "ix_threads_active_workspace_feature_order",
             "is_active",
             "workspace_root",

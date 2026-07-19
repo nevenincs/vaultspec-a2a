@@ -40,9 +40,8 @@ from ..app import create_app
 _PACKAGE_DIR = str(Path(__file__).resolve().parent)
 
 
-# API tests are middleware-layer; most drive the real SQLite/ASGI fixtures below
-# and are impure.  These files test pure logic only (no I/O) and also earn ``unit``.
-_PURE_FILES = frozenset({"test_auth.py"})
+# API tests are middleware-layer; they drive the real SQLite/ASGI fixtures below.
+_PURE_FILES: frozenset[str] = frozenset()
 
 
 def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
@@ -191,7 +190,10 @@ def make_app(
     async def _test_lifespan(_app):
         yield
 
-    app = create_app(lifespan=_test_lifespan)
+    app = create_app(
+        lifespan=_test_lifespan,
+        allow_unauthenticated_v1_for_testing=True,
+    )
 
     if aggregator is None:
         aggregator = EventAggregator()

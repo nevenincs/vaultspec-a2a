@@ -1,6 +1,6 @@
 """The ``vaultspec-a2a`` operator CLI.
 
-A minimal operator surface restored as a thin client of the five-verb gateway —
+A minimal operator surface restored as a thin client of the gateway whitelist —
 ``serve``, ``doctor`` (service-state), ``presets`` (presets-list), and
 ``run start``/``status``/``cancel``. There is no second code path: every command
 except ``serve`` is a plain HTTP call to the same ``/v1`` endpoints the engine

@@ -23,6 +23,8 @@ if TYPE_CHECKING:
     from collections.abc import AsyncIterator
     from pathlib import Path
 
+_SERVICE_TOKEN = "active-discovery-service-token"
+
 
 def _unused_loopback_port() -> int:
     with socket.socket() as listener:
@@ -56,6 +58,7 @@ async def _production_gateway(
             "VAULTSPEC_AUTO_SPAWN_WORKER": "false",
             "VAULTSPEC_REPAIR_ON_STARTUP": "false",
             "VAULTSPEC_WORKER_URL": f"http://127.0.0.1:{_unused_loopback_port()}",
+            "VAULTSPEC_INTERNAL_TOKEN": _SERVICE_TOKEN,
         }
     )
     process = await asyncio.create_subprocess_exec(
@@ -69,7 +72,11 @@ async def _production_gateway(
     )
     base_url = f"http://127.0.0.1:{port}"
     try:
-        async with httpx.AsyncClient(base_url=base_url, timeout=2.0) as client:
+        async with httpx.AsyncClient(
+            base_url=base_url,
+            timeout=2.0,
+            headers={"Authorization": f"Bearer {_SERVICE_TOKEN}"},
+        ) as client:
             for _ in range(500):
                 if process.returncode is not None:
                     output = await process.stdout.read() if process.stdout else b""
@@ -119,8 +126,21 @@ async def test_active_run_discovery_rebinds_to_authoritative_status(
 
     async with (
         _production_gateway(tmp_path) as (base_url, session_factory),
-        httpx.AsyncClient(base_url=base_url, timeout=10.0) as client,
+        httpx.AsyncClient(
+            base_url=base_url,
+            timeout=10.0,
+            headers={"Authorization": f"Bearer {_SERVICE_TOKEN}"},
+        ) as client,
     ):
+        async with httpx.AsyncClient(base_url=base_url, timeout=10.0) as anonymous:
+            missing = await anonymous.get("/v1/runs")
+            wrong = await anonymous.get(
+                "/v1/runs",
+                headers={"Authorization": "Bearer wrong-service-token"},
+            )
+        assert missing.status_code == 401, missing.text
+        assert wrong.status_code == 401, wrong.text
+
         async with session_factory() as session:
             rows = [
                 await create_thread(
@@ -260,6 +280,11 @@ async def test_active_run_discovery_rebinds_to_authoritative_status(
                     ThreadModel(
                         id=f"newer-foreign-{index:04d}",
                         status=ThreadStatus.RUNNING.value,
+                        is_active=True,
+                        workspace_root=os.path.normcase(
+                            os.path.realpath(foreign_workspace)
+                        ),
+                        feature_tag="feature-a",
                         thread_metadata=json.dumps(
                             {
                                 "workspace_root": str(foreign_workspace),
@@ -282,8 +307,11 @@ async def test_active_run_discovery_rebinds_to_authoritative_status(
             },
         )
         assert scan_bound.status_code == 200, scan_bound.text
-        assert scan_bound.json()["runs"] == []
-        assert scan_bound.json()["truncated"] is True
+        assert [run["run_id"] for run in scan_bound.json()["runs"]] == [
+            "active-new",
+            "active-old",
+        ]
+        assert scan_bound.json()["truncated"] is False
 
 
 @pytest.mark.asyncio(loop_scope="function")
@@ -293,7 +321,11 @@ async def test_active_run_discovery_rejects_unbounded_selectors(
     """Only the active state, absolute workspaces, and bounded limits are valid."""
     async with (
         _production_gateway(tmp_path) as (base_url, _session_factory),
-        httpx.AsyncClient(base_url=base_url, timeout=10.0) as client,
+        httpx.AsyncClient(
+            base_url=base_url,
+            timeout=10.0,
+            headers={"Authorization": f"Bearer {_SERVICE_TOKEN}"},
+        ) as client,
     ):
         wrong_state = await client.get("/v1/runs", params={"state": "completed"})
         assert wrong_state.status_code == 422

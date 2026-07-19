@@ -95,6 +95,26 @@ async def test_active_discovery_stays_indexed_and_bounded_at_large_history(
     assert "SCAN threads" not in plan_details
     assert "USE TEMP B-TREE" not in plan_details
 
+    feature_statement = _active_thread_page_statement(
+        limit=6,
+        workspace_root=None,
+        feature_tag="a2a",
+        after_created_at=None,
+        after_id=None,
+    )
+    feature_compiled = feature_statement.compile(
+        dialect=engine.sync_engine.dialect,
+        compile_kwargs={"literal_binds": True},
+    )
+    feature_plan = (
+        await session.execute(text(f"EXPLAIN QUERY PLAN {feature_compiled}"))
+    ).all()
+    feature_plan_details = "\n".join(str(row[-1]) for row in feature_plan)
+
+    assert "ix_threads_active_feature_order" in feature_plan_details
+    assert "SCAN threads" not in feature_plan_details
+    assert "USE TEMP B-TREE" not in feature_plan_details
+
     await discover_active_runs(
         session,
         workspace_root=tmp_path / "workspace",

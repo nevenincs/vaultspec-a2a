@@ -462,6 +462,16 @@ All four nodes pass. The full canonical suite has not been rerun, so this
 finding remains open until the remaining failure classes are resolved and the
 whole gate passes.
 
+### lifecycle-authority-curation-review | high | Initial curation retained conflicting host-process authority
+
+Type: architecture-decision curation. The first `W01.P01.S01` review found that
+the desktop decision still retained the foreground shim and that two statements
+assigned development-boundary refinement to repository tooling. The corrected
+records assign named host-process lifecycle exclusively to the dev-process
+registry, limit repository tooling to the delegating `just` surface, and retain
+service-lifecycle authority for Compose and product topology. Status: resolved.
+The second independent review passed with no findings.
+
 ## User-documentation health review
 
 The repository README, contributor and security policies, issue and pull-request

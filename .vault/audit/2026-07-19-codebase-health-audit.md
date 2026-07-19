@@ -448,6 +448,14 @@ isolation/configuration cases. Status: open and queued across the existing
 automation now invokes the correct canonical command, but the product gate is
 not green and no failure is suppressed.
 
+A focused follow-up repaired four failing nodes. Logger assertions now target
+the production services that own permission and terminal-event logging. The
+live preset test accepts the bundled Kimi profile and derives Z.ai readiness
+from the real production probe instead of assuming the host has no credential.
+All four nodes pass. The full canonical suite has not been rerun, so this
+finding remains open until the remaining failure classes are resolved and the
+whole gate passes.
+
 ## Recommendations
 
 1. Draft and approve a hardening ADR before implementation. The ADR must decide:

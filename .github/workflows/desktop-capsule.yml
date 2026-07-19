@@ -2,12 +2,9 @@ name: Desktop Capsule
 
 on:
   workflow_dispatch:
-  push:
-    tags:
-      - 'v*'
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: desktop-capsule-${{ github.ref }}
@@ -23,7 +20,7 @@ jobs:
           - target: aarch64-apple-darwin
             runner: macos-14
           - target: x86_64-apple-darwin
-            runner: macos-13
+            runner: macos-15-intel
           - target: aarch64-unknown-linux-gnu
             runner: ubuntu-24.04-arm
           - target: x86_64-unknown-linux-gnu
@@ -49,6 +46,9 @@ jobs:
       - name: Install Python
         run: uv python install 3.13
 
+      - name: Install locked build environment
+        run: uv sync --locked --no-default-groups --group tooling
+
       - name: Restore download cache
         uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
         with:
@@ -60,7 +60,7 @@ jobs:
       - name: Build capsule
         shell: bash
         run: |
-          uv run --no-sync python scripts/build_desktop_capsule.py build \
+          uv run --no-sync --frozen python scripts/build_desktop_capsule.py build \
             --target ${{ matrix.target }} \
             --out-dir dist/capsules \
             --cache-dir .capsule-cache
@@ -68,58 +68,32 @@ jobs:
       - name: Verify capsule
         shell: bash
         run: |
-          uv run --no-sync python scripts/verify_desktop_capsule.py verify \
+          uv run --no-sync --frozen python scripts/verify_desktop_capsule.py verify \
             dist/capsules/${{ matrix.target }}.zip
 
       - name: Emit SBOM
         shell: bash
         run: |
-          uv run --no-sync python scripts/verify_desktop_capsule.py sbom \
+          uv run --no-sync --frozen python scripts/verify_desktop_capsule.py sbom \
             dist/capsules/${{ matrix.target }}.zip \
             --output dist/capsules/${{ matrix.target }}.sbom.json
+
+      - name: Bind capsule archive digest
+        id: capsule-digest
+        shell: bash
+        env:
+          CAPSULE_PATH: dist/capsules/${{ matrix.target }}.zip
+        run: |
+          uv run --no-sync --frozen python -c "import hashlib, os; from pathlib import Path; p = Path(os.environ['CAPSULE_PATH']); digest = hashlib.sha256(p.read_bytes()).hexdigest(); p.with_suffix(p.suffix + '.sha256').write_text(f'{digest}  {p.name}\n', encoding='ascii'); Path(os.environ['GITHUB_OUTPUT']).open('a', encoding='utf-8').write(f'sha256={digest}\n')"
 
       - name: Upload capsule artifact
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: desktop-capsule-${{ matrix.target }}
+          name: desktop-capsule-${{ matrix.target }}-${{ steps.capsule-digest.outputs.sha256 }}
           path: |
             dist/capsules/${{ matrix.target }}.zip
+            dist/capsules/${{ matrix.target }}.zip.sha256
             dist/capsules/${{ matrix.target }}.manifest.json
             dist/capsules/${{ matrix.target }}.sbom.json
           if-no-files-found: error
           retention-days: 30
-
-  publish:
-    name: Publish release assets
-    needs: capsule
-    if: startsWith(github.ref, 'refs/tags/')
-    runs-on: ubuntu-24.04
-    timeout-minutes: 20
-
-    steps:
-      - name: Download all capsule artifacts
-        uses: actions/download-artifact@95815c38cf2ff2164869cbab79da8d1f422bc89e # v4.2.1
-        with:
-          pattern: desktop-capsule-*
-          path: release-assets
-          merge-multiple: true
-
-      - name: Create GitHub release and upload assets
-        env:
-          GH_TOKEN: ${{ github.token }}
-          TAG_NAME: ${{ github.ref_name }}
-        run: |
-          NOTES="Deterministic A2A desktop capsules for all five target triples.
-
-          Each triple ships a verified ZIP containing CPython 3.13, Node.js 22,
-          ACP 0.59.0, the vaultspec-a2a wheel, and the locked Python dependency closure.
-          The component manifest inside each archive records per-asset SHA-256 digests
-          and canonical bytes for cross-language verification."
-
-          gh release create "${TAG_NAME}" \
-            --repo "${{ github.repository }}" \
-            --title "Desktop Capsule ${TAG_NAME}" \
-            --notes "${NOTES}" \
-            release-assets/*.zip \
-            release-assets/*.manifest.json \
-            release-assets/*.sbom.json

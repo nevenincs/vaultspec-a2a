@@ -411,3 +411,170 @@ formatting, scoped type checking, lock consistency, and diff hygiene pass. The
 tests import production component identity, target, digest, and schema
 authorities and use no fake, mock, stub, patch, monkeypatch, skip, expected
 failure, or mirrored dashboard consumer logic.
+
+## `W01 P03 S13` deterministic capsule-builder review
+
+Status: REVISION REQUIRED
+
+The builder's static checks and command-line entrypoint pass, and its eleven
+service tests collect. Independent review nevertheless found four high-severity
+contract failures and one medium-severity evidence gap. S13 must remain open
+until these findings are repaired and reviewed. Work begun for S14 does not by
+itself close an S13 defect.
+
+### s13-determinism-evidence-contradiction | high | The recorded proof cannot match the manifest contract
+
+Type: release evidence. The record says wheel timestamp bytes and the outer ZIP
+change between builds while canonical manifest bytes remain identical. The
+manifest includes the exact wheel digest, so changed wheel bytes must change
+the canonical manifest. The builder does not set a stable source epoch, and its
+test checks canonical bytes rather than complete archive identity. Reproduce
+the two-build evidence, bind every nondeterministic input, and require the
+claimed artifact boundary to be byte-identical before restoring the claim.
+
+### s13-malformed-digest-fails-open | high | Invalid pins disable verification
+
+Type: supply-chain integrity. Input loading checks only that a digest key is
+present. Acquisition verifies bytes only when that value already matches the
+expected lowercase SHA-256 grammar. A typo or placeholder therefore accepts
+cached or downloaded bytes without verification. A direct real-file probe
+reproduced this behavior with `not-a-digest`. Reject invalid digests before any
+cache lookup or network access, then compare every acquired byte stream.
+
+### s13-mixed-source-snapshot | high | One capsule can combine HEAD with dirty worktree facts
+
+Type: provenance integrity. The wheel is built from `git archive HEAD`, while
+the builder, pin descriptor, exported Python lock, and both dependency-lock
+digests come from the live worktree and environment. Build every input from one
+exported commit snapshot, or fail closed on index and worktree drift and bind
+the commit identity explicitly.
+
+### s13-offline-closure-incomplete | high | The capsule omits transitive runtime payloads
+
+Type: product contract. The capsule carries runtime source archives, the root
+A2A wheel, one ACP tarball, and a Python lock recipe. It does not carry the
+Python dependency wheelhouse or ACP's transitive npm closure. The artifact
+therefore cannot satisfy the ADR's offline-after-install base closure. Assemble
+and verify the complete target-native dependency payload before closing S13.
+
+### s13-checkout-free-evidence-incomplete | medium | Locks, licensing, and SBOM cannot be reverified from the artifact
+
+Type: verification adequacy. The manifest hashes checkout lock files that are
+not shipped, while the shipped Python lock is not the manifest's bound lock
+input. License values are descriptor strings rather than evidence derived from
+the acquired artifacts, and no SBOM is present. Ship and digest the actual
+closure authorities, validate licensing evidence, and emit the required SBOM
+so S14 can verify the capsule without a checkout.
+
+## `W01 P03 S14` standalone capsule-verifier review
+
+Status: REVISION REQUIRED
+
+The verifier detects missing fixed entries, changed root-asset bytes, and
+canonical-manifest inconsistency. Independent review found that this is an
+internal-consistency check, not the checkout-free closure verifier claimed by
+S14. Five high-severity and two medium-severity findings remain open.
+
+### s14-false-closure-certification | high | Root asset names are accepted as an installable offline closure
+
+Type: product contract. Verification does not inspect runtime target identity
+or require the Python and ACP transitive payloads missing from S13. A manifest
+labeled for Windows can bind another target's runtime archives and still pass.
+Require target-native structure and the complete installable dependency payload
+before reporting target closure.
+
+### s14-lock-identity-unverified | high | Manifest lock digests cannot be checked from the capsule
+
+Type: provenance integrity. The verifier never checks the manifest's `uv.lock`
+or `package-lock.json` identities. Those files are absent, and the shipped
+Python lock is not bound by the manifest. Ship the authoritative locks, bind
+their bytes, and reject missing, stale, malformed, or mismatched closure state.
+
+### s14-manifest-claims-not-rederived | high | Target, entrypoints, and licenses are trusted assertions
+
+Type: verification adequacy. The command has no expected-target input and only
+schema-validates entrypoint and license fields copied from the manifest. It
+does not derive those facts from acquired runtime, wheel, and npm artifacts.
+Add an explicit target expectation and artifact-derived checks for every claim.
+
+### s14-sbom-incomplete | high | The emitted inventory omits material dependency evidence
+
+Type: supply-chain evidence. The generated inventory contains four top-level
+claims and Python package names and versions. It omits Python artifact hashes,
+licenses and relationships, all Node and ACP transitive components, and a
+standard authenticated SBOM identity. Generate the inventory from the complete
+verified closure and validate its schema and digest.
+
+### s14-checkout-free-proof-missing | high | Every test executes through the source checkout
+
+Type: test adequacy. Tests launch the repository script with `uv run` from the
+repository root, importing checkout modules and dependencies. Copy or install
+the independently pinned verifier and capsule into an isolated directory and
+prove verification succeeds with no repository files available.
+
+### s14-archive-ambiguity-unbounded | medium | Duplicate members and resource exhaustion are unchecked
+
+Type: input safety. Converting ZIP names to a set hides duplicate members, and
+the verifier applies no entry-count, expanded-size, per-entry-size, or
+compression-ratio bounds before whole-entry reads. Reuse the bounded,
+duplicate-safe archive discipline from the manifest reader.
+
+### s14-rejection-matrix-incomplete | medium | Explicit failure contracts lack durable tests
+
+Type: test adequacy. Negative coverage omits wrong target, stale lock identity,
+malformed lock structure, schema and canonical tampering, entrypoint and license
+mismatch, duplicate archive members, resource bounds, and absent transitive
+closure. Add real-byte rejection cases for each contract before closing S14.
+
+## `W01 P03 S15` capsule-publication workflow review
+
+Status: REVISION REQUIRED
+
+Full action pinning, concurrency, timeouts, and the five target triples are
+sound. Actionlint and independent review found four high-severity publication
+blockers and two medium-severity permission and documentation findings.
+
+### s15-intel-macos-runner-invalid | high | The five-target matrix cannot schedule
+
+Type: automation correctness. Actionlint rejects `macos-13` as an unknown
+hosted-runner label, so the Intel macOS leg cannot run. Status: resolved by
+selecting `macos-15-intel`; Actionlint accepts the complete workflow.
+
+### s15-clean-runner-environment-missing | high | Build scripts run before dependencies are installed
+
+Type: automation correctness. Jobs install uv and CPython, then call
+`uv run --no-sync` without creating or synchronizing the project environment.
+The scripts require Click, Pydantic, JSON Schema support, and the A2A package.
+Status: resolved by synchronizing the locked tooling environment before build
+and running each script with frozen no-sync semantics.
+
+### s15-release-gate-bypasses-product-ci | high | Tag publication can ship failed capsule contracts
+
+Type: release safety. The publish job depended only on the capsule matrix. It
+was not gated on canonical CI or resolution of the open S13 and S14 findings,
+so it could publish an incomplete artifact that passed only internal
+self-consistency checks. Status: resolved by removing tag-triggered release
+publication. The remaining workflow is manual artifact evidence; release
+publication must be added only after repaired capsule certification passes.
+
+### s15-artifact-identity-not-digest-stamped | high | Published assets lack an external immutable binding
+
+Type: supply-chain integrity. Artifact and release names contained only the
+target. No outer ZIP digest or checksum asset was published. Status: resolved
+for the manual artifact workflow by computing the final archive SHA-256,
+including it in the artifact name, and uploading a checksum file beside the
+capsule. A future release workflow must preserve this binding.
+
+### s15-workflow-permissions-too-broad | medium | Build jobs inherit release write authority
+
+Type: automation security. Workflow-level `contents: write` applies to all five
+build jobs even though they only read source and upload artifacts. Status:
+resolved by defaulting the workflow to `contents: read` and granting
+`contents: write` only to the publish job.
+
+### s15-release-notes-overstate-artifact | medium | Publication text claims determinism and offline closure
+
+Type: documentation accuracy. Release notes called the ZIP deterministic and
+said it contained the locked dependency closure. S13 records differing archive
+bytes and ships only a root wheel plus a lock recipe. Status: resolved by
+removing release publication and its unsupported notes.

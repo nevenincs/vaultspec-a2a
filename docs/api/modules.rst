@@ -131,7 +131,18 @@ API application
 .. py:module:: vaultspec_a2a.api.app
    :synopsis: FastAPI application construction.
 
-.. py:function:: create_app(lifespan=None)
+.. py:function:: create_app(lifespan=None, *, allow_unauthenticated_v1_for_testing=False)
+
+   Construct the gateway application. Production callers must leave the
+   unauthenticated ``/v1`` test bypass disabled.
+
+.. py:module:: vaultspec_a2a.api.auth
+   :synopsis: Bearer authentication for engine-facing gateway routes.
+
+.. py:function:: authenticate_request(request, authorization=None)
+
+   Require the service-discovery bearer token for an engine-facing request.
+   See :func:`vaultspec_a2a.api.app.create_app` for application wiring.
 
 .. py:module:: vaultspec_a2a.api.websocket
    :synopsis: WebSocket connection and command handling.
@@ -189,6 +200,75 @@ Desktop product profile
 
 .. py:function:: derive_state_paths(app_home)
 
+Staged desktop migration
+~~~~~~~~~~~~~~~~~~~~~~~~
+
+The external updater supplies a one-time descriptor to
+:func:`vaultspec_a2a.desktop.migration.run_staged_migration`. Descriptor
+validation is owned by :mod:`vaultspec_a2a.desktop.transaction`; schema work
+is owned by :mod:`vaultspec_a2a.desktop.migration`.
+
+.. py:module:: vaultspec_a2a.desktop.transaction
+   :synopsis: One-time staged-generation transaction descriptors.
+
+.. py:class:: TransactionDescriptor
+
+.. py:class:: TransactionDescriptorError
+
+.. py:function:: load_transaction_descriptor(path)
+
+.. py:function:: mark_transaction_consumed(transaction)
+
+.. py:module:: vaultspec_a2a.desktop.migration
+   :synopsis: Quiescent desktop-store migration execution.
+
+.. py:class:: MigrationResult
+
+.. py:class:: StoreOutcome
+
+.. py:function:: run_staged_migration(descriptor_path)
+
+Desktop consistency-group snapshots
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Snapshot capture and restore operate on the complete mutable desktop state
+group and require the gateway to be quiescent. See
+:mod:`vaultspec_a2a.desktop.snapshot` for the durable descriptor and interrupted
+restore-marker contracts.
+
+.. py:module:: vaultspec_a2a.desktop.snapshot
+   :synopsis: Capture, inspect, and restore desktop consistency groups.
+
+.. py:class:: ConsistencyGroupStore
+
+.. py:class:: StoreSnapshot
+
+.. py:class:: GroupDescriptor
+
+.. py:class:: RestoreMarker
+
+.. py:class:: RestoreOutcome
+
+.. py:class:: SnapshotError
+
+.. py:class:: SnapshotIntegrityError
+
+.. py:class:: SnapshotStoreLockedError
+
+.. py:class:: RestorePendingError
+
+.. py:function:: consistency_group_members(state)
+
+.. py:function:: create_snapshot(app_home, group_id, *, now=None)
+
+.. py:function:: inspect_snapshot(app_home, group_id)
+
+.. py:function:: list_snapshots(app_home)
+
+.. py:function:: pending_restore(app_home)
+
+.. py:function:: restore_snapshot(app_home, group_id, *, resume=False, now=None)
+
 Desktop assembly internals
 ~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -204,6 +284,9 @@ workflow.
 
 .. py:module:: vaultspec_a2a.desktop.capsule_evidence
    :synopsis: Installed-tree evidence and deterministic archive publication.
+
+.. py:module:: vaultspec_a2a.desktop._filesystem_authority
+   :synopsis: Native descriptor and handle authority for no-replace publication.
 
 Graph construction
 ~~~~~~~~~~~~~~~~~~
@@ -303,6 +386,15 @@ Control services
 
 .. py:module:: vaultspec_a2a.control.run_start_policy
    :synopsis: Run-start eligibility policy.
+
+.. py:module:: vaultspec_a2a.control.run_discovery_service
+   :synopsis: Bounded durable identity projection for active-run rebinding.
+
+.. py:class:: ActiveRunSummary
+
+.. py:class:: ActiveRunDiscoveryResult
+
+.. py:function:: discover_active_runs(db, *, workspace_root=None, feature_tag=None, limit=50)
 
 .. py:module:: vaultspec_a2a.control.verdict_subscriber
    :synopsis: Authoring verdict delivery.

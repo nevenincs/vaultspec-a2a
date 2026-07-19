@@ -61,6 +61,62 @@ targets a separate MCP console command rather than the native product CLI.
 ``just dev product doctor``, which checks gateway health. A foreground gateway
 is attached to its invoking terminal; the caller owns its lifetime.
 
+Gateway bearer authentication
+-----------------------------
+
+The engine-facing ``/v1`` routes require the bearer token published in the
+gateway's machine-global ``service.json`` discovery record. Product CLI calls
+reuse that discovered token automatically. Direct clients must send
+``Authorization: Bearer <token>``; an absent or invalid bearer returns ``401``.
+If the gateway has no configured service token, protected routes fail closed
+with ``503``. The top-level ``/health`` liveness route remains public so local
+supervisors can probe the process.
+
+Authentication is implemented by
+:func:`vaultspec_a2a.api.auth.authenticate_request` and wired by
+:func:`vaultspec_a2a.api.app.create_app`. The
+``allow_unauthenticated_v1_for_testing`` application option is test-only and
+must never be enabled by an operator deployment.
+
+Staged desktop migration
+------------------------
+
+``vaultspec-a2a desktop-migrate --descriptor PATH`` is an internal updater
+entry point, not an interactive run-control command. After the updater has
+quiesced the old gateway, it supplies a one-time transaction descriptor owned
+by :mod:`vaultspec_a2a.desktop.transaction`. The command invokes
+:func:`vaultspec_a2a.desktop.migration.run_staged_migration`, prints a bounded
+JSON :class:`vaultspec_a2a.desktop.migration.MigrationResult`, and exits nonzero
+when descriptor validation, store locking, schema migration, checkpointer
+setup, or the state backfill fails. Do not hand-edit, reuse, or replay a consumed
+descriptor.
+
+Desktop consistency-group snapshots
+-----------------------------------
+
+Snapshot operations treat the primary database and checkpointer database as one
+consistency group. Quiesce the gateway before calling
+:func:`vaultspec_a2a.desktop.snapshot.create_snapshot` or
+:func:`vaultspec_a2a.desktop.snapshot.restore_snapshot`; a live or locked store
+is refused. A snapshot becomes visible only after its descriptor is committed.
+Inspection verifies every captured member's digest and size. Restore writes a
+durable marker before replacing either store; while
+:func:`vaultspec_a2a.desktop.snapshot.pending_restore` returns a marker, treat
+the live group as unhealthy and roll the same snapshot forward with
+``resume=True``. Do not mix members from different snapshot groups.
+
+Active-run discovery
+--------------------
+
+``GET /v1/runs?state=active`` returns a bounded, newest-first identity
+projection for viewer rebinding. Optional absolute ``workspace_root`` and
+``feature_tag`` selectors narrow the indexed query, and ``limit`` is capped at
+100. The result from
+:func:`vaultspec_a2a.control.run_discovery_service.discover_active_runs` is not
+an authoritative recovery snapshot: after selecting a run id, read that run's
+status surface to obtain its current recovery state. The route uses the same
+``/v1`` bearer authentication described above.
+
 .. _process-registry:
 
 Named host-process registry

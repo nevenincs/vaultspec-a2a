@@ -18,6 +18,7 @@ related:
   - '[[2026-07-18-desktop-product-profile-W01-P02-S08]]'
   - '[[2026-07-18-desktop-product-profile-W01-P02-S09]]'
   - '[[2026-07-18-desktop-product-profile-W01-P02-S10]]'
+  - '[[2026-07-18-desktop-product-profile-W01-P02-S11]]'
   - '[[2026-07-18-desktop-product-profile-adr]]'
   - '[[2026-07-18-desktop-product-profile-plan]]'
   - '[[2026-07-18-desktop-product-profile-reference]]'
@@ -53,6 +54,7 @@ Auto-generated index of all documents tagged with `#desktop-product-profile`.
 - `2026-07-18-desktop-product-profile-W01-P02-S08` - Load bundled agent and team presets through package-owned resource paths
 - `2026-07-18-desktop-product-profile-W01-P02-S09` - Resolve the default Node and ACP adapter only from capsule-owned assets in the desktop profile
 - `2026-07-18-desktop-product-profile-W01-P02-S10` - Define the versioned desktop component manifest contract consumed by dashboard packaging
+- `2026-07-18-desktop-product-profile-W01-P02-S11` - Emit pinned component identity target compatibility gateway and standalone MCP entrypoints digests assets licenses and dependency-lock identity
 
 ### plan
 

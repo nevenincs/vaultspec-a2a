@@ -28,6 +28,10 @@ from .contract import contract_versions_compatible as contract_versions_compatib
 from .contract import (
     export_component_manifest_schema as export_component_manifest_schema,
 )
+from .manifest import AssetSource as AssetSource
+from .manifest import ManifestEmissionError as ManifestEmissionError
+from .manifest import component_manifest_digest as component_manifest_digest
+from .manifest import emit_component_manifest as emit_component_manifest
 
 __all__ = [
     "ACP_VERSION_PIN",
@@ -35,6 +39,7 @@ __all__ = [
     "CPYTHON_VERSION_PIN",
     "NODEJS_VERSION_PIN",
     "ApiVersionRange",
+    "AssetSource",
     "ComponentAsset",
     "ComponentAssetKind",
     "ComponentCompatibility",
@@ -45,9 +50,12 @@ __all__ = [
     "DependencyLockIdentity",
     "DigestAlgorithm",
     "EntrypointKind",
+    "ManifestEmissionError",
     "MigrationRange",
     "TargetTriple",
+    "component_manifest_digest",
     "component_manifest_schema",
     "contract_versions_compatible",
+    "emit_component_manifest",
     "export_component_manifest_schema",
 ]

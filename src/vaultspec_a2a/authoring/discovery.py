@@ -22,16 +22,28 @@ from pathlib import Path
 import httpx
 
 __all__ = [
+    "DESKTOP_RECORD_VERSION",
     "HEARTBEAT_STALE_MS",
     "SERVICE_JSON_ENV",
+    "DiscoveryRecordView",
     "EngineEndpoint",
     "heartbeat_is_fresh",
+    "parse_discovery_record",
+    "read_discovery_record",
     "read_service_json",
     "resolve_engine",
     "resolve_engine_with_retry",
 ]
 
 SERVICE_JSON_ENV = "VAULTSPEC_ENGINE_SERVICE_JSON"
+
+# The versioned desktop record's identifying version and profile. The producer
+# authority for this shape is ``lifecycle.discovery``; it is mirrored here (the
+# lower, shared reader module — importing lifecycle would cycle) so this reader
+# recognises a versioned record instead of misreading it as a malformed legacy
+# one.
+DESKTOP_RECORD_VERSION = 1
+_DESKTOP_PROFILE = "desktop"
 
 # Consumer staleness window: a heartbeat older than this is treated as a crash,
 # not as an available service (mirrors the engine's HEARTBEAT_STALE_MS).
@@ -67,6 +79,88 @@ def heartbeat_is_fresh(info: dict, now_ms: int) -> bool:
 
 
 @dataclass(frozen=True, slots=True)
+class DiscoveryRecordView:
+    """A shape-agnostic view of a discovery record: legacy or versioned desktop.
+
+    ``bearer_token`` is the inline machine bearer of a legacy record; a versioned
+    desktop record is secret-free, so its ``bearer_token`` is always ``None`` and
+    its owner-restricted attach credential is named only by
+    ``credential_reference`` (a filesystem path, never a value).
+    """
+
+    port: int
+    host: str
+    versioned: bool
+    bearer_token: str | None
+    credential_reference: str | None
+
+    @property
+    def base_url(self) -> str:
+        """Return the loopback origin the record advertises."""
+        return f"http://{self.host}:{self.port}"
+
+
+def _coerce_port(value: object) -> int | None:
+    if isinstance(value, bool) or not isinstance(value, int):
+        return None
+    return value
+
+
+def parse_discovery_record(info: dict) -> DiscoveryRecordView | None:
+    """Parse a discovery record dict into a view, preferring the versioned shape.
+
+    A record carrying the known desktop ``version`` and ``desktop`` profile is
+    read as versioned (secret-free, endpoint nested under ``endpoint``); anything
+    else is read as the legacy R8 record (top-level ``port`` and inline
+    ``service_token``). Fail-closed: a record without a valid integer port yields
+    ``None`` rather than a partially trusted view.
+    """
+    if (
+        info.get("version") == DESKTOP_RECORD_VERSION
+        and info.get("profile") == _DESKTOP_PROFILE
+    ):
+        endpoint = info.get("endpoint")
+        if not isinstance(endpoint, dict):
+            return None
+        port = _coerce_port(endpoint.get("port"))
+        if port is None:
+            return None
+        host = endpoint.get("host")
+        reference = info.get("credential_reference")
+        return DiscoveryRecordView(
+            port=port,
+            host=host if isinstance(host, str) and host else "127.0.0.1",
+            versioned=True,
+            bearer_token=None,
+            credential_reference=(
+                reference if isinstance(reference, str) and reference else None
+            ),
+        )
+    port = _coerce_port(info.get("port"))
+    if port is None:
+        return None
+    token = info.get("service_token")
+    reference = info.get("handoff_reference")
+    return DiscoveryRecordView(
+        port=port,
+        host="127.0.0.1",
+        versioned=False,
+        bearer_token=token if isinstance(token, str) and token else None,
+        credential_reference=(
+            reference if isinstance(reference, str) and reference else None
+        ),
+    )
+
+
+def read_discovery_record(path: Path) -> DiscoveryRecordView | None:
+    """Read and parse a discovery file into a shape-agnostic view, or ``None``."""
+    info = read_service_json(path)
+    if info is None:
+        return None
+    return parse_discovery_record(info)
+
+
+@dataclass(frozen=True, slots=True)
 class EngineEndpoint:
     """A resolved, liveness-confirmed engine origin and its machine bearer."""
 
@@ -92,24 +186,27 @@ def resolve_engine(*, liveness_timeout: float = 3.0) -> EngineEndpoint | None:
 
     Non-raising by contract: an unreadable file, a stale heartbeat, a malformed
     record, or a refused ``/health`` probe are all skipped so a caller can poll
-    this on a loop without guarding every failure mode.
+    this on a loop without guarding every failure mode. A versioned, secret-free
+    desktop record is now parsed rather than misread as malformed, and skipped
+    for engine resolution because it carries no inline machine bearer; the
+    engine's own record remains the legacy inline-token shape, so this path is
+    unchanged for it.
     """
     now_ms = int(time.time() * 1000)
     for path in _candidates():
         info = read_service_json(path)
         if info is None or not heartbeat_is_fresh(info, now_ms):
             continue
-        port = info.get("port")
-        token = info.get("service_token")
-        if not isinstance(port, int) or not isinstance(token, str):
+        view = parse_discovery_record(info)
+        if view is None or view.bearer_token is None:
             continue
-        base_url = f"http://127.0.0.1:{port}"
+        base_url = f"http://127.0.0.1:{view.port}"
         try:
             resp = httpx.get(f"{base_url}/health", timeout=liveness_timeout)
         except httpx.HTTPError:
             continue
         if resp.status_code == 200:
-            return EngineEndpoint(base_url=base_url, bearer_token=token)
+            return EngineEndpoint(base_url=base_url, bearer_token=view.bearer_token)
     return None
 
 

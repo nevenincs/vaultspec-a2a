@@ -165,7 +165,7 @@ Establish an operating-system-held runtime identity before listener publication 
 
 - [x] `W03.P07.S30` - Implement the cross-platform lifetime singleton and owner-matching stale-lock classification for one desktop app home; `src/vaultspec_a2a/lifecycle/singleton.py`.
 - [x] `W03.P07.S31` - Replace token-bearing discovery with an atomic versioned profile generation protocol schema owner and ACL-reference record; `src/vaultspec_a2a/lifecycle/discovery.py`.
-- [ ] `W03.P07.S32` - Parse the versioned secret-free gateway discovery record without weakening engine authoring discovery; `src/vaultspec_a2a/authoring/discovery.py`.
+- [x] `W03.P07.S32` - Parse the versioned secret-free gateway discovery record without weakening engine authoring discovery; `src/vaultspec_a2a/authoring/discovery.py`.
 - [ ] `W03.P07.S33` - Acquire the desktop singleton before invoking Uvicorn socket bind and pass its ownership into gateway startup; `src/vaultspec_a2a/cli/main.py`.
 - [ ] `W03.P07.S34` - Prove two real desktop gateway processes cannot own or overwrite one app home; `src/vaultspec_a2a/desktop_tests/test_runtime_singleton.py`.
 - [ ] `W03.P07.S35` - Prove authenticated foreign attachment stale-owner recovery and immutable live-conflict behavior with real processes; `src/vaultspec_a2a/desktop_tests/test_discovery_ownership.py`.

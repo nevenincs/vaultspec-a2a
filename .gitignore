@@ -9,6 +9,7 @@ scratchpad/
 *.log
 *.tmp
 *.bak
+*.bak-*
 *.swp
 *.swo
 *.DS_Store
@@ -27,16 +28,7 @@ venv/
 
 # Agent configs (per-developer, not shared)
 .profile
-.claude/
-.gemini/
-.codex/
 .agent/
-.agents/
-.vaultspec/
-.mcp.json
-AGENTS.md
-CLAUDE.md
-GEMINI.md
 
 # Node.js
 node_modules/
@@ -87,6 +79,7 @@ Python/
 .vault/logs/
 .vaultspec/*.lock
 .vaultspec/_snapshots/
+.vaultspec/mcp-ownership.json
 .vaultspec/providers.json
 /.gitignore.lock
 /.mcp.json.lock

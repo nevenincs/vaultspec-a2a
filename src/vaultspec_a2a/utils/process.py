@@ -41,6 +41,7 @@ _POLL_INTERVAL = 0.1
 # the whole contained tree.
 _JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE = 0x00002000
 _JOBOBJECT_EXTENDED_LIMIT_INFORMATION_CLASS = 9  # JobObjectExtendedLimitInformation
+_JOBOBJECT_BASIC_ACCOUNTING_INFORMATION_CLASS = 1  # JobObjectBasicAccountingInformation
 _PROCESS_TERMINATE = 0x0001
 _PROCESS_SET_QUOTA = 0x0100
 
@@ -331,7 +332,7 @@ class ProcessContainment:
                 return result
             return True
         if sys.platform == "win32":
-            result = self._terminate_win_job()
+            result = await self._terminate_win_job(kill_timeout=kill_timeout)
             self.close()
             return result
         result = await self._terminate_posix_group(
@@ -340,7 +341,15 @@ class ProcessContainment:
         self.close()
         return result
 
-    def _terminate_win_job(self) -> bool:
+    async def _terminate_win_job(self, *, kill_timeout: float) -> bool:
+        """Terminate the job and wait, bounded, until it holds no live process.
+
+        ``TerminateJobObject`` marks every assigned process for termination; the
+        wait confirms the whole tree is actually gone (not just the root the
+        caller separately waits on) by polling the job's active-process count -
+        via the job's own accounting information, never a parent-pid tree walk -
+        until it reaches zero or *kill_timeout* elapses.
+        """
         import ctypes
         from ctypes import wintypes
 
@@ -349,9 +358,57 @@ class ProcessContainment:
         kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
         kernel32.TerminateJobObject.restype = wintypes.BOOL
         kernel32.TerminateJobObject.argtypes = (wintypes.HANDLE, wintypes.UINT)
-        # A non-zero exit code marks the tree as force-terminated. Failure here is
+        # A non-zero exit code marks the tree as force-terminated. A failed call is
         # non-fatal: closing the KILL_ON_JOB_CLOSE handle still reaps the job.
-        return bool(kernel32.TerminateJobObject(self._job, 1))
+        kernel32.TerminateJobObject(self._job, 1)
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + kill_timeout
+        while loop.time() < deadline:
+            active = self._win_active_processes(kernel32)
+            if active == 0:
+                return True
+            await asyncio.sleep(_POLL_INTERVAL)
+        return self._win_active_processes(kernel32) == 0
+
+    def _win_active_processes(self, kernel32: Any) -> int:
+        """Return the job's live-process count via its accounting information.
+
+        Returns 0 when the count cannot be read (the job handle is gone), so a
+        query failure resolves as "empty" rather than hanging the bounded wait.
+        """
+        import ctypes
+        from ctypes import wintypes
+
+        class _JobObjectBasicAccountingInformation(ctypes.Structure):
+            _fields_ = (
+                ("TotalUserTime", ctypes.c_int64),
+                ("TotalKernelTime", ctypes.c_int64),
+                ("ThisPeriodTotalUserTime", ctypes.c_int64),
+                ("ThisPeriodTotalKernelTime", ctypes.c_int64),
+                ("TotalPageFaultCount", ctypes.c_uint32),
+                ("TotalProcesses", ctypes.c_uint32),
+                ("ActiveProcesses", ctypes.c_uint32),
+                ("TotalTerminatedProcesses", ctypes.c_uint32),
+            )
+
+        info = _JobObjectBasicAccountingInformation()
+        kernel32.QueryInformationJobObject.restype = wintypes.BOOL
+        kernel32.QueryInformationJobObject.argtypes = (
+            wintypes.HANDLE,
+            ctypes.c_int,
+            ctypes.c_void_p,
+            wintypes.DWORD,
+            ctypes.c_void_p,
+        )
+        if not kernel32.QueryInformationJobObject(
+            self._job,
+            _JOBOBJECT_BASIC_ACCOUNTING_INFORMATION_CLASS,
+            ctypes.byref(info),
+            ctypes.sizeof(info),
+            None,
+        ):
+            return 0
+        return int(info.ActiveProcesses)
 
     async def _terminate_posix_group(
         self, *, term_timeout: float, kill_timeout: float

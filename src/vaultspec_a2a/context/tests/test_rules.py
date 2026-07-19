@@ -7,8 +7,6 @@ import shutil
 import time
 from pathlib import Path
 
-import pytest
-
 from vaultspec_a2a.authoring.contract import DOCUMENT_AUTHORING_ROLES
 from vaultspec_a2a.context.rules import DEFAULT_BUNDLED_RULES_DIR, RuleManager
 
@@ -347,17 +345,15 @@ class TestRealSyncedCorpus:
     path-alignment fix, ``_RULES_SUBDIR`` targeted a nonexistent nested
     ``rules/rules/`` directory, so ``compile()`` returned ``None`` against this
     same real corpus and these assertions would have failed - this is the
-    regression that catches the defect. Skips honestly where no corpus is synced
-    (a bare checkout without ``vaultspec-core install``).
+    regression that catches the defect. The enrolled repository corpus is a
+    required integration-test precondition.
     """
 
     def test_compile_returns_real_corpus_content(self) -> None:
         root = _find_synced_rules_root()
-        if root is None:
-            pytest.skip(
-                "no synced .vaultspec/rules/ corpus found in any ancestor; run "
-                "`vaultspec-core install` to materialize the flat rule corpus"
-            )
+        assert root is not None, (
+            "no synced .vaultspec/rules/ corpus found; run `vaultspec-core install`"
+        )
 
         result = RuleManager(root).compile()
 
@@ -368,15 +364,13 @@ class TestRealSyncedCorpus:
         )
         assert result.strip(), "compiled rule text is empty"
         # Stable content from the real non-builtin corpus (01-core.md).
-        assert "Core Mandates" in result
+        assert "Repository engineering rules" in result
 
     def test_discover_reads_flat_corpus_and_excludes_builtin(self) -> None:
         root = _find_synced_rules_root()
-        if root is None:
-            pytest.skip(
-                "no synced .vaultspec/rules/ corpus found in any ancestor; run "
-                "`vaultspec-core install` to materialize the flat rule corpus"
-            )
+        assert root is not None, (
+            "no synced .vaultspec/rules/ corpus found; run `vaultspec-core install`"
+        )
 
         default = RuleManager(root).discover()
         with_builtin = RuleManager(root, include_builtin=True).discover()
@@ -403,11 +397,9 @@ class TestRealSyncedCorpus:
         current corpus and turns on only for files that opt in.
         """
         root = _find_synced_rules_root()
-        if root is None:
-            pytest.skip(
-                "no synced .vaultspec/rules/ corpus found in any ancestor; run "
-                "`vaultspec-core install` to materialize the flat rule corpus"
-            )
+        assert root is not None, (
+            "no synced .vaultspec/rules/ corpus found; run `vaultspec-core install`"
+        )
         rm = RuleManager(root)
         whole = {p.name for p in rm.discover(None)}
         scoped = {p.name for p in rm.discover("researcher")}

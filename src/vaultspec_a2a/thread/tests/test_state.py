@@ -276,6 +276,7 @@ class TestTeamStateStructure:
             "gate_pending_proposal_id",
             # workspace root path
             "workspace_root",
+            "feedback_batch_id",
         }
         actual = set(TeamState.__annotations__)
         assert expected == actual

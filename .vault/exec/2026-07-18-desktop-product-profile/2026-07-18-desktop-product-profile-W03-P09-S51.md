@@ -75,7 +75,11 @@ the preceding Steps and are unaffected by this test-only addition.
 
 ## Notes
 
-No incidents. The gateway process identity is asserted present and consistent
+Follow-up closing a review finding: the certification now byte-asserts the
+minimal liveness body on every ungated surface - both the top-level probe and the
+aggregate probe - so a regression that re-adds a disclosed field cannot pass a
+substring-only scan. No incidents. The gateway process identity is asserted
+present and consistent
 across both authenticated surfaces rather than equal to the spawn handle: a Windows
 virtual environment interpreter is a launcher stub whose real child process carries
 a different identifier, so binding the assertion to the launcher handle would be

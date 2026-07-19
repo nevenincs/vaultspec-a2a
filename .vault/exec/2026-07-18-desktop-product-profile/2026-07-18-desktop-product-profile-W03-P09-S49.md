@@ -76,3 +76,10 @@ The readiness projection is computed by the shared authority rather than
 recomputed here, so the liveness surface and the service-state verb cannot
 disclose divergent readiness. No Compose consumer of the aggregate readiness
 endpoint is touched.
+
+Follow-up closing a review finding: the aggregate liveness route was a second
+ungated surface that still disclosed process identity and worker, circuit-breaker,
+and backend state to unauthenticated callers. It now returns the same minimal
+liveness body under the armed desktop profile, with the full aggregate body
+retained for the Compose and development profiles their gateway healthchecks
+consume. Every ungated liveness surface is now minimal under the armed profile.

@@ -165,15 +165,28 @@ def test_desktop_readiness_liveness_minimal_and_readiness_authenticated(
         _await_health(base)
 
         with httpx.Client(base_url=base, timeout=5.0) as client:
-            # --- Unauthenticated liveness is minimal, byte-for-byte. ---
-            live = client.get("/health")
-            assert live.status_code == 200
-            assert live.content == b'{"liveness":"alive"}'
-            assert live.json() == {"liveness": "alive"}
-            # No process identity, product identity, or product state leaks.
-            leaks = ("pid", "generation", "profile", "worker", "gateway_readiness")
-            for token in leaks:
-                assert token not in live.text
+            # --- Every ungated liveness surface is minimal, byte-for-byte. ---
+            # Both the top-level probe and the aggregate probe must disclose only
+            # the minimal alive signal - no process identity, service identity, or
+            # product state. The body shape is asserted at the byte level so a
+            # regression that re-adds a field cannot slip past a substring scan.
+            leaks = (
+                "pid",
+                "generation",
+                "profile",
+                "worker",
+                "gateway_readiness",
+                "circuit",
+                "backend",
+                "status",
+            )
+            for path in ("/health", "/api/health"):
+                live = client.get(path)
+                assert live.status_code == 200, path
+                assert live.content == b'{"liveness":"alive"}', path
+                assert live.json() == {"liveness": "alive"}, path
+                for token in leaks:
+                    assert token not in live.text, (path, token)
 
             # --- Readiness facts are reachable only through the attach credential. ---
             assert client.get("/v1/service").status_code == 401

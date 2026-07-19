@@ -24,7 +24,7 @@ install-dry-run:
 
 # Deliberately refresh RAG inside its declared compatibility range.
 upgrade:
-    uv lock --upgrade-package vaultspec-rag
+    uv run --no-sync --frozen --no-default-groups --extra rag python -c "import subprocess; from vaultspec_a2a.providers._acp_mcp import _LOCKED_RAG_MCP_REQUIREMENT as requirement; subprocess.run(['uv', 'lock', '--upgrade-package', requirement], check=True)"
     uv sync --locked --no-default-groups --extra rag
     just dev rag _check-runtime-authority
     {{ rag_cli }} install --mode dependency --upgrade --no-mcp --no-provision --no-torch-config --yes

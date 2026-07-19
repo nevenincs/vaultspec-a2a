@@ -141,6 +141,18 @@ class InfraConfig(BaseSettings):
             "resolution is checkout-relative as before."
         ),
     )
+    desktop_app_home: Path | None = Field(
+        default=None,
+        alias="VAULTSPEC_DESKTOP_APP_HOME",
+        description=(
+            "Explicit mutable-state root for the desktop product profile. When "
+            "set, the profile is armed: the database, checkpoint, workspace, and "
+            "A2A-home paths derive ONLY from this application home (via the "
+            "desktop profile authority), never from the launch directory. Must be "
+            "an absolute path. Unset for the Compose/dev profiles, whose path "
+            "resolution is unchanged."
+        ),
+    )
     mock_api_base: str | None = Field(
         default=None,
         alias="MOCK_API_BASE",
@@ -629,6 +641,35 @@ class Settings(DomainSettingsConfig, InfraConfig):
             self.gateway_url = f"http://{host}:{self.port}"
         if not self.worker_url:
             self.worker_url = f"http://{self.worker_host}:{self.worker_port}"
+        return self
+
+    @model_validator(mode="after")
+    def _seat_desktop_profile(self) -> Self:
+        """Seat every mutable path under the explicit desktop application home.
+
+        The desktop profile is armed only when ``desktop_app_home`` is set. While
+        unarmed (the Compose and development profiles), this is a no-op and the
+        configuration is byte-for-byte unchanged — including the import surface,
+        since the desktop path authority is imported only on the armed branch.
+
+        When armed, the database, checkpoint, workspace, and A2A-home paths derive
+        from the application home through the desktop profile's single derivation
+        authority, so no mutable path resolves relative to the launch directory.
+        """
+        if self.desktop_app_home is None:
+            return self
+
+        # Imported lazily and only when armed: unarmed construction never pulls
+        # the desktop package, preserving the Compose/dev import surface.
+        from ..desktop.profile import derive_state_paths
+
+        state = derive_state_paths(self.desktop_app_home)
+        self.a2a_home = state.app_home
+        self.workspace_root = state.workspaces_root
+        self.database_url = f"sqlite+aiosqlite:///{state.database_path.as_posix()}"
+        self.checkpoint_database_url = (
+            f"sqlite+aiosqlite:///{state.checkpoint_path.as_posix()}"
+        )
         return self
 
     @property

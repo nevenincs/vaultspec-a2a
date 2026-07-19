@@ -438,6 +438,17 @@ Type: governance metadata. The dev-process-registry ADR gained a 2026-07-19
 resident-port amendment while its `modified` field still named 2026-07-15.
 Status: resolved by refreshing the modified date to the amendment date.
 
+### s11-doctor-platform-drift | high | Toolchain diagnosis depended exclusively on PowerShell
+
+Type: architectural portability. The public doctor recipes were implemented
+only with PowerShell commands even though the native Just module contract is
+portable and the documented setup supports Unix hosts. Status: resolved. The
+same recipe names now select official `[windows]` and `[unix]` variants, retain
+the Just 1.31 minimum and uv requirement, distinguish optional from required
+Docker support, and provide platform-appropriate installation links. Native
+Windows execution, formatting, listing, dry-runs, and static Unix branch
+presence pass; Unix live execution remains S12 acceptance evidence.
+
 ## Recommendations
 
 No open task remains for S01, S02, or the S03 implementation. Preserve the two
@@ -477,3 +488,7 @@ boundary, immutable action references, trusted Claude associations, and
 canonical hosted gate. During S12, rerun `just ci` after the concurrent
 formatter drift is resolved, exercise the organization-owned runner path, and
 decide whether repository policy should require SHA-pinned Actions globally.
+
+Preserve S11's platform-specific doctor variants as one public command contract.
+Exercise the Unix branch on a real Unix host during S12 before declaring the
+clone-to-CI portability matrix complete.

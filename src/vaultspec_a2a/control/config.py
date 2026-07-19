@@ -678,6 +678,18 @@ class Settings(DomainSettingsConfig, InfraConfig):
         return self.environment == Environment.DEVELOPMENT
 
     @property
+    def desktop_profile_armed(self) -> bool:
+        """Return whether the desktop product profile is armed.
+
+        This is the single authority for desktop-profile detection. The profile
+        is armed exactly when an explicit application home is configured; every
+        seam that must behave differently under the desktop profile (non-mutating
+        schema validation, checkpointer setup suppression) branches on this one
+        predicate rather than re-deriving arming from raw configuration.
+        """
+        return self.desktop_app_home is not None
+
+    @property
     def resolved_database_backend(self) -> Literal["sqlite", "postgres"]:
         """Validate the configured application database backend against the URL."""
         url = self.database_url

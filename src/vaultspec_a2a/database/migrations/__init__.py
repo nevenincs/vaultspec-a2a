@@ -8,7 +8,7 @@ import logging
 import sqlite3
 from pathlib import Path
 
-__all__ = ["backfill_teamstate_sdd_fields"]
+__all__ = ["backfill_teamstate_sdd_fields", "count_pending_sdd_backfill"]
 
 
 logger = logging.getLogger(__name__)
@@ -100,3 +100,49 @@ def backfill_teamstate_sdd_fields(db_path: Path | str) -> int:
     if patched:
         logger.info("Checkpoint backfill: patched %d row(s)", patched)
     return patched
+
+
+def count_pending_sdd_backfill(db_path: Path | str) -> int:
+    """Return how many checkpoint rows still lack the SDD state fields.
+
+    Read-only counterpart of :func:`backfill_teamstate_sdd_fields`: it applies
+    the identical row-eligibility rules (skip empty or undecodable
+    ``channel_values``, count only rows whose decoded object is missing a
+    default key) without mutating the store. A return value of ``0`` means the
+    SDD state is coherent — an armed desktop boot requires this without running
+    the backfill itself. A missing or column-incompatible table is likewise
+    treated as nothing-pending, matching the backfill's own skip semantics.
+
+    Args:
+        db_path: Path to the SQLite checkpoint database file.
+
+    Returns:
+        Number of rows that a backfill would patch.
+    """
+    conn = sqlite3.connect(str(db_path))
+    try:
+        cursor = conn.cursor()
+        try:
+            cursor.execute("SELECT channel_values FROM checkpoints")
+            rows = cursor.fetchall()
+        except sqlite3.OperationalError as exc:
+            msg = str(exc).lower()
+            if "no such table" in msg or "no such column" in msg:
+                return 0
+            raise
+
+        pending = 0
+        for (channel_values_raw,) in rows:
+            if not channel_values_raw:
+                continue
+            try:
+                channel_values = json.loads(channel_values_raw)
+            except (json.JSONDecodeError, TypeError):
+                continue
+            if not isinstance(channel_values, dict):
+                continue
+            if any(key not in channel_values for key in _SDD_DEFAULTS):
+                pending += 1
+        return pending
+    finally:
+        conn.close()

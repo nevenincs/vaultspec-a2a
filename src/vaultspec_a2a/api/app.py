@@ -140,14 +140,30 @@ async def _lifespan(app: FastAPI) -> AsyncGenerator[None]:
     logger.info("Starting gateway lifespan")
     settings.validate_postgres_requirement()
 
-    engine = await init_db(settings.database_url)
-    logger.info(
-        "Database initialised (%s, migrations applied)",
-        settings.resolved_database_backend,
-    )
+    armed = settings.desktop_profile_armed
+    engine = await init_db(settings.database_url, apply_migrations=not armed)
+    if armed:
+        # Desktop profile: ordinary boot mutates no schema. Validate that the
+        # seated stores are already compatible and fail loud otherwise; the
+        # staged-generation migration entrypoint owns every mutation.
+        from ..database.compatibility import validate_desktop_schema
+
+        await validate_desktop_schema(
+            database_url=settings.database_url,
+            checkpoint_path=settings.checkpoint_path,
+        )
+        logger.info(
+            "Desktop database schema validated (no migration performed, %s)",
+            settings.resolved_database_backend,
+        )
+    else:
+        logger.info(
+            "Database initialised (%s, migrations applied)",
+            settings.resolved_database_backend,
+        )
     app.state.sqlite_fallback_diagnostics = build_sqlite_fallback_diagnostics()
 
-    if settings.resolved_checkpoint_backend == "sqlite":
+    if not armed and settings.resolved_checkpoint_backend == "sqlite":
         backfill_teamstate_sdd_fields(settings.checkpoint_path)
 
     async with open_checkpointer() as checkpointer:

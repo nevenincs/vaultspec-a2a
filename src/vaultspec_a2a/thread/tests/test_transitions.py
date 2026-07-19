@@ -4,7 +4,13 @@ from __future__ import annotations
 
 import pytest
 
-from ..enums import TERMINAL_STATUSES, InvalidTransitionError, ThreadStatus
+from ..enums import (
+    ACTIVE_STATUSES,
+    NON_ACTIVE_STATUSES,
+    TERMINAL_STATUSES,
+    InvalidTransitionError,
+    ThreadStatus,
+)
 from ..transitions import _VALID_TRANSITIONS, validate_transition
 
 
@@ -59,6 +65,12 @@ def test_every_status_has_transitions_defined() -> None:
     """Every ThreadStatus member should appear as a key in _VALID_TRANSITIONS."""
     for status in ThreadStatus:
         assert status in _VALID_TRANSITIONS, f"{status} missing from transition table"
+
+
+def test_discovery_statuses_explicitly_classify_the_lifecycle_vocabulary() -> None:
+    """A new lifecycle state must be classified before discovery can use it."""
+    assert ACTIVE_STATUSES.isdisjoint(NON_ACTIVE_STATUSES)
+    assert ACTIVE_STATUSES | NON_ACTIVE_STATUSES == frozenset(ThreadStatus)
 
 
 def test_no_self_loops_in_transition_table() -> None:

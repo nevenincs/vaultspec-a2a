@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 from uuid import uuid4
@@ -15,9 +16,10 @@ if TYPE_CHECKING:
     from datetime import datetime
 
     from sqlalchemy.ext.asyncio import AsyncSession
+    from sqlalchemy.sql import Select
 
 from ..thread.enums import (
-    NON_ACTIVE_STATUSES,
+    ACTIVE_STATUSES,
     ApprovalStatus,
     ControlActionType,
     RepairStatus,
@@ -62,8 +64,40 @@ class ActiveThreadProjection:
 
     id: str
     status: str
-    thread_metadata: str | None
+    feature_tag: str | None
     created_at: datetime
+
+
+_MAX_DISCOVERY_WORKSPACE_ROOT_LENGTH = 4096
+_MAX_DISCOVERY_FEATURE_TAG_LENGTH = 128
+
+
+def _discovery_selectors(metadata: str | None) -> tuple[str | None, str | None]:
+    """Project bounded discovery selectors once at the metadata write seam."""
+    if not metadata:
+        return None, None
+    try:
+        value = json.loads(metadata)
+    except (json.JSONDecodeError, RecursionError, TypeError):
+        return None, None
+    if not isinstance(value, dict):
+        return None, None
+    workspace = value.get("workspace_root")
+    feature = value.get("feature_tag")
+    if (
+        not isinstance(workspace, str)
+        or not os.path.isabs(workspace)
+        or not 1 <= len(workspace) <= _MAX_DISCOVERY_WORKSPACE_ROOT_LENGTH
+    ):
+        workspace = None
+    else:
+        workspace = os.path.normcase(os.path.realpath(workspace))
+    if (
+        not isinstance(feature, str)
+        or not 1 <= len(feature) <= _MAX_DISCOVERY_FEATURE_TAG_LENGTH
+    ):
+        feature = None
+    return workspace, feature
 
 
 async def create_thread(
@@ -92,14 +126,18 @@ async def create_thread(
         if existing is not None:
             raise NicknameConflictError(nickname)
 
+    workspace_root, feature_tag = _discovery_selectors(metadata)
     thread = ThreadModel(
         id=thread_id or uuid4().hex,
         title=title,
         status=coerced_status.value,
+        is_active=coerced_status in ACTIVE_STATUSES,
         repair_status=coerced_repair_status.value,
         repair_reason=repair_reason,
         execution_readiness=execution_readiness,
         thread_metadata=metadata,
+        workspace_root=workspace_root,
+        feature_tag=feature_tag,
         nickname=nickname,
         team_preset=team_preset,
     )
@@ -163,7 +201,8 @@ async def list_active_thread_page(
     session: AsyncSession,
     *,
     limit: int,
-    metadata_prefix_length: int,
+    workspace_root: str | None = None,
+    feature_tag: str | None = None,
     after_created_at: datetime | None = None,
     after_id: str | None = None,
 ) -> Sequence[ActiveThreadProjection]:
@@ -171,52 +210,74 @@ async def list_active_thread_page(
     if not 1 <= limit <= 101:
         msg = "active-thread page limit must be between 1 and 101"
         raise ValueError(msg)
-    if not 1 <= metadata_prefix_length <= 65_536:
-        msg = "active-thread metadata prefix must be between 1 and 65536"
+    if workspace_root is not None and not 1 <= len(workspace_root) <= 4096:
+        msg = "active-thread workspace selector must be between 1 and 4096 characters"
+        raise ValueError(msg)
+    if feature_tag is not None and not 1 <= len(feature_tag) <= 128:
+        msg = "active-thread feature selector must be between 1 and 128 characters"
         raise ValueError(msg)
     if (after_created_at is None) != (after_id is None):
         msg = "active-thread keyset cursor requires both created_at and id"
         raise ValueError(msg)
 
+    stmt = _active_thread_page_statement(
+        limit=limit,
+        workspace_root=workspace_root,
+        feature_tag=feature_tag,
+        after_created_at=after_created_at,
+        after_id=after_id,
+    )
+    result = await session.execute(stmt)
+    return [
+        ActiveThreadProjection(
+            id=row.id,
+            status=row.status,
+            feature_tag=row.feature_tag,
+            created_at=row.created_at,
+        )
+        for row in result.all()
+    ]
+
+
+def _active_thread_page_statement(
+    *,
+    limit: int,
+    workspace_root: str | None,
+    feature_tag: str | None,
+    after_created_at: datetime | None,
+    after_id: str | None,
+) -> Select[tuple[str, str, str | None, datetime]]:
+    """Build the production discovery query for execution and plan inspection."""
     stmt = (
         select(
             ThreadModel.id,
             ThreadModel.status,
-            func.substr(
-                ThreadModel.thread_metadata,
-                1,
-                metadata_prefix_length,
-            ).label("thread_metadata"),
+            ThreadModel.feature_tag,
             ThreadModel.created_at,
         )
         .where(
-            ThreadModel.status.not_in(
-                [thread_status.value for thread_status in NON_ACTIVE_STATUSES]
-            )
+            ThreadModel.is_active.is_(True),
+            ThreadModel.status.in_(sorted(status.value for status in ACTIVE_STATUSES)),
+            func.length(ThreadModel.id).between(1, 128),
         )
-        .order_by(ThreadModel.created_at.desc(), ThreadModel.id.asc())
+        .order_by(ThreadModel.created_at.desc(), ThreadModel.id.desc())
         .limit(limit)
     )
+    if workspace_root is not None:
+        stmt = stmt.where(ThreadModel.workspace_root == workspace_root)
+    if feature_tag is not None:
+        stmt = stmt.where(ThreadModel.feature_tag == feature_tag)
     if after_created_at is not None and after_id is not None:
         stmt = stmt.where(
             or_(
                 ThreadModel.created_at < after_created_at,
                 and_(
                     ThreadModel.created_at == after_created_at,
-                    ThreadModel.id > after_id,
+                    ThreadModel.id < after_id,
                 ),
             )
         )
-    result = await session.execute(stmt)
-    return [
-        ActiveThreadProjection(
-            id=row.id,
-            status=row.status,
-            thread_metadata=row.thread_metadata,
-            created_at=row.created_at,
-        )
-        for row in result.all()
-    ]
+    return stmt
 
 
 async def delete_thread(session: AsyncSession, thread_id: str) -> bool:
@@ -248,6 +309,7 @@ async def update_thread_status(
     validate_transition(current, coerced_status, thread_id=thread_id)
 
     thread.status = coerced_status.value
+    thread.is_active = coerced_status in ACTIVE_STATUSES
     thread.updated_at = _utcnow()
     await session.flush()
     return thread
@@ -420,7 +482,10 @@ async def update_thread_metadata(
     thread = await session.get(ThreadModel, thread_id)
     if thread is None:
         return None
+    workspace_root, feature_tag = _discovery_selectors(metadata)
     thread.thread_metadata = metadata
+    thread.workspace_root = workspace_root
+    thread.feature_tag = feature_tag
     thread.updated_at = _utcnow()
     await session.flush()
     return thread

@@ -6,7 +6,7 @@ help:
     @just --list dev::code
 
 # Run every read-only code-quality check.
-check: lint format-check type dependencies
+check: lint format-check type dependencies workflows
 
 # Check Python lint rules without changing files.
 lint:
@@ -23,6 +23,10 @@ type:
 # Check declared dependencies against imports and explicit runtime loaders.
 dependencies:
     uv run --no-sync --frozen --no-default-groups --group tooling deptry .
+
+# Validate GitHub Actions workflows with the project-pinned authority.
+workflows:
+    uv run --no-sync --frozen --no-default-groups --group tooling actionlint
 
 # Apply configured lint fixes and formatting explicitly.
 repair:

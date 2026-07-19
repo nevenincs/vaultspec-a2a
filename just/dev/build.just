@@ -27,4 +27,4 @@ docker-prod:
 
 # Remove generated package, documentation, and Python cache artifacts.
 clean:
-    @& { $root = (Resolve-Path -LiteralPath ".").Path; $targets = @((Join-Path $root "dist"), (Join-Path $root "docs/_build")); $scanRoots = @("src", "tests", "docs") | ForEach-Object { Join-Path $root $_ } | Where-Object { Test-Path -LiteralPath $_ }; $targets += @(Get-ChildItem -Path $scanRoots -Directory -Recurse -Filter "*.egg-info" -ErrorAction SilentlyContinue | ForEach-Object FullName); $targets += @(Get-ChildItem -Path $scanRoots -Directory -Recurse -Filter "__pycache__" -ErrorAction SilentlyContinue | ForEach-Object FullName); foreach ($target in ($targets | Select-Object -Unique)) { if (-not (Test-Path -LiteralPath $target)) { continue }; $resolved = (Resolve-Path -LiteralPath $target).Path; if (-not $resolved.StartsWith($root + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase)) { throw "Refusing to remove path outside repository: $resolved" }; Remove-Item -LiteralPath $resolved -Recurse -Force }; Write-Host "Generated build artifacts removed."
+    uv run --no-sync --frozen --no-default-groups python -m vaultspec_a2a.cli.build_clean

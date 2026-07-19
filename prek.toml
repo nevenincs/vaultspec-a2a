@@ -59,6 +59,15 @@ repo = "local"
   types = ["markdown"]
 
   [[repos.hooks]]
+  entry = "uv run --no-sync --frozen --no-default-groups --group tooling actionlint"
+  files = '''^\.github/workflows/.*\.ya?ml$'''
+  id = "actionlint"
+  language = "system"
+  name = "Lint GitHub Actions workflows (actionlint)"
+  pass_filenames = true
+  types = ["yaml"]
+
+  [[repos.hooks]]
   entry = "uv run --no-sync --frozen --no-default-groups --group tooling vaultspec-core vault check all"
   id = "vault-doctor"
   language = "system"

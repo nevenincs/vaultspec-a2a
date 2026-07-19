@@ -52,6 +52,7 @@ docs = [
   "sphinx>=8.2",
 ]
 tooling = [
+  "actionlint-py==1.7.12.24",
   "deptry>=0.23.0",
   "identify>=2.0.0",
   "jsonschema>=4.26.0",
@@ -216,6 +217,7 @@ torch = "torch"
 [tool.deptry.per_rule_ignores]
 # DEP002: packages invoked as CLI tools or loaded via URL scheme (not direct Python imports)
 DEP002 = [
+  "actionlint-py",
   "ruff",
   "ty",
   "prek",

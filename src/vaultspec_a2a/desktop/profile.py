@@ -72,9 +72,9 @@ class DesktopStatePaths:
 
     The *reserved* paths — ``credentials_dir``, ``receipts_dir``,
     ``temp_homes_dir``, and ``snapshots_dir`` — are declared here so the
-    consuming phases (the consistency-group snapshots of ``W02.P06`` and the
-    split credentials of ``W03.P08``) bind one agreed layout. They have no
-    consumer yet and are therefore not materialised by :meth:`DesktopProfile.ensure`.
+    consistency-group snapshot and split-credential consumers bind one agreed
+    layout. They have no consumer yet and are therefore not materialised by
+    :meth:`DesktopProfile.ensure`.
     """
 
     app_home: Path

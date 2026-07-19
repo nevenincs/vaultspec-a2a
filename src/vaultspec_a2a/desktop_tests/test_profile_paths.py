@@ -12,7 +12,7 @@ assets — the bundled Node executable and the ACP adapter entry the provider
 factory resolves. Those exact files are written on disk here through the factory's
 own path authorities. A full base closure with real CPython, Node.js, and ACP
 archives requires network downloads and belongs to the target-capsule build and
-verifier gates (S13/S14); this gate certifies path seating, not artifact bytes.
+verifier gates; this gate certifies path seating, not artifact bytes.
 """
 
 from __future__ import annotations

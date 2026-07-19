@@ -20,6 +20,7 @@ from .process import kill_pid_tree_async as kill_pid_tree_async
 from .timestamp import human_delta as human_delta
 from .timestamp import now_utc as now_utc
 from .timestamp import parse_iso as parse_iso
+from .version import package_version as package_version
 
 __all__ = [
     "AcpRequestId",
@@ -30,6 +31,7 @@ __all__ = [
     "human_delta",
     "kill_pid_tree_async",
     "now_utc",
+    "package_version",
     "parse_iso",
     "reconfigure_console_utf8",
     "verify_internal_bearer",

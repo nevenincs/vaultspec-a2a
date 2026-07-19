@@ -22,7 +22,7 @@ import click
 import httpx
 
 from ..control.config import settings
-from ..utils import configure_logging, reconfigure_console_utf8
+from ..utils import configure_logging, package_version, reconfigure_console_utf8
 
 __all__ = ["main"]
 
@@ -62,6 +62,7 @@ def _request(method: str, url: str, **kwargs: Any) -> httpx.Response:
 
 
 @click.group()
+@click.version_option(package_version(), "--version", "-V", prog_name="vaultspec-a2a")
 def main() -> None:
     """Operator CLI for the vaultspec-a2a orchestration gateway."""
     # CLI lane: human diagnostics on stderr, stdout reserved for command output

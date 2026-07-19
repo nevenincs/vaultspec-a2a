@@ -26,6 +26,7 @@ from ..streaming.aggregator import EventAggregator, SequencedEvent
 from ..telemetry.instrumentation import get_meter, get_tracer
 from ..telemetry.middleware import inject_trace_context, ws_span
 from ..thread.constants import DEFAULT_SUPERVISOR_ID
+from ..utils import package_version
 from .event_adapter import sequenced_to_wire
 from .schemas.commands import (
     AgentControlCommand,
@@ -72,7 +73,7 @@ MessageHandler = Callable[[str, str, str | None], Awaitable[None]]
 # (thread_id, agent_id, action) -> None
 AgentControlHandler = Callable[[str, str, AgentControlAction], Awaitable[None]]
 
-_SERVER_VERSION = "0.1.0"
+_SERVER_VERSION = package_version()
 
 # Mirrors the worker heartbeat ladder's cadence (worker/ipc.py heartbeat_loop):
 # every Nth consecutive failure escalates to full WARNING detail again.

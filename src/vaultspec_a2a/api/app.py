@@ -61,7 +61,7 @@ from ..lifecycle.registration import (
 from ..streaming.aggregator import EventAggregator
 from ..telemetry import TelemetryMiddleware, configure_telemetry
 from ..telemetry.aggregator_hook import OTelAggregatorHook
-from ..utils import configure_logging, reconfigure_console_utf8
+from ..utils import configure_logging, package_version, reconfigure_console_utf8
 from ..utils.asyncio_compat import configure_asyncio_runtime
 from ._utils import trace_headers
 from .internal import internal_router
@@ -408,7 +408,7 @@ def create_app(
     """
     app = FastAPI(
         title="Vaultspec A2A Orchestrator",
-        version="0.1.0",
+        version=package_version(),
         lifespan=lifespan or _lifespan,
     )
 

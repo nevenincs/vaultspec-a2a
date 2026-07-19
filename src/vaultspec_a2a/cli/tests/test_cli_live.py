@@ -209,3 +209,17 @@ def test_cli_reports_unreachable_gateway_cleanly() -> None:
     result = _run_cli("presets", "--url", "http://127.0.0.1:1")
     assert result.returncode != 0
     assert "could not reach the gateway" in (result.stdout + result.stderr)
+
+
+def test_cli_reports_installed_package_version() -> None:
+    """``--version`` prints the resolved distribution version and exits clean.
+
+    No gateway is needed: the flag resolves against installed metadata, so the
+    expected value is derived from the same authority the CLI reports from
+    rather than a hardcoded literal that would drift from the package version.
+    """
+    from vaultspec_a2a.utils import package_version
+
+    result = _run_cli("--version")
+    assert result.returncode == 0, result.stderr
+    assert package_version() in result.stdout

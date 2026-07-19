@@ -18,7 +18,7 @@ below.
 
 Environment variables consumed (all read at import time):
     OTEL_SERVICE_NAME: Service name emitted in every span (default: vaultspec-a2a).
-    OTEL_SERVICE_VERSION: Version string (default: 0.1.0).
+    OTEL_SERVICE_VERSION: Version string (default: the installed package version).
     OTEL_EXPORTER_OTLP_ENDPOINT: gRPC endpoint (default: http://localhost:4317).
     OTEL_EXPORTER_OTLP_INSECURE: Set to "true" to disable TLS (default: true).
     OTEL_SDK_DISABLED: Set to "true" to force no-op mode.
@@ -35,6 +35,8 @@ import logging
 import os
 
 from opentelemetry import metrics, trace
+
+from ..utils.version import package_version
 
 __all__ = [
     "TelemetryConfig",
@@ -56,7 +58,7 @@ logger = logging.getLogger(__name__)
 # (e.g. ``subprocess.run([sys.executable, ...])`` with a custom env dict) rather
 # than monkeypatching the env var after import — the constant will not re-evaluate.
 _SERVICE_NAME = os.environ.get("OTEL_SERVICE_NAME", "vaultspec-a2a")
-_SERVICE_VERSION = os.environ.get("OTEL_SERVICE_VERSION", "0.1.0")
+_SERVICE_VERSION = os.environ.get("OTEL_SERVICE_VERSION", package_version())
 _OTLP_ENDPOINT = os.environ.get("OTEL_EXPORTER_OTLP_ENDPOINT", "http://localhost:4317")
 _SDK_DISABLED = os.environ.get("OTEL_SDK_DISABLED", "").lower() in (
     "1",

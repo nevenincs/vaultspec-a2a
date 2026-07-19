@@ -41,6 +41,7 @@ from ..telemetry import TelemetryMiddleware, configure_telemetry
 from ..utils import (
     BearerVerdict,
     configure_logging,
+    package_version,
     reconfigure_console_utf8,
     verify_internal_bearer,
 )
@@ -197,7 +198,7 @@ def create_worker_app(lifespan: Any | None = None) -> FastAPI:
     """
     app = FastAPI(
         title="Vaultspec Worker",
-        version="0.1.0",
+        version=package_version(),
         lifespan=lifespan or _lifespan,
     )
 

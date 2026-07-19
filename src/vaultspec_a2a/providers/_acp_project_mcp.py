@@ -132,9 +132,19 @@ def _declared_home_entries(
     return surfacing
 
 
-def _fingerprint(raw: str) -> str:
-    """A content fingerprint of a pre-merge ``.mcp.json``, for cleanup diagnostics."""
-    return "sha256:" + hashlib.sha256(raw.encode("utf-8")).hexdigest()
+def _fingerprint(base: dict[str, Any]) -> str:
+    """A content fingerprint of a pre-merge base (``mcpServers`` plus other
+    top-level keys), enforced at cleanup and re-projection - not diagnostic-only.
+
+    Hashes a canonical (sorted-key) JSON serialization of the PARSED base, not
+    the file's raw text: our own writes always go through ``json.dumps``, so a
+    raw-text fingerprint would spuriously mismatch on our own re-serialization
+    (different key order/whitespace) even with zero tampering. A canonical hash
+    survives our own round-trips while still changing on any semantic edit to
+    the base a marker is supposed to protect.
+    """
+    canonical = json.dumps(base, sort_keys=True, separators=(",", ":"))
+    return "sha256:" + hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
 def _safe_unlink(path: Path) -> None:
@@ -147,17 +157,23 @@ def _safe_unlink(path: Path) -> None:
 
 def _recover_base(
     parsed: dict[str, Any],
-    raw: str,
 ) -> tuple[dict[str, Any], dict[str, Any], bool, str | None]:
     """Recover the pre-merge base from an existing parsed ``.mcp.json``.
 
     Returns ``(base_servers, base_other, base_absent, base_fingerprint)`` where
     ``base_other`` is the file's non-``mcpServers``/non-marker top-level keys. A
     dict marker is a crash residue: its ``added`` keys are stripped to recover the
-    base, and the ORIGINAL pre-merge state it recorded is carried forward. A legacy
-    ``true`` marker means the whole file was ours (only ever written over an absent
-    file), so the base is empty and absent. No marker means a genuine foreign file:
-    its content IS the base, present and fingerprinted.
+    base, and the ORIGINAL pre-merge state it recorded is carried forward - BUT
+    only when the stripped result's fingerprint still matches the marker's
+    recorded ``base_fingerprint``. A mismatch means the file was hand-edited since
+    the crash (the marker's ``added`` list no longer accurately describes what is
+    actually ours to strip), so the stale added-list is NOT trusted: the base
+    falls back to the FULL current ``mcpServers`` (nothing stripped), fingerprinted
+    fresh, so the caller's collision check judges every name currently present as
+    an existing entry rather than silently reusing a slot we can no longer verify.
+    A legacy ``true`` marker means the whole file was ours (only ever written over
+    an absent file), so the base is empty and absent. No marker means a genuine
+    foreign file: its content IS the base, present and fingerprinted.
     """
     servers_raw = parsed.get("mcpServers")
     servers: dict[str, Any] = dict(servers_raw) if isinstance(servers_raw, dict) else {}
@@ -173,17 +189,28 @@ def _recover_base(
         return {}, {}, True, None
     if isinstance(marker, dict):
         # Crash residue from this model: strip our prior additions, carry the
-        # ORIGINAL pre-merge state forward so a later cleanup still restores it.
+        # ORIGINAL pre-merge state forward so a later cleanup still restores it -
+        # but only once the stripped base's fingerprint is verified to still
+        # match what the marker recorded.
+        stripped = dict(servers)
         for name in marker.get("added") or []:
-            servers.pop(str(name), None)
-        return (
-            servers,
-            other,
-            bool(marker.get("base_absent", False)),
-            marker.get("base_fingerprint"),
-        )
+            stripped.pop(str(name), None)
+        recorded_fingerprint = marker.get("base_fingerprint")
+        base_absent = bool(marker.get("base_absent", False))
+        if recorded_fingerprint is not None:
+            recovered_fingerprint = _fingerprint({"mcpServers": stripped, **other})
+            if recovered_fingerprint != recorded_fingerprint:
+                logger.warning(
+                    "stale projection marker's added-list no longer matches its"
+                    " recorded base fingerprint (file hand-edited since a prior"
+                    " crash); treating every currently-present server name as"
+                    " existing rather than trusting the stale added-list"
+                )
+                fresh_fingerprint = _fingerprint({"mcpServers": servers, **other})
+                return servers, other, False, fresh_fingerprint
+        return stripped, other, base_absent, recorded_fingerprint
     # Foreign, marker-less file: its content is the base.
-    return servers, other, False, _fingerprint(raw)
+    return servers, other, False, _fingerprint({"mcpServers": servers, **other})
 
 
 def project_declared_mcp(
@@ -227,7 +254,7 @@ def project_declared_mcp(
                 f"refusing to project into {path}: top-level JSON is not an object."
             )
         base_servers, base_other, base_absent, base_fingerprint = _recover_base(
-            parsed, raw
+            parsed
         )
 
     collisions = sorted(set(surfacing) & set(base_servers))
@@ -267,6 +294,15 @@ def cleanup_projected_mcp(path: Path | None) -> None:
     otherwise it writes back the surviving entries (the project's own, plus anything
     a user added mid-run) with the marker gone. A legacy ``true`` marker keeps the
     pre-merge whole-file removal. A file with no marker of ours is never touched.
+
+    Enforced, not diagnostic-only: when a recorded ``base_fingerprint`` is present,
+    the recovered base (current ``mcpServers`` minus the marker's ``added`` names,
+    plus the other top-level keys) must still fingerprint to that value. A mismatch
+    means the marker or the base was hand-edited since we wrote it - the marker's
+    ``added`` list can no longer be trusted to name only entries that are truly
+    ours, so inversion is SKIPPED entirely (the file is left exactly as found) and
+    the desync is logged at WARNING naming the file, rather than risk popping a
+    hand-added entry that merely happens to share one of our reserved names.
     """
     if path is None:
         return
@@ -288,22 +324,37 @@ def cleanup_projected_mcp(path: Path | None) -> None:
 
     servers_raw = parsed.get("mcpServers")
     servers: dict[str, Any] = dict(servers_raw) if isinstance(servers_raw, dict) else {}
-    for name in marker.get("added") or []:
-        # Remove ONLY what we added; a same-named entry a user re-added mid-run is
-        # theirs now and survives (the marker's list is the authoritative scope).
-        servers.pop(str(name), None)
     other = {
         k: v
         for k, v in parsed.items()
         if k not in ("mcpServers", PROJECTION_MARKER_KEY)
     }
 
-    if bool(marker.get("base_absent", False)) and not servers and not other:
+    recovered: dict[str, Any] = dict(servers)
+    for name in marker.get("added") or []:
+        # Remove ONLY what we added; a same-named entry a user re-added mid-run is
+        # theirs now and survives (the marker's list is the authoritative scope).
+        recovered.pop(str(name), None)
+
+    recorded_fingerprint = marker.get("base_fingerprint")
+    if recorded_fingerprint is not None:
+        recovered_fingerprint = _fingerprint({"mcpServers": recovered, **other})
+        if recovered_fingerprint != recorded_fingerprint:
+            logger.warning(
+                "skipping projection cleanup for %s: the recovered base no"
+                " longer matches the marker's recorded fingerprint (hand-edited"
+                " since projection); leaving the file untouched rather than"
+                " trusting a desynced added-list",
+                path,
+            )
+            return
+
+    if bool(marker.get("base_absent", False)) and not recovered and not other:
         # We created the file and nothing foreign remains - restore the absent state.
         _safe_unlink(path)
         return
 
-    restored: dict[str, Any] = {**other, "mcpServers": servers}
+    restored: dict[str, Any] = {**other, "mcpServers": recovered}
     try:
         path.write_text(json.dumps(restored, indent=2), encoding="utf-8")
     except OSError:

@@ -11,6 +11,7 @@ removes exactly what it added, restoring the pre-merge state.
 from __future__ import annotations
 
 import json
+import logging
 from typing import TYPE_CHECKING
 
 import pytest
@@ -279,3 +280,99 @@ def test_cleanup_never_touches_foreign_file(tmp_path: Path) -> None:
     cleanup_projected_mcp(path)
     assert path.exists()
     assert _read(path) == foreign
+
+
+# --- reserved-name mid-run edit: defined behavior --------------------------
+
+
+def test_user_entry_under_reserved_projected_name_is_removed_at_cleanup(
+    tmp_path: Path,
+) -> None:
+    """A user re-purposing one of our reserved projected names mid-run - not a
+    new foreign key, the SAME key we added, with the user's own value swapped
+    in - is popped as ours at cleanup regardless of fingerprint enforcement.
+
+    Fingerprint enforcement protects the STRUCTURE of the other keys the
+    marker's ``added`` list does not name; it cannot detect a same-named key's
+    value changing underneath it (popping by name is value-agnostic), so this
+    is defined, reserved-namespace behavior, not a gap the fingerprint closes.
+    """
+    foreign = {"mcpServers": {"user-srv": {"type": "stdio", "command": "x"}}}
+    path = tmp_path / ".mcp.json"
+    path.write_text(json.dumps(foreign), encoding="utf-8")
+
+    projected = project_declared_mcp(tmp_path, [_rag_spec()])
+    assert projected == path
+
+    # The user re-purposes our reserved "vaultspec-rag" name mid-run with
+    # their own entry - same key, different value; no other key touched.
+    content = _read(path)
+    content["mcpServers"]["vaultspec-rag"] = {
+        "type": "stdio",
+        "command": "user-owned",
+    }
+    path.write_text(json.dumps(content), encoding="utf-8")
+
+    cleanup_projected_mcp(path)
+    after = _read(path)
+    assert "vaultspec-rag" not in after["mcpServers"]
+    assert after["mcpServers"] == {"user-srv": {"type": "stdio", "command": "x"}}
+    assert PROJECTION_MARKER_KEY not in after
+
+
+# --- fingerprint enforcement: hand-desynced marker -------------------------
+
+
+def test_cleanup_skips_inversion_when_recovered_base_fingerprint_mismatches(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A hand-edit to the foreign base's OTHER keys (not our reserved name)
+    without updating the marker desyncs the recorded fingerprint - cleanup
+    must skip inversion entirely rather than trust the now-stale added-list,
+    leaving the file exactly as found and logging the desync."""
+    foreign = {"mcpServers": {"user-srv": {"type": "stdio", "command": "x"}}}
+    path = tmp_path / ".mcp.json"
+    path.write_text(json.dumps(foreign), encoding="utf-8")
+
+    project_declared_mcp(tmp_path, [_rag_spec()])
+    content = _read(path)
+    # Hand-edit the foreign base's structure (rename the foreign server) WITHOUT
+    # touching the marker - desyncs the recorded base_fingerprint.
+    content["mcpServers"]["user-srv-renamed"] = content["mcpServers"].pop("user-srv")
+    path.write_text(json.dumps(content), encoding="utf-8")
+    before_cleanup = _read(path)
+
+    with caplog.at_level(logging.WARNING):
+        cleanup_projected_mcp(path)
+
+    assert _read(path) == before_cleanup
+    assert any(
+        "fingerprint" in record.getMessage() for record in caplog.records
+    )
+
+
+def test_reprojection_over_desynced_crash_residue_refuses_via_full_collision_check(
+    tmp_path: Path,
+) -> None:
+    """Re-projection over a crash residue whose base has been hand-edited since
+    (desyncing the marker's recorded fingerprint) must not trust the stale
+    added-list to recover the base; it falls back to the FULL current server
+    set, so re-declaring a name already present (even one we added before)
+    collides and refuses rather than silently reusing an unverifiable slot."""
+    foreign = {"mcpServers": {"user-srv": {"type": "stdio", "command": "x"}}}
+    path = tmp_path / ".mcp.json"
+    path.write_text(json.dumps(foreign), encoding="utf-8")
+
+    project_declared_mcp(tmp_path, [_rag_spec()])
+    # Crash: no cleanup ran. Hand-edit the crashed file's foreign base
+    # structure without updating the marker, desyncing base_fingerprint.
+    content = _read(path)
+    content["mcpServers"]["user-srv-renamed"] = content["mcpServers"].pop("user-srv")
+    path.write_text(json.dumps(content), encoding="utf-8")
+
+    with pytest.raises(ProjectionRefusedError, match="collide"):
+        project_declared_mcp(tmp_path, [_rag_spec()])
+    # Untouched: the refusal must not have written anything.
+    after = _read(path)
+    assert "user-srv-renamed" in after["mcpServers"]
+    assert "vaultspec-rag" in after["mcpServers"]

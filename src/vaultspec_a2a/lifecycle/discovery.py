@@ -43,18 +43,26 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 __all__ = [
+    "DESKTOP_DISCOVERY_VERSION",
+    "DESKTOP_PROTOCOL_MAX",
+    "DESKTOP_PROTOCOL_MIN",
     "HEARTBEAT_REFRESH_SECONDS",
     "HEARTBEAT_STALE_MS",
+    "DesktopDiscoveryRecord",
+    "DesktopDiscoveryState",
     "DiscoveryState",
     "ServiceInfo",
     "another_resident_is_live",
+    "classify_desktop_discovery",
     "classify_discovery",
     "is_pid_alive",
     "port_has_listener",
     "probe_health",
+    "read_desktop_discovery",
     "read_resident_service",
     "remove_service_json_if_owned",
     "service_json_path",
+    "write_desktop_discovery",
     "write_service_json",
 ]
 
@@ -281,3 +289,273 @@ def remove_service_json_if_owned(path: Path, pid: int) -> bool:
         path.unlink(missing_ok=True)
         return True
     return False
+
+
+
+# ---------------------------------------------------------------------------
+# Versioned desktop discovery record
+# ---------------------------------------------------------------------------
+#
+# The desktop profile publishes a richer, versioned discovery record than the
+# R8 Compose record above. It never carries a bearer value: the attach
+# credential lives in an owner-ACL-protected file that the record only
+# *references* by path. The desktop gateway acquires the runtime singleton and
+# binds its listener before publishing this record; a contender validates it
+# (process identity, protocol compatibility, freshness) before attaching through
+# the referenced credential file, never by trusting discovery alone.
+
+# Bumped only on an incompatible desktop-record-shape change; a reader rejects an
+# unknown version fail-closed rather than guessing at a foreign layout.
+DESKTOP_DISCOVERY_VERSION = 1
+
+# The desktop gateway's supported control-protocol range (the five-verb edge).
+# Published so a contender refuses an incompatible resident instead of speaking
+# past it.
+DESKTOP_PROTOCOL_MIN = 1
+DESKTOP_PROTOCOL_MAX = 1
+
+_DESKTOP_PROFILE = "desktop"
+
+
+class DesktopDiscoveryState(StrEnum):
+    """Filesystem-only classification of a versioned desktop discovery record."""
+
+    FRESH = "fresh"
+    STALE = "stale"
+    MALFORMED = "malformed"
+    ABSENT = "absent"
+
+
+@dataclass(frozen=True, slots=True)
+class DesktopDiscoveryRecord:
+    """A parsed versioned desktop discovery record. Carries no credential value.
+
+    ``credential_reference`` is a filesystem path to the owner-ACL-protected
+    attach-credential file, never the credential itself. ``start_fingerprint`` is
+    ``None`` on platforms without a cheap process start-time source.
+    """
+
+    version: int
+    profile: str
+    generation: str
+    protocol_min: int
+    protocol_max: int
+    pid: int
+    start_fingerprint: str | None
+    host: str
+    port: int
+    last_heartbeat: int
+    owner: str
+    credential_reference: str | None
+
+    @property
+    def base_url(self) -> str:
+        """Return the loopback origin the record advertises."""
+        return f"http://{self.host}:{self.port}"
+
+    def supports_protocol(self, version: int) -> bool:
+        """Return whether *version* falls within the advertised protocol range."""
+        return self.protocol_min <= version <= self.protocol_max
+
+
+def _parse_desktop_record(info: dict) -> DesktopDiscoveryRecord | None:
+    """Map a parsed record dict to a versioned desktop record, or ``None``.
+
+    Fail-closed: an absent or unknown ``version``, a non-``desktop`` profile, or
+    any missing required identity/endpoint field yields ``None`` (classified
+    ``MALFORMED``) rather than a partially trusted record.
+    """
+    if info.get("version") != DESKTOP_DISCOVERY_VERSION:
+        return None
+    if info.get("profile") != _DESKTOP_PROFILE:
+        return None
+    protocol = info.get("protocol")
+    process = info.get("process")
+    endpoint = info.get("endpoint")
+    if not isinstance(protocol, dict) or not isinstance(process, dict):
+        return None
+    if not isinstance(endpoint, dict):
+        return None
+    protocol_min = _coerce_int(protocol.get("min"))
+    protocol_max = _coerce_int(protocol.get("max"))
+    pid = _coerce_int(process.get("pid"))
+    port = _coerce_int(endpoint.get("port"))
+    last_heartbeat = _coerce_int(info.get("last_heartbeat"))
+    if (
+        protocol_min is None
+        or protocol_max is None
+        or pid is None
+        or port is None
+        or last_heartbeat is None
+    ):
+        return None
+    if protocol_min > protocol_max:
+        return None
+    host = endpoint.get("host")
+    owner = info.get("owner")
+    generation = info.get("generation")
+    if not isinstance(host, str) or not host:
+        return None
+    if not isinstance(owner, str) or not isinstance(generation, str):
+        return None
+    fingerprint = process.get("start_fingerprint")
+    if fingerprint is not None and not isinstance(fingerprint, str):
+        return None
+    reference = info.get("credential_reference")
+    if reference is not None and not isinstance(reference, str):
+        return None
+    return DesktopDiscoveryRecord(
+        version=DESKTOP_DISCOVERY_VERSION,
+        profile=_DESKTOP_PROFILE,
+        generation=generation,
+        protocol_min=protocol_min,
+        protocol_max=protocol_max,
+        pid=pid,
+        start_fingerprint=fingerprint,
+        host=host,
+        port=port,
+        last_heartbeat=last_heartbeat,
+        owner=owner,
+        credential_reference=reference,
+    )
+
+
+def read_desktop_discovery(path: Path) -> DesktopDiscoveryRecord | None:
+    """Read and validate a versioned desktop discovery record, or ``None``."""
+    info = read_service_json(path)
+    if info is None:
+        return None
+    return _parse_desktop_record(info)
+
+
+def classify_desktop_discovery(
+    path: Path, *, now_ms: int | None = None
+) -> tuple[DesktopDiscoveryState, DesktopDiscoveryRecord | None]:
+    """Classify a desktop discovery file filesystem-only (no pid or /health probe).
+
+    ``ABSENT`` when the file is missing, ``MALFORMED`` when it is unreadable or is
+    not a valid versioned desktop record, ``STALE`` when its heartbeat is beyond
+    the freshness window, and ``FRESH`` otherwise. As with the Compose classifier,
+    a ``FRESH`` result still warrants a process-liveness probe via
+    :func:`desktop_record_process_is_live` before it is trusted as a live resident.
+    """
+    if not path.exists():
+        return DesktopDiscoveryState.ABSENT, None
+    info = read_service_json(path)
+    if info is None:
+        return DesktopDiscoveryState.MALFORMED, None
+    record = _parse_desktop_record(info)
+    if record is None:
+        return DesktopDiscoveryState.MALFORMED, None
+    now = now_ms if now_ms is not None else int(time.time() * 1000)
+    if not heartbeat_is_fresh(info, now):
+        return DesktopDiscoveryState.STALE, record
+    return DesktopDiscoveryState.FRESH, record
+
+
+def desktop_record_process_is_live(record: DesktopDiscoveryRecord) -> bool:
+    """Return ``True`` when the record's recorded gateway process is still alive.
+
+    Pid-liveness is the primary signal; the singleton's start fingerprint is the
+    pid-reuse guard. Delegates to the runtime singleton's process-liveness
+    authority so "prove this recorded process dead" has exactly one definition.
+    """
+    from .singleton import process_start_fingerprint
+
+    if not is_pid_alive(record.pid):
+        return False
+    if record.start_fingerprint is None:
+        return True
+    current = process_start_fingerprint(record.pid)
+    if current is None:
+        return True
+    return current == record.start_fingerprint
+
+
+def write_desktop_discovery(
+    path: Path,
+    *,
+    generation: str,
+    port: int,
+    owner: str,
+    credential_reference: str | None = None,
+    host: str = "127.0.0.1",
+    protocol_min: int = DESKTOP_PROTOCOL_MIN,
+    protocol_max: int = DESKTOP_PROTOCOL_MAX,
+    pid: int | None = None,
+    start_fingerprint: str | None = None,
+    now_ms: int | None = None,
+) -> DesktopDiscoveryRecord:
+    """Atomically publish the versioned desktop discovery record and return it.
+
+    Publishes no bearer value: ``credential_reference`` is a filesystem path to the
+    owner-ACL-protected attach-credential file, never its contents. The record is
+    written to a sibling temp file, fsynced, then ``os.replace``-renamed so a
+    concurrent reader never observes a partially written record. ``pid`` and
+    ``start_fingerprint`` default to this process's identity.
+    """
+    from .singleton import current_process_fingerprint
+
+    resolved_pid = pid if pid is not None else os.getpid()
+    fingerprint = (
+        start_fingerprint
+        if start_fingerprint is not None
+        else current_process_fingerprint()
+    )
+    heartbeat = now_ms if now_ms is not None else int(time.time() * 1000)
+    record = DesktopDiscoveryRecord(
+        version=DESKTOP_DISCOVERY_VERSION,
+        profile=_DESKTOP_PROFILE,
+        generation=generation,
+        protocol_min=protocol_min,
+        protocol_max=protocol_max,
+        pid=resolved_pid,
+        start_fingerprint=fingerprint,
+        host=host,
+        port=port,
+        last_heartbeat=heartbeat,
+        owner=owner,
+        credential_reference=credential_reference,
+    )
+    payload: dict[str, object] = {
+        "version": record.version,
+        "profile": record.profile,
+        "generation": record.generation,
+        "protocol": {"min": record.protocol_min, "max": record.protocol_max},
+        "process": {"pid": record.pid, "start_fingerprint": record.start_fingerprint},
+        "endpoint": {"host": record.host, "port": record.port},
+        "last_heartbeat": record.last_heartbeat,
+        "owner": record.owner,
+        "credential_reference": record.credential_reference,
+    }
+    path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    if os.name == "posix":
+        path.parent.chmod(0o700)
+    tmp = path.with_name(f"{path.name}.{os.getpid()}.tmp")
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    try:
+        os.write(fd, json.dumps(payload).encode("utf-8"))
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+    _atomic_replace(tmp, path)
+    return record
+
+
+def _atomic_replace(tmp: Path, path: Path) -> None:
+    """Rename *tmp* over *path*, riding out a transient Windows sharing violation.
+
+    ``os.replace`` is atomic, but on Windows a concurrent reader holding the target
+    open can briefly deny the rename with ``PermissionError``. The publication is
+    still all-or-nothing; this only retries the rename over the short contention
+    window rather than propagating a spurious failure to the heartbeat caller.
+    """
+    deadline = time.monotonic() + 2.0
+    while True:
+        try:
+            os.replace(tmp, path)
+            return
+        except PermissionError:
+            if time.monotonic() >= deadline:
+                raise
+            time.sleep(0.01)

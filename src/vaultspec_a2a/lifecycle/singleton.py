@@ -460,8 +460,10 @@ def acquire_singleton(app_home: Path, *, owner: str | None = None) -> RuntimeSin
     if not _acquire_lock_or_conflict(fd, record_path):
         os.close(fd)
         prior = _read_record(record_path)
-        if prior is not None and prior.owner == principal and recorded_process_is_live(
-            prior
+        if (
+            prior is not None
+            and prior.owner == principal
+            and recorded_process_is_live(prior)
         ):
             raise SingletonHeldError(
                 f"desktop application home {app_home} is already owned by a live "

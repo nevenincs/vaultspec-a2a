@@ -21,6 +21,12 @@ Token hygiene (R7): the machine bearer and per-actor token are held only to
 assemble request headers for the local subprocess and are redacted from
 ``repr``; the binding is a worker-scoped runtime value, never placed in graph
 state or a checkpoint.
+
+Process topology: this module only BUILDS the per-run authoring bridge launch
+spec (an HTTP entry with no process, or a ``python -m`` stdio entry). When the
+stdio transport is used, the ACP/Codex provider CLI spawns that bridge as its
+own child, so the bridge is a descendant of the run-owned provider root and
+inherits that root's OS containment. Nothing here spawns a process.
 """
 
 from __future__ import annotations

@@ -69,6 +69,33 @@ def test_stdio_entry_spawns_bridge_module() -> None:
     assert "url" not in entry
 
 
+def test_authoring_bridge_is_a_provider_child_launch_spec_not_self_spawned() -> None:
+    """Audit lock (W04.P11.S90): the per-run authoring bridge is a launch SPEC.
+
+    The provider CLI spawns the ``python -m`` bridge as its own child, so the
+    bridge is a descendant of the run-owned provider root and inherits that
+    root's OS containment. This module never spawns a process itself, so there is
+    no separate reaper to wire - the property that keeps the bridge contained.
+    """
+    import vaultspec_a2a.providers._acp_authoring as mod
+
+    entry = build_authoring_stdio_mcp_servers(_stdio_binding())[0]
+    # A child-launch spec the provider spawns: a command + args, no live process.
+    assert entry["command"] == sys.executable
+    assert entry["args"][:1] == ["-m"]
+    # No process-spawn primitive is reachable from this spec-builder's namespace.
+    for banned in (
+        "subprocess",
+        "Popen",
+        "spawn_acp_process",
+        "create_subprocess_exec",
+        "ProcessContainment",
+    ):
+        assert not hasattr(mod, banned), (
+            f"authoring spec builder must not spawn a process ({banned})"
+        )
+
+
 def test_stdio_entry_carries_engine_facts_in_env() -> None:
     entry = build_authoring_stdio_mcp_servers(_stdio_binding())[0]
     env = {item["name"]: item["value"] for item in entry["env"]}

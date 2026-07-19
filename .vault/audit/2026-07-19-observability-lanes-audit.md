@@ -114,4 +114,3 @@ the misconfiguration class that matters. Accepted as-is.
   discipline, already adopted team-wide).
 - Carry the debug-gotcha caveat until a sustained high-volume real-provider
   debug run retires it on evidence.
-

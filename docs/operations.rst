@@ -39,6 +39,21 @@ Uvicorn starts :mod:`vaultspec_a2a.worker` as a separate FastAPI process. No
 Gateway-worker messages follow :mod:`vaultspec_a2a.ipc`. Runtime events flow
 through :mod:`vaultspec_a2a.streaming`.
 
+Scratchpad convention
+----------------------
+
+Probe scripts, one-off log captures, ad hoc databases, and other exploratory
+artifacts a development session produces belong under a session-scoped
+scratchpad directory, never the repository root. A stray file at the repo
+root is untracked clutter that survives across sessions and pollutes ``git
+status``; a scratchpad directory is disposable by construction and git-ignored.
+
+When working through an agent harness that provisions one, use the
+harness-assigned scratchpad path. Otherwise, create a ``scratchpad/``
+directory at the repository root (already git-ignored) and write artifacts
+there. Never write probe output, temporary databases, or log captures
+directly into ``src/``, the repository root, or any tracked directory.
+
 Related references
 ------------------
 

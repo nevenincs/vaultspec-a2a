@@ -4,6 +4,7 @@ knowledge/repositories/*/
 
 logs/
 temp/
+scratchpad/
 
 *.log
 *.tmp

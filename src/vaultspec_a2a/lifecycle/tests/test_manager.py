@@ -37,6 +37,7 @@ from ..manager import (
     resolve,
     resume,
     serve_up,
+    spawn,
     tree_kill,
 )
 from ..procs_config import PortBand, ProcsConfig, RoleConfig
@@ -106,6 +107,48 @@ def test_render_command_substitutes_port_and_workspace() -> None:
     assert rendered == ["serve", "--port", "18901", "--ws", "/tmp/ws"]
 
 
+def test_spawn_rotates_an_over_cap_log_to_a_dot_one_sibling(tmp_path) -> None:
+    """A redirect log already at the size cap is rotated, not appended forever."""
+    from .. import manager as manager_module
+
+    log_path = tmp_path / "big.log"
+    log_path.write_bytes(b"x" * manager_module.SPAWN_LOG_CAP_BYTES)
+    rotated_path = tmp_path / "big.log.1"
+    assert not rotated_path.exists()
+
+    process = spawn(
+        [sys.executable, "-c", "print('fresh boot')"],
+        cwd=tmp_path,
+        log_path=str(log_path),
+    )
+    process.wait(timeout=10)
+
+    assert rotated_path.exists()
+    assert rotated_path.read_bytes() == b"x" * manager_module.SPAWN_LOG_CAP_BYTES
+    # The fresh log holds only this boot's output - far under the cap.
+    assert log_path.stat().st_size < manager_module.SPAWN_LOG_CAP_BYTES
+    assert b"fresh boot" in log_path.read_bytes()
+
+
+def test_spawn_does_not_rotate_a_log_under_the_cap(tmp_path) -> None:
+    """A log well under the cap keeps appending - no spurious rotation."""
+    log_path = tmp_path / "small.log"
+    log_path.write_text("prior boot\n", encoding="utf-8")
+    rotated_path = tmp_path / "small.log.1"
+
+    process = spawn(
+        [sys.executable, "-c", "print('this boot')"],
+        cwd=tmp_path,
+        log_path=str(log_path),
+    )
+    process.wait(timeout=10)
+
+    assert not rotated_path.exists()
+    contents = log_path.read_bytes()
+    assert b"prior boot" in contents
+    assert b"this boot" in contents
+
+
 def test_resolve_finds_unique_and_rejects_missing_and_ambiguous(tmp_path) -> None:
     write_record(_record(name="alpha", role="scratch", port=18900), home=tmp_path)
     assert resolve("alpha", home=tmp_path).name == "alpha"
@@ -142,6 +185,51 @@ def test_kill_verb_removes_the_record_after_felling_the_tree(tmp_path) -> None:
         assert record.pid == child.pid
         assert wait_pid_dead(child.pid)
         assert read_record(record_path("scratch", "killme", home=tmp_path)) is None
+    finally:
+        if child.poll() is None:
+            child.kill()
+            child.wait()
+
+
+def test_kill_verb_deletes_the_record_log_file(tmp_path) -> None:
+    """A killed record's runtime log is deleted - nothing will append to it again."""
+    child = _sleeper()
+    log_file = tmp_path / "killme.log"
+    log_file.write_text("some prior boot's output\n", encoding="utf-8")
+    try:
+        write_record(
+            _record(
+                name="killme-log",
+                pid=child.pid,
+                port=18908,
+                log_path=str(log_file),
+            ),
+            home=tmp_path,
+        )
+        kill("killme-log", home=tmp_path)
+        assert wait_pid_dead(child.pid)
+        assert not log_file.exists()
+    finally:
+        if child.poll() is None:
+            child.kill()
+            child.wait()
+
+
+def test_kill_verb_tolerates_a_missing_log_file(tmp_path) -> None:
+    """A record whose log_path was already removed must not fail the kill."""
+    child = _sleeper()
+    try:
+        write_record(
+            _record(
+                name="killme-nolog",
+                pid=child.pid,
+                port=18909,
+                log_path=str(tmp_path / "never-written.log"),
+            ),
+            home=tmp_path,
+        )
+        record = kill("killme-nolog", home=tmp_path)
+        assert record.pid == child.pid
     finally:
         if child.poll() is None:
             child.kill()
@@ -216,6 +304,35 @@ def test_reap_clears_dead_and_stale_but_keeps_live(tmp_path) -> None:
         assert "alive" not in reaped_names
         assert read_record(record_path("scratch", "corpse", home=tmp_path)) is None
         assert read_record(record_path("scratch", "alive", home=tmp_path)) is not None
+    finally:
+        tree_kill(child.pid)
+
+
+def test_reap_deletes_the_dead_records_log_but_keeps_the_live_ones(tmp_path) -> None:
+    """Reap deletes a dead/stale record's log file but never a live one's."""
+    corpse_log = tmp_path / "corpse.log"
+    corpse_log.write_text("orphaned output\n", encoding="utf-8")
+    write_record(
+        _record(
+            name="corpse-log", pid=_dead_pid(), port=18910, log_path=str(corpse_log)
+        ),
+        home=tmp_path,
+    )
+    child = _sleeper()
+    alive_log = tmp_path / "alive.log"
+    alive_log.write_text("still running\n", encoding="utf-8")
+    try:
+        write_record(
+            _record(
+                name="alive-log", pid=child.pid, port=18911, log_path=str(alive_log)
+            ),
+            home=tmp_path,
+        )
+        reaped = reap(home=tmp_path, config=_scratch_config())
+        reaped_names = {r.name for r in reaped}
+        assert "corpse-log" in reaped_names
+        assert not corpse_log.exists()
+        assert alive_log.exists()
     finally:
         tree_kill(child.pid)
 

@@ -70,7 +70,7 @@ Establish one usable decision chain and prove that prerequisite ownership work h
 
 - [x] `W01.P01.S01` - Curate the service-lifecycle supersession chain so the product lifecycle and tooling decisions have non-conflicting authority; `.vault/adr, .vault/index`.
 - [ ] `W01.P01.S02` - Certify the landed desktop singleton credential and owned-process prerequisites without treating them as proof of worker pairing identity; `.vault/exec, .vault/audit, src/vaultspec_a2a/desktop_tests`.
-- [ ] `W01.P01.S03` - Certify the process-registry prerequisite represented by repository-tooling plan step S07 before changing lifecycle registry consumers; `.vault/exec, .vault/audit, just/dev/service.just`.
+- [x] `W01.P01.S03` - Certify the process-registry prerequisite represented by repository-tooling plan step S07 before changing lifecycle registry consumers; `.vault/exec, .vault/audit, just/dev/service.just`.
 - [ ] `W01.P01.S93` - Implement gateway lifetime identity worker generation identity and explicit paired-gateway identity in authenticated readiness; `src/vaultspec_a2a/api/schemas/gateway.py, src/vaultspec_a2a/control/worker_management.py, src/vaultspec_a2a/api/internal.py, src/vaultspec_a2a/worker/app.py`.
 - [ ] `W01.P01.S94` - Fail closed on blank stale mismatched or unauthenticated pairing evidence and permit eviction only for the owner-authorized desktop prior generation; `src/vaultspec_a2a/control/worker_management.py, src/vaultspec_a2a/control/health.py`.
 - [ ] `W01.P01.S95` - Prove authenticated two-gateway one-worker pairing with real processes; `src/vaultspec_a2a/desktop_tests/test_worker_provenance.py`.

@@ -278,16 +278,21 @@ class Executor:
                         await self._handle_resume(req)
                     case ControlActionType.CANCEL:
                         span.add_event("thread_cancelled")
-                        # Cancellation ends the run — drop any held tokens and the
-                        # run's cached engine catalog snapshot.
-                        self._token_store.drop(req.thread_id)
-                        self._catalog_store.drop(req.thread_id)
                         self._aggregator.cancel_thread(req.thread_id)
-                        # Emit terminal if no active ingest (TOCTOU safe:
-                        # cancel flag set before check; DB rejects duplicates).
+                        # Release the run's tokens and cached catalog on the
+                        # TERMINAL boundary only. When an ingest is still active
+                        # the cancel is not yet terminal: that ingest settles
+                        # (its finally calls _mark_ingest_done) and drops them
+                        # there, so an in-flight authoring call is never stranded
+                        # of its own token mid-run. Only a cancel with no active
+                        # ingest is itself terminal and releases here. (TOCTOU
+                        # safe: cancel flag set before the check; DB rejects
+                        # duplicate terminals.)
                         async with self._ingest_lock:
                             is_active = req.thread_id in self._active_ingests
                         if not is_active:
+                            self._token_store.drop(req.thread_id)
+                            self._catalog_store.drop(req.thread_id)
                             await self._state_projector.emit_terminal_status(
                                 req.thread_id, ThreadStatus.CANCELLED
                             )

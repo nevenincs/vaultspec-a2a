@@ -3,8 +3,8 @@ generated: true
 tags:
   - '#index'
   - '#a2a-edge-conformance'
-date: '2026-07-17'
-modified: '2026-07-17'
+date: '2026-07-19'
+modified: '2026-07-19'
 related:
   - '[[2026-07-14-a2a-edge-conformance-W01-P01-S01]]'
   - '[[2026-07-14-a2a-edge-conformance-W01-P01-S02]]'
@@ -47,6 +47,9 @@ related:
   - '[[2026-07-14-a2a-edge-conformance-W05-P16-S39]]'
   - '[[2026-07-14-a2a-edge-conformance-W05-P16-S40]]'
   - '[[2026-07-14-a2a-edge-conformance-W05-P16-S41]]'
+  - '[[2026-07-14-a2a-edge-conformance-W05-P17-S42]]'
+  - '[[2026-07-14-a2a-edge-conformance-W05-P17-S43]]'
+  - '[[2026-07-14-a2a-edge-conformance-W05-P17-S44]]'
   - '[[2026-07-14-a2a-edge-conformance-adr]]'
   - '[[2026-07-14-a2a-edge-conformance-deletion-manifest-reference]]'
   - '[[2026-07-14-a2a-edge-conformance-engine-wire-shapes-reference]]'
@@ -72,6 +75,12 @@ related:
   - '[[2026-07-15-a2a-edge-conformance-w04-review-audit]]'
   - '[[2026-07-15-a2a-edge-conformance-w05-review-audit]]'
   - '[[2026-07-17-a2a-edge-conformance-audit]]'
+  - '[[2026-07-19-a2a-edge-conformance-S01]]'
+  - '[[2026-07-19-a2a-edge-conformance-S02]]'
+  - '[[2026-07-19-a2a-edge-conformance-active-run-discovery-audit]]'
+  - '[[2026-07-19-a2a-edge-conformance-active-run-discovery-research]]'
+  - '[[2026-07-19-a2a-edge-conformance-adr]]'
+  - '[[2026-07-19-a2a-edge-conformance-plan]]'
 ---
 
 # `a2a-edge-conformance` feature index
@@ -83,6 +92,7 @@ Auto-generated index of all documents tagged with `#a2a-edge-conformance`.
 ### adr
 
 - `2026-07-14-a2a-edge-conformance-adr` - `a2a-edge-conformance` adr: `adopting the dashboard edge contract under a salvage-and-verify posture` | (**status:** `accepted`)
+- `2026-07-19-a2a-edge-conformance-adr` - `a2a-edge-conformance` adr: `real-project-root mcp projection` | (**status:** `accepted`)
 
 ### audit
 
@@ -95,6 +105,7 @@ Auto-generated index of all documents tagged with `#a2a-edge-conformance`.
 - `2026-07-15-a2a-edge-conformance-w04-review-audit` - `a2a-edge-conformance` audit: `W04 code review: actor tokens and the five-verb gateway`
 - `2026-07-15-a2a-edge-conformance-w05-review-audit` - `a2a-edge-conformance` audit: `W05 code review and program verdict`
 - `2026-07-17-a2a-edge-conformance-audit` - `a2a-edge-conformance` audit: `w05-p16 review`
+- `2026-07-19-a2a-edge-conformance-active-run-discovery-audit` - `a2a-edge-conformance` audit: `active run discovery`
 
 ### exec
 
@@ -148,11 +159,17 @@ Auto-generated index of all documents tagged with `#a2a-edge-conformance`.
 - `2026-07-14-a2a-edge-conformance-W05-P16-S39` - Run the end-to-end D3 relay proof through the engine pass-through stream against the healthy resident stack, capture contract-correct frame evidence (envelope fields, sequence, replay) in the step record, and raise the cross-repo re-arm event to the dashboard team mirroring the S32 pattern
 - `2026-07-14-a2a-edge-conformance-W05-P16-S40` - Fix the startup-reconciliation recovery-epoch bug: the paused_resumable repair outcome path never increments threads.recovery_epoch (unlike checkpoint_unavailable), so any subsequent boot re-derives the same startup-repair idempotency key and crashes the whole app with an IntegrityError on the control_actions insert. Increment the epoch on every applied repair outcome and make the idempotency-key insert conflict-tolerant (an already-applied repair replays as a no-op, honoring idempotency semantics instead of crashing). Prove with a live boot-reboot cycle over a thread in paused_resumable state
 - `2026-07-14-a2a-edge-conformance-W05-P16-S41` - Close the two non-blocking re-review follow-ups: reconcile watchdog worker state for adopted (externally-managed) workers so plain health readiness stops reporting a healthy adopted worker as down (relax the spawned gate to reach the non-owned reconciliation branch, or set the status from the adoption probe), and harden get_or_create_control_action to an atomic on-conflict-do-nothing insert so the helper name matches its guarantee under concurrent boots. Prove with live tests covering an adopted worker reaching status up and readiness true
+- `2026-07-14-a2a-edge-conformance-W05-P17-S42` - Implement marked-entry merge projection per the 2026-07-19 real-project-root mcp projection ADR: merge declared surfacing entries into an existing foreign .mcp.json with an added-keys marker, loud refusal only on name collision or unparseable file, cleanup inverting exactly the marker's entry list (foreign and mid-run user entries never touched), idempotent crash-residue re-projection, legacy whole-file marker honored for one transition release. Live real-seam tests for merge, create, collision, crash-residue, and mid-run-edit cases
+- `2026-07-14-a2a-edge-conformance-W05-P17-S43` - Re-run the S20 solo-coder exposure probe with the run workspace pinned to a REAL project root carrying its own git-tracked .mcp.json, prove the agent sees both the project's servers and the bridged authoring tools (engine-side cs:<run_id> changeset, zero .vault writes, original .mcp.json bytes restored after cleanup), and record the closure in the S18/S20 records
+- `2026-07-14-a2a-edge-conformance-W05-P17-S44` - Close the two projection review LOWs: enforce the marker base_fingerprint at cleanup (on mismatch, skip inversion and log the desync instead of removing entries a hand-edited marker names), and add the reserved-name mid-run-edit test covering a user entry created mid-run under a projected name. Real-filesystem tests, no mocks
+- `2026-07-19-a2a-edge-conformance-S01` - `a2a-edge-conformance` `S01` - Add the durable active-run discovery projection and metadata filters
+- `2026-07-19-a2a-edge-conformance-S02` - `a2a-edge-conformance` `S02` - Serve the bounded v1 collection read and prove reload discovery over live HTTP
 
 ### plan
 
 - `2026-07-14-a2a-edge-conformance-plan` - `a2a-edge-conformance` plan
 - `2026-07-15-a2a-edge-conformance-plan` - `a2a-edge-conformance` plan
+- `2026-07-19-a2a-edge-conformance-plan` - `a2a-edge-conformance` plan
 
 ### reference
 
@@ -163,3 +180,4 @@ Auto-generated index of all documents tagged with `#a2a-edge-conformance`.
 ### research
 
 - `2026-07-14-a2a-edge-conformance-research` - `a2a-edge-conformance` research: `repo functional-reality survey grounding the edge adoption`
+- `2026-07-19-a2a-edge-conformance-active-run-discovery-research` - `a2a-edge-conformance` research: `bounded active-run discovery`

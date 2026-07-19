@@ -80,6 +80,15 @@ _LANGSMITH_ENABLED = os.environ.get("LANGSMITH_TRACING", "").lower() in (
 )
 _LANGSMITH_PROJECT = os.environ.get("LANGSMITH_PROJECT", "default")
 
+_OTLP_EXPORTER_MODULES = (
+    "opentelemetry.exporter",
+    "opentelemetry.exporter.otlp",
+    "opentelemetry.exporter.otlp.proto",
+    "opentelemetry.exporter.otlp.proto.grpc",
+    "opentelemetry.exporter.otlp.proto.grpc.trace_exporter",
+    "opentelemetry.exporter.otlp.proto.grpc.metric_exporter",
+)
+
 
 @dataclasses.dataclass(frozen=True)
 class TelemetryConfig:
@@ -123,12 +132,10 @@ def _check_otlp() -> bool:
     The OTLP exporter is optional (operators may not run a collector),
     so we retain the availability check here only for the exporter package.
     """
-    return (
-        importlib.util.find_spec(
-            "opentelemetry.exporter.otlp.proto.grpc.trace_exporter"
-        )
-        is not None
-    )
+    for module_name in _OTLP_EXPORTER_MODULES:
+        if importlib.util.find_spec(module_name) is None:
+            return False
+    return True
 
 
 def _build_sdk_provider(

@@ -85,7 +85,7 @@ Make the desktop runtime closure explicit, target-resolvable, and free of runtim
 - [x] `W01.P01.S93` - Guard optional OTLP exporter detection so the desktop base initializes gateway and worker telemetry without server extras and prove it from a clean base installation; `src/vaultspec_a2a/telemetry`.
 - [x] `W01.P01.S02` - Regenerate the locked Python graph and prove CPython 3.13 resolution for every accepted target; `uv.lock`.
 - [x] `W01.P01.S03` - Lock ACP 0.59.0 and eliminate stale JavaScript adapter identities from the Node closure; `package-lock.json`.
-- [ ] `W01.P01.S04` - Disable runtime uvx acquisition in the desktop profile and return an actionable unavailable capability result; `src/vaultspec_a2a/providers/_acp_mcp.py`.
+- [x] `W01.P01.S04` - Disable runtime uvx acquisition in the desktop profile and return an actionable unavailable capability result; `src/vaultspec_a2a/providers/_acp_mcp.py`.
 - [ ] `W01.P01.S05` - Prove installed desktop metadata excludes Torch and RAG while optional profiles remain resolvable; `src/vaultspec_a2a/desktop_tests/test_dependency_closure.py`.
 
 ### Phase `W01.P02` - package every capsule-owned runtime asset

@@ -11,22 +11,56 @@ machinery.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+from enum import StrEnum
 from typing import TYPE_CHECKING, Any
 
 from ..thread.errors import ConfigError
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
+    from typing import Literal
 
     from langchain_core.language_models import BaseChatModel
 
 __all__ = [
+    "HarnessMcpCapabilityUnavailable",
+    "HarnessMcpResolution",
+    "HarnessMcpRuntimeProfile",
     "codex_mcp_server_specs",
     "compose_harness_mcp_servers",
     "config_home_mcp_servers",
     "harness_allowed_tool_names",
+    "resolve_harness_mcp_capabilities",
     "resolve_harness_mcp_servers",
 ]
+
+
+class HarnessMcpRuntimeProfile(StrEnum):
+    """Explicit runtime authority for harness MCP capability resolution."""
+
+    NON_DESKTOP = "non-desktop"
+    DESKTOP = "desktop"
+
+
+@dataclass(frozen=True, slots=True)
+class HarnessMcpCapabilityUnavailable:
+    """Stable, path-free explanation of an unavailable harness capability."""
+
+    code: Literal["capability_unavailable"]
+    capability: str
+    reason: str
+    action: str
+
+
+@dataclass(frozen=True, slots=True)
+class HarnessMcpResolution:
+    """Profile-bound capability names safe for downstream serialization."""
+
+    profile: HarnessMcpRuntimeProfile
+    available_servers: tuple[str, ...]
+    unavailable: tuple[HarnessMcpCapabilityUnavailable, ...]
+
 
 # Known MCP server name -> registry entry. Explicit and closed by design.
 # ``uvx --from vaultspec-rag vaultspec-search-mcp`` is used rather than the repo
@@ -58,7 +92,16 @@ _KNOWN_MCP_SERVERS: dict[str, dict[str, Any]] = {
         "args": ["--from", "vaultspec-rag", "vaultspec-search-mcp"],
         "tools": ("search_vault", "search_codebase", "get_code_file"),
         "read_only": True,
+        "runtime_acquisition": True,
+        "desktop_available": False,
     },
+}
+
+_DESKTOP_ACQUISITION_REASON = "runtime acquisition is disabled for the desktop profile"
+_DESKTOP_CAPABILITY_ACTIONS = {
+    "vaultspec-rag": (
+        "Install the separately packaged vaultspec-rag desktop capability, then retry."
+    ),
 }
 
 
@@ -67,30 +110,97 @@ def _launch_spec(entry: dict[str, Any]) -> dict[str, Any]:
     return {k: entry[k] for k in _LAUNCH_SPEC_KEYS if k in entry}
 
 
-def resolve_harness_mcp_servers(names: Sequence[str]) -> list[dict[str, Any]]:
-    """Resolve declared harness MCP server names to their launch specs.
+def _desktop_available(entry: dict[str, Any]) -> bool:
+    """Return whether an entry explicitly proves offline desktop authority."""
+    return (
+        entry.get("desktop_available") is True
+        and entry.get("runtime_acquisition") is False
+    )
 
-    Raises :class:`ConfigError` naming every unknown server plus the known set,
-    so a mistyped or unsupported declaration fails loudly here rather than
-    silently dropping a server the run was told it would have.
+
+def resolve_harness_mcp_capabilities(
+    names: Sequence[str],
+    *,
+    profile: HarnessMcpRuntimeProfile,
+) -> HarnessMcpResolution:
+    """Resolve declared names under one explicit runtime profile.
+
+    The desktop profile admits only a registry entry explicitly marked desktop
+    available. An omitted marker fails closed, and a runtime-acquired entry becomes
+    an actionable, path-free unavailable capability instead of a launch spec.
+    Non-desktop resolution preserves the existing Compose and foreground-development
+    behavior.
+
+    The caller must select *profile* explicitly. Runtime integration will pass the
+    authoritative desktop profile once that authority exists; this seam never
+    infers policy from the environment, executable search path, or working directory.
     """
-    specs: list[dict[str, Any]] = []
+    if not isinstance(profile, HarnessMcpRuntimeProfile):
+        raise ConfigError(
+            "harness MCP resolution requires an explicit HarnessMcpRuntimeProfile"
+        )
+
+    available: list[str] = []
+    unavailable: list[HarnessMcpCapabilityUnavailable] = []
     unknown: list[str] = []
     for name in names:
-        spec = _KNOWN_MCP_SERVERS.get(name)
-        if spec is None:
+        entry = _KNOWN_MCP_SERVERS.get(name)
+        if entry is None:
             unknown.append(name)
-        else:
-            specs.append(_launch_spec(spec))
+            continue
+        if profile is HarnessMcpRuntimeProfile.DESKTOP and not _desktop_available(
+            entry
+        ):
+            unavailable.append(
+                HarnessMcpCapabilityUnavailable(
+                    code="capability_unavailable",
+                    capability=name,
+                    reason=_DESKTOP_ACQUISITION_REASON,
+                    action=_DESKTOP_CAPABILITY_ACTIONS.get(
+                        name,
+                        f"Install the separately packaged {name} desktop capability, "
+                        "then retry.",
+                    ),
+                )
+            )
+            continue
+        available.append(name)
     if unknown:
         raise ConfigError(
             f"unknown harness MCP server(s) {unknown}; known servers are "
             f"{sorted(_KNOWN_MCP_SERVERS)}"
         )
-    return specs
+    return HarnessMcpResolution(
+        profile=profile,
+        available_servers=tuple(available),
+        unavailable=tuple(unavailable),
+    )
 
 
-def harness_allowed_tool_names(names: Sequence[str]) -> list[str]:
+def resolve_harness_mcp_servers(
+    names: Sequence[str],
+    *,
+    profile: HarnessMcpRuntimeProfile = HarnessMcpRuntimeProfile.NON_DESKTOP,
+) -> list[dict[str, Any]]:
+    """Resolve declared harness MCP server names to their launch specs.
+
+    Raises :class:`ConfigError` naming every unknown server plus the known set,
+    so a mistyped or unsupported declaration fails loudly here rather than
+    silently dropping a server the run was told it would have. Desktop entries
+    that require runtime acquisition are omitted; callers needing the actionable
+    result use :func:`resolve_harness_mcp_capabilities` first.
+    """
+    resolution = resolve_harness_mcp_capabilities(names, profile=profile)
+    return [
+        _launch_spec(_KNOWN_MCP_SERVERS[name]) for name in resolution.available_servers
+    ]
+
+
+def harness_allowed_tool_names(
+    names: Sequence[str],
+    *,
+    profile: HarnessMcpRuntimeProfile = HarnessMcpRuntimeProfile.NON_DESKTOP,
+) -> list[str]:
     """Return the autonomous-allowlist names for the declared servers' read tools.
 
     Each declared server's registry ``tools`` are expanded to the CLI's flat
@@ -102,27 +212,21 @@ def harness_allowed_tool_names(names: Sequence[str]) -> list[str]:
     """
     tool_names: list[str] = []
     seen: set[str] = set()
-    unknown: list[str] = []
-    for name in names:
-        entry = _KNOWN_MCP_SERVERS.get(name)
-        if entry is None:
-            unknown.append(name)
-            continue
+    resolution = resolve_harness_mcp_capabilities(names, profile=profile)
+    for name in resolution.available_servers:
+        entry = _KNOWN_MCP_SERVERS[name]
         for tool in entry.get("tools", ()):
             qualified = f"mcp__{name}__{tool}"
             if qualified not in seen:
                 seen.add(qualified)
                 tool_names.append(qualified)
-    if unknown:
-        raise ConfigError(
-            f"unknown harness MCP server(s) {unknown}; known servers are "
-            f"{sorted(_KNOWN_MCP_SERVERS)}"
-        )
     return tool_names
 
 
 def config_home_mcp_servers(
     mcp_servers: Sequence[dict[str, Any]],
+    *,
+    profile: HarnessMcpRuntimeProfile = HarnessMcpRuntimeProfile.NON_DESKTOP,
 ) -> dict[str, dict[str, Any]]:
     """Select the registry-known harness servers and shape them for ``.claude.json``.
 
@@ -136,10 +240,17 @@ def config_home_mcp_servers(
     surfaces exactly the declared read-only harness servers PLUS at most the run's
     own authoring bridge. Returns an empty mapping when none match.
     """
+    known_names = [
+        str(spec.get("name"))
+        for spec in mcp_servers
+        if spec.get("name") in _KNOWN_MCP_SERVERS
+    ]
+    resolution = resolve_harness_mcp_capabilities(known_names, profile=profile)
+    available = set(resolution.available_servers)
     home: dict[str, dict[str, Any]] = {}
     for spec in mcp_servers:
         name = spec.get("name")
-        if name not in _KNOWN_MCP_SERVERS:
+        if name not in available:
             continue
         _require_read_only(name)
         entry: dict[str, Any] = {"type": "stdio", "command": spec["command"]}
@@ -165,7 +276,11 @@ def _require_read_only(name: str) -> None:
         )
 
 
-def codex_mcp_server_specs(names: Sequence[str]) -> list[dict[str, Any]]:
+def codex_mcp_server_specs(
+    names: Sequence[str],
+    *,
+    profile: HarnessMcpRuntimeProfile = HarnessMcpRuntimeProfile.NON_DESKTOP,
+) -> list[dict[str, Any]]:
     """Resolve declared harness names to full read-only registry specs for Codex.
 
     The registry's second serialization consumer (Codex ``config.toml`` vs the
@@ -176,13 +291,10 @@ def codex_mcp_server_specs(names: Sequence[str]) -> list[dict[str, Any]]:
     entry both raise :class:`ConfigError`, so one registry stays the single trust
     root across both transports.
     """
+    resolution = resolve_harness_mcp_capabilities(names, profile=profile)
     specs: list[dict[str, Any]] = []
-    unknown: list[str] = []
-    for name in names:
-        entry = _KNOWN_MCP_SERVERS.get(name)
-        if entry is None:
-            unknown.append(name)
-            continue
+    for name in resolution.available_servers:
+        entry = _KNOWN_MCP_SERVERS[name]
         _require_read_only(name)
         specs.append(
             {
@@ -193,11 +305,6 @@ def codex_mcp_server_specs(names: Sequence[str]) -> list[dict[str, Any]]:
                 "tools": list(entry.get("tools", ())),
             }
         )
-    if unknown:
-        raise ConfigError(
-            f"unknown harness MCP server(s) {unknown}; known servers are "
-            f"{sorted(_KNOWN_MCP_SERVERS)}"
-        )
     return specs
 
 
@@ -206,15 +313,21 @@ def compose_harness_mcp_servers(
     names: Sequence[str],
     *,
     allowed_tools: Sequence[str] | None = None,
+    profile: HarnessMcpRuntimeProfile = HarnessMcpRuntimeProfile.NON_DESKTOP,
 ) -> BaseChatModel:
     """Return a model advertising the declared harness MCP servers, or *model*.
 
-    ADD-only: the resolved specs are UNIONED (by server name) with any the model
-    already advertises - e.g. the per-run authoring bridge - never replacing
-    them, so composition only ever widens the session's declared surface by
-    exactly the harness declaration. A model with no ACP ``with_mcp_servers``
-    surface (mock, hosted API) is returned unchanged, and an empty *names* is a
-    no-op. Raises :class:`ConfigError` on an unknown declared name.
+    Non-desktop composition is ADD-only: the resolved specs are UNIONED (by
+    server name) with any the model already advertises - e.g. the per-run
+    authoring bridge - never replacing them. Desktop composition additionally
+    removes any requested capability that its profile marks unavailable, including
+    stale matching allowlist entries, so prohibited acquisition material cannot
+    survive an earlier non-desktop composition. A model with no ACP
+    ``with_mcp_servers`` surface (mock, hosted API) is returned unchanged, and an
+    empty *names* is a no-op for non-desktop callers. Desktop callers still inspect
+    pre-attached state when *names* is empty so a stale prohibited launch cannot
+    survive a profile transition. Raises :class:`ConfigError` on an unknown declared
+    name.
 
     ``allowed_tools`` (headless runs only) are the exact ``mcp__<server>__<tool>``
     names to auto-permit for the composed servers - typically
@@ -233,28 +346,85 @@ def compose_harness_mcp_servers(
     hosted API) is returned unchanged. A model that HAS a harness delivery
     mechanism is never silently no-oped.
     """
-    if not names:
+    if not names and profile is HarnessMcpRuntimeProfile.NON_DESKTOP:
         return model
     # Validate the declared names FIRST, so an unknown name is refused loudly
     # regardless of model type - a configuration error is an error even when
     # composition is inapplicable (a non-ACP model) and would otherwise swallow
     # it silently.
-    resolved = resolve_harness_mcp_servers(names)
+    resolution = resolve_harness_mcp_capabilities(names, profile=profile)
+    unavailable_names = {
+        unavailable.capability for unavailable in resolution.unavailable
+    }
+    if profile is HarnessMcpRuntimeProfile.DESKTOP:
+        attached_names = {
+            str(spec.get("name"))
+            for spec in (getattr(model, "mcp_servers", []) or [])
+            if spec.get("name") in _KNOWN_MCP_SERVERS
+        }
+        attached_names.update(
+            name
+            for name in (getattr(model, "harness_mcp_servers", []) or [])
+            if name in _KNOWN_MCP_SERVERS
+        )
+        if attached_names:
+            attached_resolution = resolve_harness_mcp_capabilities(
+                sorted(attached_names),
+                profile=profile,
+            )
+            unavailable_names.update(
+                unavailable.capability
+                for unavailable in attached_resolution.unavailable
+            )
+    resolved = [
+        _launch_spec(_KNOWN_MCP_SERVERS[name]) for name in resolution.available_servers
+    ]
+    if not resolved and not unavailable_names:
+        return model
     attach = getattr(model, "with_mcp_servers", None)
     if attach is None:
         # Codex lane: no ACP session surface, but its own config.toml delivery.
         codex_attach = getattr(model, "with_harness_mcp_servers", None)
         if codex_attach is not None:
-            return codex_attach(names)
+            if profile is HarnessMcpRuntimeProfile.DESKTOP:
+                existing_names = [
+                    name
+                    for name in (getattr(model, "harness_mcp_servers", []) or [])
+                    if name not in unavailable_names
+                ]
+                seen_names = set(existing_names)
+                existing_names.extend(
+                    name
+                    for name in resolution.available_servers
+                    if name not in seen_names
+                )
+                return codex_attach(existing_names)
+            return codex_attach(resolution.available_servers)
         return model
-    existing = list(getattr(model, "mcp_servers", []) or [])
+    existing = [
+        spec
+        for spec in (getattr(model, "mcp_servers", []) or [])
+        if spec.get("name") not in unavailable_names
+    ]
     seen = {s.get("name") for s in existing}
     combined = existing + [s for s in resolved if s.get("name") not in seen]
-    if not allowed_tools:
+    existing_allowed = [
+        tool
+        for tool in (getattr(model, "allowed_tools", []) or [])
+        if not any(tool.startswith(f"mcp__{name}__") for name in unavailable_names)
+    ]
+    resolved_allowed = set(
+        harness_allowed_tool_names(resolution.available_servers, profile=profile)
+    )
+    admitted_tools = [
+        tool for tool in (allowed_tools or ()) if tool in resolved_allowed
+    ]
+    if not admitted_tools:
+        if unavailable_names:
+            return attach(combined, existing_allowed)
         return attach(combined)
-    existing_allowed = list(getattr(model, "allowed_tools", []) or [])
     allow_seen = set(existing_allowed)
     merged_allowed = existing_allowed + [
-        t for t in allowed_tools if t not in allow_seen
+        t for t in admitted_tools if t not in allow_seen
     ]
     return attach(combined, merged_allowed)

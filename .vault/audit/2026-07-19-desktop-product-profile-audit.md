@@ -115,3 +115,28 @@ lock bytes already entered history in commit `a7896cc`; a record-only adoption
 is therefore correct and avoids manufacturing a no-op lock diff. Capsule-owned
 adapter resolution and removal of source-checkout installation guidance remain
 assigned to the later package-authority step.
+
+## `W01 P01 S04` runtime-acquisition review
+
+Status: PASS
+
+The new typed resolver keeps non-desktop behavior unchanged and makes desktop
+selection return a stable, path-free unavailable-capability result instead of
+an executable launch specification. Desktop policy filters launch arguments,
+autonomous tool names, Claude and project configuration, Codex configuration,
+and model composition. It also removes stale runtime-acquired entries while
+preserving unrelated authoring state.
+
+Initial independent review required two revisions. First, desktop admission
+accepted contradictory metadata that marked an entry both desktop-available
+and runtime-acquired. Admission now requires explicit availability together
+with explicit `runtime_acquisition=false`, and omitted or contradictory values
+fail closed. Second, an empty current declaration returned before cleaning
+pre-attached ACP or Codex RAG state. Desktop cleanup now runs for that case,
+while the non-desktop empty declaration remains the prior identity no-op.
+
+Follow-up review passed with no remaining findings. Nine focused tests use the
+production resolver and real ACP and Codex model objects; the impacted provider
+and configuration suites, Ruff, and scoped type checking also pass. Application
+selection of the desktop policy remains explicitly assigned to S16, so this
+step does not claim end-to-end desktop runtime closure.

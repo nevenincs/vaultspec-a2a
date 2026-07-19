@@ -328,6 +328,42 @@ class TestHeartbeatFailureLadder:
         recoveries = [r for r in caplog.records if "recovered" in r.getMessage()]
         assert recoveries == []
 
+    @pytest.mark.asyncio
+    async def test_disconnecting_a_failing_client_discards_it_from_the_ladder(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """A failed client that disconnects (rather than recovers) must not
+        linger in the failing set forever - it can never send another
+        heartbeat, so leaving it in place would grow the set unboundedly
+        across connection churn and permanently block "recovered for all
+        clients" once any failed client disconnects instead of recovering.
+        """
+        _app, _agg, manager = _create_app()
+
+        manager._log_heartbeat_failure("client-a")
+        manager._log_heartbeat_failure("client-b")
+        assert manager._failing_client_ids == {"client-a", "client-b"}
+
+        await manager.disconnect("client-a")
+        assert "client-a" not in manager._failing_client_ids
+        assert manager._failing_client_ids == {"client-b"}
+
+        # The remaining client's success now empties the failing set entirely
+        # (only possible because disconnect discarded client-a rather than
+        # leaving a phantom entry behind) and "recovered" fires - naming no
+        # trace of the already-departed client-a.
+        with caplog.at_level(logging.INFO, logger=websocket_module.__name__):
+            manager._record_heartbeat_success("client-b")
+
+        assert manager._failing_client_ids == set()
+        recoveries = [
+            r
+            for r in caplog.records
+            if r.levelno == logging.INFO and "recovered" in r.getMessage()
+        ]
+        assert len(recoveries) == 1
+        assert "client-a" not in recoveries[0].getMessage()
+
 
 # ---------------------------------------------------------------------------
 # Invalid command handling

@@ -34,3 +34,11 @@ Both dedup ladders now name the specific entities behind a suppressed storm (stu
 ## Notes
 
 Ran ruff via `uvx ruff check` (isolated, no venv mutation) per the team-lead's environment-hazard guidance; `uv run --no-sync pytest`/`ty` were both available in the shared venv at the time of this step (verified before use) and used directly for tests and type-checking. No incidents. Committed with an explicit file pathspec (`git commit -o <files>`) per the new team-wide discipline, on whatever branch the shared checkout was on at commit time (per the team-lead's reconcile-via-temp-worktree pattern - did not touch the checkout's branch or reset anything).
+
+## Revision (incremental review, disconnect leak)
+
+Review flagged a MEDIUM: `disconnect()` popped `_error_sequences` and `_connections` but never discarded the client from `_failing_client_ids`, so a client that failed a heartbeat and then disconnected (rather than recovering) stayed counted forever - the set grows unboundedly across connection churn, later ladder lines would keep naming a long-gone client as "currently failing", and "recovered for all clients" could never fire again once any failed client disconnected instead of recovering.
+
+Fix: `self._failing_client_ids.discard(client_id)` added to `disconnect()` right alongside the existing connection/sequence cleanup. The dispatch half of the review was ruled clean and closed - no change there.
+
+Live test added (`test_disconnecting_a_failing_client_discards_it_from_the_ladder`): two clients fail (failing set `{a, b}`); `client-a` disconnects via the real `disconnect()` method and is confirmed discarded (`{b}` remains); `client-b` then succeeds, the failing set empties, "recovered" fires, and the message contains no trace of `client-a`. Ruff, ty, and the full websocket test suite (23 tests) pass.

@@ -1,8 +1,8 @@
 """Certify desktop discovery ownership: attach, stale recovery, live conflict.
 
 Real child interpreters stand up a live desktop resident (runtime singleton plus
-published versioned discovery). Against it these tests prove the P07 discovery
-ownership state machine end to end:
+published versioned discovery). Against it these tests prove the desktop
+discovery ownership state machine end to end:
 
 - A foreign contender can read and validate a live compatible resident's
   discovery record and follows its named, owner-restricted attach-credential
@@ -13,10 +13,10 @@ ownership state machine end to end:
 - Stale discovery (the recorded gateway proven dead) is quarantined only by the
   matching owner; a foreign owner is refused.
 
-Full attach-credential authentication lands in W03.P08; this certifies the
-discovery-validation and conflict/quarantine machine that gates it. No mock,
-monkeypatch, stub, skip, or expected failure is used; children are always torn
-down in a ``finally``.
+Full attach-credential authentication lands with the gateway credential work in
+a later phase; this certifies the discovery-validation and conflict/quarantine
+machine that gates it. No mock, monkeypatch, stub, skip, or expected failure is
+used; children are always torn down in a ``finally``.
 """
 
 from __future__ import annotations
@@ -92,8 +92,16 @@ def _spawn_resident(
     stop = tmp_path / f"{tag}.stop"
     proc = subprocess.Popen(
         [
-            sys.executable, "-c", _RESIDENT, str(app_home), owner, str(port),
-            str(protocol[0]), str(protocol[1]), str(ready), str(stop),
+            sys.executable,
+            "-c",
+            _RESIDENT,
+            str(app_home),
+            owner,
+            str(port),
+            str(protocol[0]),
+            str(protocol[1]),
+            str(ready),
+            str(stop),
         ],
         env=os.environ.copy(),
     )

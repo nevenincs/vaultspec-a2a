@@ -88,10 +88,10 @@ def test_published_bytes_contain_no_credential_value(tmp_path: Path) -> None:
         else:
             os.environ["VAULTSPEC_TEST_SECRET"] = prior
 
-    # Scan for every credential value present in the test environment.
-    for env_value in os.environ.values():
-        if len(env_value) >= 8:  # ignore trivially short values that false-match
-            assert env_value.encode("utf-8") not in raw or env_value != secret
+    # The credential value — planted in the environment and written into the
+    # referenced file during publication — must never reach the published bytes;
+    # the record names the credential only by path.
+    assert credential_file.read_text(encoding="utf-8") == secret
     assert secret.encode("utf-8") not in raw
     payload = json.loads(raw)
     for forbidden in ("service_token", "token", "bearer", "secret"):

@@ -8,21 +8,17 @@ dependencies = [
   "anyio>=4.9.0",
   "apscheduler>=3.10",
   "aiosqlite>=0.20.0",
-  "asyncpg>=0.30.0",
   "fastapi>=0.133.1",
   "httpx>=0.28.1",
   "langchain-core>=1.2.16",
   "langchain-openai>=1.1.10",
   "langgraph>=0.2.16",
-  "langgraph-checkpoint-postgres>=2.0.0",
   "langgraph-checkpoint-sqlite>=2.0.0",
   "mcp>=1.26.0",
   "opentelemetry-sdk>=1.39.1",
-  "opentelemetry-exporter-otlp-proto-grpc>=1.39.1",
   "opentelemetry-instrumentation-fastapi>=0.60b0",
   "pydantic>=2.12.5",
   "pydantic-settings>=2.13.1",
-  "psycopg[binary,pool]>=3.2.9",
   "rich>=14.3.2",
   "sqlalchemy[asyncio]>=2.0.40",
   "starlette>=0.52.1",
@@ -31,6 +27,16 @@ dependencies = [
   "alembic>=1.15.1",
   "click>=8.1",
   "langsmith>=0.3.1",
+]
+
+[project.optional-dependencies]
+server = [
+  "asyncpg>=0.30.0",
+  "langgraph-checkpoint-postgres>=2.0.0",
+  "opentelemetry-exporter-otlp-proto-grpc>=1.39.1",
+  "psycopg[binary,pool]>=3.2.9",
+]
+rag = [
   "torch>=2.4",
   "vaultspec-rag[mcp]>=0.2.28",
 ]
@@ -59,7 +65,7 @@ dev = [
 [tool.uv.sources]
 vaultspec-core = { git = "https://github.com/wgergely/vaultspec-core.git", branch = "main" }
 torch = [
-    {index = "pytorch-cu130", marker = "sys_platform == 'linux' or sys_platform == 'win32'"},
+    { index = "pytorch-cu130", extra = "rag", marker = "sys_platform == 'linux' or sys_platform == 'win32'" },
 ]
 
 [[tool.uv.index]]
@@ -67,8 +73,6 @@ name = "pytorch-cu130"
 url = "https://download.pytorch.org/whl/cu130"
 explicit = true
 
-[tool.vaultspec-rag]
-managed-torch-direct-dependency = "[project].dependencies"
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"

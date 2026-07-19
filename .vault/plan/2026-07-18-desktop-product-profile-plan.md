@@ -81,7 +81,7 @@ Deliver the target-independent dependency, package-resource, component-manifest,
 
 Make the desktop runtime closure explicit, target-resolvable, and free of runtime acquisition while retaining optional server and development capabilities.
 
-- [ ] `W01.P01.S01` - Split install metadata into a Torch- and RAG-free desktop runtime closure plus explicit optional capability groups; `pyproject.toml`.
+- [x] `W01.P01.S01` - Split install metadata into a Torch- and RAG-free desktop runtime closure plus explicit optional capability groups; `pyproject.toml`.
 - [x] `W01.P01.S93` - Guard optional OTLP exporter detection so the desktop base initializes gateway and worker telemetry without server extras and prove it from a clean base installation; `src/vaultspec_a2a/telemetry`.
 - [ ] `W01.P01.S02` - Regenerate the locked Python graph and prove CPython 3.13 resolution for every accepted target; `uv.lock`.
 - [ ] `W01.P01.S03` - Lock ACP 0.59.0 and eliminate stale JavaScript adapter identities from the Node closure; `package-lock.json`.

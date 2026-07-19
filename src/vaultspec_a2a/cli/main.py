@@ -14,7 +14,9 @@ overridable with ``--url`` for operators driving a non-default bind.
 from __future__ import annotations
 
 import json
+import os
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -78,6 +80,90 @@ def serve() -> None:
     from ..api.app import main as serve_gateway
 
     serve_gateway()
+
+
+@dataclass(frozen=True)
+class _DesktopServePlan:
+    """The armed environment and re-exec argv for a desktop gateway launch."""
+
+    env: dict[str, str]
+    argv: list[str]
+
+
+def _prepare_desktop_serve(
+    app_home: Path,
+    capsule_root: Path,
+    *,
+    host: str | None,
+    port: int | None,
+) -> _DesktopServePlan:
+    """Validate the desktop roots and build the armed serve re-exec plan.
+
+    Resolves and fail-closed validates the profile (both roots absolute and
+    distinct, the capsule carrying its runtime assets, the application home
+    writable or creatable), materialises the mutable-state directories, and
+    returns the environment that arms the desktop profile plus the argv that
+    re-execs the existing ``serve`` path. Path resolution and gateway boot stay
+    with the profile authority and the gateway; this only assembles the launch.
+
+    Raises:
+        DesktopProfileError: If either root or a required capsule asset is
+            invalid.
+    """
+    from ..desktop.profile import DesktopProfile
+
+    profile = DesktopProfile.resolve(app_home, capsule_root)
+    profile.ensure()
+
+    env = {
+        "VAULTSPEC_DESKTOP_APP_HOME": str(profile.app_home),
+        "VAULTSPEC_CAPSULE_ASSETS": str(profile.capsule_assets_root),
+    }
+    if host is not None:
+        env["VAULTSPEC_HOST"] = host
+    if port is not None:
+        env["VAULTSPEC_PORT"] = str(port)
+    argv = [sys.executable, "-m", "vaultspec_a2a.cli.main", "serve"]
+    return _DesktopServePlan(env=env, argv=argv)
+
+
+@main.command("desktop-serve")
+@click.option(
+    "--app-home",
+    required=True,
+    type=click.Path(path_type=Path),
+    help="Explicit absolute mutable-state root for the desktop profile.",
+)
+@click.option(
+    "--capsule-root",
+    required=True,
+    type=click.Path(path_type=Path),
+    help="Explicit absolute immutable capsule (runtime asset) root.",
+)
+@click.option("--host", default=None, help="Override the gateway bind host.")
+@click.option("--port", type=int, default=None, help="Override the gateway bind port.")
+def desktop_serve(
+    app_home: Path,
+    capsule_root: Path,
+    host: str | None,
+    port: int | None,
+) -> None:
+    """Arm the desktop profile and start the gateway via the existing serve path.
+
+    Seats every mutable path under the explicit application home and binds the
+    capsule assets root, then re-execs ``serve`` in a freshly armed interpreter
+    so the gateway boots with the desktop settings in force. Compose and plain
+    ``serve`` invocations are unaffected; no run-control lifecycle verb is added.
+    """
+    from ..desktop.profile import DesktopProfileError
+
+    try:
+        plan = _prepare_desktop_serve(app_home, capsule_root, host=host, port=port)
+    except DesktopProfileError as exc:
+        raise click.ClickException(str(exc)) from exc
+
+    os.environ.update(plan.env)
+    os.execv(plan.argv[0], plan.argv)
 
 
 def _expected_route_signature() -> list[str]:

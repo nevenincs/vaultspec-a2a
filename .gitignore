@@ -9,6 +9,7 @@ scratchpad/
 *.log
 *.tmp
 *.bak
+*.bak-*
 *.swp
 *.swo
 *.DS_Store

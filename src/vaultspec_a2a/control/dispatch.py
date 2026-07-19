@@ -209,7 +209,12 @@ async def dispatch_to_worker(
 
 
 def _log_redispatch_failure_ladder(
-    counts: dict[str, int], category: str, message: str, *args: object
+    counts: dict[str, int],
+    thread_ids: dict[str, list[str]],
+    category: str,
+    thread_id: str,
+    message: str,
+    *args: object,
 ) -> None:
     """Log a re-dispatch failure at WARNING on the 1st and every Nth repeat.
 
@@ -219,9 +224,13 @@ def _log_redispatch_failure_ladder(
     (first failure -> WARNING, every Nth thereafter -> WARNING, everything
     between only advances the counter). *category* is the failure kind
     (``circuit_open``/``redispatch_error``), so switching kinds mid-batch is a
-    state change that always logs at its own occurrence 1.
+    state change that always logs at its own occurrence 1. Every occurrence's
+    *thread_id* - not just the ones logged in full - is recorded so the
+    batch-end summary can name every stuck thread, keeping per-entity
+    diagnosability even while the per-occurrence line is suppressed.
     """
     counts[category] = counts.get(category, 0) + 1
+    thread_ids.setdefault(category, []).append(thread_id)
     n = counts[category]
     if n == 1 or n % _REDISPATCH_LOG_EVERY_N == 0:
         logger.warning(message, *args)
@@ -252,6 +261,7 @@ async def redispatch_reconciling_threads(
                 return
             logger.info("Re-dispatching %d reconciling threads", len(threads))
             failure_counts: dict[str, int] = {}
+            failure_thread_ids: dict[str, list[str]] = {}
             for thread in threads:
                 meta: dict[str, Any] = {}
                 if thread.thread_metadata:
@@ -309,7 +319,9 @@ async def redispatch_reconciling_threads(
                 except WorkerCircuitOpenError:
                     _log_redispatch_failure_ladder(
                         failure_counts,
+                        failure_thread_ids,
                         "circuit_open",
+                        thread.id,
                         "Circuit breaker open, skipping re-dispatch for %s",
                         thread.id,
                     )
@@ -321,7 +333,9 @@ async def redispatch_reconciling_threads(
                 ) as exc:
                     _log_redispatch_failure_ladder(
                         failure_counts,
+                        failure_thread_ids,
                         "redispatch_error",
+                        thread.id,
                         "Re-dispatch error for thread %s: %s",
                         thread.id,
                         exc,
@@ -330,10 +344,12 @@ async def redispatch_reconciling_threads(
                 if count > 1:
                     logger.info(
                         "Re-dispatch failure ladder for %s: %d occurrences this"
-                        " batch (only the 1st and every %dth logged in full)",
+                        " batch (only the 1st and every %dth logged in full);"
+                        " threads: %s",
                         category,
                         count,
                         _REDISPATCH_LOG_EVERY_N,
+                        ", ".join(failure_thread_ids.get(category, [])),
                     )
     except Exception as exc:
         logger.error("Reconciling re-dispatch task failed: %s", exc)

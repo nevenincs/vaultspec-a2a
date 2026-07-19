@@ -1,0 +1,320 @@
+{
+  "$defs": {
+    "ApiVersionRange": {
+      "additionalProperties": false,
+      "description": "The inclusive gateway API version range this generation serves.",
+      "properties": {
+        "minimum": {
+          "description": "Lowest served gateway API version.",
+          "maxLength": 32,
+          "minLength": 1,
+          "title": "Minimum",
+          "type": "string"
+        },
+        "maximum": {
+          "description": "Highest served gateway API version.",
+          "maxLength": 32,
+          "minLength": 1,
+          "title": "Maximum",
+          "type": "string"
+        }
+      },
+      "required": [
+        "minimum",
+        "maximum"
+      ],
+      "title": "ApiVersionRange",
+      "type": "object"
+    },
+    "ComponentAsset": {
+      "additionalProperties": false,
+      "description": "One base-closure asset: its kind, pinned version, license, and digest.",
+      "properties": {
+        "kind": {
+          "$ref": "#/$defs/ComponentAssetKind",
+          "description": "Base-closure asset kind."
+        },
+        "version": {
+          "description": "Pinned asset version.",
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Version",
+          "type": "string"
+        },
+        "license": {
+          "description": "SPDX-style license identifier for the asset.",
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "License",
+          "type": "string"
+        },
+        "digest": {
+          "description": "Asset content digest under the manifest digest algorithm.",
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Digest",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "version",
+        "license",
+        "digest"
+      ],
+      "title": "ComponentAsset",
+      "type": "object"
+    },
+    "ComponentAssetKind": {
+      "description": "The base-closure asset kinds a complete capsule declares.\n\nA capsule ships a bundled CPython runtime, the locked A2A distribution, a\nbundled Node.js runtime, and the pinned ACP adapter. The pinned versions are\n:data:`CPYTHON_VERSION_PIN`, :data:`NODEJS_VERSION_PIN`, and\n:data:`ACP_VERSION_PIN`.",
+      "enum": [
+        "python-runtime",
+        "a2a-distribution",
+        "node-runtime",
+        "acp-adapter"
+      ],
+      "title": "ComponentAssetKind",
+      "type": "string"
+    },
+    "ComponentCompatibility": {
+      "additionalProperties": false,
+      "description": "Protocol and schema compatibility facts a consumer must honour.",
+      "properties": {
+        "api_versions": {
+          "$ref": "#/$defs/ApiVersionRange",
+          "description": "Gateway API version range served by this generation."
+        },
+        "migration_range": {
+          "$ref": "#/$defs/MigrationRange",
+          "description": "Alembic base/head revision range packaged in this generation."
+        }
+      },
+      "required": [
+        "api_versions",
+        "migration_range"
+      ],
+      "title": "ComponentCompatibility",
+      "type": "object"
+    },
+    "ComponentEntrypoint": {
+      "additionalProperties": false,
+      "description": "A single typed launch surface, invoked relative to the capsule root.",
+      "properties": {
+        "kind": {
+          "$ref": "#/$defs/EntrypointKind",
+          "description": "The launch surface this entry names."
+        },
+        "console_script": {
+          "description": "Console-script name declared by the distribution.",
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Console Script",
+          "type": "string"
+        },
+        "reference": {
+          "description": "Entry-point object reference, e.g. 'pkg.module:main'.",
+          "maxLength": 256,
+          "minLength": 1,
+          "title": "Reference",
+          "type": "string"
+        },
+        "relative_command": {
+          "description": "Argv path segments relative to the capsule root.",
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Relative Command",
+          "type": "array"
+        }
+      },
+      "required": [
+        "kind",
+        "console_script",
+        "reference",
+        "relative_command"
+      ],
+      "title": "ComponentEntrypoint",
+      "type": "object"
+    },
+    "ComponentEntrypoints": {
+      "additionalProperties": false,
+      "description": "The dashboard-owned gateway launch and the caller-owned MCP launch.",
+      "properties": {
+        "gateway": {
+          "$ref": "#/$defs/ComponentEntrypoint",
+          "description": "Dashboard-owned desktop gateway launch entrypoint."
+        },
+        "standalone_mcp": {
+          "$ref": "#/$defs/ComponentEntrypoint",
+          "description": "Caller-owned standalone vaultspec-mcp entrypoint."
+        }
+      },
+      "required": [
+        "gateway",
+        "standalone_mcp"
+      ],
+      "title": "ComponentEntrypoints",
+      "type": "object"
+    },
+    "ComponentIdentity": {
+      "additionalProperties": false,
+      "description": "The component's distribution name and its own version.",
+      "properties": {
+        "name": {
+          "description": "Distribution name.",
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "version": {
+          "description": "Component (A2A distribution) version string.",
+          "maxLength": 64,
+          "minLength": 1,
+          "title": "Version",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "version"
+      ],
+      "title": "ComponentIdentity",
+      "type": "object"
+    },
+    "DependencyLockIdentity": {
+      "additionalProperties": false,
+      "description": "Digests pinning the resolved Python and JavaScript dependency graphs.",
+      "properties": {
+        "uv_lock_digest": {
+          "description": "Digest of the committed uv.lock.",
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Uv Lock Digest",
+          "type": "string"
+        },
+        "package_lock_digest": {
+          "description": "Digest of the committed package-lock.json.",
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Package Lock Digest",
+          "type": "string"
+        }
+      },
+      "required": [
+        "uv_lock_digest",
+        "package_lock_digest"
+      ],
+      "title": "DependencyLockIdentity",
+      "type": "object"
+    },
+    "DigestAlgorithm": {
+      "description": "The digest algorithm governing every hash in a manifest.",
+      "enum": [
+        "sha256"
+      ],
+      "title": "DigestAlgorithm",
+      "type": "string"
+    },
+    "EntrypointKind": {
+      "description": "The two launch surfaces the contract declares.\n\n``gateway`` is the dashboard-owned desktop gateway launch. ``standalone_mcp``\nis the caller-owned ``vaultspec-mcp`` adapter, which the desktop lifecycle\nnever launches or adopts.",
+      "enum": [
+        "gateway",
+        "standalone-mcp"
+      ],
+      "title": "EntrypointKind",
+      "type": "string"
+    },
+    "MigrationRange": {
+      "additionalProperties": false,
+      "description": "The Alembic revision range the generation's package migrations cover.",
+      "properties": {
+        "base": {
+          "description": "Alembic base (initial) revision identifier.",
+          "maxLength": 64,
+          "minLength": 1,
+          "title": "Base",
+          "type": "string"
+        },
+        "head": {
+          "description": "Alembic head (target) revision identifier.",
+          "maxLength": 64,
+          "minLength": 1,
+          "title": "Head",
+          "type": "string"
+        }
+      },
+      "required": [
+        "base",
+        "head"
+      ],
+      "title": "MigrationRange",
+      "type": "object"
+    },
+    "TargetTriple": {
+      "description": "The five accepted desktop capsule targets, as Rust-style triples.\n\nThe triples match the platform vocabulary already used by the locked\ndependency closure (see ``desktop_tests/test_dependency_closure.py``).",
+      "enum": [
+        "aarch64-apple-darwin",
+        "x86_64-apple-darwin",
+        "aarch64-unknown-linux-gnu",
+        "x86_64-unknown-linux-gnu",
+        "x86_64-pc-windows-msvc"
+      ],
+      "title": "TargetTriple",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "description": "The versioned desktop component manifest consumed by dashboard packaging.\n\nThe manifest is the entire boundary the dashboard reads about an A2A\ngeneration. It is deterministic and self-describing: given the same inputs\nthe emitter produces a byte-identical document, so a release-set receipt can\npin a generation by manifest digest.",
+  "properties": {
+    "contract_version": {
+      "description": "Manifest grammar version; consumers check major equality.",
+      "pattern": "^\\d+\\.\\d+$",
+      "title": "Contract Version",
+      "type": "string"
+    },
+    "identity": {
+      "$ref": "#/$defs/ComponentIdentity",
+      "description": "Component name and version."
+    },
+    "target": {
+      "$ref": "#/$defs/TargetTriple",
+      "description": "The capsule's target triple."
+    },
+    "compatibility": {
+      "$ref": "#/$defs/ComponentCompatibility",
+      "description": "Served API range and packaged Alembic migration range."
+    },
+    "entrypoints": {
+      "$ref": "#/$defs/ComponentEntrypoints",
+      "description": "Gateway and standalone MCP launch surfaces."
+    },
+    "digest_algorithm": {
+      "$ref": "#/$defs/DigestAlgorithm",
+      "description": "Algorithm governing every digest in this manifest."
+    },
+    "assets": {
+      "description": "Base-closure assets with pinned versions, licenses, digests.",
+      "items": {
+        "$ref": "#/$defs/ComponentAsset"
+      },
+      "minItems": 1,
+      "title": "Assets",
+      "type": "array"
+    },
+    "dependency_lock": {
+      "$ref": "#/$defs/DependencyLockIdentity",
+      "description": "Digests pinning the Python and JavaScript dependency graphs."
+    }
+  },
+  "required": [
+    "contract_version",
+    "identity",
+    "target",
+    "compatibility",
+    "entrypoints",
+    "digest_algorithm",
+    "assets",
+    "dependency_lock"
+  ],
+  "title": "ComponentManifest",
+  "type": "object"
+}

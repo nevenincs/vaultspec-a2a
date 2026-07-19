@@ -11,6 +11,16 @@ related:
   - '[[2026-07-18-desktop-product-profile-reference]]'
 ---
 
+<!-- LINK RULES:
+     - [[wiki-links]] are ONLY for .vault/ documents in the
+       related: field above.
+     - The related: field carries the AUTHORISING documents
+       (ADR, research, reference, prior plan) for every Step in
+       this plan. Steps inherit this chain; per-row reference
+       footers do not exist.
+     - NEVER use [[wiki-links]] or markdown links in the
+       document body. -->
+
 <!-- RETIRED: P15, S88 -->
 
 # `desktop-product-profile` plan
@@ -104,7 +114,7 @@ Move migrations, presets, Node.js adapter resolution, and component metadata beh
 
 Produce reproducible component artifacts for each accepted target triple with digests, licenses, and software bill of materials evidence.
 
-- [ ] `W01.P03.S13` - Assemble a deterministic target capsule from pinned Python Node ACP and package-owned inputs; `scripts/build_desktop_capsule.py`.
+- [x] `W01.P03.S13` - Assemble a deterministic target capsule from pinned Python Node ACP and package-owned inputs; `scripts/build_desktop_capsule.py`.
 - [ ] `W01.P03.S14` - Verify capsule identity target closure entrypoints digests licenses and software bill of materials without a source checkout; `scripts/verify_desktop_capsule.py`.
 - [ ] `W01.P03.S15` - Create the artifact workflow that publishes deterministic component archives and manifests for dashboard consumption; `.github/workflows/desktop-capsule.yml`.
 

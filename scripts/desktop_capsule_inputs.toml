@@ -1,0 +1,81 @@
+# Pinned download inputs for the A2A desktop capsule builder.
+#
+# Each target triple names a CPython and Node.js download source with a
+# pre-verified SHA-256 digest.  The ACP section pins the npm registry
+# tarball by URL and SHA-256.  All digests are verified before the
+# corresponding bytes are used during assembly.  Regenerate a section with:
+#
+#   uv run --no-sync python scripts/build_desktop_capsule.py \
+#       compute-digests --target TRIPLE
+#
+# CPython source: astral-sh/python-build-standalone 20250702 (CPython 3.13.5),
+#   install_only variants (tar.gz, no dev headers or debug symbols).
+# Node.js source: nodejs.org/dist v22.17.0 official release archives.
+# ACP source: registry.npmjs.org tarball matching package-lock.json integrity.
+#   npm integrity: sha512-GejLH5qxsI5IoSDfhyOVDEsRNxqi6y0Rcj5FstVeOwMACSht/...
+
+[acp]
+version = "0.59.0"
+license = "Apache-2.0"
+url = "https://registry.npmjs.org/@agentclientprotocol/claude-agent-acp/-/claude-agent-acp-0.59.0.tgz"
+sha256 = "b62c8ed1deed6172abb6b1d49a4d30024efe88bba062c5458845c256e7218f61"
+
+[targets.aarch64-apple-darwin.python]
+version = "3.13"
+license = "PSF-2.0"
+url = "https://github.com/astral-sh/python-build-standalone/releases/download/20250702/cpython-3.13.5+20250702-aarch64-apple-darwin-install_only.tar.gz"
+sha256 = "66577414e9f4b0caa116a8e15fa50306db91bce13d49278079bb22adaeefb1fa"
+
+[targets.aarch64-apple-darwin.node]
+version = "22"
+license = "MIT"
+url = "https://nodejs.org/dist/v22.17.0/node-v22.17.0-darwin-arm64.tar.gz"
+sha256 = "615dda58b5fb41fad2be43940b6398ca56554cbe05800953afadc724729cb09e"
+
+[targets.x86_64-apple-darwin.python]
+version = "3.13"
+license = "PSF-2.0"
+url = "https://github.com/astral-sh/python-build-standalone/releases/download/20250702/cpython-3.13.5+20250702-x86_64-apple-darwin-install_only.tar.gz"
+sha256 = "0682afbb238b4762b8f5e383fe19cc52969c780871016c50d4cb7088a536167c"
+
+[targets.x86_64-apple-darwin.node]
+version = "22"
+license = "MIT"
+url = "https://nodejs.org/dist/v22.17.0/node-v22.17.0-darwin-x64.tar.gz"
+sha256 = "c39c8ec3cdadedfcc75de0cb3305df95ae2aecebc5db8d68a9b67bd74616d2ad"
+
+[targets.aarch64-unknown-linux-gnu.python]
+version = "3.13"
+license = "PSF-2.0"
+url = "https://github.com/astral-sh/python-build-standalone/releases/download/20250702/cpython-3.13.5+20250702-aarch64-unknown-linux-gnu-install_only.tar.gz"
+sha256 = "272a8817921856d7ac47f44c076fb62fbaf5649aa1d97b2d67a3a6adee969ff0"
+
+[targets.aarch64-unknown-linux-gnu.node]
+version = "22"
+license = "MIT"
+url = "https://nodejs.org/dist/v22.17.0/node-v22.17.0-linux-arm64.tar.gz"
+sha256 = "3e99df8b01b27dc8b334a2a30d1cd500442b3b0877d217b308fd61a9ccfc33d4"
+
+[targets.x86_64-unknown-linux-gnu.python]
+version = "3.13"
+license = "PSF-2.0"
+url = "https://github.com/astral-sh/python-build-standalone/releases/download/20250702/cpython-3.13.5+20250702-x86_64-unknown-linux-gnu-install_only.tar.gz"
+sha256 = "9f5d5260f333fcb5372ec681851d92ddac79a33362aa85626b6cc96ffe75eeef"
+
+[targets.x86_64-unknown-linux-gnu.node]
+version = "22"
+license = "MIT"
+url = "https://nodejs.org/dist/v22.17.0/node-v22.17.0-linux-x64.tar.gz"
+sha256 = "0fa01328a0f3d10800623f7107fbcd654a60ec178fab1ef5b9779e94e0419e1a"
+
+[targets.x86_64-pc-windows-msvc.python]
+version = "3.13"
+license = "PSF-2.0"
+url = "https://github.com/astral-sh/python-build-standalone/releases/download/20250702/cpython-3.13.5+20250702-x86_64-pc-windows-msvc-install_only.tar.gz"
+sha256 = "f11f915437250657019c71adb81ec523d2932c2c3ea4441b592aa3bdce0e7ef7"
+
+[targets.x86_64-pc-windows-msvc.node]
+version = "22"
+license = "MIT"
+url = "https://nodejs.org/dist/v22.17.0/node-v22.17.0-win-x64.zip"
+sha256 = "721ab118a3aac8584348b132767eadf51379e0616f0db802cc1e66d7f0d98f85"

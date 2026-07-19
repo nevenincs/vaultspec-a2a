@@ -74,3 +74,26 @@ Follow-up verification reproduced the default-only clean installation, both
 gateway and worker profiles, all 29 focused telemetry tests, the installed
 exporter branch, Ruff, formatting, targeted type checking, lock consistency,
 and the default, server, and RAG export closures.
+
+## `W01 P01 S02` lock review
+
+Status: PASS
+
+The regenerated lock is deterministic and retains 171 package identities,
+versions, and sources. Two isolated non-upgrading regenerations from committed
+metadata produced the same bytes, and the repository lock check passed under
+CPython 3.13.
+
+Default and server dry-runs passed for all five accepted targets. Exported
+closure inspection confirmed that the desktop base contains neither server nor
+RAG packages, the server extra restores only its declared capability, and RAG
+remains separate. Intel macOS's locked `cryptography` source build belongs to
+the later capsule assembly and native certification gates. The recorded Torch,
+macOS, and manylinux limits apply to the ADR-excluded optional RAG capability,
+not to the mandatory desktop base.
+
+The initial review identified one low-severity Step Record overstatement: uv
+also normalized transitive environment markers for CUDA and NVIDIA packages,
+Torch, and `phart`, rather than changing only root dependency classification.
+The record now discloses that normalization while preserving the verified fact
+that no package identity, version, or source changed. Follow-up review passed.

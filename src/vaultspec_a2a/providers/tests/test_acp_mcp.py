@@ -242,9 +242,9 @@ def test_config_home_servers_preserves_env_when_present() -> None:
 def test_live_preset_harness_drives_read_only_rag_composition() -> None:
     """The live preset's declared harness composes exactly the read-only rag surface.
 
-    End-to-end proof of the P03.S12 activation: the real ``vaultspec-adr-research``
-    preset's ``[team.harness]`` declaration flows through ``effective_harness`` into
-    the composition, so the opt-in makes rag grounding LIVE for its document roles.
+    The real ``vaultspec-adr-research`` preset's ``[team.harness]`` declaration
+    flows through ``effective_harness`` into composition, so the opt-in makes RAG
+    grounding live for its document roles.
     Walks the full chain preset harness -> effective_harness -> harness allowlist ->
     compose, and asserts the composed session advertises the vaultspec-rag stdio
     server while exactly its READ tools join the autonomous allowlist - no write
@@ -305,7 +305,7 @@ def test_codex_specs_resolves_read_only_registry_entry_with_tools() -> None:
         "vaultspec-rag[mcp]==0.3.2",
         "vaultspec-search-mcp",
     ]
-    # The read tools ride along for the Codex enabled_tools allowlist (S19).
+    # The read tools ride along for the Codex enabled_tools allowlist.
     assert spec["tools"] == ["search_vault", "search_codebase", "get_code_file"]
 
 

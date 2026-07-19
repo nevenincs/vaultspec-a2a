@@ -3,17 +3,20 @@ set windows-shell := ["powershell.exe", "-NoLogo", "-NoProfile", "-Command"]
 
 rag_cli := "uv run --no-sync --frozen --no-default-groups --extra rag vaultspec-rag"
 
+# Fail when ACP runtime acquisition no longer matches the project lock.
+_check-runtime-authority:
+    uv run --no-sync --frozen --no-default-groups --extra rag python -c "from importlib.metadata import version; from vaultspec_a2a.providers._acp_mcp import _LOCKED_RAG_MCP_REQUIREMENT as requirement; expected = f'vaultspec-rag[mcp]=={version(\"vaultspec-rag\")}'; raise SystemExit(0 if requirement == expected else f'RAG runtime drift: {requirement} != {expected}')"
+
 # Resolve locked RAG dependencies and enroll the workspace without external provisioning.
 setup:
     uv sync --locked --no-default-groups --extra rag
-    {{ rag_cli }} --version
-    {{ rag_cli }} status
+    just dev rag _check-runtime-authority
+    {{ rag_cli }} install --mode dependency --no-mcp --no-provision --no-torch-config --yes
 
 # Enroll RAG after its profile has already been synchronized; do not download models or Qdrant.
 install:
-    uv sync --locked --no-default-groups --extra rag
-    {{ rag_cli }} --version
-    {{ rag_cli }} status
+    just dev rag _check-runtime-authority
+    {{ rag_cli }} install --mode dependency --no-mcp --no-provision --no-torch-config --yes
 
 # Preview non-provisioning workspace enrollment.
 install-dry-run:
@@ -23,6 +26,8 @@ install-dry-run:
 upgrade:
     uv lock --upgrade-package vaultspec-rag
     uv sync --locked --no-default-groups --extra rag
+    just dev rag _check-runtime-authority
+    {{ rag_cli }} install --mode dependency --upgrade --no-mcp --no-provision --no-torch-config --yes
     {{ rag_cli }} --version
     {{ rag_cli }} status
     uv lock --check

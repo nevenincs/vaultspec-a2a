@@ -20,7 +20,6 @@ Two honesty guarantees carry from the design constraints:
 from __future__ import annotations
 
 import re
-import shutil
 import subprocess
 import sys
 from dataclasses import dataclass
@@ -86,9 +85,9 @@ def provision_workspace(
 
     Runs ``vaultspec-core install --target <workspace_root>`` (unless
     ``install=False``, which verifies an already-provisioned tree), surfaces any
-    pinned-vs-resolved vaultspec-core version skew, then returns the S01 harness
+    pinned-vs-resolved vaultspec-core version skew, then returns the harness
     verifier's verdict over the result. Raises :class:`ProvisionError` only when
-    provisioning could not be attempted (CLI unresolvable) or the installer
+    provisioning could not be attempted (Core is not installed) or the installer
     exited non-zero; an incomplete harness is a normal verdict, not a raise.
     """
     installed = False
@@ -116,22 +115,17 @@ def provision_workspace(
 def _core_base_command() -> list[str]:
     """Return the argv prefix for the environment's deliberate Core authority.
 
-    When the active Python environment contains the declared Core distribution,
-    invoke that exact environment with ``python -m vaultspec_core``. This keeps a
-    project-locked application from drifting to a different console script on
-    ``PATH``. A standalone installed application can have no declared Core
-    dependency, so it retains the console-script and ``uvx`` compatibility paths.
-    Raises :class:`ProvisionError` when none resolves.
+    Invoke Core only through the active environment with
+    ``python -m vaultspec_core``. Falling back to ``PATH`` or an unversioned
+    ``uvx`` acquisition would make the provisioning authority unverifiable.
+    Raises :class:`ProvisionError` when Core is not installed.
     """
-    if _pinned_version() is not None:
-        return [sys.executable, "-m", "vaultspec_core"]
-    if shutil.which(_CORE_DIST) is not None:
-        return [_CORE_DIST]
-    if shutil.which("uvx") is not None:
-        return ["uvx", "--from", _CORE_DIST, _CORE_DIST]
-    raise ProvisionError(
-        "vaultspec-core CLI does not resolve in this environment; cannot provision"
-    )
+    if _pinned_version() is None:
+        raise ProvisionError(
+            "vaultspec-core is not installed in the active environment; "
+            "install the repository's locked tooling profile before provisioning"
+        )
+    return [sys.executable, "-m", "vaultspec_core"]
 
 
 def _run_install(workspace_root: Path) -> str:

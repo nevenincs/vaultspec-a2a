@@ -34,16 +34,17 @@ Diagnose the host tools before synchronizing dependencies:
 Docker as optional. It doesn't validate Git, Python, dependencies, framework
 enrollment, or application health.
 
-Install the continuous integration (CI)-compatible contributor environment:
+Install the continuous integration (CI) contributor environment:
 
 .. code-block:: console
 
-   just dev deps tooling
+   uv sync --locked --no-default-groups --extra server --group all
 
-The ``base`` profile contains runtime dependencies. The ``tooling`` profile is
-the canonical repository-validation environment. The heavier ``all`` profile
-also selects every runtime extra, retrieval-augmented generation (RAG), Torch,
-and documentation dependencies.
+The ``base`` profile contains runtime dependencies. The ``tooling`` profile
+supports hooks and narrower repository checks. The composed ``all`` group adds
+documentation to tooling, while CI also selects the ``server`` extra. RAG and
+Torch remain isolated in the optional ``rag`` extra. ``just dev deps all`` is
+the explicit profile that selects every runtime extra.
 
 Enroll Vaultspec Core and optional RAG
 --------------------------------------
@@ -79,7 +80,7 @@ verb:
 
    just dev vault sync
 
-Enroll the optional RAG bridge when semantic discovery is required:
+If semantic discovery is required, enroll the optional RAG bridge:
 
 .. code-block:: console
 
@@ -112,6 +113,8 @@ Run the local validation sequence:
 
 The command is fail-fast and runs these stages in order:
 
+#. ``uv sync --locked --no-default-groups --extra server --group all`` prepares
+   the exact locked environment.
 #. ``just dev code check`` runs Ruff lint, Ruff format checking, Ty, and Deptry.
 #. ``just dev test unit`` runs every test not marked ``service``.
 

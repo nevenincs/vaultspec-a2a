@@ -19,10 +19,9 @@ WebSocket edge. A separate worker executes graphs for engines and other
 authoring clients. It doesn't bundle a user interface.
 
 This quick start is for developers who build, test, or review repository
-changes. It uses the `tooling` profile shared by local and hosted continuous
-integration (CI). Use the heavier `all` profile only when you need every extra,
-including retrieval-augmented generation (RAG), Torch, and documentation
-dependencies.
+changes. The continuous integration (CI) gate resolves the locked `server`
+extra plus the documentation and tooling groups. Retrieval-augmented generation
+(RAG) and Torch remain optional.
 
 Just provides a project-locked command facade. Product behavior remains in the
 `vaultspec-a2a` package and command-line interface (CLI).
@@ -86,8 +85,9 @@ Run the canonical tracked-source-safe CI gate:
 just ci
 ```
 
-The gate runs Ruff lint, Ruff format checking, Ty, Deptry, and every test not
-marked `service`. It stops at the first failure.
+The gate first synchronizes its locked dependency selection. It then runs Ruff
+lint, Ruff format checking, Ty, Deptry, and every test not marked `service`.
+It stops at the first failure.
 
 Validate documentation separately:
 

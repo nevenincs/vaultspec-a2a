@@ -31,13 +31,18 @@ from .contract import contract_versions_compatible as contract_versions_compatib
 from .contract import (
     export_component_manifest_schema as export_component_manifest_schema,
 )
+from .manifest import CANONICAL_JSON_VERSION as CANONICAL_JSON_VERSION
 from .manifest import AssetSource as AssetSource
 from .manifest import ManifestEmissionError as ManifestEmissionError
+from .manifest import (
+    component_manifest_canonical_bytes as component_manifest_canonical_bytes,
+)
 from .manifest import component_manifest_digest as component_manifest_digest
 from .manifest import emit_component_manifest as emit_component_manifest
 
 __all__ = [
     "ACP_VERSION_PIN",
+    "CANONICAL_JSON_VERSION",
     "CONTRACT_VERSION",
     "CPYTHON_VERSION_PIN",
     "NODEJS_VERSION_PIN",
@@ -59,6 +64,7 @@ __all__ = [
     "MigrationRange",
     "StandaloneMcpEntrypoint",
     "TargetTriple",
+    "component_manifest_canonical_bytes",
     "component_manifest_digest",
     "component_manifest_schema",
     "contract_versions_compatible",

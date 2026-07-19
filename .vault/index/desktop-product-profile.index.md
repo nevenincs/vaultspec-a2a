@@ -56,7 +56,7 @@ Auto-generated index of all documents tagged with `#desktop-product-profile`.
 - `2026-07-18-desktop-product-profile-W01-P02-S09` - Resolve the default Node and ACP adapter only from capsule-owned assets in the desktop profile
 - `2026-07-18-desktop-product-profile-W01-P02-S10` - Define the versioned desktop component manifest contract consumed by dashboard packaging
 - `2026-07-18-desktop-product-profile-W01-P02-S11` - Emit pinned component identity target compatibility gateway and standalone MCP entrypoints digests assets licenses and dependency-lock identity
-- `2026-07-18-desktop-product-profile-W01-P02-S12` - Prove a clean built wheel contains package assets excludes tests and satisfies a real dashboard release-manifest fixture by pinned identity
+- `2026-07-18-desktop-product-profile-W01-P02-S12` - Prove a clean built wheel contains package assets, excludes tests, and checks dashboard release-manifest identity and digest drift
 
 ### plan
 

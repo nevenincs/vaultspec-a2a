@@ -331,3 +331,48 @@ Ruff formatting, and scoped type checking. The tests import production code and
 use no fake, mock, stub, patch, monkeypatch, skip, expected failure, or mirrored
 business logic. S11 remains explicitly open until the emitter consumes these
 typed authorities and genuine immutable artifacts.
+
+## `W01 P02 S11` pinned component-manifest emitter review
+
+Status: PASS
+
+The emitter now treats the exact A2A wheel as the sole authority for component
+name, version, MIT license expression, console entrypoints, Alembic migration
+range, and A2A source-artifact digest. It copies and hashes the wheel once into
+a bounded private snapshot, then reads only that snapshot. The other three
+assets and both dependency locks remain explicit immutable source-artifact byte
+inputs; S13 and S14 retain real runtime acquisition, licensing, SBOM, and
+installed-tree integrity.
+
+Initial review found four high-severity provenance/evidence defects: identity
+could come from an unrelated distribution, duplicate console scripts collapsed
+silently, source-digest semantics were ambiguous, and positive tests fabricated
+distribution metadata. It also found producer-specific JSON bytes, unbounded
+pre-I/O work, and leaked validation failures. The first repair moved identity
+and entrypoint parsing into the real wheel, defined canonical JSON v1, and used
+real-wheel evidence.
+
+Adversarial follow-up then reproduced split `.dist-info` authority, unsafe
+Windows migration names and alternate data streams, raw migration exceptions,
+special-device hashing, late string validation, an independent digest-algorithm
+override, and stale license evidence. The final repair binds one root-level
+`.dist-info` identity, derives `License-Expression: MIT`, rejects traversal,
+devices, ADS, overlong/deep/case-colliding paths, requires regular files at
+preflight and descriptor time, normalizes expected failures, and validates
+wheel metadata through the production contract before migration materialization
+or non-A2A hashing. It also restored and verified the S10 schema force-include
+after a concurrent worktree edit removed it.
+
+Independent final review found no unresolved critical, high, or medium issue.
+It reproduced 137 focused contract/emitter tests plus the five-test clean
+dependency-closure build/install gate, for 142 passes. Ruff checking, Ruff
+formatting, scoped type checking, and lock consistency pass. A fresh 608,058-byte
+wheel has 235 entries, contains the installed schema resource, one matching
+`.dist-info` authority, MIT metadata, both required scripts, and 11 migration
+files, while excluding desktop tests. The tests use production code, real wheel
+bytes, real locks, and real package migrations without fake, mock, stub, patch,
+monkeypatch, skip, expected failure, or mirrored emitter logic.
+
+S12 remains open. Its current candidate changes rebase the certification gate
+onto the exact-wheel API, but they require a separate whole-file architecture
+review and independent adversarial verdict before any closure claim.

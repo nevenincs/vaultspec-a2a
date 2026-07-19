@@ -157,8 +157,8 @@ class StoreMember:
     ``derivable`` records whether the store may be omitted from a snapshot group
     because a release manifest proves it reconstructable. Both current members are
     non-derivable, so absence is always an integrity failure; the field exists so
-    the membership declaration -- consumed by the component manifest in ``S26`` --
-    has one authority rather than two.
+    the membership declaration -- consumed by the component manifest layer -- has
+    one authority rather than two.
     """
 
     store: ConsistencyGroupStore
@@ -356,6 +356,19 @@ def _fsync_dir(path: Path) -> None:
         os.close(fd)
 
 
+def _unlink_temp(path: Path) -> None:
+    """Remove a temp staging file and any SQLite sidecars it may have left.
+
+    A SQLite backup destination can leave ``-wal``/``-shm`` sidecars beside its
+    temp file on an error path; cleaning the whole set keeps a failed capture from
+    stranding partial WAL state in the snapshots directory.
+    """
+    for suffix in ("", *_SQLITE_SIDECARS):
+        candidate = path.with_name(path.name + suffix)
+        if candidate.exists():
+            candidate.unlink()
+
+
 def _digest_and_size(path: Path) -> tuple[str, int]:
     """Return the SHA-256 digest and byte length of ``path``."""
     hasher = hashlib.sha256()
@@ -465,8 +478,7 @@ def _stage_store(member: StoreMember, group_dir: Path) -> StoreSnapshot:
     _ensure_quiesced(member.source_path)
     final = group_dir / member.snapshot_filename
     tmp = group_dir / f"{member.snapshot_filename}.{os.getpid()}{_TEMP_SUFFIX}"
-    if tmp.exists():
-        tmp.unlink()
+    _unlink_temp(tmp)
     try:
         _backup_store(member.source_path, tmp)
         _fsync_path(tmp)
@@ -475,8 +487,7 @@ def _stage_store(member: StoreMember, group_dir: Path) -> StoreSnapshot:
         os.replace(tmp, final)
         _fsync_dir(group_dir)
     finally:
-        if tmp.exists():
-            tmp.unlink()
+        _unlink_temp(tmp)
     return StoreSnapshot(
         store=member.store,
         source_path=member.source_path,
@@ -749,6 +760,12 @@ def restore_snapshot(
         raise RestorePendingError(
             f"an interrupted restore of group {existing.group_id!r} is pending; "
             "resume it before starting another restore."
+        )
+    if existing is not None and existing.group_id != group_id:
+        raise RestorePendingError(
+            f"cannot resume restore of group {group_id!r}: an interrupted restore of "
+            f"a different group {existing.group_id!r} is pending; resume that group "
+            "instead so its half-applied stores are not abandoned."
         )
     resumed = existing is not None
 

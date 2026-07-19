@@ -317,6 +317,37 @@ class TestInterruptedRestore:
         assert pending_restore(home) is None
         assert not (state.snapshots_dir / RESTORE_MARKER_NAME).exists()
 
+    def test_resume_of_mismatched_group_is_refused(self, tmp_path: Path) -> None:
+        """Resuming a different group than the pending marker is refused.
+
+        A mismatched resume would silently overwrite the pending marker and
+        abandon the interrupted group half-applied, so it fails closed.
+        """
+        home = tmp_path / "app"
+        _seed_group(home, primary_marker="p-snap", checkpoint_marker="c-snap")
+        state = derive_state_paths(home)
+        create_snapshot(home, "grp-pending")
+        create_snapshot(home, "grp-other")
+
+        # An interrupted restore of grp-pending is on disk.
+        marker = restore_marker_path(state)
+        marker.write_text(
+            (
+                '{"marker_version":"1","group_id":"grp-pending","app_home":'
+                f'"{state.app_home.as_posix()}","started_at":'
+                f'"{datetime.now(UTC).isoformat()}",'
+                '"stores":["primary","checkpoint"]}'
+            ),
+            encoding="utf-8",
+        )
+
+        # Resuming a DIFFERENT group must not proceed and must not clear the marker.
+        with pytest.raises(RestorePendingError, match="different group"):
+            restore_snapshot(home, "grp-other", resume=True)
+        still_pending = pending_restore(home)
+        assert still_pending is not None
+        assert still_pending.group_id == "grp-pending"
+
 
 def test_membership_is_both_non_derivable_stores(tmp_path: Path) -> None:
     """The declared group is exactly the primary and checkpoint, both mandatory."""

@@ -160,9 +160,11 @@ def test_group_restore_is_all_or_nothing_across_both_stores(
     _set_marker(state.checkpoint_path, "checkpoint-snapshot")
     create_snapshot(home, "pair-group")
 
-    # Mutate only one store, then restore: the group is authoritative, so the
-    # restore returns BOTH members to the captured content, never a mixed pair.
+    # Drift BOTH stores independently, then restore: the group is authoritative,
+    # so the restore returns each member to its own captured content together,
+    # never leaving a mixed pair where one store advanced and the other did not.
     _set_marker(state.database_path, "primary-drifted")
+    _set_marker(state.checkpoint_path, "checkpoint-drifted")
     restore_snapshot(home, "pair-group")
 
     assert _read_marker(state.database_path) == "primary-snapshot"

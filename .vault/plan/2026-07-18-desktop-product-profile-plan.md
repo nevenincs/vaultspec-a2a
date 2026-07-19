@@ -206,7 +206,7 @@ Make the gateway the sole desktop worker owner, defer worker startup to executio
 Remove desktop boot and reconciliation spawn paths while preserving Compose standalone-worker behavior and atomic first-demand startup.
 
 - [x] `W04.P10.S52` - Keep desktop boot and redispatch reconciliation from spawning a worker while preserving Compose startup behavior; `src/vaultspec_a2a/api/app.py`.
-- [ ] `W04.P10.S53` - Require a desktop gateway to spawn and own its worker without discovering adopting or evicting a Compose worker; `src/vaultspec_a2a/control/worker_management.py`.
+- [x] `W04.P10.S53` - Require a desktop gateway to spawn and own its worker without discovering adopting or evicting a Compose worker; `src/vaultspec_a2a/control/worker_management.py`.
 - [ ] `W04.P10.S54` - Trigger deferred reconciliation only after authenticated execution demand has completed worker single-flight readiness; `src/vaultspec_a2a/control/dispatch.py`.
 - [ ] `W04.P10.S55` - Prove concurrent first demand creates one real worker and idle desktop boot creates none; `src/vaultspec_a2a/desktop_tests/test_lazy_worker.py`.
 

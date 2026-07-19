@@ -312,33 +312,41 @@ async def _spawn_worker(
     Returns the ``Process`` handle on success, or ``None`` if the worker
     was already running or failed to start within 30 seconds.
     """
-    existing = await _fetch_worker_health(worker_url)
-    if existing is not None:
-        if _same_gateway(existing.get("gateway_url"), settings.gateway_url):
-            logger.info(
-                "Worker already running at %s targeting this gateway (%s)"
-                " — skipping auto-spawn",
+    # The armed desktop gateway owns its worker exclusively. Its runtime directory
+    # and worker port are private to this application home, so there is never a
+    # foreign or shared worker to discover, adopt, or evict: it spawns and owns
+    # unconditionally. Only the Compose and development band profiles probe the
+    # port for an already-running same-gateway worker (adopt) or a stale foreign
+    # orphan (evict) before spawning.
+    if not settings.desktop_profile_armed:
+        existing = await _fetch_worker_health(worker_url)
+        if existing is not None:
+            if _same_gateway(existing.get("gateway_url"), settings.gateway_url):
+                logger.info(
+                    "Worker already running at %s targeting this gateway (%s)"
+                    " — skipping auto-spawn",
+                    worker_url,
+                    settings.gateway_url,
+                )
+                return None
+            # A stale orphan from a dead dev-band gateway is squatting the worker
+            # port: it heartbeats a gateway that no longer exists and would never
+            # be re-pointed. Evict it and spawn a fresh worker wired to THIS
+            # gateway.
+            logger.warning(
+                "Worker at %s targets a foreign gateway (%s != %s) — evicting the"
+                " stale orphan before spawning a fresh worker",
                 worker_url,
+                existing.get("gateway_url"),
                 settings.gateway_url,
             )
-            return None
-        # A stale orphan from a dead dev-band gateway is squatting the worker
-        # port: it heartbeats a gateway that no longer exists and would never be
-        # re-pointed. Evict it and spawn a fresh worker wired to THIS gateway.
-        logger.warning(
-            "Worker at %s targets a foreign gateway (%s != %s) — evicting the"
-            " stale orphan before spawning a fresh worker",
-            worker_url,
-            existing.get("gateway_url"),
-            settings.gateway_url,
-        )
-        if not await _evict_stale_worker(worker_url, worker_port):
-            logger.error(
-                "Stale worker at %s did not release port %d — new spawn will"
-                " likely fail to bind; manual reap may be required",
-                worker_url,
-                worker_port,
-            )
+            if not await _evict_stale_worker(worker_url, worker_port):
+                logger.error(
+                    "Stale worker at %s did not release port %d — new spawn will"
+                    " likely fail to bind; manual reap may be required",
+                    worker_url,
+                    worker_port,
+                )
 
     logger.info(
         "Auto-spawning worker on port %d",
@@ -497,6 +505,12 @@ class LazyWorkerSpawner:
         )
         self._spawned = False
         self._lock = asyncio.Lock()
+        # Optional demand-readiness signal wired by the armed desktop gateway. It
+        # is fired once, on the authenticated demand path, after the single-flight
+        # worker start reaches readiness, so deferred boot reconciliation runs only
+        # after real execution demand. Unset (``None``) for Compose and dev, whose
+        # boot reconciliation is eager.
+        self.demand_ready_event: asyncio.Event | None = None
         if auto_spawn:
             # Startup sweep (once per gateway process, before this port's own log
             # is ever (re)opened): clear stale worker-autospawn stderr logs left

@@ -8,6 +8,7 @@ modified: '2026-07-19'
 related:
   - '[[2026-07-18-desktop-product-profile-W01-P01-S01]]'
   - '[[2026-07-18-desktop-product-profile-W01-P01-S02]]'
+  - '[[2026-07-18-desktop-product-profile-W01-P01-S03]]'
   - '[[2026-07-18-desktop-product-profile-W01-P01-S93]]'
   - '[[2026-07-18-desktop-product-profile-adr]]'
   - '[[2026-07-18-desktop-product-profile-plan]]'
@@ -34,6 +35,7 @@ Auto-generated index of all documents tagged with `#desktop-product-profile`.
 
 - `2026-07-18-desktop-product-profile-W01-P01-S01` - Split install metadata into a Torch- and RAG-free desktop runtime closure plus explicit optional capability groups
 - `2026-07-18-desktop-product-profile-W01-P01-S02` - Regenerate the locked Python graph and prove CPython 3.13 resolution for every accepted target
+- `2026-07-18-desktop-product-profile-W01-P01-S03` - Lock ACP 0.59.0 and eliminate stale JavaScript adapter identities from the Node closure
 - `2026-07-18-desktop-product-profile-W01-P01-S93` - Guard optional OTLP exporter detection so the desktop base initializes gateway and worker telemetry without server extras and prove it from a clean base installation
 
 ### plan

@@ -97,3 +97,21 @@ also normalized transitive environment markers for CUDA and NVIDIA packages,
 Torch, and `phart`, rather than changing only root dependency classification.
 The record now discloses that normalization while preserving the verified fact
 that no package identity, version, or source changed. Follow-up review passed.
+
+## `W01 P01 S03` Node lock review
+
+Status: PASS
+
+No findings were identified. The existing canonical lock pins the sole root
+adapter dependency to exact `@agentclientprotocol/claude-agent-acp` 0.59.0,
+requires Node 22 or newer, and records the SDK 1.2.1 archive plus resolved URLs
+and integrity metadata throughout the production closure. The predecessor Zed
+identity and versions 0.23.1 and 0.20.2 are absent.
+
+Two isolated lock regenerations, an engine-strict clean installation, a dry-run
+installation, and real production factory classification preserved the tracked
+lock digest and selected the installed project-local adapter entrypoint. The
+lock bytes already entered history in commit `a7896cc`; a record-only adoption
+is therefore correct and avoids manufacturing a no-op lock diff. Capsule-owned
+adapter resolution and removal of source-checkout installation guidance remain
+assigned to the later package-authority step.

@@ -261,7 +261,8 @@ Share only state-transition and backpressure behavior while retaining deliberate
 
 Recheck both repositories for compatibility ownership and then remove each audited export or subsystem that still has no consumer.
 
-- [ ] `W04.P14.S57` - Prove runtime and dashboard ownership or non-ownership for the Git manager subsystem; `src/vaultspec_a2a/workspace/git_manager.py, ../../vaultspec-dashboard-worktrees/main, .vault/audit`.
+- [ ] `W04.P14.S57` - Prove runtime and dashboard ownership or non-ownership for `GitManager`, `MergeStrategy`, `WorktreeInfo`, `WorkspaceError`, `MergeConflictError`, and the live `_git_mutex`; `src/vaultspec_a2a/workspace/git_manager.py, src/vaultspec_a2a/thread/errors.py, src/vaultspec_a2a/thread/__init__.py, ../../vaultspec-dashboard-worktrees/main, .vault/audit`.
+- [ ] `W04.P14.S174` - Move `_git_mutex` from `workspace/git_manager.py` to `workspace/concurrency.py`, route the ACP handler and Git manager through it, and prove real concurrent ACP writes and Git operations remain serialized; `src/vaultspec_a2a/workspace/concurrency.py, src/vaultspec_a2a/workspace/git_manager.py, src/vaultspec_a2a/providers/_acp_rpc_handlers.py, src/vaultspec_a2a/providers/tests/test_acp_authoring.py, src/vaultspec_a2a/workspace/tests/test_workspace.py`.
 - [ ] `W04.P14.S134` - Prove runtime and dashboard ownership or non-ownership for `AgentState`; `src/vaultspec_a2a/graph/enums.py, ../../vaultspec-dashboard-worktrees/main, .vault/audit`.
 - [ ] `W04.P14.S58` - Remove the unowned `AgentState` export and its export-only tests; `src/vaultspec_a2a/graph/enums.py, tests`.
 - [ ] `W04.P14.S135` - Prove runtime and dashboard ownership or non-ownership for `AcpProtocolError`; `src/vaultspec_a2a/providers/acp_exceptions.py, ../../vaultspec-dashboard-worktrees/main, .vault/audit`.
@@ -272,8 +273,10 @@ Recheck both repositories for compatibility ownership and then remove each audit
 - [ ] `W04.P14.S61` - Remove the unowned `acceptance_gate_reason` export and its export-only tests; `src/vaultspec_a2a/providers/model_profiles.py, tests`.
 - [ ] `W04.P14.S138` - Prove runtime and dashboard ownership or non-ownership for `projected_declared_names`; `src/vaultspec_a2a/providers/_acp_project_mcp.py, ../../vaultspec-dashboard-worktrees/main, .vault/audit`.
 - [ ] `W04.P14.S62` - Remove the unowned `projected_declared_names` export and its export-only tests; `src/vaultspec_a2a/providers/_acp_project_mcp.py, tests`.
-- [ ] `W04.P14.S63` - Remove the unowned `GitManager` subsystem and its export-only tests after dashboard non-ownership is proven; `src/vaultspec_a2a/workspace/git_manager.py, src/vaultspec_a2a/workspace, tests`.
+- [ ] `W04.P14.S63` - After `S57` proves dashboard non-ownership and `S174` relocates `_git_mutex`, remove `GitManager`, `MergeStrategy`, `WorktreeInfo`, `WorkspaceError`, and `MergeConflictError`, their facade exports, and their export-only or worktree-only tests; `src/vaultspec_a2a/workspace/git_manager.py, src/vaultspec_a2a/workspace/__init__.py, src/vaultspec_a2a/workspace/tests, src/vaultspec_a2a/thread/errors.py, src/vaultspec_a2a/thread/__init__.py, src/vaultspec_a2a/thread/tests/test_errors.py`.
 - [ ] `W04.P14.S64` - Remove the unused `print_trace_summary` helper and its latent integration surface; `src/vaultspec_a2a/utils/trace.py, tests`.
+- [ ] `W04.P14.S176` - Prove runtime and dashboard ownership or non-ownership for `now_utc`, `parse_iso`, and `human_delta`; `src/vaultspec_a2a/utils/timestamp.py, src/vaultspec_a2a/utils/__init__.py, ../../vaultspec-dashboard-worktrees/main, .vault/audit`.
+- [ ] `W04.P14.S175` - After `S176` proves A2A and dashboard non-ownership, remove `utils/timestamp.py`, its facade exports, and its export-only tests; `src/vaultspec_a2a/utils/timestamp.py, src/vaultspec_a2a/utils/__init__.py, src/vaultspec_a2a/utils/tests/test_timestamp.py`.
 
 ### Phase `W04.P15` - split each complexity hotspot
 
@@ -377,8 +380,10 @@ after `W02.P05`, `W02.P06`, and `W02.P07`.
 desktop-product-profile `W04.P11.S60` through `W04.P11.S62` close. `W03.P11`
 runs after both. `W04.P12` and `W04.P13` may run in parallel after
 repository-tooling `W03.P05.S09` closes. In `W04.P14`, each ownership-proof
-step precedes its matching removal. The `W04.P15` hotspot steps may run in
-parallel only when their modules have no unreviewed W02 or W03 changes.
+step precedes its matching removal. Run `S57`, `S174`, and `S63` sequentially
+in that order. Start `S63` only after `S174`'s concurrency tests pass. `S176`
+precedes `S175`. The `W04.P15` hotspot steps may run in parallel only when
+their modules have no unreviewed W02 or W03 changes.
 `W04.P16` waits for repository-tooling `W04.P07.S11` and all concurrent vault
 writers; `W04.P17` runs last.
 
@@ -392,7 +397,7 @@ after both removals.
 ## Verification
 
 - `uv run --no-sync vaultspec-core vault plan check
-  .vault/plan/2026-07-19-codebase-health-plan.md` returns zero with all 173
+  .vault/plan/2026-07-19-codebase-health-plan.md` returns zero with all 176
   canonical steps present. Its sole PLAN022 warning must continue to describe
   the reviewed CLI append-only insertions. `uv run --no-sync vaultspec-core
   vault check all -f codebase-health --no-hints` passes.

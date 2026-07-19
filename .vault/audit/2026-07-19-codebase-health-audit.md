@@ -246,13 +246,22 @@ Reopen the previously accepted tradeoff for a continuously consumed dashboard.
 Use bulk database reads, limit checkpoint concurrency, and impose a
 request-wide deadline.
 
-### git-manager-orphaned-subsystem | medium | A 483-line worktree subsystem has no in-repository production owner
+### git-manager-orphaned-subsystem | high | Orphan worktree APIs share a module with a live file-write mutex
 
 This reopens a March audit false-negative that declared `workspace/` clean.
-`workspace/git_manager.py:66` is re-exported and extensively tested but has no
-in-repository production caller. Remove it, or record an owner in an
-architectural decision record (ADR) and integrate the subsystem through that
-owner. If retained, harden its locking and cancellation before production use.
+`GitManager`, `MergeStrategy`, and `WorktreeInfo` in
+`workspace/git_manager.py:48-66` are re-exported and extensively tested but
+have no A2A runtime or dashboard compatibility consumer. `WorkspaceError` and
+`MergeConflictError` become export-only when those APIs are removed. The module
+itself is not dead: `providers/_acp_rpc_handlers.py:347` imports its private
+`_git_mutex`, then uses the lock at line 368 to serialize production Agent
+Client Protocol (ACP) file writes.
+
+The earlier removal wording was unsafe because deleting the module would break
+that live path. Move `_git_mutex` to `workspace/concurrency.py`, and route both
+the Git manager and ACP handler through it. Prove real concurrent writes remain
+serialized. Then remove the orphan APIs and errors, facade exports, and
+worktree-only tests.
 
 ### cleanup-failure-cascades-artifact-leaks | medium | Sequential cleanup skips later sensitive cleanup after one failure
 
@@ -403,6 +412,33 @@ This reopens a March audit false-negative that declared `utils/` clean.
 The audit found no production or script callers for the high-complexity
 diagnostic helper at `utils/trace.py:37`. Remove it or wire one explicit
 operator command; do not keep testless latent integration code.
+
+### timestamp-utility-module-is-export-only | low | Three timestamp helpers have no runtime or dashboard consumer
+
+`utils/timestamp.py` exports `now_utc`, `parse_iso`, and `human_delta` through
+`utils/__init__.py`, but exact A2A and dashboard searches find only the module's
+own tests. No production module, command, script, entry point, or dashboard
+compatibility surface imports any of the three helpers.
+
+After confirming neither A2A nor the dashboard imports these helpers, remove
+the timestamp module, its facade exports, and `utils/tests/test_timestamp.py`.
+Do not reproduce the removed formatting or parsing logic in tests.
+
+### dead-code-refresh-removal-ordering-review | high | Initial plan mutation permitted unsafe or unproved removal
+
+Type: architecture and test-plan safety. Formal review found that the first
+revision did not require mutex relocation before Git manager removal. It also
+named a directory that the test runner does not collect and omitted a timestamp
+ownership-proof step. The corrected plan orders `S57`, `S174`, and `S63`; uses
+canonical provider and workspace tests; and orders `S176` before `S175`.
+Status: resolved before commit.
+
+### dead-code-refresh-clarity-review | medium | Initial plan rows obscured prerequisites and removal scope
+
+Type: documentation clarity. Editorial review found vague ownership wording,
+missing conditions, and ambiguous object lists. The revised rows name the lock
+module, compatibility proofs, exact APIs, and collected evidence paths.
+Status: resolved before commit.
 
 ### minor-exact-clone-cluster | low | Small policy and facade clones remain
 

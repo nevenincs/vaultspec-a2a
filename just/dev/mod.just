@@ -8,6 +8,8 @@ mod doctor
 mod hooks
 mod product
 mod rag
+mod service
+mod stack
 mod test
 mod vault
 

@@ -48,7 +48,7 @@ if TYPE_CHECKING:
 _API_RANGE = ApiVersionRange(minimum="v1", maximum="v1")
 _SCRIPTS = {
     "vaultspec-a2a": "vaultspec_a2a.cli.main:main",
-    "vaultspec-mcp": "vaultspec_a2a.protocols.mcp.__main__:main",
+    "vaultspec-a2a-mcp": "vaultspec_a2a.protocols.mcp.__main__:main",
 }
 
 # The pinned version and a plausible license for each base-closure asset kind.
@@ -181,7 +181,7 @@ def test_emitted_manifest_pins_real_identity_entrypoints_and_range(
     assert manifest.entrypoints.gateway.reference == "vaultspec_a2a.cli.main:main"
     assert manifest.entrypoints.gateway.relative_command == ("bin", "vaultspec-a2a")
     assert manifest.entrypoints.standalone_mcp.kind is EntrypointKind.STANDALONE_MCP
-    assert manifest.entrypoints.standalone_mcp.console_script == "vaultspec-mcp"
+    assert manifest.entrypoints.standalone_mcp.console_script == "vaultspec-a2a-mcp"
 
     # Every asset and lock digest equals an independent SHA-256 of the same bytes.
     for kind, asset in by_kind.items():
@@ -340,7 +340,7 @@ def test_missing_standalone_entrypoint_raises(tmp_path: Path) -> None:
     )
     uv_lock, package_lock = _locks(tmp_path)
 
-    with pytest.raises(ManifestEmissionError, match="vaultspec-mcp"):
+    with pytest.raises(ManifestEmissionError, match="vaultspec-a2a-mcp"):
         _emit(
             target=TargetTriple.LINUX_X86_64,
             distribution=distribution,

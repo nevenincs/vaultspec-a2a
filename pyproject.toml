@@ -43,7 +43,7 @@ rag = [
 
 [project.scripts]
 vaultspec-a2a = "vaultspec_a2a.cli.main:main"
-vaultspec-mcp = "vaultspec_a2a.protocols.mcp.__main__:main"
+vaultspec-a2a-mcp = "vaultspec_a2a.protocols.mcp.__main__:main"
 
 [dependency-groups]
 docs = [

@@ -361,7 +361,7 @@ _dev-deps-lock:
 
 # Start standalone MCP server (stdio by default, use TRANSPORT=streamable-http for HTTP)
 mcp TRANSPORT="stdio" *ARGS:
-    uv run vaultspec-mcp --transport {{TRANSPORT}} {{ARGS}}
+    uv run vaultspec-a2a-mcp --transport {{TRANSPORT}} {{ARGS}}
 
 # ===========================================================================
 # Internal helpers

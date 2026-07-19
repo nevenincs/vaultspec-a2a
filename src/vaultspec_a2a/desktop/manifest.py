@@ -51,7 +51,7 @@ __all__ = [
 # distribution (see ``[project.scripts]``): the dashboard-owned gateway launch
 # and the caller-owned standalone MCP adapter.
 _GATEWAY_SCRIPT: Final = "vaultspec-a2a"
-_MCP_SCRIPT: Final = "vaultspec-mcp"
+_MCP_SCRIPT: Final = "vaultspec-a2a-mcp"
 
 _DIGEST_CHUNK: Final = 1 << 20
 

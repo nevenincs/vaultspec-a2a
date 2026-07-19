@@ -2,7 +2,7 @@ Operator reference
 ==================
 
 Use ``vaultspec-a2a`` for gateway and local-development operations. Use
-``vaultspec-mcp`` for the lazy Model Context Protocol bridge.
+``vaultspec-a2a-mcp`` for the lazy Model Context Protocol bridge.
 
 Subcommands
 -----------

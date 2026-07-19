@@ -172,13 +172,18 @@ async def _relay_worker_event(websocket: WebSocket, msg: dict, raw: str) -> None
 @internal_router.websocket("/ws")
 async def worker_ws_endpoint(websocket: WebSocket) -> None:
     """Internal WebSocket -- receives events and heartbeats from the worker."""
-    # WebSocket routes bypass router-level Depends(), so verify
-    # the bearer token manually before accepting the connection.
-    if settings.internal_token is not None:
-        token = websocket.headers.get("authorization", "").removeprefix("Bearer ")
-        if token != settings.internal_token:
-            await websocket.close(code=1008, reason="Unauthorized")
-            return
+    # WebSocket routes bypass router-level Depends(), so enforce the same worker
+    # IPC bearer rule the HTTP endpoints use through the one shared authority. The
+    # gateway-facing internal channel accepts only the worker IPC credential, never
+    # the attach credential; a non-OK verdict refuses the connection.
+    verdict, _ = verify_internal_bearer(
+        websocket.headers.get("authorization"),
+        token=settings.internal_token,
+        environment=settings.environment,
+    )
+    if verdict is not BearerVerdict.OK:
+        await websocket.close(code=1008, reason="Unauthorized")
+        return
 
     await websocket.accept()
     logger.info("Worker connected to internal WS")

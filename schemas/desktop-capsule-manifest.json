@@ -135,6 +135,27 @@
       "title": "ComponentIdentity",
       "type": "object"
     },
+    "ConsistencyGroup": {
+      "additionalProperties": false,
+      "description": "The mutable stores the updater snapshots and restores as one group.\n\nThe declaration binds membership, per-store derivability, and each store's\nschema authority into the manifest so a consumer knows exactly which mutable\nstores move together across a generation change, and which (if any) may be\nomitted because they are provably derivable. The current generation declares\nboth stores non-derivable, so both are mandatory members.",
+      "properties": {
+        "stores": {
+          "description": "The declared consistency-group members, one per store kind.",
+          "items": {
+            "$ref": "#/$defs/MutableStore"
+          },
+          "maxItems": 2,
+          "minItems": 1,
+          "title": "Stores",
+          "type": "array"
+        }
+      },
+      "required": [
+        "stores"
+      ],
+      "title": "ConsistencyGroup",
+      "type": "object"
+    },
     "DependencyLockIdentity": {
       "additionalProperties": false,
       "description": "Digests pinning the resolved Python and JavaScript dependency graphs.",
@@ -262,6 +283,41 @@
       "title": "MigrationRange",
       "type": "object"
     },
+    "MutableStore": {
+      "additionalProperties": false,
+      "description": "One declared mutable, schema-bearing consistency-group store.",
+      "properties": {
+        "kind": {
+          "$ref": "#/$defs/MutableStoreKind",
+          "description": "Which schema-bearing mutable store this declares."
+        },
+        "derivable": {
+          "description": "Whether the store may be omitted from a snapshot group because a release manifest declares and proves it reconstructable. A non-derivable store is a mandatory group member.",
+          "title": "Derivable",
+          "type": "boolean"
+        },
+        "schema_authority": {
+          "$ref": "#/$defs/StoreSchemaAuthority",
+          "description": "Authority governing this store's schema revision. The Alembic authority reconciles with compatibility.migration_range rather than duplicating the base and head."
+        }
+      },
+      "required": [
+        "kind",
+        "derivable",
+        "schema_authority"
+      ],
+      "title": "MutableStore",
+      "type": "object"
+    },
+    "MutableStoreKind": {
+      "description": "The schema-bearing mutable stores forming the desktop consistency group.\n\nThese are the stores the dashboard's external updater snapshots and restores\nas one receipt-verifiable group across a generation change.\n``PRIMARY_DATABASE`` is the Alembic-versioned application database;\n``CHECKPOINT_DATABASE`` is the LangGraph checkpoint database carrying the\nstate-driven-development state.",
+      "enum": [
+        "primary-database",
+        "checkpoint-database"
+      ],
+      "title": "MutableStoreKind",
+      "type": "string"
+    },
     "StandaloneMcpEntrypoint": {
       "additionalProperties": false,
       "description": "The caller-owned standalone MCP launch surface.",
@@ -323,6 +379,15 @@
       "title": "StandaloneMcpEntrypoint",
       "type": "object"
     },
+    "StoreSchemaAuthority": {
+      "description": "What governs a mutable store's schema revision.\n\n``ALEMBIC_MIGRATION_RANGE`` reconciles with the manifest's\n:attr:`ComponentCompatibility.migration_range`, which is the single authority\nfor the primary database's schema-revision facts; a store bearing this\nauthority does not restate the base and head. ``CHECKPOINTER_SCHEMA`` denotes\nthe LangGraph checkpointer's own schema, which the migration range does not\ncover.",
+      "enum": [
+        "alembic-migration-range",
+        "checkpointer-schema"
+      ],
+      "title": "StoreSchemaAuthority",
+      "type": "string"
+    },
     "TargetTriple": {
       "description": "The five accepted desktop capsule targets, as Rust-style triples.\n\nThe triples match the platform vocabulary already used by the locked\ndependency closure (see ``desktop_tests/test_dependency_closure.py``).",
       "enum": [
@@ -359,6 +424,10 @@
     "compatibility": {
       "$ref": "#/$defs/ComponentCompatibility",
       "description": "Served API range and packaged Alembic migration range."
+    },
+    "consistency_group": {
+      "$ref": "#/$defs/ConsistencyGroup",
+      "description": "The mutable, schema-bearing stores the external updater snapshots and restores as one group; the primary store's schema authority reconciles with compatibility.migration_range."
     },
     "entrypoints": {
       "$ref": "#/$defs/ComponentEntrypoints",
@@ -458,6 +527,7 @@
     "identity",
     "target",
     "compatibility",
+    "consistency_group",
     "entrypoints",
     "digest_algorithm",
     "assets",

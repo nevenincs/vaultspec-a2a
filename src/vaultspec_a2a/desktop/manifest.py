@@ -34,6 +34,7 @@ from .contract import (
     ACP_VERSION_PIN,
     CONTRACT_VERSION,
     CPYTHON_VERSION_PIN,
+    DESKTOP_CONSISTENCY_GROUP,
     NODEJS_VERSION_PIN,
     ApiVersionRange,
     ComponentAsset,
@@ -732,6 +733,7 @@ def emit_component_manifest(
                     api_versions=validated.api_versions,
                     migration_range=migrations,
                 ),
+                consistency_group=DESKTOP_CONSISTENCY_GROUP,
                 entrypoints=ComponentEntrypoints(
                     gateway=GatewayEntrypoint(
                         kind=EntrypointKind.GATEWAY,

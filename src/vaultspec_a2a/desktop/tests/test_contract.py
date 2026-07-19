@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -20,6 +21,7 @@ from ..contract import (
     ACP_VERSION_PIN,
     CONTRACT_VERSION,
     CPYTHON_VERSION_PIN,
+    DESKTOP_CONSISTENCY_GROUP,
     NODEJS_VERSION_PIN,
     ApiVersionRange,
     ComponentAsset,
@@ -28,6 +30,8 @@ from ..contract import (
     ComponentManifest,
     DigestAlgorithm,
     EntrypointKind,
+    MutableStoreKind,
+    StoreSchemaAuthority,
     TargetTriple,
     component_manifest_schema,
     contract_versions_compatible,
@@ -76,12 +80,26 @@ _INVALID_RELATIVE_COMMANDS = (
 
 def _manifest_payload() -> dict[str, Any]:
     return {
-        "contract_version": "1.0",
+        "contract_version": "1.1",
         "identity": {"name": "vaultspec-a2a", "version": "1.2.3"},
         "target": "x86_64-unknown-linux-gnu",
         "compatibility": {
             "api_versions": {"minimum": "v1", "maximum": "v1"},
             "migration_range": {"base": "0001_initial", "head": "0012_current"},
+        },
+        "consistency_group": {
+            "stores": [
+                {
+                    "kind": "primary-database",
+                    "derivable": False,
+                    "schema_authority": "alembic-migration-range",
+                },
+                {
+                    "kind": "checkpoint-database",
+                    "derivable": False,
+                    "schema_authority": "checkpointer-schema",
+                },
+            ]
         },
         "entrypoints": {
             "gateway": {
@@ -420,3 +438,68 @@ def test_manifest_rejects_extra_fields() -> None:
     payload["unexpected"] = True
     with pytest.raises(ValidationError):
         ComponentManifest.model_validate(payload)
+
+
+def test_manifest_declares_both_non_derivable_group_stores() -> None:
+    """The manifest binds the mutable consistency-group membership and authority."""
+    manifest = ComponentManifest.model_validate(_manifest_payload())
+    stores = {store.kind: store for store in manifest.consistency_group.stores}
+    assert set(stores) == set(MutableStoreKind)
+    assert not stores[MutableStoreKind.PRIMARY_DATABASE].derivable
+    assert not stores[MutableStoreKind.CHECKPOINT_DATABASE].derivable
+    # The primary store's schema revision reconciles with the migration range;
+    # the checkpoint store carries the checkpointer's own schema authority.
+    assert (
+        stores[MutableStoreKind.PRIMARY_DATABASE].schema_authority
+        is StoreSchemaAuthority.ALEMBIC_MIGRATION_RANGE
+    )
+    assert (
+        stores[MutableStoreKind.CHECKPOINT_DATABASE].schema_authority
+        is StoreSchemaAuthority.CHECKPOINTER_SCHEMA
+    )
+
+
+def test_manifest_rejects_incomplete_consistency_group() -> None:
+    """A group omitting a non-derivable mandatory store is refused."""
+    payload = _manifest_payload()
+    payload["consistency_group"]["stores"] = payload["consistency_group"]["stores"][:1]
+    with pytest.raises(ValidationError, match="every mutable store kind"):
+        ComponentManifest.model_validate(payload)
+
+
+def test_manifest_rejects_duplicate_group_store_kind() -> None:
+    """A group declaring a store kind twice is refused."""
+    payload = _manifest_payload()
+    stores = payload["consistency_group"]["stores"]
+    stores[1] = dict(stores[0])
+    with pytest.raises(ValidationError, match="each store kind once"):
+        ComponentManifest.model_validate(payload)
+
+
+def test_manifest_group_membership_reconciles_with_snapshot_authority() -> None:
+    """The declared membership and derivability match the runtime snapshot module.
+
+    The snapshot module's ``consistency_group_members`` is the runtime authority
+    for which stores are seated and whether each is derivable; the manifest is the
+    dashboard-facing declaration. This binds the two to one truth so they cannot
+    silently diverge.
+    """
+    from vaultspec_a2a.desktop.profile import derive_state_paths
+    from vaultspec_a2a.desktop.snapshot import (
+        ConsistencyGroupStore,
+        consistency_group_members,
+    )
+
+    kind_of = {
+        ConsistencyGroupStore.PRIMARY: MutableStoreKind.PRIMARY_DATABASE,
+        ConsistencyGroupStore.CHECKPOINT: MutableStoreKind.CHECKPOINT_DATABASE,
+    }
+    anchor = Path("C:/anchor/app") if os.name == "nt" else Path("/anchor/app")
+    runtime = {
+        kind_of[member.store]: member.derivable
+        for member in consistency_group_members(derive_state_paths(anchor))
+    }
+    declared = {
+        store.kind: store.derivable for store in DESKTOP_CONSISTENCY_GROUP.stores
+    }
+    assert runtime == declared

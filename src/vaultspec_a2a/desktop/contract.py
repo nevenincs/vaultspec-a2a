@@ -39,6 +39,7 @@ __all__ = [
     "ACP_VERSION_PIN",
     "CONTRACT_VERSION",
     "CPYTHON_VERSION_PIN",
+    "DESKTOP_CONSISTENCY_GROUP",
     "NODEJS_VERSION_PIN",
     "ApiVersionRange",
     "ComponentAsset",
@@ -48,13 +49,17 @@ __all__ = [
     "ComponentEntrypoints",
     "ComponentIdentity",
     "ComponentManifest",
+    "ConsistencyGroup",
     "DependencyLockIdentity",
     "DigestAlgorithm",
     "EntrypointKind",
     "GatewayApiVersion",
     "GatewayEntrypoint",
     "MigrationRange",
+    "MutableStore",
+    "MutableStoreKind",
     "StandaloneMcpEntrypoint",
+    "StoreSchemaAuthority",
     "TargetTriple",
     "component_manifest_schema",
     "contract_versions_compatible",
@@ -62,8 +67,10 @@ __all__ = [
 ]
 
 # The manifest grammar version. A minor bump remains readable by consumers at
-# that minor or newer; it is not readable by an older-minor strict parser.
-CONTRACT_VERSION: Final = "1.0"
+# that minor or newer; it is not readable by an older-minor strict parser. The
+# 1.1 minor added the required consistency-group declaration: an older 1.0 parser
+# must refuse it because it cannot honour the new mandatory field.
+CONTRACT_VERSION: Final = "1.1"
 
 # Pinned base-closure runtime versions declared by the ADR. These are the
 # accepted asset versions; a capsule that ships other majors is a different
@@ -409,6 +416,112 @@ class DependencyLockIdentity(BaseModel):
     )
 
 
+class MutableStoreKind(StrEnum):
+    """The schema-bearing mutable stores forming the desktop consistency group.
+
+    These are the stores the dashboard's external updater snapshots and restores
+    as one receipt-verifiable group across a generation change.
+    ``PRIMARY_DATABASE`` is the Alembic-versioned application database;
+    ``CHECKPOINT_DATABASE`` is the LangGraph checkpoint database carrying the
+    state-driven-development state.
+    """
+
+    PRIMARY_DATABASE = "primary-database"
+    CHECKPOINT_DATABASE = "checkpoint-database"
+
+
+class StoreSchemaAuthority(StrEnum):
+    """What governs a mutable store's schema revision.
+
+    ``ALEMBIC_MIGRATION_RANGE`` reconciles with the manifest's
+    :attr:`ComponentCompatibility.migration_range`, which is the single authority
+    for the primary database's schema-revision facts; a store bearing this
+    authority does not restate the base and head. ``CHECKPOINTER_SCHEMA`` denotes
+    the LangGraph checkpointer's own schema, which the migration range does not
+    cover.
+    """
+
+    ALEMBIC_MIGRATION_RANGE = "alembic-migration-range"
+    CHECKPOINTER_SCHEMA = "checkpointer-schema"
+
+
+class MutableStore(BaseModel):
+    """One declared mutable, schema-bearing consistency-group store."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    kind: MutableStoreKind = Field(
+        description="Which schema-bearing mutable store this declares."
+    )
+    derivable: bool = Field(
+        description=(
+            "Whether the store may be omitted from a snapshot group because a "
+            "release manifest declares and proves it reconstructable. A "
+            "non-derivable store is a mandatory group member."
+        )
+    )
+    schema_authority: StoreSchemaAuthority = Field(
+        description=(
+            "Authority governing this store's schema revision. The Alembic "
+            "authority reconciles with compatibility.migration_range rather than "
+            "duplicating the base and head."
+        )
+    )
+
+
+class ConsistencyGroup(BaseModel):
+    """The mutable stores the updater snapshots and restores as one group.
+
+    The declaration binds membership, per-store derivability, and each store's
+    schema authority into the manifest so a consumer knows exactly which mutable
+    stores move together across a generation change, and which (if any) may be
+    omitted because they are provably derivable. The current generation declares
+    both stores non-derivable, so both are mandatory members.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    stores: tuple[MutableStore, ...] = Field(
+        min_length=1,
+        max_length=len(MutableStoreKind),
+        description="The declared consistency-group members, one per store kind.",
+    )
+
+    @field_validator("stores")
+    @classmethod
+    def _complete_unique_membership(
+        cls, value: tuple[MutableStore, ...]
+    ) -> tuple[MutableStore, ...]:
+        kinds = [store.kind for store in value]
+        if len(set(kinds)) != len(kinds):
+            raise ValueError("consistency group must declare each store kind once")
+        if set(kinds) != set(MutableStoreKind):
+            raise ValueError("consistency group must declare every mutable store kind")
+        return value
+
+
+# The single authority for this generation's consistency-group membership. Both
+# stores are non-derivable and therefore mandatory; the primary database's schema
+# revision is governed by the manifest's migration range (reconciled, not
+# duplicated), while the checkpoint database is governed by the checkpointer
+# schema. The runtime seating of these stores is owned by the snapshot module's
+# `consistency_group_members`; a reconciliation test binds the two to one truth.
+DESKTOP_CONSISTENCY_GROUP: Final = ConsistencyGroup(
+    stores=(
+        MutableStore(
+            kind=MutableStoreKind.PRIMARY_DATABASE,
+            derivable=False,
+            schema_authority=StoreSchemaAuthority.ALEMBIC_MIGRATION_RANGE,
+        ),
+        MutableStore(
+            kind=MutableStoreKind.CHECKPOINT_DATABASE,
+            derivable=False,
+            schema_authority=StoreSchemaAuthority.CHECKPOINTER_SCHEMA,
+        ),
+    )
+)
+
+
 class ComponentManifest(BaseModel):
     """The versioned desktop component manifest consumed by dashboard packaging.
 
@@ -447,6 +560,13 @@ class ComponentManifest(BaseModel):
     target: TargetTriple = Field(description="The capsule's target triple.")
     compatibility: ComponentCompatibility = Field(
         description="Served API range and packaged Alembic migration range."
+    )
+    consistency_group: ConsistencyGroup = Field(
+        description=(
+            "The mutable, schema-bearing stores the external updater snapshots "
+            "and restores as one group; the primary store's schema authority "
+            "reconciles with compatibility.migration_range."
+        )
     )
     entrypoints: ComponentEntrypoints = Field(
         description="Gateway and standalone MCP launch surfaces."

@@ -730,13 +730,18 @@ def test_canonical_json_v1_matches_cross_language_golden_vector() -> None:
     assert not golden_bytes.endswith(b"\n")
     assert (
         expected_digest
-        == "aab76059c36377168ff370d1531e525f26628e1919c157a035873c1665113368"
+        == "528c1d8aa105f97337eb6ee547a871e1efeb881fde1e9dccfb7cf8c3c6c87f41"
     )
     assert component_manifest_canonical_bytes(manifest) == golden_bytes
     assert component_manifest_digest(manifest) == expected_digest
     parsed = json.loads(golden_bytes)
     assert parsed["assets"][1]["license"] == 'LicenseRef-café-"quoted"-\\path'
     assert parsed["identity"]["version"] == parsed["assets"][0]["version"]
+    assert parsed["contract_version"] == "1.1"
+    assert {store["kind"] for store in parsed["consistency_group"]["stores"]} == {
+        "primary-database",
+        "checkpoint-database",
+    }
 
     digest_signature = inspect.signature(component_manifest_digest)
     assert tuple(digest_signature.parameters) == ("manifest",)

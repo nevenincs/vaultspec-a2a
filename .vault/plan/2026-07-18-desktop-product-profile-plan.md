@@ -11,6 +11,16 @@ related:
   - '[[2026-07-18-desktop-product-profile-reference]]'
 ---
 
+<!-- LINK RULES:
+     - [[wiki-links]] are ONLY for .vault/ documents in the
+       related: field above.
+     - The related: field carries the AUTHORISING documents
+       (ADR, research, reference, prior plan) for every Step in
+       this plan. Steps inherit this chain; per-row reference
+       footers do not exist.
+     - NEVER use [[wiki-links]] or markdown links in the
+       document body. -->
+
 <!-- RETIRED: P15, S88 -->
 
 # `desktop-product-profile` plan
@@ -140,7 +150,7 @@ Keep ordinary desktop gateway boot non-mutating while exposing one package-local
 Capture and restore primary, checkpoint, and declared schema-bearing stores as one receipt-verifiable group after quiescence.
 
 - [x] `W02.P06.S25` - Create temp-fsynced atomic snapshot descriptors and quiesced restore markers for every declared consistency-group store; `src/vaultspec_a2a/desktop/snapshot.py`.
-- [ ] `W02.P06.S26` - Bind mutable-store membership derivability and schema versions into the component manifest; `src/vaultspec_a2a/desktop/manifest.py`.
+- [x] `W02.P06.S26` - Bind mutable-store membership derivability and schema versions into the component manifest; `src/vaultspec_a2a/desktop/manifest.py`.
 - [x] `W02.P06.S27` - Expose bounded snapshot inspect and restore commands for the external updater transaction; `src/vaultspec_a2a/cli/main.py`.
 - [x] `W02.P06.S28` - Prove primary and checkpoint databases restore together from a real consistency group; `src/vaultspec_a2a/desktop_tests/test_snapshot_group.py`.
 - [x] `W02.P06.S29` - Prove interrupted snapshot or restore never exposes a partially committed group; `src/vaultspec_a2a/desktop_tests/test_snapshot_recovery.py`.
@@ -153,7 +163,7 @@ Harden the desktop gateway with a lifetime singleton, secret-free discovery, spl
 
 Establish an operating-system-held runtime identity before listener publication and refuse live foreign or unverifiable residents without adopting them.
 
-- [ ] `W03.P07.S30` - Implement the cross-platform lifetime singleton and owner-matching stale-lock classification for one desktop app home; `src/vaultspec_a2a/lifecycle/singleton.py`.
+- [x] `W03.P07.S30` - Implement the cross-platform lifetime singleton and owner-matching stale-lock classification for one desktop app home; `src/vaultspec_a2a/lifecycle/singleton.py`.
 - [ ] `W03.P07.S31` - Replace token-bearing discovery with an atomic versioned profile generation protocol schema owner and ACL-reference record; `src/vaultspec_a2a/lifecycle/discovery.py`.
 - [ ] `W03.P07.S32` - Parse the versioned secret-free gateway discovery record without weakening engine authoring discovery; `src/vaultspec_a2a/authoring/discovery.py`.
 - [ ] `W03.P07.S33` - Acquire the desktop singleton before invoking Uvicorn socket bind and pass its ownership into gateway startup; `src/vaultspec_a2a/cli/main.py`.

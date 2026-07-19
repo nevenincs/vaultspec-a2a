@@ -14,6 +14,8 @@ related:
   - '[[2026-07-19-repository-tooling-hardening-W02-P04-S06]]'
   - '[[2026-07-19-repository-tooling-hardening-W02-P04-S07]]'
   - '[[2026-07-19-repository-tooling-hardening-W03-P05-S08]]'
+  - '[[2026-07-19-repository-tooling-hardening-W03-P05-S09]]'
+  - '[[2026-07-19-repository-tooling-hardening-W03-P05-summary]]'
   - '[[2026-07-19-repository-tooling-hardening-adr]]'
   - '[[2026-07-19-repository-tooling-hardening-audit]]'
   - '[[2026-07-19-repository-tooling-hardening-plan]]'
@@ -45,6 +47,8 @@ Auto-generated index of all documents tagged with `#repository-tooling-hardening
 - `2026-07-19-repository-tooling-hardening-W02-P04-S06` - Replace dynamic dispatch with a minimum-version-checked native module index and modular developer surface
 - `2026-07-19-repository-tooling-hardening-W02-P04-S07` - Route named services only through the process registry and stacks only through Compose
 - `2026-07-19-repository-tooling-hardening-W03-P05-S08` - Convert hooks to locked read-only validation with explicit repair and synchronization commands
+- `2026-07-19-repository-tooling-hardening-W03-P05-S09` - Remediate formatter, typing, dependency, and test-selection debt without suppressive shortcuts
+- `2026-07-19-repository-tooling-hardening-W03-P05-summary` - `repository-tooling-hardening` `W03.P05` summary
 
 ### plan
 

@@ -1,7 +1,7 @@
 """Unit tests for the harness MCP-server registry and composition.
 
-Real objects only, no mocks: the registry is a plain dict and the composition
-runs against a real ``AcpChatModel`` and a real non-ACP stand-in.
+Real objects only, no mocks: composition runs against production
+``AcpChatModel``, ``CodexChatModel``, and ``ChatOpenAI`` instances.
 """
 
 from __future__ import annotations
@@ -9,7 +9,7 @@ from __future__ import annotations
 import subprocess
 
 import pytest
-from langchain_core.language_models.fake_chat_models import FakeListChatModel
+from langchain_openai import ChatOpenAI
 
 from ...thread.errors import ConfigError
 from .._acp_mcp import (
@@ -99,9 +99,10 @@ def test_compose_empty_names_is_a_noop() -> None:
 
 
 def test_compose_on_non_acp_model_returns_it_unchanged() -> None:
-    # A model without a ``with_mcp_servers`` surface (hosted API, fake) is a
-    # pass-through: composition never fabricates an MCP surface.
-    model = FakeListChatModel(responses=["ok"])
+    # Construction is network-free; the model is never invoked. A production
+    # hosted model has no local MCP delivery surface, so composition must remain
+    # an identity-preserving pass-through.
+    model = ChatOpenAI(model="gpt-4o-mini", api_key="unused-test-key")
     assert compose_harness_mcp_servers(model, ["vaultspec-rag"]) is model
 
 
@@ -123,13 +124,6 @@ def test_compose_dispatches_to_codex_harness_delivery() -> None:
     composed = compose_harness_mcp_servers(model, ["vaultspec-rag"])
     assert isinstance(composed, CodexChatModel)
     assert composed.harness_mcp_servers == ["vaultspec-rag"]
-
-
-def test_compose_still_noops_only_for_genuinely_no_mcp_models() -> None:
-    # A model with NEITHER delivery mechanism (no with_mcp_servers, no
-    # with_harness_mcp_servers) is the only one returned unchanged.
-    model = FakeListChatModel(responses=["ok"])
-    assert compose_harness_mcp_servers(model, ["vaultspec-rag"]) is model
 
 
 def test_compose_is_add_only_union_with_existing_servers() -> None:
@@ -300,24 +294,6 @@ def test_every_registry_entry_is_marked_read_only() -> None:
         assert entry.get("read_only") is True, name
 
 
-def test_config_home_refuses_a_non_read_only_registry_entry() -> None:
-    # Runtime fail-loud guard: even if a non-read-only entry drifts into the
-    # registry, config_home_mcp_servers refuses to write it into the surfacing
-    # home rather than silently exposing a write-capable server.
-    from .. import _acp_mcp
-
-    _acp_mcp._KNOWN_MCP_SERVERS["danger-writer"] = {
-        "name": "danger-writer",
-        "command": "x",
-        "tools": ("write_thing",),
-    }
-    try:
-        with pytest.raises(ConfigError):
-            config_home_mcp_servers([{"name": "danger-writer", "command": "x"}])
-    finally:
-        del _acp_mcp._KNOWN_MCP_SERVERS["danger-writer"]
-
-
 def test_codex_specs_resolves_read_only_registry_entry_with_tools() -> None:
     specs = codex_mcp_server_specs(["vaultspec-rag"])
     assert len(specs) == 1
@@ -338,23 +314,6 @@ def test_codex_specs_unknown_name_raises() -> None:
         codex_mcp_server_specs(["does-not-exist"])
 
 
-def test_codex_specs_refuses_non_read_only_entry() -> None:
-    # Same trust-root guard as the Claude transport: registry drift toward a
-    # write-capable entry fails loud before it can reach the Codex config.toml.
-    from .. import _acp_mcp
-
-    _acp_mcp._KNOWN_MCP_SERVERS["danger-writer"] = {
-        "name": "danger-writer",
-        "command": "x",
-        "tools": ("write_thing",),
-    }
-    try:
-        with pytest.raises(ConfigError):
-            codex_mcp_server_specs(["danger-writer"])
-    finally:
-        del _acp_mcp._KNOWN_MCP_SERVERS["danger-writer"]
-
-
 def test_compose_unknown_name_raises() -> None:
     model = AcpChatModel(command=["echo"], env_vars={})
     with pytest.raises(ConfigError):
@@ -365,6 +324,6 @@ def test_compose_unknown_name_raises_even_on_non_acp_model() -> None:
     # An unknown declared name is a configuration error even when composition is
     # inapplicable: the loud refusal is uniform across model types, not swallowed
     # by the non-ACP pass-through.
-    model = FakeListChatModel(responses=["ok"])
+    model = ChatOpenAI(model="gpt-4o-mini", api_key="unused-test-key")
     with pytest.raises(ConfigError):
         compose_harness_mcp_servers(model, ["totally-unknown"])

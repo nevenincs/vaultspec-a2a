@@ -43,6 +43,7 @@ repos:
   - id: markdownlint
     name: Lint Markdown style (markdownlint)
     entry: markdownlint
+    exclude: '^\.(?:agents|claude|codex|gemini)/(?:agents|rules|skills)/'
     language: node
     additional_dependencies:
     - markdownlint-cli@0.44.0

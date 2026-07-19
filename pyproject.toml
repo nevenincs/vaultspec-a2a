@@ -8,7 +8,6 @@ license-files = ["LICENSE"]
 
 dependencies = [
   "anyio>=4.9.0",
-  "apscheduler>=3.10",
   "aiosqlite>=0.20.0",
   "fastapi>=0.133.1",
   "httpx>=0.28.1",
@@ -21,6 +20,7 @@ dependencies = [
   "opentelemetry-instrumentation-fastapi>=0.60b0",
   "pydantic>=2.12.5",
   "pydantic-settings>=2.13.1",
+  "pyyaml>=6.0.2",
   "rich>=14.3.2",
   "sqlalchemy[asyncio]>=2.0.40",
   "starlette>=0.52.1",
@@ -203,12 +203,14 @@ indent-style = "space"
 
 [tool.deptry]
 extend_exclude = ["knowledge"]
+known_first_party = ["vaultspec_a2a"]
 
 [tool.deptry.package_module_name_map]
 opentelemetry-sdk = "opentelemetry"
 opentelemetry-exporter-otlp-proto-grpc = "opentelemetry"
 opentelemetry-instrumentation-fastapi = "opentelemetry"
 pytest-asyncio = "pytest_asyncio"
+torch = "torch"
 
 [tool.deptry.per_rule_ignores]
 # DEP002: packages invoked as CLI tools or loaded via URL scheme (not direct Python imports)
@@ -225,14 +227,22 @@ DEP002 = [
   # aiosqlite is loaded as the SQLAlchemy async driver via the URL scheme
   # "sqlite+aiosqlite://..." — never imported directly.
   "aiosqlite",
+  # Uvicorn loads websockets as its protocol backend.
+  "websockets",
+  # The server profile loads PostgreSQL drivers through SQLAlchemy URLs.
+  "asyncpg",
+  "psycopg",
+  # The RAG profile provisions its runtime and MCP service out of process.
+  "torch",
+  "vaultspec-rag",
 ]
-# DEP004: test files inside src/**/ import dev packages (pytest, tenacity) as expected.
-# This is the standard src-layout pattern; suppressing per-package is cleaner than
-# excluding all test directories from scanning.
+# DEP004: tests and documentation extensions import their owning development groups.
 DEP004 = [
+  "jsonschema",
   "packaging",
   "pytest",
   "pytest_asyncio",
+  "sphinx",
   "tenacity",
 ]
 

@@ -255,6 +255,99 @@ other agents were editing the shared worktree. A direct locked Core run returned
 success and identical Git diff hashes before and after execution. Status:
 classified as shared-worktree concurrency evidence, not hook mutation.
 
+### s09-test-selection-contract | medium | The all-test recipe inherited the default service exclusion
+
+Type: test-contract drift. The repository's named `all` and collection recipes
+still inherited Pytest's project-level `not service` marker, so their names did
+not describe the tests they selected. Status: resolved by making unit, service,
+and all-test selection explicit, adding matching collection recipes, and
+proving every recipe through real collection and dry-run execution.
+
+### s09-mcp-test-policy | medium | MCP tests used a fake model and mutated the production registry
+
+Type: evidence integrity. The MCP composition tests used
+`FakeListChatModel` and temporarily changed the production server registry to
+exercise fail-closed behavior. Status: resolved by using real production model
+objects for pass-through coverage and removing the production-global mutation
+tests; the focused provider and hook suite passes with direct production
+imports.
+
+### s09-generated-markdown-ownership | medium | Markdownlint treated provider projections as authored sources
+
+Type: validation ownership. The all-files hook linted generated provider rule,
+skill, and agent projections even though Vaultspec Core owns their bytes and
+the provider-artifact guard owns their convergence. Status: resolved with a
+hook-local exclusion limited to generated provider subtrees. Root provider
+instructions and all repository-authored Markdown remain linted, the
+provider-artifact guard remains always-on, and the complete read-only hook
+pipeline passes.
+
+### managed-gitattributes-overrides-binary-policy | medium | Managed wildcard attributes followed explicit binary rules
+
+Type: repository integrity. The generated `* text=auto eol=lf` rule appeared
+after the repository's explicit binary rules, so Git reported text
+auto-detection for PNG and ZIP examples. Status: resolved by ordering the
+intact managed block before the repository-owned binary overrides. Explicit
+binary attributes now win without editing generated content.
+
+### test-command-documentation-drift | medium | README advertised stale test selection and a removed recipe
+
+Type: documentation correctness. The developer reference described `test all`
+as the default non-service selection and still advertised `test collect` after
+the implementation split collection by unit, service, and complete scope.
+Status: resolved by documenting the actual `all`, `collect-unit`,
+`collect-service`, and `collect-all` recipes.
+
+### s09-dependency-gate-drift | high | Deptry was absent from the canonical gate and misclassified first-party imports
+
+Type: dependency integrity. The first full scan reported 221 issues: 212 were
+the project package misclassified as transitive, while the remainder exposed a
+missing direct PyYAML declaration, an unreferenced APScheduler dependency, and
+unclassified dynamic, documentation, and test loaders. Status: resolved by
+declaring `vaultspec_a2a` first-party, adding PyYAML directly, removing
+APScheduler after a zero-reference search, classifying only verified loaders,
+and adding locked Deptry execution to the canonical code gate. The refreshed
+lock removed APScheduler and `tzlocal`; Deptry now reports zero issues.
+
+### s09-residual-fake-and-stub-tests | high | Prohibited stand-ins remain outside the focused MCP cleanup
+
+Type: evidence integrity. A syntax-targeted repository inventory found 10
+non-prose `FakeChatModel` code references across
+`src/vaultspec_a2a/graph/tests/conftest.py`,
+`src/vaultspec_a2a/graph/tests/test_compiler.py`, and
+`src/vaultspec_a2a/worker/tests/test_isolation_gate.py`. It also found two
+named stub classes and two corresponding instantiations across the graph
+conftest and `src/vaultspec_a2a/service_tests/test_receipt_role_rules.py`, plus
+eight custom structural stand-in classes in
+`src/vaultspec_a2a/streaming/tests/test_aggregator.py`. Status: open for
+codebase-health steps S101 and S104. The same inventory found zero
+`unittest.mock`, Mock-constructor, monkeypatch-fixture, or patch-call/import
+uses; production `mock_chat_model` parser tests were not misclassified.
+
+### s09-residual-skip-debt | high | Twenty-eight environment skips remain in seventeen test files
+
+Type: evidence integrity. The inventory found 28 `pytest.skip` or
+`pytest.mark.skipif` uses and zero `xfail` uses across
+`src/vaultspec_a2a/api/tests/test_harness_gateway.py`,
+`src/vaultspec_a2a/authoring/tests/test_live_engine.py`,
+`src/vaultspec_a2a/authoring/tests/test_submitter_live.py`,
+`src/vaultspec_a2a/context/tests/test_rules.py`,
+`src/vaultspec_a2a/control/tests/test_verdict_subscriber_live.py`,
+`src/vaultspec_a2a/graph/tests/nodes/test_feedback_grounding_live.py`,
+`src/vaultspec_a2a/providers/tests/test_acp_authoring_bridge.py`,
+`src/vaultspec_a2a/providers/tests/test_acp_migration_surface.py`,
+`src/vaultspec_a2a/providers/tests/test_authoring_stdio_bridge.py`,
+`src/vaultspec_a2a/providers/tests/test_codex_chat_model.py`,
+`src/vaultspec_a2a/providers/tests/test_kimi_handshake_live.py`,
+`src/vaultspec_a2a/providers/tests/test_zai_fidelity.py`,
+`src/vaultspec_a2a/service_tests/conftest.py`,
+`src/vaultspec_a2a/service_tests/test_pw7_acceptance.py`,
+`src/vaultspec_a2a/service_tests/test_s20_solo_coder_bridge_live.py`,
+`src/vaultspec_a2a/service_tests/test_tool_cores_floor_live.py`, and
+`src/vaultspec_a2a/worker/tests/test_authoring_binding.py`. Status: open for
+codebase-health step S102; S09 does not treat collection success as execution
+evidence for these paths.
+
 ## Recommendations
 
 No open task remains for S01, S02, or the S03 implementation. Preserve the two
@@ -283,3 +376,8 @@ validate the production-plus-PostgreSQL overlay pair together.
 Preserve S08's frozen dependency selection and separation between validation and
 repair. Remediate the surfaced Python and Markdown debt in S09/S11, then restore
 link checking only through a pinned or explicitly provisioned Lychee contract.
+
+Preserve S09's explicit selector and dependency classifications. The
+codebase-health plan must replace the inventoried fake, stub, structural
+stand-in, and skip cases with direct production behavior or executable
+environment boundaries before it certifies global test-policy compliance.

@@ -71,7 +71,7 @@ Make one read-only gate authoritative and consume it from hooks and GitHub.
 Separate validation from repair and reduce currently classified code-health debt.
 
 - [x] `W03.P05.S08` - Convert hooks to locked read-only validation with explicit repair and synchronization commands; `.pre-commit-config.yaml, hook integration tests`.
-- [ ] `W03.P05.S09` - Remediate formatter, typing, dependency, and test-selection debt without suppressive shortcuts; `pyproject.toml, affected source and tests`.
+- [x] `W03.P05.S09` - Remediate formatter, typing, dependency, and test-selection debt without suppressive shortcuts; `pyproject.toml, affected source and tests`.
 
 ### Phase `W03.P06` - hosted enforcement
 

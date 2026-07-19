@@ -35,6 +35,15 @@ __all__ = [
     "derive_state_paths",
 ]
 
+# The gateway discovery record filename. This mirrors the canonical placement owned
+# by ``lifecycle.discovery.service_json_path`` (``<app_home>/service.json``). It is
+# restated here as a leaf constant so ``derive_state_paths`` — which the settings
+# profile calls from a model validator while ``control.config`` is still being
+# constructed — never imports the lifecycle/HTTP stack, which would close a circular
+# import back through ``control.config``. ``test_profile_paths`` guards the two names
+# against drift.
+_DISCOVERY_RECORD_FILENAME = "service.json"
+
 
 class DesktopProfileError(ValueError):
     """A desktop profile root or asset failed fail-closed validation.
@@ -99,13 +108,13 @@ class DesktopStatePaths:
 def _discovery_path(app_home: Path) -> Path:
     """Return the gateway discovery record path for ``app_home``.
 
-    Delegates to the discovery authority so the ``service.json`` name and its
-    application-home-root placement have exactly one definition. Imported lazily
-    to keep this module's import surface free of the lifecycle/HTTP stack.
+    Uses the leaf ``_DISCOVERY_RECORD_FILENAME`` constant rather than importing the
+    discovery authority, so this stays callable from the settings model validator
+    during ``control.config`` construction without closing an import cycle. The
+    placement mirrors ``lifecycle.discovery.service_json_path``; a guard test keeps
+    the two in sync.
     """
-    from ..lifecycle.discovery import service_json_path
-
-    return service_json_path(app_home)
+    return app_home / _DISCOVERY_RECORD_FILENAME
 
 
 def derive_state_paths(app_home: Path) -> DesktopStatePaths:

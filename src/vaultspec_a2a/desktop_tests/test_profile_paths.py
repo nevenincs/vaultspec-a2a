@@ -162,3 +162,16 @@ def test_unarmed_state_remains_launch_relative(tmp_path: Path) -> None:
     assert db_a != db_b
     assert db_a.is_relative_to(launch_a.resolve())
     assert db_b.is_relative_to(launch_b.resolve())
+
+
+def test_discovery_path_matches_the_discovery_authority(tmp_path: Path) -> None:
+    """The profile's discovery path mirrors the lifecycle discovery authority.
+
+    ``derive_state_paths`` uses a leaf filename constant to stay importable during
+    settings construction; this guard keeps that constant in sync with the
+    canonical ``service_json_path`` placement so the two never drift.
+    """
+    from vaultspec_a2a.lifecycle.discovery import service_json_path
+
+    home = (tmp_path / "app-home").resolve()
+    assert derive_state_paths(home).discovery_path == service_json_path(home)

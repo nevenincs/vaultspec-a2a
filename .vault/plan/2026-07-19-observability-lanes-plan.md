@@ -10,16 +10,6 @@ related:
   - '[[2026-07-19-observability-lanes-research]]'
 ---
 
-<!-- LINK RULES:
-     - [[wiki-links]] are ONLY for .vault/ documents in the
-       related: field above.
-     - The related: field carries the AUTHORISING documents
-       (ADR, research, reference, prior plan) for every Step in
-       this plan. Steps inherit this chain; per-row reference
-       footers do not exist.
-     - NEVER use [[wiki-links]] or markdown links in the
-       document body. -->
-
 # `observability-lanes` plan
 
 ### Phase `P01` - Lane wiring
@@ -28,6 +18,7 @@ Rework the dead logging setup into the ADR's configure_logging(kind) contract su
 
 - [x] `P01.S01` - Rework utils/logging.py into configure_logging(kind) per the ADR: service kind routes structured JSON to stderr plus a size-capped rotating file lane under the runtime dir honoring VAULTSPEC_LOG_LEVEL (wire the dead settings field), cli kind routes human diagnostics to stderr at WARNING leaving stdout for command output, protocol kind is stderr-only with an assertion that no stdout handler exists, library kind is an import-safe no-op. Add a defensive never-raising UTF-8 console reconfigure helper. Real-seam tests for each kind contract including the no-stdout-handler assertion; `src/vaultspec_a2a/utils/logging.py, src/vaultspec_a2a/utils/tests/, src/vaultspec_a2a/control/config.py`.
 - [x] `P01.S02` - Wire configure_logging at every entrypoint (gateway serve, worker serve, CLI main, stdio authoring bridge) with the UTF-8 guard, replace the hardcoded uvicorn log_level with settings-derived level, add VAULTSPEC_ACCESS_LOG (default false) feeding uvicorn access_log at both serve sites. Live probe: boot a fresh gateway-worker pair, verify zero access-line drip under health polling, verify VAULTSPEC_LOG_LEVEL steers levels end to end, verify the stdio bridge stdout stays pure JSON-RPC under the new config, and re-probe the historical debug-starvation gotcha at debug level as a hard ship gate; `src/vaultspec_a2a/api/app.py, src/vaultspec_a2a/worker/app.py, src/vaultspec_a2a/cli/main.py, src/vaultspec_a2a/protocols/mcp/authoring_stdio.py`.
+- [ ] `P01.S05` - Close the P01 review follow-ups: wire configure_logging protocol kind plus the UTF-8 guard into the standalone vaultspec-mcp stdio entrypoint (confirming the streamable-http branch takes the appropriate kind), commit the deterministic protocol-subprocess stdout-purity test and an entrypoint-kind smoke test so the wiring layer has regression protection, and make _reset_root close the handlers it removes; `src/vaultspec_a2a/protocols/mcp/__main__.py, src/vaultspec_a2a/utils/logging.py, src/vaultspec_a2a/utils/tests/`.
 
 ### Phase `P02` - Retention and hygiene
 

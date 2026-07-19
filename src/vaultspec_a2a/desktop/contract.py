@@ -14,17 +14,22 @@ API range plus the Alembic migration range), the dashboard-owned gateway
 entrypoint and the caller-owned standalone MCP entrypoint, per-asset SHA-256
 digests, the pinned runtime assets, per-asset license identifiers, and the
 dependency-lock identity. The contract is versioned: ``contract_version`` names
-the manifest grammar the emitter speaks, and two contract versions are
-compatible only when their major components match.
+the manifest grammar the emitter speaks. A consumer accepts only a syntactically
+valid version with the same major and a minor no newer than the consumer
+implements. This directional rule matters because the strict models reject
+unknown fields; an older parser cannot safely assume it understands a
+newer-minor document.
 """
 
 from __future__ import annotations
 
 import json
+import re
 from enum import StrEnum
+from pathlib import PurePosixPath, PureWindowsPath
 from typing import Annotated, Final
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 __all__ = [
     "ACP_VERSION_PIN",
@@ -49,8 +54,8 @@ __all__ = [
     "export_component_manifest_schema",
 ]
 
-# The manifest grammar version. Bump the minor for backward-compatible field
-# additions and the major for any change a prior-major consumer cannot read.
+# The manifest grammar version. A minor bump remains readable by consumers at
+# that minor or newer; it is not readable by an older-minor strict parser.
 CONTRACT_VERSION: Final = "1.0"
 
 # Pinned base-closure runtime versions declared by the ADR. These are the
@@ -63,19 +68,41 @@ ACP_VERSION_PIN: Final = "0.59.0"
 # A lowercase SHA-256 hex digest.
 HexDigest = Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")]
 
-# A ``MAJOR.MINOR`` contract or component version string.
-_VERSION_PATTERN: Final = r"^\d+\.\d+$"
+# Bounded, canonical versions avoid alternate representations (for example,
+# ``01.0``) and unbounded integer parsing. Contract versions are ``MAJOR.MINOR``;
+# gateway API versions use the public route vocabulary ``vMAJOR``.
+_VERSION_COMPONENT: Final = r"(?:0|[1-9][0-9]{0,5})"
+_VERSION_PATTERN: Final = rf"^{_VERSION_COMPONENT}\.{_VERSION_COMPONENT}$"
+_VERSION_RE: Final = re.compile(_VERSION_PATTERN)
+_API_VERSION_PATTERN: Final = r"^v[1-9][0-9]{0,5}$"
+_API_VERSION_RE: Final = re.compile(_API_VERSION_PATTERN)
+
+RelativeCommandSegment = Annotated[
+    str,
+    Field(
+        min_length=1,
+        max_length=128,
+        pattern=r"^[^/\\:\x00]+$",
+        description="One non-rooted capsule path segment.",
+        json_schema_extra={"not": {"enum": [".", ".."]}},
+    ),
+]
 
 
 def contract_versions_compatible(declared: str, supported: str) -> bool:
     """Return whether a ``declared`` contract version is readable by ``supported``.
 
-    The compatibility rule is major-version equality: a consumer that supports
-    ``supported`` can read any manifest whose ``contract_version`` shares its
-    major component. Minor bumps only add backward-compatible fields, so a newer
-    minor remains readable by an older-minor consumer of the same major.
+    Both values must be canonical bounded ``MAJOR.MINOR`` versions. Compatibility
+    is directional: the majors must match and the declared minor must be no newer
+    than the consumer's supported minor. Malformed versions are incompatible.
     """
-    return declared.split(".", 1)[0] == supported.split(".", 1)[0]
+    declared_match = _VERSION_RE.fullmatch(declared)
+    supported_match = _VERSION_RE.fullmatch(supported)
+    if declared_match is None or supported_match is None:
+        return False
+    declared_major, declared_minor = (int(part) for part in declared.split("."))
+    supported_major, supported_minor = (int(part) for part in supported.split("."))
+    return declared_major == supported_major and declared_minor <= supported_minor
 
 
 class TargetTriple(StrEnum):
@@ -113,6 +140,41 @@ class ComponentAssetKind(StrEnum):
     ACP_ADAPTER = "acp-adapter"
 
 
+_REQUIRED_ASSET_VERSIONS: Final = {
+    ComponentAssetKind.PYTHON_RUNTIME: CPYTHON_VERSION_PIN,
+    ComponentAssetKind.NODE_RUNTIME: NODEJS_VERSION_PIN,
+    ComponentAssetKind.ACP_ADAPTER: ACP_VERSION_PIN,
+}
+
+# ``contains`` clauses make the committed JSON Schema enforce the same exact
+# closure as the Pydantic model. Four required kinds plus ``maxItems: 4`` also
+# prevents duplicates at the cross-repository schema boundary.
+_ASSETS_SCHEMA: Final = {
+    "allOf": [
+        {
+            "contains": {
+                "properties": {
+                    "kind": {"const": kind.value},
+                    **(
+                        {"version": {"const": _REQUIRED_ASSET_VERSIONS[kind]}}
+                        if kind in _REQUIRED_ASSET_VERSIONS
+                        else {}
+                    ),
+                },
+                "required": (
+                    ["kind", "version"]
+                    if kind in _REQUIRED_ASSET_VERSIONS
+                    else ["kind"]
+                ),
+            },
+            "minContains": 1,
+            "maxContains": 1,
+        }
+        for kind in ComponentAssetKind
+    ]
+}
+
+
 class EntrypointKind(StrEnum):
     """The two launch surfaces the contract declares.
 
@@ -141,14 +203,38 @@ class ComponentIdentity(BaseModel):
 class ApiVersionRange(BaseModel):
     """The inclusive gateway API version range this generation serves."""
 
-    model_config = ConfigDict(extra="forbid", frozen=True)
+    model_config = ConfigDict(
+        extra="forbid",
+        frozen=True,
+        json_schema_extra={
+            "x-vaultspec-invariant": "minimum must not exceed maximum numerically"
+        },
+    )
 
     minimum: str = Field(
-        min_length=1, max_length=32, description="Lowest served gateway API version."
+        min_length=2,
+        max_length=7,
+        pattern=_API_VERSION_PATTERN,
+        description="Lowest served gateway API version in canonical vN form.",
     )
     maximum: str = Field(
-        min_length=1, max_length=32, description="Highest served gateway API version."
+        min_length=2,
+        max_length=7,
+        pattern=_API_VERSION_PATTERN,
+        description="Highest served gateway API version in canonical vN form.",
     )
+
+    @model_validator(mode="after")
+    def _ordered(self) -> ApiVersionRange:
+        minimum = _API_VERSION_RE.fullmatch(self.minimum)
+        maximum = _API_VERSION_RE.fullmatch(self.maximum)
+        # Field validation establishes both matches; retain the guard so this
+        # invariant stays local if construction semantics ever change.
+        if minimum is None or maximum is None:
+            return self
+        if int(self.minimum[1:]) > int(self.maximum[1:]):
+            raise ValueError("minimum API version must not exceed maximum")
+        return self
 
 
 class MigrationRange(BaseModel):
@@ -197,16 +283,36 @@ class ComponentEntrypoint(BaseModel):
         max_length=256,
         description="Entry-point object reference, e.g. 'pkg.module:main'.",
     )
-    relative_command: tuple[str, ...] = Field(
+    relative_command: tuple[RelativeCommandSegment, ...] = Field(
         min_length=1,
-        description="Argv path segments relative to the capsule root.",
+        max_length=16,
+        description="Bounded argv path segments relative to the capsule root.",
     )
 
     @field_validator("relative_command")
     @classmethod
     def _segments_non_empty(cls, value: tuple[str, ...]) -> tuple[str, ...]:
-        if any(not segment for segment in value):
-            raise ValueError("relative_command segments must be non-empty")
+        for segment in value:
+            if (
+                not segment
+                or segment in {".", ".."}
+                or "\x00" in segment
+                or "/" in segment
+                or "\\" in segment
+            ):
+                raise ValueError(
+                    "relative_command must contain only capsule-relative segments"
+                )
+            posix_segment = PurePosixPath(segment)
+            windows_segment = PureWindowsPath(segment)
+            if (
+                posix_segment.is_absolute()
+                or posix_segment.root
+                or windows_segment.is_absolute()
+                or windows_segment.drive
+                or windows_segment.root
+            ):
+                raise ValueError("relative_command must not be rooted")
         return value
 
 
@@ -281,8 +387,13 @@ class ComponentManifest(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     contract_version: str = Field(
+        min_length=3,
+        max_length=13,
         pattern=_VERSION_PATTERN,
-        description="Manifest grammar version; consumers check major equality.",
+        description=(
+            "Canonical MAJOR.MINOR grammar version; consumers require the same "
+            "major and a declared minor no newer than they support."
+        ),
     )
     identity: ComponentIdentity = Field(description="Component name and version.")
     target: TargetTriple = Field(description="The capsule's target triple.")
@@ -296,8 +407,13 @@ class ComponentManifest(BaseModel):
         description="Algorithm governing every digest in this manifest."
     )
     assets: tuple[ComponentAsset, ...] = Field(
-        min_length=1,
-        description="Base-closure assets with pinned versions, licenses, digests.",
+        min_length=4,
+        max_length=4,
+        description=(
+            "The exact four-kind base closure with pinned runtime versions, "
+            "licenses, and digests."
+        ),
+        json_schema_extra=_ASSETS_SCHEMA,
     )
     dependency_lock: DependencyLockIdentity = Field(
         description="Digests pinning the Python and JavaScript dependency graphs."
@@ -305,12 +421,20 @@ class ComponentManifest(BaseModel):
 
     @field_validator("assets")
     @classmethod
-    def _unique_asset_kinds(
+    def _complete_asset_closure(
         cls, value: tuple[ComponentAsset, ...]
     ) -> tuple[ComponentAsset, ...]:
-        kinds = [asset.kind for asset in value]
-        if len(set(kinds)) != len(kinds):
-            raise ValueError("assets must declare each kind at most once")
+        by_kind = {asset.kind: asset for asset in value}
+        required_kinds = set(ComponentAssetKind)
+        if len(by_kind) != len(value) or set(by_kind) != required_kinds:
+            raise ValueError(
+                "assets must declare exactly one of each production asset kind"
+            )
+        for kind, pinned_version in _REQUIRED_ASSET_VERSIONS.items():
+            if by_kind[kind].version != pinned_version:
+                raise ValueError(
+                    f"{kind.value} version must be pinned to {pinned_version}"
+                )
         return value
 
     def is_contract_compatible(self, supported: str = CONTRACT_VERSION) -> bool:

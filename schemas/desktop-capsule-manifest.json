@@ -5,16 +5,18 @@
       "description": "The inclusive gateway API version range this generation serves.",
       "properties": {
         "minimum": {
-          "description": "Lowest served gateway API version.",
-          "maxLength": 32,
-          "minLength": 1,
+          "description": "Lowest served gateway API version in canonical vN form.",
+          "maxLength": 7,
+          "minLength": 2,
+          "pattern": "^v[1-9][0-9]{0,5}$",
           "title": "Minimum",
           "type": "string"
         },
         "maximum": {
-          "description": "Highest served gateway API version.",
-          "maxLength": 32,
-          "minLength": 1,
+          "description": "Highest served gateway API version in canonical vN form.",
+          "maxLength": 7,
+          "minLength": 2,
+          "pattern": "^v[1-9][0-9]{0,5}$",
           "title": "Maximum",
           "type": "string"
         }
@@ -24,7 +26,8 @@
         "maximum"
       ],
       "title": "ApiVersionRange",
-      "type": "object"
+      "type": "object",
+      "x-vaultspec-invariant": "minimum must not exceed maximum numerically"
     },
     "ComponentAsset": {
       "additionalProperties": false,
@@ -118,10 +121,21 @@
           "type": "string"
         },
         "relative_command": {
-          "description": "Argv path segments relative to the capsule root.",
+          "description": "Bounded argv path segments relative to the capsule root.",
           "items": {
+            "description": "One non-rooted capsule path segment.",
+            "maxLength": 128,
+            "minLength": 1,
+            "not": {
+              "enum": [
+                ".",
+                ".."
+              ]
+            },
+            "pattern": "^[^/\\\\:\\x00]+$",
             "type": "string"
           },
+          "maxItems": 16,
           "minItems": 1,
           "title": "Relative Command",
           "type": "array"
@@ -266,8 +280,10 @@
   "description": "The versioned desktop component manifest consumed by dashboard packaging.\n\nThe manifest is the entire boundary the dashboard reads about an A2A\ngeneration. It is deterministic and self-describing: given the same inputs\nthe emitter produces a byte-identical document, so a release-set receipt can\npin a generation by manifest digest.",
   "properties": {
     "contract_version": {
-      "description": "Manifest grammar version; consumers check major equality.",
-      "pattern": "^\\d+\\.\\d+$",
+      "description": "Canonical MAJOR.MINOR grammar version; consumers require the same major and a declared minor no newer than they support.",
+      "maxLength": 13,
+      "minLength": 3,
+      "pattern": "^(?:0|[1-9][0-9]{0,5})\\.(?:0|[1-9][0-9]{0,5})$",
       "title": "Contract Version",
       "type": "string"
     },
@@ -292,11 +308,82 @@
       "description": "Algorithm governing every digest in this manifest."
     },
     "assets": {
-      "description": "Base-closure assets with pinned versions, licenses, digests.",
+      "allOf": [
+        {
+          "contains": {
+            "properties": {
+              "kind": {
+                "const": "python-runtime"
+              },
+              "version": {
+                "const": "3.13"
+              }
+            },
+            "required": [
+              "kind",
+              "version"
+            ]
+          },
+          "maxContains": 1,
+          "minContains": 1
+        },
+        {
+          "contains": {
+            "properties": {
+              "kind": {
+                "const": "a2a-distribution"
+              }
+            },
+            "required": [
+              "kind"
+            ]
+          },
+          "maxContains": 1,
+          "minContains": 1
+        },
+        {
+          "contains": {
+            "properties": {
+              "kind": {
+                "const": "node-runtime"
+              },
+              "version": {
+                "const": "22"
+              }
+            },
+            "required": [
+              "kind",
+              "version"
+            ]
+          },
+          "maxContains": 1,
+          "minContains": 1
+        },
+        {
+          "contains": {
+            "properties": {
+              "kind": {
+                "const": "acp-adapter"
+              },
+              "version": {
+                "const": "0.59.0"
+              }
+            },
+            "required": [
+              "kind",
+              "version"
+            ]
+          },
+          "maxContains": 1,
+          "minContains": 1
+        }
+      ],
+      "description": "The exact four-kind base closure with pinned runtime versions, licenses, and digests.",
       "items": {
         "$ref": "#/$defs/ComponentAsset"
       },
-      "minItems": 1,
+      "maxItems": 4,
+      "minItems": 4,
       "title": "Assets",
       "type": "array"
     },

@@ -23,7 +23,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ...control.cancel_service import cancel_thread
 from ...control.config import settings
-from ...control.health import build_full_health, probe_engine_discovery_freshness
+from ...control.health import (
+    assemble_desktop_readiness,
+    build_full_health,
+    probe_engine_discovery_freshness,
+)
 from ...control.run_discovery_service import discover_active_runs
 from ...control.run_start_policy import evaluate_run_start_eligibility
 from ...control.thread_service import (
@@ -853,6 +857,16 @@ async def service_state_endpoint(
     else:
         status = "ready"
 
+    # The separated readiness facts come from the one readiness authority, fed the
+    # live database and worker probe verdicts just computed, so service-state and
+    # the liveness surface never compute readiness twice. This is also the
+    # projection a discovery contender probes to validate readiness before attach.
+    readiness = assemble_desktop_readiness(
+        app_state=request.app.state,
+        database_ready=database_ready,
+        worker_probe_ready=worker_ready,
+    )
+
     # Only genuine failure statuses degrade readiness; informational checks such
     # as worker_spawned ("yes"/"no") or worker_stderr_log ("configured") are not
     # degradation signals.
@@ -881,6 +895,7 @@ async def service_state_endpoint(
         active_run_capacity=domain_config.max_concurrent_threads,
         degraded_reasons=degraded_reasons,
         routes=route_signature(request.app),
+        readiness=readiness,
     )
 
 

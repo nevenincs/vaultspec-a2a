@@ -270,6 +270,24 @@ class TestThreadCRUD:
         assert updated.status == "running"
 
     @pytest.mark.asyncio
+    async def test_idempotent_status_write_repairs_active_projection(
+        self, session: AsyncSession
+    ) -> None:
+        """Lifecycle writes restore the denormalized discovery selector."""
+        thread = await create_thread(
+            session,
+            title="Projection repair",
+            status=ThreadStatus.COMPLETED,
+        )
+        thread.is_active = True
+        await session.flush()
+
+        updated = await update_thread_status(session, thread.id, ThreadStatus.COMPLETED)
+
+        assert updated is not None
+        assert updated.is_active is False
+
+    @pytest.mark.asyncio
     async def test_set_thread_approval_state(self, session: AsyncSession) -> None:
         """Thread approval state should persist durable plan-approval truth."""
         thread = await create_thread(session, title="Approval State")

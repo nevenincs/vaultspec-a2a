@@ -302,6 +302,9 @@ async def update_thread_status(
 
     current = _coerce_status(thread.status)
     if current == coerced_status:
+        # Idempotent writes also repair a stale denormalized selector (for
+        # example after an interrupted migration or legacy direct write).
+        thread.is_active = coerced_status in ACTIVE_STATUSES
         thread.updated_at = _utcnow()
         await session.flush()
         return thread

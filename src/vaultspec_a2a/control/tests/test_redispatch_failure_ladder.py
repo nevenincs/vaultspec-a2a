@@ -36,11 +36,13 @@ async def test_redispatch_dedups_repeated_circuit_open_failures(
     await init_db(str(db_file))
     try:
         thread_count = 2 * _REDISPATCH_LOG_EVERY_N + 2  # 12 for N=5
+        thread_ids = [f"redispatch-dedup-{i}" for i in range(thread_count)]
         session_factory = get_session_factory()
         async with session_factory() as session:
-            for _ in range(thread_count):
+            for thread_id in thread_ids:
                 await create_thread(
                     session,
+                    thread_id=thread_id,
                     status=ThreadStatus.RECONCILING,
                     team_preset="mock-success-single",
                 )
@@ -82,7 +84,12 @@ async def test_redispatch_dedups_repeated_circuit_open_failures(
             and "Re-dispatch failure ladder" in r.getMessage()
         ]
         assert len(summaries) == 1
-        assert f"{thread_count} occurrences" in summaries[0].getMessage()
+        summary_message = summaries[0].getMessage()
+        assert f"{thread_count} occurrences" in summary_message
+        # Every stuck thread is named in the summary, including the ones whose
+        # own per-occurrence WARNING was gapped/suppressed by the ladder.
+        for thread_id in thread_ids:
+            assert thread_id in summary_message
     finally:
         await close_db()
 

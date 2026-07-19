@@ -129,6 +129,11 @@ class ConnectionManager:
         # network blip would otherwise each log identically - this counter is
         # scoped to the manager so that storm dedups instead.
         self._consecutive_heartbeat_failures = 0
+        # Client ids currently mid-failure (added on failure, discarded on that
+        # SAME client's next success), so recovery can be scoped truthfully:
+        # "delivery recovered" only fires once this set is empty, never while
+        # another client is still failing.
+        self._failing_client_ids: set[str] = set()
 
     def set_message_handler(self, handler: MessageHandler) -> None:
         """Register a callback for SEND_MESSAGE commands.
@@ -582,28 +587,49 @@ class ConnectionManager:
         client's writer loop breaks on its own first failure (nothing
         "consecutive" to track per connection) but many clients failing
         together around the same network blip must not each log identically.
+        The gate (1st + every Nth) is unchanged; each logged line additionally
+        names every client currently mid-failure, not just the triggering one,
+        so a suppressed occurrence still leaves the full failing set
+        diagnosable from the last line that did print.
         """
+        self._failing_client_ids.add(client_id)
         self._consecutive_heartbeat_failures += 1
         n = self._consecutive_heartbeat_failures
         if n == 1 or n % _WS_HEARTBEAT_FAILURE_LOG_EVERY_N == 0:
             logger.warning(
-                "Heartbeat failed for client %s (%d consecutive"
-                " heartbeat failures across all clients)",
+                "Heartbeat failed for client %s (%d consecutive heartbeat"
+                " failures across all clients; currently failing: %s)",
                 client_id,
                 n,
+                sorted(self._failing_client_ids),
                 extra={
                     "client_id": client_id,
                     "action": "send_heartbeat",
                     "consecutive_failures": n,
+                    "failing_client_ids": sorted(self._failing_client_ids),
                 },
                 exc_info=True,
             )
 
-    def _record_heartbeat_success(self) -> None:
-        """Reset the heartbeat-failure ladder and note recovery after failures."""
+    def _record_heartbeat_success(self, client_id: str) -> None:
+        """Clear *client_id* from the failing set; log recovery only once ALL
+        clients that were failing have since succeeded.
+
+        Scoped deliberately: resetting the ladder (and claiming "delivery
+        recovered") the moment ANY one client's heartbeat succeeds would be
+        false when other clients are still mid-failure - a client's own
+        success only ever speaks for that client.
+        """
+        was_failing = client_id in self._failing_client_ids
+        self._failing_client_ids.discard(client_id)
+        if not was_failing:
+            return
+        if self._failing_client_ids:
+            return
         if self._consecutive_heartbeat_failures > 0:
             logger.info(
-                "Heartbeat delivery recovered after %d consecutive failures",
+                "Heartbeat delivery recovered for all clients after %d"
+                " consecutive failures",
                 self._consecutive_heartbeat_failures,
             )
         self._consecutive_heartbeat_failures = 0
@@ -648,7 +674,7 @@ class ConnectionManager:
                     try:
                         await websocket.send_json(heartbeat.model_dump(mode="json"))
                         _ws_heartbeats_counter.add(1, {"client_id": client_id})
-                        self._record_heartbeat_success()
+                        self._record_heartbeat_success(client_id)
                     except Exception:
                         self._log_heartbeat_failure(client_id)
                         break

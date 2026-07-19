@@ -220,9 +220,33 @@ class TestHeartbeatFailureLadder:
             if r.levelno == logging.WARNING and "Heartbeat failed" in r.getMessage()
         ]
         # occurrence 1 and every Nth (5, 10) out of 12 -> exactly 3 full lines,
-        # never one per failure.
+        # never one per failure - the ladder gate itself is unchanged.
         assert len(warnings) == 3
         assert manager._consecutive_heartbeat_failures == 2 * every_n + 2
+
+    def test_logged_lines_name_every_currently_failing_client(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Even a suppressed occurrence stays diagnosable: the last line that
+        DID print names every client failing so far, not just the trigger."""
+        _app, _agg, manager = _create_app()
+        every_n = websocket_module._WS_HEARTBEAT_FAILURE_LOG_EVERY_N
+
+        with caplog.at_level(logging.WARNING, logger=websocket_module.__name__):
+            for i in range(every_n):  # occurrences 1..5, only 1 and 5 print
+                manager._log_heartbeat_failure(f"client-{i}")
+
+        warnings = [
+            r
+            for r in caplog.records
+            if r.levelno == logging.WARNING and "Heartbeat failed" in r.getMessage()
+        ]
+        assert len(warnings) == 2  # occurrence 1 and occurrence 5 (== every_n)
+        # The occurrence-5 line names all 5 clients that have failed so far,
+        # including the ones (2, 3, 4) whose own occurrence was gapped/unlogged.
+        last = warnings[-1].getMessage()
+        for i in range(every_n):
+            assert f"client-{i}" in last
 
     def test_a_lone_failure_logs_once_with_no_recovery_noise(
         self, caplog: pytest.LogCaptureFixture
@@ -240,26 +264,58 @@ class TestHeartbeatFailureLadder:
         assert len(warnings) == 1
         assert "1 consecutive" in warnings[0].getMessage()
 
+    def test_recovery_of_one_client_does_not_claim_global_recovery(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """The 'recovered' line must not fire while another client still fails -
+        a single client's success only ever speaks for that client."""
+        _app, _agg, manager = _create_app()
+
+        manager._log_heartbeat_failure("client-a")
+        manager._log_heartbeat_failure("client-b")
+
+        with caplog.at_level(logging.INFO, logger=websocket_module.__name__):
+            manager._record_heartbeat_success("client-a")
+
+        recoveries = [
+            r
+            for r in caplog.records
+            if r.levelno == logging.INFO and "recovered" in r.getMessage()
+        ]
+        assert recoveries == []
+        # client-a's own failure state is cleared; client-b's is not, and the
+        # ladder counter (a shared storm signal) is untouched by a partial
+        # recovery.
+        assert "client-a" not in manager._failing_client_ids
+        assert "client-b" in manager._failing_client_ids
+        assert manager._consecutive_heartbeat_failures == 2
+
     def test_recording_a_success_resets_the_ladder_and_logs_recovery(
         self, caplog: pytest.LogCaptureFixture
     ) -> None:
+        """Recovery fires, naming the full count, once EVERY failing client
+        has succeeded - not on the first one."""
         _app, _agg, manager = _create_app()
 
         for i in range(3):
             manager._log_heartbeat_failure(f"client-{i}")
         assert manager._consecutive_heartbeat_failures == 3
 
+        manager._record_heartbeat_success("client-0")
+        manager._record_heartbeat_success("client-1")
         with caplog.at_level(logging.INFO, logger=websocket_module.__name__):
-            manager._record_heartbeat_success()
+            manager._record_heartbeat_success("client-2")
 
         assert manager._consecutive_heartbeat_failures == 0
+        assert manager._failing_client_ids == set()
         recoveries = [
             r
             for r in caplog.records
-            if r.levelno == logging.INFO and "recovered after" in r.getMessage()
+            if r.levelno == logging.INFO and "recovered" in r.getMessage()
         ]
         assert len(recoveries) == 1
         assert "3 consecutive" in recoveries[0].getMessage()
+        assert "all clients" in recoveries[0].getMessage()
 
     def test_recording_a_success_with_no_prior_failures_is_silent(
         self, caplog: pytest.LogCaptureFixture
@@ -267,11 +323,9 @@ class TestHeartbeatFailureLadder:
         _app, _agg, manager = _create_app()
 
         with caplog.at_level(logging.INFO, logger=websocket_module.__name__):
-            manager._record_heartbeat_success()
+            manager._record_heartbeat_success("client-never-failed")
 
-        recoveries = [
-            r for r in caplog.records if "recovered after" in r.getMessage()
-        ]
+        recoveries = [r for r in caplog.records if "recovered" in r.getMessage()]
         assert recoveries == []
 
 

@@ -16,6 +16,7 @@ if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..thread.enums import (
+    NON_ACTIVE_STATUSES,
     ApprovalStatus,
     ControlActionType,
     RepairStatus,
@@ -42,6 +43,7 @@ __all__ = [
     "get_thread",
     "get_thread_execution_state",
     "get_thread_metadata",
+    "list_active_threads",
     "list_non_terminal_threads",
     "list_threads",
     "record_thread_execution_state",
@@ -140,6 +142,21 @@ async def list_non_terminal_threads(session: AsyncSession) -> Sequence[ThreadMod
             )
         )
         .order_by(ThreadModel.created_at.asc())
+    )
+    result = await session.execute(stmt)
+    return result.scalars().all()
+
+
+async def list_active_threads(session: AsyncSession) -> Sequence[ThreadModel]:
+    """Return durable active threads in newest-first discovery order."""
+    stmt = (
+        select(ThreadModel)
+        .where(
+            ThreadModel.status.not_in(
+                [thread_status.value for thread_status in NON_ACTIVE_STATUSES]
+            )
+        )
+        .order_by(ThreadModel.created_at.desc(), ThreadModel.id.asc())
     )
     result = await session.execute(stmt)
     return result.scalars().all()

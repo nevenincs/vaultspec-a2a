@@ -95,12 +95,19 @@ and it doesn't rewrite Torch configuration. Diagnose it with:
    just dev rag install-dry-run
    just dev rag status
 
-Only explicit upgrade commands mutate the selected Core or RAG versions:
+Only explicit upgrade commands mutate the Core or RAG lock selection:
 
 .. code-block:: console
 
    just dev vault upgrade
    just dev rag upgrade
+
+Core adoption stages forced reconciliation in a disposable clone. It promotes
+runtime state only when the tracked projection is byte-identical, then performs
+a non-destructive live sync. RAG upgrades resolve the exact ACP runtime
+requirement in ``src/vaultspec_a2a/providers/_acp_mcp.py``. Change that reviewed
+authority first when selecting a new RAG release; the upgrade command then
+converges the lock, installed CLI, enrollment, and status to it.
 
 Validate and diagnose
 ---------------------

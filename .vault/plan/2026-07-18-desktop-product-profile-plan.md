@@ -244,7 +244,7 @@ Require worker and provider eligibility before durable run creation or actor-tok
 - [x] `W04.P12.S66` - Evaluate worker and provider eligibility before accepting actor tokens or creating a run; `src/vaultspec_a2a/control/run_start_policy.py`.
 - [x] `W04.P12.S67` - Emit bounded terminal callbacks authenticated with the dashboard-created attach-control credential read by the gateway and containing run and non-secret lease identities only; `src/vaultspec_a2a/desktop/settlement.py`.
 - [x] `W04.P12.S68` - Trigger the attach-control-authenticated settlement component idempotently after execution-state persistence on complete cancel and fail without exposing or requiring worker IPC; `src/vaultspec_a2a/control/event_handlers.py`.
-- [ ] `W04.P12.S69` - Prove prepare timeout cancellation and failed commit release capacity without a run token or run-owned child process; `src/vaultspec_a2a/desktop_tests/test_run_admission.py`.
+- [x] `W04.P12.S69` - Prove prepare timeout cancellation and failed commit release capacity without a run token or run-owned child process; `src/vaultspec_a2a/desktop_tests/test_run_admission.py`.
 - [ ] `W04.P12.S70` - Prove attach-control-authenticated terminal callback retry rejects worker IPC and unrelated credentials while status reconciliation revokes exactly one run-scoped lease without raw tokens; `src/vaultspec_a2a/desktop_tests/test_terminal_settlement.py`.
 - [ ] `W04.P12.S71` - Certify a clean installed capsule starts and stops the standalone vaultspec-mcp adapter under caller ownership; `src/vaultspec_a2a/desktop_tests/test_standalone_mcp.py`.
 

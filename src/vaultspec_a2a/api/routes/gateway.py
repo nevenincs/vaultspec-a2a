@@ -131,6 +131,7 @@ def admission_broker(app: FastAPI) -> AdmissionBroker:
     if broker is None:
         broker = AdmissionBroker(
             max_reservations=domain_config.max_concurrent_threads,
+            reservation_ttl_seconds=domain_config.admission_reservation_ttl_seconds,
         )
         app.state.admission_broker = broker
     return broker

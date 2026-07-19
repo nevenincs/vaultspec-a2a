@@ -120,6 +120,17 @@ class InfraConfig(BaseSettings):
             "vaultspec firmware rejects foreign directories inside the vault."
         ),
     )
+    capsule_assets_root: Path | None = Field(
+        default=None,
+        alias="VAULTSPEC_CAPSULE_ASSETS",
+        description=(
+            "Root of the desktop capsule's owned runtime assets (Node.js and the "
+            "ACP adapter). When set, the provider factory resolves the default "
+            "Node executable and ACP entry point ONLY from this root, with no "
+            "checkout or PATH fallback. Unset for the Compose/dev profiles, where "
+            "resolution is checkout-relative as before."
+        ),
+    )
     mock_api_base: str | None = Field(
         default=None,
         alias="MOCK_API_BASE",

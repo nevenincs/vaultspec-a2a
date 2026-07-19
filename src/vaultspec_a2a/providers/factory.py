@@ -226,12 +226,86 @@ def _build_gemini_command(
     return command
 
 
-def _classify_acp_command(backend: str) -> tuple[list[str], dict[str, str]]:
+def _capsule_node_executable(capsule_assets_root: Path) -> Path:
+    """Return the capsule-owned Node.js executable path for this platform.
+
+    Node's official distribution layout places the executable at ``node/node.exe``
+    on Windows and ``node/bin/node`` on POSIX. The desktop capsule carries that
+    tree verbatim under its assets root.
+    """
+    if os.name == "nt":
+        return capsule_assets_root / "node" / "node.exe"
+    return capsule_assets_root / "node" / "bin" / "node"
+
+
+def _capsule_acp_entry(capsule_assets_root: Path) -> Path:
+    """Return the capsule-owned Claude ACP entry point path.
+
+    Mirrors the checkout ``node_modules`` layout so the same installed adapter
+    resolves from capsule assets.
+    """
+    return (
+        capsule_assets_root
+        / "node_modules"
+        / "@agentclientprotocol"
+        / "claude-agent-acp"
+        / "dist"
+        / "index.js"
+    )
+
+
+def _classify_capsule_acp_command(
+    capsule_assets_root: Path,
+) -> tuple[list[str], dict[str, str]]:
+    """Resolve the Node ACP command strictly from capsule-owned assets.
+
+    The desktop capsule owns Node.js and the ACP adapter, so resolution never
+    falls back to the checkout or to a PATH ``node``. A missing asset is a fatal
+    configuration error naming the exact missing path.
+
+    Raises:
+        ConfigError: If the capsule Node executable or ACP entry is absent.
+    """
+    node_executable = _capsule_node_executable(capsule_assets_root)
+    if not node_executable.is_file():
+        raise ConfigError(
+            f"Desktop capsule Node executable not found: {node_executable}. "
+            f"The capsule assets root {capsule_assets_root} must carry the "
+            "bundled Node.js runtime."
+        )
+    acp_entry = _capsule_acp_entry(capsule_assets_root)
+    if not acp_entry.is_file():
+        raise ConfigError(
+            f"Desktop capsule Claude ACP entry point not found: {acp_entry}. "
+            f"The capsule assets root {capsule_assets_root} must carry the "
+            "bundled @agentclientprotocol/claude-agent-acp adapter."
+        )
+    return [str(node_executable), str(acp_entry)], {
+        "runtime_authority": "capsule",
+        "command_origin": "capsule",
+        "command_kind": "node_entry",
+        "command_executable": node_executable.name,
+        "command_target": str(acp_entry),
+        "acp_backend": "node",
+    }
+
+
+def _classify_acp_command(
+    backend: str,
+    *,
+    capsule_assets_root: Path | None = None,
+) -> tuple[list[str], dict[str, str]]:
     """Return the ACP gateway subprocess command for the given backend.
 
     Args:
         backend: ``"node"`` for the npm-installed JS entry point (default),
             ``"binary"`` for the precompiled Bun executable in bin/.
+        capsule_assets_root: Explicit desktop capsule assets root. When ``None``
+            (the default), the configured ``settings.capsule_assets_root`` is
+            consulted. When a root is in force, the default Node backend resolves
+            its executable and ACP entry ONLY from capsule assets — no checkout or
+            PATH fallback. The experimental binary backend is already package-owned
+            and is unaffected.
 
     Raises:
         ConfigError: If the resolved entry point does not exist.
@@ -256,6 +330,13 @@ def _classify_acp_command(backend: str) -> tuple[list[str], dict[str, str]]:
             "acp_backend": "binary",
         }
     # default: "node"
+    root = (
+        capsule_assets_root
+        if capsule_assets_root is not None
+        else settings.capsule_assets_root
+    )
+    if root is not None:
+        return _classify_capsule_acp_command(root)
     if not _CLAUDE_ACP_JS.exists():
         raise ConfigError(
             f"Claude ACP entry point not found: {_CLAUDE_ACP_JS}. "
@@ -682,9 +763,7 @@ class ProviderFactory:
                 command_target=command_meta["command_target"],
                 acp_backend="kimi_cli",
                 auth_mode=(
-                    "kimi_api_key"
-                    if "KIMI_API_KEY" in env_vars
-                    else "none_detected"
+                    "kimi_api_key" if "KIMI_API_KEY" in env_vars else "none_detected"
                 ),
             )
 

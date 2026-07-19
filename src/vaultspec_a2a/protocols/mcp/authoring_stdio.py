@@ -116,6 +116,13 @@ async def _amain() -> int:
 
 def main() -> None:
     """Console entry: run the stdio bridge until the client closes the pipe."""
+    # Protocol lane: stdout is JSON-RPC frames, so logging is stderr-only and
+    # configure_logging asserts no stdout handler exists. The UTF-8 guard keeps
+    # diagnostics safe on legacy Windows consoles without touching the frame bytes.
+    from ...utils import configure_logging, reconfigure_console_utf8
+
+    reconfigure_console_utf8()
+    configure_logging("protocol")
     raise SystemExit(asyncio.run(_amain()))
 
 

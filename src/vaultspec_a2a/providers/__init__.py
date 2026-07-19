@@ -1,10 +1,16 @@
-"""LLM provider abstractions and ACP chat model.
+"""Expose chat-model providers and provider construction.
 
-Facade re-exporting all public types from the ``vaultspec_a2a.providers`` subpackage.
-Consumers should import from this module rather than reaching into
-sub-modules directly::
+Agent Client Protocol (ACP) exceptions load eagerly.
+:class:`vaultspec_a2a.providers.acp_chat_model.AcpChatModel`,
+:class:`vaultspec_a2a.providers.mock_chat_model.MockChatModel`, and
+:class:`vaultspec_a2a.providers.factory.ProviderFactory` load lazily.
 
-    from vaultspec_a2a.providers import AcpChatModel, ProviderFactory
+The lazy boundary breaks the providers, team, and graph import cycle. It also
+keeps heavyweight implementation modules unloaded until a caller requests
+them. Provider configuration resolves the applicable configuration home.
+
+Providers implement :mod:`vaultspec_a2a.graph.protocols` for
+:mod:`vaultspec_a2a.team` graphs and :mod:`vaultspec_a2a.worker` execution.
 """
 
 import importlib

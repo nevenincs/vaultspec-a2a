@@ -38,7 +38,12 @@ from ..database.checkpoints import open_checkpointer
 from ..ipc.schemas import DispatchRequest, DispatchResponse
 from ..lifecycle.registration import deregister_serve, register_serve
 from ..telemetry import TelemetryMiddleware, configure_telemetry
-from ..utils import BearerVerdict, verify_internal_bearer
+from ..utils import (
+    BearerVerdict,
+    configure_logging,
+    reconfigure_console_utf8,
+    verify_internal_bearer,
+)
 from ..utils.asyncio_compat import configure_asyncio_runtime
 from .executor import Executor
 from .ipc import WorkerBridge
@@ -272,6 +277,8 @@ def create_worker_app(lifespan: Any | None = None) -> FastAPI:
 
 def main() -> None:
     """Entry point for the ``vaultspec-worker`` console script."""
+    reconfigure_console_utf8()
+    configure_logging("service", service_name="worker")
     configure_asyncio_runtime()
     logger.info(
         "Worker main config: gateway_port=%d worker_host=%s"
@@ -286,7 +293,8 @@ def main() -> None:
         factory=True,
         host=settings.worker_host,
         port=settings.worker_port,
-        log_level="info",
+        log_level=settings.log_level.value,
+        access_log=settings.access_log,
         loop="auto",
     )
 

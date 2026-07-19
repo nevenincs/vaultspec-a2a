@@ -27,6 +27,17 @@ Two modes:
 Early and still taking shape: interfaces, presets, and deployment surfaces
 change without notice. The rest of this README is developer-facing.
 
+## Documentation
+
+- [Documentation home](docs/index.rst)
+- [Architecture navigation](docs/architecture.rst)
+- [Operator reference](docs/operations.rst)
+- [Python module reference](docs/api/modules.rst)
+- [Edge conformance mapping](docs/a2a-edge-conformance-verb-mapping.md)
+
+These pages describe current package ownership without relying on manually
+counted modules or components.
+
 ## Quickstart
 
 Clone and install dependencies:

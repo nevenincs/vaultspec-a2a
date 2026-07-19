@@ -1,33 +1,19 @@
-"""control — infrastructure services and dev-tooling.
+"""Group application and infrastructure services for runtime control.
 
-Pure domain logic (enums, state machine, snapshot dataclasses) has been
-extracted to ``thread/enums``, ``thread/transitions``, and
-``thread/snapshots`` respectively.  This package retains only
-infrastructure concerns: process supervision, health, dispatch, and
-dev-tooling.
+Services supervise workers, monitor health, dispatch work, handle events,
+maintain projections, and orchestrate threads, messages, cancellation,
+permissions, teams, and repair. Run-start policy and authoring verdict
+subscription also live in this layer.
 
-Production runtime modules:
+Import implementations from direct child modules, including
+:mod:`vaultspec_a2a.control.cancel_service`,
+:mod:`vaultspec_a2a.control.message_service`,
+:mod:`vaultspec_a2a.control.run_start_policy`, and
+:mod:`vaultspec_a2a.control.verdict_subscriber`.
 
-    config              — application settings (pydantic-settings)
-    circuit_breaker     — WorkerCircuitBreaker
-    diagnostics         — missing-thread classification, mark_thread_failed
-    dispatch            — dispatch_to_worker consolidated dispatch function
-    health              — assemble_health_status, SQLite fallback diagnostics
-    permission_service  — permission response orchestration (extracted from route)
-    team_service        — team status assembly (extracted from route)
-    worker_management   — LazyWorkerSpawner, WorkerWatchdog, WorkerState
-    event_handlers      — relay_event, terminal/permission/progress/execution
-                          state event handlers
-    projection          — checkpoint and execution-state projection helpers
-    snapshot            — snapshot enrichment from LangGraph state
-
-Dev-tooling modules invoked via ``python -m``:
-
-    python -m vaultspec_a2a.control.db      migrate [--fix]
-    python -m vaultspec_a2a.control.db      snapshot [list]
-    python -m vaultspec_a2a.control.db      restore --name FILE
-    python -m vaultspec_a2a.control.db      clear --yes
-    python -m vaultspec_a2a.control.hooks   install
+Control services coordinate :mod:`vaultspec_a2a.thread`,
+:mod:`vaultspec_a2a.database`, :mod:`vaultspec_a2a.streaming`,
+:mod:`vaultspec_a2a.authoring`, and :mod:`vaultspec_a2a.worker`.
 """
 
 from __future__ import annotations

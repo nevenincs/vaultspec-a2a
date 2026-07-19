@@ -1,7 +1,14 @@
-"""Protocol bridges for the Vaultspec A2A Orchestrator.
+"""Expose the lazy Model Context Protocol bridge.
 
-Sub-modules:
-- ``mcp``: FastMCP server exposing team orchestration tools to IDE clients.
+The ``vaultspec-mcp`` entry point enters :mod:`vaultspec_a2a.protocols.mcp`.
+Importing this package must not eagerly load the FastMCP server.
+
+Server behavior belongs to :mod:`vaultspec_a2a.protocols.mcp.server`.
+Authoring transport belongs to
+:mod:`vaultspec_a2a.protocols.mcp.authoring_stdio`.
+
+Keep protocol adaptation at this boundary. Runtime orchestration remains in
+:mod:`vaultspec_a2a.control`.
 """
 
 from typing import TYPE_CHECKING

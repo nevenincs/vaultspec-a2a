@@ -50,6 +50,16 @@ class InfraConfig(BaseSettings):
 
     environment: Environment = Field(default=Environment.DEVELOPMENT)
     log_level: LogLevel = Field(default=LogLevel.INFO)
+    access_log: bool = Field(
+        default=False,
+        alias="VAULTSPEC_ACCESS_LOG",
+        description=(
+            "Enable uvicorn per-request access logging at both serve sites. Off "
+            "by default: the gateway is polled permanently by design (worker "
+            "heartbeat, health probes), so access-line drip buries diagnostics. "
+            "OTEL spans carry request tracing; opt in here for a raw access trail."
+        ),
+    )
     database_backend: Literal["sqlite", "postgres"] = Field(
         default="sqlite",
         alias="VAULTSPEC_DATABASE_BACKEND",

@@ -1,9 +1,15 @@
-"""Domain configuration — pure behavioral knobs with zero infrastructure coupling.
+"""Define domain settings and the process-wide domain configuration.
 
-These fields govern core logic (debounce windows, buffer sizes, token budgets,
-recursion limits) and carry no dependency on ports, hosts, URLs, API keys, or
-filesystem paths.  ``DomainConfig`` is the single source of truth consumed by
-Layer 1 modules (thread/, context/, graph/, streaming/).
+:class:`vaultspec_a2a.domain_config.DomainConfig` represents resolved domain
+configuration. :class:`vaultspec_a2a.domain_config.DomainSettingsConfig`
+defines environment-based settings behavior.
+
+Importing this module creates
+:data:`vaultspec_a2a.domain_config.domain_config`, initializes configuration,
+and reads environment-based settings.
+
+The settings govern :mod:`vaultspec_a2a.context`, :mod:`vaultspec_a2a.graph`,
+:mod:`vaultspec_a2a.streaming`, and :mod:`vaultspec_a2a.control.config`.
 """
 
 from pydantic import BaseModel, Field

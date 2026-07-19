@@ -1,12 +1,15 @@
-"""Engine authoring-API client.
+"""Expose the engine authoring-plane client API.
 
-The single package that speaks to the dashboard engine's authoring plane. No
-other package in this repo may talk to the engine directly; all envelope,
-idempotency, auth, and denial handling lives here.
+The public API covers envelopes, discovery, lifecycle, sessions, catalogs,
+feedback, and submission. Submitter exports load lazily to keep the base
+package import focused.
 
-Consumers import from this facade rather than the private sub-modules::
+Standard input and output transport belongs to
+:mod:`vaultspec_a2a.protocols.mcp.authoring_stdio`. Worker integration belongs
+to :mod:`vaultspec_a2a.worker.authoring_binding`. Verdict delivery belongs to
+:mod:`vaultspec_a2a.control.verdict_subscriber`.
 
-    from vaultspec_a2a.authoring import AuthoringClient, Denial
+This package is the exclusive client boundary for the engine authoring plane.
 """
 
 from __future__ import annotations

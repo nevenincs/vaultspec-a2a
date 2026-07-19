@@ -1,4 +1,17 @@
-"""Graph orchestration layer — compilation, nodes, tools, domain events."""
+"""Expose lazy entry points for graph construction and compilation.
+
+Build the initial vault index with
+:func:`vaultspec_a2a.graph.nodes.vault_reader.build_initial_vault_index`.
+Compile a team graph with
+:func:`vaultspec_a2a.graph.compiler.compile_team_graph`.
+
+Lazy exports prevent an import cycle among :mod:`vaultspec_a2a.context`,
+:mod:`vaultspec_a2a.thread`, and :mod:`vaultspec_a2a.graph.enums`.
+
+Compiled graphs connect :mod:`vaultspec_a2a.team`,
+:mod:`vaultspec_a2a.providers`, and :mod:`vaultspec_a2a.authoring` to the
+execution context.
+"""
 
 import importlib
 

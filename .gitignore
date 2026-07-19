@@ -65,6 +65,7 @@ out.txt
 *.sqlite-wal
 
 build/
+docs/_build/
 data/
 !src/ui/src/app/data/
 

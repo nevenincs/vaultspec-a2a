@@ -309,6 +309,11 @@ dev-build TARGET:
 _dev-build-package:
     uv build
 
+# Build strict Sphinx documentation
+_dev-build-docs:
+    uv run --isolated --group docs --group dev python -m pytest docs/tests -q
+    uv run --isolated --group docs sphinx-build -n -W --keep-going -b html docs docs/_build/html
+
 # Build local dev Docker images (gateway + worker)
 _dev-build-docker:
     docker compose -f service/docker-compose.dev.yml build

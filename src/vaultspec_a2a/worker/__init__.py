@@ -1,21 +1,16 @@
-"""Agent Worker -- LangGraph execution engine.
+"""Provide the separate FastAPI execution process.
 
-Runs as a separate process from the gateway.
-Communicates via HTTP POST (events/heartbeats -> API) and HTTP
-(dispatch -> worker).
+Worker modules define the application factory, application type, graph
+executor, and gateway inter-process bridge. Uvicorn starts the application;
+this package doesn't provide a ``vaultspec-worker`` console command.
 
-Public API
-----------
-WorkerApp
-    Type alias for the worker's ``FastAPI`` instance.
-create_worker_app
-    Factory function that builds and returns the worker app.
-main
-    CLI entry point for the ``vaultspec-worker`` console script.
-Executor
-    Graph execution engine used internally by the worker app.
-WorkerBridge
-    HTTP-based IPC bridge used internally by the worker app.
+Execution uses :mod:`vaultspec_a2a.graph`, :mod:`vaultspec_a2a.providers`, and
+:mod:`vaultspec_a2a.streaming`. Gateway communication follows
+:mod:`vaultspec_a2a.ipc`.
+
+Authoring integration lives in
+:mod:`vaultspec_a2a.worker.authoring_binding`. Execution also uses
+:mod:`vaultspec_a2a.authoring` and :mod:`vaultspec_a2a.database`.
 """
 
 from .app import WorkerApp, create_worker_app, main

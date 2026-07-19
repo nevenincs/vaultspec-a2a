@@ -1,4 +1,20 @@
-"""Thread lifecycle management: reconciliation, recovery, dev-process registry."""
+"""Manage development processes and gateway-restart reconciliation.
+
+Configuration, registration, the registry, and reconciliation support
+lifecycle verbs for machine-global local services.
+
+:mod:`vaultspec_a2a.lifecycle.reconciliation` also computes pure recovery
+actions for non-terminal :mod:`vaultspec_a2a.thread` state after a gateway
+restart. It doesn't perform database or other input/output operations.
+
+:mod:`vaultspec_a2a.lifecycle.procs_config` defines process configuration.
+:mod:`vaultspec_a2a.lifecycle.registration` registers process definitions.
+:mod:`vaultspec_a2a.lifecycle.registry` persists process state.
+:mod:`vaultspec_a2a.lifecycle.manager` performs lifecycle operations.
+
+The process commands in :mod:`vaultspec_a2a.cli` use this package. See
+:ref:`process-registry` for operator guidance.
+"""
 
 from .manager import (
     LifecycleError,

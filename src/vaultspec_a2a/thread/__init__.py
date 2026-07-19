@@ -1,7 +1,15 @@
-"""Thread-level domain types: state, models, and errors.
+"""Expose thread-domain state and projection helpers.
 
-This is a Layer 1 leaf module with zero internal dependencies beyond
-standard-library and LangGraph/LangChain framework types.
+The package defines thread enums, errors, models, state, snapshots, actor
+tokens, and projection helpers. Snapshots also use
+:mod:`vaultspec_a2a.graph.enums`.
+
+:mod:`vaultspec_a2a.context` reads thread state.
+:mod:`vaultspec_a2a.control` coordinates thread operations.
+:mod:`vaultspec_a2a.database` persists thread records and projections.
+
+Graph enums are this package's cross-package runtime dependency. Control and
+database modules consume the thread API but aren't imported by it.
 """
 
 from .actor_tokens import (

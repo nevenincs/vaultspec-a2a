@@ -1,7 +1,14 @@
-"""Prompt enrichment pipeline: metadata, preamble, anchoring, rules, and token budget.
+"""Provide graph-execution context and prompt preparation.
 
-This is a Layer 1 module providing context injection and management
-for orchestration threads.
+This package covers anchoring, harness readiness, metadata, preambles, rules,
+phase inference, and token budgeting.
+
+Context construction reads :mod:`vaultspec_a2a.domain_config`, uses
+:mod:`vaultspec_a2a.thread` state, and prepares data for
+:mod:`vaultspec_a2a.graph.nodes`.
+
+The package imports thread state and graph enums. It doesn't compile a graph or
+start runtime services.
 """
 
 from .anchoring import build_anchoring_context as build_anchoring_context

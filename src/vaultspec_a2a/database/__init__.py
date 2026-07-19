@@ -10,7 +10,7 @@ Persistence stores :mod:`vaultspec_a2a.thread` state for
 :mod:`vaultspec_a2a.control` services.
 
 Choose the model, session, repository, or queue boundary that matches the
-operation. This facade re-exports the supported persistence API.
+operation. This package re-exports the supported persistence API.
 """
 
 from ..thread.enums import ApprovalStatus as ApprovalStatus

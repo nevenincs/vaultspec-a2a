@@ -1,4 +1,13 @@
-"""Agent and team configuration — canonical home for team_config and presets."""
+"""Expose canonical team, agent, and topology configuration.
+
+Public Pydantic classes in :mod:`vaultspec_a2a.team.team_config` describe
+executable teams and their agents. Preset discovery and loading turn stored
+definitions into that canonical configuration.
+
+:mod:`vaultspec_a2a.graph` compiles team topology.
+:mod:`vaultspec_a2a.providers` supplies agent models.
+:mod:`vaultspec_a2a.worker` executes the compiled team.
+"""
 
 from .team_config import (
     AgentCapabilitiesConfig as AgentCapabilitiesConfig,

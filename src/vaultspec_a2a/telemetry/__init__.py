@@ -1,24 +1,16 @@
-"""Telemetry sub-module: OpenTelemetry + LangSmith instrumentation.
+"""Expose tracing and metrics integration.
 
-Facade exposing the public telemetry API. Consumers should import from here
-rather than from sub-modules directly (facade pattern).
+Public configuration controls OpenTelemetry and LangSmith integration. Tracer
+and meter accessors support instrumentation without duplicating provider setup.
 
-Usage:
-    ```python
-    from vaultspec_a2a.telemetry import configure_telemetry, get_tracer, ws_span
+:mod:`vaultspec_a2a.telemetry.middleware` instruments
+:mod:`vaultspec_a2a.api` and provides trace injection across outbound
+inter-process communication (IPC) and WebSocket boundaries.
+:mod:`vaultspec_a2a.telemetry.instrumentation` configures tracing and metrics
+providers.
 
-    # Once at FastAPI lifespan startup:
-    cfg = configure_telemetry()
-
-    # In any module:
-    _tracer = get_tracer(__name__)
-    with _tracer.start_as_current_span("my-operation"):
-        ...
-
-    # In WebSocket handlers:
-    async with ws_span("ws.subscribe", thread_id=tid):
-        ...
-    ```
+Import this package for telemetry configuration, middleware, accessors, and
+trace propagation. It doesn't own application startup.
 """
 
 from .instrumentation import (

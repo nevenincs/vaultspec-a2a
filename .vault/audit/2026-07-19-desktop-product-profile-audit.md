@@ -1408,7 +1408,7 @@ The final docstring now requires both the continuously live lease and caller-own
 exclusive mutation authority across the operation, while leaving publication and
 activation with the outer generation lifecycle.
 
-### exact-zip-type-contract-drift | low | Resolved
+### exact-zip-type-contract-drift | medium | Resolved
 
 Review found import and annotation drift while the shared emitter was being extracted.
 The final source uses `Mapping` for the scanned directory-identity map and passes Ruff,
@@ -1439,6 +1439,13 @@ restored. Its machine-owned heading and two scope entries now exactly reflect S9
 An intermediate S95 record attributed a Windows gateway-handoff wording correction to
 the archive writer. That unrelated note was removed; gateway-handoff review remains in
 its owning audit trail.
+
+### s95-type-contract-severity-downgraded | medium | Resolved
+
+The first corrective audit recorded the missing `Mapping` contract as low even though
+it had produced three Ruff `F821` failures and broken runtime type-hint resolution.
+The original medium classification is restored above; no rationale supported the
+downgrade.
 
 This closes only S95. S96 process/substitution coverage, S14 complete-generation
 verification, and dashboard-owned receipt selection remain open. Target-native and

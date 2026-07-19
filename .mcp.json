@@ -1,0 +1,72 @@
+{
+  "mcpServers": {
+    "playwright": {
+      "type": "stdio",
+      "command": "cmd",
+      "args": [
+        "/c",
+        "npx",
+        "@playwright/mcp@latest"
+      ]
+    },
+    "shadcn-ui": {
+      "type": "stdio",
+      "command": "cmd",
+      "args": [
+        "/c",
+        "npx",
+        "-y",
+        "shadcn-ui-mcp-server@latest"
+      ]
+    },
+    "chrome-devtools": {
+      "type": "stdio",
+      "command": "cmd",
+      "args": [
+        "/c",
+        "npx",
+        "-y",
+        "chrome-devtools-mcp@latest",
+        "--no-usage-statistics"
+      ]
+    },
+    "docs-langchain": {
+      "type": "http",
+      "url": "https://docs.langchain.com/mcp"
+    },
+    "context7": {
+      "type": "stdio",
+      "command": "cmd",
+      "args": [
+        "/c",
+        "npx",
+        "-y",
+        "@upstash/context7-mcp@latest"
+      ]
+    },
+    "figma": {
+      "type": "http",
+      "url": "http://127.0.0.1:3845/mcp"
+    },
+    "vaultspec-rag": {
+      "command": "uv",
+      "args": [
+        "run",
+        "--no-sync",
+        "python",
+        "-m",
+        "vaultspec_rag.server"
+      ]
+    },
+    "vaultspec-core": {
+      "command": "uv",
+      "args": [
+        "run",
+        "--no-sync",
+        "python",
+        "-m",
+        "vaultspec_core.mcp_server.app"
+      ]
+    }
+  }
+}

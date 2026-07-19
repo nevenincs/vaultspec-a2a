@@ -32,7 +32,11 @@ def test_render_emits_parseable_mcp_server_block_for_rag() -> None:
     parsed = tomllib.loads(toml)
     rag = parsed["mcp_servers"]["vaultspec-rag"]
     assert rag["command"] == "uvx"
-    assert rag["args"] == ["--from", "vaultspec-rag", "vaultspec-search-mcp"]
+    assert rag["args"] == [
+        "--from",
+        "vaultspec-rag[mcp]==0.3.2",
+        "vaultspec-search-mcp",
+    ]
 
 
 def test_render_constrains_to_read_tools_auto_approved() -> None:

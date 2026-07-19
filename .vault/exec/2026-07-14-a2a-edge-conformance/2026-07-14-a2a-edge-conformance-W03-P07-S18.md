@@ -105,9 +105,12 @@ completed and the close-together criterion is now met on live evidence:
   the pre-inline engine, standard top-level JSON Schema pass-through against
   the inlined engine). Placeholder-only `.mcp.json` on disk; planted ancestor
   collision and `evil-writer` listeners recorded zero connections.
-- Carry-forward (open, production hardening, not an S18 gap): projecting into
-  a run workspace that is itself a real vaultspec project collides with its
-  committed `.mcp.json` (the guard correctly refuses; run `pw7-1784409828`).
-  Green runs used clean scratch engine workspaces. Remedy candidates recorded
-  above (isolated per-run cwd or marked-entry merge); owed before real-project
-  workspaces are used for bridged runs.
+- Carry-forward RESOLVED (2026-07-19): projecting into a run workspace that is
+  itself a real vaultspec project (which collided with its committed `.mcp.json`;
+  run `pw7-1784409828`) is fixed by the 2026-07-19 marked-entry merge ADR,
+  implemented in W05.P17.S42 (`27e9726`) and live-proven on a real project root in
+  W05.P17.S43: the workspace `.mcp.json` now merges the project's own servers with
+  the bridged authoring entry during the run and restores the original on cleanup,
+  no refusal. The full exposure chain (upstream CLI surfacing, bridge cold-start,
+  projection collision) is cleared; S18/S20 now gate only on the engine-changeset
+  closure from a completing provider lane. See the S43 record.

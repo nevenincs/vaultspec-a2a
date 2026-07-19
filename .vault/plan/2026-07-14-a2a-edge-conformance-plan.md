@@ -13,6 +13,15 @@ related:
   - '[[2026-07-14-a2a-edge-conformance-worktree-reconciliation-audit]]'
 ---
 
+<!-- LINK RULES:
+     - [[wiki-links]] are ONLY for .vault/ documents in the
+       related: field above.
+     - The related: field carries the AUTHORISING documents
+       (ADR, research, reference, prior plan) for every Step in
+       this plan. Steps inherit this chain; per-row reference
+       footers do not exist.
+     - NEVER use [[wiki-links]] or markdown links in the
+       document body. -->
 
 # `a2a-edge-conformance` plan
 
@@ -156,6 +165,13 @@ Close the two dashboard-reported blockers for Transcript live-frame wiring: the 
 - [x] `W05.P16.S39` - Run the end-to-end D3 relay proof through the engine pass-through stream against the healthy resident stack, capture contract-correct frame evidence (envelope fields, sequence, replay) in the step record, and raise the cross-repo re-arm event to the dashboard team mirroring the S32 pattern; `src/vaultspec_a2a/service_tests/, .vault/exec/`.
 - [x] `W05.P16.S40` - Fix the startup-reconciliation recovery-epoch bug: the paused_resumable repair outcome path never increments threads.recovery_epoch (unlike checkpoint_unavailable), so any subsequent boot re-derives the same startup-repair idempotency key and crashes the whole app with an IntegrityError on the control_actions insert. Increment the epoch on every applied repair outcome and make the idempotency-key insert conflict-tolerant (an already-applied repair replays as a no-op, honoring idempotency semantics instead of crashing). Prove with a live boot-reboot cycle over a thread in paused_resumable state; `src/vaultspec_a2a/database/reconciliation.py, src/vaultspec_a2a/database/tests/`.
 - [x] `W05.P16.S41` - Close the two non-blocking re-review follow-ups: reconcile watchdog worker state for adopted (externally-managed) workers so plain health readiness stops reporting a healthy adopted worker as down (relax the spawned gate to reach the non-owned reconciliation branch, or set the status from the adoption probe), and harden get_or_create_control_action to an atomic on-conflict-do-nothing insert so the helper name matches its guarantee under concurrent boots. Prove with live tests covering an adopted worker reaching status up and readiness true; `src/vaultspec_a2a/control/worker_management.py, src/vaultspec_a2a/api/app.py, src/vaultspec_a2a/database/permission_repository.py`.
+
+### Phase `W05.P17` - Real-project-root MCP projection
+
+Implement the accepted real-project-root mcp projection decision (2026-07-19 ADR): rework the run-workspace projection from file-replacement to marked-entry merge so every invocation resolves both the project's real MCP config and the bridged tool surface against real project roots, then re-run the S20 exposure probe with the run workspace pinned to a real project root as closure evidence.
+
+- [ ] `W05.P17.S42` - Implement marked-entry merge projection per the 2026-07-19 real-project-root mcp projection ADR: merge declared surfacing entries into an existing foreign .mcp.json with an added-keys marker, loud refusal only on name collision or unparseable file, cleanup inverting exactly the marker's entry list (foreign and mid-run user entries never touched), idempotent crash-residue re-projection, legacy whole-file marker honored for one transition release. Live real-seam tests for merge, create, collision, crash-residue, and mid-run-edit cases; `src/vaultspec_a2a/providers/_acp_project_mcp.py, src/vaultspec_a2a/providers/tests/`.
+- [ ] `W05.P17.S43` - Re-run the S20 solo-coder exposure probe with the run workspace pinned to a REAL project root carrying its own git-tracked .mcp.json, prove the agent sees both the project's servers and the bridged authoring tools (engine-side cs:<run_id> changeset, zero .vault writes, original .mcp.json bytes restored after cleanup), and record the closure in the S18/S20 records; `src/vaultspec_a2a/service_tests/, .vault/exec/`.
 
 ## Description
 

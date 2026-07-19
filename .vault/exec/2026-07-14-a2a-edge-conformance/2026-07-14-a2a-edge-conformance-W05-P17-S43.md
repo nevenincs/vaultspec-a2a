@@ -93,3 +93,41 @@ further proof.
 
 The probe driver lives in the session scratchpad (not committed); it reuses the
 production acceptance helpers and only overrides the workspace-root coupling.
+
+## Closure (2026-07-19, orchestrator re-drive)
+
+The re-arm criterion is met and every closure criterion is green. With the
+provider lane available again, the same probe driver was re-run against a
+freshly bounced resident on current head (gateway pid 81092, gateway-owned
+worker with correct provenance, doctor clean exit 0) and a quiet engine vault
+(all concurrent sessions stopped, so the previously-contaminated zero-writes
+criterion was cleanly measurable).
+
+Run `pw7-1784454134` (solo-coder preset, autonomous, workspace pinned to a
+crash-isolated real project root seeded with the foreign no-marker config):
+
+- **Changeset (unforgeable): PROVEN.** `cs:pw7-1784454134:bridge` present in
+  the engine's authoring plane - only a real bridged `propose_changeset`
+  forwarded to the engine creates a run-scoped changeset. The solo-coder
+  natively invoked the bridged authoring tool mid-turn: the full
+  surfacing-to-invocation-to-engine-effect chain the S18/S20 program existed
+  to prove.
+- **Zero vault writes: PROVEN.** Empty created/modified/deleted delta across
+  the run on the uncontaminated engine vault.
+- **Projection during: PROVEN.** Mid-run the workspace config carried BOTH
+  surfaces (`project-devtools` and `vaultspec-authoring`) with the dict marker
+  listing exactly the added entry.
+- **Restoration after: PROVEN.** The run reached terminal `completed` and the
+  workspace config was restored to the exact original foreign content, marker
+  gone, foreign top-level key intact.
+
+One driver artifact for the record: the probe's own printed verdict was RED
+solely because it broke out of its observe loop the moment the changeset
+appeared (run still live, `terminal=None`) and checked restoration two seconds
+later while the run legitimately still held the projection; post-terminal
+inspection confirmed the restoration. The product behaved correctly; the
+driver's early-break is the artifact.
+
+This discharges the plan row in full: the accepted real-project-root mcp
+projection decision is live-proven end to end, and the s43-closure-owed
+residual from the phase review is closed.

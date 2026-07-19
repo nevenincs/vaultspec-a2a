@@ -217,6 +217,140 @@ def desktop_migrate(descriptor: Path) -> None:
         sys.exit(1)
 
 
+def _emit_snapshot_failure(operation: str, exc: Exception) -> None:
+    """Print a bounded machine-readable snapshot failure and exit non-zero.
+
+    The operator-facing detail names the offending store or descriptor so a
+    failed updater transaction is actionable; the exit status carries the failure
+    so automation need not parse the payload.
+    """
+    click.echo(
+        json.dumps(
+            {
+                "status": "failed",
+                "operation": operation,
+                "error_class": type(exc).__name__,
+                "detail": str(exc),
+            },
+            indent=2,
+            sort_keys=True,
+        )
+    )
+    sys.exit(1)
+
+
+@main.command("desktop-snapshot-create")
+@click.option(
+    "--app-home",
+    required=True,
+    type=click.Path(path_type=Path),
+    help="Explicit absolute mutable-state root for the desktop profile.",
+)
+@click.option(
+    "--group-id",
+    required=True,
+    help="Single-component identity for the new snapshot group.",
+)
+def desktop_snapshot_create(app_home: Path, group_id: str) -> None:
+    """Capture the desktop consistency group as one committed snapshot.
+
+    Internal external-updater command: after quiescence it captures the primary
+    and checkpoint stores as one receipt-verifiable group and prints the committed
+    group descriptor as JSON to stdout. It refuses a live or locked store and a
+    group id that is already committed. This lifecycle verb is CLI-only and is
+    never exposed on the run-control HTTP API; the exit status is zero only when
+    the group commits.
+    """
+    from ..desktop.snapshot import SnapshotError, create_snapshot
+
+    try:
+        descriptor = create_snapshot(app_home, group_id)
+    except SnapshotError as exc:
+        _emit_snapshot_failure("create", exc)
+        return
+    click.echo(json.dumps(descriptor.model_dump(mode="json"), indent=2, sort_keys=True))
+
+
+@main.command("desktop-snapshot-inspect")
+@click.option(
+    "--app-home",
+    required=True,
+    type=click.Path(path_type=Path),
+    help="Explicit absolute mutable-state root for the desktop profile.",
+)
+@click.option(
+    "--group-id",
+    required=True,
+    help="Identity of the committed snapshot group to inspect.",
+)
+def desktop_snapshot_inspect(app_home: Path, group_id: str) -> None:
+    """Print a committed snapshot group's descriptor after integrity-checking it.
+
+    Internal external-updater command: it reports a group only when its descriptor
+    is committed and every captured store still matches its recorded digest, and
+    prints the descriptor as JSON to stdout. An uncommitted or corrupt group makes
+    the command fail closed and exit non-zero. CLI-only; never HTTP-exposed.
+    """
+    from ..desktop.snapshot import SnapshotError, inspect_snapshot
+
+    try:
+        descriptor = inspect_snapshot(app_home, group_id)
+    except SnapshotError as exc:
+        _emit_snapshot_failure("inspect", exc)
+        return
+    click.echo(json.dumps(descriptor.model_dump(mode="json"), indent=2, sort_keys=True))
+
+
+@main.command("desktop-snapshot-restore")
+@click.option(
+    "--app-home",
+    required=True,
+    type=click.Path(path_type=Path),
+    help="Explicit absolute mutable-state root for the desktop profile.",
+)
+@click.option(
+    "--group-id",
+    required=True,
+    help="Identity of the committed snapshot group to restore.",
+)
+@click.option(
+    "--resume/--no-resume",
+    "resume",
+    default=False,
+    help="Roll forward an interrupted restore instead of refusing.",
+)
+def desktop_snapshot_restore(app_home: Path, group_id: str, resume: bool) -> None:
+    """Restore the desktop consistency group from a committed snapshot.
+
+    Internal external-updater command: after quiescence it restores every group
+    member from its verified captured copy under a quiesced-restore marker, then
+    prints a bounded JSON result to stdout. It requires the quiesced condition and
+    refuses a live or locked store; an interrupted restore is refused unless
+    ``--resume`` is given, which rolls it forward deterministically. CLI-only;
+    never HTTP-exposed. The exit status is zero only when the group is restored.
+    """
+    from ..desktop.snapshot import SnapshotError, restore_snapshot
+
+    try:
+        outcome = restore_snapshot(app_home, group_id, resume=resume)
+    except SnapshotError as exc:
+        _emit_snapshot_failure("restore", exc)
+        return
+    click.echo(
+        json.dumps(
+            {
+                "status": "succeeded",
+                "operation": "restore",
+                "group_id": outcome.group_id,
+                "restored": [store.value for store in outcome.restored],
+                "resumed": outcome.resumed,
+            },
+            indent=2,
+            sort_keys=True,
+        )
+    )
+
+
 def _expected_route_signature() -> list[str]:
     """Return the route signature the installed source currently defines.
 

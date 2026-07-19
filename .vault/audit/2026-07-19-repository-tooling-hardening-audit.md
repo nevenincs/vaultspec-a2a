@@ -535,7 +535,8 @@ The wrapper was deleted. Forced adoption now runs only in a disposable clone,
 where its tracked projection must match the live repository byte-for-byte. The
 live workspace receives only absent runtime seeds through exclusive creation,
 then uses Core's non-destructive sync. An untracked `.mcp.json` makes first
-adoption fail before Core can touch the live workspace.
+adoption fail before Core can touch the live workspace. Upstream ownership is
+accepted by open issue `nevenincs/vaultspec-core#229`.
 
 ### s12-rag-setup-regression | high | Public setup stopped enrolling the RAG workspace
 
@@ -593,10 +594,10 @@ selection and keep RAG and Torch optional.
 
 Type: validation reproducibility. The available `actionlint-py` 1.7.7.24 label
 inventory rejected a concurrently introduced `macos-15-intel` runner, while
-actionlint 1.7.12 accepts the current workflow corpus. Status: open and assigned
-to the repository-health queue. Pin a current workflow-lint authority in the
-project toolchain or select a runner label supported by the declared authority;
-do not make ambient availability the hosted contract.
+actionlint 1.7.12 accepts the current workflow corpus. Status: resolved. The
+tooling group pins `actionlint-py` 1.7.12.24, the canonical code gate and Prek
+hook invoke it, and an isolated locked run validates every hosted workflow with
+actionlint 1.7.12.
 
 ### s12-core-prek-regression-coverage | medium | Cross-tool convergence has no committed acceptance test
 
@@ -604,26 +605,30 @@ Type: test coverage. Real clean-clone evidence proves two Core and RAG setup
 runs preserve `prek.toml`, avoid the legacy hook file, and leave the tracked
 tree unchanged. Existing hook tests do not automate that installed-tool
 boundary or the new enrollment helper's dirty-file rejection, projection-drift
-rejection, and exclusive-seed conflict paths. Status: open and assigned to the
-repository-tooling queue. Add non-mocked temporary-repository subprocess tests
-that install the locked tools and assert rejection safety, byte convergence,
-exclusive creation, and Git convergence.
+rejection, and exclusive-seed conflict paths. Status: resolved. Four committed
+real-filesystem enrollment tests cover those rejection paths, build a genuine
+Core-managed Git repository, clone it without ignored runtime state, execute
+adoption twice as a subprocess, and assert manifest, Prek-byte, and tracked-tree
+convergence.
 
 ### s12-unix-build-clean-portability | medium | Artifact cleanup remains PowerShell-only
 
 Type: platform portability. Doctor has native Windows and Unix variants, but
-the public build-clean recipe still embeds a PowerShell implementation. Status:
-open and assigned to the repository-tooling queue. Add owner-equivalent Windows
-and Unix variants with the same resolved-path containment guard before claiming
-full Unix control-surface parity.
+the public build-clean recipe embedded a PowerShell implementation. Status:
+resolved. The recipe now calls one cross-platform Python implementation with a
+resolved repository-containment guard. Real-filesystem tests prove it removes
+only `dist`, `docs/_build`, `*.egg-info`, and `__pycache__` directories and
+refuses a target outside the repository.
 
 ### s12-runtime-ignore-ownership | medium | RAG runtime surfaces remain outside Core's managed policy
 
 Type: generated-state ownership. Fresh setup exposes `.vaultspec/runtime/` and
 `.qdrant-initialized`, while Core owns the framework ignore block and does not
 currently list them. Status: open and assigned first to the Core/RAG integration
-queue. Decide whether Core should own these exact runtime entries before adding
-any repository fallback, preserving the single-writer boundary.
+queue. RAG issue `nevenincs/vaultspec-rag#236` now owns the runtime-artifact
+contract. Core issue `nevenincs/vaultspec-core#230` owns its provider-native lock
+sentinels. No repository fallback duplicates either framework's single-writer
+boundary.
 
 ### s12-unit-contract-failures | high | Full unit selection exposes 15 product-contract failures
 
@@ -634,7 +639,10 @@ preset availability, ACP capsule resolution, Codex config-home behavior, thread
 error exports, and thread feedback state. Status: open and assigned to the
 accepted codebase-health plan and the relevant desktop, context, control,
 provider, protocol, and thread owner queues. The tooling gate preserves these
-failures without skips, fakes, mocks, or weakened selection.
+failures without skips, fakes, mocks, or weakened selection. A later isolated
+rerun of the eight affected modules selected 229 tests and all passed in the
+current integrated worktree. Keep this item open until the owning changes are
+committed and the full clean-clone unit selection passes.
 
 ### s12-legacy-precommit-lock | low | Existing checkouts can expose an obsolete zero-byte lock
 
@@ -642,14 +650,16 @@ Type: migration residue. Replacing `.pre-commit-config.yaml` with `prek.toml`
 correctly removed the legacy lock entry from Core's managed ignore block, so an
 old checkout can expose `.pre-commit-config.yaml.lock`. Status: open for local
 cleanup guidance. The observed file is zero bytes and runtime-only; it must not
-be reintroduced into a competing repository-owned ignore policy.
+be reintroduced into a competing repository-owned ignore policy. Core issue
+`nevenincs/vaultspec-core#230` owns the migration cleanup and managed-ignore fix.
 
 ### s12-core-precommit-warning | low | Repeated Core setup reports an unknown PrecommitSignal member
 
 Type: upstream diagnostics. A second Core setup can emit
 `Unknown PrecommitSignal member: unrefreshable` while returning success and
-converging byte-for-byte. Status: open upstream observation; retain as a warning
-until Core either recognizes or removes the signal.
+converging byte-for-byte. Status: open in
+`nevenincs/vaultspec-core#231`; retain as a warning until Core either recognizes
+or removes the signal.
 
 ### s12-linux-docker-engine | low | Live Unix Docker acceptance was environmentally blocked
 
@@ -658,6 +668,19 @@ integration, infrastructure, production, and database configuration resolution.
 The available Docker Desktop engine returned HTTP 500 for the Linux-engine
 request, preventing a live Unix container run. Status: open operational
 evidence, not a repository defect. Repeat on a healthy Unix Docker host.
+
+### runtime-fallback-ownership-drift | high | Initial repository fallback bypassed Core's exclusive ignore ownership
+
+Type: architectural ownership. A follow-up initially added
+`.vaultspec/runtime/` to the repository-owned runtime section. The rule was
+narrow and effective, but it sat outside Core's marker-bounded block and
+contradicted the accepted single-writer constraint plus the open S12 finding.
+Status: resolved before commit by removing the tracked fallback, retaining RAG
+issue `nevenincs/vaultspec-rag#236` as the shared-policy owner, and adding the
+exact path only to this worktree's local `.git/info/exclude`. Refreshed local
+and origin refs contain zero runtime-path objects, so no history rewrite or
+force-push is warranted. The local exclusion is immediate containment, not a
+published replacement for the upstream contract.
 
 ## Recommendations
 
@@ -716,6 +739,6 @@ runtime requirement changes.
 
 Do not hide the 15 product-contract failures behind selection changes. Resolve
 them through the accepted codebase-health plan and their owning feature audits,
-then rerun the exact 2,141-test selection. Add the clean-clone Core/Prek/RAG
-convergence test and a pinned workflow-lint authority as repository-tooling
-follow-up work.
+then rerun the exact 2,141-test selection from a clean commit. Preserve the
+committed Core adoption and build-clean real-filesystem tests and the exact
+workflow-lint pin as repository-tooling regression gates.

@@ -25,6 +25,20 @@ related:
   - '[[2026-07-18-desktop-product-profile-W01-P03-S14]]'
   - '[[2026-07-18-desktop-product-profile-W01-P03-S15]]'
   - '[[2026-07-18-desktop-product-profile-W02-P04-S16]]'
+  - '[[2026-07-18-desktop-product-profile-W02-P04-S17]]'
+  - '[[2026-07-18-desktop-product-profile-W02-P04-S18]]'
+  - '[[2026-07-18-desktop-product-profile-W02-P04-S19]]'
+  - '[[2026-07-18-desktop-product-profile-W02-P04-summary]]'
+  - '[[2026-07-18-desktop-product-profile-W02-P05-S20]]'
+  - '[[2026-07-18-desktop-product-profile-W02-P05-S21]]'
+  - '[[2026-07-18-desktop-product-profile-W02-P05-S22]]'
+  - '[[2026-07-18-desktop-product-profile-W02-P05-S23]]'
+  - '[[2026-07-18-desktop-product-profile-W02-P05-S24]]'
+  - '[[2026-07-18-desktop-product-profile-W02-P05-summary]]'
+  - '[[2026-07-18-desktop-product-profile-W02-P06-S25]]'
+  - '[[2026-07-18-desktop-product-profile-W02-P06-S27]]'
+  - '[[2026-07-18-desktop-product-profile-W02-P06-S28]]'
+  - '[[2026-07-18-desktop-product-profile-W02-P06-S29]]'
   - '[[2026-07-18-desktop-product-profile-adr]]'
   - '[[2026-07-18-desktop-product-profile-plan]]'
   - '[[2026-07-18-desktop-product-profile-reference]]'
@@ -69,6 +83,20 @@ Auto-generated index of all documents tagged with `#desktop-product-profile`.
 - `2026-07-18-desktop-product-profile-W01-P03-S14` - Verify capsule identity target closure entrypoints digests licenses and software bill of materials without a source checkout
 - `2026-07-18-desktop-product-profile-W01-P03-S15` - Create the artifact workflow that publishes deterministic component archives and manifests for dashboard consumption
 - `2026-07-18-desktop-product-profile-W02-P04-S16` - Define the desktop profile and validate explicit immutable and mutable product roots
+- `2026-07-18-desktop-product-profile-W02-P04-S17` - Derive database checkpoint log credential discovery receipt workspace temporary-home and snapshot paths only from the explicit desktop app home
+- `2026-07-18-desktop-product-profile-W02-P04-S18` - Add the manifest-declared desktop gateway invocation without changing Compose or foreground serve defaults
+- `2026-07-18-desktop-product-profile-W02-P04-S19` - Prove desktop state remains app-home-seated across launch-directory changes and capsule relocation
+- `2026-07-18-desktop-product-profile-W02-P04-summary` - `desktop-product-profile` `W02.P04` summary
+- `2026-07-18-desktop-product-profile-W02-P05-S20` - Make ordinary desktop database checkpointer and SDD initialization validate compatibility without schema mutation
+- `2026-07-18-desktop-product-profile-W02-P05-S21` - Validate the updater one-time descriptor owned state roots and compatible schema range before lifecycle mutation
+- `2026-07-18-desktop-product-profile-W02-P05-S22` - Implement the staged-generation Alembic SDD-backfill and checkpoint migration entrypoint with bounded machine-readable results
+- `2026-07-18-desktop-product-profile-W02-P05-S23` - Expose the internal desktop migrate command while keeping lifecycle verbs off the public run-control API
+- `2026-07-18-desktop-product-profile-W02-P05-S24` - Run package-local migrations from a clean installed capsule and reject incompatible or live-store attempts
+- `2026-07-18-desktop-product-profile-W02-P05-summary` - `desktop-product-profile` `W02.P05` summary
+- `2026-07-18-desktop-product-profile-W02-P06-S25` - Create temp-fsynced atomic snapshot descriptors and quiesced restore markers for every declared consistency-group store
+- `2026-07-18-desktop-product-profile-W02-P06-S27` - Expose bounded snapshot inspect and restore commands for the external updater transaction
+- `2026-07-18-desktop-product-profile-W02-P06-S28` - Prove primary and checkpoint databases restore together from a real consistency group
+- `2026-07-18-desktop-product-profile-W02-P06-S29` - Prove interrupted snapshot or restore never exposes a partially committed group
 
 ### plan
 

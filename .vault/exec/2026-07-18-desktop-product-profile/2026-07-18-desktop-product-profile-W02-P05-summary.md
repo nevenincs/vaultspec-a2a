@@ -8,9 +8,6 @@ related:
   - "[[2026-07-18-desktop-product-profile-plan]]"
 ---
 
-
-
-
 # `desktop-product-profile` `W02.P05` summary
 
 Phase P05 separated schema validation from migration: ordinary armed desktop

@@ -822,6 +822,80 @@ caller-owned temporary generation whose cleanup and activation boundaries are
 the transaction. After that choice, require Windows cross-process and native
 Linux/macOS no-replace tests before independent formal review.
 
+## Corrective review after the unsafe certification commit
+
+Status: SAFETY PASS FOR THE PINNED WORKING SNAPSHOT; PRODUCT READINESS FAILS.
+`W01 P03 S13`, `S14`, and `S15` remain open, and no release or tag publication
+is approved.
+
+Commit `9b78c164` recorded an implementation-and-documentation certification
+before the required review gates were satisfied. Later commits now descend from
+it, so this audit does not rewrite shared history. The commit remains unsuitable
+as product evidence. This disposition applies only to the uncommitted corrective
+snapshot with these SHA-256 identities:
+
+- `_filesystem_authority.py`:
+  `9977638f53664b9e8e4298e731aa4d8cf6185fefe9248d90939643b498cf91fc`
+- `capsule.py`:
+  `dc3c80c13487f5e51059237be01c279552345fce2b410bc8e8724b40ba9d2e62`
+- `capsule_evidence.py`:
+  `bf67d40d4f3bd793733cf0aad4c1e9c2ecc3a796533eae58d918c3c1a737a2a6`
+- `test_capsule_archives.py`:
+  `89b2d1ece32ac277175600a31cb4bb19a691b1eb9706ebeab4396cf38ed1ad70`
+- `test_capsule_publication_races.py`:
+  `20337f281149d0ccd23135a6c8acbea74726f74660bd37cd712a9596b461adb5`
+
+### Safety findings resolved in the working snapshot
+
+- Windows publishes the exact held file or directory handle relative to the
+  leased destination through `NtSetInformationFile` with no replacement.
+- POSIX member materialization creates and opens descendants relative to the
+  continuously leased quarantine descriptor with mandatory `O_DIRECTORY` and
+  `O_NOFOLLOW`; unsupported capability fails closed.
+- Source-tree enumeration consumes at most the remaining global entry budget
+  plus one before sorting or collecting metadata.
+- Failed POSIX projections clear through the held quarantine descriptor,
+  identity-check the empty name beneath the leased parent, and reclaim the
+  empty slot descriptor-relatively. The unavoidable same-user empty-name swap
+  remains inside the documented exclusive-parent-mutation precondition.
+- Named archive staging is unbuffered. Exceptional exit truncates the exact
+  still-open file descriptor to zero before `fsync` and close, so at most 16
+  zero-length named slots can remain. Successful publication and anonymous
+  Linux staging are not truncated.
+- Typed overwrite refusal is preserved under both simultaneous and delayed
+  publisher startup. Tests continue to use production imports and real files
+  and processes without mocks, patches, skips, or expected failures.
+
+The final safety review found no unresolved critical, high, or medium safety
+finding for those exact production hashes. Hash-pinned Windows evidence reports
+42 focused artifact/capsule tests and 219 complete desktop tests passing. Ruff
+format/check, Ty, the lock check, and diff checks pass. Isolated WSL CPython
+3.13 resource tests report three passes for bounded enumeration, exact-file
+truncation, and failed-projection slot reclamation.
+
+### Product readiness remains blocked
+
+Named POSIX file publication and every POSIX directory publication currently
+fail with `ENOSYS` because native rename APIs re-resolve a mutable source name.
+Linux archive publication therefore works only when anonymous `O_TMPFILE` plus
+descriptor-bound `linkat` is available; Linux directory projection and macOS
+archive and directory publication cannot complete. The cross-process directory
+race test still requires one real winner and one collision loser on every
+supported target; it does not accept `ENOSYS` as success.
+
+The governing architecture already assigns release-set receipt, activation,
+rollback, and final visibility to the dashboard-owned immutable generation.
+The next implementation must expose and prove an A2A writer/projector contract
+for a caller-owned unpublished generation, then make the dashboard activate
+only the complete five-target cohort. Do not reintroduce name-bound inner
+publication or weaken target-native success tests to close this gap.
+
+Target-native macOS evidence, both Linux release architectures, the Intel
+macOS `cryptography==49.0.0` build, Windows CRT redistribution and servicing
+provenance, and qualified authority for the root ACP package's Anthropic SDK
+dependency remain unresolved. General implementation approval does not satisfy
+those target-native or redistribution gates.
+
 ## Capsule-foundation corrective implementation review
 
 Status: IMPLEMENTED AND INDEPENDENTLY APPROVED AS A FOUNDATION. This supersedes
@@ -874,3 +948,141 @@ Type: documentation accuracy. Status: resolved after the final independent
 review. The public projector and archive-writer docstrings now describe fixed
 Windows slots, anonymous Linux file staging, native no-replace publication,
 fail-closed unsupported hosts, and the bounded quarantine model.
+
+## Capsule-foundation corrective re-review
+
+Status: REVISED AFTER CONTRADICTORY IMPLEMENTATION EVIDENCE. The historical
+approval above is retained because it records the review that occurred, but its
+POSIX premise was inaccurate: the reviewed implementation identity-checked a
+named source and then renamed that name, leaving a same-user check-to-rename
+swap interval. The current correction restores the contract the approval
+claimed: Windows publishes the exact held handle, Linux may publish an
+anonymous ``O_TMPFILE`` through descriptor-bound ``linkat``, and named POSIX
+files plus POSIX directories fail closed.
+
+### capsule-posix-publication-not-identity-bound | high | Named sources could be swapped after validation
+
+Type: filesystem authority and publication safety. Status: resolved in the
+corrective pass. Named POSIX file and directory publication now raises
+``ENOSYS`` before any name-based rename. POSIX tests require the destination to
+remain absent and the owned projection quarantine to remain bounded; Windows
+retains exact-handle no-replace publication.
+
+### active-run-feature-selector-unindexed | medium | Feature-only discovery lacked a matching index
+
+Type: query scalability. Status: resolved in the corrective pass. The schema
+and migration now provide the ``is_active, feature_tag, created_at DESC, id
+DESC`` index, and the real 100,000-row query-plan test covers the feature-only
+selector as well as workspace-plus-feature discovery.
+
+### gateway-and-migration-api-docs-missing | medium | New operator surfaces lacked Sphinx references
+
+Type: user documentation. Status: resolved in the corrective pass. The module
+reference now registers the authentication, transaction, and migration modules
+and their public objects with Sphinx roles. The operator guide documents bearer
+reuse, public health behavior, tokenless fail-closed behavior, and the internal
+one-time desktop migration command.
+
+### corrective-history-deleted | medium | Rolling audit approval was removed instead of superseded
+
+Type: audit governance. Status: resolved in the corrective pass. The historical
+review is restored verbatim and this re-review appends the contradictory
+evidence and revised disposition rather than rewriting history.
+
+### snapshot-and-discovery-api-docs-missing | medium | Later public modules were absent from the API registry
+
+Type: user documentation. Status: resolved after formal re-review. The Sphinx
+module reference now registers the desktop consistency-group snapshot models
+and functions plus the bounded active-run discovery projection. The operator
+guide explains quiescence, descriptor visibility, interrupted-restore markers,
+viewer rebinding, selector bounds, and the authoritative per-run follow-up.
+
+### real-corpus-tests-used-skip | low | Enrolled-corpus integration tests bypassed a missing prerequisite
+
+Type: test policy. Status: resolved after formal re-review. The three real-rule
+corpus tests now fail with an enrollment instruction when the required synced
+corpus is absent; they no longer use ``pytest.skip``.
+
+### provider-credential-cleanup-timeout | low | One pre-existing provider cleanup test is timing-sensitive
+
+Type: test reliability. Status: open follow-up. A broad changed-file review run
+observed ``test_turn_failure_after_build_cleans_credential_home`` time out once
+instead of reaching its expected prompt ``RuntimeError``; the edited assertion
+in that file is unrelated. Keep this queued for provider-process teardown
+diagnosis if the canonical isolated gate reproduces it.
+
+### desktop-vault-hygiene-warnings | low | Existing annotations and feature index remain noisy
+
+Type: audit hygiene. Status: open follow-up. ``vault check all`` is structurally
+clean but still reports template annotations, execution-record whitespace, and
+a stale ``desktop-product-profile`` feature index. These warnings do not alter
+the capsule safety disposition and remain visible for the next curation pass.
+
+## Architecture-owner disposition after outer-generation mapping
+
+Status: INNER PUBLICATION SAFETY PASS; END-TO-END PRODUCT ACTIVATION FAIL.
+This is the latest disposition. Historical implementation-approval sections
+above describe earlier review snapshots and do not close producer Steps
+``W01.P03.S13`` through ``S15``, authorize a release, or establish that a
+dashboard receipt can safely activate the current output.
+
+The pinned inner-publication snapshot remains independently acceptable for its
+narrow filesystem-safety claim. The reviewed production hashes are
+``29360075558E8961DBF13B91E22EFACFA34B5151A9E4873EF8944FEE2504FD78`` for
+``_capsule_archive_io.py``,
+``9977638F53664B9E8E4298E731AA4D8CF6185FEFE9248D90939643B498CF91FC`` for
+``_filesystem_authority.py``,
+``DC3C80C13487F5E51059237BE01C279552345FCE2B410BC8E8724B40BA9D2E62`` for
+``capsule.py``, and
+``BF67D40D4F3BD793733CF0AAD4C1E9C2ECC3A796533EAE58D918C3C1A737A2A6`` for
+``capsule_evidence.py``. The race contract hash is
+``20337F281149D0CCD23135A6C8ACBEA74726F74660BD37CD712A9596B461ADB5``.
+It contains no POSIX ``ENOSYS`` acceptance branch: POSIX directory publication
+fails the test because the test requires exactly one real winner, one
+no-replace loser, and the winner's bytes.
+
+The accepted architecture already provides the portable completion path. The
+dashboard creates a final-name generation that remains unpublished because no
+active receipt selects it. A2A claims one absent prefix and writes exclusively
+through continuously leased descriptor or handle authority, returning
+deterministic evidence without an inner rename. A failure poisons the complete
+unpublished generation; A2A does not perform name-based partial cleanup. The
+dashboard verifies the complete generation and makes it visible only by
+committing a complete active receipt. No new ADR is required because both
+accepted provisioning records already assign release-set receipt, activation,
+and rollback authority to the dashboard.
+
+The cross-repository code audit found that the dashboard cannot yet serve as
+that visibility transaction. Unreceipted generation directories are inert:
+production start derives a generation only from ``receipt.active_generation``
+and no production consumer scans the generations directory. However:
+
+- ``LifecycleController::active_receipt`` accepts parsed ``Staged`` and
+  ``RollingBack`` records instead of requiring an active receipt.
+- ``Receipt::persist`` uses a predictable process-identifier temporary name,
+  path-based write and rename, and no file or directory durability barrier.
+  It also stores candidate interruption state at the active receipt path.
+- The receipt does not bind the dashboard build, complete release-set manifest
+  digest, component-lock digest, or installed-generation file digest table.
+- Gateway start reads ``component.lock`` from the candidate generation itself
+  and verifies manifest claims, but it does not establish a dashboard-trusted
+  lock identity or verify every installed byte against the receipt-bound
+  release set.
+
+The canonical plans now expose these findings instead of preserving false
+completion. A2A Steps ``S13``, ``S14``, and ``S15`` are open; new Steps ``S94``
+through ``S97`` own the direct unpublished-generation projector, exact-file ZIP
+writer, real process tests, and child-directory authority. Dashboard Steps
+``S08``, ``S11``, and ``S16`` are reopened; new Steps ``S162`` through ``S165``
+own generation identity, inertness, receipt-bound installed-byte verification,
+and start refusal. Self-install ``S51`` and product-build ``S64`` now require
+final-name unpublished generations and receipt-only activation without a POSIX
+tree rename.
+
+Commit ``9b78c16479951838033d5318a624099f841c5bbd`` remains unsuitable as release
+evidence because it recorded the foundation before this end-to-end contract
+was reviewed. No target artifact, tag, installer, or release may be published
+from it. Target-native macOS and Linux evidence, Intel macOS cryptography,
+Windows C runtime redistribution and servicing provenance, qualified ACP and
+Anthropic SDK redistribution authority, and the immutable five-target cohort
+remain independent blockers.

@@ -11,16 +11,6 @@ related:
   - '[[2026-07-18-desktop-product-profile-reference]]'
 ---
 
-<!-- LINK RULES:
-     - [[wiki-links]] are ONLY for .vault/ documents in the
-       related: field above.
-     - The related: field carries the AUTHORISING documents
-       (ADR, research, reference, prior plan) for every Step in
-       this plan. Steps inherit this chain; per-row reference
-       footers do not exist.
-     - NEVER use [[wiki-links]] or markdown links in the
-       document body. -->
-
 <!-- RETIRED: P15, S88 -->
 
 # `desktop-product-profile` plan
@@ -114,9 +104,13 @@ Move migrations, presets, Node.js adapter resolution, and component metadata beh
 
 Produce reproducible component artifacts for each accepted target triple with digests, licenses, and software bill of materials evidence.
 
-- [x] `W01.P03.S13` - Assemble a deterministic target capsule from pinned Python Node ACP and package-owned inputs; `scripts/build_desktop_capsule.py`.
-- [x] `W01.P03.S14` - Verify capsule identity target closure entrypoints digests licenses and software bill of materials without a source checkout; `scripts/verify_desktop_capsule.py`.
-- [x] `W01.P03.S15` - Create the artifact workflow that publishes deterministic component archives and manifests for dashboard consumption; `.github/workflows/desktop-capsule.yml`.
+- [ ] `W01.P03.S13` - Assemble each deterministic target capsule directly inside one caller-owned final-name unpublished generation from pinned Python Node ACP and package-owned inputs and emit machine-readable evidence without inner publication; `scripts/build_desktop_capsule.py`.
+- [ ] `W01.P03.S14` - Verify the complete caller-owned unpublished generation identity target closure entrypoints installed bytes digests licenses software bill of materials and evidence without a source checkout; `scripts/verify_desktop_capsule.py`.
+- [ ] `W01.P03.S15` - Publish only target-native unpublished generations and component evidence that passed producer verification for dashboard consumption; `.github/workflows/desktop-capsule.yml`.
+- [ ] `W01.P03.S94` - Project archive payloads directly into one exclusively claimed prefix of a caller-owned unpublished generation through continuously leased descriptor or handle authority and return deterministic evidence without inner rename or cleanup; `src/vaultspec_a2a/desktop/capsule.py`.
+- [ ] `W01.P03.S95` - Write deterministic capsule archives through one exact create-new file inside a caller-owned unpublished generation while sharing the bounded emitter and retaining fail-closed legacy publication behavior; `src/vaultspec_a2a/desktop/capsule_evidence.py`.
+- [ ] `W01.P03.S96` - Prove direct-generation projection and archive writing with real files and competing processes including collisions source and parent swaps partial failure evidence bounds and unchanged POSIX legacy-publication refusal; `src/vaultspec_a2a/desktop/tests/test_unpublished_generation.py`.
+- [ ] `W01.P03.S97` - Claim and continuously lease one new child directory beneath an existing authority with relative no-follow creation and exact identity checks on every supported platform; `src/vaultspec_a2a/desktop/_filesystem_authority.py`.
 
 ## Wave `W02` - establish transactional desktop state
 

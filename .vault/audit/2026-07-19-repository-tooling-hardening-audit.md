@@ -348,6 +348,82 @@ Type: evidence integrity. The inventory found 28 `pytest.skip` or
 codebase-health step S102; S09 does not treat collection success as execution
 evidence for these paths.
 
+### s10-actionlint-runner-label-authority | low | Custom self-hosted label was undeclared to workflow linting
+
+Type: hosted-validation configuration. Actionlint recognized `self-hosted` but
+reported the repository's `dev-runner` label as unknown. Status: resolved by
+declaring that exact label in the repository Actionlint configuration. The full
+workflow lint now passes without suppressing runner-label validation.
+
+### self-hosted-bootstrap-untrusted-issue-payload | high | Raw issue content crossed the persistent runner boundary beside a credential
+
+Type: hosted security and architecture. The bootstrap workflow fetched an
+issue's attacker-controlled title and body on the persistent self-hosted runner
+and passed them to an opaque local script while a repository credential was
+present. Status: resolved. Trusted manual dispatch and positive-integer checks
+now precede a read-only issue-existence lookup with the repository token. The
+script receives only the validated action, repository identity, numeric issue
+ID, deterministic title, and empty body; the development PAT is reserved for
+the local script rather than the lookup.
+
+### s10-mutable-action-supply-chain | high | Hosted automation depended on mutable or invalid action references
+
+Type: supply-chain integrity. Checkout, uv setup, Claude, and project automation
+used floating major tags, while the project workflow referenced an unavailable
+`add-to-project` v1 tag. Status: resolved. Every action now uses a full commit
+resolved from its official upstream reference; project automation uses v2, and
+hosted validation provisions uv 0.11.29 and Just 1.46.0 explicitly.
+
+### s10-claude-secret-authorization | high | Secret-bearing Claude jobs lacked an explicit YAML trust boundary
+
+Type: credential authorization. Mention and automatic review jobs could reach
+the Claude OAuth secret without a visible trusted-author rule, and automatic
+review loaded a floating remote plugin marketplace. Status: resolved. Both jobs
+require OWNER, MEMBER, or COLLABORATOR association before the secret-bearing
+action; automatic review uses the pinned action's direct prompt and no floating
+plugin configuration.
+
+### s10-hosted-contract-drift | medium | Hosted tests and migrations bypassed the canonical locked profiles
+
+Type: validation reproducibility. The test workflow duplicated individual
+checks under every dependency group, and migration validation used the legacy
+development profile. Status: resolved. Hosted tests synchronize only locked
+tooling, invoke canonical `just ci`, and run strict documentation separately;
+migrations synchronize and execute the locked server/tooling profile.
+
+### s10-workflow-guardrails | medium | Automation omitted bounded execution and least-privilege defaults
+
+Type: hosted safety. Multiple workflows lacked explicit permissions,
+concurrency, or timeouts, and project item output was interpolated directly in
+a shell block. Status: resolved. Each job now has bounded execution and
+event-specific concurrency, permissions are read-only or empty except for the
+Claude OIDC requirement, and shell data crosses through quoted environment
+variables.
+
+### s10-repository-sha-policy | medium | Server-side Actions policy still permits mutable references
+
+Type: defense in depth. The read-only repository settings audit reported that
+SHA pinning is not required and all actions are allowed. Status: open for owner
+review during S12. The checked-in workflows are immutable, but repository
+policy does not yet prevent a future change from reintroducing floating action
+references.
+
+### s10-full-gate-shared-worktree-drift | medium | Unrelated formatter drift blocks a green canonical CI run
+
+Type: acceptance evidence. The real `just ci` invocation reached Ruff and
+reported that `test_component_contract.py` would be reformatted. Status: open
+for the owner of that concurrent out-of-scope edit and terminal S12 acceptance;
+S10 did not alter the file. Workflow lint, YAML parsing, immutable-pin checks,
+and canonical command dry-runs pass.
+
+### s10-self-hosted-live-evidence | low | Repository-scoped runner inventory cannot prove dispatch readiness
+
+Type: operational evidence. The read-only repository runner query returned no
+repository-scoped runner, although an organization runner may own the declared
+labels. Status: open for S12 live acceptance. The workflow retains the existing
+`self-hosted` and `dev-runner` labels without inventing an environment or runner
+group.
+
 ## Recommendations
 
 No open task remains for S01, S02, or the S03 implementation. Preserve the two
@@ -381,3 +457,9 @@ Preserve S09's explicit selector and dependency classifications. The
 codebase-health plan must replace the inventoried fake, stub, structural
 stand-in, and skip cases with direct production behavior or executable
 environment boundaries before it certifies global test-policy compliance.
+
+Preserve S10's manual self-hosted authorization, content-free bootstrap
+boundary, immutable action references, trusted Claude associations, and
+canonical hosted gate. During S12, rerun `just ci` after the concurrent
+formatter drift is resolved, exercise the organization-owned runner path, and
+decide whether repository policy should require SHA-pinned Actions globally.

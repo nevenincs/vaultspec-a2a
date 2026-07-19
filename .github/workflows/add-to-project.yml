@@ -4,12 +4,20 @@ on:
   issues:
     types: [opened]
 
+permissions: {}
+
+concurrency:
+  group: add-to-project-${{ github.event.issue.number }}
+  cancel-in-progress: false
+
 jobs:
   add-to-project:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
-      - uses: actions/add-to-project@v1
+      - name: Add issue to project
         id: add
+        uses: actions/add-to-project@5afcf98fcd03f1c2f92c3c83f58ae24323cc57fd # v2
         with:
           project-url: https://github.com/users/wgergely/projects/3
           github-token: ${{ secrets.ADD_TO_PROJECT_PAT }}
@@ -17,11 +25,11 @@ jobs:
       - name: Set target date to created_at + 30 days
         env:
           GH_TOKEN: ${{ secrets.ADD_TO_PROJECT_PAT }}
+          PROJECT_ITEM_ID: ${{ steps.add.outputs.itemId }}
         run: |
-          DEADLINE=$(date -d "+30 days" +%Y-%m-%d)
+          DEADLINE="$(date -d '+30 days' +%Y-%m-%d)"
           gh project item-edit \
             --project-id PVT_kwHOAKyuWc4BS9uc \
-            --id ${{ steps.add.outputs.itemId }} \
+            --id "$PROJECT_ITEM_ID" \
             --field-id PVTF_lAHOAKyuWc4BS9uczhAaFWg \
             --date "$DEADLINE"
-

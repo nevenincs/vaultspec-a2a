@@ -77,7 +77,7 @@ Separate validation from repair and reduce currently classified code-health debt
 
 Apply the local contract and least-privilege security boundary to hosted automation.
 
-- [ ] `W03.P06.S10` - Invoke canonical CI, pin actions, minimize permissions, and authorize self-hosted dispatch before secrets; `.github/workflows, repository health configuration`.
+- [x] `W03.P06.S10` - Invoke canonical CI, pin actions, minimize permissions, and authorize self-hosted dispatch before secrets; `.github/workflows, repository health configuration`.
 
 ## Wave `W04` - document, verify, review, and queue
 

@@ -1,40 +1,80 @@
 name: Bootstrap Feature Branch
 
 on:
-  issues:
-    types: [opened, closed, reopened, edited]
+  workflow_dispatch:
+    inputs:
+      issue_number:
+        description: Existing issue number to bootstrap
+        required: true
+        type: string
+      action:
+        description: Issue lifecycle action to process
+        required: true
+        type: choice
+        options:
+          - opened
+          - closed
+          - reopened
+          - edited
 
 permissions:
-  issues: write
-  contents: read
+  issues: read
+
+concurrency:
+  group: bootstrap-issue-${{ inputs.issue_number }}
+  cancel-in-progress: false
 
 jobs:
   bootstrap:
     runs-on: [self-hosted, dev-runner]
-    # Skip edited events unless title or body changed
-    if: >-
-      github.event.action != 'edited' ||
-      github.event.changes.title != null ||
-      github.event.changes.body != null
-    concurrency:
-      group: bootstrap-issue-${{ github.event.issue.number }}
-      cancel-in-progress: false
+    timeout-minutes: 20
     steps:
+      - name: Validate issue dispatch
+        id: issue
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ISSUE_ACTION: ${{ inputs.action }}
+          ISSUE_REPO: ${{ github.repository }}
+          REQUESTED_ISSUE_NUMBER: ${{ inputs.issue_number }}
+        run: |
+          set -euo pipefail
+
+          if [[ ! "$REQUESTED_ISSUE_NUMBER" =~ ^[1-9][0-9]*$ ]]; then
+            echo "issue_number must be a positive integer" >&2
+            exit 2
+          fi
+
+          case "$ISSUE_ACTION" in
+            opened|closed|reopened|edited) ;;
+            *)
+              echo "unsupported issue action" >&2
+              exit 2
+              ;;
+          esac
+
+          ISSUE_NUMBER="$(
+            gh issue view "$REQUESTED_ISSUE_NUMBER" \
+              --repo "$ISSUE_REPO" \
+              --json number \
+              --jq '.number'
+          )"
+
+          echo "issue_number=$ISSUE_NUMBER" >> "$GITHUB_OUTPUT"
+
       - name: Bootstrap local worktree
-        # SECURITY: All issue data passed via env vars, NOT ${{ }} interpolation
-        # in run blocks. Direct interpolation allows script injection via issue
-        # titles containing shell metacharacters.
+        shell: bash
         env:
           GITHUB_TOKEN: ${{ secrets.DEV_RUNNER_PAT }}
-          ISSUE_ACTION: ${{ github.event.action }}
+          ISSUE_ACTION: ${{ inputs.action }}
+          ISSUE_NUMBER: ${{ steps.issue.outputs.issue_number }}
           ISSUE_REPO: ${{ github.repository }}
-          ISSUE_NUMBER: ${{ github.event.issue.number }}
-          ISSUE_TITLE: ${{ github.event.issue.title }}
-          ISSUE_BODY: ${{ github.event.issue.body }}
         run: |
+          set -euo pipefail
+
           /usr/local/bin/bootstrap.sh \
             --action "$ISSUE_ACTION" \
             --repo "$ISSUE_REPO" \
             --issue "$ISSUE_NUMBER" \
-            --title "$ISSUE_TITLE" \
-            --body "$ISSUE_BODY"
+            --title "issue-$ISSUE_NUMBER" \
+            --body ""

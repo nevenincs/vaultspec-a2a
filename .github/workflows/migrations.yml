@@ -1,15 +1,38 @@
 name: Migration Check
+
 on: [push, pull_request]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: migrations-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   migrate:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v7
+      - name: Checkout repository
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          persist-credentials: false
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7
         with:
           enable-cache: true
-      - run: uv python install 3.13
-      - run: uv sync --locked --dev
-      - run: uv run alembic upgrade head
-      - run: uv run alembic downgrade base
-      - run: uv run alembic upgrade head
+          version: "0.11.29"
+
+      - name: Install Python
+        run: uv python install 3.13
+
+      - name: Synchronize locked migration environment
+        run: uv sync --locked --no-default-groups --extra server --group tooling
+
+      - name: Exercise migration round trip
+        run: |
+          uv run --no-sync --frozen --no-default-groups --extra server --group tooling alembic upgrade head
+          uv run --no-sync --frozen --no-default-groups --extra server --group tooling alembic downgrade base
+          uv run --no-sync --frozen --no-default-groups --extra server --group tooling alembic upgrade head

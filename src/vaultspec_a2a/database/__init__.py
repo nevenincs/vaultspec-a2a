@@ -1,10 +1,16 @@
-"""Persistence layer for the orchestrator.
+"""Expose persistence boundaries for runtime state.
 
-Facade re-exporting all public types from the ``vaultspec_a2a.database`` subpackage.
-Consumers should import from this module rather than reaching into
-sub-modules directly::
+:mod:`vaultspec_a2a.database.models` defines SQLAlchemy models, and
+:mod:`vaultspec_a2a.database.session` owns asynchronous sessions. Repository
+modules manage artifacts, authoring cursors, permissions, threads, and the
+persisted task queue.
 
-    from vaultspec_a2a.database import init_db, create_thread, ThreadModel
+Migration support belongs to :mod:`vaultspec_a2a.database.migrations`.
+Persistence stores :mod:`vaultspec_a2a.thread` state for
+:mod:`vaultspec_a2a.control` services.
+
+Choose the model, session, repository, or queue boundary that matches the
+operation. This facade re-exports the supported persistence API.
 """
 
 from ..thread.enums import ApprovalStatus as ApprovalStatus
@@ -34,6 +40,8 @@ from .authoring_cursor_repository import (
 from .authoring_cursor_repository import (
     set_authoring_cursor as set_authoring_cursor,
 )
+from .migrate import build_migration_config as build_migration_config
+from .migrate import migration_script_location as migration_script_location
 from .migrate import run_migrations as run_migrations
 from .models import ArtifactModel as ArtifactModel
 from .models import AuthoringEventCursorModel as AuthoringEventCursorModel
@@ -133,6 +141,7 @@ __all__ = [
     "ThreadStatus",
     "append_cost_record",
     "append_permission_log",
+    "build_migration_config",
     "close_db",
     "create_artifact",
     "create_control_action",
@@ -163,6 +172,7 @@ __all__ = [
     "mark_control_action_superseded",
     "mark_permission_request_applied",
     "mark_task_complete",
+    "migration_script_location",
     "record_permission_request",
     "record_permission_response_submission",
     "record_thread_execution_state",

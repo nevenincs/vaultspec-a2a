@@ -15,7 +15,12 @@ import pytest
 from alembic import command
 from alembic.config import Config
 
-from ..migrate import run_migrations
+from .. import migrations as _migrations_package
+from ..migrate import (
+    build_migration_config,
+    migration_script_location,
+    run_migrations,
+)
 
 _APP_TABLES = {
     "threads",
@@ -210,6 +215,36 @@ class TestAlembicUpgradeDowngrade:
         } <= columns
 
 
+class TestPackageResourceResolution:
+    """The runtime migration path resolves scripts from installed package data."""
+
+    def test_script_location_is_the_migrations_package(self) -> None:
+        """``migration_script_location`` resolves the packaged scripts directory."""
+        expected = Path(next(iter(_migrations_package.__path__))).resolve()
+        location = migration_script_location().resolve()
+
+        assert location == expected
+        assert location.is_dir()
+        assert (location / "env.py").is_file()
+        assert (location / "versions").is_dir()
+
+    def test_runtime_config_consults_no_repo_root_file(self) -> None:
+        """The runtime config attaches no ``alembic.ini`` and binds package scripts."""
+        cfg = build_migration_config("sqlite+aiosqlite:///runtime.db")
+
+        # A programmatic config reads no ini file: env.py's fileConfig branch is
+        # skipped and no repo-root alembic.ini is required at runtime.
+        assert cfg.config_file_name is None
+        script_location = cfg.get_main_option("script_location")
+        assert script_location is not None
+        assert (
+            Path(script_location).resolve() == migration_script_location().resolve()
+        )
+        assert cfg.get_main_option("sqlalchemy.url") == (
+            "sqlite+aiosqlite:///runtime.db"
+        )
+
+
 class TestRunMigrations:
     @pytest.mark.asyncio
     async def test_run_migrations_programmatic(self, runtime_dir: Path) -> None:
@@ -219,3 +254,21 @@ class TestRunMigrations:
 
         tables = _get_tables(db)
         assert tables >= _APP_TABLES
+
+    @pytest.mark.asyncio
+    async def test_run_migrations_upgrades_to_head_from_package_scripts(
+        self, runtime_dir: Path
+    ) -> None:
+        """A real upgrade applied through the package-resolved scripts reaches head."""
+        db = runtime_dir / "package_resolved.db"
+        url = f"sqlite+aiosqlite:///{db}"
+        await run_migrations(url)
+
+        conn = sqlite3.connect(str(db))
+        try:
+            version = conn.execute("SELECT version_num FROM alembic_version").fetchone()
+        finally:
+            conn.close()
+
+        assert version is not None
+        assert version[0] == "0007"

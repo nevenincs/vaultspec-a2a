@@ -24,6 +24,7 @@ related:
   - '[[2026-07-18-desktop-product-profile-W01-P03-S13]]'
   - '[[2026-07-18-desktop-product-profile-W01-P03-S14]]'
   - '[[2026-07-18-desktop-product-profile-W01-P03-S15]]'
+  - '[[2026-07-18-desktop-product-profile-W02-P04-S16]]'
   - '[[2026-07-18-desktop-product-profile-adr]]'
   - '[[2026-07-18-desktop-product-profile-plan]]'
   - '[[2026-07-18-desktop-product-profile-reference]]'
@@ -67,6 +68,7 @@ Auto-generated index of all documents tagged with `#desktop-product-profile`.
 - `2026-07-18-desktop-product-profile-W01-P03-S13` - Assemble a deterministic target capsule from pinned Python Node ACP and package-owned inputs
 - `2026-07-18-desktop-product-profile-W01-P03-S14` - Verify capsule identity target closure entrypoints digests licenses and software bill of materials without a source checkout
 - `2026-07-18-desktop-product-profile-W01-P03-S15` - Create the artifact workflow that publishes deterministic component archives and manifests for dashboard consumption
+- `2026-07-18-desktop-product-profile-W02-P04-S16` - Define the desktop profile and validate explicit immutable and mutable product roots
 
 ### plan
 

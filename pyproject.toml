@@ -67,6 +67,7 @@ tooling = [
   "ty>=0.0.15",
   "vaultspec-core>=0.1.48,<0.2",
   "websockets>=16.0",
+  "zstandard>=0.25.0",
 ]
 dev = [
   { include-group = "tooling" },

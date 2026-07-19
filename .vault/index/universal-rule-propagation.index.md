@@ -3,7 +3,7 @@ generated: true
 tags:
   - '#index'
   - '#universal-rule-propagation'
-date: '2026-07-15'
+date: '2026-07-19'
 modified: '2026-07-19'
 related:
   - '[[2026-03-31-universal-rule-propagation-adr]]'
@@ -17,4 +17,4 @@ Auto-generated index of all documents tagged with `#universal-rule-propagation`.
 
 ### adr
 
-- `2026-03-31-universal-rule-propagation-adr` - `universal-rule-propagation` adr: `adr-028` | (**status:** `proposed`)
+- `2026-03-31-universal-rule-propagation-adr` - `universal-rule-propagation` adr: `adr-028` | (**status:** `accepted`)

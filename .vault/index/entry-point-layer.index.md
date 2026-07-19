@@ -3,7 +3,7 @@ generated: true
 tags:
   - '#index'
   - '#entry-point-layer'
-date: '2026-07-15'
+date: '2026-07-19'
 modified: '2026-07-19'
 related:
   - '[[2026-03-24-api-module-research]]'

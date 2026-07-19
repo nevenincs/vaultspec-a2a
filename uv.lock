@@ -3158,6 +3158,7 @@ all = [
     { name = "ty" },
     { name = "vaultspec-core" },
     { name = "websockets" },
+    { name = "zstandard" },
 ]
 dev = [
     { name = "deptry" },
@@ -3175,6 +3176,7 @@ dev = [
     { name = "ty" },
     { name = "vaultspec-core" },
     { name = "websockets" },
+    { name = "zstandard" },
 ]
 docs = [
     { name = "sphinx" },
@@ -3195,6 +3197,7 @@ tooling = [
     { name = "ty" },
     { name = "vaultspec-core" },
     { name = "websockets" },
+    { name = "zstandard" },
 ]
 
 [package.metadata]
@@ -3249,6 +3252,7 @@ all = [
     { name = "ty", specifier = ">=0.0.15" },
     { name = "vaultspec-core", specifier = ">=0.1.48,<0.2" },
     { name = "websockets", specifier = ">=16.0" },
+    { name = "zstandard", specifier = ">=0.25.0" },
 ]
 dev = [
     { name = "deptry", specifier = ">=0.23.0" },
@@ -3266,6 +3270,7 @@ dev = [
     { name = "ty", specifier = ">=0.0.15" },
     { name = "vaultspec-core", specifier = ">=0.1.48,<0.2" },
     { name = "websockets", specifier = ">=16.0" },
+    { name = "zstandard", specifier = ">=0.25.0" },
 ]
 docs = [{ name = "sphinx", specifier = ">=8.2" }]
 tooling = [
@@ -3284,6 +3289,7 @@ tooling = [
     { name = "ty", specifier = ">=0.0.15" },
     { name = "vaultspec-core", specifier = ">=0.1.48,<0.2" },
     { name = "websockets", specifier = ">=16.0" },
+    { name = "zstandard", specifier = ">=0.25.0" },
 ]
 
 [[package]]

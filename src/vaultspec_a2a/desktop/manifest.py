@@ -1,8 +1,9 @@
 """Deterministic emitter for the desktop component manifest.
 
-The immutable A2A wheel is the sole authority for component identity, version,
-console entrypoints, and the A2A source-artifact digest.  Every other capsule
-asset is an explicitly pinned immutable source artifact.  The emitter performs
+The immutable agent-to-agent (A2A) wheel is the sole authority for component
+identity, version, console entry points, and the A2A source-artifact digest.
+Every other capsule
+asset is an explicitly pinned immutable source artifact. The emitter performs
 no discovery, network access, or wall-clock reads.
 """
 
@@ -660,7 +661,7 @@ def emit_component_manifest(
     """Emit a manifest whose A2A facts derive from its exact wheel artifact.
 
     Source cardinality, uniqueness, and runtime pins are validated before any
-    path is opened.  Expected archive, metadata, file, Alembic, and Pydantic
+    path is opened. Expected archive, metadata, file, Alembic, and Pydantic
     failures are normalized to path-safe :class:`ManifestEmissionError` values.
     """
     validated = _validate_inputs(
@@ -773,7 +774,7 @@ def emit_component_manifest(
 def component_manifest_canonical_bytes(manifest: ComponentManifest) -> bytes:
     """Serialize ``manifest`` with :data:`CANONICAL_JSON_VERSION`.
 
-    ``sort_keys`` applies recursively to every JSON object.  The compact
+    ``sort_keys`` applies recursively to every JSON object. The compact
     separators and direct UTF-8 encoding make the returned bytes portable to
     Rust, TypeScript, and other release-set consumers.
     """

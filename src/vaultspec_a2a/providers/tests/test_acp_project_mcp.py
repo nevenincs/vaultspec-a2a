@@ -346,9 +346,7 @@ def test_cleanup_skips_inversion_when_recovered_base_fingerprint_mismatches(
         cleanup_projected_mcp(path)
 
     assert _read(path) == before_cleanup
-    assert any(
-        "fingerprint" in record.getMessage() for record in caplog.records
-    )
+    assert any("fingerprint" in record.getMessage() for record in caplog.records)
 
 
 def test_reprojection_over_desynced_crash_residue_refuses_via_full_collision_check(

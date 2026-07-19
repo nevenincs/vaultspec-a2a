@@ -3,7 +3,7 @@ generated: true
 tags:
   - '#index'
   - '#authoring-contract'
-date: '2026-07-16'
+date: '2026-07-19'
 modified: '2026-07-19'
 related:
   - '[[2026-07-16-authoring-contract-adr]]'

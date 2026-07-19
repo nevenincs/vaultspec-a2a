@@ -1,24 +1,28 @@
 """Versioned desktop component-manifest contract.
 
-The desktop capsule is a target-specific, immutable A2A generation carried
-inside the dashboard's composite installation. The dashboard packages and
-activates that generation without importing A2A packages or inferring the
-capsule layout; the only thing it may read is the component manifest defined
-here. These Pydantic models are the single authority for that manifest. The
-committed ``schemas/desktop-capsule-manifest.json`` snapshot is the exported
-form of :func:`component_manifest_schema`, and a certification gate proves the
-two stay equal.
+The desktop capsule is a target-specific, immutable agent-to-agent (A2A)
+generation inside the dashboard's composite installation. The dashboard
+packages and activates that generation without importing A2A packages or
+inferring the capsule layout. It may read only the component manifest defined
+here.
 
-Each generation declares component identity, target, compatibility (the gateway
-API range plus the Alembic migration range), the dashboard-owned gateway
-entrypoint and the caller-owned standalone MCP entrypoint, per-asset SHA-256
-digests, the pinned runtime assets, per-asset license identifiers, and the
-dependency-lock identity. The contract is versioned: ``contract_version`` names
-the manifest grammar the emitter speaks. A consumer accepts only a syntactically
-valid version with the same major and a minor no newer than the consumer
-implements. This directional rule matters because the strict models reject
-unknown fields; an older parser cannot safely assume it understands a
-newer-minor document.
+These Pydantic models are the single authority for that manifest. The committed
+``schemas/desktop-capsule-manifest.json`` snapshot is the exported form of
+:func:`component_manifest_schema`. A certification gate proves that the models
+and snapshot stay equal.
+
+Each generation declares component identity and target. It binds the gateway
+application programming interface (API) range and Alembic migration range. It
+also declares the dashboard-owned gateway entry point and the caller-owned
+standalone Model Context Protocol (MCP) entry point. Per-asset Secure Hash
+Algorithm 256-bit (SHA-256) digests bind the pinned runtime assets, license
+identifiers, and dependency-lock identity.
+
+``contract_version`` names the manifest version the emitter produces. A consumer
+accepts only a syntactically valid version with the same major and a minor
+version no newer than the consumer supports. This directional rule matters
+because the strict models reject unknown fields. An older parser cannot safely
+assume it understands a document with a newer minor version.
 """
 
 from __future__ import annotations

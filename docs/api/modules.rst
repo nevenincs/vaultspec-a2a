@@ -1,8 +1,9 @@
 Python module reference
 =======================
 
-This reference documents the supported public APIs and their runtime ownership
-boundaries. Import concrete features from the module that owns them.
+This reference documents the supported public application programming
+interfaces (APIs) and their runtime ownership boundaries. Import concrete
+features from the module that owns them.
 
 Major package surfaces
 ----------------------
@@ -55,6 +56,11 @@ Database
 ~~~~~~~~
 
 .. automoduledoc:: vaultspec_a2a.database
+
+Desktop capsule
+~~~~~~~~~~~~~~~
+
+.. automoduledoc:: vaultspec_a2a.desktop
 
 Graph
 ~~~~~
@@ -146,6 +152,59 @@ Command-line entry point
 .. py:module:: vaultspec_a2a.context.harness
    :synopsis: Agent-harness discovery and verification.
 
+Desktop capsule contract
+~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. py:module:: vaultspec_a2a.desktop.contract
+   :synopsis: Versioned desktop component-manifest models and compatibility.
+
+.. py:class:: ComponentManifest
+
+.. py:function:: component_manifest_schema()
+
+.. py:function:: contract_versions_compatible(declared, supported)
+
+.. py:function:: export_component_manifest_schema()
+
+.. py:module:: vaultspec_a2a.desktop.manifest
+   :synopsis: Deterministic desktop component-manifest emission and hashing.
+
+.. py:class:: AssetSource
+
+.. py:function:: emit_component_manifest(*, target, api_versions, assets, uv_lock_path, package_lock_path, digest_algorithm=DigestAlgorithm.SHA256)
+
+.. py:function:: component_manifest_canonical_bytes(manifest)
+
+.. py:function:: component_manifest_digest(manifest)
+
+Desktop product profile
+~~~~~~~~~~~~~~~~~~~~~~~
+
+.. py:module:: vaultspec_a2a.desktop.profile
+   :synopsis: Explicit immutable-runtime and mutable-state authorities.
+
+.. py:class:: DesktopProfile
+
+.. py:class:: DesktopStatePaths
+
+.. py:function:: derive_state_paths(app_home)
+
+Desktop assembly internals
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+These workflow-facing modules implement capsule assembly. They aren't part of
+the package-root component-manifest API and may change with the release
+workflow.
+
+.. py:module:: vaultspec_a2a.desktop.artifacts
+   :synopsis: Exact local-input descriptor and byte-identity verification.
+
+.. py:module:: vaultspec_a2a.desktop.capsule
+   :synopsis: Bounded archive projection into private staging trees.
+
+.. py:module:: vaultspec_a2a.desktop.capsule_evidence
+   :synopsis: Installed-tree evidence and deterministic archive publication.
+
 Graph construction
 ~~~~~~~~~~~~~~~~~~
 
@@ -204,7 +263,7 @@ API and protocols
 ~~~~~~~~~~~~~~~~~
 
 .. py:module:: vaultspec_a2a.api.schemas
-   :synopsis: HTTP and WebSocket wire schemas.
+   :synopsis: Hypertext Transfer Protocol (HTTP) and WebSocket wire schemas.
 
 .. py:module:: vaultspec_a2a.protocols.mcp
    :synopsis: Model Context Protocol package boundary.

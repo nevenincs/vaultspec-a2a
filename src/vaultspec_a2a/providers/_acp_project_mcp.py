@@ -253,9 +253,7 @@ def project_declared_mcp(
             raise ProjectionRefusedError(
                 f"refusing to project into {path}: top-level JSON is not an object."
             )
-        base_servers, base_other, base_absent, base_fingerprint = _recover_base(
-            parsed
-        )
+        base_servers, base_other, base_absent, base_fingerprint = _recover_base(parsed)
 
     collisions = sorted(set(surfacing) & set(base_servers))
     if collisions:

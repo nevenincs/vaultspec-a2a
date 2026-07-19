@@ -10,7 +10,7 @@ public issue.
 2. Follow the [README](README.md) and [development guide](docs/development.rst).
 3. Run `just help` to discover the native task surface.
 4. Keep the change focused on the selected issue.
-5. Update tests and documentation when behavior or user workflows change.
+5. If behavior or user workflows change, update tests and documentation.
 
 ## Respect component ownership
 
@@ -28,7 +28,7 @@ Import the real code under test and verify observable behavior. Tests must not:
 - Use fakes, mocks, stubs, patches, or monkeypatching as shortcuts
 - Use `skip` or `xfail` to manufacture a passing run
 
-Add service tests when a change affects service or integration behavior.
+If a change affects service or integration behavior, add service tests.
 
 ## Complete the rolling audit
 

@@ -604,3 +604,273 @@ resolve paths again. A concurrent parent replacement with a symbolic link can
 redirect writes outside the staging root. Use descriptor-relative,
 no-follow filesystem operations or revalidate opened parent identities through
 the final link, and add a real race-oriented rejection test.
+
+### capsule-zstd-window-unit | high | The configured decompressor window is effectively two tebibytes
+
+Type: resource safety. The candidate passes a byte-valued two-gibibyte constant
+to the Zstandard API's kibibyte-valued `max_window_size` parameter. Gzip and XZ
+tar grammars also enumerate the complete decompressed archive before enforcing
+the later member limits. Correct the unit and bound every compressed tar byte
+before full archive indexing.
+
+### capsule-installed-evidence-invalid | high | Invalid and duplicate installed-file claims are accepted
+
+Type: integrity evidence. `ProjectedFile`, `deterministic_tree_digest`, and the
+installed-tree inventory accept duplicate paths, malformed digests, negative
+sizes, and invalid modes. A real production-function probe emitted a digest for
+two identical invalid records. Validate every record and reject portable path
+collisions before any evidence is serialized or hashed.
+
+### capsule-output-identity-race | high | The returned archive digest may describe replacement bytes
+
+Type: artifact integrity. The archive writer closes its output path and reopens
+that pathname to calculate the returned SHA-256. A replacement between those
+operations can detach the digest from the file object that was written. Hash
+the same open descriptor and retain stable file identity through publication.
+
+### capsule-output-promotion-race | high | Failure cleanup can delete another creator's output
+
+Type: filesystem safety. The writer creates the final path directly. If another
+creator wins the no-overwrite race, the generic failure handler can unlink that
+other output; an interruption can also strand a partial final archive. Write a
+private temporary file, flush it, atomically promote it without overwrite, and
+remove only paths created by the current invocation.
+
+### capsule-projection-not-transactional | medium | A failed later member leaves earlier files behind
+
+Type: filesystem safety. Member writes are atomic individually, but an archive
+failure after the first successful member leaves a partial destination tree.
+Retry then fails against the no-overwrite rule. Roll back every path created by
+the projection or require and enforce a disposable private subtree.
+
+### capsule-windows-junction-boundary | medium | Link checks do not cover Windows junctions
+
+Type: cross-platform safety. Staging-root and candidate-tree checks use symbolic
+link predicates only. Reject junction and reparse-point directory authorities
+where the platform exposes them, and revalidate destination parents at the
+final materialization boundary.
+
+### capsule-descriptor-is-not-provenance | medium | Exact metadata is not a trusted source catalog
+
+Type: provenance integrity. The descriptor accepts any credential-free HTTPS
+URL and caller-supplied target, archive, license, and evidence strings. It does
+not derive GNU versus musl identity or bind the tuple to qualified PBS, Node,
+or ACP release authorities. Keep the type explicitly metadata-only until a
+reviewed catalog validates the exact target tuple.
+
+### capsule-acp-inventory-blob-only | medium | ACP inventory claims are not semantically reconciled
+
+Type: dependency closure. The verifier proves only the declared inventory
+blob's size and SHA-256. It does not parse the package list, reconcile the
+declared count, prove the selected target SDK version and SRI against
+`package-lock.json`, or verify the installed inventory. Rename the boundary
+honestly or add semantic package-lock reconciliation before using it as closure
+evidence.
+
+### capsule-public-input-errors-leak | medium | Invalid projector input can escape the typed error contract
+
+Type: API safety. The public generic source dataclass is unvalidated. Invalid
+archive-root data can escape as a raw validation exception instead of the
+declared capsule assembly error. Validate public arguments before archive work
+and normalize failures to the typed boundary.
+
+### capsule-build-decoder-runtime-dependency | medium | Build-only decoding expands every product installation
+
+Type: dependency hygiene. The candidate declares Zstandard in mandatory product
+dependencies even though it exists to read release-build PBS archives. Keep the
+decoder behind a lazy build authority or document and certify why its native
+wheel belongs in the immutable runtime closure.
+
+### capsule-foundation-maintainability | medium | The module and rejection matrix exceed a reviewable boundary
+
+Type: maintainability and test adequacy. The candidate module is 1,029 lines.
+Its default real-byte tests are valuable but omit compressed-tar exhaustion,
+projection rollback, invalid and duplicate evidence, raced final output,
+junctions, semantic ACP inventory, and Unicode-normalized collisions. Split
+archive projection from evidence/publication and add the missing rejection
+cases before preserving this foundation.
+
+## Uncommitted capsule-foundation corrective disposition
+
+Status: REVISION REQUIRED; no foundation commit is approved and `W01 P03 S13`,
+`S14`, and `S15` remain open.
+
+This disposition reviews the candidate snapshot whose `capsule.py` SHA-256 is
+`45cf3363cda89ffaecf8616dce2c0e5f38ca299d468b03f47bd32ed06207deff` and whose
+`capsule_evidence.py` SHA-256 is
+`162d16fb08798be11284daede8b9ee1f17c9e29a74ebcb781276890f4420ac76`.
+The focused real-file suite reports 37 passing tests and the scoped Ruff,
+format, and Ty gates pass. Those gates do not resolve the filesystem and
+product-closure findings below.
+
+### Corrected finding: `capsule-zstd-window-unit`
+
+The original high-severity premise was incorrect for locked
+`zstandard==0.25.0`. Both installed backends pass `max_window_size` to libzstd
+as bytes even though upstream Python-facing documentation describes
+kibibytes. The old two-gibibyte argument therefore imposed a two-gibibyte cap,
+not a two-tebibyte cap. The candidate now uses an explicit 128 MiB byte limit,
+and a valid frame advertising a 256 MiB window is rejected. This finding is
+resolved as a resource-bound repair and retained here to correct the audit
+record.
+
+### Repairs verified in the reviewed snapshot
+
+- Compressed tar streams are bounded before archive indexing; XZ uses a 128
+  MiB decoder-memory limit and Zstandard uses the verified 128 MiB byte limit.
+- ZIP central-directory bytes and entry count are preflighted before
+  `ZipFile`, installed-file evidence is validated and collision checked, and
+  evidence iterable consumption stops at 80,001 records.
+- Archive hashing uses the same open descriptor, member creation uses
+  no-follow exclusive creation, and the archive writer requests ZIP64-capable
+  local headers.
+- Public input failures are normalized to `CapsuleAssemblyError`, Windows
+  link-like authorities include junctions and reparse points, the Zstandard
+  decoder remains a lazy tooling dependency, and archive I/O is split behind
+  an acyclic private module.
+- Current `os.open` to `os.fdopen` paths retain descriptor sentinels and close
+  on failure. `_relative_directory_descriptor` also closes a newly opened
+  descriptor if `fstat` or validation fails. The prior descriptor-leak finding
+  is resolved in this snapshot.
+
+### capsule-directory-publication-can-replace | high | POSIX projection promotion is not exclusive
+
+Type: filesystem correctness. `project_archive` checks that the destination is
+absent and then calls ordinary `os.rename`. On POSIX that operation can replace
+a concurrently created empty destination directory. The public refusal-to-
+overwrite contract is therefore false. Use a target-native exclusive rename
+authority and fail closed when the platform or filesystem cannot provide it;
+the check-then-rename sequence is not an acceptable fallback.
+
+### capsule-failed-projection-residue-unbounded | high | Rejected archives leave complete private trees
+
+Type: resource safety. The previous stat-then-`rmtree` cleanup could delete a
+swapped replacement and was correctly removed, but the replacement behavior
+leaves every randomized `.vaultspec-projection-*` tree after failure. The tests
+now explicitly accept those trees. A late rejection can retain up to the
+multi-gibibyte expansion bound, and repeated failures accumulate without a
+bounded quarantine or owning cleanup authority. Define and enforce an
+exclusive parent/quarantine contract or leave cleanup to a caller-owned outer
+temporary generation whose removal is proven. Do not describe permanent
+residue as transactional rollback.
+
+### capsule-windows-cross-process-lease-contamination | high | Process-local filtering cannot protect the source snapshot
+
+Type: determinism and concurrency. The Windows directory lease creates visible
+`.vaultspec-authority-*.lease` files inside the capsule source and filters only
+the names registered in the current process. A real two-process probe against
+one source tree made both independent archive writers fail, while the in-
+process thread test passed. Another process's lease can be scanned as payload
+or disappear during emission. Replace visible sentinel files with a native
+directory-handle authority and add a real subprocess concurrency gate; a
+process-local set cannot certify release determinism.
+
+### capsule-file-publication-path-authority | high | Linux publication discards the leased parent descriptor
+
+Type: filesystem safety. The Linux `renameat2(RENAME_NOREPLACE)` candidate uses
+`AT_FDCWD` and absolute paths even though the output directory is already
+leased by descriptor. A parent rename or replacement can therefore invalidate
+the checked authority before the native call. Use the opened source and
+destination directory descriptors with relative names and revalidate the
+published identity through that authority. Fail closed for unsupported symbols,
+flags, filesystems, and cross-device publication.
+
+### capsule-success-temporary-residue | medium | Hard-link publication retains duplicate archives
+
+Type: operational resource safety. On macOS and on Linux without usable
+`renameat2`, the archive publisher falls back to a no-replace hard link and
+never removes the private source name. The test permits one quarantine beside
+every successful output. Repeated successful builds therefore retain duplicate
+full-size capsule archives. Either adopt a platform-native consuming exclusive
+rename or make an owning outer temporary directory responsible for the source
+name and prove its bounded cleanup.
+
+### capsule-zip64-policy-ambiguous | medium | Per-entry ZIP64 passes a central-directory-only rejection rule
+
+Type: archive contract. Canonical ZIP64 end records are rejected, but a valid
+small archive using a ZIP64 local header and ordinary end record passes. State
+whether only ZIP64 central directories are unsupported or all ZIP64 grammar is
+forbidden, then add positive and negative real-byte cases matching that policy.
+
+### capsule-zip-comment-eocd-limitation | low | EOCD signatures in comments can reject valid archives
+
+Type: compatibility. The preflight inherits CPython's end-record search
+limitation: an ordinary comment passes, while some valid comments containing an
+EOCD signature are rejected. Keep this as a documented controlled-input limit
+unless the parser is replaced.
+
+### Product-closure blockers unchanged
+
+The exact metadata descriptor is still not a trusted PBS, Node, or ACP source
+catalog. ACP inventory remains a digest-bound blob rather than a semantically
+reconciled package-lock and installed-tree inventory. Windows CRT
+redistribution and servicing provenance still require qualified confirmation,
+and the root ACP package's Anthropic SDK dependency still requires qualified
+redistribution authority or an upstream grant. Intel macOS still requires a
+target-native locked `cryptography==49.0.0` build. No target cohort has produced
+the required native install, compile, relocation, entrypoint, tree-mutation,
+license, and CycloneDX evidence. Ordinary implementation approval does not
+resolve those legal or target-native evidence gates.
+
+### Disposition
+
+Do not stage or commit the capsule foundation and do not restore S13-S15
+completion markers. The next admissible implementation must first choose and
+document one enforceable ownership model: native exclusive directory and file
+publication with descriptor-relative authorities on every target, or an outer
+caller-owned temporary generation whose cleanup and activation boundaries are
+the transaction. After that choice, require Windows cross-process and native
+Linux/macOS no-replace tests before independent formal review.
+
+## Capsule-foundation corrective implementation review
+
+Status: IMPLEMENTED AND INDEPENDENTLY APPROVED AS A FOUNDATION. This supersedes
+the revision-required disposition above for the reviewed source snapshot. It
+does not close ``W01 P03 S13``, ``S14``, or ``S15`` and does not satisfy the
+product-closure evidence listed above.
+
+The corrective pass replaces pathname-based publication and cleanup with a
+shared native filesystem-authority layer. Windows uses non-link-like directory
+handles that deny rename/delete races and publishes the exact open file or
+directory handle with a no-replace rename. Linux archive publication uses an
+anonymous ``O_TMPFILE`` and descriptor-bound ``linkat``. POSIX directory
+projection and hosts without an identity-bound primitive fail closed.
+
+Projection staging claims one of 64 fixed directories by atomic exclusive
+creation. Failed bytes are cleared through a live lease to the owned directory
+inode, so cleanup cannot follow a swapped parent entry; an empty bounded slot
+can remain for explicit caller-owned maintenance. Windows archive staging uses
+16 fixed ``CREATE_NEW`` slots, while successful Linux staging is anonymous and
+leaves no source residue. Source discovery begins under the root lease, uses
+descriptor-relative no-follow traversal on POSIX, and holds native
+per-directory Windows authority without visible sentinel files.
+
+The ZIP policy is explicit: ZIP64 end records and central-directory sentinels
+are unsupported, while bounded ZIP64 local headers with an ordinary central
+directory are accepted. Positive and negative real-byte tests preserve that
+distinction. The end-of-central-directory signature-in-comment limitation
+remains a queued low compatibility constraint for controlled inputs.
+
+Validation reports 40 focused artifact/capsule tests and 188 complete desktop
+tests passing. The focused matrix includes real cross-process archive and
+directory publishers, source and parent churn, late projection failure,
+compressed-stream exhaustion, decoder memory limits, ZIP grammar bounds,
+evidence collisions, and deterministic bytes. Ruff, format, and Ty gates pass.
+Independent review found no remaining high- or medium-severity foundation
+blocker.
+
+The prior directory-publication replacement, projection residue, visible
+Windows lease, descriptor-discarding publication, successful temporary residue,
+cleanup race, and quarantine-capacity findings are resolved. Descriptor
+metadata and ACP inventory semantics remain intentionally scoped: they are
+exact caller-supplied metadata and opaque digest-bound evidence, not a qualified
+source catalog or semantic dependency closure. Target-native install,
+relocation, license, CycloneDX, and redistribution evidence remain required
+before a target capsule or release workflow can be called complete.
+
+### capsule-publication-docstring-drift | low | Docstrings described obsolete randomized staging semantics
+
+Type: documentation accuracy. Status: resolved after the final independent
+review. The public projector and archive-writer docstrings now describe fixed
+Windows slots, anonymous Linux file staging, native no-replace publication,
+fail-closed unsupported hosts, and the bounded quarantine model.

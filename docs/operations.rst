@@ -2,7 +2,7 @@ Operator reference
 ==================
 
 Use the project-locked Just facade to route product operations, named host
-processes, and Compose stacks to their owning implementation.
+processes, and Docker Compose (Compose) stacks to their owning implementation.
 
 Command discovery
 -----------------

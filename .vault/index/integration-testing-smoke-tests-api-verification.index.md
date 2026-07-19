@@ -3,7 +3,7 @@ generated: true
 tags:
   - '#index'
   - '#integration-testing-smoke-tests-api-verification'
-date: '2026-07-15'
+date: '2026-07-19'
 modified: '2026-07-19'
 related:
   - '[[2026-03-31-integration-testing-smoke-tests-api-verification-adr]]'

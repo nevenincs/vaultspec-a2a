@@ -389,7 +389,13 @@ aggregator/subscriber implementation.
 
 `service/README.md:10`, `service/docker/README.md:33`, and
 `service/.env.example:18` contradict the headless Dockerfile and the previous
-dead-code audit's closure. Repair through the documentation workflow.
+dead-code audit's closure. Status: resolved through the documentation workflow.
+The service guides now describe the live headless Compose profiles and
+``just dev stack`` recipes, distinguish published from Compose-internal ports,
+and link to the canonical operator guide. Deleted Vite, frontend, mock-seeder,
+provider-overlay, and stale verifier claims were removed; Compose configuration
+was validated for development, integration, production SQLite, and the
+production PostgreSQL overlay.
 
 ### unused-trace-helper | low | LangSmith trace summary has no caller
 
@@ -455,6 +461,74 @@ from the real production probe instead of assuming the host has no credential.
 All four nodes pass. The full canonical suite has not been rerun, so this
 finding remains open until the remaining failure classes are resolved and the
 whole gate passes.
+
+## User-documentation health review
+
+The repository README, contributor and security policies, issue and pull-request
+intake, Sphinx guides, API module index, and major package docstrings received a
+combined editorial and warning-fatal Sphinx review. The following findings were
+classified and resolved in this pass.
+
+### docs-policy-navigation-gap | medium | Contributor and security policy links were absent from the Sphinx path
+
+Type: documentation navigation. Status: resolved by linking both repository
+policies from the documentation home, development guide, glossary, and README.
+
+### docs-terminology-and-acronym-drift | medium | First-use terms and provider ownership language were inconsistent
+
+Type: documentation clarity. Status: resolved by expanding CI, CLI, MCP, RAG,
+HTTP, and Vaultspec Core on first use, standardizing managed output on
+``provider projection``, and defining the terms in the glossary.
+
+### docs-validation-mutation-ambiguity | medium | Validation was called read-only despite ignored output
+
+Type: documentation accuracy. Status: resolved by describing validation as
+tracked-source-safe and stating that tests and documentation may create ignored
+caches or build output.
+
+### docs-ownership-policy-duplication | medium | Three ownership tables could drift independently
+
+Type: documentation architecture. Status: resolved by making the Sphinx
+architecture guide canonical and replacing duplicate README and contributor
+tables with concise links to that owner map.
+
+### docs-ci-migration-claim | medium | Guides incorrectly said the unit gate excluded migrations
+
+Type: documentation accuracy. Status: resolved after live collection confirmed
+that non-service SQLite and Alembic migration tests run under ``just ci``. The
+guides now distinguish those tests from the separate hosted PostgreSQL round
+trip.
+
+### docs-ci-environment-claim | medium | Guides named the wrong dependency profile for the canonical gate
+
+Type: documentation accuracy. Status: resolved after a live ``just ci`` run
+confirmed that the gate first synchronizes the locked ``server`` extra and
+composed ``all`` group. The README and development guide now name that exact
+selection and reserve ``tooling`` for hooks and narrower checks. The same live
+run was blocked before static checks by a Windows dynamic-library file held by
+an active Python process; it isn't passing evidence for the canonical gate.
+
+### docs-sphinx-module-navigation-gap | medium | Operator boundaries lacked module cross-references
+
+Type: API documentation navigation. Status: resolved by linking the CLI, API,
+MCP, lifecycle, worker, thread, provisioning, and harness modules with Sphinx
+``:mod:`` roles. The desktop contract, manifest, artifact-input, archive
+projection, and evidence-publication modules are registered in the API module
+index. Workflow-internal assembly modules are explicitly distinguished from
+the package-root public component-manifest API.
+
+### docs-navigation-and-intake-copy | low | Navigation labels and intake wording were inconsistent
+
+Type: documentation usability. Status: resolved by aligning the README link
+label with its destination, pluralizing the pull-request audit prompt, using
+``not run`` consistently, and adding structured bug, feature, and private
+vulnerability-reporting routes.
+
+### docs-sync-glossary-ambiguity | low | Sync and reconciliation were treated as exact synonyms
+
+Type: documentation terminology. Status: resolved by defining Vaultspec sync as
+an explicit Core mutation and reconciliation as the underlying state comparison
+that may be diagnostic or mutating.
 
 ## Recommendations
 

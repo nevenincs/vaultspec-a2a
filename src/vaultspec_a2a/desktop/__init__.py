@@ -1,7 +1,16 @@
 """Desktop product profile: the capsule component contract and its emitter.
 
-Facade re-exporting the public desktop-capsule types. Consumers import from
-this package root rather than reaching into sub-modules::
+:mod:`vaultspec_a2a.desktop.contract` defines the versioned component model,
+while :mod:`vaultspec_a2a.desktop.manifest` emits and hashes deterministic
+manifest bytes. This facade re-exports their supported public types.
+:mod:`vaultspec_a2a.desktop.artifacts` verifies exact local input identities,
+:mod:`vaultspec_a2a.desktop.capsule` projects bounded archive content, and
+:mod:`vaultspec_a2a.desktop.capsule_evidence` validates installed-tree evidence
+and publishes deterministic archives. Those assembly modules are workflow
+internals and aren't re-exported here.
+
+Consumers of the stable component-manifest contract import from this package
+root::
 
     from vaultspec_a2a.desktop import ComponentManifest, emit_component_manifest
 """

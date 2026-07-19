@@ -10,7 +10,9 @@ related:
   - '[[2026-07-19-repository-tooling-hardening-W01-P02-S02]]'
   - '[[2026-07-19-repository-tooling-hardening-W01-P02-S03]]'
   - '[[2026-07-19-repository-tooling-hardening-W02-P03-S04]]'
+  - '[[2026-07-19-repository-tooling-hardening-W02-P03-S05]]'
   - '[[2026-07-19-repository-tooling-hardening-W02-P04-S06]]'
+  - '[[2026-07-19-repository-tooling-hardening-W02-P04-S07]]'
   - '[[2026-07-19-repository-tooling-hardening-adr]]'
   - '[[2026-07-19-repository-tooling-hardening-audit]]'
   - '[[2026-07-19-repository-tooling-hardening-plan]]'
@@ -38,7 +40,9 @@ Auto-generated index of all documents tagged with `#repository-tooling-hardening
 - `2026-07-19-repository-tooling-hardening-W01-P02-S02` - Add locked setup, sync, upgrade, status, and service recipes for Core and RAG
 - `2026-07-19-repository-tooling-hardening-W01-P02-S03` - Route workspace provisioning and agent RAG acquisition through deliberate locked versions with real subprocess tests
 - `2026-07-19-repository-tooling-hardening-W02-P03-S04` - Remove obsolete broad framework ignores and prove Core-managed policy convergence
+- `2026-07-19-repository-tooling-hardening-W02-P03-S05` - Reconcile the compact custom rule corpus and regenerate provider projections through owning verbs
 - `2026-07-19-repository-tooling-hardening-W02-P04-S06` - Replace dynamic dispatch with a minimum-version-checked native module index and modular developer surface
+- `2026-07-19-repository-tooling-hardening-W02-P04-S07` - Route named services only through the process registry and stacks only through Compose
 
 ### plan
 

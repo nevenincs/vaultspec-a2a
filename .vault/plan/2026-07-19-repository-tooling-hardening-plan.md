@@ -53,14 +53,14 @@ Land clone-persistent governance and then replace dynamic dispatch with owner-th
 Converge effective Git policy and canonical rules through Vaultspec Core ownership.
 
 - [x] `W02.P03.S04` - Remove obsolete broad framework ignores and prove Core-managed policy convergence; `.gitignore`.
-- [ ] `W02.P03.S05` - Reconcile the compact custom rule corpus and regenerate provider projections through owning verbs; `.vaultspec/rules, generated provider projections`.
+- [x] `W02.P03.S05` - Reconcile the compact custom rule corpus and regenerate provider projections through owning verbs; `.vaultspec/rules, generated provider projections`.
 
 ### Phase `W02.P04` - native Just modules
 
 Replace the monolithic dispatcher with a discoverable portable module hierarchy.
 
 - [x] `W02.P04.S06` - Replace dynamic dispatch with a minimum-version-checked native module index and modular developer surface; `Justfile, just/dev`.
-- [ ] `W02.P04.S07` - Route named services only through the process registry and stacks only through Compose; `just/dev/service.just, just/dev/stack.just`.
+- [x] `W02.P04.S07` - Route named services only through the process registry and stacks only through Compose; `just/dev/service.just, just/dev/stack.just`.
 
 ## Wave `W03` - unify validation and harden hosted automation
 

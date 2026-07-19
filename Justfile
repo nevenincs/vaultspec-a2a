@@ -16,6 +16,7 @@ help:
 
 # Run the current read-only local validation baseline.
 ci:
+    uv sync --locked --no-default-groups --extra server --group all
     just dev code check
     just dev test unit
 

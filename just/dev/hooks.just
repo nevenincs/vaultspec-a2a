@@ -8,7 +8,7 @@ help:
 # Resolve the locked development environment used by hooks.
 bootstrap:
     uv venv .venv --allow-existing
-    uv sync --locked --no-default-groups --group dev
+    uv sync --locked --no-default-groups --extra server --group all
 
 # Install the repository-managed, path-agnostic prek hook.
 install: bootstrap

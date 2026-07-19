@@ -7,12 +7,12 @@ help:
 
 # Build the Python source distribution and wheel.
 package:
-    uv build
+    uv build --build-constraints build-constraints.txt
 
 # Run documentation tests and build strict Sphinx HTML.
 docs:
-    uv run --isolated --group docs --group dev python -m pytest docs/tests -q
-    uv run --isolated --group docs sphinx-build -n -W --keep-going -b html docs docs/_build/html
+    uv run --isolated --locked --group docs --group dev python -m pytest docs/tests -q
+    uv run --isolated --locked --group docs sphinx-build -n -W --keep-going -b html docs docs/_build/html
 
 # Build local development container images.
 docker:

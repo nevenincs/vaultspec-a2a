@@ -33,8 +33,8 @@ jobs:
       - name: Install Python
         run: uv python install 3.13
 
-      - name: Synchronize locked tooling environment
-        run: uv sync --locked --no-default-groups --group tooling
+      - name: Synchronize locked CI environment
+        run: uv sync --locked --no-default-groups --extra server --group all
 
       - name: Run canonical CI
         run: just ci

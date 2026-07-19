@@ -18,12 +18,15 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    from ..api.schemas.gateway import ProviderEligibility
     from ..context.harness import HarnessReadiness
     from ..team.team_config import TeamConfig
     from ..thread.actor_tokens import ActorTokenBundle
 
 __all__ = [
+    "ExecutionEligibility",
     "RunStartEligibility",
+    "evaluate_execution_eligibility",
     "evaluate_run_start_eligibility",
     "is_document_authoring_preset",
     "required_role_ids",
@@ -41,6 +44,47 @@ class RunStartEligibility:
 
     eligible: bool
     reason: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class ExecutionEligibility:
+    """Whether the runtime and a provider are eligible to execute a run right now.
+
+    The commit stage of desktop run-admission binds actor tokens and creates a
+    durable run only when this is ``eligible``: the ADR mints run credentials only
+    after the runtime (a reachable worker) and a provider have become eligible.
+    ``reason`` is populated only on a refusal and is safe to return - it names the
+    missing runtime or provider precondition without any path or secret.
+    """
+
+    eligible: bool
+    reason: str | None = None
+
+
+def evaluate_execution_eligibility(
+    *,
+    worker_reachable: bool,
+    provider_eligibility: ProviderEligibility,
+) -> ExecutionEligibility:
+    """Decide whether execution is eligible before accepting tokens or a run.
+
+    Pure policy over two facts the commit path probes live: whether the
+    gateway-owned worker is reachable, and whether at least one subprocess
+    provider command resolves on this host (the no-instantiation classify seam).
+    Both must hold; a refusal composes the missing preconditions into one safe
+    reason so a not-yet-ready worker and an unresolved provider are reported
+    together rather than one at a time.
+    """
+    from ..api.schemas.gateway import ProviderEligibility
+
+    reasons: list[str] = []
+    if not worker_reachable:
+        reasons.append("the gateway worker is not execution-ready")
+    if provider_eligibility is not ProviderEligibility.ELIGIBLE:
+        reasons.append("no subprocess provider command resolves on this host")
+    if reasons:
+        return ExecutionEligibility(eligible=False, reason="; ".join(reasons))
+    return ExecutionEligibility(eligible=True)
 
 
 def is_document_authoring_preset(team_config: TeamConfig) -> bool:

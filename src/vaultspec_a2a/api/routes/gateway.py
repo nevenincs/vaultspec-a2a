@@ -33,6 +33,7 @@ from ...control.health import (
 )
 from ...control.run_discovery_service import discover_active_runs
 from ...control.run_start_policy import (
+    evaluate_execution_eligibility,
     evaluate_run_start_eligibility,
     required_role_ids,
 )
@@ -456,6 +457,26 @@ async def _run_commit(
     if body.reservation_id is None:  # pragma: no cover - guarded by the schema
         raise HTTPException(status_code=422, detail="commit requires a reservation id")
     broker = admission_broker(request.app)
+
+    # Evaluate worker and provider eligibility BEFORE consuming the reservation,
+    # accepting the actor tokens, or creating a run (ADR: mint run credentials only
+    # after the runtime and provider are eligible). The worker reachability is
+    # probed live so the verdict never lags behind the watchdog's status ladder; a
+    # refusal releases the reservation so a failed commit leaks nothing.
+    from ...control.worker_management import _check_worker_health
+
+    worker_reachable = await _check_worker_health(
+        settings.worker_url, client=worker_client
+    )
+    readiness = _admission_readiness(request.app.state)
+    execution = evaluate_execution_eligibility(
+        worker_reachable=worker_reachable,
+        provider_eligibility=readiness.provider_eligibility,
+    )
+    if not execution.eligible:
+        await broker.release(body.reservation_id)
+        raise HTTPException(status_code=503, detail=execution.reason)
+
     outcome = await broker.commit(body.reservation_id)
     if not outcome.committed or outcome.lease_id is None:
         raise HTTPException(status_code=409, detail=outcome.reason)

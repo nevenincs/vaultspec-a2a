@@ -241,7 +241,7 @@ Require worker and provider eligibility before durable run creation or actor-tok
 - [x] `W04.P12.S63` - Define prepare and commit variants bounded required-role output reservation identity lease identity and terminal settlement under run-start; `src/vaultspec_a2a/api/schemas/gateway.py`.
 - [x] `W04.P12.S64` - Implement hard-bounded expiring prepare reservations that validate required roles capacity worker startup and provider readiness without run-owned children or durable runs; `src/vaultspec_a2a/control/admission.py`.
 - [x] `W04.P12.S65` - Implement prepare and commit through the existing POST /v1/runs verb without durable state before commit; `src/vaultspec_a2a/api/routes/gateway.py`.
-- [ ] `W04.P12.S66` - Evaluate worker and provider eligibility before accepting actor tokens or creating a run; `src/vaultspec_a2a/control/run_start_policy.py`.
+- [x] `W04.P12.S66` - Evaluate worker and provider eligibility before accepting actor tokens or creating a run; `src/vaultspec_a2a/control/run_start_policy.py`.
 - [ ] `W04.P12.S67` - Emit bounded terminal callbacks authenticated with the dashboard-created attach-control credential read by the gateway and containing run and non-secret lease identities only; `src/vaultspec_a2a/desktop/settlement.py`.
 - [ ] `W04.P12.S68` - Trigger the attach-control-authenticated settlement component idempotently after execution-state persistence on complete cancel and fail without exposing or requiring worker IPC; `src/vaultspec_a2a/control/event_handlers.py`.
 - [ ] `W04.P12.S69` - Prove prepare timeout cancellation and failed commit release capacity without a run token or run-owned child process; `src/vaultspec_a2a/desktop_tests/test_run_admission.py`.

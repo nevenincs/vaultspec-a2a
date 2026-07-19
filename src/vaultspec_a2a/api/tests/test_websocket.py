@@ -7,6 +7,7 @@ import asyncio
 import logging
 import threading
 
+import pytest
 from starlette.applications import Starlette
 from starlette.routing import WebSocketRoute
 from starlette.testclient import TestClient
@@ -183,6 +184,95 @@ class TestPingCommand:
             assert pong["type"] == "heartbeat"
             assert "timestamp" in pong
             assert "server_uptime_seconds" in pong
+
+
+# ---------------------------------------------------------------------------
+# Heartbeat-send failure ladder
+# ---------------------------------------------------------------------------
+
+
+class TestHeartbeatFailureLadder:
+    """The idle-heartbeat send-failure log follows the worker heartbeat ladder.
+
+    A single client's writer loop breaks on its own first heartbeat-send
+    failure (there is no per-connection "consecutive" to escalate), so the
+    ladder is scoped across all clients on the real ``ConnectionManager``
+    instance the app is wired to - real production methods, a real logger,
+    no test doubles - proving the counting/log-level decisions the ladder adds
+    without needing a live socket to fault mid-send (a graceful WebSocket
+    disconnect is drained and its writer task cancelled before any heartbeat
+    timeout could fire, so it cannot exercise this branch through the wire).
+    """
+
+    def test_only_first_and_every_nth_failure_logs_in_full(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        _app, _agg, manager = _create_app()
+        every_n = websocket_module._WS_HEARTBEAT_FAILURE_LOG_EVERY_N
+
+        with caplog.at_level(logging.WARNING, logger=websocket_module.__name__):
+            for i in range(2 * every_n + 2):  # 12 for N=5
+                manager._log_heartbeat_failure(f"client-{i}")
+
+        warnings = [
+            r
+            for r in caplog.records
+            if r.levelno == logging.WARNING and "Heartbeat failed" in r.getMessage()
+        ]
+        # occurrence 1 and every Nth (5, 10) out of 12 -> exactly 3 full lines,
+        # never one per failure.
+        assert len(warnings) == 3
+        assert manager._consecutive_heartbeat_failures == 2 * every_n + 2
+
+    def test_a_lone_failure_logs_once_with_no_recovery_noise(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        _app, _agg, manager = _create_app()
+
+        with caplog.at_level(logging.INFO, logger=websocket_module.__name__):
+            manager._log_heartbeat_failure("client-x")
+
+        warnings = [
+            r
+            for r in caplog.records
+            if r.levelno == logging.WARNING and "Heartbeat failed" in r.getMessage()
+        ]
+        assert len(warnings) == 1
+        assert "1 consecutive" in warnings[0].getMessage()
+
+    def test_recording_a_success_resets_the_ladder_and_logs_recovery(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        _app, _agg, manager = _create_app()
+
+        for i in range(3):
+            manager._log_heartbeat_failure(f"client-{i}")
+        assert manager._consecutive_heartbeat_failures == 3
+
+        with caplog.at_level(logging.INFO, logger=websocket_module.__name__):
+            manager._record_heartbeat_success()
+
+        assert manager._consecutive_heartbeat_failures == 0
+        recoveries = [
+            r
+            for r in caplog.records
+            if r.levelno == logging.INFO and "recovered after" in r.getMessage()
+        ]
+        assert len(recoveries) == 1
+        assert "3 consecutive" in recoveries[0].getMessage()
+
+    def test_recording_a_success_with_no_prior_failures_is_silent(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        _app, _agg, manager = _create_app()
+
+        with caplog.at_level(logging.INFO, logger=websocket_module.__name__):
+            manager._record_heartbeat_success()
+
+        recoveries = [
+            r for r in caplog.records if "recovered after" in r.getMessage()
+        ]
+        assert recoveries == []
 
 
 # ---------------------------------------------------------------------------

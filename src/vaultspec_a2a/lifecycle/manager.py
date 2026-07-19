@@ -74,6 +74,15 @@ __all__ = [
 _OWNER_ENV = "VAULTSPEC_PROCS_OWNER"
 _KILL_POLL_INTERVAL = 0.1
 
+# A spawned process's redirect file is a raw append-mode file, not a Python
+# logging handler, so it cannot rotate on its own — a long-lived dev instance
+# (gateway-dev/worker-dev/engine-dev, restarted many times via resume/rerun onto
+# the SAME log_path) would otherwise grow it forever. Checked once at spawn time
+# (research: lifecycle/manager.py:200-241 appends unbounded); 10 MiB is generous
+# headroom for a single boot's worth of stdout+stderr while still bounding the
+# pathological case.
+SPAWN_LOG_CAP_BYTES = 10 * 1024 * 1024
+
 
 class LifecycleError(RuntimeError):
     """A lifecycle verb could not complete (unknown record, role, or command)."""
@@ -197,6 +206,27 @@ def _build_sha(cwd: Path) -> str | None:
     return sha or None
 
 
+def _rotate_log_if_over_cap(
+    log_path: Path, *, cap_bytes: int = SPAWN_LOG_CAP_BYTES
+) -> None:
+    """Rotate *log_path* to a ``.1`` sibling when it is at or over *cap_bytes*.
+
+    A single-generation rotation (overwriting any prior ``.1``): simple, matches
+    the "one prior boot's worth of context" value these redirect files carry, and
+    needs no background thread the way a full ``RotatingFileHandler`` would for a
+    plain subprocess-redirect file. A missing file is a no-op (nothing to rotate).
+    """
+    try:
+        if log_path.stat().st_size < cap_bytes:
+            return
+    except OSError:
+        return
+    rotated = log_path.with_name(f"{log_path.name}.1")
+    with contextlib.suppress(OSError):
+        rotated.unlink(missing_ok=True)
+        log_path.rename(rotated)
+
+
 def spawn(
     command: list[str],
     *,
@@ -208,12 +238,19 @@ def spawn(
 
     Windows gets a new process group (``CREATE_NEW_PROCESS_GROUP``) so a later
     ``taskkill /T`` fells the whole tree by pid; POSIX gets its own session.
-    Output is appended to *log_path* when given, else discarded. *env*, when given,
-    is overlaid on the inherited environment (not a replacement) so a serve command
-    inherits PATH and the venv while picking up its injected port/config vars.
+    Output is appended to *log_path* when given, else discarded — rotated to a
+    ``.1`` sibling first when the existing file is already at the size cap, so a
+    dev instance restarted many times onto the same log_path (``resume``/
+    ``rerun``) never grows it without bound. *env*, when given, is overlaid on
+    the inherited environment (not a replacement) so a serve command inherits
+    PATH and the venv while picking up its injected port/config vars.
     """
     if not command:
         raise LifecycleError("cannot spawn an empty command")
+    if log_path is not None:
+        from pathlib import Path as _Path
+
+        _rotate_log_if_over_cap(_Path(log_path))
     log_handle = open(log_path, "ab") if log_path is not None else None  # noqa: SIM115
     stdout: IO[bytes] | int = (
         log_handle if log_handle is not None else subprocess.DEVNULL
@@ -311,11 +348,29 @@ def attach(name: str, *, home: Path | None = None) -> ProcVerdict:
     return ProcVerdict(record=record, state=state, endpoint=endpoint_for(record))
 
 
+def _delete_record_log(record: ProcRecord) -> None:
+    """Delete *record*'s runtime log file, if any, once its process is gone.
+
+    A killed/reaped record's process no longer exists to append to it and no
+    resume/rerun is pending in the same call, so the file is a pure orphan from
+    this point on (research: kill/reap removed the registry record and process
+    but left the log behind indefinitely). Best-effort: a missing or unremovable
+    file must not fail the kill/reap it is cleaning up after.
+    """
+    if not record.log_path:
+        return
+    from pathlib import Path as _Path
+
+    with contextlib.suppress(OSError):
+        _Path(record.log_path).unlink(missing_ok=True)
+
+
 def kill(name: str, *, home: Path | None = None) -> ProcRecord:
-    """Tree-kill the named process and remove its record.
+    """Tree-kill the named process, remove its record, and delete its runtime log.
 
     The kill is an OS action; once the pid is dead the record is unconditionally
-    removed (a dead record fights no owner). Returns the killed record.
+    removed (a dead record fights no owner) and its ``log_path`` file (if any)
+    deleted, since nothing will append to it again. Returns the killed record.
     """
     record = resolve(name, home=home)
     if not tree_kill(record.pid):
@@ -323,6 +378,7 @@ def kill(name: str, *, home: Path | None = None) -> ProcRecord:
             f"failed to kill {record.role}-{record.name} pid {record.pid}"
         )
     remove_record(record.role, record.name, home=home)
+    _delete_record_log(record)
     return record
 
 
@@ -404,11 +460,12 @@ def rerun(
 def reap(
     *, home: Path | None = None, config: ProcsConfig | None = None
 ) -> list[ProcRecord]:
-    """Kill every stale/dead record's orphan and clear it; return the reaped records.
+    """Kill every stale/dead record's orphan, clear it, and delete its runtime log.
 
     A ``DEAD`` record's pid is already gone; a ``STALE`` record's pid is alive but
     past its heartbeat window - both are orphans the operator no longer wants, so
-    the tree is felled (no-op when already dead) and the record removed.
+    the tree is felled (no-op when already dead), the record removed, and its
+    ``log_path`` file (if any) deleted since nothing will append to it again.
     """
     resolved_config = config if config is not None else _load_config_or_empty()
     reaped: list[ProcRecord] = []
@@ -420,6 +477,7 @@ def reap(
             continue
         tree_kill(record.pid)
         remove_record(record.role, record.name, home=home)
+        _delete_record_log(record)
         reaped.append(record)
     return reaped
 

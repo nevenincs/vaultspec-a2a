@@ -10,6 +10,16 @@ related:
   - '[[2026-07-19-observability-lanes-research]]'
 ---
 
+<!-- LINK RULES:
+     - [[wiki-links]] are ONLY for .vault/ documents in the
+       related: field above.
+     - The related: field carries the AUTHORISING documents
+       (ADR, research, reference, prior plan) for every Step in
+       this plan. Steps inherit this chain; per-row reference
+       footers do not exist.
+     - NEVER use [[wiki-links]] or markdown links in the
+       document body. -->
+
 # `observability-lanes` plan
 
 ### Phase `P01` - Lane wiring
@@ -24,8 +34,8 @@ Rework the dead logging setup into the ADR's configure_logging(kind) contract su
 
 Bound every file lane (rotation), reap orphaned runtime logs, close the two loop-hygiene residuals, and make test output quiet by default with documented opt-ins and scratchpad conventions.
 
-- [ ] `P02.S03` - Bound and reap file lanes: rotating handlers on service file lanes, lifecycle reap path deletes the reaped process's runtime logs, startup sweep removes stale worker-autospawn logs whose port has no live registry record. Live tests covering rotation trigger, reap deletion, and orphan sweep against real files and a real registry record; `src/vaultspec_a2a/lifecycle/, src/vaultspec_a2a/control/worker_management.py, src/vaultspec_a2a/lifecycle/tests/`.
-- [ ] `P02.S04` - Close loop-hygiene residuals and test-output noise: dedup the dispatch reconciling-redispatch failure log (state change plus every Nth repeat), give the websocket client-heartbeat failure the worker heartbeat's escalation ladder, remove log_cli from default pytest config documenting the opt-in, and document the scratchpad artifact convention. Live tests for both loop-hygiene changes; `src/vaultspec_a2a/control/dispatch.py, src/vaultspec_a2a/api/websocket.py, pyproject.toml, docs/`.
+- [x] `P02.S03` - Bound and reap file lanes: rotating handlers on service file lanes, lifecycle reap path deletes the reaped process's runtime logs, startup sweep removes stale worker-autospawn logs whose port has no live registry record. Live tests covering rotation trigger, reap deletion, and orphan sweep against real files and a real registry record; `src/vaultspec_a2a/lifecycle/, src/vaultspec_a2a/control/worker_management.py, src/vaultspec_a2a/lifecycle/tests/`.
+- [x] `P02.S04` - Close loop-hygiene residuals and test-output noise: dedup the dispatch reconciling-redispatch failure log (state change plus every Nth repeat), give the websocket client-heartbeat failure the worker heartbeat's escalation ladder, remove log_cli from default pytest config documenting the opt-in, and document the scratchpad artifact convention. Live tests for both loop-hygiene changes; `src/vaultspec_a2a/control/dispatch.py, src/vaultspec_a2a/api/websocket.py, pyproject.toml, docs/`.
 
 ## Description
 

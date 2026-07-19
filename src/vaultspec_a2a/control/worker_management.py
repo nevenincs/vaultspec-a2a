@@ -31,6 +31,7 @@ __all__ = [
     "LazyWorkerSpawner",
     "WorkerState",
     "WorkerWatchdog",
+    "sweep_orphan_worker_logs",
 ]
 
 logger = logging.getLogger(__name__)
@@ -85,6 +86,49 @@ def _runtime_dir() -> Path:
 def _worker_stderr_log_path(worker_port: int) -> Path:
     """Return the deterministic stderr log path for the auto-spawned worker."""
     return _runtime_dir() / f"worker-autospawn-{worker_port}.stderr.log"
+
+
+_WORKER_LOG_NAME_RE = re.compile(r"^worker-autospawn-(\d+)\.stderr\.log$")
+
+
+def sweep_orphan_worker_logs(
+    *, current_worker_port: int, registry_home: Path | None = None
+) -> list[Path]:
+    """Delete ``worker-autospawn-<port>.stderr.log`` files with no live claim.
+
+    A dev-band worker instance gets a fresh port (hence a fresh log filename)
+    every boot, so the runtime dir accumulates one orphaned file per past
+    instance forever - no reap ever touched them (research: 15+ accumulated at
+    audit time). Meant to run once per gateway boot, before this process spawns
+    its own worker: a file's port is kept when it is the port THIS process is
+    about to (re)use, or when the dev-process registry (``~/.vaultspec/procs``,
+    a separate registry from this gateway's own service discovery) still shows
+    a live record on that port; every other file is a stale orphan and removed.
+    Best-effort per file and per registry read - neither may abort a real boot.
+    """
+    from ..lifecycle.registry import StalenessState, classify_record, list_records
+
+    try:
+        live_ports = {
+            record.port
+            for record in list_records(registry_home)
+            if classify_record(record, None) is StalenessState.LIVE
+        }
+    except OSError:
+        live_ports = set()
+
+    removed: list[Path] = []
+    for path in _runtime_dir().glob("worker-autospawn-*.stderr.log"):
+        match = _WORKER_LOG_NAME_RE.match(path.name)
+        if match is None:
+            continue
+        port = int(match.group(1))
+        if port == current_worker_port or port in live_ports:
+            continue
+        with contextlib.suppress(OSError):
+            path.unlink()
+            removed.append(path)
+    return removed
 
 
 def _read_log_tail(log_path: Path, max_bytes: int = _WORKER_STDERR_TAIL_BYTES) -> str:
@@ -229,11 +273,23 @@ async def _evict_stale_worker(
             )
 
     deadline = asyncio.get_event_loop().time() + timeout
+    freed = False
     while asyncio.get_event_loop().time() < deadline:
         if not await _tcp_port_ready("127.0.0.1", worker_port):
-            return True
+            freed = True
+            break
         await asyncio.sleep(0.25)
-    return not await _tcp_port_ready("127.0.0.1", worker_port)
+    else:
+        freed = not await _tcp_port_ready("127.0.0.1", worker_port)
+    if freed:
+        # The evicted worker's own stderr log is a dead end from this point:
+        # nothing will append to it unless OUR spawn reuses the same port (which
+        # truncates it anyway), and an eviction whose follow-up spawn then fails
+        # would otherwise leave it behind exactly like the registry orphans this
+        # step's kill/reap deletion closes.
+        with contextlib.suppress(OSError):
+            _worker_stderr_log_path(worker_port).unlink(missing_ok=True)
+    return freed
 
 
 async def _spawn_worker(
@@ -430,6 +486,13 @@ class LazyWorkerSpawner:
         )
         self._spawned = False
         self._lock = asyncio.Lock()
+        if auto_spawn:
+            # Startup sweep (once per gateway process, before this port's own log
+            # is ever (re)opened): clear stale worker-autospawn stderr logs left
+            # behind by past dev-band instances. Best-effort - a sweep failure
+            # must never block gateway construction.
+            with contextlib.suppress(Exception):
+                sweep_orphan_worker_logs(current_worker_port=worker_port)
 
     @property
     def spawned(self) -> bool:

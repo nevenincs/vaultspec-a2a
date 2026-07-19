@@ -74,6 +74,10 @@ AgentControlHandler = Callable[[str, str, AgentControlAction], Awaitable[None]]
 
 _SERVER_VERSION = "0.1.0"
 
+# Mirrors the worker heartbeat ladder's cadence (worker/ipc.py heartbeat_loop):
+# every Nth consecutive failure escalates to full WARNING detail again.
+_WS_HEARTBEAT_FAILURE_LOG_EVERY_N = 5
+
 _client_message_adapter: TypeAdapter[ClientMessage] = TypeAdapter(ClientMessage)
 
 
@@ -117,6 +121,13 @@ class ConnectionManager:
         self._agent_control_handler: AgentControlHandler | None = None
         # Per-connection error sequence counters (sequences start at 1)
         self._error_sequences: dict[str, int] = {}
+        # Server-wide heartbeat-send failure ladder (mirrors the worker
+        # heartbeat ladder in worker/ipc.py): a single client's writer loop
+        # breaks on its own first heartbeat failure (no per-client "consecutive"
+        # to track), but many independently-failing clients around the same
+        # network blip would otherwise each log identically - this counter is
+        # scoped to the manager so that storm dedups instead.
+        self._consecutive_heartbeat_failures = 0
 
     def set_message_handler(self, handler: MessageHandler) -> None:
         """Register a callback for SEND_MESSAGE commands.
@@ -563,6 +574,39 @@ class ConnectionManager:
     # Writer loop (event queue -> WebSocket)
     # ------------------------------------------------------------------
 
+    def _log_heartbeat_failure(self, client_id: str) -> None:
+        """Log a heartbeat-send failure at the same escalation ladder cadence
+        as the worker heartbeat loop (worker/ipc.py): full detail on the 1st
+        and every Nth consecutive failure across ALL clients, since one
+        client's writer loop breaks on its own first failure (nothing
+        "consecutive" to track per connection) but many clients failing
+        together around the same network blip must not each log identically.
+        """
+        self._consecutive_heartbeat_failures += 1
+        n = self._consecutive_heartbeat_failures
+        if n == 1 or n % _WS_HEARTBEAT_FAILURE_LOG_EVERY_N == 0:
+            logger.warning(
+                "Heartbeat failed for client %s (%d consecutive"
+                " heartbeat failures across all clients)",
+                client_id,
+                n,
+                extra={
+                    "client_id": client_id,
+                    "action": "send_heartbeat",
+                    "consecutive_failures": n,
+                },
+                exc_info=True,
+            )
+
+    def _record_heartbeat_success(self) -> None:
+        """Reset the heartbeat-failure ladder and note recovery after failures."""
+        if self._consecutive_heartbeat_failures > 0:
+            logger.info(
+                "Heartbeat delivery recovered after %d consecutive failures",
+                self._consecutive_heartbeat_failures,
+            )
+        self._consecutive_heartbeat_failures = 0
+
     async def _writer_loop(
         self,
         client_id: str,
@@ -603,13 +647,9 @@ class ConnectionManager:
                     try:
                         await websocket.send_json(heartbeat.model_dump(mode="json"))
                         _ws_heartbeats_counter.add(1, {"client_id": client_id})
+                        self._record_heartbeat_success()
                     except Exception:
-                        logger.warning(
-                            "Heartbeat failed for client %s",
-                            client_id,
-                            extra={"client_id": client_id, "action": "send_heartbeat"},
-                            exc_info=True,
-                        )
+                        self._log_heartbeat_failure(client_id)
                         break
                     continue
 

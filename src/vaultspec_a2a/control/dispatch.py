@@ -42,6 +42,11 @@ __all__ = [
 
 logger = logging.getLogger(__name__)
 
+# Mirrors the worker heartbeat ladder's cadence (worker/ipc.py heartbeat_loop):
+# first occurrence logs in full, every Nth repeat thereafter logs in full, the
+# rest only advance the counter a batch-end summary reports.
+_REDISPATCH_LOG_EVERY_N = 5
+
 
 @dataclass(frozen=True, slots=True)
 class DispatchOutcome:
@@ -203,6 +208,25 @@ async def dispatch_to_worker(
     )
 
 
+def _log_redispatch_failure_ladder(
+    counts: dict[str, int], category: str, message: str, *args: object
+) -> None:
+    """Log a re-dispatch failure at WARNING on the 1st and every Nth repeat.
+
+    A persistent per-thread failure across a large reconciling batch (a stuck
+    worker, an open circuit breaker) would otherwise re-log the identical line
+    once per thread with no dedup; this mirrors the worker heartbeat ladder
+    (first failure -> WARNING, every Nth thereafter -> WARNING, everything
+    between only advances the counter). *category* is the failure kind
+    (``circuit_open``/``redispatch_error``), so switching kinds mid-batch is a
+    state change that always logs at its own occurrence 1.
+    """
+    counts[category] = counts.get(category, 0) + 1
+    n = counts[category]
+    if n == 1 or n % _REDISPATCH_LOG_EVERY_N == 0:
+        logger.warning(message, *args)
+
+
 async def redispatch_reconciling_threads(
     worker_client: httpx.AsyncClient,
     circuit_breaker: WorkerCircuitBreaker,
@@ -227,6 +251,7 @@ async def redispatch_reconciling_threads(
             if not threads:
                 return
             logger.info("Re-dispatching %d reconciling threads", len(threads))
+            failure_counts: dict[str, int] = {}
             for thread in threads:
                 meta: dict[str, Any] = {}
                 if thread.thread_metadata:
@@ -282,7 +307,9 @@ async def redispatch_reconciling_threads(
                         thread.id,
                     )
                 except WorkerCircuitOpenError:
-                    logger.warning(
+                    _log_redispatch_failure_ladder(
+                        failure_counts,
+                        "circuit_open",
                         "Circuit breaker open, skipping re-dispatch for %s",
                         thread.id,
                     )
@@ -292,10 +319,21 @@ async def redispatch_reconciling_threads(
                     WorkerDispatchRejectedError,
                     WorkerUnreachableError,
                 ) as exc:
-                    logger.warning(
+                    _log_redispatch_failure_ladder(
+                        failure_counts,
+                        "redispatch_error",
                         "Re-dispatch error for thread %s: %s",
                         thread.id,
                         exc,
+                    )
+            for category, count in failure_counts.items():
+                if count > 1:
+                    logger.info(
+                        "Re-dispatch failure ladder for %s: %d occurrences this"
+                        " batch (only the 1st and every %dth logged in full)",
+                        category,
+                        count,
+                        _REDISPATCH_LOG_EVERY_N,
                     )
     except Exception as exc:
         logger.error("Reconciling re-dispatch task failed: %s", exc)

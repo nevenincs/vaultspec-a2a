@@ -80,6 +80,29 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/vaultspec_a2a"]
+# The desktop capsule ships a deliberately shaped wheel: every capsule-owned
+# runtime asset is package data, and no in-package test tree is carried.
+#
+# Included (hatchling default-includes all tracked files under the package, so
+# these ride in without an allowlist that would risk dropping production
+# modules):
+#   - database/migrations/**  — Alembic scripts, env.py, and script.py.mako
+#     resolved from installed package resources (see database/migrate.py).
+#   - team/presets/**  — bundled agent and team TOML presets, including the
+#     mock-* presets that the /v1/presets discovery surface globs and filters
+#     via is_mock_preset (team/team_config.py); excluding them would change the
+#     installed discovery contract.
+#   - context/presets/**  — bundled authoring rule corpus.
+#
+# Excluded: the rust-style per-module `tests/` trees and the `desktop_tests/`
+# certification package. These are source-tree-only (pytest testpaths point at
+# the checkout), so their removal cannot weaken any gate that runs from source.
+exclude = [
+  "**/tests",
+  "**/tests/**",
+  "src/vaultspec_a2a/desktop_tests",
+  "src/vaultspec_a2a/desktop_tests/**",
+]
 
 [tool.pytest.ini_options]
 # --capture=sys: avoids pytest's fd-level dup2 which crashes silently under

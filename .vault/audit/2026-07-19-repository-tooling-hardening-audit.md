@@ -58,6 +58,51 @@ but its current managed policy does not cover these three runtime surfaces.
 Status: open and queued for S05/upstream reconciliation; S04 does not stage the
 exposed runtime or lock files and does not add a competing framework policy.
 
+### implicit-tooling-profile | high | Initial native recipes relied on ambient tooling packages
+
+Type: dependency authority. The first S06 code and test modules used frozen
+`uv run` commands without selecting the `tooling` group even though the project
+declares no default groups. The shared environment masked the fresh-clone
+failure. Status: resolved in S06 by adding explicit no-default-group tooling or
+development profile selection and proving the packages in an isolated run.
+
+### build-clean-venv-scope | high | Initial cleanup discovery could enter the project virtual environment
+
+Type: destructive-path safety. The first S06 cleanup recipe recursively found
+egg metadata from the repository root, which could include the project virtual
+environment. Status: resolved in S06 before execution by limiting discovery to
+explicit source, test, and documentation roots and retaining an absolute
+repository-boundary check before every recursive removal.
+
+### native-module-version-check | medium | Installed Just rejected the documented minimum-version setting
+
+Type: compatibility drift. The initially researched setting was not accepted by
+the installed Just 1.46 parser. Status: resolved in S06 by keeping an actionable
+root requirement notice and adding a real PowerShell version comparison to the
+doctor; Just 1.46.0 satisfies the stable-module minimum of 1.31.0.
+
+### nested-help-option-order | low | Initial developer help passed the module outside the list option
+
+Type: command usability. The first `just dev` run rejected the list command
+because its module argument followed another option. Status: resolved in S06 by
+binding `dev` directly to `--list`; root and nested help now execute and list all
+submodules.
+
+### hook-validation-mutation | medium | Current hook pipeline is not yet a read-only validator
+
+Type: contract debt. S06 preserves hook install, removal, execution, and explicit
+repair entry points but deliberately does not describe the current `prek`
+pipeline as read-only because its configuration still contains mutating
+Vaultspec hooks. Status: open and queued for S08, which owns hook validation and
+repair separation.
+
+### test-selection-name-drift | medium | The all-test recipe still inherits the non-service default marker
+
+Type: test contract debt. S06 preserves the current Pytest selection while
+making its recipe description honest; the project-level default still excludes
+service tests, so `all` is not yet semantically complete. Status: open and
+queued for S09 test-selection remediation.
+
 ## Recommendations
 
 No open task remains for S01, S02, or the S03 implementation. Preserve the two
@@ -69,3 +114,8 @@ Keep the newly trackable canonical `.vaultspec` and provider projections in
 S05 scope, while classifying the exposed runtime and lock surfaces separately.
 Resolve whether Core should expand its managed policy before adding any exact
 repository stopgap, so Core remains the single framework-ignore owner.
+
+Preserve S06's explicit dependency groups and cleanup boundary. Complete named
+service and stack ownership in S07, make hooks read-only in S08, and correct the
+project-wide test selection in S09 before promoting those surfaces into the
+terminal CI contract.

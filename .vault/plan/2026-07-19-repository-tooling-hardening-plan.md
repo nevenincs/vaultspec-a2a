@@ -59,7 +59,7 @@ Converge effective Git policy and canonical rules through Vaultspec Core ownersh
 
 Replace the monolithic dispatcher with a discoverable portable module hierarchy.
 
-- [ ] `W02.P04.S06` - Replace dynamic dispatch with a minimum-version-checked native module index and modular developer surface; `Justfile, just/dev`.
+- [x] `W02.P04.S06` - Replace dynamic dispatch with a minimum-version-checked native module index and modular developer surface; `Justfile, just/dev`.
 - [ ] `W02.P04.S07` - Route named services only through the process registry and stacks only through Compose; `just/dev/service.just, just/dev/stack.just`.
 
 ## Wave `W03` - unify validation and harden hosted automation

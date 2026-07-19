@@ -38,7 +38,7 @@ server = [
 ]
 rag = [
   "torch>=2.4",
-  "vaultspec-rag[mcp]>=0.2.28",
+  "vaultspec-rag[mcp]>=0.3.2,<0.4",
 ]
 
 [project.scripts]
@@ -46,7 +46,10 @@ vaultspec-a2a = "vaultspec_a2a.cli.main:main"
 vaultspec-mcp = "vaultspec_a2a.protocols.mcp.__main__:main"
 
 [dependency-groups]
-dev = [
+docs = [
+  "sphinx>=8.2",
+]
+tooling = [
   "deptry>=0.23.0",
   "identify>=2.0.0",
   "nodeenv>=1.0.0",
@@ -59,12 +62,21 @@ dev = [
   "ruff>=0.15.2",
   "tenacity>=9.0.0",
   "ty>=0.0.15",
-  "vaultspec-core",
+  "vaultspec-core>=0.1.48,<0.2",
   "websockets>=16.0",
 ]
+dev = [
+  { include-group = "tooling" },
+]
+all = [
+  { include-group = "docs" },
+  { include-group = "tooling" },
+]
+
+[tool.uv]
+default-groups = []
 
 [tool.uv.sources]
-vaultspec-core = { git = "https://github.com/wgergely/vaultspec-core.git", branch = "main" }
 torch = [
     { index = "pytorch-cu130", extra = "rag", marker = "sys_platform == 'linux' or sys_platform == 'win32'" },
 ]

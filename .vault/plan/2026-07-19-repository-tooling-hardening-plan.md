@@ -35,7 +35,7 @@ Establish the project lock as the only Core and RAG execution authority before a
 
 Define explicit dependency profiles and make the lock authoritative for every Vaultspec tool invocation.
 
-- [ ] `W01.P01.S01` - Define explicit base, server, RAG, tooling, and all profiles with bounded Core and RAG upgrades; `pyproject.toml, uv.lock`.
+- [x] `W01.P01.S01` - Define explicit base, server, RAG, tooling, and all profiles with bounded Core and RAG upgrades; `pyproject.toml, uv.lock`.
 
 ### Phase `W01.P02` - framework lifecycle commands
 

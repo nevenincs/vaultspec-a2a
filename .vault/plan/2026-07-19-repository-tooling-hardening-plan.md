@@ -41,7 +41,7 @@ Define explicit dependency profiles and make the lock authoritative for every Va
 
 Expose deterministic setup, upgrade, synchronization, and diagnosis without ambient-latest fallbacks.
 
-- [ ] `W01.P02.S02` - Add locked setup, sync, upgrade, status, and service recipes for Core and RAG; `just/dev/deps.just, just/dev/vault.just, just/dev/rag.just`.
+- [x] `W01.P02.S02` - Add locked setup, sync, upgrade, status, and service recipes for Core and RAG; `just/dev/deps.just, just/dev/vault.just, just/dev/rag.just`.
 - [ ] `W01.P02.S03` - Route workspace provisioning and agent RAG acquisition through deliberate locked versions with real subprocess tests; `src/vaultspec_a2a/cli/provision.py, src/vaultspec_a2a/providers/_acp_mcp.py, tests`.
 
 ## Wave `W02` - reconcile governance and redesign the command facade

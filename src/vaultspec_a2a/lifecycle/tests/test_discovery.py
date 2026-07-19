@@ -11,11 +11,14 @@ from __future__ import annotations
 import json
 import os
 import socket
+import subprocess
 import threading
 import time
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 import httpx
+import pytest
 import uvicorn
 from fastapi import FastAPI
 
@@ -24,6 +27,7 @@ if TYPE_CHECKING:
 
 from ..discovery import (
     DiscoveryState,
+    _windows_file_is_restricted,
     another_resident_is_live,
     classify_discovery,
     is_pid_alive,
@@ -94,9 +98,27 @@ def test_classifier_covers_absent_fresh_stale_malformed(tmp_path) -> None:
     state, info = classify_discovery(path)
     assert state is DiscoveryState.FRESH
     assert info is not None and info.port == 8000 and info.pid == os.getpid()
-    # The token is redacted from repr but preserved on disk for the engine.
+    # Discovery is secret-free; the resolved token comes only from the bounded
+    # owner handoff file.
     assert "s3cr3t-abc" not in repr(info)
-    assert json.loads(path.read_text())["service_token"] == "s3cr3t-abc"
+    record = json.loads(path.read_text())
+    assert "service_token" not in record
+    handoff = Path(record["handoff_reference"])
+    assert handoff == path.with_name("service.token").resolve()
+    assert handoff.read_text(encoding="utf-8") == "s3cr3t-abc"
+    assert info.service_token == "s3cr3t-abc"
+    if os.name == "posix":
+        assert handoff.stat().st_mode & 0o077 == 0
+    elif os.name == "nt":
+        assert _windows_file_is_restricted(path.parent)
+        acl = subprocess.run(
+            ["icacls.exe", str(handoff)],
+            check=True,
+            capture_output=True,
+            text=True,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        ).stdout
+        assert "(I)" not in acl
 
     old = int(time.time() * 1000) - 10_000_000
     write_service_json(path, port=8000, pid=os.getpid(), now_ms=old)
@@ -104,6 +126,112 @@ def test_classifier_covers_absent_fresh_stale_malformed(tmp_path) -> None:
 
     path.write_text("{ not json", encoding="utf-8")
     assert classify_discovery(path)[0] is DiscoveryState.MALFORMED
+
+
+def test_token_publication_refuses_preexisting_link(tmp_path: Path) -> None:
+    """A planted handoff link cannot redirect credential publication."""
+    path = service_json_path(tmp_path)
+    outside = tmp_path / "outside-secret.txt"
+    outside.write_text("must-survive", encoding="utf-8")
+    handoff = path.with_name("service.token")
+    handoff.symlink_to(outside)
+
+    with pytest.raises(OSError, match="link-like"):
+        write_service_json(
+            path,
+            port=8000,
+            pid=os.getpid(),
+            service_token="replacement-secret",
+        )
+
+    assert outside.read_text(encoding="utf-8") == "must-survive"
+    assert handoff.is_symlink()
+    assert not path.exists()
+
+
+def test_credential_reader_rejects_permissions_without_repair(tmp_path: Path) -> None:
+    """Filesystem-only discovery never repairs an untrusted handoff file."""
+    path = service_json_path(tmp_path)
+    handoff = path.with_name("service.token")
+    handoff.write_text("untrusted-secret", encoding="utf-8")
+    path.write_text(
+        json.dumps(
+            {
+                "port": 8000,
+                "pid": os.getpid(),
+                "last_heartbeat": int(time.time() * 1000),
+                "handoff_reference": str(handoff.resolve()),
+            }
+        ),
+        encoding="utf-8",
+    )
+    if os.name == "posix":
+        handoff.chmod(0o644)
+        before: object = handoff.stat().st_mode
+    else:
+        subprocess.run(
+            ["icacls.exe", str(handoff), "/grant", "*S-1-1-0:F"],
+            check=True,
+            capture_output=True,
+            text=True,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+        before = subprocess.run(
+            ["icacls.exe", str(handoff)],
+            check=True,
+            capture_output=True,
+            text=True,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        ).stdout
+
+    state, info = classify_discovery(path)
+
+    assert state is DiscoveryState.FRESH
+    assert info is not None and info.service_token is None
+    if os.name == "posix":
+        assert handoff.stat().st_mode == before
+    else:
+        after = subprocess.run(
+            ["icacls.exe", str(handoff)],
+            check=True,
+            capture_output=True,
+            text=True,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        ).stdout
+        assert after == before
+
+
+def test_writer_replaces_preexisting_broad_directory_authority(tmp_path: Path) -> None:
+    """Publication replaces, rather than layers grants onto, a shared parent."""
+    home = tmp_path / "shared-home"
+    home.mkdir()
+    if os.name == "posix":
+        home.chmod(0o777)
+    else:
+        subprocess.run(
+            ["icacls.exe", str(home), "/grant", "*S-1-1-0:(OI)(CI)F"],
+            check=True,
+            capture_output=True,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+
+    path = service_json_path(home)
+    write_service_json(
+        path,
+        port=8000,
+        pid=os.getpid(),
+        service_token="private-after-replacement",
+    )
+    state, info = classify_discovery(path)
+
+    assert state is DiscoveryState.FRESH
+    assert info is not None
+    assert info.service_token == "private-after-replacement"
+    if os.name == "posix":
+        assert home.stat().st_mode & 0o077 == 0
+    else:
+        assert _windows_file_is_restricted(home)
+        assert _windows_file_is_restricted(home / "service.token")
 
 
 def test_pid_liveness_and_ownership(tmp_path) -> None:

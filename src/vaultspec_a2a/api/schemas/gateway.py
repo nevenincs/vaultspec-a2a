@@ -16,7 +16,8 @@ cancel, preset listing, and health.
 
 from __future__ import annotations
 
-from typing import Literal
+import re
+from typing import Annotated, Literal
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -27,6 +28,7 @@ from ...thread.enums import ThreadStatus
 __all__ = [
     "ActiveRunRecord",
     "ActiveRunsResponse",
+    "PathSafeRunId",
     "PresetSummary",
     "PresetsListResponse",
     "ProfileSummary",
@@ -41,6 +43,11 @@ __all__ = [
 ]
 
 _API_VERSION = "v1"
+_PATH_SAFE_RUN_ID = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9_-]{0,127}$")
+PathSafeRunId = Annotated[
+    str,
+    Field(min_length=1, max_length=128, pattern=_PATH_SAFE_RUN_ID.pattern),
+]
 
 
 class RunStartRequest(BaseModel):
@@ -68,7 +75,7 @@ class RunStartRequest(BaseModel):
     # Client-supplied stable run/idempotency id. When present the verb is
     # dispatch-exactly-once: a retry with the same id returns the existing run
     # instead of starting a second. Absent, the gateway mints a server-side id.
-    run_id: str | None = Field(default=None, min_length=1, max_length=128)
+    run_id: PathSafeRunId | None = None
     # model-profiles: the selected model profile id. Defaults to the implicit
     # team-defaults profile (the team's normal resolution). An unknown or
     # ineligible profile is refused before dispatch - never silently replaced.
@@ -85,6 +92,14 @@ class RunStartRequest(BaseModel):
         """Reject an empty or whitespace-only prompt before dispatch."""
         if not value.strip():
             raise ValueError("message must not be empty")
+        return value
+
+    @field_validator("run_id")
+    @classmethod
+    def _run_id_must_be_path_safe(cls, value: str | None) -> str | None:
+        """Keep client identities addressable by every per-run gateway route."""
+        if value is not None and _PATH_SAFE_RUN_ID.fullmatch(value) is None:
+            raise ValueError("run_id must be a path-safe token")
         return value
 
 

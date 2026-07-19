@@ -65,19 +65,18 @@ def _request(method: str, url: str, **kwargs: Any) -> httpx.Response:
     port matches that discovery record; a user-supplied remote URL never receives
     a machine-local discovery credential.
     """
-    token = settings.internal_token
-    if token is None:
-        parsed = urlsplit(url)
-        if parsed.hostname in {"127.0.0.1", "localhost", "::1"}:
-            from ..lifecycle.discovery import DiscoveryState, read_resident_service
+    token = settings.gateway_service_token
+    parsed = urlsplit(url)
+    if token is None and parsed.hostname in {"127.0.0.1", "localhost", "::1"}:
+        from ..lifecycle.discovery import DiscoveryState, read_resident_service
 
-            state, info = read_resident_service(settings.a2a_home)
-            if (
-                state is DiscoveryState.FRESH
-                and info is not None
-                and info.port == parsed.port
-            ):
-                token = info.service_token
+        state, info = read_resident_service(settings.a2a_home)
+        if (
+            state is DiscoveryState.FRESH
+            and info is not None
+            and info.port == parsed.port
+        ):
+            token = info.service_token
 
     headers = dict(kwargs.pop("headers", {}))
     if token is not None:

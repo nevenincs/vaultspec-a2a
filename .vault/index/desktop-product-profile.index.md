@@ -25,6 +25,7 @@ related:
   - '[[2026-07-18-desktop-product-profile-W01-P03-S14]]'
   - '[[2026-07-18-desktop-product-profile-W01-P03-S15]]'
   - '[[2026-07-18-desktop-product-profile-W01-P03-S94]]'
+  - '[[2026-07-18-desktop-product-profile-W01-P03-S95]]'
   - '[[2026-07-18-desktop-product-profile-W01-P03-S97]]'
   - '[[2026-07-18-desktop-product-profile-W02-P04-S16]]'
   - '[[2026-07-18-desktop-product-profile-W02-P04-S17]]'
@@ -94,6 +95,7 @@ Auto-generated index of all documents tagged with `#desktop-product-profile`.
 - `2026-07-18-desktop-product-profile-W01-P03-S14` - Verify capsule identity target closure entrypoints digests licenses and software bill of materials without a source checkout
 - `2026-07-18-desktop-product-profile-W01-P03-S15` - Create the artifact workflow that publishes deterministic component archives and manifests for dashboard consumption
 - `2026-07-18-desktop-product-profile-W01-P03-S94` - Project archive payloads directly into one exclusively claimed prefix of a caller-owned unpublished generation through continuously leased descriptor or handle authority and return deterministic evidence without inner rename or cleanup
+- `2026-07-18-desktop-product-profile-W01-P03-S95` - Write deterministic capsule archives through one exact create-new file inside a caller-owned unpublished generation while sharing the bounded emitter and retaining fail-closed legacy publication behavior
 - `2026-07-18-desktop-product-profile-W01-P03-S97` - Lease one empty unpublished-generation child before any write
 - `2026-07-18-desktop-product-profile-W02-P04-S16` - Define the desktop profile and validate explicit immutable and mutable product roots
 - `2026-07-18-desktop-product-profile-W02-P04-S17` - Derive database checkpoint log credential discovery receipt workspace temporary-home and snapshot paths only from the explicit desktop app home

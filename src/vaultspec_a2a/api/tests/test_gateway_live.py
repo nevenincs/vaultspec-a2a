@@ -515,8 +515,46 @@ async def test_run_start_refusals_over_live_socket(
         assert thin_bundle.status_code == 422
         assert "token" in thin_bundle.json()["detail"]
 
-        # None of the refusals reached the worker.
-        assert worker.dispatches == []
+        # Client ids must remain addressable by the path-based status, stream,
+        # and cancel routes. Reject every ambiguous/path-breaking form at the
+        # public gateway boundary before persistence or dispatch.
+        for invalid_run_id in (
+            "path/segment",
+            "contains whitespace",
+            "-leading-hyphen",
+            "x" * 129,
+        ):
+            invalid_id = await client.post(
+                "/v1/runs",
+                json={
+                    "team_preset": _PRESET,
+                    "message": "go",
+                    "run_id": invalid_run_id,
+                },
+            )
+            assert invalid_id.status_code == 422, invalid_run_id
+
+        for method, target in (
+            (client.get, "/v1/runs/-leading-hyphen"),
+            (client.get, "/v1/runs/contains%20whitespace/stream"),
+            (client.post, "/v1/runs/-leading-hyphen/cancel"),
+        ):
+            invalid_path = await method(target)
+            assert invalid_path.status_code == 422, target
+
+        dashboard_id = await client.post(
+            "/v1/runs",
+            json={
+                "team_preset": _PRESET,
+                "message": "go",
+                "run_id": "run-0123456789abcdef0123456789abcdef",
+            },
+        )
+        assert dashboard_id.status_code == 201
+        assert dashboard_id.json()["run_id"] == "run-0123456789abcdef0123456789abcdef"
+
+        # Only the valid dashboard-form id reached the worker.
+        assert len(worker.dispatches) == 1
 
 
 @pytest.mark.asyncio(loop_scope="function")
@@ -544,6 +582,42 @@ async def test_run_start_client_id_is_dispatch_exactly_once(
         assert second.json()["run_id"] == "client-run-0001"
 
         # Dispatched exactly once despite the retry.
+        assert len(worker.dispatches) == 1
+
+
+@pytest.mark.asyncio(loop_scope="function")
+async def test_run_id_reservation_is_visible_before_dispatch_ack(
+    session_factory, checkpointer
+) -> None:
+    """A concurrent retry observes one durable reservation and one dispatch."""
+    app, _agg, worker, _cp = make_app(session_factory, checkpointer)
+    worker.hold_dispatch_response()
+    payload = {
+        "team_preset": _PRESET,
+        "message": "build it",
+        "autonomous": True,
+        "run_id": "run-0123456789abcdef0123456789abcdef",
+    }
+    async with (
+        _live_server(app) as base,
+        httpx.AsyncClient(base_url=base, timeout=10.0) as client,
+    ):
+        first = asyncio.create_task(client.post("/v1/runs", json=payload))
+        await asyncio.wait_for(worker.dispatch_received.wait(), timeout=5.0)
+
+        status = await client.get(f"/v1/runs/{payload['run_id']}")
+        assert status.status_code == 200
+        assert status.json()["status"] == "submitted"
+
+        replay = await client.post("/v1/runs", json=payload)
+        assert replay.status_code == 201
+        assert replay.json()["run_id"] == payload["run_id"]
+        assert len(worker.dispatches) == 1
+
+        worker.release_dispatch.set()
+        accepted = await first
+        assert accepted.status_code == 201
+        assert accepted.json()["run_id"] == payload["run_id"]
         assert len(worker.dispatches) == 1
 
 

@@ -64,13 +64,21 @@ is attached to its invoking terminal; the caller owns its lifetime.
 Gateway bearer authentication
 -----------------------------
 
-The engine-facing ``/v1`` routes require the bearer token published in the
-gateway's machine-global ``service.json`` discovery record. Product CLI calls
-reuse that discovered token automatically. Direct clients must send
+The engine-facing ``/v1`` routes require a gateway bearer token. The gateway
+uses its configured service token or generates a fresh token when none is
+configured. It publishes the credential in the adjacent, owner-restricted
+``service.token`` handoff file. The machine-global ``service.json`` discovery
+record is secret-free: its ``handoff_reference`` names that file but never
+embeds the token.
+
+Product CLI calls use :func:`vaultspec_a2a.lifecycle.discovery.read_resident_service`
+to follow a validated handoff reference automatically, but only for a fresh
+record whose port matches the requested loopback endpoint. Direct clients with
+authority to read the handoff credential must send
 ``Authorization: Bearer <token>``; an absent or invalid bearer returns ``401``.
-If the gateway has no configured service token, protected routes fail closed
-with ``503``. The top-level ``/health`` liveness route remains public so local
-supervisors can probe the process.
+The top-level ``/health`` liveness route remains public so local supervisors can
+probe the process. Discovery publication and credential-file validation are
+implemented by :mod:`vaultspec_a2a.lifecycle.discovery`.
 
 Authentication is implemented by
 :func:`vaultspec_a2a.api.auth.authenticate_request` and wired by

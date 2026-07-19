@@ -2,10 +2,12 @@
 
 The resident A2A gateway publishes ``~/.vaultspec-a2a/service.json`` so the engine
 can attach to it under the attach-never-own discipline. The record adopts the R8
-``ServiceInfo`` contract: ``port`` required; optional ``pid``, ``service_token``,
-and ``last_heartbeat`` (ms-epoch). The producer refreshes the heartbeat every
-:data:`HEARTBEAT_REFRESH_SECONDS`; a consumer treats a heartbeat older than
-:data:`~vaultspec_a2a.authoring.discovery.HEARTBEAT_STALE_MS` as a crash.
+``ServiceInfo`` contract: ``port`` required; optional ``pid``, a non-secret
+``handoff_reference``, and ``last_heartbeat`` (ms-epoch). The bearer lives in
+the referenced owner-restricted file, never in discovery. The producer refreshes the
+heartbeat every :data:`HEARTBEAT_REFRESH_SECONDS`; a consumer treats a heartbeat
+older than :data:`~vaultspec_a2a.authoring.discovery.HEARTBEAT_STALE_MS` as a
+crash.
 
 Discovery is classified as ``FRESH | STALE | MALFORMED | ABSENT``: only ``ABSENT``
 licenses starting a new resident service; a live ``FRESH`` file means another
@@ -20,14 +22,20 @@ The reader half (parse + heartbeat freshness) is shared with
 
 from __future__ import annotations
 
+import ctypes
 import json
 import os
+import secrets
 import socket
+import stat
+import subprocess
 import sys
 import time
+from csv import reader as csv_reader
 from dataclasses import dataclass
 from enum import StrEnum
-from typing import TYPE_CHECKING
+from functools import cache
+from pathlib import Path
 
 import httpx
 
@@ -38,9 +46,15 @@ from ..authoring.discovery import (
     heartbeat_is_fresh,
     read_service_json,
 )
-
-if TYPE_CHECKING:
-    from pathlib import Path
+from ..desktop._filesystem_authority import (
+    assert_directory_authority,
+    create_anonymous_file,
+    create_private_file,
+    directory_lease,
+    path_is_link_like,
+    publish_no_replace,
+    resolve_directory_authority,
+)
 
 __all__ = [
     "DESKTOP_DISCOVERY_VERSION",
@@ -73,6 +87,167 @@ HEARTBEAT_REFRESH_SECONDS = 15
 _SERVICE_JSON_NAME = "service.json"
 
 
+class _AclSizeInformation(ctypes.Structure):
+    _fields_ = (
+        ("ace_count", ctypes.c_uint32),
+        ("acl_bytes_in_use", ctypes.c_uint32),
+        ("acl_bytes_free", ctypes.c_uint32),
+    )
+
+
+class _AceHeader(ctypes.Structure):
+    _fields_ = (
+        ("ace_type", ctypes.c_ubyte),
+        ("ace_flags", ctypes.c_ubyte),
+        ("ace_size", ctypes.c_ushort),
+    )
+
+
+@cache
+def _windows_system_executable(name: str) -> str:
+    """Resolve a trusted executable directly from the native system directory."""
+    if os.name != "nt" or Path(name).name != name:
+        raise OSError("trusted Windows executable resolution is unavailable")
+    buffer = ctypes.create_unicode_buffer(32_768)
+    length = ctypes.windll.kernel32.GetSystemDirectoryW(buffer, len(buffer))
+    if length <= 0 or length >= len(buffer):
+        raise ctypes.WinError(ctypes.get_last_error())
+    executable = Path(buffer.value) / name
+    if not executable.is_file():
+        raise FileNotFoundError(executable)
+    return str(executable)
+
+
+@cache
+def _windows_current_user_sid() -> str:
+    """Resolve the current Windows account SID without localized name parsing."""
+    completed = subprocess.run(
+        [_windows_system_executable("whoami.exe"), "/user", "/fo", "csv", "/nh"],
+        check=True,
+        capture_output=True,
+        text=True,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+    )
+    row = next(csv_reader([completed.stdout.strip()]))
+    if len(row) != 2 or not row[1].startswith("S-1-"):
+        msg = "unable to resolve current Windows account SID"
+        raise OSError(msg)
+    return row[1]
+
+
+def _restrict_windows_file(path: Path) -> None:
+    """Replace the DACL with user, SYSTEM, and administrators full access."""
+    if os.name != "nt":
+        return
+    current_sid = _windows_current_user_sid()
+    advapi32 = ctypes.WinDLL("advapi32", use_last_error=True)
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    descriptor = ctypes.c_void_p()
+    inheritance = "OICI" if path.is_dir() else ""
+    sddl = (
+        f"D:P(A;{inheritance};FA;;;{current_sid})"
+        f"(A;{inheritance};FA;;;SY)(A;{inheritance};FA;;;BA)"
+    )
+    if not advapi32.ConvertStringSecurityDescriptorToSecurityDescriptorW(
+        sddl,
+        1,  # SDDL_REVISION_1
+        ctypes.byref(descriptor),
+        None,
+    ):
+        raise ctypes.WinError(ctypes.get_last_error())
+    try:
+        dacl = ctypes.c_void_p()
+        present = ctypes.c_int()
+        defaulted = ctypes.c_int()
+        if not advapi32.GetSecurityDescriptorDacl(
+            descriptor,
+            ctypes.byref(present),
+            ctypes.byref(dacl),
+            ctypes.byref(defaulted),
+        ):
+            raise ctypes.WinError(ctypes.get_last_error())
+        if not present.value or not dacl.value:
+            raise OSError("private Windows DACL is absent")
+        result = advapi32.SetNamedSecurityInfoW(
+            str(path),
+            1,  # SE_FILE_OBJECT
+            0x00000004 | 0x80000000,  # DACL + PROTECTED_DACL
+            None,
+            None,
+            dacl,
+            None,
+        )
+        if result:
+            raise OSError(result, ctypes.FormatError(result), path)
+    finally:
+        kernel32.LocalFree(descriptor)
+
+
+def _windows_file_is_restricted(path: Path) -> bool:
+    """Return whether *path* has exactly the private publication DACL.
+
+    Discovery uses native ACL APIs and stays read-only. Every ACE must be a
+    non-inherited allow for the current user, SYSTEM, or administrators.
+    """
+    if os.name != "nt":
+        return True
+    advapi32 = ctypes.WinDLL("advapi32", use_last_error=True)
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    descriptor = ctypes.c_void_p()
+    dacl = ctypes.c_void_p()
+    result = advapi32.GetNamedSecurityInfoW(
+        str(path),
+        1,  # SE_FILE_OBJECT
+        0x00000004,  # DACL_SECURITY_INFORMATION
+        None,
+        None,
+        ctypes.byref(dacl),
+        None,
+        ctypes.byref(descriptor),
+    )
+    if result:
+        raise OSError(result, ctypes.FormatError(result), path)
+    try:
+        if not dacl.value:
+            return False
+        information = _AclSizeInformation()
+        if not advapi32.GetAclInformation(
+            dacl,
+            ctypes.byref(information),
+            ctypes.sizeof(information),
+            2,  # AclSizeInformation
+        ):
+            raise ctypes.WinError(ctypes.get_last_error())
+        principals: set[str] = set()
+        for index in range(information.ace_count):
+            ace = ctypes.c_void_p()
+            if not advapi32.GetAce(dacl, index, ctypes.byref(ace)):
+                raise ctypes.WinError(ctypes.get_last_error())
+            header = ctypes.cast(ace, ctypes.POINTER(_AceHeader)).contents
+            if header.ace_type != 0 or header.ace_flags & 0x10:
+                return False
+            ace_address = ace.value
+            if ace_address is None:
+                return False
+            sid = ctypes.c_void_p(ace_address + ctypes.sizeof(_AceHeader) + 4)
+            rendered = ctypes.c_wchar_p()
+            if not advapi32.ConvertSidToStringSidW(sid, ctypes.byref(rendered)):
+                raise ctypes.WinError(ctypes.get_last_error())
+            try:
+                if rendered.value is None:
+                    return False
+                principals.add(rendered.value)
+            finally:
+                kernel32.LocalFree(rendered)
+        return principals == {
+            _windows_current_user_sid(),
+            "S-1-5-18",
+            "S-1-5-32-544",
+        }
+    finally:
+        kernel32.LocalFree(descriptor)
+
+
 class DiscoveryState(StrEnum):
     """Attach-never-own classification of a discovery file (R8)."""
 
@@ -84,19 +259,21 @@ class DiscoveryState(StrEnum):
 
 @dataclass(frozen=True, slots=True)
 class ServiceInfo:
-    """A parsed discovery record. ``service_token`` is redacted from ``repr``."""
+    """A parsed discovery record plus its validated local handoff credential."""
 
     port: int
     pid: int | None = None
     last_heartbeat: int | None = None
     service_token: str | None = None
+    handoff_reference: str | None = None
 
     def __repr__(self) -> str:
         """Redacted representation — never leaks the service token."""
         token = "<set>" if self.service_token else None
         return (
             f"ServiceInfo(port={self.port}, pid={self.pid}, "
-            f"last_heartbeat={self.last_heartbeat}, service_token={token})"
+            f"last_heartbeat={self.last_heartbeat}, service_token={token}, "
+            f"handoff_reference={self.handoff_reference!r})"
         )
 
 
@@ -115,17 +292,156 @@ def _coerce_int(value: object) -> int | None:
     return None
 
 
-def _service_info(info: dict) -> ServiceInfo | None:
+def _read_handoff_credential(discovery_path: Path, reference: object) -> str | None:
+    """Read only this discovery record's regular, owner-restricted token file."""
+    if not isinstance(reference, str) or not reference:
+        return None
+    candidate = Path(reference)
+    try:
+        authority = resolve_directory_authority(discovery_path.parent)
+        expected = authority.path / "service.token"
+        if candidate != expected or path_is_link_like(candidate):
+            return None
+        with directory_lease(authority) as leased:
+            if path_is_link_like(expected):
+                return None
+            if os.name == "posix":
+                if leased.dir_fd is None or not hasattr(os, "O_NOFOLLOW"):
+                    return None
+                descriptor = os.open(
+                    "service.token",
+                    os.O_RDONLY | os.O_NOFOLLOW | getattr(os, "O_CLOEXEC", 0),
+                    dir_fd=leased.dir_fd,
+                )
+                named = os.stat(
+                    "service.token", dir_fd=leased.dir_fd, follow_symlinks=False
+                )
+            else:
+                descriptor = os.open(
+                    expected,
+                    os.O_RDONLY | getattr(os, "O_BINARY", 0),
+                )
+                named = expected.stat(follow_symlinks=False)
+            try:
+                opened = os.fstat(descriptor)
+                if (
+                    not stat.S_ISREG(named.st_mode)
+                    or not stat.S_ISREG(opened.st_mode)
+                    or (named.st_dev, named.st_ino) != (opened.st_dev, opened.st_ino)
+                ):
+                    return None
+                if os.name == "posix" and (
+                    opened.st_uid != os.geteuid() or opened.st_mode & 0o077
+                ):
+                    return None
+                if not _windows_file_is_restricted(expected):
+                    return None
+                with os.fdopen(descriptor, "r", encoding="utf-8") as handle:
+                    descriptor = -1
+                    token = handle.read().strip()
+                assert_directory_authority(leased)
+                named_after = expected.stat(follow_symlinks=False)
+                if path_is_link_like(expected) or (
+                    named_after.st_dev,
+                    named_after.st_ino,
+                ) != (opened.st_dev, opened.st_ino):
+                    return None
+            finally:
+                if descriptor >= 0:
+                    os.close(descriptor)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return token or None
+
+
+def _replace_private_credential(path: Path, payload: bytes) -> Path:
+    """Replace the adjacent credential through one leased parent authority."""
+    authority = resolve_directory_authority(path.parent)
+    destination_name = "service.token"
+    destination = authority.path / destination_name
+    with directory_lease(authority, publication=True) as leased:
+        if path_is_link_like(destination):
+            raise OSError("credential destination is link-like")
+        try:
+            metadata = destination.stat(follow_symlinks=False)
+        except FileNotFoundError:
+            pass
+        else:
+            if not stat.S_ISREG(metadata.st_mode):
+                raise OSError("credential destination is not a regular file")
+            destination.unlink()
+            assert_directory_authority(leased)
+
+        anonymous = False
+        if os.name == "nt":
+            source_name = f".service-token-{os.getpid()}-{secrets.token_hex(16)}"
+            handle = create_private_file(leased, source_name)
+        else:
+            source_name = f".service-token-{os.getpid()}-{secrets.token_hex(16)}"
+            try:
+                handle = create_anonymous_file(leased)
+                anonymous = True
+            except OSError:
+                handle = create_private_file(leased, source_name)
+        try:
+            handle.write(payload)
+            handle.flush()
+            os.fsync(handle.fileno())
+            if os.name == "posix":
+                os.fchmod(handle.fileno(), 0o600)
+            else:
+                _restrict_windows_file(leased.path / source_name)
+            if os.name == "nt" or anonymous:
+                publish_no_replace(
+                    leased,
+                    source_name,
+                    destination_name,
+                    source_fd=handle.fileno(),
+                )
+            else:
+                if leased.dir_fd is None:
+                    raise OSError("POSIX credential authority is not leased")
+                os.link(
+                    source_name,
+                    destination_name,
+                    src_dir_fd=leased.dir_fd,
+                    dst_dir_fd=leased.dir_fd,
+                    follow_symlinks=False,
+                )
+                opened = os.fstat(handle.fileno())
+                published = os.stat(
+                    destination_name,
+                    dir_fd=leased.dir_fd,
+                    follow_symlinks=False,
+                )
+                if not stat.S_ISREG(published.st_mode) or (
+                    published.st_dev,
+                    published.st_ino,
+                ) != (opened.st_dev, opened.st_ino):
+                    os.unlink(destination_name, dir_fd=leased.dir_fd)
+                    raise OSError("credential publication identity changed")
+                os.unlink(source_name, dir_fd=leased.dir_fd)
+        finally:
+            handle.close()
+            if not anonymous:
+                (leased.path / source_name).unlink(missing_ok=True)
+        assert_directory_authority(leased)
+    return destination
+
+
+def _service_info(info: dict, discovery_path: Path) -> ServiceInfo | None:
     """Build a :class:`ServiceInfo` from a parsed record, or ``None`` if invalid."""
     port = _coerce_int(info.get("port"))
     if port is None:
         return None
-    token = info.get("service_token")
+    reference = info.get("handoff_reference")
+    token = _read_handoff_credential(discovery_path, reference)
     return ServiceInfo(
         port=port,
         pid=_coerce_int(info.get("pid")),
         last_heartbeat=_coerce_int(info.get("last_heartbeat")),
-        service_token=token if isinstance(token, str) and token else None,
+        service_token=token,
+        handoff_reference=reference if isinstance(reference, str) else None,
     )
 
 
@@ -145,7 +461,7 @@ def classify_discovery(
     info = read_service_json(path)
     if info is None:
         return DiscoveryState.MALFORMED, None
-    service = _service_info(info)
+    service = _service_info(info, path)
     if service is None:
         return DiscoveryState.MALFORMED, None
     now = now_ms if now_ms is not None else int(time.time() * 1000)
@@ -223,14 +539,34 @@ def write_service_json(
     Writes to a sibling temp file then ``os.replace`` so a concurrent reader
     never observes a partially written record.
     """
-    path.parent.mkdir(parents=True, exist_ok=True)
+    path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    if os.name == "posix":
+        path.parent.chmod(0o700)
+    else:
+        parent_authority = resolve_directory_authority(path.parent)
+        _restrict_windows_file(parent_authority.path)
+        if not _windows_file_is_restricted(parent_authority.path):
+            raise OSError("discovery parent does not have a private ACL")
     record: dict[str, object] = {
         "port": port,
         "pid": pid,
         "last_heartbeat": now_ms if now_ms is not None else int(time.time() * 1000),
     }
+    credential_path = path.parent.resolve(strict=True) / "service.token"
+    credential_is_current = (
+        service_token
+        and _read_handoff_credential(path, str(credential_path)) == service_token
+    )
+    if service_token and not credential_is_current:
+        credential_path = _replace_private_credential(
+            path, service_token.encode("utf-8")
+        )
     if service_token:
-        record["service_token"] = service_token
+        record["handoff_reference"] = str(credential_path)
+    else:
+        if path_is_link_like(credential_path):
+            raise OSError("credential destination is link-like")
+        credential_path.unlink(missing_ok=True)
     tmp = path.with_name(f"{path.name}.{os.getpid()}.tmp")
     tmp.write_text(json.dumps(record), encoding="utf-8")
     os.replace(tmp, path)
@@ -287,9 +623,9 @@ def remove_service_json_if_owned(path: Path, pid: int) -> bool:
         return False
     if info is not None and info.pid == pid:
         path.unlink(missing_ok=True)
+        path.with_name("service.token").unlink(missing_ok=True)
         return True
     return False
-
 
 
 # ---------------------------------------------------------------------------
@@ -308,7 +644,8 @@ def remove_service_json_if_owned(path: Path, pid: int) -> bool:
 # unknown version fail-closed rather than guessing at a foreign layout.
 DESKTOP_DISCOVERY_VERSION = 1
 
-# The desktop gateway's supported control-protocol range (the five-verb edge).
+# The desktop gateway's supported control-protocol range (five control verbs
+# plus the bounded active-run discovery read).
 # Published so a contender refuses an incompatible resident instead of speaking
 # past it.
 DESKTOP_PROTOCOL_MIN = 1

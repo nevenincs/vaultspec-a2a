@@ -59,6 +59,7 @@ from ..dependencies import (
 from ..schemas.gateway import (
     ActiveRunRecord,
     ActiveRunsResponse,
+    PathSafeRunId,
     PresetsListResponse,
     PresetSummary,
     ProfileSummary,
@@ -470,7 +471,7 @@ def _active_role(next_nodes: list[str], agents: list[Any]) -> str | None:
 
 @router.get("/runs/{run_id}", response_model=RunStatusResponse)
 async def run_status_endpoint(
-    run_id: str,
+    run_id: PathSafeRunId,
     db: AsyncSession = Depends(get_db),
     aggregator: EventAggregator = Depends(get_aggregator),
     checkpointer: Checkpointer = Depends(get_checkpointer),
@@ -538,7 +539,7 @@ async def run_status_endpoint(
 
 @router.get("/runs/{run_id}/stream")
 async def run_stream_endpoint(
-    run_id: str,
+    run_id: PathSafeRunId,
     db: AsyncSession = Depends(get_db),
     aggregator: EventAggregator = Depends(get_aggregator),
 ) -> StreamingResponse:
@@ -567,7 +568,7 @@ async def run_stream_endpoint(
 
 @router.post("/runs/{run_id}/cancel", response_model=RunCancelResponse)
 async def run_cancel_endpoint(
-    run_id: str,
+    run_id: PathSafeRunId,
     request: Request,
     db: AsyncSession = Depends(get_db),
     worker_client: httpx.AsyncClient = Depends(get_worker_client),

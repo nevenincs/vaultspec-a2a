@@ -241,6 +241,8 @@ restore-marker contracts.
 
 .. py:class:: ConsistencyGroupStore
 
+.. py:class:: ConsistencyGroupStoreSpecification
+
 .. py:class:: StoreSnapshot
 
 .. py:class:: GroupDescriptor
@@ -256,6 +258,8 @@ restore-marker contracts.
 .. py:class:: SnapshotStoreLockedError
 
 .. py:class:: RestorePendingError
+
+.. py:function:: consistency_group_specifications()
 
 .. py:function:: consistency_group_members(state)
 
@@ -402,6 +406,19 @@ Control services
 Persistence
 ~~~~~~~~~~~
 
+.. py:module:: vaultspec_a2a.database.checkpoint_schema
+   :synopsis: Version and validate the desktop checkpoint database schema.
+
+.. py:class:: CheckpointSchemaError
+
+.. py:function:: install_checkpoint_schema_identity(checkpoint_path)
+
+.. py:function:: open_checkpoint_read_only(checkpoint_path)
+
+.. py:function:: validate_checkpoint_schema_connection(connection)
+
+.. py:function:: validate_checkpoint_schema_identity(checkpoint_path)
+
 .. py:module:: vaultspec_a2a.database.models
    :synopsis: SQLAlchemy persistence models.
 
@@ -455,6 +472,23 @@ IPC and streaming
 
 Process lifecycle
 ~~~~~~~~~~~~~~~~~
+
+.. py:module:: vaultspec_a2a.lifecycle.discovery
+   :synopsis: Secret-free resident discovery and owner-restricted credential handoff.
+
+``service.json`` carries a non-secret ``handoff_reference``. The referenced
+adjacent ``service.token`` file carries the bearer credential and is validated
+as an owner-restricted handoff before :func:`read_resident_service` returns it.
+
+.. py:class:: DiscoveryState
+
+.. py:class:: ServiceInfo
+
+.. py:function:: service_json_path(a2a_home)
+
+.. py:function:: read_resident_service(a2a_home)
+
+.. py:function:: write_service_json(path, *, port, pid, service_token=None, now_ms=None)
 
 .. py:module:: vaultspec_a2a.lifecycle.procs_config
    :synopsis: Development-process configuration.

@@ -1234,7 +1234,8 @@ unchanged, and no release is authorized.
 
 ## Final gateway-handoff corrective review
 
-Status: PASS AFTER HIGH-SEVERITY REMEDIATION.
+Status: LOCAL SECURITY PASS AFTER THREE REVIEW/REMEDIATION ROUNDS;
+TARGET POSIX FALLBACK EVIDENCE OPEN.
 
 ### gateway-handoff-link-redirection | high | Resolved
 
@@ -1245,18 +1246,85 @@ discovery record accept that external path. The reader also repaired Windows
 ACLs while performing its documented filesystem-only classification.
 
 Credential publication now leases the exact parent directory, rejects any
-link-like or non-regular destination, creates the payload through a private
-exclusive handle (an anonymous descriptor on Linux), and publishes the held
-object without replacement. The record references only the canonical adjacent
-path. Reading opens the adjacent name under the leased parent with no-follow
-semantics where available, compares the named and opened identities, validates
-owner permissions without mutation, and revalidates identity before returning
-the token. Real filesystem tests prove a planted link cannot alter its target
-and that an untrusted credential's permissions remain byte-for-byte unchanged
-through classification.
+link-like or non-regular destination, and creates the payload through a private
+exclusive handle. Linux prefers an anonymous descriptor. Other POSIX filesystems
+use an exclusive private name, no-replace hard-link publication, and an exact
+opened-versus-published identity check before the source name is removed.
+Windows publishes the exact held handle. The record references only the
+canonical adjacent path. Reading opens the adjacent name under the leased parent
+with no-follow semantics where available, compares the named and opened
+identities, validates owner permissions without mutation, and revalidates
+identity before returning the token. Real filesystem tests prove a planted link
+cannot alter its target and that an untrusted credential's permissions remain
+byte-for-byte unchanged through classification.
 
-Classification: security / filesystem authority. No lower-severity findings
-remain from this review pass.
+### gateway-handoff-windows-search-path | high | Resolved
+
+The follow-up review found bare ``whoami.exe`` and ``icacls.exe`` launches that
+could resolve from an attacker-controlled working directory. Production now
+obtains the native Windows system directory through ``GetSystemDirectoryW`` and
+launches both tools by their verified absolute System32 paths.
+
+### gateway-handoff-explicit-broad-acl | high | Resolved
+
+The first Windows validator rejected inherited ACEs but accepted an explicit
+non-inheriting ``Everyone:F`` grant. The read path now enumerates the DACL through
+native Windows security APIs and accepts exactly three non-inherited allow ACEs:
+the current account, LocalSystem, and built-in administrators. A real Windows ACL
+test adds explicit ``Everyone:F`` and proves classification returns no token
+without repairing the file.
+
+### gateway-handoff-private-at-creation | high | Resolved
+
+The second follow-up found that a new Windows source file inherited its parent
+DACL and briefly contained the bearer before ACL restriction. Publication now
+restricts and natively verifies the exact parent-directory DACL before any
+credential source is created or written. A broadly explicit or inherited
+application home is normalized to the same
+current user, LocalSystem, and administrators authority used by the final file.
+Failure to establish and verify that exact private DACL fails closed. The real
+Windows lifecycle test verifies the parent is private after publication.
+
+### gateway-handoff-posix-publication-portability | high | Resolved
+
+The first correction required Linux ``O_TMPFILE`` on every POSIX host. The
+portable checked-hard-link fallback above preserves macOS and filesystems that
+do not support anonymous temporary files while retaining no-replace publication
+and exact post-publication identity validation.
+
+### cli-configured-token-precedence | medium | Resolved
+
+Loopback discovery previously overwrote an explicitly configured gateway token,
+contradicting the CLI contract. Discovery is now consulted only when no token is
+configured. A real child-process CLI test proves configured authority wins over
+a conflicting fresh discovery credential.
+
+### gateway-handoff-documentation-drift | medium | Resolved
+
+Operator and API documentation no longer claim that ``service.json`` contains
+the bearer or that absence of configuration normally yields ``503``. They now
+describe generated per-process credentials, the adjacent owner-restricted handoff
+file, secret-free discovery, and corrupted-state fail-closed behavior.
+
+### sphinx-public-surface-coverage | medium | Resolved
+
+The Sphinx module index now covers lifecycle discovery, checkpoint schema
+identity, consistency-group store specifications, and the specification factory,
+with cross-references to the relevant operator workflow. Strict nitpicky Sphinx
+with warnings as errors passes.
+
+### gateway-handoff-posix-fallback-target-proof | medium | Open evidence
+
+The portable named-file fallback is statically reviewed but is not forced by the
+Windows campaign, and ordinary Ubuntu filesystems select ``O_TMPFILE``. The
+target-native macOS/Linux campaign must execute token publication on a filesystem
+without anonymous temporary-file support and prove the no-replace hard-link plus
+opened-versus-published identity checks. This is queued with the existing
+target-native release evidence and does not weaken the Windows security result.
+
+All implementation findings in this review pass are resolved. The explicit
+target-proof gap above and independent release blockers listed earlier in this
+audit remain open.
 
 ## `W01.P03.S94` direct unpublished-generation projection review
 
@@ -1312,3 +1380,99 @@ Dashboard-owned final-name generation creation, installed-byte verification, dur
 receipt selection, and the real producer-consumer workflow remain mandatory before
 activation. Target-native and legal/provenance blockers remain unchanged, and no
 release is authorized.
+
+## `W01.P03.S95` exact final-name archive review
+
+Status: PASS AFTER REVIEW AND PUBLIC-CONTRACT REVISION.
+
+The accepted API consumes the caller's continuously live unpublished-generation
+authority, claims one portable final archive name through exact create-new file
+authority, shares the existing bounded deterministic emitter, hashes and revalidates
+the held output, and performs no rename, cleanup, publication, activation, or outer
+generation mutation. Late failure leaves the exact partial file inert for complete
+generation verification to reject.
+
+### exact-zip-public-name-omits-unpublished-boundary | medium | Resolved
+
+The first public name omitted the safety-critical `unpublished` qualifier even though
+failure deliberately retains a partial final-name file. The exported API is now
+`write_deterministic_capsule_zip_into_unpublished_generation`, matching the direct
+projector and preventing callers from mistaking it for a general publication helper.
+
+### exact-zip-exclusive-mutation-precondition-omitted | high | Resolved
+
+The first public contract accepted a live generation lease but did not state that the
+caller must also retain exclusive mutation authority for the complete composition.
+That omission made the no-replacement proof appear stronger than its actual boundary.
+The final docstring now requires both the continuously live lease and caller-owned
+exclusive mutation authority across the operation, while leaving publication and
+activation with the outer generation lifecycle.
+
+### exact-zip-type-contract-drift | low | Resolved
+
+Review found import and annotation drift while the shared emitter was being extracted.
+The final source uses `Mapping` for the scanned directory-identity map and passes Ruff,
+formatting, and Ty without an unused or missing type import.
+
+### exact-zip-real-authority-proof | medium | Resolved
+
+The initial S95 code had no focused caller-leased proof. Real production-importing
+tests now write deterministic bytes at the final name, verify SHA-256 and ZIP members,
+refuse a second create without changing the winner, and retain the claimed zero-byte
+file after a real empty-source failure. Eight unpublished-generation tests and the
+38-test focused archive/publication/build/verifier campaign pass; the complete desktop
+suite passes 262 tests. Ruff, formatting, Ty, and diff hygiene pass for exact SHA-256
+``B72C6B49947E2BBB449F114373BD229604DE2441FECCDBE77CE4FCD22A9DA35F``.
+Independent technical and editorial reviewers reported no remaining finding for that
+exact source state.
+
+### step-record-plan-drift | high | Resolved
+
+Editorial review found that the generated Step Record heading and scope no longer
+matched the canonical S95 row, and that the plan omitted the production-importing test
+file modified by the Step. The plan scope was reconciled through `vaultspec-core`, then
+the Step Record was regenerated through its owning CLI before its authored body was
+restored. Its machine-owned heading and two scope entries now exactly reflect S95.
+
+### unrelated-gateway-note | medium | Resolved
+
+An intermediate S95 record attributed a Windows gateway-handoff wording correction to
+the archive writer. That unrelated note was removed; gateway-handoff review remains in
+its owning audit trail.
+
+This closes only S95. S96 process/substitution coverage, S14 complete-generation
+verification, and dashboard-owned receipt selection remain open. Target-native and
+legal/provenance blockers remain unchanged, and no release is authorized.
+
+## Final active-run gateway and discovery review
+
+Status: PASS; FINDINGS CLASSIFIED AND RESOLVED.
+
+### active-run-id-path-safety | high | Resolved
+
+Client run identifiers previously allowed route separators and leading punctuation,
+making persisted identities unaddressable or ambiguous on per-run gateway routes.
+One shared grammar now validates start requests and every status, stream, and cancel
+path. Active discovery applies the same predicate in SQL before `LIMIT`, excluding
+legacy invalid identifiers without consuming the bounded page. Real gateway tests
+reject invalid values before persistence or dispatch and preserve valid dashboard ids.
+
+### active-run-discovery-cross-dialect-bound | medium | Resolved
+
+The path-safe database filter originally risked SQLite-specific SQL. The production
+predicate uses SQLAlchemy's dialect-aware regular-expression operator; a direct
+compile test proves SQLite `REGEXP` and PostgreSQL `~`, while the 100,000-row real
+SQLite test saturates the active index with foreign selectors and still proves the
+workspace/feature prefix and bounded limit are used.
+
+### active-run-reservation-before-dispatch | high | Resolved
+
+Worker dispatch previously crossed the external HTTP boundary before the client run
+id was durably reserved. The service now commits the submitted row and ingest request
+first. A real held worker response proves status and a concurrent replay observe one
+durable reservation while only one dispatch is emitted; same-id races return the
+winner rather than producing a duplicate or 500 response.
+
+The gateway credential-separation, loopback-only exposure, invalid-legacy discovery,
+and bounded-selector checks are covered by the same real production-process campaign.
+No finding from this active-run review remains unqueued.

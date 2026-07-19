@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import errno
+import hashlib
 import multiprocessing
 import time
+import zipfile
 from typing import TYPE_CHECKING
 
 import pytest
@@ -15,9 +17,15 @@ from vaultspec_a2a.desktop._filesystem_authority import (
     directory_lease,
     resolve_directory_authority,
 )
+from vaultspec_a2a.desktop.capsule_evidence import (
+    CapsuleAssemblyError,
+    write_deterministic_capsule_zip_into_unpublished_generation,
+)
 
 if TYPE_CHECKING:
     from pathlib import Path
+
+_SOURCE_DATE_EPOCH = 1_700_000_000
 
 
 def _claim_generation_process(
@@ -151,3 +159,69 @@ def test_concurrent_generation_claims_have_exactly_one_winner(tmp_path: Path) ->
     assert outcomes.count("claimed") == 1
     assert outcomes.count("collision") == 1
     assert (tmp_path / "candidate/winner").read_bytes() in payloads
+
+
+def test_deterministic_zip_is_written_once_at_its_final_generation_name(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "source"
+    source.mkdir()
+    (source / "payload.txt").write_bytes(b"capsule-payload\n")
+    generations = tmp_path / "generations"
+    generations.mkdir()
+    generations_authority = resolve_directory_authority(generations)
+
+    with (
+        directory_lease(generations_authority) as root_lease,
+        claim_new_directory(root_lease, "candidate") as generation_lease,
+    ):
+        digest, evidence = write_deterministic_capsule_zip_into_unpublished_generation(
+            source,
+            generation_authority=generation_lease,
+            output_name="component.zip",
+            source_date_epoch=_SOURCE_DATE_EPOCH,
+        )
+        archive_path = generation_lease.path / "component.zip"
+        original = archive_path.read_bytes()
+        with pytest.raises(CapsuleAssemblyError, match="already exists"):
+            write_deterministic_capsule_zip_into_unpublished_generation(
+                source,
+                generation_authority=generation_lease,
+                output_name="component.zip",
+                source_date_epoch=_SOURCE_DATE_EPOCH,
+            )
+
+    assert digest == hashlib.sha256(original).hexdigest()
+    assert [(item.relative_path, item.size) for item in evidence] == [
+        ("payload.txt", len(b"capsule-payload\n"))
+    ]
+    assert archive_path.read_bytes() == original
+    with zipfile.ZipFile(archive_path) as archive:
+        assert archive.namelist() == ["capsule/payload.txt"]
+        assert archive.read("capsule/payload.txt") == b"capsule-payload\n"
+
+
+def test_failed_generation_zip_write_retains_exact_partial_file(
+    tmp_path: Path,
+) -> None:
+    empty_source = tmp_path / "empty-source"
+    empty_source.mkdir()
+    generations = tmp_path / "generations"
+    generations.mkdir()
+    generations_authority = resolve_directory_authority(generations)
+
+    with (
+        directory_lease(generations_authority) as root_lease,
+        claim_new_directory(root_lease, "candidate") as generation_lease,
+        pytest.raises(CapsuleAssemblyError, match="contains no files"),
+    ):
+        write_deterministic_capsule_zip_into_unpublished_generation(
+            empty_source,
+            generation_authority=generation_lease,
+            output_name="partial.zip",
+            source_date_epoch=_SOURCE_DATE_EPOCH,
+        )
+
+    partial = generations / "candidate/partial.zip"
+    assert partial.is_file()
+    assert partial.stat().st_size == 0

@@ -68,8 +68,11 @@ async def test_active_discovery_stays_indexed_and_bounded_at_large_history(
                     "id": f"history-{index:06d}",
                     "created_at": created_at,
                     "updated_at": created_at,
-                    "status": "running" if matching else "completed",
-                    "is_active": matching,
+                    # Saturate the active index with nonmatching selectors. This
+                    # proves the workspace/feature prefix, not a mostly-inactive
+                    # history, bounds the discovery read.
+                    "status": "running",
+                    "is_active": True,
                     "workspace_root": workspace if matching else foreign_workspace,
                     "feature_tag": "a2a" if matching else "other",
                 }

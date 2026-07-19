@@ -319,9 +319,17 @@ class InfraConfig(BaseSettings):
         default=None,
         alias=INTERNAL_TOKEN_ENV,
         description=(
-            "Bearer token for worker<->control IPC and the engine-facing /v1 "
-            "gateway. A tokenless /v1 gateway fails closed except in the explicit "
-            "application test mode."
+            "Bearer token for worker<->control IPC. It is never accepted by the "
+            "engine-facing /v1 gateway."
+        ),
+    )
+    gateway_service_token: str | None = Field(
+        default=None,
+        alias="VAULTSPEC_A2A_GATEWAY_TOKEN",
+        description=(
+            "Optional dedicated bearer for the engine-facing /v1 gateway. "
+            "When absent, the gateway generates a per-process credential; it "
+            "is never shared with worker IPC or embedded in discovery."
         ),
     )
     auto_spawn_worker: bool = Field(
@@ -611,10 +619,10 @@ class InfraConfig(BaseSettings):
         validation_alias=AliasChoices("VAULTSPEC_NO_COLOR", "NO_COLOR"),
     )
 
-    @field_validator("internal_token", mode="before")
+    @field_validator("internal_token", "gateway_service_token", mode="before")
     @classmethod
     def _normalize_blank_internal_token(cls, value: object) -> object:
-        """Treat blank env-var tokens as auth-disabled in dev/test stacks."""
+        """Treat blank configured tokens as absent."""
         if isinstance(value, str) and not value.strip():
             return None
         return value
@@ -634,6 +642,20 @@ class Settings(DomainSettingsConfig, InfraConfig):
         env_prefix="VAULTSPEC_",
         extra="ignore",
     )
+
+    @model_validator(mode="after")
+    def _separate_gateway_and_worker_credentials(self) -> Self:
+        """Reject configurations that collapse gateway and worker authority."""
+        if (
+            self.gateway_service_token is not None
+            and self.internal_token is not None
+            and self.gateway_service_token == self.internal_token
+        ):
+            msg = (
+                "VAULTSPEC_A2A_GATEWAY_TOKEN must differ from VAULTSPEC_INTERNAL_TOKEN"
+            )
+            raise ValueError(msg)
+        return self
 
     @model_validator(mode="after")
     def _derive_service_urls(self) -> Self:

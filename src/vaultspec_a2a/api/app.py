@@ -15,6 +15,7 @@ worker process via HTTP POST to ``/dispatch`` (service separation).
 import asyncio  # Gateway uses asyncio directly — no structured concurrency needed.
 import logging
 import os
+import secrets
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from typing import Any, cast
@@ -277,7 +278,7 @@ async def _lifespan(app: FastAPI) -> AsyncGenerator[None]:
             discovery_path,
             port=settings.port,
             pid=discovery_pid,
-            service_token=settings.internal_token,
+            service_token=app.state.v1_service_token,
         )
         # Master-bug guard (BEFORE registration so a refusal leaves zero residue): a
         # band gateway-dev whose dispatch target is outside the worker-dev band while
@@ -312,7 +313,7 @@ async def _lifespan(app: FastAPI) -> AsyncGenerator[None]:
                 discovery_path,
                 settings.port,
                 discovery_pid,
-                settings.internal_token,
+                app.state.v1_service_token,
                 serve_record,
             )
         )
@@ -422,8 +423,9 @@ def create_app(
             the production ``_lifespan`` is used.
         allow_unauthenticated_v1_for_testing: Explicit test-only escape hatch
             for legacy route-behaviour tests. Production callers must leave it
-            false; an absent service token then fails closed on every ``/v1``
-            request while ``/health`` remains available.
+            false. Production snapshots a configured gateway token or generates
+            a per-process token; corrupted runtime state with no token fails
+            closed on every ``/v1`` request while ``/health`` remains available.
 
     Returns:
         A fully configured ``FastAPI`` instance ready for ``uvicorn.run()``.
@@ -433,9 +435,10 @@ def create_app(
         version=package_version(),
         lifespan=lifespan or _lifespan,
     )
-    # Snapshot the exact token published by the production lifespan's discovery
-    # record. It is immutable for this app generation and never logged.
-    app.state.v1_service_token = settings.internal_token
+    # The engine-facing credential is distinct from worker IPC by default. It is
+    # immutable for this app generation, published only through the owner-restricted
+    # handoff file, and never logged.
+    app.state.v1_service_token = settings.gateway_service_token or secrets.token_hex(32)
     app.state.allow_unauthenticated_v1_for_testing = (
         allow_unauthenticated_v1_for_testing
     )

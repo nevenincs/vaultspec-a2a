@@ -77,8 +77,15 @@ def _spawn_gateway(
     outcome = tmp_path / f"{tag}.outcome"
     proc = subprocess.Popen(
         [
-            sys.executable, "-c", _GATEWAY, str(app_home), owner, str(port),
-            str(ready), str(stop), str(outcome),
+            sys.executable,
+            "-c",
+            _GATEWAY,
+            str(app_home),
+            owner,
+            str(port),
+            str(ready),
+            str(stop),
+            str(outcome),
         ],
         env=os.environ.copy(),
     )

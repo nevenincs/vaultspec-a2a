@@ -253,8 +253,9 @@ It replaces desktop discovery decision R8 in
 `2026-07-14-a2a-edge-conformance-adr`. Discovery no longer carries the worker
 token. Ungated health proves neither ownership nor readiness. Absent alone does
 not grant start permission; the singleton and receipt do. Compatible foreign
-instances remain attachable but immutable. The five-verb edge and process split
-remain intact.
+instances remain attachable but immutable. The six-member reviewed whitelist
+(five control verbs plus bounded active-run discovery) and process split remain
+intact.
 
 It extends `2026-02-28-dependency-hygiene-cli-entry-point-adr`. Target closure
 and shipped non-Python assets become dependency-hygiene requirements. A wheel,

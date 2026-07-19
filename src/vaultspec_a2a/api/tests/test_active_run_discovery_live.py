@@ -24,6 +24,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 _SERVICE_TOKEN = "active-discovery-service-token"
+_WORKER_TOKEN = "active-discovery-worker-token"
 
 
 def _unused_loopback_port() -> int:
@@ -58,7 +59,8 @@ async def _production_gateway(
             "VAULTSPEC_AUTO_SPAWN_WORKER": "false",
             "VAULTSPEC_REPAIR_ON_STARTUP": "false",
             "VAULTSPEC_WORKER_URL": f"http://127.0.0.1:{_unused_loopback_port()}",
-            "VAULTSPEC_INTERNAL_TOKEN": _SERVICE_TOKEN,
+            "VAULTSPEC_INTERNAL_TOKEN": _WORKER_TOKEN,
+            "VAULTSPEC_A2A_GATEWAY_TOKEN": _SERVICE_TOKEN,
         }
     )
     process = await asyncio.create_subprocess_exec(
@@ -133,13 +135,62 @@ async def test_active_run_discovery_rebinds_to_authoritative_status(
         ) as client,
     ):
         async with httpx.AsyncClient(base_url=base_url, timeout=10.0) as anonymous:
-            missing = await anonymous.get("/v1/runs")
-            wrong = await anonymous.get(
-                "/v1/runs",
-                headers={"Authorization": "Bearer wrong-service-token"},
+            route_classes = (
+                ("GET", "/v1/runs"),
+                ("POST", "/v1/runs"),
+                ("GET", "/v1/runs/no-such-run"),
+                ("GET", "/v1/runs/no-such-run/stream"),
+                ("POST", "/v1/runs/no-such-run/cancel"),
+                ("GET", "/v1/presets"),
+                ("GET", "/v1/service"),
             )
-        assert missing.status_code == 401, missing.text
-        assert wrong.status_code == 401, wrong.text
+            for method, target in route_classes:
+                missing = await anonymous.request(method, target)
+                wrong = await anonymous.request(
+                    method,
+                    target,
+                    headers={"Authorization": "Bearer wrong-service-token"},
+                )
+                worker_credential = await anonymous.request(
+                    method,
+                    target,
+                    headers={"Authorization": f"Bearer {_WORKER_TOKEN}"},
+                )
+                assert missing.status_code == 401, (target, missing.text)
+                assert wrong.status_code == 401, (target, wrong.text)
+                assert worker_credential.status_code == 401, (
+                    target,
+                    worker_credential.text,
+                )
+            gateway_on_worker_boundary = await anonymous.get(
+                "/internal/health",
+                headers={"Authorization": f"Bearer {_SERVICE_TOKEN}"},
+            )
+            worker_on_worker_boundary = await anonymous.get(
+                "/internal/health",
+                headers={"Authorization": f"Bearer {_WORKER_TOKEN}"},
+            )
+            assert gateway_on_worker_boundary.status_code == 401
+            assert worker_on_worker_boundary.status_code == 200
+            assert (await anonymous.get("/health")).status_code == 200
+
+        discovery = json.loads(
+            (tmp_path / "a2a-home" / "service.json").read_text(encoding="utf-8")
+        )
+        assert "service_token" not in discovery
+        assert discovery["handoff_reference"]
+
+        # The same production process is reachable on loopback only. Probe the
+        # machine's routed interface at the gateway port; binding 127.0.0.1 must
+        # not expose the authenticated surface there.
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as route_probe:
+            route_probe.connect(("192.0.2.1", 9))
+            non_loopback = route_probe.getsockname()[0]
+        assert non_loopback != "127.0.0.1"
+        gateway_port = int(base_url.rsplit(":", 1)[1])
+        async with httpx.AsyncClient(timeout=1.0, trust_env=False) as network_client:
+            with pytest.raises(httpx.TransportError):
+                await network_client.get(f"http://{non_loopback}:{gateway_port}/health")
 
         async with session_factory() as session:
             rows = [
@@ -220,8 +271,24 @@ async def test_active_run_discovery_rebinds_to_authoritative_status(
                         {"workspace_root": str(workspace), "feature_tag": "feature-a"}
                     ),
                 ),
+                await create_thread(
+                    session,
+                    thread_id="legacy/broken",
+                    status=ThreadStatus.RUNNING,
+                    metadata=json.dumps(
+                        {"workspace_root": str(workspace), "feature_tag": "feature-a"}
+                    ),
+                ),
+                await create_thread(
+                    session,
+                    thread_id="-legacy-leading",
+                    status=ThreadStatus.RUNNING,
+                    metadata=json.dumps(
+                        {"workspace_root": str(workspace), "feature_tag": "feature-a"}
+                    ),
+                ),
             ]
-            rows[-2].status = "unknown"
+            rows[-4].status = "unknown"
             for index, row in enumerate(rows):
                 row.created_at = now + timedelta(seconds=index)
             await session.commit()

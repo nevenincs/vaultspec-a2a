@@ -14,6 +14,7 @@ SQLite file so that gateway read-path enrichment exercises the real
 checkpointer implementation, not a ``MemorySaver`` stub.
 """
 
+import asyncio
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -124,6 +125,9 @@ class _InProcessWorker:
 
     def __init__(self) -> None:
         self.dispatches: list[dict] = []
+        self.dispatch_received = asyncio.Event()
+        self.release_dispatch = asyncio.Event()
+        self.release_dispatch.set()
 
         _app = FastAPI()
 
@@ -140,6 +144,8 @@ class _InProcessWorker:
                     )
             body = await request.json()
             self.dispatches.append(body)
+            self.dispatch_received.set()
+            await self.release_dispatch.wait()
             return {"status": "dispatched", "thread_id": body.get("thread_id", "")}
 
         @_app.get("/health")
@@ -164,6 +170,11 @@ class _InProcessWorker:
     def clear(self) -> None:
         """Clear all recorded dispatch requests."""
         self.dispatches.clear()
+
+    def hold_dispatch_response(self) -> None:
+        """Pause a real dispatch response after its request has been recorded."""
+        self.dispatch_received.clear()
+        self.release_dispatch.clear()
 
 
 # ---------------------------------------------------------------------------

@@ -16,12 +16,10 @@ from contextlib import ExitStack, contextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from itertools import islice
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Final
 
-from ._filesystem_authority import (
-    DirectoryAuthority as _DirectoryAuthority,
-)
+from ._filesystem_authority import DirectoryAuthority
 from ._filesystem_authority import (
     assert_directory_authority as _assert_directory_authority,
 )
@@ -43,7 +41,7 @@ from .artifacts import validate_portable_archive_path
 from .manifest import component_manifest_digest
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable, Iterator, Sequence
+    from collections.abc import Iterable, Iterator, Mapping, Sequence
     from typing import BinaryIO
 
     from .contract import ComponentManifest
@@ -55,6 +53,7 @@ __all__ = [
     "deterministic_tree_digest",
     "installed_tree_inventory",
     "write_deterministic_capsule_zip",
+    "write_deterministic_capsule_zip_into_unpublished_generation",
 ]
 
 _READ_CHUNK: Final = 1 << 20
@@ -109,6 +108,15 @@ class ProjectedFile:
             or self.mode not in _FILE_MODES
         ):
             raise CapsuleAssemblyError("installed-tree file mode is invalid")
+
+
+@dataclass(frozen=True, slots=True)
+class _ScannedFile:
+    relative_path: str
+    identity: tuple[int, int]
+    size: int
+    mtime_ns: int
+    mode: int
 
 
 def _validate_source_date_epoch(value: object) -> int:
@@ -235,10 +243,71 @@ def _directory_open_flags() -> int:
     )
 
 
+def _validated_generation_output_name(value: object) -> str:
+    if not isinstance(value, str):
+        raise CapsuleAssemblyError("capsule archive output name is invalid")
+    try:
+        validated = validate_portable_archive_path(value)
+    except ValueError:
+        raise CapsuleAssemblyError("capsule archive output name is invalid") from None
+    if len(PurePosixPath(validated).parts) != 1:
+        raise CapsuleAssemblyError("capsule archive output must be one top-level file")
+    return validated
+
+
+def _assert_live_directory_authority(
+    authority: DirectoryAuthority,
+    *,
+    label: str,
+) -> None:
+    """Require one current native lease, never a path-only authority token."""
+    if not isinstance(authority, DirectoryAuthority):
+        raise CapsuleAssemblyError(f"{label} authority is invalid")
+    if os.name == "nt":
+        live = authority.native_handle is not None and authority.dir_fd is None
+    elif os.name == "posix":
+        live = authority.dir_fd is not None and authority.native_handle is None
+    else:
+        raise CapsuleAssemblyError(f"{label} authority is unsupported on this host")
+    if not live:
+        raise CapsuleAssemblyError(f"{label} authority is not continuously leased")
+    try:
+        _assert_directory_authority(authority)
+    except OSError:
+        raise CapsuleAssemblyError(f"{label} authority changed identity") from None
+
+
+def _assert_exact_output_file(
+    authority: DirectoryAuthority,
+    name: str,
+    output: BinaryIO,
+) -> os.stat_result:
+    _assert_live_directory_authority(authority, label="unpublished generation")
+    try:
+        opened = os.fstat(output.fileno())
+        named = _stat_authority_child(authority, name)
+        if (
+            not stat.S_ISREG(opened.st_mode)
+            or not stat.S_ISREG(named.st_mode)
+            or _path_is_link_like(authority.path / name)
+            or (opened.st_dev, opened.st_ino, opened.st_size)
+            != (named.st_dev, named.st_ino, named.st_size)
+        ):
+            raise CapsuleAssemblyError("capsule archive output changed identity")
+        _assert_live_directory_authority(authority, label="unpublished generation")
+        return opened
+    except CapsuleAssemblyError:
+        raise
+    except OSError:
+        raise CapsuleAssemblyError(
+            "cannot verify capsule archive output identity"
+        ) from None
+
+
 @contextmanager
 def _archive_quarantine(
     output_parent: Path,
-    output_authority: _DirectoryAuthority,
+    output_authority: DirectoryAuthority,
     output_name: str,
 ) -> Iterator[tuple[Path | None, BinaryIO]]:
     """Create Linux anonymous staging or one bounded named private slot."""
@@ -284,7 +353,7 @@ def _archive_quarantine(
 
 
 def _stat_authority_child(
-    authority: _DirectoryAuthority,
+    authority: DirectoryAuthority,
     name: str,
 ) -> os.stat_result:
     """Inspect one direct child through the leased authority where supported."""
@@ -297,11 +366,19 @@ def _stat_authority_child(
 def _relative_directory_descriptor(
     root_descriptor: int,
     components: Sequence[str],
+    directory_identities: Mapping[tuple[str, ...], tuple[int, int]],
 ) -> Iterator[int]:
     """Walk *components* without resolving any descendant through a pathname."""
     descriptors: list[int] = []
     current = root_descriptor
     try:
+        root_metadata = os.fstat(root_descriptor)
+        if not stat.S_ISDIR(root_metadata.st_mode) or (
+            root_metadata.st_dev,
+            root_metadata.st_ino,
+        ) != directory_identities.get(()):
+            raise CapsuleAssemblyError("capsule directory changed after enumeration")
+        walked: tuple[str, ...] = ()
         for component in components:
             descriptor = os.open(
                 component,
@@ -310,9 +387,13 @@ def _relative_directory_descriptor(
             )
             try:
                 opened = os.fstat(descriptor)
-                if not stat.S_ISDIR(opened.st_mode):
+                walked = (*walked, component)
+                if not stat.S_ISDIR(opened.st_mode) or (
+                    opened.st_dev,
+                    opened.st_ino,
+                ) != directory_identities.get(walked):
                     raise CapsuleAssemblyError(
-                        "capsule tree descendant is not a directory"
+                        "capsule directory changed after enumeration"
                     )
             except BaseException:
                 os.close(descriptor)
@@ -320,6 +401,19 @@ def _relative_directory_descriptor(
             descriptors.append(descriptor)
             current = descriptor
         yield current
+        current = root_descriptor
+        walked = ()
+        for component, descriptor in zip(components, descriptors, strict=True):
+            walked = (*walked, component)
+            named = os.stat(component, dir_fd=current, follow_symlinks=False)
+            if not stat.S_ISDIR(named.st_mode) or (
+                named.st_dev,
+                named.st_ino,
+            ) != directory_identities.get(walked):
+                raise CapsuleAssemblyError(
+                    "capsule directory changed during archive emission"
+                )
+            current = descriptor
     finally:
         for descriptor in reversed(descriptors):
             os.close(descriptor)
@@ -338,12 +432,13 @@ def _bounded_directory_names(
 
 
 def _capsule_files(
-    root_authority: _DirectoryAuthority,
+    root_authority: DirectoryAuthority,
     root_descriptor: int | None,
-) -> tuple[str, ...]:
-    """Return portable descendant names; file metadata is not trusted from scan."""
+) -> tuple[tuple[_ScannedFile, ...], dict[tuple[str, ...], tuple[int, int]]]:
+    """Return bounded file and directory identities from one source-tree scan."""
     stack: list[tuple[str, ...]] = [()]
-    files: list[str] = []
+    files: list[_ScannedFile] = []
+    directory_identities = {(): root_authority.identity}
     portable_names: set[str] = set()
     entries_seen = 0
     try:
@@ -351,7 +446,7 @@ def _capsule_files(
             components = stack.pop()
             if root_descriptor is not None:
                 with _relative_directory_descriptor(
-                    root_descriptor, components
+                    root_descriptor, components, directory_identities
                 ) as directory_descriptor:
                     names = _bounded_directory_names(
                         directory_descriptor,
@@ -370,6 +465,10 @@ def _capsule_files(
                 directory_authority = _resolve_directory_authority(directory)
                 with _directory_lease(directory_authority) as directory_lease:
                     _assert_directory_authority(root_authority)
+                    if directory_lease.identity != directory_identities.get(components):
+                        raise CapsuleAssemblyError(
+                            "capsule directory changed after enumeration"
+                        )
                     names = _bounded_directory_names(
                         directory_authority.path,
                         _MAX_PROJECTED_FILES - entries_seen,
@@ -389,6 +488,10 @@ def _capsule_files(
                 if stat.S_ISLNK(inspected.st_mode):
                     raise CapsuleAssemblyError("capsule tree contains a link-like path")
                 if stat.S_ISDIR(inspected.st_mode):
+                    directory_identities[relative_components] = (
+                        inspected.st_dev,
+                        inspected.st_ino,
+                    )
                     stack.append(relative_components)
                     continue
                 if not stat.S_ISREG(inspected.st_mode):
@@ -402,22 +505,45 @@ def _capsule_files(
                 if folded in portable_names:
                     raise CapsuleAssemblyError("capsule tree contains colliding paths")
                 portable_names.add(folded)
-                files.append(relative)
+                files.append(
+                    _ScannedFile(
+                        relative_path=relative,
+                        identity=(inspected.st_dev, inspected.st_ino),
+                        size=inspected.st_size,
+                        mtime_ns=inspected.st_mtime_ns,
+                        mode=inspected.st_mode,
+                    )
+                )
     except CapsuleAssemblyError:
         raise
     except (OSError, RuntimeError):
         raise CapsuleAssemblyError("cannot inspect capsule staging tree") from None
-    return tuple(sorted(files))
+    return (
+        tuple(sorted(files, key=lambda file: file.relative_path)),
+        directory_identities,
+    )
+
+
+def _assert_scanned_file(metadata: os.stat_result, scanned: _ScannedFile) -> None:
+    if (
+        not stat.S_ISREG(metadata.st_mode)
+        or (metadata.st_dev, metadata.st_ino) != scanned.identity
+        or metadata.st_size != scanned.size
+        or metadata.st_mtime_ns != scanned.mtime_ns
+        or metadata.st_mode != scanned.mode
+    ):
+        raise CapsuleAssemblyError("capsule file changed after enumeration")
 
 
 @contextmanager
 def _open_capsule_source(
-    root_authority: _DirectoryAuthority,
+    root_authority: DirectoryAuthority,
     root_descriptor: int | None,
-    relative: str,
+    scanned: _ScannedFile,
+    directory_identities: Mapping[tuple[str, ...], tuple[int, int]],
 ) -> Iterator[tuple[BinaryIO, os.stat_result]]:
     """Open one scanned name beneath the leased root without pathname escape."""
-    components = relative.split("/")
+    components = scanned.relative_path.split("/")
     flags = (
         os.O_RDONLY
         | getattr(os, "O_BINARY", 0)
@@ -432,7 +558,9 @@ def _open_capsule_source(
     try:
         if root_descriptor is not None:
             with _relative_directory_descriptor(
-                root_descriptor, components[:-1]
+                root_descriptor,
+                components[:-1],
+                directory_identities,
             ) as parent_descriptor:
                 descriptor = os.open(
                     components[-1],
@@ -440,18 +568,29 @@ def _open_capsule_source(
                     dir_fd=parent_descriptor,
                 )
                 opened = os.fstat(descriptor)
-                if not stat.S_ISREG(opened.st_mode):
-                    raise CapsuleAssemblyError("capsule tree contains a special file")
+                _assert_scanned_file(opened, scanned)
                 source = os.fdopen(descriptor, "rb", closefd=True)
                 descriptor = -1
                 yield source, opened
-                return
+                named_after = os.stat(
+                    components[-1],
+                    dir_fd=parent_descriptor,
+                    follow_symlinks=False,
+                )
+                _assert_scanned_file(named_after, scanned)
+            return
 
         current = root_authority.path
+        walked: tuple[str, ...] = ()
         for component in components[:-1]:
+            walked = (*walked, component)
             current = current / component
             authority = _resolve_directory_authority(current)
-            windows_stack.enter_context(_directory_lease(authority))
+            directory_lease = windows_stack.enter_context(_directory_lease(authority))
+            if directory_lease.identity != directory_identities.get(walked):
+                raise CapsuleAssemblyError(
+                    "capsule directory changed after enumeration"
+                )
             _assert_directory_authority(root_authority)
         candidate = current / components[-1]
         if _path_is_link_like(candidate):
@@ -459,20 +598,19 @@ def _open_capsule_source(
         descriptor = os.open(candidate, flags)
         opened = os.fstat(descriptor)
         named = candidate.stat(follow_symlinks=False)
-        if (
-            not stat.S_ISREG(opened.st_mode)
-            or _path_is_link_like(candidate)
-            or (opened.st_dev, opened.st_ino) != (named.st_dev, named.st_ino)
+        _assert_scanned_file(opened, scanned)
+        _assert_scanned_file(named, scanned)
+        if _path_is_link_like(candidate) or (opened.st_dev, opened.st_ino) != (
+            named.st_dev,
+            named.st_ino,
         ):
             raise CapsuleAssemblyError("capsule file changed before archive emission")
         source = os.fdopen(descriptor, "rb", closefd=True)
         descriptor = -1
         yield source, opened
         named_after = candidate.stat(follow_symlinks=False)
-        if _path_is_link_like(candidate) or (opened.st_dev, opened.st_ino) != (
-            named_after.st_dev,
-            named_after.st_ino,
-        ):
+        _assert_scanned_file(named_after, scanned)
+        if _path_is_link_like(candidate):
             raise CapsuleAssemblyError("capsule file changed during archive emission")
         _assert_directory_authority(root_authority)
     finally:
@@ -481,6 +619,211 @@ def _open_capsule_source(
         if descriptor >= 0:
             os.close(descriptor)
         windows_stack.close()
+
+
+def _assert_archive_output(
+    output_authority: DirectoryAuthority,
+    output_name: str | None,
+    output: BinaryIO,
+) -> os.stat_result:
+    if output_name is not None:
+        return _assert_exact_output_file(output_authority, output_name, output)
+    _assert_live_directory_authority(output_authority, label="capsule archive output")
+    try:
+        opened = os.fstat(output.fileno())
+    except OSError:
+        raise CapsuleAssemblyError("cannot inspect capsule archive output") from None
+    if not stat.S_ISREG(opened.st_mode):
+        raise CapsuleAssemblyError("capsule archive output is not a regular file")
+    return opened
+
+
+def _emit_deterministic_capsule_zip(
+    *,
+    root_lease: DirectoryAuthority,
+    root_descriptor: int | None,
+    files: Sequence[_ScannedFile],
+    directory_identities: Mapping[tuple[str, ...], tuple[int, int]],
+    raw_output: BinaryIO,
+    output_authority: DirectoryAuthority,
+    output_name: str | None,
+    source_date_epoch: int,
+) -> tuple[str, tuple[ProjectedFile, ...]]:
+    """Emit one bounded deterministic ZIP into an already-open exact file."""
+    date_time = time.gmtime(source_date_epoch)[:6]
+    evidence: list[ProjectedFile] = []
+    archive_digest = hashlib.sha256()
+    expanded_size = 0
+    _assert_directory_authority(root_lease)
+    _assert_archive_output(output_authority, output_name, raw_output)
+    with zipfile.ZipFile(
+        raw_output,
+        mode="w",
+        compression=zipfile.ZIP_STORED,
+        strict_timestamps=False,
+    ) as archive:
+        for scanned in files:
+            relative = scanned.relative_path
+            _assert_directory_authority(root_lease)
+            _assert_archive_output(output_authority, output_name, raw_output)
+            with _open_capsule_source(
+                root_lease,
+                root_descriptor,
+                scanned,
+                directory_identities,
+            ) as (source, before):
+                if before.st_size > _MAX_MEMBER_BYTES:
+                    raise CapsuleAssemblyError("capsule file exceeds its size bound")
+                expanded_size += before.st_size
+                if expanded_size > _MAX_EXPANDED_BYTES:
+                    raise CapsuleAssemblyError(
+                        "capsule tree exceeds its expanded-size bound"
+                    )
+                mode = _normalized_mode(before.st_mode)
+                info = zipfile.ZipInfo(
+                    filename=f"{_CAPSULE_ARCHIVE_ROOT}/{relative}",
+                    date_time=date_time,
+                )
+                info.compress_type = zipfile.ZIP_STORED
+                info.create_system = 3
+                info.external_attr = (stat.S_IFREG | mode) << 16
+                info.flag_bits = 0x800
+                digest = hashlib.sha256()
+                consumed = 0
+                with archive.open(info, "w", force_zip64=True) as target:
+                    for chunk in iter(lambda: source.read(_READ_CHUNK), b""):
+                        consumed += len(chunk)
+                        if consumed > before.st_size:
+                            raise CapsuleAssemblyError(
+                                "capsule file grew during archive emission"
+                            )
+                        digest.update(chunk)
+                        target.write(chunk)
+                    after = os.fstat(source.fileno())
+                if consumed != before.st_size or (
+                    before.st_dev,
+                    before.st_ino,
+                    before.st_size,
+                    before.st_mtime_ns,
+                ) != (
+                    after.st_dev,
+                    after.st_ino,
+                    after.st_size,
+                    after.st_mtime_ns,
+                ):
+                    raise CapsuleAssemblyError(
+                        "capsule file changed during archive emission"
+                    )
+                evidence.append(
+                    ProjectedFile(
+                        relative_path=relative,
+                        size=consumed,
+                        sha256=digest.hexdigest(),
+                        mode=mode,
+                    )
+                )
+            _assert_directory_authority(root_lease)
+            _assert_archive_output(output_authority, output_name, raw_output)
+    raw_output.flush()
+    os.fsync(raw_output.fileno())
+    opened = _assert_archive_output(output_authority, output_name, raw_output)
+    raw_output.seek(0)
+    for chunk in iter(lambda: raw_output.read(_READ_CHUNK), b""):
+        archive_digest.update(chunk)
+    after_digest = _assert_archive_output(output_authority, output_name, raw_output)
+    if (opened.st_dev, opened.st_ino, opened.st_size) != (
+        after_digest.st_dev,
+        after_digest.st_ino,
+        after_digest.st_size,
+    ):
+        raise CapsuleAssemblyError("capsule archive changed while hashing")
+    _assert_directory_authority(root_lease)
+    return archive_digest.hexdigest(), _validated_files(evidence)
+
+
+def write_deterministic_capsule_zip_into_unpublished_generation(
+    capsule_root: Path,
+    *,
+    generation_authority: DirectoryAuthority,
+    output_name: str,
+    source_date_epoch: int,
+) -> tuple[str, tuple[ProjectedFile, ...]]:
+    """Write a deterministic ZIP directly into an unpublished generation.
+
+    The caller retains one live generation lease and exclusive mutation authority
+    across the complete composition. ``output_name`` is claimed once as its final
+    top-level name and is never renamed, published, truncated, or removed here. Any
+    failure after that claim leaves the exact partial file in the unpublished
+    generation for outer verification to reject.
+    """
+    if (
+        not isinstance(capsule_root, Path)
+        or not isinstance(generation_authority, DirectoryAuthority)
+        or not isinstance(output_name, str)
+    ):
+        raise CapsuleAssemblyError("capsule archive generation inputs are invalid")
+    source_date_epoch = _validate_source_date_epoch(source_date_epoch)
+    validated_name = _validated_generation_output_name(output_name)
+    _assert_live_directory_authority(
+        generation_authority, label="unpublished generation"
+    )
+    try:
+        root_authority = _resolve_directory_authority(capsule_root)
+        root = root_authority.path
+        final_path = generation_authority.path / validated_name
+        if final_path.resolve(strict=False).is_relative_to(root):
+            raise CapsuleAssemblyError(
+                "capsule archive must be outside its source tree"
+            )
+        _assert_live_directory_authority(
+            generation_authority, label="unpublished generation"
+        )
+        with _directory_lease(root_authority) as root_lease:
+            _assert_live_directory_authority(
+                generation_authority, label="unpublished generation"
+            )
+            try:
+                raw_output = _create_private_file(generation_authority, validated_name)
+            except FileExistsError:
+                raise CapsuleAssemblyError(
+                    "capsule archive output already exists"
+                ) from None
+            with raw_output:
+                _assert_exact_output_file(
+                    generation_authority, validated_name, raw_output
+                )
+                root_descriptor = root_lease.dir_fd
+                files, directory_identities = _capsule_files(
+                    root_lease, root_descriptor
+                )
+                if not files:
+                    raise CapsuleAssemblyError("capsule staging tree contains no files")
+                result = _emit_deterministic_capsule_zip(
+                    root_lease=root_lease,
+                    root_descriptor=root_descriptor,
+                    files=files,
+                    directory_identities=directory_identities,
+                    raw_output=raw_output,
+                    output_authority=generation_authority,
+                    output_name=validated_name,
+                    source_date_epoch=source_date_epoch,
+                )
+                _assert_exact_output_file(
+                    generation_authority, validated_name, raw_output
+                )
+            _assert_live_directory_authority(
+                generation_authority, label="unpublished generation"
+            )
+        _assert_live_directory_authority(
+            generation_authority, label="unpublished generation"
+        )
+        return result
+    except CapsuleAssemblyError:
+        raise
+    except (OSError, RuntimeError, zipfile.BadZipFile, zipfile.LargeZipFile):
+        raise CapsuleAssemblyError(
+            "cannot write deterministic capsule archive into unpublished generation"
+        ) from None
 
 
 def write_deterministic_capsule_zip(
@@ -522,17 +865,14 @@ def write_deterministic_capsule_zip(
     except (OSError, RuntimeError):
         raise CapsuleAssemblyError("cannot inspect capsule archive paths") from None
 
-    date_time = time.gmtime(source_date_epoch)[:6]
-    evidence: list[ProjectedFile] = []
     temporary_path: Path | None = None
-    archive_digest = hashlib.sha256()
-    expanded_size = 0
+    result: tuple[str, tuple[ProjectedFile, ...]] | None = None
     authority_stack = ExitStack()
     try:
         root_lease = authority_stack.enter_context(_directory_lease(root_authority))
         output_lease = authority_stack.enter_context(_directory_lease(output_authority))
         root_descriptor = root_lease.dir_fd
-        files = _capsule_files(root_lease, root_descriptor)
+        files, directory_identities = _capsule_files(root_lease, root_descriptor)
         if not files:
             raise CapsuleAssemblyError("capsule staging tree contains no files")
         _assert_directory_authority(output_lease)
@@ -552,76 +892,17 @@ def write_deterministic_capsule_zip(
                     raise CapsuleAssemblyError(
                         "capsule archive temporary identity changed"
                     )
-            with zipfile.ZipFile(
-                raw_output,
-                mode="w",
-                compression=zipfile.ZIP_STORED,
-                strict_timestamps=False,
-            ) as archive:
-                for relative in files:
-                    with _open_capsule_source(
-                        root_lease,
-                        root_descriptor,
-                        relative,
-                    ) as (source, before):
-                        if before.st_size > _MAX_MEMBER_BYTES:
-                            raise CapsuleAssemblyError(
-                                "capsule file exceeds its size bound"
-                            )
-                        expanded_size += before.st_size
-                        if expanded_size > _MAX_EXPANDED_BYTES:
-                            raise CapsuleAssemblyError(
-                                "capsule tree exceeds its expanded-size bound"
-                            )
-                        mode = _normalized_mode(before.st_mode)
-                        info = zipfile.ZipInfo(
-                            filename=f"{_CAPSULE_ARCHIVE_ROOT}/{relative}",
-                            date_time=date_time,
-                        )
-                        info.compress_type = zipfile.ZIP_STORED
-                        info.create_system = 3
-                        info.external_attr = (stat.S_IFREG | mode) << 16
-                        info.flag_bits = 0x800
-                        digest = hashlib.sha256()
-                        consumed = 0
-                        with archive.open(info, "w", force_zip64=True) as target:
-                            for chunk in iter(lambda: source.read(_READ_CHUNK), b""):
-                                consumed += len(chunk)
-                                if consumed > before.st_size:
-                                    raise CapsuleAssemblyError(
-                                        "capsule file grew during archive emission"
-                                    )
-                                digest.update(chunk)
-                                target.write(chunk)
-                            after = os.fstat(source.fileno())
-                        if consumed != before.st_size or (
-                            before.st_dev,
-                            before.st_ino,
-                            before.st_size,
-                            before.st_mtime_ns,
-                        ) != (
-                            after.st_dev,
-                            after.st_ino,
-                            after.st_size,
-                            after.st_mtime_ns,
-                        ):
-                            raise CapsuleAssemblyError(
-                                "capsule file changed during archive emission"
-                            )
-                        _assert_directory_authority(root_lease)
-                        evidence.append(
-                            ProjectedFile(
-                                relative_path=relative,
-                                size=consumed,
-                                sha256=digest.hexdigest(),
-                                mode=mode,
-                            )
-                        )
-            raw_output.flush()
-            os.fsync(raw_output.fileno())
-            raw_output.seek(0)
-            for chunk in iter(lambda: raw_output.read(_READ_CHUNK), b""):
-                archive_digest.update(chunk)
+            output_name = temporary_path.name if temporary_path is not None else None
+            result = _emit_deterministic_capsule_zip(
+                root_lease=root_lease,
+                root_descriptor=root_descriptor,
+                files=files,
+                directory_identities=directory_identities,
+                raw_output=raw_output,
+                output_authority=output_lease,
+                output_name=output_name,
+                source_date_epoch=source_date_epoch,
+            )
             opened = os.fstat(raw_output.fileno())
             if temporary_path is not None:
                 _assert_directory_authority(output_lease)
@@ -634,7 +915,6 @@ def write_deterministic_capsule_zip(
                     raise CapsuleAssemblyError(
                         "capsule archive temporary identity changed"
                     )
-            validated_evidence = _validated_files(evidence)
             _assert_directory_authority(root_lease)
             _assert_directory_authority(output_lease)
             try:
@@ -661,4 +941,6 @@ def write_deterministic_capsule_zip(
     finally:
         authority_stack.close()
 
-    return archive_digest.hexdigest(), validated_evidence
+    if result is None:
+        raise CapsuleAssemblyError("capsule archive emission produced no result")
+    return result

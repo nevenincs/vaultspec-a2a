@@ -17,6 +17,7 @@ if TYPE_CHECKING:
 
     from sqlalchemy.ext.asyncio import AsyncSession
     from sqlalchemy.sql import Select
+    from sqlalchemy.sql.elements import ColumnElement
 
 from ..thread.enums import (
     ACTIVE_STATUSES,
@@ -70,6 +71,11 @@ class ActiveThreadProjection:
 
 _MAX_DISCOVERY_WORKSPACE_ROOT_LENGTH = 4096
 _MAX_DISCOVERY_FEATURE_TAG_LENGTH = 128
+
+
+def _path_safe_run_id_clause() -> ColumnElement[bool]:
+    """Return the cross-dialect persisted run-id grammar predicate."""
+    return ThreadModel.id.regexp_match(r"^[A-Za-z0-9_][A-Za-z0-9_-]{0,127}$")
 
 
 def _discovery_selectors(metadata: str | None) -> tuple[str | None, str | None]:
@@ -258,7 +264,11 @@ def _active_thread_page_statement(
         .where(
             ThreadModel.is_active.is_(True),
             ThreadModel.status.in_(sorted(status.value for status in ACTIVE_STATUSES)),
-            func.length(ThreadModel.id).between(1, 128),
+            # SQLAlchemy renders this portable operator as ``REGEXP`` on
+            # SQLite (whose dialect installs a Python regexp function) and
+            # ``~`` on PostgreSQL. Keep legacy invalid identifiers out of the
+            # bounded page in the database, before LIMIT is applied.
+            _path_safe_run_id_clause(),
         )
         .order_by(ThreadModel.created_at.desc(), ThreadModel.id.desc())
         .limit(limit)

@@ -201,6 +201,60 @@ gateway records and one dead worker record. Status: open for an operator to revi
 and clear explicitly with the registry-owned reap recipe; S07 did not mutate or
 delete machine-global process state during validation.
 
+### s08-hook-authority-and-mutation | high | Hooks mixed floating tools with commit-time repair
+
+Type: reproducibility and validation integrity. The original pipeline selected
+Ruff, Ty, Core, and Lychee through ambient environments and ran Vaultspec repair
+and annotation cleanup during validation. Status: resolved in S08 by selecting
+the frozen project tooling profile for every Python and Core command, retaining
+exact Node dependencies for Taplo and Markdownlint, and moving synchronization,
+repair, and annotation cleanup to explicit Just recipes outside commit flow.
+
+### s08-hook-shim-default-profile | medium | Installed hook did not reject default dependency groups
+
+Type: dependency authority. The real installer shim selected the frozen `dev`
+group but did not explicitly disable default groups, leaving its authority
+dependent on project metadata. Status: resolved in S08 by adding
+`--no-default-groups` to the production shim and updating the real linked-worktree
+test; both installer scenarios pass.
+
+### s08-ambient-link-check-coverage | medium | Removing floating Lychee also removes hook link coverage
+
+Type: validation coverage. The existing Lychee hook executed whichever system
+binary appeared first on `PATH`. The upstream auto-installing hook is also not
+deterministic because it installs an unconstrained latest release. Status: open
+and queued for S10/S11 link-contract work; S08 removes the ambient hook rather
+than claiming reproducibility, while preserving exact Markdownlint validation.
+
+### s08-spec-doctor-warning-contract | medium | Spec Doctor rejects intentional mixed provider state
+
+Type: hook suitability. The locked `spec doctor` command exits one for the
+repository's currently intentional mixed provider directories and tracked
+annotations, so it cannot be an honest commit gate yet. Status: removed from the
+normal hook pipeline and retained under explicit Vaultspec diagnosis. Provider
+artifact validation remains an always-run, read-only hook.
+
+### s08-full-pipeline-python-debt | high | All-files hooks expose concurrent lint, format, and type failures
+
+Type: code-health debt. The complete read-only run found 19 Ruff diagnostics,
+one file requiring Ruff formatting, and 29 Ty diagnostics in concurrent desktop
+manifest work, including unresolved references and call-signature drift. Status:
+open and queued for S09; S08 neither suppresses nor repairs these failures.
+
+### s08-full-pipeline-markdown-debt | medium | Markdownlint reports existing rule and skill violations
+
+Type: documentation quality. The complete pipeline reported bare URLs and
+untyped fenced code blocks in existing agent rules, skills, and documentation
+references. Status: open for S09/S11 remediation; the exact
+`markdownlint-cli@0.44.0` hook remains active and read-only.
+
+### s08-shared-worktree-hook-race | low | Concurrent edits produced a false hook-mutation report
+
+Type: validation environment. Prek labeled Vault Doctor as modifying files while
+other agents were editing the shared worktree. A direct locked Core run returned
+success and identical Git diff hashes before and after execution. Status:
+classified as shared-worktree concurrency evidence, not hook mutation.
+
 ## Recommendations
 
 No open task remains for S01, S02, or the S03 implementation. Preserve the two
@@ -225,3 +279,7 @@ repeat the owning upgrade preview before future framework version changes.
 Preserve S07's registry-only host-process boundary and isolated Compose project
 names. Review the three dead registry entries before invoking reap, and always
 validate the production-plus-PostgreSQL overlay pair together.
+
+Preserve S08's frozen dependency selection and separation between validation and
+repair. Remediate the surfaced Python and Markdown debt in S09/S11, then restore
+link checking only through a pinned or explicitly provisioned Lychee contract.

@@ -46,7 +46,10 @@ def test_install_hook_writes_portable_shim_into_common_hooks_dir(
     assert 'ROOT="$(git rev-parse --show-toplevel 2>/dev/null)"' in text
     assert 'export UV_CACHE_DIR="${UV_CACHE_DIR:-$ROOT/.uv-cache}"' in text
     assert 'export PREK_HOME="${PREK_HOME:-$ROOT/.prek-home}"' in text
-    assert 'exec uv run --project "$ROOT" --group dev --no-sync --frozen \\' in text
+    assert (
+        'exec uv run --project "$ROOT" --no-default-groups --group dev '
+        "--no-sync --frozen \\" in text
+    )
     assert '--hook-type=pre-commit -- "$@"' in text
     assert ".venv\\Scripts\\prek.exe" not in text
     assert os.access(hook_path, os.X_OK)

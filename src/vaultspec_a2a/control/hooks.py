@@ -71,7 +71,8 @@ def _hook_script(hook_type: str) -> str:
             "    exit 1",
             "fi",
             "",
-            'exec uv run --project "$ROOT" --group dev --no-sync --frozen \\',
+            'exec uv run --project "$ROOT" --no-default-groups --group dev '
+            "--no-sync --frozen \\",
             '    prek hook-impl --hook-dir "$HERE" '
             f"--script-version {_SCRIPT_VERSION} \\",
             f'    --hook-type={hook_type} -- "$@"',

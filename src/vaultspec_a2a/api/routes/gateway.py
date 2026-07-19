@@ -23,6 +23,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ...control.cancel_service import cancel_thread
 from ...control.config import settings
+from ...control.drain import DrainGate
 from ...control.health import (
     assemble_desktop_readiness,
     build_full_health,
@@ -48,7 +49,7 @@ from ...database.session import get_db
 from ...domain_config import domain_config
 from ...streaming.aggregator import EventAggregator
 from ...thread.dispatch_policy import FailureType
-from ...thread.enums import ThreadStatus
+from ...thread.enums import TERMINAL_STATUSES, ThreadStatus
 from ...thread.errors import NicknameConflictError
 from .._utils import mark_worker_connected, trace_headers
 from ..dependencies import (
@@ -90,6 +91,23 @@ logger = logging.getLogger(__name__)
 _DEGRADED_CHECK_STATUSES: frozenset[str] = frozenset(
     {"error", "open", "down", "restarting", "half_open", "timeout"}
 )
+
+
+def admission_gate(app: FastAPI) -> DrainGate:
+    """Return the process-wide run-admission drain gate, creating it once.
+
+    One :class:`DrainGate` per gateway process, seated on ``app.state`` so the
+    run verbs here and the administrative stop path (gateway shutdown /
+    receipt-bound admin shutdown, wired where those handlers live) share the
+    single authority: run-start admits against it, and the stop path closes
+    admission and drains it before bounded cancellation. Get-or-create is atomic
+    on the single event loop - there is no await between the read and the store.
+    """
+    gate = getattr(app.state, "drain_gate", None)
+    if gate is None:
+        gate = DrainGate()
+        app.state.drain_gate = gate
+    return gate
 
 
 # ---------------------------------------------------------------------------
@@ -185,6 +203,16 @@ async def run_start_endpoint(
     )
     metadata_json = _persist_frozen(metadata_json, frozen)
 
+    # Admission gate: a draining gateway refuses a new run before any durable
+    # state is created, so drain closes admission ahead of bounded cancellation.
+    # An admitted run joins the active set the drain waits on; it is released on
+    # a terminal outcome (the execution-state settlement path, W04.P12) or here
+    # when creation itself fails without leaving a durable run.
+    gate = admission_gate(request.app)
+    admission = await gate.admit(run_id)
+    if not admission.admitted:
+        raise HTTPException(status_code=503, detail=admission.reason)
+
     try:
         result = await create_and_dispatch_thread(
             db,
@@ -209,6 +237,8 @@ async def run_start_endpoint(
             trace_headers=trace_headers(),
         )
     except NicknameConflictError as exc:
+        # No durable run was created, so drop the admission it never used.
+        await gate.release(run_id)
         raise HTTPException(
             status_code=409, detail=f"Run nickname already exists: {exc.nickname!r}"
         ) from exc
@@ -601,6 +631,13 @@ async def run_cancel_endpoint(
 
     if result.cancelled:
         mark_worker_connected(request)
+
+    # Cancellation is the drain's tool and is never itself admission-gated. When
+    # a cancel settles the run terminally here (e.g. a submitted-but-undispatched
+    # run), release it from the admission gate so a concurrent drain can quiesce;
+    # a run that only reaches CANCELLING is released on its terminal event.
+    if result.thread_status in TERMINAL_STATUSES:
+        await admission_gate(request.app).release(result.thread_id)
 
     return RunCancelResponse(
         run_id=result.thread_id,

@@ -223,7 +223,7 @@ before `S62`; document order keeps each spawn or configuration hardening Step
 ahead of the integrated real-descendant proof.
 
 - [x] `W04.P11.S56` - Implement a bounded drain gate that atomically closes admission tracks active runs and reports quiescence; `src/vaultspec_a2a/control/drain.py`.
-- [ ] `W04.P11.S57` - Apply the drain gate to run start cancellation and administrative stop paths; `src/vaultspec_a2a/api/routes/gateway.py`.
+- [x] `W04.P11.S57` - Apply the drain gate to run start cancellation and administrative stop paths; `src/vaultspec_a2a/api/routes/gateway.py`.
 - [ ] `W04.P11.S58` - Retain actor tokens through INPUT_REQUIRED and release active-run ownership tokens and child handles only on terminal outcomes; `src/vaultspec_a2a/worker/executor.py`.
 - [ ] `W04.P11.S59` - Spawn the desktop worker in a POSIX new session and owned process group or an assigned Windows Job Object or equivalently proven OS-owned job or tree before descendant work and retain containment for bounded shutdown; `src/vaultspec_a2a/control/worker_management.py`.
 - [ ] `W04.P11.S60` - Spawn each run-owned ACP or Codex provider root in a POSIX new session and owned process group or an assigned Windows Job Object or equivalently proven OS-owned job or tree before descendant work; `src/vaultspec_a2a/providers/_subprocess.py`.

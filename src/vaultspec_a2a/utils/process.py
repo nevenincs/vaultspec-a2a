@@ -17,12 +17,32 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import logging
 import os
 import sys
+from typing import TYPE_CHECKING, Any
 
-__all__ = ["kill_pid_tree_async"]
+if TYPE_CHECKING:
+    from collections.abc import Mapping
+
+__all__ = [
+    "ProcessContainment",
+    "ProcessContainmentError",
+    "kill_pid_tree_async",
+]
+
+logger = logging.getLogger(__name__)
 
 _POLL_INTERVAL = 0.1
+
+# Windows Job Object constants (winnt.h). A job created with
+# KILL_ON_JOB_CLOSE terminates every assigned process when the job is terminated
+# OR when the last handle to it is closed, so an owner that crashes still reaps
+# the whole contained tree.
+_JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE = 0x00002000
+_JOBOBJECT_EXTENDED_LIMIT_INFORMATION_CLASS = 9  # JobObjectExtendedLimitInformation
+_PROCESS_TERMINATE = 0x0001
+_PROCESS_SET_QUOTA = 0x0100
 
 
 def _pid_alive(pid: int) -> bool:
@@ -93,3 +113,280 @@ async def kill_pid_tree_async(
     with contextlib.suppress(ProcessLookupError, PermissionError):
         os.kill(pid, signal.SIGKILL)
     return await _await_pid_gone(pid, timeout=kill_timeout)
+
+
+# ---------------------------------------------------------------------------
+# ProcessContainment — OS-owned containment for a spawned root and its tree
+# ---------------------------------------------------------------------------
+
+
+def _win_job_structures() -> tuple[Any, int]:
+    """Build a KILL_ON_JOB_CLOSE extended-limit-information payload for a job.
+
+    Kept behind a function so the ctypes structure classes are only defined on
+    Windows, where ``ctypes.wintypes`` and the job APIs exist. Returns the filled
+    structure instance and its byte size for ``SetInformationJobObject``.
+    """
+    import ctypes
+
+    class _JobObjectBasicLimitInformation(ctypes.Structure):
+        _fields_ = (
+            ("PerProcessUserTimeLimit", ctypes.c_int64),
+            ("PerJobUserTimeLimit", ctypes.c_int64),
+            ("LimitFlags", ctypes.c_uint32),
+            ("MinimumWorkingSetSize", ctypes.c_size_t),
+            ("MaximumWorkingSetSize", ctypes.c_size_t),
+            ("ActiveProcessLimit", ctypes.c_uint32),
+            ("Affinity", ctypes.c_size_t),
+            ("PriorityClass", ctypes.c_uint32),
+            ("SchedulingClass", ctypes.c_uint32),
+        )
+
+    class _IoCounters(ctypes.Structure):
+        _fields_ = tuple(
+            (name, ctypes.c_uint64)
+            for name in (
+                "ReadOperationCount",
+                "WriteOperationCount",
+                "OtherOperationCount",
+                "ReadTransferCount",
+                "WriteTransferCount",
+                "OtherTransferCount",
+            )
+        )
+
+    class _JobObjectExtendedLimitInformation(ctypes.Structure):
+        _fields_ = (
+            ("BasicLimitInformation", _JobObjectBasicLimitInformation),
+            ("IoInfo", _IoCounters),
+            ("ProcessMemoryLimit", ctypes.c_size_t),
+            ("JobMemoryLimit", ctypes.c_size_t),
+            ("PeakProcessMemoryUsed", ctypes.c_size_t),
+            ("PeakJobMemoryUsed", ctypes.c_size_t),
+        )
+
+    info = _JobObjectExtendedLimitInformation()
+    info.BasicLimitInformation.LimitFlags = _JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
+    return info, ctypes.sizeof(info)
+
+
+class ProcessContainmentError(RuntimeError):
+    """Raised when an owned root cannot be assigned to its OS containment."""
+
+
+class ProcessContainment:
+    """An operating-system-owned containment for a spawned root and its tree.
+
+    Two backends, one contract - reap the whole tree without walking it by
+    parent pid:
+
+    - **POSIX**: the root is spawned into a new session and process group
+      (``start_new_session=True`` -> ``setsid``), so the root's process-group id
+      equals its pid and every descendant that does not itself ``setsid`` stays
+      in that group. Termination signals the group with ``killpg`` (SIGTERM then
+      SIGKILL), never a per-pid tree walk.
+    - **Windows**: a Job Object created with ``KILL_ON_JOB_CLOSE`` owns the root;
+      ``TerminateJobObject`` fells every assigned process at once, and closing the
+      last handle (e.g. on owner crash) also reaps the job. No ``taskkill /T``
+      parent-pid discovery.
+
+    Lifecycle: :meth:`create` builds the containment, :meth:`spawn_kwargs` feeds
+    the spawn call, :meth:`assign` binds the just-spawned pid before it does
+    descendant work, and :meth:`terminate` reaps the tree with bounded
+    escalation. An unassigned containment falls back to a per-pid tree kill so a
+    spawn is never left unreapable, and the fallback is logged.
+    """
+
+    def __init__(self) -> None:
+        self._pid: int | None = None
+        self._pgid: int | None = None
+        self._job: Any | None = None  # Windows job HANDLE (ctypes c_void_p)
+        self._assigned = False
+
+    @classmethod
+    def create(cls) -> ProcessContainment:
+        """Build a containment; on Windows this creates the KILL_ON_JOB_CLOSE job.
+
+        A Windows job-creation failure is fatal to containment and raises; POSIX
+        needs no OS object until a pid is assigned.
+        """
+        self = cls()
+        if sys.platform == "win32":
+            self._job = self._create_win_job()
+        return self
+
+    @staticmethod
+    def _create_win_job() -> Any:
+        import ctypes
+        from ctypes import wintypes
+
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        kernel32.CreateJobObjectW.restype = wintypes.HANDLE
+        kernel32.CreateJobObjectW.argtypes = (wintypes.LPVOID, wintypes.LPCWSTR)
+        job = kernel32.CreateJobObjectW(None, None)
+        if not job:
+            raise ctypes.WinError(ctypes.get_last_error())
+        info, size = _win_job_structures()
+        kernel32.SetInformationJobObject.restype = wintypes.BOOL
+        kernel32.SetInformationJobObject.argtypes = (
+            wintypes.HANDLE,
+            ctypes.c_int,
+            ctypes.c_void_p,
+            wintypes.DWORD,
+        )
+        if not kernel32.SetInformationJobObject(
+            job,
+            _JOBOBJECT_EXTENDED_LIMIT_INFORMATION_CLASS,
+            ctypes.byref(info),
+            size,
+        ):
+            err = ctypes.get_last_error()
+            kernel32.CloseHandle(job)
+            raise ctypes.WinError(err)
+        return job
+
+    def spawn_kwargs(self) -> Mapping[str, Any]:
+        """Return spawn kwargs that seat the root in its containment at spawn.
+
+        POSIX seats the root in a new session/process group at fork; Windows
+        assigns after spawn (see :meth:`assign`), so it contributes no spawn-time
+        kwargs here.
+        """
+        if sys.platform == "win32":
+            return {}
+        return {"start_new_session": True}
+
+    def assign(self, pid: int) -> None:
+        """Bind *pid* to the containment before the root does descendant work.
+
+        POSIX records the new process group (its id equals the session leader's
+        pid). Windows assigns the process to the job. A Windows assignment failure
+        raises :class:`ProcessContainmentError`; the caller may downgrade to the
+        per-pid fallback rather than fail the spawn.
+        """
+        self._pid = pid
+        if sys.platform != "win32":
+            # start_new_session made the child a session/group leader: pgid == pid.
+            self._pgid = pid
+            self._assigned = True
+            return
+        import ctypes
+        from ctypes import wintypes
+
+        if self._job is None:
+            raise ProcessContainmentError("Windows containment has no job object")
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        kernel32.OpenProcess.restype = wintypes.HANDLE
+        kernel32.OpenProcess.argtypes = (wintypes.DWORD, wintypes.BOOL, wintypes.DWORD)
+        handle = kernel32.OpenProcess(
+            _PROCESS_TERMINATE | _PROCESS_SET_QUOTA, False, pid
+        )
+        if not handle:
+            raise ProcessContainmentError(
+                f"could not open process {pid} to assign it to the job: "
+                f"{ctypes.WinError(ctypes.get_last_error())}"
+            )
+        try:
+            kernel32.AssignProcessToJobObject.restype = wintypes.BOOL
+            kernel32.AssignProcessToJobObject.argtypes = (
+                wintypes.HANDLE,
+                wintypes.HANDLE,
+            )
+            if not kernel32.AssignProcessToJobObject(self._job, handle):
+                raise ProcessContainmentError(
+                    f"could not assign process {pid} to the job: "
+                    f"{ctypes.WinError(ctypes.get_last_error())}"
+                )
+        finally:
+            kernel32.CloseHandle(handle)
+        self._assigned = True
+
+    @property
+    def assigned(self) -> bool:
+        """Whether a root pid is bound to this containment."""
+        return self._assigned
+
+    async def terminate(
+        self, *, term_timeout: float = 10.0, kill_timeout: float = 5.0
+    ) -> bool:
+        """Reap the contained tree with bounded escalation; return ``True`` when gone.
+
+        POSIX escalates ``killpg`` SIGTERM -> (wait ``term_timeout``) -> SIGKILL
+        (wait ``kill_timeout``) over the owned process group. Windows terminates
+        the job. An unassigned containment (assignment failed or never ran) falls
+        back to the per-pid tree kill so the root is never left unreapable, logging
+        the downgrade.
+        """
+        if not self._assigned or self._pid is None:
+            if self._pid is not None:
+                logger.warning(
+                    "Process %d has no OS containment; falling back to a per-pid"
+                    " tree kill (containment assignment did not complete)",
+                    self._pid,
+                )
+                result = await kill_pid_tree_async(
+                    self._pid, term_timeout=term_timeout, kill_timeout=kill_timeout
+                )
+                self.close()
+                return result
+            return True
+        if sys.platform == "win32":
+            result = self._terminate_win_job()
+            self.close()
+            return result
+        result = await self._terminate_posix_group(
+            term_timeout=term_timeout, kill_timeout=kill_timeout
+        )
+        self.close()
+        return result
+
+    def _terminate_win_job(self) -> bool:
+        import ctypes
+        from ctypes import wintypes
+
+        if self._job is None:
+            return True
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        kernel32.TerminateJobObject.restype = wintypes.BOOL
+        kernel32.TerminateJobObject.argtypes = (wintypes.HANDLE, wintypes.UINT)
+        # A non-zero exit code marks the tree as force-terminated. Failure here is
+        # non-fatal: closing the KILL_ON_JOB_CLOSE handle still reaps the job.
+        return bool(kernel32.TerminateJobObject(self._job, 1))
+
+    async def _terminate_posix_group(
+        self, *, term_timeout: float, kill_timeout: float
+    ) -> bool:
+        # Kept under the platform guard so the type checker narrows ``signal`` and
+        # ``os.killpg`` to their POSIX members (absent on Windows). Only ever
+        # reached on POSIX via :meth:`terminate`.
+        if sys.platform == "win32":  # pragma: no cover - Windows uses the job path
+            return True
+        import signal
+
+        pgid = self._pgid
+        pid = self._pid
+        if pgid is None or pid is None:
+            return True
+        with contextlib.suppress(ProcessLookupError, PermissionError):
+            os.killpg(pgid, signal.SIGTERM)
+        if await _await_pid_gone(pid, timeout=term_timeout):
+            return True
+        with contextlib.suppress(ProcessLookupError, PermissionError):
+            os.killpg(pgid, signal.SIGKILL)
+        return await _await_pid_gone(pid, timeout=kill_timeout)
+
+    def close(self) -> None:
+        """Release the OS containment handle; idempotent.
+
+        On Windows this closes the job handle - with KILL_ON_JOB_CLOSE this also
+        reaps any still-running assigned process, so it doubles as a crash-safe
+        backstop. POSIX holds no handle.
+        """
+        if self._job is None:
+            return
+        import ctypes
+
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        with contextlib.suppress(Exception):
+            kernel32.CloseHandle(self._job)
+        self._job = None

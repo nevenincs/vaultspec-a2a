@@ -17,7 +17,11 @@ from typing import TYPE_CHECKING
 import pytest
 
 from ...authoring import AgentTool, CatalogSnapshot
-from .._acp_authoring import AuthoringToolBinding, build_authoring_stdio_mcp_servers
+from .._acp_authoring import (
+    AUTHORING_MCP_SERVER_NAME,
+    AuthoringToolBinding,
+    build_authoring_stdio_mcp_servers,
+)
 from .._acp_project_mcp import (
     PROJECTION_MARKER_KEY,
     ProjectionRefusedError,
@@ -75,6 +79,43 @@ def _write_mcp(directory: Path, names: list[str]) -> None:
 
 def _read(path: Path) -> dict:
     return json.loads(path.read_text(encoding="utf-8"))
+
+
+def test_only_run_owned_specs_enter_the_projected_provider_tree(
+    tmp_path: Path,
+) -> None:
+    """Audit lock (W04.P11.S91): only run-owned launch specs enter the tree.
+
+    Every projected server is launched by the contained ACP provider root, so
+    what a run declares is exactly what becomes a descendant. A foreign server in
+    an ancestor ``.mcp.json`` is enumerated (so the caller can DENY it) but is
+    never part of what this module projects, and this config-only module reaches
+    no process-spawn primitive.
+    """
+    run_ws = tmp_path / "run-ws"
+    run_ws.mkdir()
+    _write_mcp(tmp_path, ["foreign-ancestor-srv"])
+
+    declared = [_rag_spec(), *_bridge_specs()]
+    run_owned = set(projected_declared_names(declared))
+    # Exactly the run-owned declared servers (harness + the run's authoring bridge).
+    assert run_owned == {"vaultspec-rag", AUTHORING_MCP_SERVER_NAME}
+    # The foreign ancestor server is enumerated for the caller's deny set, but is
+    # NOT part of what enters the isolated provider tree.
+    enumerated = set(enumerate_ancestor_mcp_names(run_ws))
+    assert "foreign-ancestor-srv" in enumerated
+    assert "foreign-ancestor-srv" not in run_owned
+
+    import vaultspec_a2a.providers._acp_project_mcp as mod
+
+    for banned in (
+        "subprocess",
+        "Popen",
+        "spawn_acp_process",
+        "create_subprocess_exec",
+        "ProcessContainment",
+    ):
+        assert not hasattr(mod, banned), f"projection module must not spawn ({banned})"
 
 
 # --- ancestor enumeration (unchanged upstream deny composition) ------------

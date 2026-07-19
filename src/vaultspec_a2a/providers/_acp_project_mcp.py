@@ -34,6 +34,14 @@ added. Ownership is entry-level, not file-level:
   level of the harness deny-pin. The caller denies ``enumerated - declared`` so a
   server declared in an ancestor tree cannot ride in beside the projected set. This
   decision is upstream of the merge and unchanged by it.
+
+Process topology: this module only WRITES config. Every server it projects is
+launched by the ACP provider CLI as its own child, so it is a descendant of the
+run-owned provider root and inherits that root's OS containment. The marked-entry
+merge plus the ancestor deny set mean ONLY run-owned launch specs (the declared
+harness servers and the run's own authoring bridge) enter that isolated provider
+tree; a foreign or ancestor-declared server never rides in. Nothing here spawns a
+process.
 """
 
 from __future__ import annotations

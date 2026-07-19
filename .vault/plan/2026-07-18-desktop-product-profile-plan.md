@@ -230,7 +230,7 @@ ahead of the integrated real-descendant proof.
 - [x] `W04.P11.S61` - Terminate owned POSIX process groups with bounded killpg SIGTERM-to-SIGKILL escalation and assigned Windows Job Objects or equivalently proven OS-owned jobs or trees without recursive process discovery; `src/vaultspec_a2a/utils/process.py`.
 - [x] `W04.P11.S89` - Audit and harden ACP terminal children to inherit the owning run containment and bounded reaper; `src/vaultspec_a2a/providers/_acp_rpc_handlers.py`.
 - [x] `W04.P11.S90` - Audit and harden per-run authoring MCP launch specifications to remain descendants of the owning provider group; `src/vaultspec_a2a/providers/_acp_authoring.py`.
-- [ ] `W04.P11.S91` - Audit and harden projected project MCP configuration so only run-owned launch specifications enter the isolated provider tree; `src/vaultspec_a2a/providers/_acp_project_mcp.py`.
+- [x] `W04.P11.S91` - Audit and harden projected project MCP configuration so only run-owned launch specifications enter the isolated provider tree; `src/vaultspec_a2a/providers/_acp_project_mcp.py`.
 - [ ] `W04.P11.S92` - Audit and harden declared harness MCP launch specifications to inherit the owning ACP or Codex provider group; `src/vaultspec_a2a/providers/_acp_mcp.py`.
 - [ ] `W04.P11.S62` - Prove real worker provider terminal authoring projected-project MCP and harness descendants are contained before work and reaped on every graceful and forced terminal path without recursive process discovery; `src/vaultspec_a2a/desktop_tests/test_owned_process_tree.py`.
 

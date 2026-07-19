@@ -5,7 +5,7 @@ rag_cli := "uv run --no-sync --frozen --no-default-groups --extra rag vaultspec-
 
 # Fail when ACP runtime acquisition no longer matches the project lock.
 _check-runtime-authority:
-    uv run --no-sync --frozen --no-default-groups --extra rag python -c "from importlib.metadata import version; from vaultspec_a2a.providers._acp_mcp import _LOCKED_RAG_MCP_REQUIREMENT as requirement; expected = f'vaultspec-rag[mcp]=={version(\"vaultspec-rag\")}'; raise SystemExit(0 if requirement == expected else f'RAG runtime drift: {requirement} != {expected}')"
+    uv run --no-sync --frozen --no-default-groups --extra rag python -c "from importlib.metadata import version; from vaultspec_a2a.providers._acp_mcp import _LOCKED_RAG_MCP_REQUIREMENT as requirement; expected = 'vaultspec-rag[mcp]==' + version('vaultspec-rag'); raise SystemExit(0 if requirement == expected else 'RAG runtime drift: ' + requirement + ' != ' + expected)"
 
 # Resolve locked RAG dependencies and enroll the workspace without external provisioning.
 setup:

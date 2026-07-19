@@ -6,10 +6,12 @@ service operations across the edge. Every response carries an explicit
 and fence event-shape drift; every field is bounded so a response is always safe
 to wrap under the engine's 8 MiB / 120 s caps.
 
-The verbs reshape the existing service surface rather than reinventing it:
+The gateway contract reshapes the existing service surface rather than
+reinventing it:
 ``run-start`` delegates to the same thread-create/dispatch flow the internal
-``/api`` surface uses, ``run-status`` composes the recovery snapshot, and the
-remaining three roll up cancel, preset listing, and health.
+``/api`` surface uses, ``run-status`` composes the recovery snapshot, active-run
+discovery projects bounded durable identities, and the operator verbs roll up
+cancel, preset listing, and health.
 """
 
 from __future__ import annotations

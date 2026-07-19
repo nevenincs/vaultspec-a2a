@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import json
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 from uuid import uuid4
 
-from sqlalchemy import func, select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.exc import IntegrityError
 
 if TYPE_CHECKING:
@@ -37,13 +38,14 @@ from ._helpers import (
 from .models import ThreadExecutionStateModel, ThreadModel
 
 __all__ = [
+    "ActiveThreadProjection",
     "create_thread",
     "delete_thread",
     "delete_thread_execution_state",
     "get_thread",
     "get_thread_execution_state",
     "get_thread_metadata",
-    "list_active_threads",
+    "list_active_thread_page",
     "list_non_terminal_threads",
     "list_threads",
     "record_thread_execution_state",
@@ -52,6 +54,16 @@ __all__ = [
     "update_thread_metadata",
     "update_thread_status",
 ]
+
+
+@dataclass(frozen=True, slots=True)
+class ActiveThreadProjection:
+    """Narrow durable fields needed by active-run discovery."""
+
+    id: str
+    status: str
+    thread_metadata: str | None
+    created_at: datetime
 
 
 async def create_thread(
@@ -147,19 +159,64 @@ async def list_non_terminal_threads(session: AsyncSession) -> Sequence[ThreadMod
     return result.scalars().all()
 
 
-async def list_active_threads(session: AsyncSession) -> Sequence[ThreadModel]:
-    """Return durable active threads in newest-first discovery order."""
+async def list_active_thread_page(
+    session: AsyncSession,
+    *,
+    limit: int,
+    metadata_prefix_length: int,
+    after_created_at: datetime | None = None,
+    after_id: str | None = None,
+) -> Sequence[ActiveThreadProjection]:
+    """Return one narrow, keyset-paginated page of durable active threads."""
+    if not 1 <= limit <= 101:
+        msg = "active-thread page limit must be between 1 and 101"
+        raise ValueError(msg)
+    if not 1 <= metadata_prefix_length <= 65_536:
+        msg = "active-thread metadata prefix must be between 1 and 65536"
+        raise ValueError(msg)
+    if (after_created_at is None) != (after_id is None):
+        msg = "active-thread keyset cursor requires both created_at and id"
+        raise ValueError(msg)
+
     stmt = (
-        select(ThreadModel)
+        select(
+            ThreadModel.id,
+            ThreadModel.status,
+            func.substr(
+                ThreadModel.thread_metadata,
+                1,
+                metadata_prefix_length,
+            ).label("thread_metadata"),
+            ThreadModel.created_at,
+        )
         .where(
             ThreadModel.status.not_in(
                 [thread_status.value for thread_status in NON_ACTIVE_STATUSES]
             )
         )
         .order_by(ThreadModel.created_at.desc(), ThreadModel.id.asc())
+        .limit(limit)
     )
+    if after_created_at is not None and after_id is not None:
+        stmt = stmt.where(
+            or_(
+                ThreadModel.created_at < after_created_at,
+                and_(
+                    ThreadModel.created_at == after_created_at,
+                    ThreadModel.id > after_id,
+                ),
+            )
+        )
     result = await session.execute(stmt)
-    return result.scalars().all()
+    return [
+        ActiveThreadProjection(
+            id=row.id,
+            status=row.status,
+            thread_metadata=row.thread_metadata,
+            created_at=row.created_at,
+        )
+        for row in result.all()
+    ]
 
 
 async def delete_thread(session: AsyncSession, thread_id: str) -> bool:

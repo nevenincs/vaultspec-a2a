@@ -24,9 +24,9 @@ def register_routes(app: FastAPI) -> None:
     """Include per-resource routers.
 
     The internal ``/api`` surface (thread CRUD, permissions, messages, WS
-    replay) stays for dashboard-internal and operator use; the versioned
-    ``/v1`` five-verb surface is the engine-facing edge and carries
-    its own ``/v1`` prefix.
+    replay) stays for dashboard-internal and operator use. The versioned
+    ``/v1`` surface is the engine-facing edge and carries its own ``/v1``
+    prefix.
     """
     for sub_router in (
         health_router,
@@ -41,5 +41,5 @@ def register_routes(app: FastAPI) -> None:
     ):
         app.include_router(sub_router, prefix="/api")
 
-    # The five-verb gateway is the versioned engine edge.
+    # The v1 gateway is the versioned engine edge.
     app.include_router(gateway_router)

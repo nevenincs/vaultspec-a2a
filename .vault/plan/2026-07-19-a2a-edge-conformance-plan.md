@@ -10,7 +10,6 @@ related:
   - '[[2026-07-19-a2a-edge-conformance-active-run-discovery-research]]'
 ---
 
-
 # `a2a-edge-conformance` plan
 
 Add the dashboard-requested bounded active-run discovery read to the versioned gateway.

@@ -1,17 +1,18 @@
-# A2A five-verb gateway: verb-to-legacy-service mapping and retirement path
+# A2A versioned gateway: contract-to-service mapping and retirement path
 
 The versioned `/v1` gateway (the engine-facing contract) reshapes the existing
-internal `/api` services rather than reimplementing orchestration. Each verb
+internal `/api` services rather than reimplementing orchestration. Each operation
 delegates to the same service function the internal surface uses, so there is a
 single code path beneath two surfaces. This document records that mapping and the
 legacy-route retirement path (a2a-edge-conformance, plan `2026-07-15`).
 
-## Verb-to-legacy-service mapping
+## Contract-to-legacy-service mapping
 
 | `/v1` verb | Route | Reused service (module) | Internal `/api` sibling |
 | --- | --- | --- | --- |
 | run-start | `POST /v1/runs` | `create_and_dispatch_thread` (`control/thread_service.py`), `process_metadata`, `generate_thread_id`; plus `evaluate_run_start_eligibility` (`control/run_start_policy.py`) for pre-dispatch refusal | `POST /api/threads` |
 | run-status | `GET /v1/runs/{run_id}` | `build_thread_state` (`control/thread_state_service.py`), `read_run_authoring_ids`, `read_run_semantic_context`, `project_semantic_phase` | `GET /api/threads/{id}/state` |
+| active-run discovery | `GET /v1/runs?state=active` | `discover_active_runs` (`control/run_discovery_service.py`) over the bounded keyset projection in `database/thread_repository.py` | no equivalent; `/api/threads` exposes a broader authoritative DTO |
 | run-cancel | `POST /v1/runs/{run_id}/cancel` | `cancel_thread` (`control/cancel_service.py`) | `POST /api/threads/{id}/cancel` |
 | presets-list | `GET /v1/presets` | `discover_team_preset_ids`, `load_team_config`, `is_mock_preset`, `authoring_capability` (`team/team_config.py`) | internal preset listing (`api/routes`, distinct summary shape) |
 | service-state | `GET /v1/service` | `build_full_health` (`control/health.py`), `probe_engine_discovery_freshness` | `GET /api/health` |
@@ -32,6 +33,10 @@ route; frames are versioned and phase-stamped by `streaming/sse_frames.py`
   preset; the internal listing does not carry the truthful runnability fields.
 - service-state derives `status` from real probes and distinguishes `alive` from
   `can_accept_run`; the internal `/api/health` is the richer operator rollup.
+- active-run discovery returns only bounded run identity, lifecycle status, and
+  feature tag so a viewer can rebind and then call authoritative run-status. It
+  never exposes the transcript, prompt, topology, actor credentials, tokens, or
+  raw thread metadata.
 
 ## Legacy `/api` route retirement path
 
@@ -52,5 +57,5 @@ staged:
    `thread_state_service`, `health`) are retained - they are the shared
    implementation, not legacy.
 
-No legacy thread DTOs are exposed as aliases of the `/v1` contract; the five-verb
+No legacy thread DTOs are exposed as aliases of the `/v1` contract; gateway
 models are independent versioned schemas (`api/schemas/gateway.py`).

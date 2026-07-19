@@ -12,8 +12,9 @@ supersedes:
   - '2026-02-28-react-tailwind-figma-migration-adr'
   - '2026-02-26-frontend-backend-contract-adr'
   - '2026-04-05-contract-validation-adr'
-modified: '2026-07-18'
+modified: '2026-07-19'
 ---
+
 # `a2a-edge-conformance` adr: `adopting the dashboard edge contract under a salvage-and-verify posture` | (**status:** `accepted`)
 
 ## Problem Statement
@@ -259,13 +260,22 @@ restated):
     wave), rows enter through the internal repository/service API only -
     used by tests and future gateway internals; no agent-reachable
     population path exists, preserving R2's closure.
-- **R6 - Gateway reshaping, not new service.** The five verbs map onto the
-  existing FastAPI app: `run-start` -> reshaped thread-create+message flow
-  accepting the actor-token bundle; `run-status` -> reshaped thread-state
-  read designed as a recovery snapshot; `run-cancel` -> existing cancel made
-  idempotent; `presets-list` -> existing teams listing; `service-state` ->
-  health/doctor rollup. Endpoint shapes are versioned; UI static mounting
-  and every UI-only route are removed. Shapes are designed against the
+- **R6 - Gateway reshaping, not new service.** The initial five verbs map
+  onto the existing FastAPI app: `run-start` -> reshaped
+  thread-create+message flow accepting the actor-token bundle; `run-status`
+  -> reshaped thread-state read designed as a recovery snapshot;
+  `run-cancel` -> existing cancel made idempotent; `presets-list` ->
+  existing teams listing; `service-state` -> health/doctor rollup. The
+  approved 2026-07-19 contract event additively introduces
+  `GET /v1/runs?state=active`: a non-authoritative discovery projection
+  containing only `run_id`, status, and `feature_tag`, with optional exact
+  workspace/feature selectors, a hard response cap, a hard durable-row scan
+  budget, stable newest-first order, and an explicit truncation signal.
+  Viewers must follow discovery with authoritative `run-status`; discovery
+  never carries transcript, prompt, topology, actor credential, token, or raw
+  metadata. Actor filtering remains excluded until a stable non-secret actor
+  identifier exists. Endpoint shapes are versioned; UI static mounting and
+  every UI-only route are removed. Shapes are designed against the
   engine's pass-through template
   (`2026-07-14-a2a-edge-conformance-engine-wire-shapes-reference`): the
   engine whitelists verbs and 403s unknown ones before I/O, validates args
@@ -362,10 +372,12 @@ versioned with the engine that owns them.
 - Binding worker tools to the engine catalog means engine upgrades can
   change our tool surface mid-run; run-start snapshots the catalog per run
   to fence this.
-- The five-verb gateway makes the existing richer `/api` surface (thread
-  metadata, permissions, messages) internal-only; anything the dashboard
-  needs beyond the five verbs is a cross-repo contract event, not a local
-  addition.
+- The initial five-verb gateway plus the approved bounded active-run
+  discovery read make the existing richer `/api` surface (thread metadata,
+  permissions, messages) internal-only. Any further dashboard need remains a
+  cross-repo contract event, not a local addition. The 2026-07-19 discovery
+  event is not release-complete until the dashboard engine adds its reviewed
+  `/ops/a2a` whitelist and caller-scope contract.
 - Two repos now hold halves of one contract; the mirrored reference must be
   kept in sync with the dashboard's brief, and drift between them is itself
   a defect.

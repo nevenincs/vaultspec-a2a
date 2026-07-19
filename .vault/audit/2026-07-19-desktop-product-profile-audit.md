@@ -1066,6 +1066,68 @@ member to ``derivable=false``. Before permitting ``true``, replace the Boolean
 with a tagged object that identifies the reconstruction mechanism and carries a
 size-limited proof reference.
 
+## `W02.P06.S26` corrective implementation review
+
+Status: Local pass; dashboard activation blocked.
+
+The corrective pass resolves all five earlier high-severity findings. Snapshot-owned
+specifications now declare membership once. Runtime seating and manifest
+generation consume that declaration. Contract ``2.0`` requires both stores,
+``derivable=false``, authority pairs, and explicit schema versions.
+
+The generated JSON Schema Draft 2020-12 definition now enforces exactly one
+primary and one checkpoint store. It pins the primary version and migration
+head to packaged Alembic head ``0008``. It pins checkpoint schema version
+``1.0.0``. Real validator tests reject missing, duplicate, derivable, mismatched,
+and foreign-version groups.
+
+### s26-sdd-column-noop | high | Resolved
+
+The earlier backfill queried a nonexistent ``channel_values`` SQL column and
+treated that failure as success. The repair decodes real ``checkpoint`` blobs
+through LangGraph's production serializer. It updates their nested
+``channel_values`` mapping before the semantic marker is written. Real stored
+legacy state proves one row is patched and remains readable afterward.
+
+### s26-schema-object-identity-incomplete | high | Resolved
+
+The first structural digest covered columns only. It could accept foreign
+indexes and behavior-changing triggers. Version ``1.0.0`` now binds normalized
+table DDL, automatic indexes, every additional SQLite object, column facts, and
+primary-key positions. Real index and trigger mutations fail validation.
+
+### s26-compatibility-split-writable-reads | medium | Resolved
+
+Ordinary primary and checkpoint compatibility reads now use SQLite-enforced
+read-only connections. Checkpoint identity and serialized state are validated
+through one open database handle, closing the split-open replacement gap.
+
+### s26-corrupt-store-diagnostics | medium | Resolved
+
+Corrupt primary or checkpoint bytes previously escaped as bare SQLite database
+errors. Compatibility now wraps both paths in ``SchemaCompatibilityError`` with
+the store identity, supported version, and staged-migration remedy. Real corrupt
+files prove the bounded diagnostic contract.
+
+### s26-dashboard-consumer-ignores-contract-2 | high | Open external dependency
+
+The dashboard ``CapsuleManifest`` still omits ``consistency_group`` and does not
+gate ``contract_version``. Default Serde behavior discards the new safety field.
+Dashboard ``S06`` owns the strict parser and verifier repair. Dashboard ``S145``
+owns a real producer-consumer workflow. Dashboard ``S49`` must not implement
+manifest-led snapshotting until ``S06`` and ``S145`` close.
+
+### s26-producer-consumer-proof-absent | medium | Open external dependency
+
+A2A proves real-wheel emission and standard JSON Schema validation locally.
+The dashboard still constructs legacy fixture JSON. Dashboard ``S145`` must pass
+the same emitted bytes through ``vaultspec-product`` and reject every invalid
+membership, authority, derivability, version, and legacy-contract case.
+
+The final local campaign passes 378 desktop and database tests plus four focused
+CLI migration tests. Ruff, scoped type checking, schema equality, and diff
+hygiene pass without mocks, fakes, patches, skips, or expected failures.
+
 ## Architecture-owner disposition after outer-generation mapping
 
 Status: INNER PUBLICATION SAFETY PASS; END-TO-END PRODUCT ACTIVATION FAIL.
@@ -1169,3 +1231,29 @@ exercise the complete competing-process and substitution matrix; S14 must
 verify the full generation; dashboard receipt-bound installed-byte verification
 must pass before activation. Target-native and legal/provenance blockers remain
 unchanged, and no release is authorized.
+
+## Final gateway-handoff corrective review
+
+Status: PASS AFTER HIGH-SEVERITY REMEDIATION.
+
+### gateway-handoff-link-redirection | high | Resolved
+
+The final implementation review found that credential publication resolved the
+final ``service.token`` component before opening its temporary output. A planted
+file link could therefore redirect the write outside the A2A home and make the
+discovery record accept that external path. The reader also repaired Windows
+ACLs while performing its documented filesystem-only classification.
+
+Credential publication now leases the exact parent directory, rejects any
+link-like or non-regular destination, creates the payload through a private
+exclusive handle (an anonymous descriptor on Linux), and publishes the held
+object without replacement. The record references only the canonical adjacent
+path. Reading opens the adjacent name under the leased parent with no-follow
+semantics where available, compares the named and opened identities, validates
+owner permissions without mutation, and revalidates identity before returning
+the token. Real filesystem tests prove a planted link cannot alter its target
+and that an untrusted credential's permissions remain byte-for-byte unchanged
+through classification.
+
+Classification: security / filesystem authority. No lower-severity findings
+remain from this review pass.

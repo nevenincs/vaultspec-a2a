@@ -27,6 +27,8 @@ from typing import TYPE_CHECKING, BinaryIO, Final, cast
 from alembic.script import ScriptDirectory
 from pydantic import ValidationError
 
+from vaultspec_a2a.database.checkpoint_schema import CHECKPOINT_SCHEMA_VERSION
+
 if TYPE_CHECKING:
     from collections.abc import Iterator, Sequence
 
@@ -34,7 +36,6 @@ from .contract import (
     ACP_VERSION_PIN,
     CONTRACT_VERSION,
     CPYTHON_VERSION_PIN,
-    DESKTOP_CONSISTENCY_GROUP,
     NODEJS_VERSION_PIN,
     ApiVersionRange,
     ComponentAsset,
@@ -43,14 +44,19 @@ from .contract import (
     ComponentEntrypoints,
     ComponentIdentity,
     ComponentManifest,
+    ConsistencyGroup,
     DependencyLockIdentity,
     DigestAlgorithm,
     EntrypointKind,
     GatewayEntrypoint,
     MigrationRange,
+    MutableStore,
+    MutableStoreKind,
     StandaloneMcpEntrypoint,
+    StoreSchemaAuthority,
     TargetTriple,
 )
+from .snapshot import consistency_group_specifications
 
 __all__ = [
     "CANONICAL_JSON_VERSION",
@@ -78,6 +84,28 @@ _GATEWAY_SCRIPT: Final = "vaultspec-a2a"
 _MCP_SCRIPT: Final = "vaultspec-a2a-mcp"
 _GATEWAY_REFERENCE: Final = "vaultspec_a2a.cli.main:main"
 _MCP_REFERENCE: Final = "vaultspec_a2a.protocols.mcp.__main__:main"
+
+
+def _manifest_consistency_group(migrations: MigrationRange) -> ConsistencyGroup:
+    """Translate the snapshot-owned store declaration into contract wire types."""
+    schema_versions = {
+        StoreSchemaAuthority.ALEMBIC_MIGRATION_RANGE: migrations.head,
+        StoreSchemaAuthority.CHECKPOINTER_SCHEMA: CHECKPOINT_SCHEMA_VERSION,
+    }
+    stores = []
+    for specification in consistency_group_specifications():
+        authority = StoreSchemaAuthority(specification.schema_authority)
+        stores.append(
+            MutableStore(
+                kind=MutableStoreKind(specification.manifest_kind),
+                derivable=specification.derivable,
+                schema_authority=authority,
+                schema_version=schema_versions[authority],
+            )
+        )
+    return ConsistencyGroup(stores=tuple(stores))
+
+
 _DIGEST_CHUNK: Final = 1 << 20
 _MAX_METADATA_BYTES: Final = 1 << 20
 _MAX_ENTRYPOINT_BYTES: Final = 1 << 18
@@ -733,7 +761,7 @@ def emit_component_manifest(
                     api_versions=validated.api_versions,
                     migration_range=migrations,
                 ),
-                consistency_group=DESKTOP_CONSISTENCY_GROUP,
+                consistency_group=_manifest_consistency_group(migrations),
                 entrypoints=ComponentEntrypoints(
                     gateway=GatewayEntrypoint(
                         kind=EntrypointKind.GATEWAY,

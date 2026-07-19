@@ -52,7 +52,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from enum import StrEnum
 from pathlib import Path
-from typing import TYPE_CHECKING, Final, Literal
+from typing import TYPE_CHECKING, Final, Literal, cast
 
 from pydantic import (
     AwareDatetime,
@@ -69,6 +69,7 @@ if TYPE_CHECKING:
 
 __all__ = [
     "ConsistencyGroupStore",
+    "ConsistencyGroupStoreSpecification",
     "GroupDescriptor",
     "RestoreMarker",
     "RestoreOutcome",
@@ -79,6 +80,7 @@ __all__ = [
     "StoreMember",
     "StoreSnapshot",
     "consistency_group_members",
+    "consistency_group_specifications",
     "create_snapshot",
     "descriptor_path",
     "inspect_snapshot",
@@ -115,6 +117,45 @@ class ConsistencyGroupStore(StrEnum):
 
     PRIMARY = "primary"
     CHECKPOINT = "checkpoint"
+
+
+@dataclass(frozen=True, slots=True)
+class ConsistencyGroupStoreSpecification:
+    """One path-independent mutable-store declaration for the desktop profile.
+
+    Runtime seating and component-manifest generation both consume this type.
+    The wire values live here as data, while the contract module owns only their
+    validation grammar.
+    """
+
+    store: ConsistencyGroupStore
+    manifest_kind: Literal["primary-database", "checkpoint-database"]
+    state_path_attribute: Literal["database_path", "checkpoint_path"]
+    schema_authority: Literal["alembic-migration-range", "checkpointer-schema"]
+    derivable: Literal[False] = False
+
+
+_CONSISTENCY_GROUP_SPECIFICATIONS: Final = (
+    ConsistencyGroupStoreSpecification(
+        store=ConsistencyGroupStore.PRIMARY,
+        manifest_kind="primary-database",
+        state_path_attribute="database_path",
+        schema_authority="alembic-migration-range",
+    ),
+    ConsistencyGroupStoreSpecification(
+        store=ConsistencyGroupStore.CHECKPOINT,
+        manifest_kind="checkpoint-database",
+        state_path_attribute="checkpoint_path",
+        schema_authority="checkpointer-schema",
+    ),
+)
+
+
+def consistency_group_specifications() -> tuple[
+    ConsistencyGroupStoreSpecification, ...
+]:
+    """Return the profile's sole path-independent mutable-store declaration."""
+    return _CONSISTENCY_GROUP_SPECIFICATIONS
 
 
 class SnapshotError(RuntimeError):
@@ -161,9 +202,18 @@ class StoreMember:
     one authority rather than two.
     """
 
-    store: ConsistencyGroupStore
+    specification: ConsistencyGroupStoreSpecification
     source_path: Path
-    derivable: bool = False
+
+    @property
+    def store(self) -> ConsistencyGroupStore:
+        """Return the runtime store identity from the shared specification."""
+        return self.specification.store
+
+    @property
+    def derivable(self) -> Literal[False]:
+        """Return the omission policy from the shared specification."""
+        return self.specification.derivable
 
     @property
     def snapshot_filename(self) -> str:
@@ -266,17 +316,14 @@ def consistency_group_members(state: DesktopStatePaths) -> tuple[StoreMember, ..
     are mandatory. This is the single authority the snapshot, restore, and
     component-manifest layers consult so membership is declared exactly once.
     """
-    return (
+    return tuple(
         StoreMember(
-            store=ConsistencyGroupStore.PRIMARY,
-            source_path=state.database_path,
-            derivable=False,
-        ),
-        StoreMember(
-            store=ConsistencyGroupStore.CHECKPOINT,
-            source_path=state.checkpoint_path,
-            derivable=False,
-        ),
+            specification=specification,
+            source_path=cast(
+                "Path", getattr(state, specification.state_path_attribute)
+            ),
+        )
+        for specification in consistency_group_specifications()
     )
 
 

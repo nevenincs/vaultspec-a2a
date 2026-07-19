@@ -13,11 +13,18 @@ from __future__ import annotations
 import asyncio
 import sqlite3
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 from alembic import command
 from alembic.config import Config
+from langgraph.checkpoint.base import empty_checkpoint
+from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
+from ..checkpoint_schema import (
+    CHECKPOINT_SCHEMA_VERSION,
+    install_checkpoint_schema_identity,
+)
 from ..compatibility import (
     SchemaCompatibilityError,
     supported_migration_head,
@@ -25,6 +32,9 @@ from ..compatibility import (
 )
 from ..migrate import run_migrations
 from ..session import init_db
+
+if TYPE_CHECKING:
+    from langchain_core.runnables import RunnableConfig
 
 _ALEMBIC_INI = (
     Path(__file__).resolve().parent.parent.parent.parent.parent / "alembic.ini"
@@ -48,10 +58,9 @@ def _schema_dump(db_path: Path) -> list[tuple[object, ...]]:
 
 async def _make_checkpoint_store(path: Path) -> None:
     """Create a real LangGraph SQLite checkpointer schema at ``path``."""
-    from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
-
     async with AsyncSqliteSaver.from_conn_string(str(path)) as checkpointer:
         await checkpointer.setup()
+    await asyncio.to_thread(install_checkpoint_schema_identity, path)
 
 
 async def _make_compatible_stores(runtime_dir: Path) -> tuple[Path, Path]:
@@ -96,6 +105,42 @@ class TestCompatibleStoresValidateWithoutMutation:
 
 
 class TestIncompatibleStoresFailLoud:
+    @pytest.mark.asyncio
+    async def test_corrupt_primary_store_has_actionable_error(
+        self, runtime_dir: Path
+    ) -> None:
+        """Corrupt primary bytes retain store context and the migration remedy."""
+        primary = runtime_dir / "vaultspec.db"
+        checkpoint = runtime_dir / "checkpoints.db"
+        primary.write_bytes(b"not a sqlite database")
+        await _make_checkpoint_store(checkpoint)
+
+        with pytest.raises(
+            SchemaCompatibilityError,
+            match=r"primary database.*unreadable or corrupt",
+        ):
+            await validate_desktop_schema(
+                database_url=_url(primary), checkpoint_path=checkpoint
+            )
+
+    @pytest.mark.asyncio
+    async def test_corrupt_checkpoint_store_has_actionable_error(
+        self, runtime_dir: Path
+    ) -> None:
+        """Corrupt checkpoint bytes retain store context and the remedy."""
+        primary = runtime_dir / "vaultspec.db"
+        checkpoint = runtime_dir / "checkpoints.db"
+        await run_migrations(_url(primary))
+        checkpoint.write_bytes(b"not a sqlite database")
+
+        with pytest.raises(
+            SchemaCompatibilityError,
+            match=r"checkpoint database.*compatible semantic schema version",
+        ):
+            await validate_desktop_schema(
+                database_url=_url(primary), checkpoint_path=checkpoint
+            )
+
     @pytest.mark.asyncio
     async def test_empty_primary_store_fails_loud(self, runtime_dir: Path) -> None:
         """A never-migrated primary database is rejected with the remedy."""
@@ -156,29 +201,87 @@ class TestIncompatibleStoresFailLoud:
         checkpoint = runtime_dir / "checkpoints.db"
         await run_migrations(_url(primary))
 
-        with pytest.raises(SchemaCompatibilityError, match="no checkpointer schema"):
+        with pytest.raises(
+            SchemaCompatibilityError, match="compatible semantic schema version"
+        ):
             await validate_desktop_schema(
                 database_url=_url(primary), checkpoint_path=checkpoint
             )
 
     @pytest.mark.asyncio
-    async def test_incoherent_sdd_state_fails_loud(self, runtime_dir: Path) -> None:
-        """Checkpoint rows missing SDD state fields are rejected."""
+    async def test_unversioned_checkpoint_schema_fails_loud(
+        self, runtime_dir: Path
+    ) -> None:
+        """Real LangGraph tables without project identity are rejected."""
         primary = runtime_dir / "vaultspec.db"
         checkpoint = runtime_dir / "checkpoints.db"
         await run_migrations(_url(primary))
+        async with AsyncSqliteSaver.from_conn_string(str(checkpoint)) as checkpointer:
+            await checkpointer.setup()
 
-        # A real checkpoints table carrying a channel_values row that predates the
-        # SDD fields: the store exists but is not coherent for desktop boot.
+        with pytest.raises(
+            SchemaCompatibilityError, match="compatible semantic schema version"
+        ):
+            await validate_desktop_schema(
+                database_url=_url(primary), checkpoint_path=checkpoint
+            )
+
+    @pytest.mark.asyncio
+    async def test_foreign_checkpoint_version_fails_loud(
+        self, runtime_dir: Path
+    ) -> None:
+        """A durable marker from another semantic version is rejected."""
+        primary, checkpoint = await _make_compatible_stores(runtime_dir)
+
         conn = sqlite3.connect(str(checkpoint))
         try:
             conn.execute(
-                "CREATE TABLE checkpoints (rowid INTEGER, channel_values TEXT)"
+                "UPDATE vaultspec_checkpoint_schema SET schema_version = '9.0.0'"
             )
-            conn.execute("INSERT INTO checkpoints VALUES (1, '{\"unrelated\": true}')")
             conn.commit()
         finally:
             conn.close()
+
+        with pytest.raises(
+            SchemaCompatibilityError,
+            match=f"semantic schema version {CHECKPOINT_SCHEMA_VERSION}",
+        ):
+            await validate_desktop_schema(
+                database_url=_url(primary), checkpoint_path=checkpoint
+            )
+
+    @pytest.mark.asyncio
+    async def test_checkpoint_structural_drift_fails_loud(
+        self, runtime_dir: Path
+    ) -> None:
+        """A marker cannot conceal changed checkpointer table structure."""
+        primary, checkpoint = await _make_compatible_stores(runtime_dir)
+
+        conn = sqlite3.connect(str(checkpoint))
+        try:
+            conn.execute("ALTER TABLE checkpoints ADD COLUMN foreign_value TEXT")
+            conn.commit()
+        finally:
+            conn.close()
+
+        with pytest.raises(SchemaCompatibilityError, match="object closure"):
+            await validate_desktop_schema(
+                database_url=_url(primary), checkpoint_path=checkpoint
+            )
+
+    @pytest.mark.asyncio
+    async def test_checkpoint_state_missing_sdd_fields_fails_loud(
+        self, runtime_dir: Path
+    ) -> None:
+        """A structurally compatible store with legacy state is rejected."""
+        primary, checkpoint = await _make_compatible_stores(runtime_dir)
+        legacy = empty_checkpoint()
+        legacy["channel_values"] = {"messages": []}
+        config: RunnableConfig = {
+            "configurable": {"thread_id": "legacy-thread", "checkpoint_ns": ""}
+        }
+        async with AsyncSqliteSaver.from_conn_string(str(checkpoint)) as checkpointer:
+            await checkpointer.aput(config, legacy, {}, {})
 
         with pytest.raises(SchemaCompatibilityError, match="missing SDD state"):
             await validate_desktop_schema(

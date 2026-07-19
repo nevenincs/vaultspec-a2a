@@ -16,6 +16,8 @@ from typing import Any, cast
 
 import pytest
 
+from vaultspec_a2a.database.checkpoint_schema import CHECKPOINT_SCHEMA_VERSION
+
 from .. import (
     CANONICAL_JSON_VERSION,
     component_manifest_canonical_bytes,
@@ -23,6 +25,7 @@ from .. import (
 )
 from ..contract import (
     ACP_VERSION_PIN,
+    CONTRACT_VERSION,
     CPYTHON_VERSION_PIN,
     NODEJS_VERSION_PIN,
     ApiVersionRange,
@@ -160,6 +163,22 @@ def test_emitter_derives_identity_entrypoints_and_digest_from_exact_built_wheel(
     assert manifest.identity.version == built_wheel.project["version"]
     assert manifest.compatibility.migration_range.base == "0001"
     assert manifest.compatibility.migration_range.head == "0008"
+    assert [
+        store.model_dump(mode="json") for store in manifest.consistency_group.stores
+    ] == [
+        {
+            "kind": "primary-database",
+            "derivable": False,
+            "schema_authority": "alembic-migration-range",
+            "schema_version": "0008",
+        },
+        {
+            "kind": "checkpoint-database",
+            "derivable": False,
+            "schema_authority": "checkpointer-schema",
+            "schema_version": CHECKPOINT_SCHEMA_VERSION,
+        },
+    ]
     assert manifest.entrypoints.gateway == GatewayEntrypoint(
         kind=EntrypointKind.GATEWAY,
         console_script="vaultspec-a2a",
@@ -730,14 +749,14 @@ def test_canonical_json_v1_matches_cross_language_golden_vector() -> None:
     assert not golden_bytes.endswith(b"\n")
     assert (
         expected_digest
-        == "528c1d8aa105f97337eb6ee547a871e1efeb881fde1e9dccfb7cf8c3c6c87f41"
+        == "07a0ae0dbedb99f18a5903718ec1b5a3dd5c3bbe14385f2458348dadf75d00e6"
     )
     assert component_manifest_canonical_bytes(manifest) == golden_bytes
     assert component_manifest_digest(manifest) == expected_digest
     parsed = json.loads(golden_bytes)
     assert parsed["assets"][1]["license"] == 'LicenseRef-café-"quoted"-\\path'
     assert parsed["identity"]["version"] == parsed["assets"][0]["version"]
-    assert parsed["contract_version"] == "1.1"
+    assert parsed["contract_version"] == CONTRACT_VERSION
     assert {store["kind"] for store in parsed["consistency_group"]["stores"]} == {
         "primary-database",
         "checkpoint-database",

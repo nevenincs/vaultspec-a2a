@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import os
 import shutil
 import subprocess
 import sys
@@ -16,13 +15,15 @@ from jsonschema import Draft202012Validator
 from jsonschema.exceptions import ValidationError as JsonSchemaValidationError
 from pydantic import ValidationError
 
+from vaultspec_a2a.database.checkpoint_schema import CHECKPOINT_SCHEMA_VERSION
+
 from .. import GatewayApiVersion, GatewayEntrypoint, StandaloneMcpEntrypoint
 from ..contract import (
     ACP_VERSION_PIN,
     CONTRACT_VERSION,
     CPYTHON_VERSION_PIN,
-    DESKTOP_CONSISTENCY_GROUP,
     NODEJS_VERSION_PIN,
+    PRIMARY_SCHEMA_VERSION,
     ApiVersionRange,
     ComponentAsset,
     ComponentAssetKind,
@@ -80,12 +81,15 @@ _INVALID_RELATIVE_COMMANDS = (
 
 def _manifest_payload() -> dict[str, Any]:
     return {
-        "contract_version": "1.1",
+        "contract_version": CONTRACT_VERSION,
         "identity": {"name": "vaultspec-a2a", "version": "1.2.3"},
         "target": "x86_64-unknown-linux-gnu",
         "compatibility": {
             "api_versions": {"minimum": "v1", "maximum": "v1"},
-            "migration_range": {"base": "0001_initial", "head": "0012_current"},
+            "migration_range": {
+                "base": "0001_initial",
+                "head": PRIMARY_SCHEMA_VERSION,
+            },
         },
         "consistency_group": {
             "stores": [
@@ -93,11 +97,13 @@ def _manifest_payload() -> dict[str, Any]:
                     "kind": "primary-database",
                     "derivable": False,
                     "schema_authority": "alembic-migration-range",
+                    "schema_version": PRIMARY_SCHEMA_VERSION,
                 },
                 {
                     "kind": "checkpoint-database",
                     "derivable": False,
                     "schema_authority": "checkpointer-schema",
+                    "schema_version": CHECKPOINT_SCHEMA_VERSION,
                 },
             ]
         },
@@ -178,6 +184,16 @@ def test_contract_versions_reject_malformed_values(
 
 def test_current_contract_version_is_self_compatible() -> None:
     assert contract_versions_compatible(CONTRACT_VERSION, CONTRACT_VERSION)
+    assert not contract_versions_compatible("1.1", CONTRACT_VERSION)
+
+
+def test_legacy_manifest_is_neither_parseable_nor_currently_compatible() -> None:
+    payload = _manifest_payload()
+    payload["contract_version"] = "1.0"
+    del payload["consistency_group"]
+    with pytest.raises(ValidationError):
+        ComponentManifest.model_validate(payload)
+    assert not contract_versions_compatible("1.0", CONTRACT_VERSION)
 
 
 @pytest.mark.parametrize("version", ["1", "1.0.0", "01.0", "1.00", "1.-1"])
@@ -316,7 +332,9 @@ def test_manifest_runtime_rejects_crossed_entrypoint_kinds(
 
 
 def test_draft202012_schema_accepts_the_production_manifest() -> None:
-    Draft202012Validator(component_manifest_schema()).validate(_manifest_payload())
+    schema = component_manifest_schema()
+    Draft202012Validator.check_schema(schema)
+    Draft202012Validator(schema).validate(_manifest_payload())
 
 
 @pytest.mark.parametrize(
@@ -457,14 +475,24 @@ def test_manifest_declares_both_non_derivable_group_stores() -> None:
         stores[MutableStoreKind.CHECKPOINT_DATABASE].schema_authority
         is StoreSchemaAuthority.CHECKPOINTER_SCHEMA
     )
+    assert (
+        stores[MutableStoreKind.PRIMARY_DATABASE].schema_version
+        == PRIMARY_SCHEMA_VERSION
+    )
+    assert (
+        stores[MutableStoreKind.CHECKPOINT_DATABASE].schema_version
+        == CHECKPOINT_SCHEMA_VERSION
+    )
 
 
 def test_manifest_rejects_incomplete_consistency_group() -> None:
     """A group omitting a non-derivable mandatory store is refused."""
     payload = _manifest_payload()
     payload["consistency_group"]["stores"] = payload["consistency_group"]["stores"][:1]
-    with pytest.raises(ValidationError, match="every mutable store kind"):
+    with pytest.raises(ValidationError):
         ComponentManifest.model_validate(payload)
+    with pytest.raises(JsonSchemaValidationError):
+        Draft202012Validator(component_manifest_schema()).validate(payload)
 
 
 def test_manifest_rejects_duplicate_group_store_kind() -> None:
@@ -474,32 +502,40 @@ def test_manifest_rejects_duplicate_group_store_kind() -> None:
     stores[1] = dict(stores[0])
     with pytest.raises(ValidationError, match="each store kind once"):
         ComponentManifest.model_validate(payload)
+    with pytest.raises(JsonSchemaValidationError):
+        Draft202012Validator(component_manifest_schema()).validate(payload)
 
 
-def test_manifest_group_membership_reconciles_with_snapshot_authority() -> None:
-    """The declared membership and derivability match the runtime snapshot module.
+def test_manifest_rejects_unproved_derivability() -> None:
+    payload = _manifest_payload()
+    payload["consistency_group"]["stores"][0]["derivable"] = True
+    with pytest.raises(ValidationError):
+        ComponentManifest.model_validate(payload)
+    with pytest.raises(JsonSchemaValidationError):
+        Draft202012Validator(component_manifest_schema()).validate(payload)
 
-    The snapshot module's ``consistency_group_members`` is the runtime authority
-    for which stores are seated and whether each is derivable; the manifest is the
-    dashboard-facing declaration. This binds the two to one truth so they cannot
-    silently diverge.
-    """
-    from vaultspec_a2a.desktop.profile import derive_state_paths
-    from vaultspec_a2a.desktop.snapshot import (
-        ConsistencyGroupStore,
-        consistency_group_members,
+
+def test_manifest_rejects_mismatched_store_authority() -> None:
+    payload = _manifest_payload()
+    payload["consistency_group"]["stores"][0]["schema_authority"] = (
+        "checkpointer-schema"
     )
+    with pytest.raises(ValidationError, match="schema authority"):
+        ComponentManifest.model_validate(payload)
+    with pytest.raises(JsonSchemaValidationError):
+        Draft202012Validator(component_manifest_schema()).validate(payload)
 
-    kind_of = {
-        ConsistencyGroupStore.PRIMARY: MutableStoreKind.PRIMARY_DATABASE,
-        ConsistencyGroupStore.CHECKPOINT: MutableStoreKind.CHECKPOINT_DATABASE,
-    }
-    anchor = Path("C:/anchor/app") if os.name == "nt" else Path("/anchor/app")
-    runtime = {
-        kind_of[member.store]: member.derivable
-        for member in consistency_group_members(derive_state_paths(anchor))
-    }
-    declared = {
-        store.kind: store.derivable for store in DESKTOP_CONSISTENCY_GROUP.stores
-    }
-    assert runtime == declared
+
+@pytest.mark.parametrize(
+    ("store_index", "version"),
+    [(0, "9999_foreign"), (1, "9.0.0")],
+)
+def test_manifest_rejects_schema_versions_outside_generation_authority(
+    store_index: int, version: str
+) -> None:
+    payload = _manifest_payload()
+    payload["consistency_group"]["stores"][store_index]["schema_version"] = version
+    with pytest.raises(ValidationError, match="schema_version"):
+        ComponentManifest.model_validate(payload)
+    with pytest.raises(JsonSchemaValidationError):
+        Draft202012Validator(component_manifest_schema()).validate(payload)

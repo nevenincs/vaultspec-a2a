@@ -35,12 +35,15 @@ from typing import Annotated, Final, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from vaultspec_a2a.database.checkpoint_schema import CHECKPOINT_SCHEMA_VERSION
+from vaultspec_a2a.database.compatibility import supported_migration_head
+
 __all__ = [
     "ACP_VERSION_PIN",
     "CONTRACT_VERSION",
     "CPYTHON_VERSION_PIN",
-    "DESKTOP_CONSISTENCY_GROUP",
     "NODEJS_VERSION_PIN",
+    "PRIMARY_SCHEMA_VERSION",
     "ApiVersionRange",
     "ComponentAsset",
     "ComponentAssetKind",
@@ -66,11 +69,12 @@ __all__ = [
     "export_component_manifest_schema",
 ]
 
-# The manifest grammar version. A minor bump remains readable by consumers at
-# that minor or newer; it is not readable by an older-minor strict parser. The
-# 1.1 minor added the required consistency-group declaration: an older 1.0 parser
-# must refuse it because it cannot honour the new mandatory field.
-CONTRACT_VERSION: Final = "1.1"
+# The required consistency-group declaration cannot be read from a 1.x manifest,
+# so this generation uses a breaking major instead of claiming minor-version
+# compatibility with documents that lack updater safety evidence.
+CONTRACT_VERSION: Final = "2.0"
+PRIMARY_SCHEMA_VERSION: Final = supported_migration_head("sqlite+aiosqlite:///:memory:")
+"""Alembic head carried by the installed producer package."""
 
 # Pinned base-closure runtime versions declared by the ADR. These are the
 # accepted asset versions; a capsule that ships other majors is a different
@@ -88,6 +92,7 @@ HexDigest = Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")]
 _VERSION_COMPONENT: Final = r"(?:0|[1-9][0-9]{0,5})"
 _VERSION_PATTERN: Final = rf"^{_VERSION_COMPONENT}\.{_VERSION_COMPONENT}$"
 _VERSION_RE: Final = re.compile(_VERSION_PATTERN)
+_STORE_SCHEMA_VERSION_PATTERN: Final = r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$"
 
 # Windows applies these filename restrictions even when the capsule is built on
 # another operating system. Keep the JSON-Schema expressions ECMA-262 compatible
@@ -289,6 +294,7 @@ class MigrationRange(BaseModel):
         min_length=1,
         max_length=64,
         description="Alembic head (target) revision identifier.",
+        json_schema_extra={"const": PRIMARY_SCHEMA_VERSION},
     )
 
 
@@ -445,6 +451,42 @@ class StoreSchemaAuthority(StrEnum):
     CHECKPOINTER_SCHEMA = "checkpointer-schema"
 
 
+_STORE_AUTHORITY_BY_KIND: Final = {
+    MutableStoreKind.PRIMARY_DATABASE: StoreSchemaAuthority.ALEMBIC_MIGRATION_RANGE,
+    MutableStoreKind.CHECKPOINT_DATABASE: StoreSchemaAuthority.CHECKPOINTER_SCHEMA,
+}
+
+_CONSISTENCY_GROUP_SCHEMA: Final = {
+    "minItems": len(MutableStoreKind),
+    "maxItems": len(MutableStoreKind),
+    "allOf": [
+        {
+            "contains": {
+                "properties": {
+                    "kind": {"const": kind.value},
+                    "schema_authority": {"const": authority.value},
+                    "derivable": {"const": False},
+                    **(
+                        {"schema_version": {"const": CHECKPOINT_SCHEMA_VERSION}}
+                        if kind is MutableStoreKind.CHECKPOINT_DATABASE
+                        else {"schema_version": {"const": PRIMARY_SCHEMA_VERSION}}
+                    ),
+                },
+                "required": [
+                    "kind",
+                    "schema_authority",
+                    "schema_version",
+                    "derivable",
+                ],
+            },
+            "minContains": 1,
+            "maxContains": 1,
+        }
+        for kind, authority in _STORE_AUTHORITY_BY_KIND.items()
+    ],
+}
+
+
 class MutableStore(BaseModel):
     """One declared mutable, schema-bearing consistency-group store."""
 
@@ -453,11 +495,10 @@ class MutableStore(BaseModel):
     kind: MutableStoreKind = Field(
         description="Which schema-bearing mutable store this declares."
     )
-    derivable: bool = Field(
+    derivable: Literal[False] = Field(
         description=(
-            "Whether the store may be omitted from a snapshot group because a "
-            "release manifest declares and proves it reconstructable. A "
-            "non-derivable store is a mandatory group member."
+            "Current stores are mandatory and cannot be omitted. A future "
+            "derivable form requires a separate tagged evidence contract."
         )
     )
     schema_authority: StoreSchemaAuthority = Field(
@@ -467,6 +508,24 @@ class MutableStore(BaseModel):
             "duplicating the base and head."
         )
     )
+    schema_version: str = Field(
+        min_length=1,
+        max_length=64,
+        pattern=_STORE_SCHEMA_VERSION_PATTERN,
+        description=(
+            "Exact schema revision required by this generation: the packaged "
+            "Alembic head or the project-owned checkpoint semantic version."
+        ),
+    )
+
+    @model_validator(mode="after")
+    def _authority_matches_kind(self) -> MutableStore:
+        expected = _STORE_AUTHORITY_BY_KIND[self.kind]
+        if self.schema_authority is not expected:
+            raise ValueError(
+                f"{self.kind.value} schema authority must be {expected.value}"
+            )
+        return self
 
 
 class ConsistencyGroup(BaseModel):
@@ -482,9 +541,10 @@ class ConsistencyGroup(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     stores: tuple[MutableStore, ...] = Field(
-        min_length=1,
+        min_length=len(MutableStoreKind),
         max_length=len(MutableStoreKind),
         description="The declared consistency-group members, one per store kind.",
+        json_schema_extra=_CONSISTENCY_GROUP_SCHEMA,
     )
 
     @field_validator("stores")
@@ -498,28 +558,6 @@ class ConsistencyGroup(BaseModel):
         if set(kinds) != set(MutableStoreKind):
             raise ValueError("consistency group must declare every mutable store kind")
         return value
-
-
-# The single authority for this generation's consistency-group membership. Both
-# stores are non-derivable and therefore mandatory; the primary database's schema
-# revision is governed by the manifest's migration range (reconciled, not
-# duplicated), while the checkpoint database is governed by the checkpointer
-# schema. The runtime seating of these stores is owned by the snapshot module's
-# `consistency_group_members`; a reconciliation test binds the two to one truth.
-DESKTOP_CONSISTENCY_GROUP: Final = ConsistencyGroup(
-    stores=(
-        MutableStore(
-            kind=MutableStoreKind.PRIMARY_DATABASE,
-            derivable=False,
-            schema_authority=StoreSchemaAuthority.ALEMBIC_MIGRATION_RANGE,
-        ),
-        MutableStore(
-            kind=MutableStoreKind.CHECKPOINT_DATABASE,
-            derivable=False,
-            schema_authority=StoreSchemaAuthority.CHECKPOINTER_SCHEMA,
-        ),
-    )
-)
 
 
 class ComponentManifest(BaseModel):
@@ -542,7 +580,13 @@ class ComponentManifest(BaseModel):
                     "version; enforced by the production model because JSON "
                     "Schema Draft 2020-12 has no standard cross-field equality "
                     "keyword"
-                )
+                ),
+                (
+                    "the primary-database schema_version must equal "
+                    "compatibility.migration_range.head; enforced by the "
+                    "production model because JSON Schema Draft 2020-12 has "
+                    "no standard cross-field equality keyword"
+                ),
             ],
         },
     )
@@ -615,6 +659,23 @@ class ComponentManifest(BaseModel):
         if self.identity.version != distribution.version:
             raise ValueError(
                 "identity.version must equal a2a-distribution asset version"
+            )
+        if self.compatibility.migration_range.head != PRIMARY_SCHEMA_VERSION:
+            raise ValueError(
+                "migration_range.head must equal packaged Alembic head "
+                f"{PRIMARY_SCHEMA_VERSION}"
+            )
+        stores = {store.kind: store for store in self.consistency_group.stores}
+        primary = stores[MutableStoreKind.PRIMARY_DATABASE]
+        if primary.schema_version != self.compatibility.migration_range.head:
+            raise ValueError(
+                "primary-database schema_version must equal migration_range.head"
+            )
+        checkpoint = stores[MutableStoreKind.CHECKPOINT_DATABASE]
+        if checkpoint.schema_version != CHECKPOINT_SCHEMA_VERSION:
+            raise ValueError(
+                "checkpoint-database schema_version must equal supported checkpoint "
+                f"schema version {CHECKPOINT_SCHEMA_VERSION}"
             )
         return self
 

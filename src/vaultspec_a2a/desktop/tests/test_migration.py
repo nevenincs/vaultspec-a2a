@@ -15,6 +15,13 @@ from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
 
 import pytest
+from langgraph.checkpoint.base import empty_checkpoint
+from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
+
+from vaultspec_a2a.database.checkpoint_schema import (
+    CHECKPOINT_SCHEMA_DIGEST,
+    CHECKPOINT_SCHEMA_VERSION,
+)
 
 from ..migration import (
     MigrationStage,
@@ -27,6 +34,8 @@ from ..transaction import package_migration_range
 
 if TYPE_CHECKING:
     from pathlib import Path
+
+    from langchain_core.runnables import RunnableConfig
 
 _DIGEST = "b" * 64
 
@@ -81,6 +90,9 @@ class TestFreshStoreMigration:
         assert outcomes[StoreName.PRIMARY].from_revision is None
         assert outcomes[StoreName.PRIMARY].to_revision == packaged.head
         assert outcomes[StoreName.CHECKPOINT].status is StoreStatus.INITIALIZED
+        assert (
+            outcomes[StoreName.CHECKPOINT].schema_version == CHECKPOINT_SCHEMA_VERSION
+        )
         assert outcomes[StoreName.SDD].status is StoreStatus.BACKFILLED
 
         # Real schema landed and the transaction is durably consumed.
@@ -92,9 +104,55 @@ class TestFreshStoreMigration:
         assert version is not None
         assert version[0] == packaged.head
         assert _table_present(state.checkpoint_path, "checkpoints")
+        checkpoint_identity = (
+            sqlite3.connect(str(state.checkpoint_path))
+            .execute(
+                "SELECT schema_version, schema_digest "
+                "FROM vaultspec_checkpoint_schema WHERE singleton = 1"
+            )
+            .fetchone()
+        )
+        assert checkpoint_identity == (
+            CHECKPOINT_SCHEMA_VERSION,
+            CHECKPOINT_SCHEMA_DIGEST,
+        )
         assert (
             state.receipts_dir / "migration-transaction-txn-migrate-1.consumed"
         ).is_file()
+
+    @pytest.mark.asyncio
+    async def test_legacy_serialized_state_is_backfilled_before_identity_stamp(
+        self, tmp_path: Path
+    ) -> None:
+        """The semantic marker is written only after real state migration."""
+        home = tmp_path / "app"
+        descriptor = _write_descriptor(tmp_path / "txn.json", home)
+        state = derive_state_paths(home)
+        state.checkpoint_path.parent.mkdir(parents=True, exist_ok=True)
+        legacy = empty_checkpoint()
+        legacy["channel_values"] = {"messages": []}
+        config: RunnableConfig = {
+            "configurable": {"thread_id": "legacy-thread", "checkpoint_ns": ""}
+        }
+        async with AsyncSqliteSaver.from_conn_string(
+            str(state.checkpoint_path)
+        ) as checkpointer:
+            stored_config = await checkpointer.aput(config, legacy, {}, {})
+
+        result = await run_staged_migration(descriptor)
+
+        assert result.status == "succeeded"
+        outcomes = {outcome.store: outcome for outcome in result.stores}
+        assert outcomes[StoreName.SDD].rows_affected == 1
+        assert (
+            outcomes[StoreName.CHECKPOINT].schema_version == CHECKPOINT_SCHEMA_VERSION
+        )
+        async with AsyncSqliteSaver.from_conn_string(
+            str(state.checkpoint_path)
+        ) as checkpointer:
+            stored = await checkpointer.aget_tuple(stored_config)
+        assert stored is not None
+        assert stored.checkpoint["channel_values"]["vault_index"] == {}
 
     @pytest.mark.asyncio
     async def test_consumed_descriptor_is_refused_on_replay(

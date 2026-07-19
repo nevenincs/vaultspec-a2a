@@ -36,62 +36,90 @@ related:
 <!-- STEP RECORD:
      This file represents one Step from the originating plan. Identified
      by its canonical leaf identifier (S##) and ancestor display path.
-     The Bind mutable-store membership derivability and schema versions into the component manifest and ## Scope
+     The Bind single-authority mutable-store membership, explicit schema versions, derivability evidence, compatibility rules, and exact generated-schema constraints into the component manifest and ## Scope
 
-- `src/vaultspec_a2a/desktop/manifest.py` placeholders below are machine-filled
+- `src/vaultspec_a2a/desktop/snapshot.py`
+- `src/vaultspec_a2a/desktop/contract.py`
+- `src/vaultspec_a2a/desktop/manifest.py`
+- `src/vaultspec_a2a/desktop/migration.py`
+- `src/vaultspec_a2a/database/checkpoint_schema.py`
+- `src/vaultspec_a2a/database/compatibility.py`
+- `src/vaultspec_a2a/database/migrations/__init__.py`
+- `schemas/desktop-capsule-manifest.json`
+- `src/vaultspec_a2a/desktop/tests/fixtures/component-manifest-canonical-v1.b64`
+- `src/vaultspec_a2a/desktop/tests/fixtures/component-manifest-canonical-v1.sha256`
+- `src/vaultspec_a2a/desktop/tests/test_contract.py`
+- `src/vaultspec_a2a/desktop/tests/test_manifest.py`
+- `src/vaultspec_a2a/desktop/tests/test_migration.py`
+- `src/vaultspec_a2a/database/tests/test_checkpoint_schema.py`
+- `src/vaultspec_a2a/database/tests/test_checkpoint_state_migration.py`
+- `src/vaultspec_a2a/database/tests/test_compatibility.py` placeholders below are machine-filled
      by `vaultspec-core vault add exec` from the originating Step row;
      do not fill them by hand. -->
 
-# Bind mutable-store membership derivability and schema versions into the component manifest
+# Bind single-authority mutable-store membership, explicit schema versions, derivability evidence, compatibility rules, and exact generated-schema constraints into the component manifest
 
 ## Scope
 
+- `src/vaultspec_a2a/desktop/snapshot.py`
+- `src/vaultspec_a2a/desktop/contract.py`
 - `src/vaultspec_a2a/desktop/manifest.py`
+- `src/vaultspec_a2a/desktop/migration.py`
+- `src/vaultspec_a2a/database/checkpoint_schema.py`
+- `src/vaultspec_a2a/database/compatibility.py`
+- `src/vaultspec_a2a/database/migrations/__init__.py`
+- `schemas/desktop-capsule-manifest.json`
+- `src/vaultspec_a2a/desktop/tests/fixtures/component-manifest-canonical-v1.b64`
+- `src/vaultspec_a2a/desktop/tests/fixtures/component-manifest-canonical-v1.sha256`
+- `src/vaultspec_a2a/desktop/tests/test_contract.py`
+- `src/vaultspec_a2a/desktop/tests/test_manifest.py`
+- `src/vaultspec_a2a/desktop/tests/test_migration.py`
+- `src/vaultspec_a2a/database/tests/test_checkpoint_schema.py`
+- `src/vaultspec_a2a/database/tests/test_checkpoint_state_migration.py`
+- `src/vaultspec_a2a/database/tests/test_compatibility.py`
 
 ## Description
 
-- Add a mutable consistency-group declaration to the component-manifest contract:
-  a `MutableStoreKind` enum (primary and checkpoint databases), a
-  `StoreSchemaAuthority` enum, a `MutableStore` model carrying kind, derivability,
-  and schema authority, and a `ConsistencyGroup` model that validates the
-  membership is complete and each kind is declared once.
-- Bind a required `consistency_group` field into `ComponentManifest`, so each
-  generation declares which mutable schema-bearing stores snapshot and restore
-  together and whether each may be omitted because it is provably derivable.
-- Reconcile schema-version facts rather than duplicate them: the primary store's
-  schema authority points at the manifest's existing `compatibility.migration_range`
-  (single authority, base and head not restated); the checkpoint store declares
-  the checkpointer schema authority the migration range does not cover.
-- Declare the canonical `DESKTOP_CONSISTENCY_GROUP` (both stores non-derivable,
-  therefore mandatory) and emit it from the deterministic manifest emitter.
-- Bump `contract_version` 1.0 to 1.1 per the contract's own directional rule:
-  adding a required field means an older 1.0 parser must refuse the document.
-- Regenerate the committed `schemas/desktop-capsule-manifest.json` from the
-  production exporter, and derive the cross-language golden vector and its
-  digest from the settled model (never hand-copied from a failing run): the
-  existing golden manifest gains the consistency group and the version bump, and
-  its canonical bytes and SHA-256 are recomputed through the canonical serializer.
-- Update the affected tests to the new shape: the golden-vector digest and a new
-  group assertion in the manifest test; the manifest payload plus completeness,
-  duplicate, membership, and reconciliation tests in the contract test, including
-  one binding the manifest membership and derivability to the snapshot module's
-  runtime `consistency_group_members` so the two cannot silently diverge.
+- Make `snapshot.consistency_group_specifications` the sole production
+  declaration of mutable-store membership, wire kinds, schema authority, and
+  current non-derivability. Runtime seating and manifest emission consume it.
+- Publish contract `2.0`. The required consistency group is a breaking change,
+  so legacy 1.x manifests are not claimed as readable.
+- Require exactly one primary and one checkpoint store. Both carry
+  `derivable=false`, an authority, and an explicit schema version.
+- Derive the primary schema version from the packaged Alembic head. Require the
+  generated schema's migration head and primary store version to equal it.
+- Define checkpoint schema `1.0.0` over the complete normalized SQLite object
+  closure, column facts, and primary-key positions. Store its structural digest
+  in a project-owned singleton marker.
+- Decode real LangGraph checkpoint blobs with the production serializer. Add
+  missing state-driven-development fields before installing the schema marker.
+- Make ordinary compatibility validation read-only. Validate checkpoint schema
+  identity and serialized state through one already-open SQLite connection.
+- Regenerate the committed JSON Schema and cross-language canonical fixture.
+  Exercise Pydantic and the real Draft 2020-12 validator independently.
 
 ## Outcome
 
-The component manifest now declares its mutable consistency-group membership,
-per-store derivability, and schema authority as a versioned 1.1 contract,
-reconciled with the migration section as a single authority and grounded in the
-S25 snapshot membership. `ruff` and `ty` pass; the full contract and manifest
-suites (141) and the schema/golden regeneration pass; the packaged-schema gate
-passes against the committed generation.
+Local S26 implementation passes. The component manifest now carries enforceable
+membership, derivability, authority, and schema-version evidence under contract
+`2.0`. Staged migration writes checkpoint identity only after real state
+migration, and ordinary boot validates without mutation.
+
+The desktop and database campaign passes 378 tests. Focused CLI migration tests
+pass four tests. Ruff, scoped type checking, generated-schema equality, and diff
+hygiene pass.
 
 ## Notes
 
-- The manifest membership is declared in the dashboard-facing contract module,
-  which stays self-contained (it imports no internal runtime module); a
-  reconciliation test binds it to the snapshot module's runtime authority instead
-  of a code-level import, keeping the cross-repository boundary clean.
-- This Step was deferred to phase-last and landed only after the concurrent
-  session's migration-head work (`test_manifest.py` 0007 to 0008 and migration
-  0008) settled at HEAD, so the golden vector was derived against a stable head.
+- Formal review of the first implementation found five high-severity defects.
+  S26 was reopened, its scope expanded through the plan CLI, and every local
+  defect was repaired before closure.
+- A later review found the old SDD backfill was a no-op on current LangGraph
+  storage. It also found incomplete schema identity and writable split reads.
+  Those findings are resolved in this pass.
+- The last review found corrupt SQLite files escaped as bare database errors.
+  Both store paths now retain context and the staged-migration remedy.
+- The dashboard parser still ignores contract `2.0` safety fields. Dashboard
+  `S06` owns parser enforcement, and `S145` owns the real producer-consumer
+  workflow. Dashboard `S49` remains blocked until both close.

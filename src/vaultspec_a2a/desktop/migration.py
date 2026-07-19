@@ -16,6 +16,7 @@ never leaks free-form internals or store contents.
 
 from __future__ import annotations
 
+import asyncio
 import sqlite3
 import time
 from enum import StrEnum
@@ -23,6 +24,10 @@ from typing import TYPE_CHECKING, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from ..database.checkpoint_schema import (
+    CHECKPOINT_SCHEMA_VERSION,
+    install_checkpoint_schema_identity,
+)
 from ..database.migrate import run_migrations
 from ..database.migrations import backfill_teamstate_sdd_fields
 from .transaction import (
@@ -71,6 +76,7 @@ class MigrationStage(StrEnum):
     PRIMARY = "primary"
     CHECKPOINT = "checkpoint"
     SDD = "sdd"
+    CHECKPOINT_IDENTITY = "checkpoint-identity"
     CONSUME = "consume"
 
 
@@ -102,6 +108,10 @@ class StoreOutcome(BaseModel):
     )
     rows_affected: int | None = Field(
         default=None, description="Rows patched by the SDD backfill, if applicable."
+    )
+    schema_version: str | None = Field(
+        default=None,
+        description="Installed semantic schema version, when the store owns one.",
     )
 
 
@@ -177,7 +187,7 @@ def _ensure_unlocked(db_path: Path) -> None:
 
 
 async def _setup_checkpointer(checkpoint_path: Path) -> None:
-    """Create the LangGraph checkpointer schema and enable WAL."""
+    """Create the real LangGraph tables without claiming migration completion."""
     from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
     async with AsyncSqliteSaver.from_conn_string(str(checkpoint_path)) as checkpointer:
@@ -223,6 +233,17 @@ async def _execute(
         raise _StageError(MigrationStage.SDD, type(exc).__name__) from exc
     sdd = StoreOutcome(
         store=StoreName.SDD, status=StoreStatus.BACKFILLED, rows_affected=patched
+    )
+    try:
+        await asyncio.to_thread(
+            install_checkpoint_schema_identity, state.checkpoint_path
+        )
+    except Exception as exc:
+        raise _StageError(
+            MigrationStage.CHECKPOINT_IDENTITY, type(exc).__name__
+        ) from exc
+    checkpoint = checkpoint.model_copy(
+        update={"schema_version": CHECKPOINT_SCHEMA_VERSION}
     )
     return (primary, checkpoint, sdd)
 

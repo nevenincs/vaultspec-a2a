@@ -9,9 +9,9 @@ one-time transaction descriptor; ordinary boot only reads.
 
 This module is the single authority for that read-only validation. It compares
 the primary database's recorded Alembic revision against the package's migration
-script head, confirms the checkpointer schema exists, and confirms the SDD state
-fields are already present. Every check is a plain synchronous SQLite read; no
-connection ever issues a write.
+script head, validates the checkpoint store's semantic schema identity, and
+confirms the SDD state fields are already present. Every check is a plain
+synchronous SQLite read; no connection ever issues a write.
 """
 
 from __future__ import annotations
@@ -20,8 +20,17 @@ import asyncio
 import sqlite3
 from pathlib import Path
 
+from .checkpoint_schema import (
+    CHECKPOINT_SCHEMA_VERSION,
+    CheckpointSchemaError,
+    open_checkpoint_read_only,
+    validate_checkpoint_schema_connection,
+)
 from .migrate import build_migration_config
-from .migrations import count_pending_sdd_backfill
+from .migrations import (
+    CheckpointStateMigrationError,
+    count_pending_sdd_backfill_connection,
+)
 
 __all__ = [
     "SchemaCompatibilityError",
@@ -100,7 +109,7 @@ def _read_alembic_version(db_path: Path) -> str | None:
     """
     if not db_path.is_file():
         return None
-    conn = sqlite3.connect(str(db_path))
+    conn = sqlite3.connect(f"{db_path.resolve().as_uri()}?mode=ro", uri=True)
     try:
         try:
             rows = conn.execute("SELECT version_num FROM alembic_version").fetchall()
@@ -119,7 +128,13 @@ def _validate_primary_schema(database_url: str) -> None:
     """Validate the primary database sits exactly at the package migration head."""
     db_path = _sqlite_path_from_url(database_url)
     head = supported_migration_head(database_url)
-    current = _read_alembic_version(db_path)
+    try:
+        current = _read_alembic_version(db_path)
+    except sqlite3.Error as exc:
+        raise SchemaCompatibilityError(
+            f"desktop primary database at {db_path} is unreadable or corrupt; "
+            f"expected packaged Alembic head {head}. {_REMEDY}"
+        ) from exc
 
     if current is None:
         raise SchemaCompatibilityError(
@@ -141,28 +156,25 @@ def _validate_primary_schema(database_url: str) -> None:
     )
 
 
-def _checkpoint_table_present(checkpoint_path: Path) -> bool:
-    """Return whether the LangGraph ``checkpoints`` table exists."""
-    if not checkpoint_path.is_file():
-        return False
-    conn = sqlite3.connect(str(checkpoint_path))
-    try:
-        row = conn.execute(
-            "SELECT name FROM sqlite_master WHERE type='table' AND name='checkpoints'"
-        ).fetchone()
-    finally:
-        conn.close()
-    return row is not None
-
-
 def _validate_checkpoint_schema(checkpoint_path: Path) -> None:
     """Validate the checkpointer schema and SDD state are already present."""
-    if not _checkpoint_table_present(checkpoint_path):
+    try:
+        connection = open_checkpoint_read_only(checkpoint_path)
+        try:
+            validate_checkpoint_schema_connection(connection)
+            pending = count_pending_sdd_backfill_connection(connection)
+        finally:
+            connection.close()
+    except (
+        CheckpointSchemaError,
+        CheckpointStateMigrationError,
+        sqlite3.Error,
+    ) as exc:
         raise SchemaCompatibilityError(
-            f"desktop checkpoint database at {checkpoint_path} has no checkpointer "
-            f"schema; the store is empty or has never been initialised. {_REMEDY}"
-        )
-    pending = count_pending_sdd_backfill(checkpoint_path)
+            f"desktop checkpoint database at {checkpoint_path} does not carry "
+            f"compatible semantic schema version {CHECKPOINT_SCHEMA_VERSION}: "
+            f"{exc}. {_REMEDY}"
+        ) from exc
     if pending:
         raise SchemaCompatibilityError(
             f"desktop checkpoint database at {checkpoint_path} has {pending} "
@@ -176,7 +188,7 @@ async def validate_desktop_schema(*, database_url: str, checkpoint_path: Path) -
     Confirms three facts and mutates nothing:
 
     - the primary database sits exactly at the package's Alembic migration head,
-    - the checkpointer schema is present, and
+    - the checkpointer schema has the exact supported semantic identity, and
     - the SDD state fields are already backfilled.
 
     Args:

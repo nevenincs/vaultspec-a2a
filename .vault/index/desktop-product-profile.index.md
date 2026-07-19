@@ -37,9 +37,18 @@ related:
   - '[[2026-07-18-desktop-product-profile-W02-P05-S24]]'
   - '[[2026-07-18-desktop-product-profile-W02-P05-summary]]'
   - '[[2026-07-18-desktop-product-profile-W02-P06-S25]]'
+  - '[[2026-07-18-desktop-product-profile-W02-P06-S26]]'
   - '[[2026-07-18-desktop-product-profile-W02-P06-S27]]'
   - '[[2026-07-18-desktop-product-profile-W02-P06-S28]]'
   - '[[2026-07-18-desktop-product-profile-W02-P06-S29]]'
+  - '[[2026-07-18-desktop-product-profile-W02-P06-summary]]'
+  - '[[2026-07-18-desktop-product-profile-W03-P07-S30]]'
+  - '[[2026-07-18-desktop-product-profile-W03-P07-S31]]'
+  - '[[2026-07-18-desktop-product-profile-W03-P07-S32]]'
+  - '[[2026-07-18-desktop-product-profile-W03-P07-S33]]'
+  - '[[2026-07-18-desktop-product-profile-W03-P07-S34]]'
+  - '[[2026-07-18-desktop-product-profile-W03-P07-S35]]'
+  - '[[2026-07-18-desktop-product-profile-W03-P07-summary]]'
   - '[[2026-07-18-desktop-product-profile-adr]]'
   - '[[2026-07-18-desktop-product-profile-plan]]'
   - '[[2026-07-18-desktop-product-profile-reference]]'
@@ -96,9 +105,18 @@ Auto-generated index of all documents tagged with `#desktop-product-profile`.
 - `2026-07-18-desktop-product-profile-W02-P05-S24` - Run package-local migrations from a clean installed capsule and reject incompatible or live-store attempts
 - `2026-07-18-desktop-product-profile-W02-P05-summary` - `desktop-product-profile` `W02.P05` summary
 - `2026-07-18-desktop-product-profile-W02-P06-S25` - Create temp-fsynced atomic snapshot descriptors and quiesced restore markers for every declared consistency-group store
+- `2026-07-18-desktop-product-profile-W02-P06-S26` - Bind single-authority mutable-store membership, explicit schema versions, derivability evidence, compatibility rules, and exact generated-schema constraints into the component manifest
 - `2026-07-18-desktop-product-profile-W02-P06-S27` - Expose bounded snapshot inspect and restore commands for the external updater transaction
 - `2026-07-18-desktop-product-profile-W02-P06-S28` - Prove primary and checkpoint databases restore together from a real consistency group
 - `2026-07-18-desktop-product-profile-W02-P06-S29` - Prove interrupted snapshot or restore never exposes a partially committed group
+- `2026-07-18-desktop-product-profile-W02-P06-summary` - `desktop-product-profile` `W02.P06` summary
+- `2026-07-18-desktop-product-profile-W03-P07-S30` - Implement the cross-platform lifetime singleton and owner-matching stale-lock classification for one desktop app home
+- `2026-07-18-desktop-product-profile-W03-P07-S31` - Replace token-bearing discovery with an atomic versioned profile generation protocol schema owner and ACL-reference record
+- `2026-07-18-desktop-product-profile-W03-P07-S32` - Parse the versioned secret-free gateway discovery record without weakening engine authoring discovery
+- `2026-07-18-desktop-product-profile-W03-P07-S33` - Acquire the desktop singleton before invoking Uvicorn socket bind and pass its ownership into gateway startup
+- `2026-07-18-desktop-product-profile-W03-P07-S34` - Prove two real desktop gateway processes cannot own or overwrite one app home
+- `2026-07-18-desktop-product-profile-W03-P07-S35` - Prove authenticated foreign attachment stale-owner recovery and immutable live-conflict behavior with real processes
+- `2026-07-18-desktop-product-profile-W03-P07-summary` - `desktop-product-profile` `W03.P07` summary
 
 ### plan
 

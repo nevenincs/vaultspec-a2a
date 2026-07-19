@@ -140,12 +140,66 @@
       "description": "The mutable stores the updater snapshots and restores as one group.\n\nThe declaration binds membership, per-store derivability, and each store's\nschema authority into the manifest so a consumer knows exactly which mutable\nstores move together across a generation change, and which (if any) may be\nomitted because they are provably derivable. The current generation declares\nboth stores non-derivable, so both are mandatory members.",
       "properties": {
         "stores": {
+          "allOf": [
+            {
+              "contains": {
+                "properties": {
+                  "kind": {
+                    "const": "primary-database"
+                  },
+                  "schema_authority": {
+                    "const": "alembic-migration-range"
+                  },
+                  "derivable": {
+                    "const": false
+                  },
+                  "schema_version": {
+                    "const": "0008"
+                  }
+                },
+                "required": [
+                  "kind",
+                  "schema_authority",
+                  "schema_version",
+                  "derivable"
+                ]
+              },
+              "maxContains": 1,
+              "minContains": 1
+            },
+            {
+              "contains": {
+                "properties": {
+                  "kind": {
+                    "const": "checkpoint-database"
+                  },
+                  "schema_authority": {
+                    "const": "checkpointer-schema"
+                  },
+                  "derivable": {
+                    "const": false
+                  },
+                  "schema_version": {
+                    "const": "1.0.0"
+                  }
+                },
+                "required": [
+                  "kind",
+                  "schema_authority",
+                  "schema_version",
+                  "derivable"
+                ]
+              },
+              "maxContains": 1,
+              "minContains": 1
+            }
+          ],
           "description": "The declared consistency-group members, one per store kind.",
           "items": {
             "$ref": "#/$defs/MutableStore"
           },
           "maxItems": 2,
-          "minItems": 1,
+          "minItems": 2,
           "title": "Stores",
           "type": "array"
         }
@@ -269,6 +323,7 @@
           "type": "string"
         },
         "head": {
+          "const": "0008",
           "description": "Alembic head (target) revision identifier.",
           "maxLength": 64,
           "minLength": 1,
@@ -292,19 +347,29 @@
           "description": "Which schema-bearing mutable store this declares."
         },
         "derivable": {
-          "description": "Whether the store may be omitted from a snapshot group because a release manifest declares and proves it reconstructable. A non-derivable store is a mandatory group member.",
+          "const": false,
+          "description": "Current stores are mandatory and cannot be omitted. A future derivable form requires a separate tagged evidence contract.",
           "title": "Derivable",
           "type": "boolean"
         },
         "schema_authority": {
           "$ref": "#/$defs/StoreSchemaAuthority",
           "description": "Authority governing this store's schema revision. The Alembic authority reconciles with compatibility.migration_range rather than duplicating the base and head."
+        },
+        "schema_version": {
+          "description": "Exact schema revision required by this generation: the packaged Alembic head or the project-owned checkpoint semantic version.",
+          "maxLength": 64,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$",
+          "title": "Schema Version",
+          "type": "string"
         }
       },
       "required": [
         "kind",
         "derivable",
-        "schema_authority"
+        "schema_authority",
+        "schema_version"
       ],
       "title": "MutableStore",
       "type": "object"
@@ -536,6 +601,7 @@
   "title": "ComponentManifest",
   "type": "object",
   "x-vaultspec-invariants": [
-    "identity.version must equal the a2a-distribution asset version; enforced by the production model because JSON Schema Draft 2020-12 has no standard cross-field equality keyword"
+    "identity.version must equal the a2a-distribution asset version; enforced by the production model because JSON Schema Draft 2020-12 has no standard cross-field equality keyword",
+    "the primary-database schema_version must equal compatibility.migration_range.head; enforced by the production model because JSON Schema Draft 2020-12 has no standard cross-field equality keyword"
   ]
 }

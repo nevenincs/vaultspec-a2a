@@ -5,20 +5,12 @@
       "description": "The inclusive gateway API version range this generation serves.",
       "properties": {
         "minimum": {
-          "description": "Lowest served gateway API version in canonical vN form.",
-          "maxLength": 7,
-          "minLength": 2,
-          "pattern": "^v[1-9][0-9]{0,5}$",
-          "title": "Minimum",
-          "type": "string"
+          "$ref": "#/$defs/GatewayApiVersion",
+          "description": "Lowest served gateway API version from the supported enum."
         },
         "maximum": {
-          "description": "Highest served gateway API version in canonical vN form.",
-          "maxLength": 7,
-          "minLength": 2,
-          "pattern": "^v[1-9][0-9]{0,5}$",
-          "title": "Maximum",
-          "type": "string"
+          "$ref": "#/$defs/GatewayApiVersion",
+          "description": "Highest served gateway API version from the supported enum."
         }
       },
       "required": [
@@ -26,12 +18,11 @@
         "maximum"
       ],
       "title": "ApiVersionRange",
-      "type": "object",
-      "x-vaultspec-invariant": "minimum must not exceed maximum numerically"
+      "type": "object"
     },
     "ComponentAsset": {
       "additionalProperties": false,
-      "description": "One base-closure asset: its kind, pinned version, license, and digest.",
+      "description": "One immutable source artifact used to assemble the base closure.",
       "properties": {
         "kind": {
           "$ref": "#/$defs/ComponentAssetKind",
@@ -52,7 +43,7 @@
           "type": "string"
         },
         "digest": {
-          "description": "Asset content digest under the manifest digest algorithm.",
+          "description": "Digest of the immutable source artifact bytes used for assembly (runtime archive, A2A wheel, or ACP package); installed-tree integrity is governed by later release/SBOM contracts.",
           "pattern": "^[0-9a-f]{64}$",
           "title": "Digest",
           "type": "string"
@@ -98,69 +89,17 @@
       "title": "ComponentCompatibility",
       "type": "object"
     },
-    "ComponentEntrypoint": {
-      "additionalProperties": false,
-      "description": "A single typed launch surface, invoked relative to the capsule root.",
-      "properties": {
-        "kind": {
-          "$ref": "#/$defs/EntrypointKind",
-          "description": "The launch surface this entry names."
-        },
-        "console_script": {
-          "description": "Console-script name declared by the distribution.",
-          "maxLength": 128,
-          "minLength": 1,
-          "title": "Console Script",
-          "type": "string"
-        },
-        "reference": {
-          "description": "Entry-point object reference, e.g. 'pkg.module:main'.",
-          "maxLength": 256,
-          "minLength": 1,
-          "title": "Reference",
-          "type": "string"
-        },
-        "relative_command": {
-          "description": "Bounded argv path segments relative to the capsule root.",
-          "items": {
-            "description": "One non-rooted capsule path segment.",
-            "maxLength": 128,
-            "minLength": 1,
-            "not": {
-              "enum": [
-                ".",
-                ".."
-              ]
-            },
-            "pattern": "^[^/\\\\:\\x00]+$",
-            "type": "string"
-          },
-          "maxItems": 16,
-          "minItems": 1,
-          "title": "Relative Command",
-          "type": "array"
-        }
-      },
-      "required": [
-        "kind",
-        "console_script",
-        "reference",
-        "relative_command"
-      ],
-      "title": "ComponentEntrypoint",
-      "type": "object"
-    },
     "ComponentEntrypoints": {
       "additionalProperties": false,
       "description": "The dashboard-owned gateway launch and the caller-owned MCP launch.",
       "properties": {
         "gateway": {
-          "$ref": "#/$defs/ComponentEntrypoint",
+          "$ref": "#/$defs/GatewayEntrypoint",
           "description": "Dashboard-owned desktop gateway launch entrypoint."
         },
         "standalone_mcp": {
-          "$ref": "#/$defs/ComponentEntrypoint",
-          "description": "Caller-owned standalone vaultspec-mcp entrypoint."
+          "$ref": "#/$defs/StandaloneMcpEntrypoint",
+          "description": "Caller-owned standalone vaultspec-a2a-mcp entrypoint."
         }
       },
       "required": [
@@ -228,14 +167,74 @@
       "title": "DigestAlgorithm",
       "type": "string"
     },
-    "EntrypointKind": {
-      "description": "The two launch surfaces the contract declares.\n\n``gateway`` is the dashboard-owned desktop gateway launch. ``standalone_mcp``\nis the caller-owned ``vaultspec-mcp`` adapter, which the desktop lifecycle\nnever launches or adopts.",
+    "GatewayApiVersion": {
+      "description": "Gateway API versions implemented by the production route surface.",
       "enum": [
-        "gateway",
-        "standalone-mcp"
+        "v1"
       ],
-      "title": "EntrypointKind",
+      "title": "GatewayApiVersion",
       "type": "string"
+    },
+    "GatewayEntrypoint": {
+      "additionalProperties": false,
+      "description": "The dashboard-owned gateway launch surface.",
+      "properties": {
+        "kind": {
+          "const": "gateway",
+          "description": "The gateway launch-surface discriminator.",
+          "title": "Kind",
+          "type": "string"
+        },
+        "console_script": {
+          "description": "Console-script name declared by the distribution.",
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Console Script",
+          "type": "string"
+        },
+        "reference": {
+          "description": "Entry-point object reference, e.g. 'pkg.module:main'.",
+          "maxLength": 256,
+          "minLength": 1,
+          "title": "Reference",
+          "type": "string"
+        },
+        "relative_command": {
+          "description": "Bounded argv path segments relative to the capsule root.",
+          "items": {
+            "description": "One portable, non-rooted capsule path segment; Windows device basenames and platform-invalid characters are forbidden.",
+            "maxLength": 128,
+            "minLength": 1,
+            "not": {
+              "anyOf": [
+                {
+                  "enum": [
+                    ".",
+                    ".."
+                  ]
+                },
+                {
+                  "pattern": "^(?:[Cc][Oo][Nn](?:[Ii][Nn]\\$|[Oo][Uu][Tt]\\$)?|[Pp][Rr][Nn]|[Aa][Uu][Xx]|[Nn][Uu][Ll]|[Cc][Oo][Mm][1-9\u00b9\u00b2\u00b3]|[Ll][Pp][Tt][1-9\u00b9\u00b2\u00b3])(?:\\..*)?$"
+                }
+              ]
+            },
+            "pattern": "^[^\\x00-\\x1f\\x7f<>:\"/\\\\|?*]*[^\\x00-\\x1f\\x7f<>:\"/\\\\|?*. ]$",
+            "type": "string"
+          },
+          "maxItems": 16,
+          "minItems": 1,
+          "title": "Relative Command",
+          "type": "array"
+        }
+      },
+      "required": [
+        "kind",
+        "console_script",
+        "reference",
+        "relative_command"
+      ],
+      "title": "GatewayEntrypoint",
+      "type": "object"
     },
     "MigrationRange": {
       "additionalProperties": false,
@@ -263,6 +262,67 @@
       "title": "MigrationRange",
       "type": "object"
     },
+    "StandaloneMcpEntrypoint": {
+      "additionalProperties": false,
+      "description": "The caller-owned standalone MCP launch surface.",
+      "properties": {
+        "kind": {
+          "const": "standalone-mcp",
+          "description": "The standalone MCP launch-surface discriminator.",
+          "title": "Kind",
+          "type": "string"
+        },
+        "console_script": {
+          "description": "Console-script name declared by the distribution.",
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Console Script",
+          "type": "string"
+        },
+        "reference": {
+          "description": "Entry-point object reference, e.g. 'pkg.module:main'.",
+          "maxLength": 256,
+          "minLength": 1,
+          "title": "Reference",
+          "type": "string"
+        },
+        "relative_command": {
+          "description": "Bounded argv path segments relative to the capsule root.",
+          "items": {
+            "description": "One portable, non-rooted capsule path segment; Windows device basenames and platform-invalid characters are forbidden.",
+            "maxLength": 128,
+            "minLength": 1,
+            "not": {
+              "anyOf": [
+                {
+                  "enum": [
+                    ".",
+                    ".."
+                  ]
+                },
+                {
+                  "pattern": "^(?:[Cc][Oo][Nn](?:[Ii][Nn]\\$|[Oo][Uu][Tt]\\$)?|[Pp][Rr][Nn]|[Aa][Uu][Xx]|[Nn][Uu][Ll]|[Cc][Oo][Mm][1-9\u00b9\u00b2\u00b3]|[Ll][Pp][Tt][1-9\u00b9\u00b2\u00b3])(?:\\..*)?$"
+                }
+              ]
+            },
+            "pattern": "^[^\\x00-\\x1f\\x7f<>:\"/\\\\|?*]*[^\\x00-\\x1f\\x7f<>:\"/\\\\|?*. ]$",
+            "type": "string"
+          },
+          "maxItems": 16,
+          "minItems": 1,
+          "title": "Relative Command",
+          "type": "array"
+        }
+      },
+      "required": [
+        "kind",
+        "console_script",
+        "reference",
+        "relative_command"
+      ],
+      "title": "StandaloneMcpEntrypoint",
+      "type": "object"
+    },
     "TargetTriple": {
       "description": "The five accepted desktop capsule targets, as Rust-style triples.\n\nThe triples match the platform vocabulary already used by the locked\ndependency closure (see ``desktop_tests/test_dependency_closure.py``).",
       "enum": [
@@ -276,6 +336,7 @@
       "type": "string"
     }
   },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
   "description": "The versioned desktop component manifest consumed by dashboard packaging.\n\nThe manifest is the entire boundary the dashboard reads about an A2A\ngeneration. It is deterministic and self-describing: given the same inputs\nthe emitter produces a byte-identical document, so a release-set receipt can\npin a generation by manifest digest.",
   "properties": {
@@ -403,5 +464,8 @@
     "dependency_lock"
   ],
   "title": "ComponentManifest",
-  "type": "object"
+  "type": "object",
+  "x-vaultspec-invariants": [
+    "identity.version must equal the a2a-distribution asset version; enforced by the production model because JSON Schema Draft 2020-12 has no standard cross-field equality keyword"
+  ]
 }

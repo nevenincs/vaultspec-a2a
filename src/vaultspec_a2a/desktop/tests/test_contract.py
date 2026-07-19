@@ -3,12 +3,19 @@
 from __future__ import annotations
 
 import json
+import shutil
+import subprocess
+import sys
+import zipfile
 from pathlib import Path
 from typing import Any, cast
 
 import pytest
+from jsonschema import Draft202012Validator
+from jsonschema.exceptions import ValidationError as JsonSchemaValidationError
 from pydantic import ValidationError
 
+from .. import GatewayApiVersion, GatewayEntrypoint, StandaloneMcpEntrypoint
 from ..contract import (
     ACP_VERSION_PIN,
     CONTRACT_VERSION,
@@ -27,8 +34,43 @@ from ..contract import (
     export_component_manifest_schema,
 )
 
-_SCHEMA_SNAPSHOT = (
-    Path(__file__).resolve().parents[4] / "schemas" / "desktop-capsule-manifest.json"
+_PROJECT_ROOT = Path(__file__).resolve().parents[4]
+_SCHEMA_SNAPSHOT = _PROJECT_ROOT / "schemas" / "desktop-capsule-manifest.json"
+_WHEEL_SCHEMA_PATH = "vaultspec_a2a/desktop/schemas/desktop-capsule-manifest.json"
+_INVALID_RELATIVE_COMMANDS = (
+    (),
+    ("",),
+    (".",),
+    ("..",),
+    ("/bin",),
+    ("\\bin",),
+    ("C:",),
+    ("C:\\bin",),
+    ("bin/tool",),
+    ("bin\\tool",),
+    ("bad\x00name",),
+    ("bad\x1fname",),
+    ("bad\x7fname",),
+    ("bad<name",),
+    ("bad>name",),
+    ('bad"name',),
+    ("bad|name",),
+    ("bad?name",),
+    ("bad*name",),
+    ("CON",),
+    ("con.txt",),
+    ("CONIN$",),
+    ("conout$",),
+    ("NUL",),
+    ("com1.exe",),
+    ("LPT9",),
+    ("COM¹",),
+    ("com².log",),
+    ("LPT³",),
+    ("trailing.",),
+    ("trailing ",),
+    tuple("segment" for _ in range(17)),
+    ("x" * 129,),
 )
 
 
@@ -50,9 +92,9 @@ def _manifest_payload() -> dict[str, Any]:
             },
             "standalone_mcp": {
                 "kind": "standalone-mcp",
-                "console_script": "vaultspec-mcp",
+                "console_script": "vaultspec-a2a-mcp",
                 "reference": "vaultspec_a2a.protocols.mcp.__main__:main",
-                "relative_command": ["bin", "vaultspec-mcp"],
+                "relative_command": ["bin", "vaultspec-a2a-mcp"],
             },
         },
         "digest_algorithm": "sha256",
@@ -128,14 +170,22 @@ def test_manifest_rejects_malformed_contract_version(version: str) -> None:
         ComponentManifest.model_validate(payload)
 
 
-def test_api_version_range_uses_ordered_vn_grammar() -> None:
-    assert ApiVersionRange(minimum="v1", maximum="v12").maximum == "v12"
-    with pytest.raises(ValidationError, match="must not exceed"):
-        ApiVersionRange(minimum="v12", maximum="v2")
+def test_api_version_range_accepts_the_production_v1_surface() -> None:
+    api_range = ApiVersionRange(minimum="v1", maximum="v1")
+    assert api_range.minimum.value == "v1"
+    assert api_range.maximum.value == "v1"
 
 
-@pytest.mark.parametrize("version", ["1", "V1", "v0", "v01", "v1.0", "v-1"])
-def test_api_version_range_rejects_noncanonical_values(version: str) -> None:
+def test_typed_contract_authorities_are_exported_from_desktop_facade() -> None:
+    assert GatewayApiVersion.V1.value == "v1"
+    assert GatewayEntrypoint.__name__ == "GatewayEntrypoint"
+    assert StandaloneMcpEntrypoint.__name__ == "StandaloneMcpEntrypoint"
+
+
+@pytest.mark.parametrize("version", ["1", "V1", "v0", "v01", "v1.0", "v-1", "v2"])
+def test_api_version_range_rejects_unsupported_or_noncanonical_values(
+    version: str,
+) -> None:
     with pytest.raises(ValidationError):
         ApiVersionRange(minimum=version, maximum="v1")
 
@@ -170,6 +220,13 @@ def test_manifest_accepts_exactly_the_complete_production_closure() -> None:
     manifest = ComponentManifest.model_validate(_manifest_payload())
     assert {asset.kind for asset in manifest.assets} == set(ComponentAssetKind)
     assert manifest.digest_algorithm is DigestAlgorithm.SHA256
+
+
+def test_manifest_binds_identity_version_to_a2a_distribution_version() -> None:
+    payload = _manifest_payload()
+    payload["identity"]["version"] = "9.9.9"
+    with pytest.raises(ValidationError, match=r"identity\.version must equal"):
+        ComponentManifest.model_validate(payload)
 
 
 def test_manifest_rejects_incomplete_asset_closure() -> None:
@@ -214,24 +271,7 @@ def test_relative_command_accepts_bounded_capsule_segments() -> None:
     assert entrypoint.relative_command == ("runtime", "bin", "vaultspec-a2a")
 
 
-@pytest.mark.parametrize(
-    "command",
-    [
-        (),
-        ("",),
-        (".",),
-        ("..",),
-        ("/bin",),
-        ("\\bin",),
-        ("C:",),
-        ("C:\\bin",),
-        ("bin/tool",),
-        ("bin\\tool",),
-        ("bad\x00name",),
-        tuple("segment" for _ in range(17)),
-        ("x" * 129,),
-    ],
-)
+@pytest.mark.parametrize("command", _INVALID_RELATIVE_COMMANDS)
 def test_relative_command_rejects_unbounded_or_rooted_paths(
     command: tuple[str, ...],
 ) -> None:
@@ -242,6 +282,53 @@ def test_relative_command_rejects_unbounded_or_rooted_paths(
             reference="vaultspec_a2a.cli.main:main",
             relative_command=command,
         )
+
+
+@pytest.mark.parametrize(
+    ("surface", "wrong_kind"),
+    [("gateway", "standalone-mcp"), ("standalone_mcp", "gateway")],
+)
+def test_manifest_runtime_rejects_crossed_entrypoint_kinds(
+    surface: str, wrong_kind: str
+) -> None:
+    payload = _manifest_payload()
+    payload["entrypoints"][surface]["kind"] = wrong_kind
+    with pytest.raises(ValidationError):
+        ComponentManifest.model_validate(payload)
+
+
+def test_draft202012_schema_accepts_the_production_manifest() -> None:
+    Draft202012Validator(component_manifest_schema()).validate(_manifest_payload())
+
+
+@pytest.mark.parametrize(
+    ("surface", "wrong_kind"),
+    [("gateway", "standalone-mcp"), ("standalone_mcp", "gateway")],
+)
+def test_draft202012_schema_rejects_crossed_entrypoint_kinds(
+    surface: str, wrong_kind: str
+) -> None:
+    payload = _manifest_payload()
+    payload["entrypoints"][surface]["kind"] = wrong_kind
+    with pytest.raises(JsonSchemaValidationError):
+        Draft202012Validator(component_manifest_schema()).validate(payload)
+
+
+@pytest.mark.parametrize("command", _INVALID_RELATIVE_COMMANDS)
+def test_draft202012_schema_rejects_nonportable_relative_commands(
+    command: tuple[str, ...],
+) -> None:
+    payload = _manifest_payload()
+    payload["entrypoints"]["gateway"]["relative_command"] = command
+    with pytest.raises(JsonSchemaValidationError):
+        Draft202012Validator(component_manifest_schema()).validate(payload)
+
+
+def test_draft202012_schema_rejects_unsupported_gateway_api_version() -> None:
+    payload = _manifest_payload()
+    payload["compatibility"]["api_versions"]["maximum"] = "v2"
+    with pytest.raises(JsonSchemaValidationError):
+        Draft202012Validator(component_manifest_schema()).validate(payload)
 
 
 def test_committed_schema_snapshot_exactly_matches_production_exporter() -> None:
@@ -258,12 +345,74 @@ def test_exported_schema_carries_collection_and_path_bounds() -> None:
     assert assets["maxItems"] == 4
     assert len(assets["allOf"]) == 4
 
-    command = schema["$defs"]["ComponentEntrypoint"]["properties"]["relative_command"]
-    assert command["minItems"] == 1
-    assert command["maxItems"] == 16
-    assert command["items"]["minLength"] == 1
-    assert command["items"]["maxLength"] == 128
-    assert command["items"]["not"] == {"enum": [".", ".."]}
+    assert schema["$defs"]["GatewayApiVersion"]["enum"] == ["v1"]
+    for definition, expected_kind in (
+        ("GatewayEntrypoint", "gateway"),
+        ("StandaloneMcpEntrypoint", "standalone-mcp"),
+    ):
+        properties = schema["$defs"][definition]["properties"]
+        assert properties["kind"]["const"] == expected_kind
+        command = properties["relative_command"]
+        assert command["minItems"] == 1
+        assert command["maxItems"] == 16
+        assert command["items"]["minLength"] == 1
+        assert command["items"]["maxLength"] == 128
+        assert "pattern" in command["items"]
+        assert "not" in command["items"]
+
+    assert "identity.version must equal" in schema["x-vaultspec-invariants"][0]
+
+
+def test_working_tree_wheel_installs_schema_as_package_resource(
+    tmp_path: Path,
+) -> None:
+    uv = shutil.which("uv")
+    assert uv is not None, "uv is required by the repository build workflow"
+    dist = tmp_path / "dist"
+    build = subprocess.run(
+        [uv, "build", "--wheel", "--out-dir", str(dist)],
+        cwd=_PROJECT_ROOT,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert build.returncode == 0, build.stderr
+    wheels = list(dist.glob("*.whl"))
+    assert len(wheels) == 1
+
+    with zipfile.ZipFile(wheels[0]) as archive:
+        assert _WHEEL_SCHEMA_PATH in archive.namelist()
+        assert archive.read(_WHEEL_SCHEMA_PATH) == _SCHEMA_SNAPSHOT.read_bytes()
+
+    installed = tmp_path / "installed"
+    install = subprocess.run(
+        [uv, "pip", "install", "--target", str(installed), "--no-deps", str(wheels[0])],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert install.returncode == 0, install.stderr
+    probe = subprocess.run(
+        [
+            sys.executable,
+            "-I",
+            "-c",
+            (
+                "import importlib.resources as r, sys; "
+                "sys.path.insert(0, sys.argv[1]); "
+                "sys.stdout.write(r.files('vaultspec_a2a.desktop').joinpath("
+                "'schemas', 'desktop-capsule-manifest.json')"
+                ".read_text(encoding='utf-8'))"
+            ),
+            str(installed),
+        ],
+        cwd=tmp_path,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert probe.returncode == 0, probe.stderr
+    assert probe.stdout == _SCHEMA_SNAPSHOT.read_text(encoding="utf-8")
 
 
 def test_manifest_rejects_extra_fields() -> None:

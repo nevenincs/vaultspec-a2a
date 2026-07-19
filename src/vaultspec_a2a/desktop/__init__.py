@@ -21,7 +21,10 @@ from .contract import ComponentManifest as ComponentManifest
 from .contract import DependencyLockIdentity as DependencyLockIdentity
 from .contract import DigestAlgorithm as DigestAlgorithm
 from .contract import EntrypointKind as EntrypointKind
+from .contract import GatewayApiVersion as GatewayApiVersion
+from .contract import GatewayEntrypoint as GatewayEntrypoint
 from .contract import MigrationRange as MigrationRange
+from .contract import StandaloneMcpEntrypoint as StandaloneMcpEntrypoint
 from .contract import TargetTriple as TargetTriple
 from .contract import component_manifest_schema as component_manifest_schema
 from .contract import contract_versions_compatible as contract_versions_compatible
@@ -50,8 +53,11 @@ __all__ = [
     "DependencyLockIdentity",
     "DigestAlgorithm",
     "EntrypointKind",
+    "GatewayApiVersion",
+    "GatewayEntrypoint",
     "ManifestEmissionError",
     "MigrationRange",
+    "StandaloneMcpEntrypoint",
     "TargetTriple",
     "component_manifest_digest",
     "component_manifest_schema",

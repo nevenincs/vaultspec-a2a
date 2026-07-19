@@ -52,6 +52,7 @@ docs = [
 tooling = [
   "deptry>=0.23.0",
   "identify>=2.0.0",
+  "jsonschema>=4.26.0",
   "nodeenv>=1.0.0",
   "packaging>=25.0",
   "prek>=0.3.2",

@@ -3168,6 +3168,7 @@ server = [
 all = [
     { name = "deptry" },
     { name = "identify" },
+    { name = "jsonschema" },
     { name = "nodeenv" },
     { name = "packaging" },
     { name = "prek" },
@@ -3185,6 +3186,7 @@ all = [
 dev = [
     { name = "deptry" },
     { name = "identify" },
+    { name = "jsonschema" },
     { name = "nodeenv" },
     { name = "packaging" },
     { name = "prek" },
@@ -3204,6 +3206,7 @@ docs = [
 tooling = [
     { name = "deptry" },
     { name = "identify" },
+    { name = "jsonschema" },
     { name = "nodeenv" },
     { name = "packaging" },
     { name = "prek" },
@@ -3256,6 +3259,7 @@ provides-extras = ["server", "rag"]
 all = [
     { name = "deptry", specifier = ">=0.23.0" },
     { name = "identify", specifier = ">=2.0.0" },
+    { name = "jsonschema", specifier = ">=4.26.0" },
     { name = "nodeenv", specifier = ">=1.0.0" },
     { name = "packaging", specifier = ">=25.0" },
     { name = "prek", specifier = ">=0.3.2" },
@@ -3273,6 +3277,7 @@ all = [
 dev = [
     { name = "deptry", specifier = ">=0.23.0" },
     { name = "identify", specifier = ">=2.0.0" },
+    { name = "jsonschema", specifier = ">=4.26.0" },
     { name = "nodeenv", specifier = ">=1.0.0" },
     { name = "packaging", specifier = ">=25.0" },
     { name = "prek", specifier = ">=0.3.2" },
@@ -3290,6 +3295,7 @@ docs = [{ name = "sphinx", specifier = ">=8.2" }]
 tooling = [
     { name = "deptry", specifier = ">=0.23.0" },
     { name = "identify", specifier = ">=2.0.0" },
+    { name = "jsonschema", specifier = ">=4.26.0" },
     { name = "nodeenv", specifier = ">=1.0.0" },
     { name = "packaging", specifier = ">=25.0" },
     { name = "prek", specifier = ">=0.3.2" },

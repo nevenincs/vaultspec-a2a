@@ -301,3 +301,33 @@ S09 proves canonical path identity, ownership, presence, and armed no-fallback
 behavior. It deliberately makes no readiness or successful-launch claim.
 Executable-mode and runnable-artifact certification remains assigned to S14,
 which precedes S16 desktop-profile activation.
+
+## `W01 P02 S10` component-manifest contract review
+
+Status: PASS
+
+The A2A package now owns one versioned desktop component-manifest authority and
+exports its byte-exact Draft 2020-12 schema at a stable installed resource path.
+The contract binds the component identity to the A2A distribution asset, admits
+only the five approved target triples and exact four-asset closure, pins CPython
+3.13, Node.js 22, and ACP 0.59.0, and gives the gateway and standalone MCP
+surfaces distinct schema-visible discriminators. Asset digests describe the
+immutable source artifact bytes; later SBOM and dashboard release-set contracts
+remain responsible for installed-tree and composite-release integrity.
+
+Initial review found crossed entrypoint kinds could pass schema validation, the
+schema was absent from the built wheel, component and distribution versions
+could disagree, the API range admitted versions the production router does not
+implement, and command segments were not portable across Windows. The repair
+introduced typed entrypoints, a schema-visible `v1` API enum, production identity
+binding, stable wheel inclusion, and one shared runtime/schema portability
+policy. Follow-up review found and repaired the legacy Windows device spellings
+`COM¹`/`²`/`³` and `LPT¹`/`²`/`³`.
+
+Independent final review found no unresolved critical, high, or medium issue.
+It reproduced 111 focused production-model and Draft 2020-12 tests, the real
+working-tree wheel build and isolated installed-resource read, Ruff checking,
+Ruff formatting, and scoped type checking. The tests import production code and
+use no fake, mock, stub, patch, monkeypatch, skip, expected failure, or mirrored
+business logic. S11 remains explicitly open until the emitter consumes these
+typed authorities and genuine immutable artifacts.

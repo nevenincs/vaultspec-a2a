@@ -52,6 +52,12 @@ related:
   - '[[2026-07-18-desktop-product-profile-W03-P07-S34]]'
   - '[[2026-07-18-desktop-product-profile-W03-P07-S35]]'
   - '[[2026-07-18-desktop-product-profile-W03-P07-summary]]'
+  - '[[2026-07-18-desktop-product-profile-W03-P08-S36]]'
+  - '[[2026-07-18-desktop-product-profile-W03-P08-S37]]'
+  - '[[2026-07-18-desktop-product-profile-W03-P08-S38]]'
+  - '[[2026-07-18-desktop-product-profile-W03-P08-S39]]'
+  - '[[2026-07-18-desktop-product-profile-W03-P08-S40]]'
+  - '[[2026-07-18-desktop-product-profile-W03-P08-S41]]'
   - '[[2026-07-18-desktop-product-profile-adr]]'
   - '[[2026-07-18-desktop-product-profile-plan]]'
   - '[[2026-07-18-desktop-product-profile-reference]]'
@@ -123,6 +129,12 @@ Auto-generated index of all documents tagged with `#desktop-product-profile`.
 - `2026-07-18-desktop-product-profile-W03-P07-S34` - Prove two real desktop gateway processes cannot own or overwrite one app home
 - `2026-07-18-desktop-product-profile-W03-P07-S35` - Prove authenticated foreign attachment stale-owner recovery and immutable live-conflict behavior with real processes
 - `2026-07-18-desktop-product-profile-W03-P07-summary` - `desktop-product-profile` `W03.P07` summary
+- `2026-07-18-desktop-product-profile-W03-P08-S36` - Validate dashboard-created attach and ownership files and create a distinct gateway-owned worker IPC credential with platform ACL checks
+- `2026-07-18-desktop-product-profile-W03-P08-S37` - Model distinct attach credential worker IPC credential and receipt-bound lifecycle capability references
+- `2026-07-18-desktop-product-profile-W03-P08-S38` - Implement constant-time attach and lifecycle capability dependencies with redacted failures
+- `2026-07-18-desktop-product-profile-W03-P08-S39` - Require the attach credential on the versioned six-member whitelist (five run-control verbs plus bounded active-run discovery) without expanding it
+- `2026-07-18-desktop-product-profile-W03-P08-S40` - Require attach authentication on dashboard product APIs while leaving minimal liveness ungated
+- `2026-07-18-desktop-product-profile-W03-P08-S41` - Require attach authentication before accepting desktop event WebSockets
 
 ### plan
 

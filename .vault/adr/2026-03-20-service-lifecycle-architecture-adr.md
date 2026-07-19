@@ -1,17 +1,17 @@
 ---
 tags:
-- '#adr'
-- '#service-lifecycle-architecture'
-date: 2026-03-20
-modified: '2026-07-15'
+  - "#adr"
+  - "#service-lifecycle-architecture"
+date: '2026-03-20'
 related:
-- '[[2026-03-04-worker-process-architecture-adr]]'
-- '[[2026-03-19-control-layer-cli-justfile-separation-adr]]'
-- '[[2026-02-28-containerization-strategy-adr]]'
-- '[[2026-03-31-docs-vault-migration-research]]'
+  - "[[2026-03-04-worker-process-architecture-adr]]"
+  - "[[2026-03-19-control-layer-cli-justfile-separation-adr]]"
+  - "[[2026-02-28-containerization-strategy-adr]]"
+  - "[[2026-03-31-docs-vault-migration-research]]"
+superseded_by: '2026-07-19-repository-tooling-hardening-adr'
+modified: '2026-07-19'
 ---
-
-# `service-lifecycle-architecture` adr: `adr-039` | (**status:** `accepted`)
+# `service-lifecycle-architecture` adr: `adr-039` | (**status:** `superseded`)
 
 ## Migration Note
 

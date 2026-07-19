@@ -1,15 +1,15 @@
 ---
 tags:
-- '#adr'
-- '#control-layer-cli-justfile-separation'
-date: 2026-03-19
-modified: '2026-07-15'
+  - "#adr"
+  - "#control-layer-cli-justfile-separation"
+date: '2026-03-19'
 related:
-- '[[2026-03-04-worker-process-architecture-adr]]'
-- '[[2026-03-31-docs-vault-migration-research]]'
+  - "[[2026-03-04-worker-process-architecture-adr]]"
+  - "[[2026-03-31-docs-vault-migration-research]]"
+superseded_by: '2026-07-19-repository-tooling-hardening-adr'
+modified: '2026-07-19'
 ---
-
-# `control-layer-cli-justfile-separation` adr: `adr-038` | (**status:** `accepted`)
+# `control-layer-cli-justfile-separation` adr: `adr-038` | (**status:** `superseded`)
 
 ## Migration Note
 

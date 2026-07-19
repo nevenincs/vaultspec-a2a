@@ -373,6 +373,41 @@ files, while excluding desktop tests. The tests use production code, real wheel
 bytes, real locks, and real package migrations without fake, mock, stub, patch,
 monkeypatch, skip, expected failure, or mirrored emitter logic.
 
-S12 remains open. Its current candidate changes rebase the certification gate
-onto the exact-wheel API, but they require a separate whole-file architecture
-review and independent adversarial verdict before any closure claim.
+At S11 closure, S12 remained open because its candidate certification gate
+required a separate whole-file architecture review and independent adversarial
+verdict. The following section records that later review and repair.
+
+## `W01 P02 S12` clean-wheel component-certification review
+
+Status: PASS
+
+The initial candidate did not meet the architecture boundary even though its
+tests passed. It built from the shared dirty checkout, treated the host Node.js
+24 executable as a Node.js 22 source artifact, treated a virtual-environment
+interpreter and one checkout ACP JavaScript file as complete runtime sources,
+and required the local fixture digest to differ from the emitted manifest. Its
+fixture-local pin helper also mirrored dashboard rejection logic that does not
+yet exist in production.
+
+The repaired gate captures one exact Git commit object, builds the wheel from
+that clean archive, and inspects the resulting immutable artifact. It proves the
+exact production preset inventory, package-owned migrations, one installed
+component-schema resource, standardized Name/version/MIT metadata, and complete
+test and certification-preset exclusion. Both the repository schema snapshot
+and packaged schema bytes equal the production Pydantic exporter.
+
+The A2A-owned dashboard-shaped JSON is now explicitly `fixture_only`. It binds
+only the component name and version to real wheel metadata and validates the
+A2A-owned target and digest vocabulary. It does not claim that its digest names
+a current emitted manifest, that it is a complete release set, or that it proves
+dashboard rejection policy. Real target artifacts and emitted manifests remain
+owned by A2A S13 through S15. The dashboard-owned release-set schema, parser, and
+producer-consumer proof remain dashboard S04, S06, and S145.
+
+Independent final review found no unresolved critical, high, or medium issue.
+It reproduced three focused tests and 145 integrated contract, emitter,
+dependency-closure, and component-certification tests. Ruff checking, Ruff
+formatting, scoped type checking, lock consistency, and diff hygiene pass. The
+tests import production component identity, target, digest, and schema
+authorities and use no fake, mock, stub, patch, monkeypatch, skip, expected
+failure, or mirrored dashboard consumer logic.

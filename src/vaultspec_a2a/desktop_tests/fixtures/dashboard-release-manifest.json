@@ -1,7 +1,8 @@
 {
-  "release_set_id": "vaultspec-desktop-2026-07-19-win-x64",
+  "fixture_only": true,
+  "release_set_id": "fixture-vaultspec-desktop-win-x64",
   "dashboard": {
-    "version": "0.1.0"
+    "version": "0.1.4"
   },
   "components": [
     {

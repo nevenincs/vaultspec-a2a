@@ -3,7 +3,7 @@ tags:
   - '#plan'
   - '#adr-authoring-orchestration'
 date: '2026-07-14'
-modified: '2026-07-16'
+modified: '2026-07-17'
 tier: L2
 related:
   - '[[2026-07-14-a2a-edge-conformance-plan]]'

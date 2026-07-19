@@ -228,7 +228,7 @@ ahead of the integrated real-descendant proof.
 - [x] `W04.P11.S59` - Spawn the desktop worker in a POSIX new session and owned process group or an assigned Windows Job Object or equivalently proven OS-owned job or tree before descendant work and retain containment for bounded shutdown; `src/vaultspec_a2a/control/worker_management.py`.
 - [x] `W04.P11.S60` - Spawn each run-owned ACP or Codex provider root in a POSIX new session and owned process group or an assigned Windows Job Object or equivalently proven OS-owned job or tree before descendant work; `src/vaultspec_a2a/providers/_subprocess.py`.
 - [x] `W04.P11.S61` - Terminate owned POSIX process groups with bounded killpg SIGTERM-to-SIGKILL escalation and assigned Windows Job Objects or equivalently proven OS-owned jobs or trees without recursive process discovery; `src/vaultspec_a2a/utils/process.py`.
-- [ ] `W04.P11.S89` - Audit and harden ACP terminal children to inherit the owning run containment and bounded reaper; `src/vaultspec_a2a/providers/_acp_rpc_handlers.py`.
+- [x] `W04.P11.S89` - Audit and harden ACP terminal children to inherit the owning run containment and bounded reaper; `src/vaultspec_a2a/providers/_acp_rpc_handlers.py`.
 - [ ] `W04.P11.S90` - Audit and harden per-run authoring MCP launch specifications to remain descendants of the owning provider group; `src/vaultspec_a2a/providers/_acp_authoring.py`.
 - [ ] `W04.P11.S91` - Audit and harden projected project MCP configuration so only run-owned launch specifications enter the isolated provider tree; `src/vaultspec_a2a/providers/_acp_project_mcp.py`.
 - [ ] `W04.P11.S92` - Audit and harden declared harness MCP launch specifications to inherit the owning ACP or Codex provider group; `src/vaultspec_a2a/providers/_acp_mcp.py`.

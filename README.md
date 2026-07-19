@@ -18,87 +18,86 @@ Headless agent-to-agent orchestration.
 
 vaultspec-a2a is the headless orchestration layer of the vaultspec family. It
 dispatches agent work across Claude, Gemini, and Codex through a gateway/worker
-architecture, and it fronts that work behind a versioned loopback HTTP edge so a
-UI (the dashboard) or an engine can drive it without embedding it.
+architecture. That work sits behind a versioned loopback HTTP edge, so a UI (the
+dashboard) or an engine can drive it without embedding it.
 
 It ships no bundled UI. Every document an agent produces becomes a human-reviewed
-proposal in the review lane through the authoring API — agents never write to the
+proposal in the review lane through the authoring API; agents never write to the
 vault directly.
 
 Two modes:
 
-- **Team mode** — a self-orchestrating team (supervisor + coders) works
+- **Team mode** - a self-orchestrating team (supervisor + coders) works
   concurrently against a task. Preferred for parallelized, long-horizon coding
   work.
-- **Subagent mode** — a single agent performs a task on behalf of a client
+- **Subagent mode** - a single agent performs a task on behalf of a client
   application (Claude Code, Gemini CLI, Antigravity). Preferred for
   non-parallelized, sequential handoffs.
 
 ## Getting started
 
 Requires Python 3.13+ and [uv](https://docs.astral.sh/uv/). vaultspec-a2a is not
-yet published to a package index; install it from source or run the production
-Docker stack. (PyPI publication is planned now that the vaultspec-core dependency
-is pinned to a released version.)
+yet published to a package index; install it from source or run the Docker stack.
+(PyPI publication is planned now that the vaultspec-core dependency is pinned to a
+released version.)
 
-**From source:**
+Install the base runtime and configure a provider key:
 
 ```bash
 git clone https://github.com/nevenincs/vaultspec-a2a
 cd vaultspec-a2a
-just dev deps install
+just dev deps base
 cp service/.env.example .env
 # Set at least one provider key: ANTHROPIC_API_KEY, GEMINI_API_KEY, or OPENAI_API_KEY
 ```
 
-Start the gateway and worker (each runs in the foreground, in its own terminal),
-then verify:
+Verify your toolchain, then run the gateway and worker as a local Docker stack:
 
 ```bash
-just dev service start gateway   # terminal 1 — port 8000
-just dev service start worker    # terminal 2 — port 8001
 just doctor
+docker compose -f service/docker-compose.dev.yml up
 ```
 
-Start a run and follow it (list preset ids with `vaultspec-a2a presets`):
+To run just the gateway in the foreground without Docker, use `vaultspec-a2a
+serve`. Start a run and follow it (list preset ids with `vaultspec-a2a presets`):
 
 ```bash
 vaultspec-a2a run start --preset <preset-id> --message "Create a hello world module"
 vaultspec-a2a run status <run_id>
 ```
 
-**With Docker (production stack):**
+For a production deployment, use the production Compose file:
 
 ```bash
 docker compose -f service/docker-compose.prod.yml up -d
 ```
 
-**Optional extras:** `uv sync --extra server` adds the Postgres driver,
-checkpoint saver, and OTLP exporter for a production install; `uv sync --extra
-rag` adds the `vaultspec-rag` semantic-search bridge and its Torch dependency.
+**Optional extras:** `just dev deps server` adds the Postgres driver, checkpoint
+saver, and OTLP exporter for a production install; `just dev deps rag` adds the
+`vaultspec-rag` semantic-search bridge and its Torch dependency.
 
 ## Capabilities
 
 | Capability | Detail |
 | ---------- | ------ |
-| Gateway edge | A versioned `/v1` HTTP surface (service-state, presets, run start/status/cancel) that operator and engine share — one code path, no divergence. |
+| Gateway edge | A versioned `/v1` HTTP surface (service-state, presets, run start/status/cancel) that operator and engine share: one code path, no divergence. |
 | Team mode | Self-orchestrating supervisor + coder team for parallel, long-horizon work. |
 | Subagent mode | A single agent serving one client application for sequential handoffs. |
 | Providers | Claude (ACP), Gemini, and OpenAI/Codex adapters. |
 | Review lane | Agent outputs become human-reviewed proposals via the authoring API; agents never write the vault directly. |
-| Operator CLI | `vaultspec-a2a` — a thin client of the gateway: `serve`, `doctor`, `presets`, `run`, `workspace`, and the `procs` dev registry. |
+| Operator CLI | `vaultspec-a2a`, a thin client of the gateway: `serve`, `doctor`, `presets`, `run`, `workspace`, and the `procs` dev registry. |
 
 ## The vaultspec family
 
 vaultspec-a2a is one project in a family built around one shared vault:
 
-- [vaultspec-core](https://github.com/nevenincs/vaultspec-core) — The agent
+- [vaultspec-core](https://github.com/nevenincs/vaultspec-core) - The agent
   harness: the pipeline, the vault, and the CLI that drives them. **(Beta)**
-- [vaultspec-rag](https://github.com/nevenincs/vaultspec-rag) — The semantic
+- [vaultspec-rag](https://github.com/nevenincs/vaultspec-rag) - The semantic
   search component for vault and code. **(Beta)**
-- [vaultspec-dashboard](https://github.com/nevenincs/vaultspec-dashboard) — The
+- [vaultspec-dashboard](https://github.com/nevenincs/vaultspec-dashboard) - The
   application that runs it all as a UI. **(Beta)**
-- **vaultspec-a2a** — Headless agent-to-agent orchestration. **(Beta)** — this
+- **vaultspec-a2a** - Headless agent-to-agent orchestration. **(Beta)** - this
   project.
 
 ## Documentation
@@ -124,119 +123,96 @@ developing, and deploying vaultspec-a2a.
 
 ## Operating and development reference
 
-vaultspec-a2a runs as two foreground services — a gateway and a worker — either
-directly during development or as a Docker Compose stack in production. The
-sections below cover both.
+Developer tasks are exposed through a [just](https://just.systems/) command tree
+rooted at `just dev`. Run `just help` for the full recipe list, or
+`just dev <module> help` for one module (`build`, `code`, `deps`, `doctor`,
+`hooks`, `product`, `rag`, `test`, `vault`).
 
-## Running services
-
-All services run in the foreground. Each requires its own terminal. There is no
-background daemon or PID registry.
-
-```bash
-just dev service start [target]     # start service(s) — foreground
-just dev service stop [target]      # stop service(s)
-just dev service kill [target]      # force-kill service(s)
-just dev service restart [target]   # stop then start
-just dev service rebuild [target]   # rebuild image then start
-just dev service health [target]    # HTTP probe to /health endpoints
-just dev service logs TARGET        # stream logs
-just dev service probe PROVIDER     # probe a specific LLM provider
-```
-
-Service targets:
-
-| Target | Services | Ports |
-|--------|----------|-------|
-| `all` (default) | Everything in dependency order | — |
-| `prod` | gateway + worker + postgres | — |
-| `dev` | jaeger + vidaimock | — |
-| `gateway` | Gateway API server | 8000 |
-| `worker` | Worker executor (LangGraph) | 8001 |
-| `postgres` | PostgreSQL | 5432 |
-| `jaeger` | Jaeger trace collector + UI | 4317, 16686 |
-| `vidaimock` | Mock LLM provider | 8100 |
-
-Multiple targets: `just dev service start gateway worker`
-
-Database operations:
+Contributors who will run tests, linters, or type checks should install the full
+profile first:
 
 ```bash
-just dev service db migrate [--fix]
-just dev service db snapshot [list]
-just dev service db restore --name FILE
-just dev service db clear --yes
+just dev deps all       # every runtime extra plus the tooling and docs groups
 ```
 
-For production, Docker Compose is the deployment unit; the Compose files live
+### Running services
+
+The gateway and worker run as a Docker Compose stack. The Compose files live
 under `service/`:
 
 ```bash
-docker compose -f service/docker-compose.prod.yml up -d
+docker compose -f service/docker-compose.dev.yml up        # local dev: gateway + worker
+docker compose -f service/docker-compose.prod.yml up -d    # production: detached
 ```
 
-This starts gateway and worker with Docker healthchecks, `restart:
+The production stack runs gateway and worker with Docker healthchecks, `restart:
 unless-stopped` policies, dependency ordering, and Jaeger distributed tracing.
 Log aggregation: `docker compose -f service/docker-compose.prod.yml logs -f`.
 See `service/.env.example` for all environment variables; the only mandatory
-config for a working stack is one provider API key, and
-`service/docker-compose.prod.yml` picks up `.env` automatically.
+config for a working stack is one provider API key, and the Compose file picks up
+`.env` automatically. A Postgres-backed production variant is available at
+`service/docker-compose.prod.postgres.yml`.
+
+To run the gateway alone in the foreground (no Docker), use `vaultspec-a2a serve`.
+Machine-global development processes are managed through the `procs` CLI registry
+(see [Operator CLI reference](#operator-cli-reference)).
 
 ### Pre-flight: doctor
 
-Run before starting services to catch configuration and port problems before
-they become confusing startup failures:
+`just doctor` (an alias for `just dev doctor check`) verifies the developer
+toolchain before you build or run:
 
 ```bash
-just doctor              # full environment check
-just doctor ports        # what is listening on 8000, 8001?
-just doctor config       # API keys, DB backend, required env vars
-just doctor services     # HTTP probe to /health endpoints
+just doctor                       # verify just and uv, then report Docker support
+just dev doctor required          # require just >= 1.31 and uv, printing versions
+just dev doctor docker-optional   # report Docker/Compose without failing if absent
+just dev doctor docker            # require Docker and Compose (for container recipes)
 ```
-
-If a port is occupied, `just doctor ports` shows the occupying PID and process
-name and suggests a fix command.
 
 ### Code quality
 
 ```bash
-just dev code check [target]    # read-only lint + type check
-just dev code fix [target]      # auto-repair
+just dev code check          # run every read-only check (lint, format-check, type)
+just dev code lint           # ruff lint, no changes
+just dev code format-check   # ruff format check, no changes
+just dev code type           # ty type check
+just dev code repair         # apply ruff lint fixes and formatting
 ```
-
-Targets: `lint`, `type`, `all` (default)
 
 ### Testing
 
 ```bash
-just dev test unit [*ARGS]              # unit tests
-just dev test live [*ARGS]              # live integration tests (services must be running)
-just dev test smoke [*ARGS]             # smoke tests against real gateway + worker
-just dev test tracing [*ARGS]           # OTel/Jaeger tracing tests
-just dev test mock [NAME | --list]      # mock provider tests
-just dev test verify docker | provider NAME | endpoints | core
-just dev test ci                        # CI gate: unit + tracing
-just dev test all                       # full suite
+just dev test unit [*ARGS]        # the default non-service selection
+just dev test service [*ARGS]     # deterministic service tests against real local services
+just dev test all [*ARGS]         # the project-wide default selection
+just dev test coverage [*ARGS]    # the default selection with terminal coverage
+just dev test collect [*ARGS]     # collect the selection without executing
 ```
 
-Live and smoke tests require a running gateway and worker. Mocks are not used.
+Service tests exercise real local services; no test doubles are used.
 
 ### Build artifacts
 
 ```bash
-just dev build package       # Python sdist + wheel
-just dev build docker        # local dev Docker image
-just dev build docker-prod   # production multi-stage image
-just dev build clean         # remove dist/, egg-info, __pycache__
+just dev build package      # Python sdist + wheel (uv build)
+just dev build docs         # doc tests + strict Sphinx HTML
+just dev build docker       # local dev container images (docker-compose.dev.yml)
+just dev build docker-prod  # production gateway and worker images
+just dev build clean        # remove dist/, docs/_build, egg-info, __pycache__
 ```
 
 ### Dependency management
 
+Each recipe resolves a profile from the committed lock; none of them mutate the
+lock except by your explicit choice.
+
 ```bash
-just dev deps install    # full bootstrap: uv sync + npm install
-just dev deps sync       # sync to lockfile
-just dev deps upgrade    # upgrade all dependencies
-just dev deps lock       # regenerate lockfile
+just dev deps base       # base runtime profile
+just dev deps server     # base + the server extra (Postgres, OTLP)
+just dev deps rag        # base + the rag extra (search bridge, Torch)
+just dev deps tooling    # the repository tooling group
+just dev deps all        # every runtime extra plus the composed all group
+just dev deps check      # verify metadata and the lock agree (uv lock --check)
 ```
 
 ## Operator CLI reference
@@ -255,8 +231,8 @@ vaultspec-a2a doctor [--url URL]     # report gateway health via the service-sta
 vaultspec-a2a presets [--url URL]    # list available team presets
 ```
 
-`doctor` also diagnoses a stale resident — a gateway process started before a
-route landed still serving the old route table — and encodes the verdict in its
+`doctor` also diagnoses a stale resident (a gateway process started before a
+route landed, still serving the old route table) and encodes the verdict in its
 exit code: `0` healthy, `1` unreachable or HTTP error, `3` reachable but stale.
 
 ### Runs
@@ -284,8 +260,8 @@ the harness is incomplete, so a caller can gate on provisioning.
 ### Dev process registry
 
 `procs` manages machine-global development processes (gateway-dev, worker-dev,
-engine-dev) through a shared registry — distinct from the Docker service
-lifecycle above.
+engine-dev) through a shared registry, distinct from the Docker service lifecycle
+above.
 
 ```bash
 vaultspec-a2a procs list                 # every registered process, its liveness, and endpoint
@@ -306,8 +282,8 @@ per-command (`--url`).
 ## Port layout
 
 Default port assignments. All ports are overridable via environment variables.
-In Docker, only the host side of port mappings changes — container-internal
-ports are fixed.
+In Docker, only the host side of port mappings changes; container-internal ports
+are fixed.
 
 | Port | Service | Env Override | Notes |
 |------|---------|--------------|-------|
@@ -315,7 +291,7 @@ ports are fixed.
 | 8001 | Worker | `VAULTSPEC_WORKER_PORT` | LangGraph executor |
 | 8200 | MCP server | `VAULTSPEC_MCP_PORT` | Streamable HTTP transport |
 | 4317 | Jaeger OTLP | `OTEL_EXPORTER_OTLP_ENDPOINT` | Trace collector |
-| 16686 | Jaeger UI | — | Trace viewer |
+| 16686 | Jaeger UI | (none) | Trace viewer |
 | 5432 | PostgreSQL | (embedded in `DATABASE_URL`) | Only when `backend=postgres` |
 | 8100 | VidaiMock | `MOCK_API_BASE` | Mock LLM, dev only |
 
@@ -333,7 +309,7 @@ For production with Postgres, install the `server` extra (Postgres driver,
 checkpoint saver, and OTLP exporter) and set in `.env`:
 
 ```bash
-uv sync --extra server
+just dev deps server
 ```
 
 ```bash
@@ -346,61 +322,51 @@ Semantic search over the vault (the `vaultspec-rag` bridge and its Torch
 dependency) is a separate opt-in extra:
 
 ```bash
-uv sync --extra rag
+just dev deps rag
 ```
 
 ## Troubleshooting
 
 ### Gateway not running / CLI fails immediately
 
-Run `just doctor services` to probe all health endpoints. Then start the missing
-service: `just dev service start gateway` or `just dev service start worker`.
+The operator CLI fails fast when the gateway is unreachable. Confirm the stack is
+up (`docker compose -f service/docker-compose.dev.yml ps`) or start the gateway
+directly with `vaultspec-a2a serve`, then re-run `vaultspec-a2a doctor`.
 
-### Port already in use
+### Toolchain problems
 
-Run `just doctor ports` to see which process is occupying the port. The output
-includes PID, process name, and a suggested fix command (`just dev service kill`
-or the relevant system command).
+Run `just doctor` to verify just, uv, and Docker are installed at the required
+versions before building or running the stack.
 
 ### Missing API key
 
-Run `just doctor config` to validate all required environment variables. The
-output shows which keys are missing and the exact `export` command to set them.
+The gateway needs at least one provider key in `.env`
+(`ANTHROPIC_API_KEY`, `GEMINI_API_KEY`, or `OPENAI_API_KEY`). Copy
+`service/.env.example` and set one, then restart the stack.
 
-### Services appear to start but requests fail
-
-Run `just doctor` for a full environment check — it covers ports, config, and
-HTTP health probes in one pass.
-
-### Worker crashes on startup
-
-Crash output is visible directly in the terminal (no background process, no log
-files to hunt). Read the traceback, fix the issue, and run
-`just dev service start worker` again.
-
-### Docker Compose production stack fails to become healthy
+### Docker Compose stack fails to become healthy
 
 Check service logs: `docker compose -f service/docker-compose.prod.yml logs -f`.
 All services have healthchecks and `restart: unless-stopped` policies. Gateway
-and worker expose `/health` endpoints — probe them directly to isolate which
+and worker expose `/health` endpoints; probe them directly to isolate which
 service is unhealthy.
 
 ## Architecture
 
-- `src/vaultspec_a2a/` — Python package
-  - `api/` — FastAPI gateway (HTTP REST, WebSocket relay, worker spawn)
-  - `worker/` — LangGraph executor (agent graphs, checkpointing)
-  - `thread/`, `context/`, `team/`, `graph/`, `streaming/` — layered domain and orchestration packages
-  - `database/` — SQLAlchemy models, Alembic migrations
-  - `providers/` — LLM provider adapters (Claude/ACP, Gemini, OpenAI)
-  - `authoring/` — loopback client for the engine's authoring API (proposals)
-  - `lifecycle/` — machine-global service discovery and heartbeat
-  - `cli/` — the `vaultspec-a2a` operator CLI (thin client of the five-verb gateway)
-  - `control/` — service orchestration, health, config, and runtime support modules
+- `src/vaultspec_a2a/` - Python package
+  - `api/` - FastAPI gateway (HTTP REST, WebSocket relay, worker spawn)
+  - `worker/` - LangGraph executor (agent graphs, checkpointing)
+  - `thread/`, `context/`, `team/`, `graph/`, `streaming/` - layered domain and orchestration packages
+  - `database/` - SQLAlchemy models, Alembic migrations
+  - `providers/` - LLM provider adapters (Claude/ACP, Gemini, OpenAI)
+  - `authoring/` - loopback client for the engine's authoring API (proposals)
+  - `lifecycle/` - machine-global service discovery and heartbeat
+  - `cli/` - the `vaultspec-a2a` operator CLI (thin client of the five-verb gateway)
+  - `control/` - service orchestration, health, config, and runtime support modules
 
-A few load-bearing decisions shape the design: the operator CLI and the Justfile
-stay separate, so automation drives the same gateway edge a human does; the
-service lifecycle is container-first with a lightweight development shim; the
+A few load-bearing decisions shape the design: the operator CLI and the developer
+task tree stay separate, so automation drives the same gateway edge a human does;
+the service lifecycle is container-first with a lightweight development shim; the
 worker runs as its own process so agent execution is isolated from the gateway;
 and the whole stack ships as containers for reproducible deployment.
 

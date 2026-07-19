@@ -19,6 +19,7 @@ Discovery order for team configs:
 import re
 import tomllib
 from enum import StrEnum
+from importlib import resources
 from pathlib import Path
 
 from pydantic import BaseModel, Field, model_validator
@@ -110,9 +111,13 @@ class TopologyType(StrEnum):
     RESEARCH_ADR = "research_adr"
 
 
-# Bundled preset directories, relative to this file.
-_PRESET_AGENTS_DIR = Path(__file__).parent / "presets" / "agents"
-_PRESET_TEAMS_DIR = Path(__file__).parent / "presets" / "teams"
+# Bundled preset directories, resolved from the installed ``vaultspec_a2a.team``
+# package rather than a checkout-relative ``__file__`` path, so preset discovery
+# works from a clean installed wheel. Wheels install unzipped, so the resource
+# traversable is a real directory these ``Path`` operations can read.
+_PRESET_ROOT = Path(str(resources.files("vaultspec_a2a.team"))) / "presets"
+_PRESET_AGENTS_DIR = _PRESET_ROOT / "agents"
+_PRESET_TEAMS_DIR = _PRESET_ROOT / "teams"
 
 
 def discover_agent_preset_ids() -> frozenset[str]:

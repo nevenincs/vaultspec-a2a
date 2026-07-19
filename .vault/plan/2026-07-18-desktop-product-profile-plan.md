@@ -94,7 +94,7 @@ Move migrations, presets, Node.js adapter resolution, and component metadata beh
 
 - [x] `W01.P02.S06` - Declare migrations presets and desktop runtime metadata as explicit wheel package data; `pyproject.toml`.
 - [x] `W01.P02.S07` - Resolve Alembic configuration and migration scripts from installed package resources; `src/vaultspec_a2a/database/migrate.py`.
-- [ ] `W01.P02.S08` - Load bundled agent and team presets through package-owned resource paths; `src/vaultspec_a2a/team/team_config.py`.
+- [x] `W01.P02.S08` - Load bundled agent and team presets through package-owned resource paths; `src/vaultspec_a2a/team/team_config.py`.
 - [ ] `W01.P02.S09` - Resolve the default Node and ACP adapter only from capsule-owned assets in the desktop profile; `src/vaultspec_a2a/providers/factory.py`.
 - [ ] `W01.P02.S10` - Define the versioned desktop component manifest contract consumed by dashboard packaging; `schemas/desktop-capsule-manifest.json`.
 - [ ] `W01.P02.S11` - Emit pinned component identity target compatibility gateway and standalone MCP entrypoints digests assets licenses and dependency-lock identity; `src/vaultspec_a2a/desktop/manifest.py`.

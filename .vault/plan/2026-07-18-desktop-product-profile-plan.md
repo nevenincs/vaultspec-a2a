@@ -137,7 +137,7 @@ Keep ordinary desktop gateway boot non-mutating while exposing one package-local
 
 - [x] `W02.P05.S20` - Make ordinary desktop database checkpointer and SDD initialization validate compatibility without schema mutation; `src/vaultspec_a2a/database/`.
 - [x] `W02.P05.S21` - Validate the updater one-time descriptor owned state roots and compatible schema range before lifecycle mutation; `src/vaultspec_a2a/desktop/transaction.py`.
-- [ ] `W02.P05.S22` - Implement the staged-generation Alembic SDD-backfill and checkpoint migration entrypoint with bounded machine-readable results; `src/vaultspec_a2a/desktop/migration.py`.
+- [x] `W02.P05.S22` - Implement the staged-generation Alembic SDD-backfill and checkpoint migration entrypoint with bounded machine-readable results; `src/vaultspec_a2a/desktop/migration.py`.
 - [ ] `W02.P05.S23` - Expose the internal desktop migrate command while keeping lifecycle verbs off the public run-control API; `src/vaultspec_a2a/cli/main.py`.
 - [ ] `W02.P05.S24` - Run package-local migrations from a clean installed capsule and reject incompatible or live-store attempts; `src/vaultspec_a2a/desktop_tests/test_migration_entrypoint.py`.
 

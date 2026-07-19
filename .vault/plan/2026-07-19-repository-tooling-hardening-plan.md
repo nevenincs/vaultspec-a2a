@@ -93,7 +93,7 @@ Ship separated onboarding, how-to, reference, and explanation surfaces that matc
 
 Run real-behavior acceptance, review the implementation, and queue every finding.
 
-- [ ] `W04.P08.S12` - Run clone-to-CI acceptance, formal review, finding classification, audit queue updates, and execution summaries; `.vault/audit, .vault/exec`.
+- [x] `W04.P08.S12` - Run clone-to-CI acceptance, formal review, finding classification, audit queue updates, and execution summaries; `.vault/audit, .vault/exec`.
 
 ## Parallelization
 

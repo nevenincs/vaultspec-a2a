@@ -525,6 +525,140 @@ route sensitive reports to GitHub private vulnerability reporting. Status:
 verified enabled through the repository API on 2026-07-19; public issue forms
 also warn against submitting credentials or vulnerability details.
 
+### s12-core-adoption-overwrite-risk | critical | Forced adoption wrapper could overwrite concurrent edits
+
+Type: data-integrity and concurrency safety. The first clean-clone workaround
+used a byte-restoring wrapper around a forced Core install. Formal review found
+that it could restore stale bytes over edits made during the command and that
+the force flag was wider than the intended adoption boundary. Status: resolved.
+The wrapper was deleted. Forced adoption now runs only in a disposable clone,
+where its tracked projection must match the live repository byte-for-byte. The
+live workspace receives only absent runtime seeds through exclusive creation,
+then uses Core's non-destructive sync. An untracked `.mcp.json` makes first
+adoption fail before Core can touch the live workspace.
+
+### s12-rag-setup-regression | high | Public setup stopped enrolling the RAG workspace
+
+Type: architectural contract. An intermediate correction synchronized and
+reported RAG but no longer ran the installer, contradicting the accepted setup
+contract and published documentation. Status: resolved. Setup and install run
+the locked dependency-mode installer without MCP, external provisioning, or
+Torch configuration. Two successive fresh-clone runs converge without tracked
+drift or hook mutation.
+
+### s12-ambient-core-fallback | high | Workspace provisioning could escape the project lock
+
+Type: dependency authority. Product provisioning retained console-script and
+unversioned `uvx` fallbacks when Core was absent from the active environment.
+Status: resolved. Provisioning now invokes Core only as a module from the active
+environment and fails with an actionable locked-tooling instruction otherwise.
+Real subprocess tests exercise both the installed authority and the refusal.
+
+### s12-rag-version-authority | high | RAG upgrade and ACP acquisition could diverge
+
+Type: dependency authority. The upgrade recipe could refresh RAG independently
+of the exact runtime requirement embedded in ACP MCP composition. Status:
+resolved. Setup, install, and upgrade compare the installed distribution against
+the exact acquisition requirement before enrollment. Upgrade asks uv to resolve
+that source-pinned requirement instead of ambient newest, so a version change
+must update the ACP authority in the same reviewed change. The first fresh-clone
+run found a Windows quoting defect in this check; the shell-stable correction
+then passed with RAG 0.3.2, including the upgrade path.
+
+### s12-build-reproducibility | high | Package build and CI environment were incomplete or floating
+
+Type: build integrity. The first clean-clone gate lacked server and
+documentation dependencies required by Ty and package validation, while the
+isolated build backend was unconstrained. Status: resolved. CI synchronizes the
+locked server plus composed documentation/tooling environment, documentation
+commands use the lock, and package construction applies
+`build-constraints.txt` with Hatchling 1.31.0. The source distribution and wheel
+build successfully from the fresh clone.
+
+### s12-lifecycle-identifiers-in-code | high | Tests and docstrings embedded transient plan language
+
+Type: maintainability. Review found Step identifiers and architecture-process
+phrases in production-facing documentation and tests. Status: resolved. The
+comments now describe enduring behavior and contracts without lifecycle IDs.
+
+### s12-ci-documentation-drift | medium | Published dependency profile did not match the executable gate
+
+Type: documentation accuracy. An intermediate guide described tooling alone as
+the hosted profile and then overstated the corrected profile as including RAG
+and Torch. Status: resolved through the documentation pipeline. The README and
+development guide now name the exact server, documentation, and tooling
+selection and keep RAG and Torch optional.
+
+### s12-workflow-lint-authority | medium | Workflow lint is not project-pinned
+
+Type: validation reproducibility. The available `actionlint-py` 1.7.7.24 label
+inventory rejected a concurrently introduced `macos-15-intel` runner, while
+actionlint 1.7.12 accepts the current workflow corpus. Status: open and assigned
+to the repository-health queue. Pin a current workflow-lint authority in the
+project toolchain or select a runner label supported by the declared authority;
+do not make ambient availability the hosted contract.
+
+### s12-core-prek-regression-coverage | medium | Cross-tool convergence has no committed acceptance test
+
+Type: test coverage. Real clean-clone evidence proves two Core and RAG setup
+runs preserve `prek.toml`, avoid the legacy hook file, and leave the tracked
+tree unchanged. Existing hook tests do not automate that installed-tool
+boundary or the new enrollment helper's dirty-file rejection, projection-drift
+rejection, and exclusive-seed conflict paths. Status: open and assigned to the
+repository-tooling queue. Add non-mocked temporary-repository subprocess tests
+that install the locked tools and assert rejection safety, byte convergence,
+exclusive creation, and Git convergence.
+
+### s12-unix-build-clean-portability | medium | Artifact cleanup remains PowerShell-only
+
+Type: platform portability. Doctor has native Windows and Unix variants, but
+the public build-clean recipe still embeds a PowerShell implementation. Status:
+open and assigned to the repository-tooling queue. Add owner-equivalent Windows
+and Unix variants with the same resolved-path containment guard before claiming
+full Unix control-surface parity.
+
+### s12-runtime-ignore-ownership | medium | RAG runtime surfaces remain outside Core's managed policy
+
+Type: generated-state ownership. Fresh setup exposes `.vaultspec/runtime/` and
+`.qdrant-initialized`, while Core owns the framework ignore block and does not
+currently list them. Status: open and assigned first to the Core/RAG integration
+queue. Decide whether Core should own these exact runtime entries before adding
+any repository fallback, preserving the single-writer boundary.
+
+### s12-unit-contract-failures | high | Full unit selection exposes 15 product-contract failures
+
+Type: product correctness and test drift. The clean-clone unit gate selected
+2,141 tests; 2,126 passed and 15 failed across gateway preset truthfulness, the
+real synchronized rule corpus, redispatch failure-ladder deduplication, MCP
+preset availability, ACP capsule resolution, Codex config-home behavior, thread
+error exports, and thread feedback state. Status: open and assigned to the
+accepted codebase-health plan and the relevant desktop, context, control,
+provider, protocol, and thread owner queues. The tooling gate preserves these
+failures without skips, fakes, mocks, or weakened selection.
+
+### s12-legacy-precommit-lock | low | Existing checkouts can expose an obsolete zero-byte lock
+
+Type: migration residue. Replacing `.pre-commit-config.yaml` with `prek.toml`
+correctly removed the legacy lock entry from Core's managed ignore block, so an
+old checkout can expose `.pre-commit-config.yaml.lock`. Status: open for local
+cleanup guidance. The observed file is zero bytes and runtime-only; it must not
+be reintroduced into a competing repository-owned ignore policy.
+
+### s12-core-precommit-warning | low | Repeated Core setup reports an unknown PrecommitSignal member
+
+Type: upstream diagnostics. A second Core setup can emit
+`Unknown PrecommitSignal member: unrefreshable` while returning success and
+converging byte-for-byte. Status: open upstream observation; retain as a warning
+until Core either recognizes or removes the signal.
+
+### s12-linux-docker-engine | low | Live Unix Docker acceptance was environmentally blocked
+
+Type: acceptance environment. Docker CLI and Compose discovery pass, as do dev,
+integration, infrastructure, production, and database configuration resolution.
+The available Docker Desktop engine returned HTTP 500 for the Linux-engine
+request, preventing a live Unix container run. Status: open operational
+evidence, not a repository defect. Repeat on a healthy Unix Docker host.
+
 ## Recommendations
 
 No open task remains for S01, S02, or the S03 implementation. Preserve the two
@@ -566,10 +700,22 @@ formatter drift is resolved, exercise the organization-owned runner path, and
 decide whether repository policy should require SHA-pinned Actions globally.
 
 Preserve S11's platform-specific doctor variants as one public command contract.
-Exercise the Unix branch on a real Unix host during S12 before declaring the
-clone-to-CI portability matrix complete.
+Exercise the Unix branch and build-clean parity on a healthy Unix Docker host
+before declaring the full portability matrix complete.
 
 Preserve S11's separated onboarding, contributor, operator, architecture,
 glossary, security, and contribution surfaces. Keep issue-form taxonomies and
 labels aligned with live repository configuration, and repeat the private
 reporting API check during security-policy changes.
+
+Preserve the accepted Core/Prek boundary: forced Core adoption remains isolated
+to a disposable clone, its tracked projection must match byte-for-byte, runtime
+seeds use exclusive creation, and `prek.toml` remains repository-owned. Preserve
+the RAG authority check whenever either the project constraint or the ACP
+runtime requirement changes.
+
+Do not hide the 15 product-contract failures behind selection changes. Resolve
+them through the accepted codebase-health plan and their owning feature audits,
+then rerun the exact 2,141-test selection. Add the clean-clone Core/Prek/RAG
+convergence test and a pinned workflow-lint authority as repository-tooling
+follow-up work.

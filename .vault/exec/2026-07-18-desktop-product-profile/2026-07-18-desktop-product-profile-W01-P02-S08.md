@@ -32,11 +32,11 @@ The bundled preset directories now resolve from the installed
 `load_team_config` are byte-for-byte unchanged; only the root authority moved.
 
 The two-level workspace-then-bundled discovery order is preserved, and the
-`mock-` preset marking through `is_mock_preset` is untouched: discovery still
-globs and returns every bundled preset, including the mock ids, and the product
-layer filters them at selection time. A probe confirmed 12 team presets and 16
-agent presets discovered from the source tree, the mock ids present, and a real
-preset still loading.
+`mock-` preset marking through `is_mock_preset` is untouched. Source and Compose
+discovery still see the repository's wider certification inventory. The desktop
+product inventory is instead curated by the S06 wheel exclusions, so its clean
+installation contains only the production resources that this package-owned
+seam discovers.
 
 ## Tests
 
@@ -45,6 +45,11 @@ preset still loading.
 - A discovery probe confirmed the resolved teams directory is a real directory,
   12 team and 16 agent presets are discovered, `mock-success-single` is present,
   and `load_team_config("vaultspec-solo-coder")` resolves.
+- Independent review installed the clean S06 wheel into isolated CPython 3.13
+  and confirmed the resource root is under `site-packages`, exactly nine agent
+  and two team production presets are discovered, no mock or deterministic
+  certification id is present, a real workspace override wins, and a missing
+  preset raises `TeamConfigNotFoundError`.
 - `uv run --no-sync pytest src/vaultspec_a2a/desktop_tests -q` reported 5 passed,
   keeping the S05 dependency-closure gate green.
 - Ruff check and format, and scoped `ty check`, passed for the changed module.
@@ -53,5 +58,6 @@ preset still loading.
 
 Wheels install unzipped, so the resource traversable is a real filesystem
 directory that the existing `Path` operations read without change. No discovery
-semantics, workspace-override precedence, or mock marking was altered. No mock,
+semantics, workspace-override precedence, or mock marking was altered. S12 owns
+the persistent clean-installed artifact assertion for this inventory. No mock,
 stub, patch, or skip was introduced.

@@ -7,12 +7,12 @@ compiled.
 
 Discovery order for agent configs:
     1. {workspace_root}/.vaultspec/agents/{agent_id}.toml   (workspace override)
-    2. src/vaultspec_a2a/team/presets/agents/{agent_id}.toml  (bundled default)
+    2. vaultspec_a2a.team/presets/agents/{agent_id}.toml    (bundled resource)
     3. Raise AgentConfigNotFoundError
 
 Discovery order for team configs:
     1. {workspace_root}/.vaultspec/teams/{team_id}.toml     (workspace override)
-    2. src/vaultspec_a2a/team/presets/teams/{team_id}.toml  (bundled default)
+    2. vaultspec_a2a.team/presets/teams/{team_id}.toml      (bundled resource)
     3. Raise TeamConfigNotFoundError
 """
 
@@ -123,8 +123,8 @@ _PRESET_TEAMS_DIR = _PRESET_ROOT / "teams"
 def discover_agent_preset_ids() -> frozenset[str]:
     """Discover available agent preset IDs by globbing the bundled TOML directory.
 
-    Returns a frozenset of TOML file stems from
-    ``src/vaultspec_a2a/team/presets/agents/*.toml``.
+    Returns a frozenset of TOML file stems from the installed
+    ``vaultspec_a2a.team/presets/agents`` package resource.
     If the directory does not exist or is empty, returns an empty frozenset.
     """
     if _PRESET_AGENTS_DIR.is_dir():
@@ -137,8 +137,8 @@ def discover_team_preset_ids(workspace_root: Path | None = None) -> frozenset[st
 
     Returns the union of TOML file stems from
     ``{workspace_root}/.vaultspec/teams/*.toml`` (when a workspace is given and
-    the directory exists) and the bundled
-    ``src/vaultspec_a2a/team/presets/teams/*.toml``. Discovery is a superset of
+    the directory exists) and the installed
+    ``vaultspec_a2a.team/presets/teams`` package resource. Discovery is a superset of
     what ``load_team_config`` can resolve, so a workspace-local preset is listed
     even though it shadows or extends the bundled set. Returns an empty frozenset
     when no directory exists.
@@ -154,10 +154,11 @@ def discover_team_preset_ids(workspace_root: Path | None = None) -> frozenset[st
 
 
 def is_mock_preset(preset_id: str) -> bool:
-    """Return True for bundled mock/test presets the product layer excludes.
+    """Return whether a preset id follows the source-side mock convention.
 
-    Mock presets follow the ``mock-`` id convention; the marking lets the Rust
-    product layer filter test fixtures out of user-facing preset selection.
+    Source and Compose discovery may include these certification presets. The
+    desktop product wheel excludes them at packaging time; this helper remains
+    useful to source-side callers that need to label the wider inventory.
     """
     return preset_id.startswith("mock-")
 

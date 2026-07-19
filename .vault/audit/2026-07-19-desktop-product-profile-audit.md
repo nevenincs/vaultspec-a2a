@@ -246,3 +246,27 @@ PostgreSQL configuration round trips, and concurrent upgrades of two distinct
 databases. Ruff, formatting, and scoped type checking pass. The tests import
 production code and exercise real package resources and databases without
 fakes, mocks, stubs, patches, skips, or mirrored migration logic.
+
+## `W01 P02 S08` package-owned preset review
+
+Status: PASS
+
+The preset-loading seam now derives bundled agent and team directories from the
+installed `vaultspec_a2a.team` package resource. Workspace overrides retain
+their precedence, and source and Compose profiles retain their wider preset
+inventory. Desktop product curation remains the S06 packaging authority; no
+dashboard-side preset filter exists or is required for the clean capsule.
+
+Independent review installed the clean S06 wheel into isolated CPython 3.13.
+The resource authority resolved beneath `site-packages`; discovery returned
+exactly nine production agent presets and two production team presets, no mock
+or deterministic certification id, and real workspace override and missing-id
+behavior remained correct. All 120 team tests, Ruff, formatting, and scoped
+type checking pass.
+
+The original Step Record incorrectly said a product-layer selection filter
+removed source-side mock ids. The record and module documentation now state the
+actual boundary: the desktop wheel excludes certification resources, while the
+loader reads whatever valid inventory its installed package contains. S12 must
+retain this clean-installed inventory proof. No unresolved critical, high, or
+medium issue remains.

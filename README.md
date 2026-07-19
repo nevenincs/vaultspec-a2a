@@ -1,31 +1,104 @@
-# Vaultspec A2A Agent Orchestration
+# vaultspec-a2a
 
+Headless agent-to-agent orchestration.
+
+[![Tests](https://github.com/nevenincs/vaultspec-a2a/actions/workflows/test.yml/badge.svg)](https://github.com/nevenincs/vaultspec-a2a/actions/workflows/test.yml)
 [![Python 3.13+](https://img.shields.io/badge/python-3.13%2B-blue.svg)](https://www.python.org/)
-[![Status: Early](https://img.shields.io/badge/status-early-orange.svg)](#status)
+[![Status: Beta](https://img.shields.io/badge/status-beta-blue.svg)](#status-and-license)
 
-Headless A2A orchestration sibling for the
-[vaultspec](https://github.com/nevenincs/vaultspec-core) agentic coding
-workflow. Provides team-based and subagent-based task dispatch across Claude,
-Gemini, and Codex agents via a gateway/worker architecture.
+[What it does](#what-it-does) ·
+[Getting started](#getting-started) ·
+[Capabilities](#capabilities) ·
+[Family](#the-vaultspec-family) ·
+[Documentation](#documentation) ·
+[Operating & development](#operating-and-development-reference)
 
-A2A is headless: it ships no bundled UI. The dashboard engine fronts it across a
-loopback HTTP edge (a versioned five-verb surface), and every document an agent
-produces becomes a human-reviewed proposal in the engine's review lane through
-the authoring API — agents never write to the vault directly.
+## What it does
+
+vaultspec-a2a is the headless orchestration layer of the vaultspec family. It
+dispatches agent work across Claude, Gemini, and Codex through a gateway/worker
+architecture, and it fronts that work behind a versioned loopback HTTP edge so a
+UI (the dashboard) or an engine can drive it without embedding it.
+
+It ships no bundled UI. Every document an agent produces becomes a human-reviewed
+proposal in the review lane through the authoring API — agents never write to the
+vault directly.
 
 Two modes:
 
-- **Team mode:** A self-orchestrating team (supervisor + coders) works
+- **Team mode** — a self-orchestrating team (supervisor + coders) works
   concurrently against a task. Preferred for parallelized, long-horizon coding
   work.
-- **Subagent mode:** A single agent performs a task on behalf of a client
+- **Subagent mode** — a single agent performs a task on behalf of a client
   application (Claude Code, Gemini CLI, Antigravity). Preferred for
   non-parallelized, sequential handoffs.
 
-## Status
+## Getting started
 
-Early and still taking shape: interfaces, presets, and deployment surfaces
-change without notice. The rest of this README is developer-facing.
+Requires Python 3.13+ and [uv](https://docs.astral.sh/uv/). vaultspec-a2a is not
+yet published to a package index; install it from source or run the production
+Docker stack. (PyPI publication is planned now that the vaultspec-core dependency
+is pinned to a released version.)
+
+**From source:**
+
+```bash
+git clone https://github.com/nevenincs/vaultspec-a2a
+cd vaultspec-a2a
+just dev deps install
+cp service/.env.example .env
+# Set at least one provider key: ANTHROPIC_API_KEY, GEMINI_API_KEY, or OPENAI_API_KEY
+```
+
+Start the gateway and worker (each runs in the foreground, in its own terminal),
+then verify:
+
+```bash
+just dev service start gateway   # terminal 1 — port 8000
+just dev service start worker    # terminal 2 — port 8001
+just doctor
+```
+
+Start a run and follow it (list preset ids with `vaultspec-a2a presets`):
+
+```bash
+vaultspec-a2a run start --preset <preset-id> --message "Create a hello world module"
+vaultspec-a2a run status <run_id>
+```
+
+**With Docker (production stack):**
+
+```bash
+docker compose -f service/docker-compose.prod.yml up -d
+```
+
+**Optional extras:** `uv sync --extra server` adds the Postgres driver,
+checkpoint saver, and OTLP exporter for a production install; `uv sync --extra
+rag` adds the `vaultspec-rag` semantic-search bridge and its Torch dependency.
+
+## Capabilities
+
+| Capability | Detail |
+| ---------- | ------ |
+| Gateway edge | A versioned `/v1` HTTP surface (service-state, presets, run start/status/cancel) that operator and engine share — one code path, no divergence. |
+| Team mode | Self-orchestrating supervisor + coder team for parallel, long-horizon work. |
+| Subagent mode | A single agent serving one client application for sequential handoffs. |
+| Providers | Claude (ACP), Gemini, and OpenAI/Codex adapters. |
+| Review lane | Agent outputs become human-reviewed proposals via the authoring API; agents never write the vault directly. |
+| Operator CLI | `vaultspec-a2a` — a thin client of the gateway: `serve`, `doctor`, `presets`, `run`, `workspace`, and the `procs` dev registry. |
+
+## The vaultspec family
+
+vaultspec-a2a is one project in a family built around one shared vault:
+
+- [vaultspec-core](https://github.com/nevenincs/vaultspec-core) — The agent
+  harness: the pipeline, the vault, and the CLI that drives them. **(Beta)**
+- [vaultspec-rag](https://github.com/nevenincs/vaultspec-rag) — The semantic
+  search component for vault and code. **(Beta)**
+- [vaultspec-dashboard](https://github.com/nevenincs/vaultspec-dashboard) — The
+  application that runs it all as a UI. **(Beta)**
+- **vaultspec-a2a** — Headless agent-to-agent orchestration. **(Beta)** — this
+  project.
 
 ## Documentation
 
@@ -35,75 +108,27 @@ change without notice. The rest of this README is developer-facing.
 - [Python module reference](docs/api/modules.rst)
 - [Edge conformance mapping](docs/a2a-edge-conformance-verb-mapping.md)
 
-These pages describe current package ownership without relying on manually
-counted modules or components.
+## Status and license
 
-## Quickstart
+**Beta.** Interfaces, presets, and deployment surfaces are still taking shape and
+may change without notice. The project is usable and under active development;
+support is best-effort.
 
-Clone and install dependencies:
+License: not yet declared. The distribution carries no SPDX license in its
+metadata pending an owner decision.
 
-```bash
-git clone <repo-url>
-cd vaultspec-a2a
-just dev deps install
-```
+---
 
-Copy and edit the environment file (`.env.example` lives under `service/`):
+The rest of this document is an operator and contributor reference for running,
+developing, and deploying vaultspec-a2a.
 
-```bash
-cp service/.env.example .env
-# Set at least one provider key: ANTHROPIC_API_KEY, GEMINI_API_KEY, or OPENAI_API_KEY
-```
+## Operating and development reference
 
-Start services (each command runs in the foreground — use a separate terminal
-for each):
+vaultspec-a2a runs as two foreground services — a gateway and a worker — either
+directly during development or as a Docker Compose stack in production. The
+sections below cover both.
 
-```bash
-just dev service start gateway   # terminal 1 — port 8000
-just dev service start worker    # terminal 2 — port 8001
-```
-
-Verify services are healthy:
-
-```bash
-just doctor
-```
-
-Start a run and follow its progress (list preset ids with
-`vaultspec-a2a presets`):
-
-```bash
-vaultspec-a2a run start --preset <preset-id> --message "Create a hello world module"
-vaultspec-a2a run status <run_id>
-```
-
-## Production Deployment
-
-Docker Compose is the production deployment unit; the Compose files live under
-`service/`:
-
-```bash
-docker compose -f service/docker-compose.prod.yml up -d
-```
-
-This starts gateway and worker with Docker healthchecks, `restart:
-unless-stopped` policies, dependency ordering, and Jaeger distributed tracing.
-Log aggregation: `docker compose -f service/docker-compose.prod.yml logs -f`.
-
-See `service/.env.example` for all environment variables. The only mandatory
-config for a working stack is one provider API key, and
-`service/docker-compose.prod.yml` picks up `.env` automatically.
-
-For a source (non-Docker) production install, pull in the `server` extra so the
-Postgres driver and OTLP exporter are present:
-
-```bash
-uv sync --extra server
-```
-
-## Development Workflow
-
-### Service Management
+## Running services
 
 All services run in the foreground. Each requires its own terminal. There is no
 background daemon or PID registry.
@@ -143,7 +168,21 @@ just dev service db restore --name FILE
 just dev service db clear --yes
 ```
 
-### Pre-flight: Doctor
+For production, Docker Compose is the deployment unit; the Compose files live
+under `service/`:
+
+```bash
+docker compose -f service/docker-compose.prod.yml up -d
+```
+
+This starts gateway and worker with Docker healthchecks, `restart:
+unless-stopped` policies, dependency ordering, and Jaeger distributed tracing.
+Log aggregation: `docker compose -f service/docker-compose.prod.yml logs -f`.
+See `service/.env.example` for all environment variables; the only mandatory
+config for a working stack is one provider API key, and
+`service/docker-compose.prod.yml` picks up `.env` automatically.
+
+### Pre-flight: doctor
 
 Run before starting services to catch configuration and port problems before
 they become confusing startup failures:
@@ -158,7 +197,7 @@ just doctor services     # HTTP probe to /health endpoints
 If a port is occupied, `just doctor ports` shows the occupying PID and process
 name and suggests a fix command.
 
-### Code Quality
+### Code quality
 
 ```bash
 just dev code check [target]    # read-only lint + type check
@@ -182,7 +221,7 @@ just dev test all                       # full suite
 
 Live and smoke tests require a running gateway and worker. Mocks are not used.
 
-### Build Artifacts
+### Build artifacts
 
 ```bash
 just dev build package       # Python sdist + wheel
@@ -191,7 +230,7 @@ just dev build docker-prod   # production multi-stage image
 just dev build clean         # remove dist/, egg-info, __pycache__
 ```
 
-### Dependency Management
+### Dependency management
 
 ```bash
 just dev deps install    # full bootstrap: uv sync + npm install
@@ -200,7 +239,7 @@ just dev deps upgrade    # upgrade all dependencies
 just dev deps lock       # regenerate lockfile
 ```
 
-## Operator CLI Reference
+## Operator CLI reference
 
 `vaultspec-a2a` is the operator CLI. It is a thin client of the gateway's
 versioned `/v1` edge: every command except `serve` is a plain HTTP call to a
@@ -260,13 +299,11 @@ vaultspec-a2a procs reap                 # kill and clear every stale or dead re
 vaultspec-a2a procs allocate ROLE        # reserve and print the next free band port for ROLE
 ```
 
-### Global options
-
 The command group itself exposes only `--version`/`-V` (print the installed
 version and exit) and `--help`. Logging and gateway-target options are
 per-command (`--url`).
 
-## Port Layout
+## Port layout
 
 Default port assignments. All ports are overridable via environment variables.
 In Docker, only the host side of port mappings changes — container-internal
@@ -287,7 +324,7 @@ Auto-derived URLs (no explicit config needed):
 - `VAULTSPEC_GATEWAY_URL` derives from `VAULTSPEC_HOST` + `VAULTSPEC_PORT`
 - `VAULTSPEC_WORKER_URL` derives from `VAULTSPEC_WORKER_HOST` + `VAULTSPEC_WORKER_PORT`
 
-## Database Backends
+## Database backends
 
 SQLite is the local and development default. No configuration needed. The only
 required config is one LLM provider key.
@@ -343,8 +380,8 @@ files to hunt). Read the traceback, fix the issue, and run
 
 ### Docker Compose production stack fails to become healthy
 
-Check service logs: `docker compose -f docker-compose.prod.yml logs -f`. All
-services have healthchecks and `restart: unless-stopped` policies. Gateway
+Check service logs: `docker compose -f service/docker-compose.prod.yml logs -f`.
+All services have healthchecks and `restart: unless-stopped` policies. Gateway
 and worker expose `/health` endpoints — probe them directly to isolate which
 service is unhealthy.
 
@@ -360,32 +397,16 @@ service is unhealthy.
   - `lifecycle/` — machine-global service discovery and heartbeat
   - `cli/` — the `vaultspec-a2a` operator CLI (thin client of the five-verb gateway)
   - `control/` — service orchestration, health, config, and runtime support modules
-- `.vault/adr/` — Architecture Decision Records (binding)
-- `knowledge/` — implementation notes and repository snippets
 
-Key ADRs:
-
-- ADR-038: Control layer — CLI/Justfile separation
-- ADR-039: Service lifecycle architecture — container-first with dev shim
-- ADR-031: Worker process architecture
-- ADR-017: Containerization strategy
+A few load-bearing decisions shape the design: the operator CLI and the Justfile
+stay separate, so automation drives the same gateway edge a human does; the
+service lifecycle is container-first with a lightweight development shim; the
+worker runs as its own process so agent execution is isolated from the gateway;
+and the whole stack ships as containers for reproducible deployment.
 
 ## References
 
-- Project ADRs: `.vault/adr/`
-- Knowledge base: `knowledge/`
-- Environment variables: `.env.example`
-- IDE setup (MCP configuration for Cursor/Claude/Windsurf): `.vault/reference/2026-03-31-ide-mcp-server-setup-reference.md`
-
-## The vaultspec family
-
-vaultspec-a2a is the orchestration layer of the vaultspec family - a set of
-tools built around one shared vault:
-
-- [vaultspec-core](https://github.com/nevenincs/vaultspec-core) - the hub: the
-  `Research → Decide → Plan → Code → Review` pipeline, the git-tracked
-  Markdown vault, and the CLI that drives them.
-- [vaultspec-rag](https://github.com/nevenincs/vaultspec-rag) - semantic
-  search across the vault and the codebase.
-- vaultspec-dashboard - a visual companion for vault health, decision graphs,
-  and search activity. In development.
+- Environment variables: `service/.env.example`
+- Editor MCP setup (Cursor, Claude, Windsurf): point your editor's MCP client at
+  the `vaultspec-a2a-mcp` console script, or at the MCP server on port 8200 (see
+  [Port layout](#port-layout)).

@@ -288,6 +288,110 @@ def _validate_relative_name(value: str) -> bytes:
     return os.fsencode(value)
 
 
+@contextmanager
+def claim_new_directory(
+    authority: DirectoryAuthority,
+    name: str,
+) -> Iterator[DirectoryAuthority]:
+    """Require an absent child name, then lease its current empty directory.
+
+    Creation is atomic and refuses replacement, but portable POSIX ``mkdir`` does
+    not return a descriptor. A same-user actor can therefore substitute another
+    child before the no-follow lease is acquired. This function intentionally
+    claims only that the leased authority is the current child, not that its inode
+    is necessarily the inode created by ``mkdir``. It verifies that current child
+    is empty before yielding and continuously holds its exact authority afterward.
+
+    The caller retains exclusive mutation authority over the leased parent. A
+    pre-lease substitution poisons only the caller-owned unpublished generation;
+    failure never cleans or publishes any name, and the enclosing transaction must
+    discard the whole unreceipted generation.
+    """
+    _validate_relative_name(name)
+    assert_directory_authority(authority)
+    child_path = authority.path / name
+
+    if os.name == "nt":
+        if authority.native_handle is None or authority.dir_fd is not None:
+            raise OSError(errno.EBADF, "Windows parent authority is not leased")
+        child_path.mkdir(mode=0o700)
+        child_authority = resolve_directory_authority(child_path)
+        with _windows_directory_lease(
+            child_authority,
+            publication=False,
+        ) as child_lease:
+            assert_directory_authority(authority)
+            assert_empty_directory_authority(child_lease)
+            yield child_lease
+            assert_directory_authority(authority)
+        return
+
+    if authority.dir_fd is None or authority.native_handle is not None:
+        raise OSError(errno.EBADF, "POSIX parent authority is not leased")
+    if not hasattr(os, "O_DIRECTORY") or not hasattr(os, "O_NOFOLLOW"):
+        raise OSError(
+            errno.ENOSYS,
+            "POSIX directory claims require O_DIRECTORY and O_NOFOLLOW",
+        )
+
+    os.mkdir(name, mode=0o700, dir_fd=authority.dir_fd)
+    flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+    flags |= getattr(os, "O_CLOEXEC", 0)
+    descriptor = os.open(name, flags, dir_fd=authority.dir_fd)
+    try:
+        opened = os.fstat(descriptor)
+        named = os.stat(name, dir_fd=authority.dir_fd, follow_symlinks=False)
+        identity = (opened.st_dev, opened.st_ino)
+        if (
+            not stat.S_ISDIR(opened.st_mode)
+            or not stat.S_ISDIR(named.st_mode)
+            or identity != (named.st_dev, named.st_ino)
+        ):
+            raise OSError(
+                errno.ESTALE,
+                "current POSIX child changed while acquiring its lease",
+                child_path,
+            )
+        child_lease = DirectoryAuthority(
+            path=child_path,
+            identity=identity,
+            dir_fd=descriptor,
+        )
+        assert_directory_authority(authority)
+        assert_empty_directory_authority(child_lease)
+        yield child_lease
+        assert_directory_authority(child_lease)
+        assert_directory_authority(authority)
+    finally:
+        os.close(descriptor)
+
+
+def assert_empty_directory_authority(authority: DirectoryAuthority) -> None:
+    """Require one leased directory authority to be empty without mutation.
+
+    POSIX enumerates the exact held directory descriptor. Windows revalidates
+    the held non-delete-shared identity and its path immediately around pathname
+    enumeration. The caller's exclusive-mutation precondition remains in force.
+    """
+    assert_directory_authority(authority)
+    if authority.dir_fd is not None:
+        with os.scandir(authority.dir_fd) as entries:
+            occupied = next(entries, None) is not None
+        assert_directory_authority(authority)
+    elif os.name == "nt" and authority.native_handle is not None:
+        with os.scandir(authority.path) as entries:
+            occupied = next(entries, None) is not None
+        assert_directory_authority(authority)
+    else:
+        raise OSError(errno.EBADF, "directory authority is not leased")
+    if occupied:
+        raise OSError(
+            errno.ENOTEMPTY,
+            "unpublished generation directory is not empty",
+            authority.path,
+        )
+
+
 def create_private_file(authority: DirectoryAuthority, name: str) -> BinaryIO:
     """Atomically claim one private regular-file slot beneath *authority*.
 

@@ -120,7 +120,7 @@ Produce reproducible component artifacts for each accepted target triple with di
 - [ ] `W01.P03.S94` - Project archive payloads directly into one exclusively claimed prefix of a caller-owned unpublished generation through continuously leased descriptor or handle authority and return deterministic evidence without inner rename or cleanup; `src/vaultspec_a2a/desktop/capsule.py`.
 - [ ] `W01.P03.S95` - Write deterministic capsule archives through one exact create-new file inside a caller-owned unpublished generation while sharing the bounded emitter and retaining fail-closed legacy publication behavior; `src/vaultspec_a2a/desktop/capsule_evidence.py`.
 - [ ] `W01.P03.S96` - Prove direct-generation projection and archive writing with real files and competing processes including collisions source and parent swaps partial failure evidence bounds and unchanged POSIX legacy-publication refusal; `src/vaultspec_a2a/desktop/tests/test_unpublished_generation.py`.
-- [ ] `W01.P03.S97` - Claim and continuously lease one new child directory beneath an existing authority with relative no-follow creation and exact identity checks on every supported platform; `src/vaultspec_a2a/desktop/_filesystem_authority.py`.
+- [x] `W01.P03.S97` - Atomically require one absent child name then acquire and continuously retain a no-follow exact lease of the current empty child before any write while leaving every failed or pre-lease-substituted unpublished generation inert for complete verification instead of cleanup or publication; `src/vaultspec_a2a/desktop/_filesystem_authority.py`.
 
 ## Wave `W02` - establish transactional desktop state
 

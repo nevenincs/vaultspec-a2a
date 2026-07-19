@@ -1134,3 +1134,38 @@ from it. Target-native macOS and Linux evidence, Intel macOS cryptography,
 Windows C runtime redistribution and servicing provenance, qualified ACP and
 Anthropic SDK redistribution authority, and the immutable five-target cohort
 remain independent blockers.
+
+## `W01.P03.S97` unpublished child-authority review
+
+Status: PASS AFTER REVISION.
+
+The first S97 review rejected an impossible identity claim. POSIX `mkdirat`
+does not return a descriptor, and a real `renameat2(RENAME_EXCHANGE)` probe
+proved that a prepared directory could replace the newly created child before
+`openat`; matching the opened descriptor to the current name did not prove it
+was the inode created by that invocation. The plan and implementation now state
+the achievable product invariant instead of hiding that gap.
+
+The accepted primitive atomically requires an absent child name, acquires a
+no-follow lease of the current child before any write, requires that exact
+leased child to be empty, and performs no cleanup or publication on failure.
+POSIX enumerates the held descriptor directly. Windows brackets enumeration
+with held-handle and named-path identity validation. A pre-lease substitution
+can only poison an unpublished generation; it cannot select one. Complete
+generation verification and the dashboard's active receipt remain the sole
+visibility boundary.
+
+Independent re-review found no critical, high, or medium finding. Windows
+reported six focused passes and WSL CPython 3.13 reported ten focused and
+POSIX-regression passes. Ruff, Ty, formatting, and the production-importing
+real-file/process test policy passed. The reviewed hashes are
+``6B5ED61237001BFE127B67153C7644F12C037B37FF8A07EE159E2C13C2A7A245``
+for `_filesystem_authority.py` and
+``5626ACB0AD81929D47185A6B111AFABA7F270B3B7AED342EA948BA2BD0932E5F``
+for `test_unpublished_generation.py`.
+
+This closes only S97. S94 must keep writes under the leased authority; S96 must
+exercise the complete competing-process and substitution matrix; S14 must
+verify the full generation; dashboard receipt-bound installed-byte verification
+must pass before activation. Target-native and legal/provenance blockers remain
+unchanged, and no release is authorized.

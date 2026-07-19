@@ -3,7 +3,7 @@ tags:
   - '#plan'
   - '#desktop-product-profile'
 date: '2026-07-18'
-modified: '2026-07-19'
+modified: '2026-07-20'
 tier: L3
 related:
   - '[[2026-07-18-desktop-product-profile-adr]]'
@@ -238,7 +238,7 @@ ahead of the integrated real-descendant proof.
 
 Require worker and provider eligibility before durable run creation or actor-token acceptance, and keep standalone MCP outside the desktop lifecycle tree.
 
-- [ ] `W04.P12.S63` - Define prepare and commit variants bounded required-role output reservation identity lease identity and terminal settlement under run-start; `src/vaultspec_a2a/api/schemas/gateway.py`.
+- [x] `W04.P12.S63` - Define prepare and commit variants bounded required-role output reservation identity lease identity and terminal settlement under run-start; `src/vaultspec_a2a/api/schemas/gateway.py`.
 - [ ] `W04.P12.S64` - Implement hard-bounded expiring prepare reservations that validate required roles capacity worker startup and provider readiness without run-owned children or durable runs; `src/vaultspec_a2a/control/admission.py`.
 - [ ] `W04.P12.S65` - Implement prepare and commit through the existing POST /v1/runs verb without durable state before commit; `src/vaultspec_a2a/api/routes/gateway.py`.
 - [ ] `W04.P12.S66` - Evaluate worker and provider eligibility before accepting actor tokens or creating a run; `src/vaultspec_a2a/control/run_start_policy.py`.

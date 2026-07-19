@@ -3,7 +3,9 @@
 Real filesystem, no mocks: the module reads and writes real ``.mcp.json`` files.
 Bridge specs come through the production builder seam
 (``build_authoring_stdio_mcp_servers``), so the projected file is asserted against
-the same shape the isolated home admits.
+the same shape the isolated home admits. Covers the marked-entry MERGE model: a
+run's declared surface is added ALONGSIDE a project's own ``.mcp.json`` and cleanup
+removes exactly what it added, restoring the pre-merge state.
 """
 
 from __future__ import annotations
@@ -70,7 +72,11 @@ def _write_mcp(directory: Path, names: list[str]) -> None:
     )
 
 
-# --- ancestor enumeration -------------------------------------------------
+def _read(path: Path) -> dict:
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+# --- ancestor enumeration (unchanged upstream deny composition) ------------
 
 
 def test_enumerate_ancestor_walks_every_level_to_root(tmp_path: Path) -> None:
@@ -82,7 +88,6 @@ def test_enumerate_ancestor_walks_every_level_to_root(tmp_path: Path) -> None:
     _write_mcp(a, ["a-srv"])
     _write_mcp(c, ["c-srv"])
     names = enumerate_ancestor_mcp_names(c)
-    # Union across the cwd and every ancestor to the filesystem root (b has none).
     assert {"root-srv", "a-srv", "c-srv"} <= set(names)
     assert names == sorted(names)
 
@@ -91,24 +96,37 @@ def test_enumerate_ancestor_best_effort(tmp_path: Path) -> None:
     assert enumerate_ancestor_mcp_names(None) == []
     d = tmp_path / "empty"
     d.mkdir()
-    # No .mcp.json anywhere under tmp_path's created dirs contributes names.
     (tmp_path / ".mcp.json").write_text("{not json", encoding="utf-8")
-    # Malformed ancestor file contributes nothing rather than raising.
     assert "root-srv" not in enumerate_ancestor_mcp_names(d)
 
 
-# --- projection write -----------------------------------------------------
+def test_deny_set_is_ancestor_enumeration_minus_declared(tmp_path: Path) -> None:
+    _write_mcp(tmp_path, ["foreign-srv", "vaultspec-rag"])
+    run_ws = tmp_path / "run"
+    run_ws.mkdir()
+    declared = set(projected_declared_names([_rag_spec()]))
+    enumerated = set(enumerate_ancestor_mcp_names(run_ws))
+    deny = enumerated - declared
+    assert "foreign-srv" in deny
+    assert "vaultspec-rag" not in deny  # declared -> surfaced, never denied
 
 
-def test_project_writes_declared_with_marker_and_placeholders(tmp_path: Path) -> None:
+# --- absent file: create then remove ---------------------------------------
+
+
+def test_project_creates_absent_file_with_entry_marker_and_placeholders(
+    tmp_path: Path,
+) -> None:
     specs = [_rag_spec(), *_bridge_specs(bearer="SECRET-BEARER", actor="SECRET-ACTOR")]
     path = project_declared_mcp(tmp_path, specs)
     assert path == tmp_path / ".mcp.json"
-    content = json.loads(path.read_text(encoding="utf-8"))
-    assert content[PROJECTION_MARKER_KEY] is True
-    servers = content["mcpServers"]
-    # Declared harness server + the authoring bridge, nothing else.
-    assert set(servers) == {"vaultspec-rag", "vaultspec-authoring"}
+    content = _read(path)
+    assert set(content["mcpServers"]) == {"vaultspec-rag", "vaultspec-authoring"}
+    marker = content[PROJECTION_MARKER_KEY]
+    # Entry-level marker: the added names, and an absent pre-merge base.
+    assert marker["added"] == ["vaultspec-authoring", "vaultspec-rag"]
+    assert marker["base_absent"] is True
+    assert marker["base_fingerprint"] is None
     # Bridge env carries placeholders, NEVER the real tokens (they ride spawn env).
     text = path.read_text(encoding="utf-8")
     assert "${VAULTSPEC_AUTHORING_BEARER}" in text
@@ -116,59 +134,147 @@ def test_project_writes_declared_with_marker_and_placeholders(tmp_path: Path) ->
     assert "SECRET-ACTOR" not in text
 
 
-def test_project_returns_none_when_nothing_declared(tmp_path: Path) -> None:
-    # No harness server and no bridge -> nothing to project, workspace untouched.
-    assert project_declared_mcp(tmp_path, []) is None
-    assert not (tmp_path / ".mcp.json").exists()
-
-
-def test_project_refuses_foreign_mcp_json(tmp_path: Path) -> None:
-    foreign = {"mcpServers": {"user-srv": {"type": "stdio", "command": "x"}}}
-    (tmp_path / ".mcp.json").write_text(json.dumps(foreign), encoding="utf-8")
-    with pytest.raises(ProjectionRefusedError, match="marker"):
-        project_declared_mcp(tmp_path, [_rag_spec()])
-    # The foreign file is untouched.
-    assert json.loads((tmp_path / ".mcp.json").read_text(encoding="utf-8")) == foreign
-
-
-def test_project_overwrites_own_marked_file(tmp_path: Path) -> None:
-    project_declared_mcp(tmp_path, [_rag_spec()])
-    # A second projection replaces our own prior file without refusal.
-    path = project_declared_mcp(tmp_path, [_rag_spec(), *_bridge_specs()])
-    assert path is not None
-    servers = json.loads(path.read_text(encoding="utf-8"))["mcpServers"]
-    assert set(servers) == {"vaultspec-rag", "vaultspec-authoring"}
-
-
-# --- deny-set composition -------------------------------------------------
-
-
-def test_deny_set_is_ancestor_enumeration_minus_declared(tmp_path: Path) -> None:
-    # An ancestor declares a foreign server AND (adversarially) a name equal to a
-    # declared one; the caller's deny set is enumerated - declared, so the declared
-    # name is never denied while the foreign one is.
-    _write_mcp(tmp_path, ["foreign-srv", "vaultspec-rag"])
-    run_ws = tmp_path / "run"
-    run_ws.mkdir()
-    specs = [_rag_spec()]
-    declared = set(projected_declared_names(specs))
-    enumerated = set(enumerate_ancestor_mcp_names(run_ws))
-    deny = enumerated - declared
-    assert "foreign-srv" in deny
-    assert "vaultspec-rag" not in deny  # declared -> surfaced, never denied
-
-
-# --- cleanup --------------------------------------------------------------
-
-
-def test_cleanup_removes_only_our_marked_file(tmp_path: Path) -> None:
+def test_cleanup_of_created_file_restores_absent_state(tmp_path: Path) -> None:
     path = project_declared_mcp(tmp_path, [_rag_spec()])
     assert path is not None and path.exists()
     cleanup_projected_mcp(path)
     assert not path.exists()
-    # A foreign file at the same path is never removed by cleanup.
-    foreign = {"mcpServers": {}}
+    cleanup_projected_mcp(None)  # None-safe
+
+
+def test_project_returns_none_when_nothing_declared(tmp_path: Path) -> None:
+    assert project_declared_mcp(tmp_path, []) is None
+    assert not (tmp_path / ".mcp.json").exists()
+
+
+# --- merge into a real project .mcp.json -----------------------------------
+
+
+def test_merge_preserves_project_servers_and_cleanup_restores_original(
+    tmp_path: Path,
+) -> None:
+    foreign = {
+        "mcpServers": {"user-srv": {"type": "stdio", "command": "x"}},
+        "_vaultspecManaged": ["user-srv"],
+    }
+    path = tmp_path / ".mcp.json"
+    path.write_text(json.dumps(foreign), encoding="utf-8")
+
+    projected = project_declared_mcp(tmp_path, [_rag_spec()])
+    assert projected == path
+    content = _read(path)
+    # BOTH surfaces present: the project's own AND the declared bridge/harness set.
+    assert set(content["mcpServers"]) == {"user-srv", "vaultspec-rag"}
+    # Non-mcpServers project keys are preserved through the merge.
+    assert content["_vaultspecManaged"] == ["user-srv"]
+    marker = content[PROJECTION_MARKER_KEY]
+    assert marker["added"] == ["vaultspec-rag"]
+    assert marker["base_absent"] is False
+    assert marker["base_fingerprint"] is not None
+
+    cleanup_projected_mcp(path)
+    # The file survives and is restored to the original project config (content).
+    assert path.exists()
+    assert _read(path) == foreign
+
+
+# --- name collision: loud refusal ------------------------------------------
+
+
+def test_project_refuses_on_server_name_collision(tmp_path: Path) -> None:
+    foreign = {"mcpServers": {"vaultspec-rag": {"type": "stdio", "command": "x"}}}
+    path = tmp_path / ".mcp.json"
+    path.write_text(json.dumps(foreign), encoding="utf-8")
+    with pytest.raises(ProjectionRefusedError, match="collide"):
+        project_declared_mcp(tmp_path, [_rag_spec()])
+    # The foreign file is untouched.
+    assert _read(path) == foreign
+
+
+def test_project_refuses_unparseable_file(tmp_path: Path) -> None:
+    path = tmp_path / ".mcp.json"
+    path.write_text("{not valid json", encoding="utf-8")
+    with pytest.raises(ProjectionRefusedError, match="unparseable"):
+        project_declared_mcp(tmp_path, [_rag_spec()])
+    assert path.read_text(encoding="utf-8") == "{not valid json"
+
+
+# --- crash-residue re-projection: idempotent -------------------------------
+
+
+def test_reprojection_over_own_absent_residue_is_idempotent(tmp_path: Path) -> None:
+    first = project_declared_mcp(tmp_path, [_rag_spec()])
+    assert first is not None
+    # Simulate a crash: the projected file remains, no cleanup ran.
+    second = project_declared_mcp(tmp_path, [_rag_spec()])
+    assert second is not None
+    content = _read(second)
+    assert set(content["mcpServers"]) == {"vaultspec-rag"}
+    assert content[PROJECTION_MARKER_KEY]["added"] == ["vaultspec-rag"]
+    assert content[PROJECTION_MARKER_KEY]["base_absent"] is True
+    # Cleanup after the idempotent re-projection still restores absent.
+    cleanup_projected_mcp(second)
+    assert not second.exists()
+
+
+def test_reprojection_over_own_foreign_residue_restores_foreign(
+    tmp_path: Path,
+) -> None:
+    foreign = {"mcpServers": {"user-srv": {"type": "stdio", "command": "x"}}}
+    path = tmp_path / ".mcp.json"
+    path.write_text(json.dumps(foreign), encoding="utf-8")
+
+    project_declared_mcp(tmp_path, [_rag_spec()])
+    # Crash residue: re-project without cleanup. Must recover the original foreign
+    # base (not double-count) and carry the foreign pre-merge state forward.
+    project_declared_mcp(tmp_path, [_rag_spec()])
+    content = _read(path)
+    assert set(content["mcpServers"]) == {"user-srv", "vaultspec-rag"}
+    assert content[PROJECTION_MARKER_KEY]["base_absent"] is False
+
+    cleanup_projected_mcp(path)
+    assert path.exists()
+    assert _read(path) == foreign
+
+
+# --- mid-run user edit survives cleanup ------------------------------------
+
+
+def test_mid_run_user_added_entry_survives_cleanup(tmp_path: Path) -> None:
+    path = project_declared_mcp(tmp_path, [_rag_spec()])
+    assert path is not None
+    # A user adds their own server into our projected file mid-run.
+    content = _read(path)
+    content["mcpServers"]["user-mid-run"] = {"type": "stdio", "command": "y"}
+    path.write_text(json.dumps(content), encoding="utf-8")
+
+    cleanup_projected_mcp(path)
+    # The file is NOT deleted (foreign entry present) and the user's entry survives;
+    # only our added entry and the marker are gone.
+    assert path.exists()
+    after = _read(path)
+    assert set(after["mcpServers"]) == {"user-mid-run"}
+    assert PROJECTION_MARKER_KEY not in after
+
+
+# --- legacy whole-file marker (one transition release) ---------------------
+
+
+def test_legacy_true_marker_cleanup_removes_whole_file(tmp_path: Path) -> None:
+    path = tmp_path / ".mcp.json"
+    legacy = {
+        "mcpServers": {"vaultspec-rag": {"type": "stdio", "command": "x"}},
+        PROJECTION_MARKER_KEY: True,
+    }
+    path.write_text(json.dumps(legacy), encoding="utf-8")
+    cleanup_projected_mcp(path)
+    assert not path.exists()
+
+
+def test_cleanup_never_touches_foreign_file(tmp_path: Path) -> None:
+    foreign = {"mcpServers": {"user-srv": {"type": "stdio", "command": "x"}}}
+    path = tmp_path / ".mcp.json"
     path.write_text(json.dumps(foreign), encoding="utf-8")
     cleanup_projected_mcp(path)
     assert path.exists()
-    cleanup_projected_mcp(None)  # None-safe
+    assert _read(path) == foreign

@@ -98,11 +98,13 @@ class WorkspaceError(VaultspecError):
 class ProjectionRefusedError(ConfigError):
     """Raised when the run workspace cannot host a projected ``.mcp.json``.
 
-    The surfacing channel projects the declared MCP set into the run workspace's
-    ``.mcp.json`` (the only scope the adapter path surfaces). A pre-existing
-    ``.mcp.json`` without our signature marker is a foreign (user or crashed-run)
-    file; refusing to overwrite it is fail-loud rather than silently destroying
-    real project config. A sibling of :class:`IsolationRequiredError`: both mean
+    The surfacing channel merges the declared MCP set into the run workspace's
+    ``.mcp.json`` (the only scope the adapter path surfaces), adding its entries
+    alongside any the project already declares. Refusal is narrow: a declared
+    server name that collides with an existing NON-projected entry (silently
+    shadowing either side is unacceptable), or an existing ``.mcp.json`` that
+    cannot be parsed (projecting over a file we cannot reason about would risk the
+    project's real config). A sibling of :class:`IsolationRequiredError`: both mean
     the run cannot establish its declared, bounded MCP surface, so it must not
     launch.
     """

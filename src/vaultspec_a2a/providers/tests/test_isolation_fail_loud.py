@@ -54,11 +54,15 @@ async def test_armed_run_without_token_raises_isolation_required(
 
 
 @pytest.mark.asyncio
-async def test_armed_run_refuses_foreign_workspace_mcp_json(tmp_path: Path) -> None:
-    # Isolation engages (token present), so the projection channel runs; a foreign
-    # .mcp.json already in the run workspace must make _astream raise
-    # ProjectionRefusedError BEFORE spawning, rather than clobber it.
-    foreign = {"mcpServers": {"user-srv": {"type": "stdio", "command": "x"}}}
+async def test_armed_run_refuses_on_workspace_mcp_name_collision(
+    tmp_path: Path,
+) -> None:
+    # Isolation engages (token present), so the projection channel runs. A foreign
+    # workspace .mcp.json whose server NAME collides with a declared surfacing entry
+    # must make _astream raise ProjectionRefusedError BEFORE spawning, rather than
+    # silently shadow either side. (A non-colliding foreign file is now merged, not
+    # refused - covered in test_acp_project_mcp.py.)
+    foreign = {"mcpServers": {"vaultspec-rag": {"type": "stdio", "command": "x"}}}
     (tmp_path / ".mcp.json").write_text(json.dumps(foreign), encoding="utf-8")
     model = AcpChatModel(
         command=_CLAUDE_CMD,
@@ -73,7 +77,7 @@ async def test_armed_run_refuses_foreign_workspace_mcp_json(tmp_path: Path) -> N
         ],
         workspace_root=str(tmp_path),
     )
-    with pytest.raises(ProjectionRefusedError):
+    with pytest.raises(ProjectionRefusedError, match="collide"):
         async for _ in model._astream([HumanMessage(content="hi")]):
             pass
     # The foreign file is left intact (never clobbered).

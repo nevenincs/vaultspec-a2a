@@ -340,14 +340,15 @@ class AcpChatModel(BaseChatModel):
             env["CLAUDE_CONFIG_DIR"] = str(config_home)
             # Surfacing channel (S20): the adapter path does NOT surface the home's
             # user-scope mcpServers to the model, but it DOES surface a PROJECT-scope
-            # .mcp.json. Project the declared set into the run workspace so it
-            # actually reaches the model; the home's enabledMcpjsonServers pins it ON
-            # and the ancestor-walking deny keys pin everything else OFF. The bridge
-            # env placeholders were already hoisted above, so the projected file
-            # carries only ${VAR} references. Raises ProjectionRefusedError (fail
-            # loud) on a foreign .mcp.json - clean the home we just created on that
-            # path so the refusal does not leak it; a successful projection is
-            # removed in the finally with the home.
+            # .mcp.json. Merge the declared set INTO the run workspace's .mcp.json so
+            # it actually reaches the model alongside the project's own servers; the
+            # home's enabledMcpjsonServers pins it ON and the ancestor-walking deny
+            # keys pin everything else OFF. The bridge env placeholders were already
+            # hoisted above, so the projected entries carry only ${VAR} references.
+            # Raises ProjectionRefusedError (fail loud) only on a server-name
+            # collision with a non-projected entry or an unparseable file - clean the
+            # home we just created on that path so the refusal does not leak it; a
+            # successful projection is inverted in the finally with the home.
             try:
                 projected_mcp = project_declared_mcp(
                     _ws_path, self._config.mcp_servers

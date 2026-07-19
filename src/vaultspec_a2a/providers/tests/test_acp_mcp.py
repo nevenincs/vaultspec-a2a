@@ -36,6 +36,30 @@ def test_resolve_known_server_returns_stdio_spec() -> None:
     ]
 
 
+def test_harness_specs_are_provider_child_launch_specs_not_self_spawned() -> None:
+    """Audit lock (W04.P11.S92): the registry emits launch SPECS only.
+
+    The ACP/Codex provider CLI spawns each declared harness server as its own
+    child, so the server is a descendant of the run-owned provider root and
+    inherits that root's OS containment. This registry module never spawns a
+    process itself, so there is no separate reaper to wire.
+    """
+    import vaultspec_a2a.providers._acp_mcp as mod
+
+    spec = resolve_harness_mcp_servers(["vaultspec-rag"])[0]
+    # A child-launch spec the provider spawns: command + args, no live process.
+    assert set(spec) <= {"name", "command", "args", "env"}
+    assert "command" in spec
+    for banned in (
+        "subprocess",
+        "Popen",
+        "spawn_acp_process",
+        "create_subprocess_exec",
+        "ProcessContainment",
+    ):
+        assert not hasattr(mod, banned), f"registry module must not spawn ({banned})"
+
+
 def test_locked_rag_runtime_acquisition_executes_the_published_cli() -> None:
     """The resolved production launch command acquires a runnable locked MCP CLI."""
     spec = resolve_harness_mcp_servers(["vaultspec-rag"])[0]

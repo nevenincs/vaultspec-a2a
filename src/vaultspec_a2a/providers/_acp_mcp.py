@@ -7,6 +7,12 @@ advertises in the CLI's ``session/new`` params. The registry is explicit and
 closed: a declared name with no entry is a configuration error refused at
 composition time, never a silent no-op, and there is no plugin/discovery
 machinery.
+
+Process topology: this module only RESOLVES launch specs. The declared harness
+MCP servers are spawned by the ACP/Codex provider CLI as its own children when
+it reads them from ``session/new`` (or ``config.toml``), so each one is a
+descendant of the run-owned provider root and inherits that root's OS
+containment. Nothing here spawns a process; there is no separate reaper to wire.
 """
 
 from __future__ import annotations

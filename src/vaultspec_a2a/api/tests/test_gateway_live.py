@@ -25,6 +25,8 @@ import httpx
 import pytest
 import uvicorn
 
+from ...graph.enums import Provider
+from ...providers.model_profiles import probe_provider_readiness
 from ...streaming.aggregator import EventAggregator
 from .conftest import make_app
 
@@ -278,7 +280,7 @@ async def test_presets_list_is_truthful_and_resilient(
         ]
         assert authoring["default_profile_id"] == "team-defaults"
         profiles = {p["id"]: p for p in authoring["profiles"]}
-        assert set(profiles) == {"team-defaults", "fast", "codex", "zai"}
+        assert set(profiles) == {"team-defaults", "fast", "codex", "zai", "kimi"}
         assert profiles["team-defaults"]["is_default"] is True
 
         # team-defaults effective assignments: safe operational fields only. All
@@ -320,14 +322,17 @@ async def test_presets_list_is_truthful_and_resilient(
         assert codex_by_agent["vaultspec-doc-reviewer"]["provider_id"] != "codex"
 
         zai_by_agent = {a["agent_id"]: a for a in profiles["zai"]["assignments"]}
+        zai_readiness = probe_provider_readiness(Provider.ZAI)
         for agent_id in authoring_roles:
             assert zai_by_agent[agent_id]["provider_id"] == "zai"
             assert zai_by_agent[agent_id]["source"] == "profile"
-        # With no Z.ai credential in the environment, the zai lane is unavailable
-        # with a safe reason that ATTRIBUTES the unready provider by name - the
-        # system disclosing what is missing, never a credential value.
-        zai_reasons = " ".join(profiles["zai"]["unavailable_reasons"]).lower()
-        assert "zai" in zai_reasons
+            assert zai_by_agent[agent_id]["provider_ready"] is zai_readiness.ready
+        # Readiness reflects the real host. When Z.ai is unavailable, discovery
+        # must carry the same safe production-probe reason without exposing a
+        # credential value.
+        if not zai_readiness.ready:
+            assert zai_readiness.reason
+            assert zai_readiness.reason in profiles["zai"]["unavailable_reasons"]
 
         # Eligibility is reported honestly: the production acceptance gate is open,
         # so every profile is unavailable with a safe reason (no secrets anywhere).

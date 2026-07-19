@@ -847,7 +847,9 @@ class TestAggregatorGCOnTerminal:
             await update_thread_status(session, thread.id, ThreadStatus.RUNNING)
             await session.commit()
 
-        with caplog.at_level(logging.INFO, logger="vaultspec_a2a.api.internal"):
+        with caplog.at_level(
+            logging.INFO, logger="vaultspec_a2a.control.event_handlers"
+        ):
             await _handle_terminal_event(
                 "t-logged",
                 {"event_type": "thread_terminal", "status": "completed"},
@@ -884,7 +886,9 @@ class TestAggregatorGCOnTerminal:
             session_factory=session_factory,
         )
 
-        with caplog.at_level(logging.INFO, logger="vaultspec_a2a.api.internal"):
+        with caplog.at_level(
+            logging.INFO, logger="vaultspec_a2a.control.event_handlers"
+        ):
             await _handle_terminal_event(
                 "t-terminal-skip",
                 {"event_type": "thread_terminal", "status": "completed"},

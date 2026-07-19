@@ -70,7 +70,7 @@ def test_stdio_entry_spawns_bridge_module() -> None:
 
 
 def test_authoring_bridge_is_a_provider_child_launch_spec_not_self_spawned() -> None:
-    """Audit lock (W04.P11.S90): the per-run authoring bridge is a launch SPEC.
+    """Audit lock: the per-run authoring bridge is a launch SPEC, never a spawn.
 
     The provider CLI spawns the ``python -m`` bridge as its own child, so the
     bridge is a descendant of the run-owned provider root and inherits that

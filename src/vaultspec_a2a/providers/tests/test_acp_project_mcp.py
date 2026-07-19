@@ -84,7 +84,7 @@ def _read(path: Path) -> dict:
 def test_only_run_owned_specs_enter_the_projected_provider_tree(
     tmp_path: Path,
 ) -> None:
-    """Audit lock (W04.P11.S91): only run-owned launch specs enter the tree.
+    """Audit lock: only run-owned launch specs enter the isolated provider tree.
 
     Every projected server is launched by the contained ACP provider root, so
     what a run declares is exactly what becomes a descendant. A foreign server in

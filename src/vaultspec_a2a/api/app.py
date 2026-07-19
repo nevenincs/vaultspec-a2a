@@ -517,6 +517,14 @@ async def _lifespan(app: FastAPI) -> AsyncGenerator[None]:
 
         yield
 
+        # Close run admission first so the gateway admits no new run while it
+        # drains and reaps its owned worker and run descendants below. Closing
+        # does not wait for quiescence (that composes with terminal settlement);
+        # it just refuses new admissions from this point on.
+        from .routes.gateway import admission_gate
+
+        await admission_gate(app).close_admission()
+
         if verdict_subscriber_task is not None:
             verdict_subscriber_task.cancel()
             await asyncio.gather(verdict_subscriber_task, return_exceptions=True)

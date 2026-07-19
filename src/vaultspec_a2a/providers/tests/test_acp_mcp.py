@@ -37,7 +37,7 @@ def test_resolve_known_server_returns_stdio_spec() -> None:
 
 
 def test_harness_specs_are_provider_child_launch_specs_not_self_spawned() -> None:
-    """Audit lock (W04.P11.S92): the registry emits launch SPECS only.
+    """Audit lock: the harness registry emits launch SPECS only, never a spawn.
 
     The ACP/Codex provider CLI spawns each declared harness server as its own
     child, so the server is a descendant of the run-owned provider root and

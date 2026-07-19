@@ -76,11 +76,16 @@ Closeout suite `pytest api control worker providers` = 857 passed, 16 deselected
 
 ## Notes
 
-The drain gate is seated lazily on first run-start rather than in the gateway
-lifespan (`api/app.py`), which is outside this Step's scoped file; the
-administrative stop path (gateway shutdown / receipt-bound admin shutdown)
-invokes `close_admission`/`drain` on the same shared instance where those
-handlers live. Steady-state release of a completed long-running run from the
-gate is driven by execution-state terminal settlement (`W04.P12`); this Step
-wires the release points observable at the gateway verbs (nickname conflict,
+REVIEW REMEDIATION (P11 HIGH-2): the drain gate is now engaged by the production
+stop paths. The gateway lifespan shutdown (`api/app.py`) closes admission as its
+first shutdown action, and the receipt-bound administrative shutdown
+(`api/routes/admin.py`) closes admission before its deferred process stop
+(composed with the existing attach + lifecycle-capability gates); a
+`test_gateway_drain.py` case proves a run-start after an admin stop is refused
+503. This supersedes the original deferral note below, which incorrectly left
+the stop-path wiring to a later Step. The drain gate is still seated lazily on
+first run-start (or on the stop path's `admission_gate` get-or-create).
+Steady-state release of a completed long-running run from the gate is driven by
+execution-state terminal settlement (`W04.P12`); this Step wires the release
+points observable at the gateway verbs (nickname conflict,
 terminal cancel).

@@ -175,7 +175,7 @@ Establish an operating-system-held runtime identity before listener publication 
 Protect versioned product APIs and administrative operations with distinct owner-scoped credentials while keeping the worker IPC secret private to the gateway-worker pair.
 
 - [x] `W03.P08.S36` - Validate dashboard-created attach and ownership files and create a distinct gateway-owned worker IPC credential with platform ACL checks; `src/vaultspec_a2a/desktop/credentials.py`.
-- [ ] `W03.P08.S37` - Model distinct attach credential worker IPC credential and receipt-bound lifecycle capability references; `src/vaultspec_a2a/control/config.py`.
+- [x] `W03.P08.S37` - Model distinct attach credential worker IPC credential and receipt-bound lifecycle capability references; `src/vaultspec_a2a/control/config.py`.
 - [ ] `W03.P08.S38` - Implement constant-time attach and lifecycle capability dependencies with redacted failures; `src/vaultspec_a2a/api/dependencies.py`.
 - [ ] `W03.P08.S39` - Require the attach credential on the versioned six-member whitelist (five run-control verbs plus bounded active-run discovery) without expanding it; `src/vaultspec_a2a/api/routes/gateway.py`.
 - [ ] `W03.P08.S40` - Require attach authentication on dashboard product APIs while leaving minimal liveness ungated; `src/vaultspec_a2a/api/routes/__init__.py`.

@@ -9,7 +9,7 @@ a drop-in replacement for the former ``core.config.Settings``.
 """
 
 from pathlib import Path
-from typing import Literal, Self
+from typing import TYPE_CHECKING, Literal, Self
 
 from pydantic import (
     AliasChoices,
@@ -22,6 +22,9 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from ..domain_config import DomainSettingsConfig
 from ..utils.enums import Environment, LogLevel
+
+if TYPE_CHECKING:
+    from ..desktop.credentials import DesktopCredentialPaths
 
 # Defaults for path-override fields.  Computed once at module import relative to
 # this file: control/config.py → control → vaultspec_a2a → src → project-root.
@@ -712,6 +715,33 @@ class Settings(DomainSettingsConfig, InfraConfig):
         predicate rather than re-deriving arming from raw configuration.
         """
         return self.desktop_app_home is not None
+
+    @property
+    def desktop_credential_paths(self) -> "DesktopCredentialPaths | None":
+        """Return the three desktop credential file references, or ``None``.
+
+        The desktop profile authenticates three disjoint trust planes, each backed
+        by its own owner-restricted file beneath the application home's credentials
+        directory: the dashboard-created attach-control credential, the
+        receipt-bound ownership (lifecycle) capability, and the gateway-owned worker
+        interprocess-communication secret. This is the single settings-side
+        authority for those references; it derives them through the desktop profile
+        path authority rather than restating the layout.
+
+        Returns ``None`` while the profile is unarmed (the Compose and development
+        profiles), so no credential path resolves relative to a launch directory and
+        the unarmed import surface never pulls the desktop package.
+        """
+        if self.desktop_app_home is None:
+            return None
+
+        # Imported lazily and only when armed, mirroring the path-seating validator:
+        # unarmed construction never pulls the desktop credential package.
+        from ..desktop.credentials import credential_paths
+        from ..desktop.profile import derive_state_paths
+
+        state = derive_state_paths(self.desktop_app_home)
+        return credential_paths(state.credentials_dir)
 
     @property
     def resolved_database_backend(self) -> Literal["sqlite", "postgres"]:

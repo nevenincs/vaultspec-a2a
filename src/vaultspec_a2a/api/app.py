@@ -13,6 +13,7 @@ worker process via HTTP POST to ``/dispatch`` (service separation).
 """
 
 import asyncio  # Gateway uses asyncio directly — no structured concurrency needed.
+import hmac
 import logging
 import os
 import secrets
@@ -52,6 +53,7 @@ from ..lifecycle.discovery import (
     another_resident_is_live,
     remove_service_json_if_owned,
     service_json_path,
+    write_desktop_discovery,
     write_service_json,
 )
 from ..lifecycle.registration import (
@@ -117,6 +119,83 @@ async def _discovery_heartbeat(
                 exc_info=True,
             )
         await asyncio.sleep(HEARTBEAT_REFRESH_SECONDS)
+
+
+async def _desktop_discovery_heartbeat(
+    path: Any,
+    *,
+    generation: str,
+    port: int,
+    owner: str,
+    credential_reference: str | None,
+    pid: int,
+) -> None:
+    """Refresh the versioned desktop discovery record every cadence.
+
+    The desktop profile publishes the versioned, secret-free record rather than
+    the Compose ``ServiceInfo`` record; this keeps its heartbeat fresh so a
+    contender never reads a live gateway as stale. Non-fatal: a transient write
+    failure is logged and retried on the next tick.
+    """
+    while True:
+        try:
+            await asyncio.to_thread(
+                write_desktop_discovery,
+                path,
+                generation=generation,
+                port=port,
+                owner=owner,
+                credential_reference=credential_reference,
+                pid=pid,
+            )
+        except OSError:
+            logger.warning(
+                "Failed to refresh desktop discovery heartbeat at %s",
+                path,
+                exc_info=True,
+            )
+        await asyncio.sleep(HEARTBEAT_REFRESH_SECONDS)
+
+
+def _load_desktop_credentials(app: FastAPI) -> None:
+    """Load the armed desktop credential planes into the application state.
+
+    The attach-control credential and the receipt-bound ownership capability are
+    read from their dashboard-created owner-restricted files; the worker
+    interprocess-communication secret is minted per boot and seated on the shared
+    internal-token setting so gateway-worker traffic authenticates with it. A
+    missing or malformed dashboard file fails the gateway closed rather than
+    booting an unauthenticated desktop surface.
+    """
+    from ..desktop.credentials import (
+        create_worker_ipc_credential,
+        load_attach_credential,
+        load_ownership_capability,
+    )
+
+    references = settings.desktop_credential_paths
+    if references is None:
+        return
+    credentials_dir = references.credentials_dir
+    app.state.v1_service_token = load_attach_credential(credentials_dir)
+    app.state.lifecycle_capability = load_ownership_capability(credentials_dir)
+    settings.internal_token = create_worker_ipc_credential(credentials_dir)
+
+
+def _websocket_attach_authorized(websocket: WebSocket, app: FastAPI) -> bool:
+    """Return whether a desktop event WebSocket presents a valid attach credential.
+
+    Constant-time comparison against the loaded attach credential; the explicit
+    test-only bypass short-circuits for route-behaviour tests. A missing runtime
+    credential is corrupted state and refuses the connection.
+    """
+    if bool(getattr(app.state, "allow_unauthenticated_v1_for_testing", False)):
+        return True
+    expected = getattr(app.state, "v1_service_token", None)
+    if not isinstance(expected, str) or not expected:
+        return False
+    supplied = websocket.headers.get("authorization", "").encode("utf-8")
+    return hmac.compare_digest(supplied, f"Bearer {expected}".encode())
 
 
 # ---------------------------------------------------------------------------
@@ -268,18 +347,46 @@ async def _lifespan(app: FastAPI) -> AsyncGenerator[None]:
         # single-instance guard) so tests and intentional restarts are not broken.
         discovery_path = service_json_path(settings.a2a_home)
         discovery_pid = os.getpid()
-        if another_resident_is_live(settings.a2a_home):
-            logger.warning(
-                "A live resident gateway already holds %s; starting anyway "
-                "(the port bind is the authoritative single-instance guard)",
-                discovery_path,
+        armed = settings.desktop_profile_armed
+        desktop_generation: str | None = None
+        desktop_owner: str | None = None
+        desktop_credential_reference: str | None = None
+        if armed:
+            # Desktop profile: publish the versioned, secret-free record keyed to
+            # the runtime singleton this process already holds. The record names
+            # only the ACL-protected attach-credential reference, never a bearer.
+            from ..lifecycle.singleton import active_singleton, default_owner
+
+            singleton = active_singleton()
+            desktop_owner = (
+                singleton.owner if singleton is not None else default_owner()
             )
-        write_service_json(
-            discovery_path,
-            port=settings.port,
-            pid=discovery_pid,
-            service_token=app.state.v1_service_token,
-        )
+            desktop_generation = package_version()
+            references = settings.desktop_credential_paths
+            desktop_credential_reference = (
+                str(references.attach_path) if references is not None else None
+            )
+            write_desktop_discovery(
+                discovery_path,
+                generation=desktop_generation,
+                port=settings.port,
+                owner=desktop_owner,
+                credential_reference=desktop_credential_reference,
+                pid=discovery_pid,
+            )
+        else:
+            if another_resident_is_live(settings.a2a_home):
+                logger.warning(
+                    "A live resident gateway already holds %s; starting anyway "
+                    "(the port bind is the authoritative single-instance guard)",
+                    discovery_path,
+                )
+            write_service_json(
+                discovery_path,
+                port=settings.port,
+                pid=discovery_pid,
+                service_token=app.state.v1_service_token,
+            )
         # Master-bug guard (BEFORE registration so a refusal leaves zero residue): a
         # band gateway-dev whose dispatch target is outside the worker-dev band while
         # a live band worker exists is mis-paired - refuse to boot rather than
@@ -308,15 +415,27 @@ async def _lifespan(app: FastAPI) -> AsyncGenerator[None]:
             workspace=str(settings.workspace_root),
             command=["vaultspec-a2a", "serve", "--port", str(settings.port)],
         )
-        discovery_task = asyncio.create_task(
-            _discovery_heartbeat(
-                discovery_path,
-                settings.port,
-                discovery_pid,
-                app.state.v1_service_token,
-                serve_record,
+        if armed:
+            discovery_task = asyncio.create_task(
+                _desktop_discovery_heartbeat(
+                    discovery_path,
+                    generation=cast("str", desktop_generation),
+                    port=settings.port,
+                    owner=cast("str", desktop_owner),
+                    credential_reference=desktop_credential_reference,
+                    pid=discovery_pid,
+                )
             )
-        )
+        else:
+            discovery_task = asyncio.create_task(
+                _discovery_heartbeat(
+                    discovery_path,
+                    settings.port,
+                    discovery_pid,
+                    app.state.v1_service_token,
+                    serve_record,
+                )
+            )
         logger.info("Service discovery published at %s", discovery_path)
 
         verdict_subscriber_task: asyncio.Task[None] | None = None
@@ -442,6 +561,14 @@ def create_app(
     app.state.allow_unauthenticated_v1_for_testing = (
         allow_unauthenticated_v1_for_testing
     )
+    # The receipt-bound lifecycle ownership capability is only present under the
+    # armed desktop profile; unarmed profiles never carry one.
+    app.state.lifecycle_capability = None
+    if settings.desktop_profile_armed and not allow_unauthenticated_v1_for_testing:
+        # Armed desktop: replace the generated attach token with the
+        # dashboard-created attach credential, load the ownership capability, and
+        # mint the worker IPC secret. Fails closed if a dashboard file is absent.
+        _load_desktop_credentials(app)
 
     cors_origins: list[str] = list(settings.cors_allowed_origins)
     app.add_middleware(
@@ -493,7 +620,15 @@ def create_app(
 
     @app.websocket("/ws")
     async def websocket_endpoint(websocket: WebSocket) -> None:
-        """WebSocket endpoint for multiplexed real-time events."""
+        """WebSocket endpoint for multiplexed real-time events.
+
+        Desktop event streams carry product state, so the attach credential is
+        required before the connection is accepted; an unauthenticated or
+        unverifiable client is closed with a policy-violation code.
+        """
+        if not _websocket_attach_authorized(websocket, app):
+            await websocket.close(code=1008, reason="Unauthorized")
+            return
         cm: ConnectionManager = app.state.connection_manager
         client_id = await cm.connect(websocket)
         await cm.listen(client_id)

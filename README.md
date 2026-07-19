@@ -48,10 +48,10 @@ cd vaultspec-a2a
 just dev deps install
 ```
 
-Copy and edit the environment file:
+Copy and edit the environment file (`.env.example` lives under `service/`):
 
 ```bash
-cp .env.example .env
+cp service/.env.example .env
 # Set at least one provider key: ANTHROPIC_API_KEY, GEMINI_API_KEY, or OPENAI_API_KEY
 ```
 
@@ -69,29 +69,37 @@ Verify services are healthy:
 just doctor
 ```
 
-Start a team and follow its progress:
+Start a run and follow its progress (list preset ids with
+`vaultspec-a2a presets`):
 
 ```bash
-vaultspec team start --preset vaultspec-solo-coder --message "Create a hello world module"
-vaultspec team status <thread_id>
-vaultspec team watch <thread_id>
+vaultspec-a2a run start --preset <preset-id> --message "Create a hello world module"
+vaultspec-a2a run status <run_id>
 ```
 
 ## Production Deployment
 
-Docker Compose is the production deployment unit:
+Docker Compose is the production deployment unit; the Compose files live under
+`service/`:
 
 ```bash
-docker compose -f docker-compose.prod.yml up -d
+docker compose -f service/docker-compose.prod.yml up -d
 ```
 
 This starts gateway and worker with Docker healthchecks, `restart:
 unless-stopped` policies, dependency ordering, and Jaeger distributed tracing.
-Log aggregation: `docker compose -f docker-compose.prod.yml logs -f`.
+Log aggregation: `docker compose -f service/docker-compose.prod.yml logs -f`.
 
-See `.env.example` for all environment variables. The only mandatory config for
-a working stack is one provider API key and `docker-compose.prod.yml` picks up
-`.env` automatically.
+See `service/.env.example` for all environment variables. The only mandatory
+config for a working stack is one provider API key, and
+`service/docker-compose.prod.yml` picks up `.env` automatically.
+
+For a source (non-Docker) production install, pull in the `server` extra so the
+Postgres driver and OTLP exporter are present:
+
+```bash
+uv sync --extra server
+```
 
 ## Development Workflow
 
@@ -192,56 +200,71 @@ just dev deps upgrade    # upgrade all dependencies
 just dev deps lock       # regenerate lockfile
 ```
 
-## Production CLI Reference
+## Operator CLI Reference
 
-`vaultspec` is the production CLI. It operates against a running gateway and
-fails fast if the gateway is unreachable:
+`vaultspec-a2a` is the operator CLI. It is a thin client of the gateway's
+versioned `/v1` edge: every command except `serve` is a plain HTTP call to a
+running gateway, so operator and engine exercise one surface. Commands that
+reach the gateway take `--url` to target a non-default bind (default: the local
+`gateway_url`).
 
-```text
-Error: Gateway not running at http://127.0.0.1:8000
-
-  just dev service start gateway    Start the gateway
-  just dev service start            Start all services
-```
-
-### Team commands
+### Gateway lifecycle and health
 
 ```bash
-vaultspec team start --preset NAME --message TEXT [--name NICK] [--autonomous|--supervised]
-vaultspec team message THREAD_ID --content TEXT [--agent AGENT_ID]
-vaultspec team respond THREAD_ID --request-id ID --option OPTION_ID
-vaultspec team resume THREAD_ID [--message TEXT]
-vaultspec team cancel THREAD_ID
-vaultspec team delete THREAD_ID
-vaultspec team archive THREAD_ID
-vaultspec team status THREAD_ID [--json]
-vaultspec team watch THREAD_ID
-vaultspec team list [STATUS_FILTER] [--json]
-vaultspec team presets [--json]
+vaultspec-a2a serve                  # boot the local gateway app in the foreground
+vaultspec-a2a doctor [--url URL]     # report gateway health via the service-state verb
+vaultspec-a2a presets [--url URL]    # list available team presets
 ```
 
-### Agent commands
+`doctor` also diagnoses a stale resident — a gateway process started before a
+route landed still serving the old route table — and encodes the verdict in its
+exit code: `0` healthy, `1` unreachable or HTTP error, `3` reachable but stale.
+
+### Runs
 
 ```bash
-vaultspec agent list [--json]
-vaultspec agent show NAME [--json]
+vaultspec-a2a run start --preset ID --message TEXT [--title T] [--autonomous|--supervised] [--url URL]
+vaultspec-a2a run status RUN_ID [--url URL]
+vaultspec-a2a run cancel RUN_ID [--url URL]
+```
+
+`--autonomous/--supervised` overrides the preset's autonomy default; omit it to
+inherit the preset. `run cancel` is idempotent.
+
+### Workspace provisioning
+
+```bash
+vaultspec-a2a workspace provision [PATH] [--verify-only]
+```
+
+Installs the vaultspec framework into `PATH` and verifies its agent harness,
+reporting any version skew and each missing surface. `--verify-only` skips the
+install and only re-checks an already-provisioned workspace. Exits non-zero when
+the harness is incomplete, so a caller can gate on provisioning.
+
+### Dev process registry
+
+`procs` manages machine-global development processes (gateway-dev, worker-dev,
+engine-dev) through a shared registry — distinct from the Docker service
+lifecycle above.
+
+```bash
+vaultspec-a2a procs list                 # every registered process, its liveness, and endpoint
+vaultspec-a2a procs up ROLE NAME [...]    # allocate a band port, boot the role, and register it
+vaultspec-a2a procs attach NAME          # verify a process is live and print its endpoint
+vaultspec-a2a procs rebuild NAME         # run the role's build command from procs.toml
+vaultspec-a2a procs rerun NAME           # kill, rebuild, and restart on the same port
+vaultspec-a2a procs resume NAME          # restart a died record on its original port
+vaultspec-a2a procs kill NAME            # tree-kill a process and remove its record
+vaultspec-a2a procs reap                 # kill and clear every stale or dead record
+vaultspec-a2a procs allocate ROLE        # reserve and print the next free band port for ROLE
 ```
 
 ### Global options
 
-| Option | Short | Effect |
-|--------|-------|--------|
-| `--verbose` | `-v` | INFO logging |
-| `--debug` | `-d` | DEBUG logging |
-| `--version` | `-V` | Print version, exit |
-| `--show-config` | | Print resolved settings, exit |
-
-### Production CLI passthrough via Justfile
-
-```bash
-just prod team [*ARGS]     # equivalent to: uv run vaultspec team ...
-just prod agent [*ARGS]    # equivalent to: uv run vaultspec agent ...
-```
+The command group itself exposes only `--version`/`-V` (print the installed
+version and exit) and `--help`. Logging and gateway-target options are
+per-command (`--url`).
 
 ## Port Layout
 
@@ -269,12 +292,24 @@ Auto-derived URLs (no explicit config needed):
 SQLite is the local and development default. No configuration needed. The only
 required config is one LLM provider key.
 
-For production with Postgres, set in `.env`:
+For production with Postgres, install the `server` extra (Postgres driver,
+checkpoint saver, and OTLP exporter) and set in `.env`:
+
+```bash
+uv sync --extra server
+```
 
 ```bash
 VAULTSPEC_DATABASE_BACKEND=postgres
 VAULTSPEC_DATABASE_URL=postgresql+asyncpg://postgres:postgres@127.0.0.1:5432/vaultspec
 VAULTSPEC_CHECKPOINT_DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:5432/vaultspec?sslmode=disable
+```
+
+Semantic search over the vault (the `vaultspec-rag` bridge and its Torch
+dependency) is a separate opt-in extra:
+
+```bash
+uv sync --extra rag
 ```
 
 ## Troubleshooting

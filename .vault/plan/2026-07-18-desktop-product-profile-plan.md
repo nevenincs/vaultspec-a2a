@@ -11,6 +11,16 @@ related:
   - '[[2026-07-18-desktop-product-profile-reference]]'
 ---
 
+<!-- LINK RULES:
+     - [[wiki-links]] are ONLY for .vault/ documents in the
+       related: field above.
+     - The related: field carries the AUTHORISING documents
+       (ADR, research, reference, prior plan) for every Step in
+       this plan. Steps inherit this chain; per-row reference
+       footers do not exist.
+     - NEVER use [[wiki-links]] or markdown links in the
+       document body. -->
+
 <!-- RETIRED: P15, S88 -->
 
 # `desktop-product-profile` plan
@@ -116,7 +126,7 @@ Deliver explicit mutable-state seating, schema validation, staged migration, and
 
 Define one desktop profile whose databases, checkpoints, credentials, discovery, receipts, logs, workspaces, temporary homes, and snapshots never derive from the launch directory.
 
-- [ ] `W02.P04.S16` - Define the desktop profile and validate explicit immutable and mutable product roots; `src/vaultspec_a2a/desktop/profile.py`.
+- [x] `W02.P04.S16` - Define the desktop profile and validate explicit immutable and mutable product roots; `src/vaultspec_a2a/desktop/profile.py`.
 - [ ] `W02.P04.S17` - Derive database checkpoint log credential discovery receipt workspace temporary-home and snapshot paths only from the explicit desktop app home; `src/vaultspec_a2a/control/config.py`.
 - [ ] `W02.P04.S18` - Add the manifest-declared desktop gateway invocation without changing Compose or foreground serve defaults; `src/vaultspec_a2a/cli/main.py`.
 - [ ] `W02.P04.S19` - Prove desktop state remains app-home-seated across launch-directory changes and capsule relocation; `src/vaultspec_a2a/desktop_tests/test_profile_paths.py`.

@@ -50,11 +50,14 @@ __all__ = [
     "SingletonRecord",
     "SingletonState",
     "acquire_singleton",
+    "active_singleton",
     "classify_app_home",
+    "clear_active_singleton",
     "current_process_fingerprint",
     "default_owner",
     "process_start_fingerprint",
     "recorded_process_is_live",
+    "set_active_singleton",
     "singleton_lock_path",
     "singleton_record_path",
 ]
@@ -66,6 +69,30 @@ SINGLETON_RECORD_VERSION = 1
 _LOCK_NAME = "gateway.singleton.lock"
 _RECORD_NAME = "gateway.singleton.json"
 _RUNTIME_DIR = "runtime"
+
+# The runtime singleton the current process holds for its desktop application
+# home, if any. The desktop serve entrypoint acquires the singleton before the
+# gateway binds and registers it here; the gateway lifetime reads it to key its
+# discovery publication and to release ownership on shutdown. This is process
+# state, not machine state — it is never persisted.
+_active: RuntimeSingleton | None = None
+
+
+def set_active_singleton(singleton: RuntimeSingleton) -> None:
+    """Register the runtime singleton this process holds for its app home."""
+    global _active
+    _active = singleton
+
+
+def active_singleton() -> RuntimeSingleton | None:
+    """Return the runtime singleton this process holds, or ``None`` if none."""
+    return _active
+
+
+def clear_active_singleton() -> None:
+    """Forget the process's active runtime singleton (after release)."""
+    global _active
+    _active = None
 
 
 class SingletonState(StrEnum):

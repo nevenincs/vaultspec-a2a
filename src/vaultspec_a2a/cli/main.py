@@ -18,7 +18,7 @@ import os
 import sys
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from urllib.parse import urlsplit
 
 import click
@@ -26,6 +26,9 @@ import httpx
 
 from ..control.config import settings
 from ..utils import configure_logging, package_version, reconfigure_console_utf8
+
+if TYPE_CHECKING:
+    from ..lifecycle.singleton import RuntimeSingleton
 
 __all__ = ["main"]
 
@@ -98,12 +101,68 @@ def main() -> None:
     configure_logging("cli")
 
 
+def _acquire_desktop_singleton() -> RuntimeSingleton | None:
+    """Acquire the desktop runtime singleton before the gateway binds, or fail loud.
+
+    Ordering (per the desktop profile decision): the operating-system runtime
+    singleton is taken over the explicit application home *before* the listener
+    binds and *before* discovery is published, so two gateways can never own one
+    application home. A live foreign or unverifiable resident is an immutable
+    conflict — the caller must attach to it, not start a competitor — and this
+    raises a loud, non-zero ``ClickException`` carrying the classification.
+
+    Returns the held singleton (kept alive for the gateway's lifetime and released
+    on shutdown) or ``None`` when the desktop profile is not armed. The versioned
+    secret-free discovery record is published by the gateway lifetime after bind,
+    schema validation, and control-auth setup; it reads this held singleton for
+    its owner identity. That publication seam lands with the gateway credential
+    work; acquisition and ownership registration are wired here now.
+    """
+    if not settings.desktop_profile_armed:
+        return None
+    return _acquire_singleton_for_serve(settings.a2a_home)
+
+
+def _acquire_singleton_for_serve(app_home: Path) -> RuntimeSingleton:
+    """Take the runtime singleton over *app_home* or fail loud with the conflict.
+
+    Factored from :func:`_acquire_desktop_singleton` so the acquisition-and-fail
+    path can be exercised against a real held application home without booting the
+    gateway. Registers the held singleton as this process's active owner.
+    """
+    from ..lifecycle.singleton import (
+        SingletonConflictError,
+        acquire_singleton,
+        set_active_singleton,
+    )
+
+    try:
+        singleton = acquire_singleton(app_home)
+    except SingletonConflictError as exc:
+        raise click.ClickException(str(exc)) from exc
+    set_active_singleton(singleton)
+    return singleton
+
+
 @main.command()
 def serve() -> None:
-    """Start the local gateway (boots the existing app; no second code path)."""
+    """Start the local gateway (boots the existing app; no second code path).
+
+    Under the desktop profile the runtime singleton is acquired before the app
+    boots so the socket bind and discovery publication follow sole-ownership; it
+    is released when the gateway stops.
+    """
     from ..api.app import main as serve_gateway
 
-    serve_gateway()
+    singleton = _acquire_desktop_singleton()
+    try:
+        serve_gateway()
+    finally:
+        if singleton is not None:
+            from ..lifecycle.singleton import clear_active_singleton
+
+            singleton.release()
+            clear_active_singleton()
 
 
 @dataclass(frozen=True)

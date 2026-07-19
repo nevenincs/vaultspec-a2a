@@ -9,9 +9,8 @@ license conclusion, or redistribution authorization.
 
 from __future__ import annotations
 
-import base64
-import binascii
 import hashlib
+import json
 import os
 import re
 import stat
@@ -19,9 +18,8 @@ import tomllib
 from contextlib import contextmanager
 from dataclasses import dataclass
 from enum import StrEnum
-from pathlib import Path, PurePosixPath, PureWindowsPath
+from pathlib import Path
 from typing import TYPE_CHECKING, Annotated, BinaryIO, Final, Literal, cast
-from urllib.parse import urlsplit
 
 from pydantic import (
     BaseModel,
@@ -32,6 +30,23 @@ from pydantic import (
     model_validator,
 )
 
+from .closure_inventory import (
+    _ACP_ROOT_PACKAGE,
+    _MAX_ARTIFACT_BYTES,
+    _MAX_INVENTORY_BYTES,
+    _TARGET_SDK_PREFIX,
+    AcpClosureInventory,
+    AcpPackageArtifact,
+    ExternalLicenseArtifact,
+    PythonClosureInventory,
+    PythonWheelArtifact,
+    _portable_key,
+    _validate_https_url,
+    _validate_sha512_sri,
+    _validated_license_expression,
+    canonical_closure_inventory_bytes,
+    validate_portable_archive_path,
+)
 from .contract import (
     ACP_VERSION_PIN,
     CPYTHON_VERSION_PIN,
@@ -39,45 +54,66 @@ from .contract import (
     ComponentAssetKind,
     TargetTriple,
 )
+from .installed_inventory import (
+    InstalledClosureDescriptor,
+    InstalledLicenseRecord,
+    LoadedInstalledClosureInventory,
+    load_installed_closure_inventory,
+    validate_dashboard_installed_closure_set,
+)
+from .lock_reconciliation import (
+    LockReconciliationError,
+    reconcile_acp_closure_lock_bytes,
+    reconcile_python_closure_lock_bytes,
+)
+from .package_archives import (
+    PackageArchiveError,
+    VerifiedPackageArchive,
+    verify_acp_package_archive,
+    verify_external_license_artifacts,
+    verify_python_wheel_archive,
+)
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator, Mapping, Sequence
+    from collections.abc import Callable, Iterator
 
 __all__ = [
     "AcpClosureDescriptor",
+    "AcpClosureInventory",
+    "AcpPackageArtifact",
     "ArchiveKind",
     "ArtifactInputError",
     "CapsuleInputDescriptor",
+    "ExternalLicenseArtifact",
+    "LoadedAcpClosureInventory",
+    "LoadedCapsuleClosures",
     "LoadedDescriptor",
+    "LoadedPythonClosureInventory",
     "LockInputDescriptor",
+    "PythonClosureDescriptor",
+    "PythonClosureInventory",
+    "PythonWheelArtifact",
     "SourceArtifactDescriptor",
     "VerifiedArtifact",
+    "VerifiedPackageArchive",
+    "canonical_closure_inventory_bytes",
+    "load_acp_closure_inventory",
+    "load_capsule_closures",
     "load_capsule_input_descriptor",
+    "load_python_closure_inventory",
     "validate_portable_archive_path",
-    "verify_acp_tarball_inventory",
+    "verify_acp_tarballs",
     "verify_cached_artifacts",
     "verify_lock_input",
+    "verify_python_wheelhouse",
 ]
 
 _SHA256_PATTERN: Final = re.compile(r"^[0-9a-f]{64}$")
 _MAX_DESCRIPTOR_BYTES: Final = 1 << 20
-_MAX_SOURCE_BYTES: Final = 4 << 30
+_MAX_SOURCE_BYTES: Final = _MAX_ARTIFACT_BYTES
 _MAX_LOCK_BYTES: Final = 32 << 20
 _READ_CHUNK: Final = 1 << 20
-_MAX_URL_LENGTH: Final = 2048
-_MAX_MEMBER_DEPTH: Final = 32
-_MAX_SEGMENT_LENGTH: Final = 128
-_WINDOWS_INVALID_SEGMENT_RE: Final = re.compile(r'[<>:"/\\|?*\x00-\x1f\x7f]')
-_WINDOWS_DEVICE_NAMES: Final = {
-    "con",
-    "conin$",
-    "conout$",
-    "prn",
-    "aux",
-    "nul",
-    *(f"com{suffix}" for suffix in (*map(str, range(1, 10)), "¹", "²", "³")),
-    *(f"lpt{suffix}" for suffix in (*map(str, range(1, 10)), "¹", "²", "³")),
-}
+_SOURCE_COMMIT_PATTERN: Final = re.compile(r"^[0-9a-f]{40}$")
 _REQUIRED_VERSIONS: Final = {
     ComponentAssetKind.PYTHON_RUNTIME: CPYTHON_VERSION_PIN,
     ComponentAssetKind.NODE_RUNTIME: NODEJS_VERSION_PIN,
@@ -114,59 +150,6 @@ class ArchiveKind(StrEnum):
 HexDigest = Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")]
 
 
-def _validate_sha512_sri(value: str) -> str:
-    if not value.startswith("sha512-") or len(value) > 128:
-        raise ValueError("package integrity must be a bounded sha512 SRI")
-    try:
-        decoded = base64.b64decode(value.removeprefix("sha512-"), validate=True)
-    except (binascii.Error, ValueError):
-        raise ValueError("package integrity must contain canonical base64") from None
-    if len(decoded) != hashlib.sha512().digest_size:
-        raise ValueError("package integrity must contain one SHA-512 digest")
-    canonical = base64.b64encode(decoded).decode("ascii")
-    if value != f"sha512-{canonical}":
-        raise ValueError("package integrity must use canonical base64")
-    return value
-
-
-def validate_portable_archive_path(value: str) -> str:
-    """Validate one bounded cross-platform archive-relative path."""
-    if not value or "\\" in value or len(value) > 4096:
-        raise ValueError("archive member must be a bounded portable path")
-    path = PurePosixPath(value)
-    windows = PureWindowsPath(value)
-    if path.is_absolute() or windows.is_absolute() or windows.drive or windows.root:
-        raise ValueError("archive member must be relative")
-    parts = value.split("/")
-    if len(parts) > _MAX_MEMBER_DEPTH or any(part in {"", ".", ".."} for part in parts):
-        raise ValueError("archive member contains an unsafe segment")
-    for segment in parts:
-        if (
-            len(segment) > _MAX_SEGMENT_LENGTH
-            or segment.endswith((".", " "))
-            or _WINDOWS_INVALID_SEGMENT_RE.search(segment) is not None
-            or segment.split(".", 1)[0].casefold() in _WINDOWS_DEVICE_NAMES
-        ):
-            raise ValueError("archive member contains a non-portable segment")
-    return value
-
-
-def _validate_https_url(value: str) -> str:
-    if len(value) > _MAX_URL_LENGTH:
-        raise ValueError("source URL exceeds its length bound")
-    parsed = urlsplit(value)
-    if (
-        parsed.scheme != "https"
-        or not parsed.hostname
-        or parsed.username is not None
-        or parsed.password is not None
-        or parsed.query
-        or parsed.fragment
-    ):
-        raise ValueError("source URL metadata must be credential-free HTTPS")
-    return value
-
-
 class LockInputDescriptor(BaseModel):
     """Exact byte identity for one dependency lock input."""
 
@@ -174,6 +157,71 @@ class LockInputDescriptor(BaseModel):
 
     sha256: HexDigest
     size: int = Field(gt=0, le=_MAX_LOCK_BYTES)
+
+
+class PythonClosureDescriptor(BaseModel):
+    """Exact source and expected installed identities for one wheel closure."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    target: TargetTriple
+    lock_sha256: HexDigest
+    package_count: int = Field(gt=0, le=2048)
+    wheel_inventory_sha256: HexDigest
+    wheel_inventory_size: int = Field(gt=0, le=_MAX_INVENTORY_BYTES)
+    installed: InstalledClosureDescriptor
+
+    @model_validator(mode="after")
+    def _installed_authority_joins_source(self) -> PythonClosureDescriptor:
+        if (
+            self.installed.closure_kind != "python"
+            or self.installed.target is not self.target
+            or self.installed.install_root != "runtime/python"
+            or self.installed.source_inventory_sha256 != self.wheel_inventory_sha256
+            or self.installed.lock_sha256 != self.lock_sha256
+        ):
+            raise ValueError("Python installed authority does not join its source")
+        return self
+
+
+class AcpClosureDescriptor(BaseModel):
+    """Exact source and expected installed identities for one ACP closure."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    target: TargetTriple
+    lock_sha256: HexDigest
+    package_count: int = Field(gt=1, le=2048)
+    tarball_inventory_sha256: HexDigest
+    tarball_inventory_size: int = Field(gt=0, le=_MAX_INVENTORY_BYTES)
+    installed: InstalledClosureDescriptor
+    root_package_integrity: str = Field(min_length=1, max_length=128)
+    target_sdk_package: str = Field(min_length=1, max_length=256)
+    target_sdk_integrity: str = Field(min_length=1, max_length=128)
+
+    @field_validator("target_sdk_package")
+    @classmethod
+    def _sdk_package_is_bounded(cls, value: str) -> str:
+        if value not in _TARGET_SDK_PACKAGES.values():
+            raise ValueError("ACP target SDK package is invalid")
+        return value
+
+    @field_validator("root_package_integrity", "target_sdk_integrity")
+    @classmethod
+    def _sdk_integrity_is_valid(cls, value: str) -> str:
+        return _validate_sha512_sri(value)
+
+    @model_validator(mode="after")
+    def _installed_authority_joins_source(self) -> AcpClosureDescriptor:
+        if (
+            self.installed.closure_kind != "acp"
+            or self.installed.target is not self.target
+            or self.installed.install_root != "runtime/acp"
+            or self.installed.source_inventory_sha256 != self.tarball_inventory_sha256
+            or self.installed.lock_sha256 != self.lock_sha256
+        ):
+            raise ValueError("ACP installed authority does not join its source")
+        return self
 
 
 class SourceArtifactDescriptor(BaseModel):
@@ -201,6 +249,7 @@ class SourceArtifactDescriptor(BaseModel):
     license_members: tuple[str, ...] = Field(min_length=1, max_length=64)
     redistribution_evidence: tuple[str, ...] = Field(min_length=1, max_length=32)
     package_lock_integrity: str | None = Field(default=None, max_length=256)
+    source_commit: str | None = Field(default=None, max_length=40)
 
     @field_validator("url")
     @classmethod
@@ -216,7 +265,7 @@ class SourceArtifactDescriptor(BaseModel):
     @classmethod
     def _licenses_are_portable(cls, value: tuple[str, ...]) -> tuple[str, ...]:
         validated = tuple(validate_portable_archive_path(member) for member in value)
-        if len({member.casefold() for member in validated}) != len(validated):
+        if len({_portable_key(member) for member in validated}) != len(validated):
             raise ValueError("license members must not collide portably")
         return validated
 
@@ -246,6 +295,11 @@ class SourceArtifactDescriptor(BaseModel):
             raise ValueError("descriptor strings must not contain controls")
         return value
 
+    @field_validator("license_expression")
+    @classmethod
+    def _license_expression_is_spdx(cls, value: str) -> str:
+        return _validated_license_expression(value)
+
     @model_validator(mode="after")
     def _kind_specific_facts(self) -> SourceArtifactDescriptor:
         if self.kind is ComponentAssetKind.A2A_DISTRIBUTION:
@@ -257,6 +311,11 @@ class SourceArtifactDescriptor(BaseModel):
                 raise ValueError(
                     "the A2A distribution must be one target-neutral wheel"
                 )
+            if (
+                self.source_commit is None
+                or _SOURCE_COMMIT_PATTERN.fullmatch(self.source_commit) is None
+            ):
+                raise ValueError("the A2A distribution must bind one source commit")
         elif self.kind is ComponentAssetKind.ACP_ADAPTER:
             if self.target is not None or self.archive_root is None:
                 raise ValueError("the official ACP root package must be target-neutral")
@@ -286,6 +345,11 @@ class SourceArtifactDescriptor(BaseModel):
             _validate_sha512_sri(self.package_lock_integrity)
         elif self.package_lock_integrity is not None:
             raise ValueError("root package SRI belongs only to the ACP source")
+        if (
+            self.kind is not ComponentAssetKind.A2A_DISTRIBUTION
+            and self.source_commit is not None
+        ):
+            raise ValueError("source commit belongs only to the A2A distribution")
         return self
 
     @property
@@ -294,49 +358,18 @@ class SourceArtifactDescriptor(BaseModel):
         return f"{self.release}+{self.build}"
 
 
-class AcpClosureDescriptor(BaseModel):
-    """Separate exact evidence for the target-native locked npm closure.
-
-    The official ACP root package remains one immutable source artifact. This
-    record independently binds opaque package-lock-derived tarball-inventory
-    bytes, expected installed-inventory bytes, and one target-native SDK choice;
-    it never re-describes a composed closure bundle as the official root tarball.
-    Package graph and license semantics require a separate qualified validator.
-    """
-
-    model_config = ConfigDict(extra="forbid", frozen=True)
-
-    package_count: int = Field(gt=1, le=2048)
-    tarball_inventory_sha256: HexDigest
-    tarball_inventory_size: int = Field(gt=0, le=_MAX_LOCK_BYTES)
-    installed_inventory_sha256: HexDigest
-    target_sdk_package: str = Field(min_length=1, max_length=256)
-    target_sdk_integrity: str = Field(min_length=1, max_length=128)
-
-    @field_validator("target_sdk_package")
-    @classmethod
-    def _sdk_package_is_bounded(cls, value: str) -> str:
-        if any(ord(character) < 33 or ord(character) == 127 for character in value):
-            raise ValueError("target SDK package name is invalid")
-        return value
-
-    @field_validator("target_sdk_integrity")
-    @classmethod
-    def _sdk_integrity_is_valid(cls, value: str) -> str:
-        return _validate_sha512_sri(value)
-
-
 class CapsuleInputDescriptor(BaseModel):
     """Versioned, exact, target-native capsule source declaration."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
-    descriptor_version: Literal["1"]
+    descriptor_version: Literal["2"]
     target: TargetTriple
     source_date_epoch: int = Field(ge=315532800, le=4102444800)
     sources: tuple[SourceArtifactDescriptor, ...] = Field(min_length=4, max_length=4)
     uv_lock: LockInputDescriptor
     package_lock: LockInputDescriptor
+    python_closure: PythonClosureDescriptor
     acp_closure: AcpClosureDescriptor
 
     @field_validator("sources")
@@ -345,8 +378,8 @@ class CapsuleInputDescriptor(BaseModel):
         cls, value: tuple[SourceArtifactDescriptor, ...]
     ) -> tuple[SourceArtifactDescriptor, ...]:
         kinds = tuple(source.kind for source in value)
-        if len(set(kinds)) != len(kinds) or set(kinds) != set(ComponentAssetKind):
-            raise ValueError("sources must contain each component asset kind once")
+        if kinds != tuple(ComponentAssetKind):
+            raise ValueError("sources must contain each component asset kind in order")
         digests = tuple(source.sha256 for source in value)
         if len(set(digests)) != len(digests):
             raise ValueError("source artifacts must have distinct byte identities")
@@ -354,6 +387,7 @@ class CapsuleInputDescriptor(BaseModel):
 
     @model_validator(mode="after")
     def _target_native_sources(self) -> CapsuleInputDescriptor:
+        acp_source: SourceArtifactDescriptor | None = None
         for source in self.sources:
             if (
                 source.kind
@@ -364,8 +398,27 @@ class CapsuleInputDescriptor(BaseModel):
                 and source.target is not self.target
             ):
                 raise ValueError("every target-specific source must match the target")
+            if source.kind is ComponentAssetKind.ACP_ADAPTER:
+                acp_source = source
+        if self.python_closure.target is not self.target:
+            raise ValueError("Python closure target must match the capsule target")
+        if self.acp_closure.target is not self.target:
+            raise ValueError("ACP closure target must match the capsule target")
+        if self.python_closure.lock_sha256 != self.uv_lock.sha256:
+            raise ValueError("Python closure must bind the declared uv lock")
+        if self.acp_closure.lock_sha256 != self.package_lock.sha256:
+            raise ValueError("ACP closure must bind the declared package lock")
+        validate_dashboard_installed_closure_set(
+            (self.python_closure.installed, self.acp_closure.installed)
+        )
         if self.acp_closure.target_sdk_package != _TARGET_SDK_PACKAGES[self.target]:
             raise ValueError("ACP closure selects the wrong target-native SDK package")
+        if (
+            acp_source is None
+            or acp_source.package_lock_integrity
+            != self.acp_closure.root_package_integrity
+        ):
+            raise ValueError("ACP closure root integrity must match the source pin")
         return self
 
 
@@ -375,6 +428,38 @@ class LoadedDescriptor:
 
     value: CapsuleInputDescriptor
     sha256: str
+
+
+@dataclass(frozen=True, slots=True)
+class LoadedPythonClosureInventory:
+    """One canonical Python inventory parsed from digest-verified bytes."""
+
+    value: PythonClosureInventory
+    sha256: str
+    path: Path
+    installed: LoadedInstalledClosureInventory
+
+
+@dataclass(frozen=True, slots=True)
+class LoadedAcpClosureInventory:
+    """One canonical ACP inventory parsed from digest-verified bytes."""
+
+    value: AcpClosureInventory
+    sha256: str
+    path: Path
+    installed: LoadedInstalledClosureInventory
+
+
+@dataclass(frozen=True, slots=True)
+class LoadedCapsuleClosures:
+    """Both closures proven against exact locks, archives, and license sources."""
+
+    python: LoadedPythonClosureInventory
+    acp: LoadedAcpClosureInventory
+    python_packages: tuple[VerifiedPackageArchive, ...]
+    acp_packages: tuple[VerifiedPackageArchive, ...]
+    uv_lock_path: Path
+    package_lock_path: Path
 
 
 @dataclass(frozen=True, slots=True)
@@ -427,12 +512,44 @@ def _read_and_digest(path: Path, *, label: str, maximum_size: int) -> tuple[byte
         source,
         declared_size,
     ):
-        for chunk in iter(lambda: source.read(_READ_CHUNK), b""):
+        for chunk in _exact_file_chunks(
+            source, expected_size=declared_size, label=label
+        ):
             payload.extend(chunk)
             digest.update(chunk)
-    if len(payload) != declared_size:
-        raise ArtifactInputError(f"{label} changed while being read")
     return bytes(payload), digest.hexdigest()
+
+
+def _exact_file_chunks(
+    source: BinaryIO, *, expected_size: int, label: str
+) -> Iterator[bytes]:
+    """Yield exactly one preflight size and reject truncation or growth."""
+    remaining = expected_size
+    while remaining:
+        chunk = source.read(min(_READ_CHUNK, remaining))
+        if not chunk:
+            raise ArtifactInputError(f"{label} changed while being read")
+        remaining -= len(chunk)
+        yield chunk
+    if source.read(1):
+        raise ArtifactInputError(f"{label} changed while being read")
+
+
+def _resolved_input_root(input_dir: Path) -> Path:
+    if not isinstance(input_dir, Path):
+        raise ArtifactInputError("input cache path is invalid")
+    try:
+        if input_dir.is_symlink() or input_dir.is_junction():
+            raise ArtifactInputError("input cache must not be a link-like path")
+        root = input_dir.resolve(strict=True)
+        metadata = root.stat()
+    except ArtifactInputError:
+        raise
+    except (OSError, RuntimeError):
+        raise ArtifactInputError("input cache must resolve to a directory") from None
+    if not stat.S_ISDIR(metadata.st_mode):
+        raise ArtifactInputError("input cache must resolve to a directory")
+    return root
 
 
 def load_capsule_input_descriptor(
@@ -454,22 +571,146 @@ def load_capsule_input_descriptor(
     return LoadedDescriptor(value=descriptor, sha256=digest)
 
 
+def load_python_closure_inventory(
+    descriptor: PythonClosureDescriptor, *, input_dir: Path
+) -> LoadedPythonClosureInventory:
+    """Load one canonical target-selected wheel inventory by exact identity."""
+    if not isinstance(descriptor, PythonClosureDescriptor):
+        raise ArtifactInputError("Python closure descriptor is invalid")
+    root = _resolved_input_root(input_dir)
+    candidate = root / descriptor.wheel_inventory_sha256
+    payload, digest = _read_and_digest(
+        candidate,
+        label="Python wheel inventory",
+        maximum_size=_MAX_INVENTORY_BYTES,
+    )
+    if len(payload) != descriptor.wheel_inventory_size:
+        raise ArtifactInputError("Python wheel inventory size does not match")
+    if digest != descriptor.wheel_inventory_sha256:
+        raise ArtifactInputError("Python wheel inventory digest does not match")
+    try:
+        document = json.loads(payload.decode("utf-8"))
+        inventory = PythonClosureInventory.model_validate(document)
+    except (UnicodeDecodeError, json.JSONDecodeError, ValidationError):
+        raise ArtifactInputError("Python wheel inventory is invalid") from None
+    if payload != canonical_closure_inventory_bytes(inventory):
+        raise ArtifactInputError("Python wheel inventory is not canonical JSON")
+    if inventory.target is not descriptor.target:
+        raise ArtifactInputError("Python wheel inventory target does not match")
+    if inventory.lock_sha256 != descriptor.lock_sha256:
+        raise ArtifactInputError("Python wheel inventory lock does not match")
+    if len(inventory.packages) != descriptor.package_count:
+        raise ArtifactInputError("Python wheel inventory package count does not match")
+    try:
+        installed = load_installed_closure_inventory(
+            descriptor.installed, input_dir=input_dir
+        )
+    except RuntimeError as error:
+        raise ArtifactInputError(str(error)) from None
+    package_names = {package.name for package in inventory.packages}
+    licensed_packages = {license.package for license in installed.value.licenses}
+    if licensed_packages != package_names:
+        raise ArtifactInputError(
+            "Python installed licenses do not cover the package closure"
+        )
+    return LoadedPythonClosureInventory(
+        value=inventory,
+        sha256=digest,
+        path=candidate,
+        installed=installed,
+    )
+
+
+def load_acp_closure_inventory(
+    descriptor: AcpClosureDescriptor, *, input_dir: Path
+) -> LoadedAcpClosureInventory:
+    """Load and reconcile one canonical target-selected ACP tarball inventory."""
+    if not isinstance(descriptor, AcpClosureDescriptor):
+        raise ArtifactInputError("ACP closure descriptor is invalid")
+    root = _resolved_input_root(input_dir)
+    candidate = root / descriptor.tarball_inventory_sha256
+    payload, digest = _read_and_digest(
+        candidate,
+        label="ACP tarball inventory",
+        maximum_size=_MAX_INVENTORY_BYTES,
+    )
+    if len(payload) != descriptor.tarball_inventory_size:
+        raise ArtifactInputError("ACP tarball inventory size does not match")
+    if digest != descriptor.tarball_inventory_sha256:
+        raise ArtifactInputError("ACP tarball inventory digest does not match")
+    try:
+        document = json.loads(payload.decode("utf-8"))
+        inventory = AcpClosureInventory.model_validate(document)
+    except (UnicodeDecodeError, json.JSONDecodeError, ValidationError):
+        raise ArtifactInputError("ACP tarball inventory is invalid") from None
+    if payload != canonical_closure_inventory_bytes(inventory):
+        raise ArtifactInputError("ACP tarball inventory is not canonical JSON")
+    if inventory.target is not descriptor.target:
+        raise ArtifactInputError("ACP tarball inventory target does not match")
+    if inventory.lock_sha256 != descriptor.lock_sha256:
+        raise ArtifactInputError("ACP tarball inventory lock does not match")
+    if len(inventory.packages) != descriptor.package_count:
+        raise ArtifactInputError("ACP tarball inventory package count does not match")
+    by_path = {package.install_path: package for package in inventory.packages}
+    root_package = by_path.get(f"node_modules/{_ACP_ROOT_PACKAGE}")
+    if (
+        root_package is None
+        or root_package.version != ACP_VERSION_PIN
+        or root_package.integrity != descriptor.root_package_integrity
+    ):
+        raise ArtifactInputError("ACP root package identity does not match")
+    target_sdks = tuple(
+        package
+        for package in inventory.packages
+        if package.name == descriptor.target_sdk_package
+    )
+    if (
+        len(target_sdks) != 1
+        or target_sdks[0].integrity != descriptor.target_sdk_integrity
+    ):
+        raise ArtifactInputError("ACP target SDK identity does not match")
+    unexpected_sdks = {
+        package.name
+        for package in inventory.packages
+        if package.name.startswith(_TARGET_SDK_PREFIX)
+        and package.name != descriptor.target_sdk_package
+    }
+    if unexpected_sdks:
+        raise ArtifactInputError("ACP inventory contains another target SDK")
+    try:
+        installed = load_installed_closure_inventory(
+            descriptor.installed, input_dir=input_dir
+        )
+    except RuntimeError as error:
+        raise ArtifactInputError(str(error)) from None
+    package_names = {package.install_path for package in inventory.packages}
+    licensed_packages = {license.package for license in installed.value.licenses}
+    if licensed_packages != package_names:
+        raise ArtifactInputError(
+            "ACP installed licenses do not cover the package closure"
+        )
+    return LoadedAcpClosureInventory(
+        value=inventory,
+        sha256=digest,
+        path=candidate,
+        installed=installed,
+    )
+
+
 def _digest_open_file(
     path: Path, *, label: str, expected_size: int, maximum_size: int
 ) -> str:
     digest = hashlib.sha256()
-    consumed = 0
     with _ordinary_reader(path, label=label, maximum_size=maximum_size) as (
         source,
         actual_size,
     ):
         if actual_size != expected_size:
             raise ArtifactInputError(f"{label} size does not match its descriptor")
-        for chunk in iter(lambda: source.read(_READ_CHUNK), b""):
-            consumed += len(chunk)
+        for chunk in _exact_file_chunks(
+            source, expected_size=expected_size, label=label
+        ):
             digest.update(chunk)
-    if consumed != expected_size:
-        raise ArtifactInputError(f"{label} changed while being read")
     return digest.hexdigest()
 
 
@@ -481,15 +722,7 @@ def verify_cached_artifacts(
         input_dir, Path
     ):
         raise ArtifactInputError("descriptor and input directory are invalid")
-    try:
-        if input_dir.is_symlink() or input_dir.is_junction():
-            raise ArtifactInputError("input cache must not be a link-like path")
-        root = input_dir.resolve(strict=True)
-        metadata = root.stat()
-    except (OSError, RuntimeError):
-        raise ArtifactInputError("input cache must resolve to a directory") from None
-    if not stat.S_ISDIR(metadata.st_mode):
-        raise ArtifactInputError("input cache must resolve to a directory")
+    root = _resolved_input_root(input_dir)
 
     verified: list[VerifiedArtifact] = []
     for source in descriptor.sources:
@@ -510,40 +743,104 @@ def verify_cached_artifacts(
     return tuple(verified)
 
 
-def verify_acp_tarball_inventory(
-    descriptor: AcpClosureDescriptor, *, input_dir: Path
-) -> Path:
-    """Verify only the exact bytes of the opaque ACP inventory input.
-
-    This function does not parse package entries or establish that the declared
-    package count, SDK choice, licenses, and package-lock graph agree.
-    """
-    if not isinstance(descriptor, AcpClosureDescriptor) or not isinstance(
-        input_dir, Path
-    ):
-        raise ArtifactInputError(
-            "ACP closure descriptor and input directory are invalid"
-        )
+def verify_python_wheelhouse(
+    inventory: LoadedPythonClosureInventory, *, input_dir: Path
+) -> tuple[VerifiedPackageArchive, ...]:
+    """Verify every target-selected Python wheel from the content-addressed cache."""
+    if not isinstance(inventory, LoadedPythonClosureInventory):
+        raise ArtifactInputError("loaded Python wheel inventory is invalid")
+    root = _resolved_input_root(input_dir)
     try:
-        if input_dir.is_symlink() or input_dir.is_junction():
-            raise ArtifactInputError("input cache must not be a link-like path")
-        root = input_dir.resolve(strict=True)
-        if not root.is_dir():
-            raise ArtifactInputError("input cache must resolve to a directory")
-    except (OSError, RuntimeError):
-        raise ArtifactInputError("input cache must resolve to a directory") from None
-    candidate = root / descriptor.tarball_inventory_sha256
-    if not candidate.exists() and not candidate.is_symlink():
-        raise ArtifactInputError("offline cache miss for ACP tarball inventory")
-    digest = _digest_open_file(
-        candidate,
-        label="ACP tarball inventory",
-        expected_size=descriptor.tarball_inventory_size,
-        maximum_size=_MAX_LOCK_BYTES,
+        verified = tuple(
+            verify_external_license_artifacts(
+                verify_python_wheel_archive(
+                    root / package.sha256,
+                    package,
+                    target=inventory.value.target,
+                ),
+                input_dir=root,
+            )
+            for package in inventory.value.packages
+        )
+    except PackageArchiveError as error:
+        raise ArtifactInputError(str(error)) from None
+    _verify_installed_license_sources(
+        inventory.installed,
+        verified,
+        package_identity=_python_archive_identity,
     )
-    if digest != descriptor.tarball_inventory_sha256:
-        raise ArtifactInputError("ACP tarball inventory digest does not match")
-    return candidate
+    return verified
+
+
+def verify_acp_tarballs(
+    inventory: LoadedAcpClosureInventory, *, input_dir: Path
+) -> tuple[VerifiedPackageArchive, ...]:
+    """Verify every target-selected ACP tarball from the content-addressed cache."""
+    if not isinstance(inventory, LoadedAcpClosureInventory):
+        raise ArtifactInputError("loaded ACP tarball inventory is invalid")
+    root = _resolved_input_root(input_dir)
+    try:
+        verified = tuple(
+            verify_external_license_artifacts(
+                verify_acp_package_archive(root / package.sha256, package),
+                input_dir=root,
+            )
+            for package in inventory.value.packages
+        )
+    except PackageArchiveError as error:
+        raise ArtifactInputError(str(error)) from None
+    _verify_installed_license_sources(
+        inventory.installed,
+        verified,
+        package_identity=_acp_archive_identity,
+    )
+    return verified
+
+
+def _python_archive_identity(archive: VerifiedPackageArchive) -> str:
+    if not isinstance(archive.descriptor, PythonWheelArtifact):
+        raise ArtifactInputError("Python license archive identity is invalid")
+    return archive.descriptor.name
+
+
+def _acp_archive_identity(archive: VerifiedPackageArchive) -> str:
+    if not isinstance(archive.descriptor, AcpPackageArtifact):
+        raise ArtifactInputError("ACP license archive identity is invalid")
+    return archive.descriptor.install_path
+
+
+def _verify_installed_license_sources(
+    installed: LoadedInstalledClosureInventory,
+    archives: tuple[VerifiedPackageArchive, ...],
+    *,
+    package_identity: Callable[[VerifiedPackageArchive], str],
+) -> None:
+    records_by_package: dict[str, list[InstalledLicenseRecord]] = {}
+    for record in installed.value.licenses:
+        records_by_package.setdefault(record.package, []).append(record)
+    for archive in archives:
+        identity = package_identity(archive)
+        records = records_by_package.get(identity, [])
+        declared_sources = set(archive.descriptor.license_members) | {
+            item.source_id for item in archive.descriptor.external_licenses
+        }
+        if {record.source_member for record in records} != declared_sources:
+            raise ArtifactInputError(
+                f"installed licenses do not cover declared members for {identity}"
+            )
+        source_evidence = {
+            evidence.path: evidence for evidence in archive.license_members
+        }
+        for record in records:
+            evidence = source_evidence.get(record.source_member)
+            if (
+                record.license_expression != archive.descriptor.license_expression
+                or evidence is None
+                or record.sha256 != evidence.sha256
+            ):
+                raise ArtifactInputError(
+                    f"installed license evidence does not match source for {identity}"
+                )
 
 
 def verify_lock_input(
@@ -552,28 +849,87 @@ def verify_lock_input(
     """Verify one explicit dependency lock without resolving a repository root."""
     if not isinstance(path, Path) or not isinstance(descriptor, LockInputDescriptor):
         raise ArtifactInputError("lock path and descriptor are invalid")
+    _payload, resolved = _read_verified_lock(path, descriptor=descriptor, label=label)
+    return resolved
+
+
+def _read_verified_lock(
+    path: Path, *, descriptor: LockInputDescriptor, label: str
+) -> tuple[bytes, Path]:
     if not path.exists() and not path.is_symlink():
         raise ArtifactInputError(f"{label} is missing") from None
-    digest = _digest_open_file(
+    payload, digest = _read_and_digest(
         path,
         label=label,
-        expected_size=descriptor.size,
         maximum_size=_MAX_LOCK_BYTES,
     )
+    if len(payload) != descriptor.size:
+        raise ArtifactInputError(f"{label} size does not match its descriptor")
     if digest != descriptor.sha256:
         raise ArtifactInputError(f"{label} digest does not match")
-    return path.absolute()
+    return payload, path.absolute()
 
 
-def source_artifact_map(
-    artifacts: Sequence[VerifiedArtifact],
-) -> Mapping[ComponentAssetKind, VerifiedArtifact]:
-    """Return the exact source closure indexed by kind after cardinality checks."""
-    if len(artifacts) != len(ComponentAssetKind) or any(
-        not isinstance(artifact, VerifiedArtifact) for artifact in artifacts
-    ):
-        raise ArtifactInputError("verified artifact closure is invalid")
-    by_kind = {artifact.descriptor.kind: artifact for artifact in artifacts}
-    if set(by_kind) != set(ComponentAssetKind):
-        raise ArtifactInputError("verified artifact closure is incomplete")
-    return by_kind
+def load_capsule_closures(
+    descriptor: CapsuleInputDescriptor,
+    *,
+    input_dir: Path,
+    uv_lock_path: Path,
+    package_lock_path: Path,
+) -> LoadedCapsuleClosures:
+    """Load both closures and prove them against one exact snapshot of each lock."""
+    if not isinstance(descriptor, CapsuleInputDescriptor):
+        raise ArtifactInputError("capsule descriptor is invalid")
+    uv_bytes, verified_uv_path = _read_verified_lock(
+        uv_lock_path, descriptor=descriptor.uv_lock, label="uv lock"
+    )
+    package_bytes, verified_package_path = _read_verified_lock(
+        package_lock_path,
+        descriptor=descriptor.package_lock,
+        label="package lock",
+    )
+    python = load_python_closure_inventory(
+        descriptor.python_closure, input_dir=input_dir
+    )
+    acp = load_acp_closure_inventory(descriptor.acp_closure, input_dir=input_dir)
+    try:
+        validate_dashboard_installed_closure_set(
+            (python.installed.value, acp.installed.value)
+        )
+    except ValueError as error:
+        raise ArtifactInputError(str(error)) from None
+    python_source = next(
+        source
+        for source in descriptor.sources
+        if source.kind is ComponentAssetKind.PYTHON_RUNTIME
+    )
+    node_source = next(
+        source
+        for source in descriptor.sources
+        if source.kind is ComponentAssetKind.NODE_RUNTIME
+    )
+    try:
+        reconcile_python_closure_lock_bytes(
+            python.value,
+            lock_bytes=uv_bytes,
+            root_package="vaultspec-a2a",
+            python_full_version=python_source.release,
+        )
+        reconcile_acp_closure_lock_bytes(
+            acp.value,
+            lock_bytes=package_bytes,
+            root_package=_ACP_ROOT_PACKAGE,
+            node_full_version=node_source.release,
+        )
+    except LockReconciliationError as error:
+        raise ArtifactInputError(str(error)) from None
+    python_packages = verify_python_wheelhouse(python, input_dir=input_dir)
+    acp_packages = verify_acp_tarballs(acp, input_dir=input_dir)
+    return LoadedCapsuleClosures(
+        python=python,
+        acp=acp,
+        python_packages=python_packages,
+        acp_packages=acp_packages,
+        uv_lock_path=verified_uv_path,
+        package_lock_path=verified_package_path,
+    )

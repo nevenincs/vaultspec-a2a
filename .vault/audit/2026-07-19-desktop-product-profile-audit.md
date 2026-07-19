@@ -1598,3 +1598,123 @@ credential-test policy finding, target-native release evidence, and legal/proven
 gates continue to block release authorization. The final exact-source Windows desktop
 campaign passed 290 tests with 26 deselected; its single pre-existing skip is the
 credential-policy finding queued as S98 above.
+
+## `W01.P03.S99` offline closure authority review
+
+Status: PASS AFTER THREE FORMAL REVIEW ROUNDS; PHYSICAL EXTRACTION FOLLOW-UP OPEN.
+
+S99 now defines canonical content-addressed authority for target-selected Python wheels,
+ACP npm tarballs, their exact lock graphs, and their expected installed trees. The final
+public loader cannot return the combined closure until both locks, every selected package
+archive, every external license byte source, and every installed-license source join pass.
+This remains candidate assembly input and grants no publication, receipt, activation, or
+independent provenance authority.
+
+### nominal-lock-and-target-selection | high | Resolved
+
+The first inventory shape bound lock digests without proving the selected graph, roots,
+target markers, nested npm installation identity, or one exact native SDK. Exact uv lock
+and package-lock bytes are now parsed fail-closed, roots and reachability are explicit,
+unreachable extras reject, nested package paths remain distinct, and excluded RAG and
+Torch capabilities cannot enter the desktop closure.
+
+### package-bytes-not-structurally-authoritative | high | Resolved
+
+Early package records could describe arbitrary blobs. Real wheel and npm bytes now match
+content-addressed SHA-256 identities, npm SHA-512 integrity, URL and version authority,
+safe portable member paths, bounded expansion, archive identity, wheel `WHEEL` tags, and
+complete `RECORD` hashes. Links, special members, traversal, collisions, encryption,
+wrong identities, absent evidence, and compression bombs reject.
+
+### installed-tree-authority-opaque | high | Resolved
+
+The first closure descriptor did not bind the post-install result. Each closure now joins
+one canonical content-addressed installed inventory containing sorted path, mode, size,
+SHA-256, entrypoint, license, aggregate-size, file-count, and tree-digest facts. Descriptor
+and inventory target, root, lock, source inventory, counts, size, and digest must all agree.
+
+### installed-dashboard-domain-drift | high | Resolved
+
+Review showed that NFC paths, per-closure 80,000-file bounds, unbounded combined license
+counts, and duplicate license paths could create locally valid authority that the dashboard
+must reject. Installed paths now use the dashboard segment grammar; Python plus ACP share
+the dashboard-wide 80,000-file, 8 GiB, and 4,096-license bounds; cross-closure paths and
+semantic license paths are unique; and component tokens plus canonical SPDX expressions
+fit the dashboard schema.
+
+### installed-license-source-join-absent | high | Resolved
+
+Package-name coverage alone allowed arbitrary installed files to be relabelled as license
+evidence. Every installed license now identifies one exact archive member or external
+license source, carries the same canonical SPDX claim, and matches the verified source
+digest. Every declared source is covered exactly once before the combined loader returns.
+
+### real-wheel-license-metadata-unrepresentable | high | Resolved
+
+Requiring `License-Expression` and one in-wheel license member made unavoidable locked
+wheels impossible to represent. Version-aware handling now supports Metadata 2.4
+`.dist-info/licenses` members, Metadata 2.1 direct and legacy license directories, and an
+explicit curated SPDX fallback when the optional expression is absent. Deficient wheels
+may bind separately supplied content-addressed external license bytes with an exact source
+id, declared member, HTTPS provenance claim, size, SHA-256, and redistribution reference.
+Missing, ambiguous, changed, or unreferenced external bytes reject.
+
+### npm-semver-and-node-engine-drift | high | Resolved
+
+The initial npm graph discarded dependency ranges and ignored `engines.node`. A partial
+PEP 440 implementation then diverged from npm for prereleases, zero-major carets, partial
+comparators, and short-circuited invalid OR branches. The accepted bounded evaluator
+supports the stable forms mechanically present in the lock, rejects prerelease and
+unsupported syntax before evaluation, evaluates every clause and token, and checks normal,
+optional, peer, and Node-engine ranges. The pinned Node 22.17 runtime rejects incompatible
+requirements. An independent differential checked 486 stable cases and all 183 real lock
+edges against npm's bundled SemVer implementation with zero mismatches.
+
+### wheel-runtime-and-platform-false-acceptance | high | Resolved
+
+Compatibility originally accepted future CPython ABI tags, future macOS and manylinux
+floors, native-ABI `any` wheels, and raw Linux tags with no glibc proof. The single wheel
+compatibility authority now permits only CPython 3.13-compatible ABI forms, pure
+`none-any`, target-native Windows and macOS tags within the recorded floor, and bounded
+manylinux policies no newer than glibc 2.28. Raw Linux and future-floor inputs reject.
+
+### exact-runtime-marker-drift | high | Resolved
+
+Python markers originally used a nominal 3.13.0 environment instead of the descriptor's
+exact 3.13.5 runtime. Lock reconciliation now receives the exact runtime release, validates
+the `requires-python` contract, and evaluates patch-sensitive markers against that release.
+
+### complete-verification-was-optional | medium | Resolved
+
+Earlier callers could load lock-reconciled inventories without invoking package archive
+and installed-license verification. The combined loader now performs the complete sequence
+and returns the verified package results. A real-files test proves success with every byte
+present and fail-closed behavior when one wheel disappears.
+
+### duplicate-weaker-lock-and-wheel-apis | low | Resolved
+
+Test-only path readers duplicated the production exact-lock snapshot path, and wheel
+compatibility had a second public export. The weaker wrappers and duplicate export were
+removed; production and tests use the exact byte APIs and single compatibility home.
+
+### archive-preflight-snapshot-and-scanner-duplication | medium | Open; queued as `W01.P03.S100`
+
+Package and capsule scanners still duplicate bounded path and member traversal. Expansion
+ratio checks now occur before evidence reads, but ZIP central-directory preflight, fully
+streamed member verification, and retention of the verified package snapshot through
+extraction remain mandatory. S100 owns consolidation before S13 may extract package bytes.
+
+### final-dashboard-tree-and-trusted-commit-join | medium | Open; assigned to `W01.P03.S13` and `W01.P03.S14`
+
+Per-closure authority is only substrate. S13 must combine Python, ACP, CPython, Node, the
+A2A distribution, and launcher files; reserve aggregate capacity for all of them; reject
+cross-component collisions; and emit one dashboard `vaultspec-installed-tree-v1` bound to
+the component manifest digest. The A2A source commit remains a candidate claim until the
+dashboard independently joins it to the trusted component lock. S14 must verify the whole
+unpublished generation without a source checkout.
+
+The final exact-hash focused campaign passes 102 tests. The complete Windows desktop
+campaign passes 384 tests with 26 deselected and the one pre-existing credential-policy
+skip queued as S98. Ruff, formatting, Ty, and diff hygiene pass. Independent dashboard,
+contract, and code-health reviewers found no S99 blocker; the sole carried medium finding
+is assigned to S100 above. This closes only S99 and authorizes no release.

@@ -28,6 +28,7 @@ related:
   - '[[2026-07-18-desktop-product-profile-W01-P03-S95]]'
   - '[[2026-07-18-desktop-product-profile-W01-P03-S96]]'
   - '[[2026-07-18-desktop-product-profile-W01-P03-S97]]'
+  - '[[2026-07-18-desktop-product-profile-W01-P03-S99]]'
   - '[[2026-07-18-desktop-product-profile-W02-P04-S16]]'
   - '[[2026-07-18-desktop-product-profile-W02-P04-S17]]'
   - '[[2026-07-18-desktop-product-profile-W02-P04-S18]]'
@@ -58,6 +59,24 @@ related:
   - '[[2026-07-18-desktop-product-profile-W03-P08-S39]]'
   - '[[2026-07-18-desktop-product-profile-W03-P08-S40]]'
   - '[[2026-07-18-desktop-product-profile-W03-P08-S41]]'
+  - '[[2026-07-18-desktop-product-profile-W03-P08-S42]]'
+  - '[[2026-07-18-desktop-product-profile-W03-P08-S43]]'
+  - '[[2026-07-18-desktop-product-profile-W03-P08-S44]]'
+  - '[[2026-07-18-desktop-product-profile-W03-P08-S45]]'
+  - '[[2026-07-18-desktop-product-profile-W03-P08-S46]]'
+  - '[[2026-07-18-desktop-product-profile-W03-P08-summary]]'
+  - '[[2026-07-18-desktop-product-profile-W03-P09-S47]]'
+  - '[[2026-07-18-desktop-product-profile-W03-P09-S48]]'
+  - '[[2026-07-18-desktop-product-profile-W03-P09-S49]]'
+  - '[[2026-07-18-desktop-product-profile-W03-P09-S50]]'
+  - '[[2026-07-18-desktop-product-profile-W03-P09-S51]]'
+  - '[[2026-07-18-desktop-product-profile-W03-P09-summary]]'
+  - '[[2026-07-18-desktop-product-profile-W04-P10-S52]]'
+  - '[[2026-07-18-desktop-product-profile-W04-P10-S53]]'
+  - '[[2026-07-18-desktop-product-profile-W04-P10-S54]]'
+  - '[[2026-07-18-desktop-product-profile-W04-P10-S55]]'
+  - '[[2026-07-18-desktop-product-profile-W04-P10-summary]]'
+  - '[[2026-07-18-desktop-product-profile-W04-P11-S56]]'
   - '[[2026-07-18-desktop-product-profile-adr]]'
   - '[[2026-07-18-desktop-product-profile-plan]]'
   - '[[2026-07-18-desktop-product-profile-reference]]'
@@ -105,6 +124,7 @@ Auto-generated index of all documents tagged with `#desktop-product-profile`.
 - `2026-07-18-desktop-product-profile-W01-P03-S95` - Write deterministic capsule archives through one exact create-new file inside a caller-owned unpublished generation while sharing the bounded emitter and retaining fail-closed legacy publication behavior
 - `2026-07-18-desktop-product-profile-W01-P03-S96` - Prove direct-generation projection and archive writing with real files and competing processes including collisions source and parent swaps partial failure evidence bounds and unchanged POSIX legacy-publication refusal
 - `2026-07-18-desktop-product-profile-W01-P03-S97` - Lease one empty unpublished-generation child before any write
+- `2026-07-18-desktop-product-profile-W01-P03-S99` - Define versioned offline Python and ACP closure inventories that bind every content-addressed package target selection lock identity license claim and expected installed inventory before generation assembly
 - `2026-07-18-desktop-product-profile-W02-P04-S16` - Define the desktop profile and validate explicit immutable and mutable product roots
 - `2026-07-18-desktop-product-profile-W02-P04-S17` - Derive database checkpoint log credential discovery receipt workspace temporary-home and snapshot paths only from the explicit desktop app home
 - `2026-07-18-desktop-product-profile-W02-P04-S18` - Add the manifest-declared desktop gateway invocation without changing Compose or foreground serve defaults
@@ -135,6 +155,24 @@ Auto-generated index of all documents tagged with `#desktop-product-profile`.
 - `2026-07-18-desktop-product-profile-W03-P08-S39` - Require the attach credential on the versioned six-member whitelist (five run-control verbs plus bounded active-run discovery) without expanding it
 - `2026-07-18-desktop-product-profile-W03-P08-S40` - Require attach authentication on dashboard product APIs while leaving minimal liveness ungated
 - `2026-07-18-desktop-product-profile-W03-P08-S41` - Require attach authentication before accepting desktop event WebSockets
+- `2026-07-18-desktop-product-profile-W03-P08-S42` - Require both authenticated runtime control and receipt ownership for administrative shutdown
+- `2026-07-18-desktop-product-profile-W03-P08-S43` - Enforce the worker IPC credential on dispatch events heartbeats health and administration
+- `2026-07-18-desktop-product-profile-W03-P08-S44` - Use only the worker IPC credential for gateway-facing event heartbeat and health traffic
+- `2026-07-18-desktop-product-profile-W03-P08-S45` - Read owner-scoped credential files for operator calls without accepting secret command-line arguments
+- `2026-07-18-desktop-product-profile-W03-P08-S46` - Prove attach-control worker IPC and lifecycle credentials are non-interchangeable rejected outside their planes and absent from discovery logs and responses
+- `2026-07-18-desktop-product-profile-W03-P08-summary` - `desktop-product-profile` `W03.P08` summary
+- `2026-07-18-desktop-product-profile-W03-P09-S47` - Define separate liveness gateway readiness worker state provider eligibility and run-admission fields
+- `2026-07-18-desktop-product-profile-W03-P09-S48` - Make a valid desktop database with a cold startable worker gateway-ready without claiming execution readiness
+- `2026-07-18-desktop-product-profile-W03-P09-S49` - Return only a minimal alive or not-alive signal from unauthenticated HTTP liveness and return process and product identity plus state only from authenticated readiness responses
+- `2026-07-18-desktop-product-profile-W03-P09-S50` - Serve the same authenticated readiness facts through service-state and discovery probes
+- `2026-07-18-desktop-product-profile-W03-P09-S51` - Prove unauthenticated HTTP liveness exposes only the minimal alive or not-alive signal and authenticated readiness responses carry process and product identity plus cold-to-execution state
+- `2026-07-18-desktop-product-profile-W03-P09-summary` - `desktop-product-profile` `W03.P09` summary
+- `2026-07-18-desktop-product-profile-W04-P10-S52` - Keep desktop boot and redispatch reconciliation from spawning a worker while preserving Compose startup behavior
+- `2026-07-18-desktop-product-profile-W04-P10-S53` - Require a desktop gateway to spawn and own its worker without discovering adopting or evicting a Compose worker
+- `2026-07-18-desktop-product-profile-W04-P10-S54` - Trigger deferred reconciliation only after authenticated execution demand has completed worker single-flight readiness
+- `2026-07-18-desktop-product-profile-W04-P10-S55` - Prove concurrent first demand creates one real worker and idle desktop boot creates none
+- `2026-07-18-desktop-product-profile-W04-P10-summary` - `desktop-product-profile` `W04.P10` summary
+- `2026-07-18-desktop-product-profile-W04-P11-S56` - Implement a bounded drain gate that atomically closes admission tracks active runs and reports quiescence
 
 ### plan
 

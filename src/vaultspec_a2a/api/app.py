@@ -355,15 +355,42 @@ async def _lifespan(app: FastAPI) -> AsyncGenerator[None]:
         )
         connection_manager.set_agent_control_handler(ctrl_handler)
 
-        reconcile_task = asyncio.create_task(
-            redispatch_reconciling_threads(
+        # Deferred-reconciliation gate: ordinary armed desktop boot must not start
+        # the worker. The worker starts only on the first authenticated execution
+        # demand, which fires this event once its single-flight start reaches
+        # readiness (see the dispatch demand path). Reconciliation of RECONCILING
+        # threads then runs against the already-started worker. The Compose and
+        # development profiles keep eager boot reconciliation: their worker is
+        # either standalone (no auto-spawn) or foreground-spawned at boot.
+        worker_demand_ready = asyncio.Event()
+        app.state.worker_demand_ready = worker_demand_ready
+
+        async def _deferred_reconcile() -> None:
+            await worker_demand_ready.wait()
+            await redispatch_reconciling_threads(
                 worker_client,
                 circuit_breaker,
                 worker_spawner,
                 app.state,
                 trace_headers_fn=trace_headers,
             )
-        )
+
+        if armed:
+            # Hand the spawner the event it fires once the first demand-driven
+            # single-flight worker start reaches readiness; the parked
+            # reconciliation above then wakes.
+            cast("Any", worker_spawner).demand_ready_event = worker_demand_ready
+            reconcile_task = asyncio.create_task(_deferred_reconcile())
+        else:
+            reconcile_task = asyncio.create_task(
+                redispatch_reconciling_threads(
+                    worker_client,
+                    circuit_breaker,
+                    worker_spawner,
+                    app.state,
+                    trace_headers_fn=trace_headers,
+                )
+            )
 
         # Publish and heartbeat the machine-global discovery file so the
         # engine can attach-never-own. A crashed/stale prior record is reclaimed;

@@ -107,8 +107,8 @@ def test_build_worker_messages_adds_rejection_revision_instruction() -> None:
     )
 
 
-def _minimal_state(**overrides: object) -> TeamState:
-    base: TeamState = {
+def _minimal_state() -> TeamState:
+    return {
         "messages": [HumanMessage(content="Revise the research document.")],
         "active_agent": "vaultspec-synthesist",
         "artifacts": [],
@@ -118,8 +118,6 @@ def _minimal_state(**overrides: object) -> TeamState:
         "next": "",
         "active_feature": "edge-feature",
     }
-    base.update(overrides)  # type: ignore[typeddict-item]
-    return base
 
 
 def test_build_worker_messages_grounds_feedback_when_present() -> None:

@@ -4,7 +4,7 @@ tags:
   - '#index'
   - '#frontend-backend-contract'
 date: '2026-07-15'
-modified: '2026-07-15'
+modified: '2026-07-19'
 related:
   - '[[2026-02-26-frontend-backend-contract-adr]]'
 ---

@@ -3,7 +3,7 @@ tags:
   - "#reference"
   - "#ide-mcp-setup"
 date: 2026-03-31
-modified: '2026-07-15'
+modified: '2026-07-19'
 related:
   - "[[2026-02-25-llm-context-provider-abstraction-adr]]"
   - "[[2026-03-04-worker-process-architecture-adr]]"
@@ -208,7 +208,7 @@ All variables use the `VAULTSPEC_` prefix and can be set in your shell, a
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `VAULTSPEC_GATEWAY_URL` | `http://localhost:8000` | Gateway API base URL. |
+| `VAULTSPEC_GATEWAY_URL` | `http://localhost:18000` | Gateway API base URL. |
 | `VAULTSPEC_MCP_AUTO_START_GATEWAY` | `true` | Auto-start gateway + worker as subprocesses on MCP server start. |
 | `VAULTSPEC_MCP_HOST` | `0.0.0.0` | Bind host for `streamable-http` transport (not used in stdio mode). |
 | `VAULTSPEC_MCP_PORT` | `8200` | Bind port for `streamable-http` transport (not used in stdio mode). |
@@ -217,9 +217,9 @@ All variables use the `VAULTSPEC_` prefix and can be set in your shell, a
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `VAULTSPEC_PORT` | `8000` | Gateway HTTP port. |
-| `VAULTSPEC_WORKER_PORT` | `8001` | Worker HTTP port. |
-| `VAULTSPEC_WORKER_URL` | `http://127.0.0.1:8001` | Worker base URL for dispatch calls. |
+| `VAULTSPEC_PORT` | `18000` | Gateway HTTP port. |
+| `VAULTSPEC_WORKER_PORT` | `18001` | Worker HTTP port. |
+| `VAULTSPEC_WORKER_URL` | `http://127.0.0.1:18001` | Worker base URL for dispatch calls. |
 | `VAULTSPEC_AUTO_SPAWN_WORKER` | `true` | Gateway auto-spawns worker subprocess on first dispatch. |
 | `VAULTSPEC_DATABASE_URL` | `sqlite+aiosqlite:///vaultspec.db` | SQLite database connection URL. |
 | `VAULTSPEC_WORKSPACE_ROOT` | `./workspaces` | Project root for agent file operations. |
@@ -299,7 +299,7 @@ The MCP server cannot reach the gateway API.
 3. Verify the gateway is healthy:
 
    ```bash
-   curl http://localhost:8000/health
+   curl http://localhost:18000/health
    ```text
 
 ### "Worker unavailable" / dispatch failures
@@ -309,7 +309,7 @@ The gateway cannot reach the worker.
 1. Check if the worker is running:
 
    ```bash
-   curl http://localhost:8001/health
+   curl http://localhost:18001/health
    ```text
 
 2. If using auto-spawn (default), the worker starts on first dispatch. The
@@ -333,7 +333,7 @@ failures. This typically means the worker crashed.
 3. Check circuit breaker status:
 
    ```bash
-   curl http://localhost:8000/health
+   curl http://localhost:18000/health
    # Look for "circuit_breaker": {"status": "open"|"closed"|"half_open"}
    ```text
 
@@ -345,19 +345,19 @@ failures. This typically means the worker crashed.
 
 ### Port conflicts
 
-Another process is using port 8000 or 8001.
+Another process is using port 18000 or 18001.
 
 1. Check what's using the port:
 
    ```powershell
    # Windows
-   netstat -ano | findstr :8000
+   netstat -ano | findstr :18000
    taskkill /F /PID <pid>
    ```text
 
    ```bash
    # Linux/macOS
-   lsof -i :8000 | grep LISTEN
+   lsof -i :18000 | grep LISTEN
    kill <pid>
    ```text
 
@@ -389,7 +389,7 @@ Get-Process -Name python | Where-Object {
 } | Stop-Process -Force
 
 # Or kill by port
-netstat -ano | findstr ":8000 :8001"
+netstat -ano | findstr ":18000 :18001"
 taskkill /F /PID <pid>
 ```text
 

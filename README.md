@@ -184,9 +184,11 @@ just dev code repair         # apply ruff lint fixes and formatting
 ```bash
 just dev test unit [*ARGS]        # the default non-service selection
 just dev test service [*ARGS]     # deterministic service tests against real local services
-just dev test all [*ARGS]         # the project-wide default selection
-just dev test coverage [*ARGS]    # the default selection with terminal coverage
-just dev test collect [*ARGS]     # collect the selection without executing
+just dev test all [*ARGS]         # every collected test, including service tests
+just dev test coverage [*ARGS]    # the unit selection with terminal coverage
+just dev test collect-unit [*ARGS]    # collect the unit selection without executing
+just dev test collect-service [*ARGS] # collect the service selection without executing
+just dev test collect-all [*ARGS]     # collect every test without executing
 ```
 
 Service tests exercise real local services; no test doubles are used.
@@ -287,8 +289,8 @@ are fixed.
 
 | Port | Service | Env Override | Notes |
 |------|---------|--------------|-------|
-| 8000 | Gateway API | `VAULTSPEC_PORT` | REST + WebSocket |
-| 8001 | Worker | `VAULTSPEC_WORKER_PORT` | LangGraph executor |
+| 18000 | Gateway API | `VAULTSPEC_PORT` | REST + WebSocket |
+| 18001 | Worker | `VAULTSPEC_WORKER_PORT` | LangGraph executor |
 | 8200 | MCP server | `VAULTSPEC_MCP_PORT` | Streamable HTTP transport |
 | 4317 | Jaeger OTLP | `OTEL_EXPORTER_OTLP_ENDPOINT` | Trace collector |
 | 16686 | Jaeger UI | (none) | Trace viewer |

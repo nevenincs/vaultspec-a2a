@@ -119,6 +119,7 @@ def test_project_creates_absent_file_with_entry_marker_and_placeholders(
 ) -> None:
     specs = [_rag_spec(), *_bridge_specs(bearer="SECRET-BEARER", actor="SECRET-ACTOR")]
     path = project_declared_mcp(tmp_path, specs)
+    assert path is not None
     assert path == tmp_path / ".mcp.json"
     content = _read(path)
     assert set(content["mcpServers"]) == {"vaultspec-rag", "vaultspec-authoring"}

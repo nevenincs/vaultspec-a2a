@@ -397,7 +397,7 @@ def procs_reap() -> None:
     default="",
     help="Paired worker base URL (VAULTSPEC_WORKER_URL) a gateway dispatches to. "
     "Recorded per process so the gateway targets the dev worker rather than "
-    "auto-deriving the owner's resident worker (port 8001).",
+    "auto-deriving the owner's resident worker (port 18001).",
 )
 @click.option(
     "--log", "log_path", default=None, help="Append process output to this file."

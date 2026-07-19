@@ -22,7 +22,7 @@ All commands run from the **repository root** (not `service/`).
 docker compose -f service/docker-compose.dev.yml up --build
 ```
 
-- Gateway: <http://localhost:8000>
+- Gateway: <http://localhost:18000>
 - Frontend: <http://localhost:5173> (HMR, proxied to the gateway)
 
 ### Deterministic certification stack
@@ -31,8 +31,8 @@ docker compose -f service/docker-compose.dev.yml up --build
 just dev service start integration
 ```
 
-- Gateway: <http://localhost:8000>
-- Worker: <http://localhost:8001>
+- Gateway: <http://localhost:18000>
+- Worker: <http://localhost:18001>
 - VidaiMock: <http://localhost:8100>
 - Jaeger UI: <http://localhost:16686>
 
@@ -49,7 +49,7 @@ just dev service stop integration
 docker compose -f service/docker-compose.prod.yml up --build
 ```
 
-- Gateway: <http://localhost:8000>
+- Gateway: <http://localhost:18000>
 - Jaeger UI: <http://localhost:16686>
 
 ### Production with Postgres (recommended)

@@ -33,6 +33,12 @@ Justfile         text
 # ── Build / generated (do not show in diffs by default) ─────────────
 src/ui/dist/** -diff linguist-generated
 
+# >>> vaultspec-managed (do not edit this block) >>>
+* text=auto eol=lf
+*.bat text eol=crlf
+*.cmd text eol=crlf
+# <<< vaultspec-managed <<<
+
 # ── Binary files (never normalise) ──────────────────────────────────
 *.zip       binary
 *.db        binary

@@ -4,7 +4,7 @@ tags:
   - '#index'
   - '#phase-artifact-gates'
 date: '2026-07-15'
-modified: '2026-07-15'
+modified: '2026-07-19'
 related:
   - '[[2026-03-03-phase-artifact-gates-adr]]'
 ---

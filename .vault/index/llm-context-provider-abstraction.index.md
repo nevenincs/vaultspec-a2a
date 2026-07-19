@@ -4,7 +4,7 @@ tags:
   - '#index'
   - '#llm-context-provider-abstraction'
 date: '2026-07-15'
-modified: '2026-07-15'
+modified: '2026-07-19'
 related:
   - '[[2026-02-25-llm-context-provider-abstraction-adr]]'
 ---

@@ -10,7 +10,8 @@
 [resident]
 # Fixed ports for the resident owner instances (never allocated by the registry).
 engine = 8767
-gateway = 8000
+gateway = 18000
+worker = 18001
 
 # Per-role dev/test configuration. `band` is an inclusive [start, end] port range;
 # the registry allocates only within it. `heartbeat` marks roles that refresh a

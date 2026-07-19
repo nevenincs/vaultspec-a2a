@@ -62,11 +62,11 @@ def test_pairing_ok_when_target_is_in_band(tmp_path) -> None:
 
 
 def test_pairing_exempts_a_resident_out_of_band_gateway(tmp_path) -> None:
-    # A resident gateway (port 8000, outside the gateway-dev band) is never guarded,
+    # A resident gateway (port 18000, outside the gateway-dev band) is never guarded,
     # even dispatching out-of-band with a live band worker present.
     _seed_band_worker(tmp_path, pid=os.getpid())
     status, _ = verify_dispatch_pairing(
-        "http://127.0.0.1:8001", 8000, home=tmp_path, config=_config()
+        "http://127.0.0.1:18001", 18000, home=tmp_path, config=_config()
     )
     assert status is DispatchPairingStatus.OK
 
@@ -74,11 +74,11 @@ def test_pairing_exempts_a_resident_out_of_band_gateway(tmp_path) -> None:
 def test_pairing_mispaired_when_out_of_band_and_a_band_worker_is_live(tmp_path) -> None:
     _seed_band_worker(tmp_path, pid=os.getpid())
     status, msg = verify_dispatch_pairing(
-        "http://127.0.0.1:8001", _BAND_GATEWAY_PORT, home=tmp_path, config=_config()
+        "http://127.0.0.1:18001", _BAND_GATEWAY_PORT, home=tmp_path, config=_config()
     )
     assert status is DispatchPairingStatus.MISPAIRED
     # The message names the mis-target, the band worker being ignored, and the fix.
-    assert "8001" in msg
+    assert "18001" in msg
     assert "worker-dev-wk" in msg
     assert "18110" in msg
     assert "--worker-url" in msg
@@ -86,7 +86,7 @@ def test_pairing_mispaired_when_out_of_band_and_a_band_worker_is_live(tmp_path) 
 
 def test_pairing_unpaired_when_out_of_band_and_no_band_worker(tmp_path) -> None:
     status, msg = verify_dispatch_pairing(
-        "http://127.0.0.1:8001", _BAND_GATEWAY_PORT, home=tmp_path, config=_config()
+        "http://127.0.0.1:18001", _BAND_GATEWAY_PORT, home=tmp_path, config=_config()
     )
     assert status is DispatchPairingStatus.UNPAIRED
     assert "intentional" in msg
@@ -97,7 +97,7 @@ def test_pairing_unpaired_when_the_band_worker_record_is_dead(tmp_path) -> None:
     # out-of-band gateway is UNPAIRED (warn), not MISPAIRED (refuse).
     _seed_band_worker(tmp_path, pid=_dead_pid())
     status, _ = verify_dispatch_pairing(
-        "http://127.0.0.1:8001", _BAND_GATEWAY_PORT, home=tmp_path, config=_config()
+        "http://127.0.0.1:18001", _BAND_GATEWAY_PORT, home=tmp_path, config=_config()
     )
     assert status is DispatchPairingStatus.UNPAIRED
 
@@ -117,7 +117,7 @@ def test_pairing_ok_when_no_worker_dev_role(tmp_path) -> None:
         },
     )
     status, _ = verify_dispatch_pairing(
-        "http://127.0.0.1:8001", _BAND_GATEWAY_PORT, home=tmp_path, config=config
+        "http://127.0.0.1:18001", _BAND_GATEWAY_PORT, home=tmp_path, config=config
     )
     assert status is DispatchPairingStatus.OK
 

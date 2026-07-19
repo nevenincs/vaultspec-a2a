@@ -565,8 +565,7 @@ def test_cites_named_adr_accepts_filename_and_stem() -> None:
     assert _cites_named_adr(f"EVIDENCE: `{name}` (Problem Statement)", name, stem)
     # Bare stem cited (the paraphrase that broke the first Claude S05 run).
     assert _cites_named_adr(
-        "grounding in the llm-context-provider-abstraction ADR "
-        f"({stem}) as decided",
+        f"grounding in the llm-context-provider-abstraction ADR ({stem}) as decided",
         name,
         stem,
     )

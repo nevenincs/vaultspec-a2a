@@ -30,6 +30,10 @@ import logging
 import shutil
 import tempfile
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from collections.abc import Mapping
 
 from ._acp_project_mcp import enumerate_ancestor_mcp_names
 
@@ -101,7 +105,7 @@ def isolation_required_but_absent(
 
 
 def create_isolated_config_home(
-    mcp_servers: dict[str, dict[str, object]] | None = None,
+    mcp_servers: Mapping[str, Mapping[str, object]] | None = None,
     workspace_root: Path | str | None = None,
 ) -> Path:
     """Create and return a fresh per-run ``CLAUDE_CONFIG_DIR``.
@@ -139,9 +143,7 @@ def create_isolated_config_home(
         for name in enumerate_ancestor_mcp_names(workspace_root)
         if name not in declared_set
     ]
-    _write_settings(
-        home, disabled_server_names=denied, enabled_server_names=declared
-    )
+    _write_settings(home, disabled_server_names=denied, enabled_server_names=declared)
     logger.debug(
         "ACP isolated config home created at %s (surfacing %d server(s), "
         "enabling %d declared, pinning out %d ancestor MCP server(s))",
@@ -153,11 +155,15 @@ def create_isolated_config_home(
     return home
 
 
-def _write_config(home: Path, mcp_servers: dict[str, dict[str, object]] | None) -> None:
+def _write_config(
+    home: Path, mcp_servers: Mapping[str, Mapping[str, object]] | None
+) -> None:
     """Write the home's ``.claude.json`` with onboarding flags and optional servers."""
     config: dict[str, object] = dict(_ONBOARDING_FLAGS)
     if mcp_servers:
-        config["mcpServers"] = mcp_servers
+        config["mcpServers"] = {
+            name: dict(server) for name, server in mcp_servers.items()
+        }
     (home / ".claude.json").write_text(json.dumps(config, indent=2), encoding="utf-8")
 
 

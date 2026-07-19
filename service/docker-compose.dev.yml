@@ -1,6 +1,6 @@
 # Headless development environment: backend gateway + worker.
 # Usage: docker compose -f service/docker-compose.dev.yml up --build
-# Gateway: http://localhost:8000
+# Gateway: http://localhost:18000
 
 services:
   gateway:
@@ -9,14 +9,14 @@ services:
       dockerfile: service/docker/prod.Dockerfile
       target: gateway
     ports:
-      - '${VAULTSPEC_PORT:-8000}:8000'
+      - '${VAULTSPEC_PORT:-18000}:18000'
     volumes:
       - db-data:/app/data
     environment:
       VAULTSPEC_DATABASE_URL: 'sqlite+aiosqlite:////app/data/vaultspec.db'
       VAULTSPEC_DATABASE_BACKEND: sqlite
       VAULTSPEC_CHECKPOINT_BACKEND: sqlite
-      VAULTSPEC_WORKER_URL: 'http://worker:8001'
+      VAULTSPEC_WORKER_URL: 'http://worker:18001'
       VAULTSPEC_AUTO_SPAWN_WORKER: 'false'
     depends_on:
       worker:
@@ -27,7 +27,7 @@ services:
           'CMD',
           'python',
           '-c',
-          "import urllib.request; urllib.request.urlopen('http://localhost:8000/internal/health')",
+          "import urllib.request; urllib.request.urlopen('http://localhost:18000/internal/health')",
         ]
       interval: 10s
       timeout: 5s
@@ -45,14 +45,14 @@ services:
       VAULTSPEC_DATABASE_URL: 'sqlite+aiosqlite:////app/data/vaultspec.db'
       VAULTSPEC_DATABASE_BACKEND: sqlite
       VAULTSPEC_CHECKPOINT_BACKEND: sqlite
-      VAULTSPEC_GATEWAY_URL: 'http://gateway:8000'
+      VAULTSPEC_GATEWAY_URL: 'http://gateway:18000'
     healthcheck:
       test:
         [
           'CMD',
           'python',
           '-c',
-          "import urllib.request; urllib.request.urlopen('http://localhost:8001/health')",
+          "import urllib.request; urllib.request.urlopen('http://localhost:18001/health')",
         ]
       interval: 10s
       timeout: 5s

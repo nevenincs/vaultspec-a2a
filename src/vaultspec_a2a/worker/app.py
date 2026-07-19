@@ -7,7 +7,7 @@ and heartbeat loop.
 Run standalone::
 
     python -m uvicorn vaultspec_a2a.worker.app:create_worker_app \
-        --factory --host 127.0.0.1 --port 8001
+        --factory --host 127.0.0.1 --port 18001
 
 Or via the ``vaultspec-worker`` console script (once registered in
 ``pyproject.toml``).

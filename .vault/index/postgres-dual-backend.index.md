@@ -4,7 +4,7 @@ tags:
   - '#index'
   - '#postgres-dual-backend'
 date: '2026-07-15'
-modified: '2026-07-15'
+modified: '2026-07-19'
 related:
   - '[[2026-03-10-postgres-dual-backend-adr]]'
 ---

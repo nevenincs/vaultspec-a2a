@@ -197,7 +197,7 @@ def test_refresh_last_seen_advances_the_heartbeat(tmp_path) -> None:
 
 def _config(band: PortBand) -> ProcsConfig:
     return ProcsConfig(
-        resident={"engine": 8767, "gateway": 8000},
+        resident={"engine": 8767, "gateway": 18000, "worker": 18001},
         roles={"scratch": _role(band, heartbeat=False)},
     )
 

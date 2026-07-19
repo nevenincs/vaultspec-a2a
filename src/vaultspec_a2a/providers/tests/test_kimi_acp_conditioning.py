@@ -25,9 +25,7 @@ _SIMULATOR = (
 _ALLOWED = ["mcp__vaultspec-rag__search_vault"]
 
 
-async def _drive_and_record(
-    tmp_path: Path, acp_family: str
-) -> tuple[dict, dict]:
+async def _drive_and_record(tmp_path: Path, acp_family: str) -> tuple[dict, dict]:
     """Run one turn on the simulator and return (initialize, session_new) params."""
     init_file = tmp_path / f"init_{acp_family}.json"
     new_file = tmp_path / f"new_{acp_family}.json"

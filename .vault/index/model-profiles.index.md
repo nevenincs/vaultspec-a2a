@@ -4,7 +4,7 @@ tags:
   - '#index'
   - '#model-profiles'
 date: '2026-07-15'
-modified: '2026-07-15'
+modified: '2026-07-19'
 related:
   - '[[2026-07-15-model-profiles-P01-S01]]'
   - '[[2026-07-15-model-profiles-P01-S02]]'

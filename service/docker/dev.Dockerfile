@@ -20,4 +20,4 @@ COPY src/vaultspec_a2a/ ./src/vaultspec_a2a/
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --frozen --no-editable
 
-EXPOSE 8000
+EXPOSE 18000

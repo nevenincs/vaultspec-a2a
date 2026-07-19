@@ -245,7 +245,7 @@ class InfraConfig(BaseSettings):
         description="Bind host for the uvicorn server (VAULTSPEC_HOST).",
     )
     port: int = Field(
-        default=8000,
+        default=18000,
         description="Bind port for the uvicorn server (VAULTSPEC_PORT).",
     )
 
@@ -274,8 +274,8 @@ class InfraConfig(BaseSettings):
 
     cors_allowed_origins: list[str] = Field(
         default=[
-            "http://localhost:8000",  # local gateway (operator tooling / health)
-            "http://127.0.0.1:8000",
+            "http://localhost:18000",  # local gateway (operator tooling / health)
+            "http://127.0.0.1:18000",
         ],
         description=(
             "Allowed CORS origins.  A2A is headless (no browser frontend); the "
@@ -286,7 +286,7 @@ class InfraConfig(BaseSettings):
 
     # Worker process settings
     worker_port: int = Field(
-        default=8001,
+        default=18001,
         description="Internal worker HTTP port",
         alias="VAULTSPEC_WORKER_PORT",
     )

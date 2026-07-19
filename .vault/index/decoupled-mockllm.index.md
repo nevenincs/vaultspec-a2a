@@ -4,7 +4,7 @@ tags:
   - '#index'
   - '#decoupled-mockllm'
 date: '2026-07-15'
-modified: '2026-07-15'
+modified: '2026-07-19'
 related:
   - '[[2026-03-31-decoupled-mockllm-adr]]'
 ---

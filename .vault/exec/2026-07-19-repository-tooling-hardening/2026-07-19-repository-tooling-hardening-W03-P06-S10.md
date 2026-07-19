@@ -49,9 +49,9 @@ related:
 
 - Pin verification rejected two stale candidate SHAs before closure; the final
   setup-uv and Claude references resolve to their current official tags.
-- The real `just ci` invocation reached Ruff but is presently blocked by an
-  unrelated shared-worktree edit to `test_component_contract.py` that Ruff
-  reports would be reformatted. The S10 workflow and command dry-runs pass, and
-  this step did not mutate that out-of-scope file.
+- The final real `just ci` invocation passed Ruff lint, Ruff formatting, Ty,
+  and Deptry. Its non-service suite passed 2,124 tests and failed 17, with 80
+  service tests deselected. The failures are recorded in the codebase-health
+  audit rather than suppressed or misreported as hosted-workflow success.
 - Live self-hosted dispatch remains terminal acceptance work because no
   repository-scoped runner was visible during the read-only settings audit.

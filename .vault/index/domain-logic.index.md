@@ -4,7 +4,7 @@ tags:
   - '#index'
   - '#domain-logic'
 date: '2026-07-15'
-modified: '2026-07-15'
+modified: '2026-07-19'
 related:
   - '[[2026-03-27-domain-logic-extraction-adr]]'
   - '[[2026-03-27-domain-logic-extraction-research]]'

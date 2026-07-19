@@ -4,7 +4,7 @@ tags:
   - '#index'
   - '#tool-cores'
 date: '2026-07-17'
-modified: '2026-07-17'
+modified: '2026-07-19'
 related:
   - '[[2026-07-17-tool-cores-P01-S01]]'
   - '[[2026-07-17-tool-cores-P01-S02]]'

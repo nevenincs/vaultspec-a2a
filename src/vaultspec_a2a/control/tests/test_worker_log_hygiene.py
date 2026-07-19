@@ -121,9 +121,7 @@ def test_sweep_orphan_worker_logs_removes_dead_keeps_live_and_current(
     registry_home = tmp_path / "registry"
     a2a_home = tmp_path / "a2a-home"
 
-    live_proc = subprocess.Popen(
-        [sys.executable, "-c", "import time; time.sleep(30)"]
-    )
+    live_proc = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
     try:
         with _a2a_home(a2a_home):
             orphan_log = _worker_stderr_log_path(18801)

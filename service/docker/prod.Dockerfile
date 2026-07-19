@@ -49,12 +49,12 @@ USER appuser
 FROM python-base AS gateway
 
 # Worker runs as a separate container — never auto-spawn inside Docker.
-ENV VAULTSPEC_WORKER_URL=http://worker:8001 \
+ENV VAULTSPEC_WORKER_URL=http://worker:18001 \
     VAULTSPEC_PROJECT_ROOT=/app \
     VAULTSPEC_AUTO_SPAWN_WORKER=false
 
-EXPOSE 8000
-CMD ["/app/.venv/bin/python", "-m", "uvicorn", "vaultspec_a2a.api.app:create_app", "--factory", "--host", "0.0.0.0", "--port", "8000"]
+EXPOSE 18000
+CMD ["/app/.venv/bin/python", "-m", "uvicorn", "vaultspec_a2a.api.app:create_app", "--factory", "--host", "0.0.0.0", "--port", "18000"]
 
 # ── Stage 2c: Worker (agent executor) ───────────────────────────────────────
 FROM node:22-slim AS gemini-cli
@@ -80,8 +80,8 @@ COPY --from=gemini-cli /usr/local/lib/node_modules/@google /usr/local/lib/node_m
 
 # PROV-O02: VAULTSPEC_PROJECT_ROOT prevents path traversal resolving into
 # site-packages in non-editable installs (factory.py _PROJECT_ROOT).
-ENV VAULTSPEC_GATEWAY_URL=http://gateway:8000 \
+ENV VAULTSPEC_GATEWAY_URL=http://gateway:18000 \
     VAULTSPEC_PROJECT_ROOT=/app
 
-EXPOSE 8001
-CMD ["/app/.venv/bin/python", "-m", "uvicorn", "vaultspec_a2a.worker.app:create_worker_app", "--factory", "--host", "0.0.0.0", "--port", "8001"]
+EXPOSE 18001
+CMD ["/app/.venv/bin/python", "-m", "uvicorn", "vaultspec_a2a.worker.app:create_worker_app", "--factory", "--host", "0.0.0.0", "--port", "18001"]

@@ -4,7 +4,7 @@ tags:
   - '#index'
   - '#integration-testing'
 date: '2026-07-15'
-modified: '2026-07-15'
+modified: '2026-07-19'
 related:
   - '[[2026-03-31-integration-testing-service-certification-research]]'
 ---

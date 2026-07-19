@@ -424,6 +424,20 @@ labels. Status: open for S12 live acceptance. The workflow retains the existing
 `self-hosted` and `dev-runner` labels without inventing an environment or runner
 group.
 
+### resident-port-reference-drift | medium | Canonical IDE and MCP guidance retained the retired 8000 and 8001 defaults
+
+Type: documentation contract. The accepted resident-port amendment and runtime
+surfaces use gateway 18000 and worker 18001, but the canonical setup reference
+still prescribed the former defaults in configuration, health, conflict, and
+orphan-cleanup examples. Status: resolved by updating every resident-port
+example while preserving explicit custom-port examples.
+
+### dev-process-registry-amendment-stamp | low | ADR amendment left stale modified metadata
+
+Type: governance metadata. The dev-process-registry ADR gained a 2026-07-19
+resident-port amendment while its `modified` field still named 2026-07-15.
+Status: resolved by refreshing the modified date to the amendment date.
+
 ## Recommendations
 
 No open task remains for S01, S02, or the S03 implementation. Preserve the two

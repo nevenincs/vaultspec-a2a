@@ -4,7 +4,7 @@ tags:
   - '#index'
   - '#adr-authoring-orchestration'
 date: '2026-07-16'
-modified: '2026-07-16'
+modified: '2026-07-19'
 related:
   - '[[2026-07-14-adr-authoring-orchestration-P01-S01]]'
   - '[[2026-07-14-adr-authoring-orchestration-P01-S02]]'

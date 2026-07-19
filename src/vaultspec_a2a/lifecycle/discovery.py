@@ -22,7 +22,6 @@ The reader half (parse + heartbeat freshness) is shared with
 
 from __future__ import annotations
 
-import ctypes
 import json
 import os
 import secrets
@@ -31,10 +30,8 @@ import stat
 import subprocess
 import sys
 import time
-from csv import reader as csv_reader
 from dataclasses import dataclass
 from enum import StrEnum
-from functools import cache
 from pathlib import Path
 
 import httpx
@@ -54,6 +51,12 @@ from ..desktop._filesystem_authority import (
     path_is_link_like,
     publish_no_replace,
     resolve_directory_authority,
+)
+from ..desktop._platform_acl import (
+    restrict_windows_file as _restrict_windows_file,
+)
+from ..desktop._platform_acl import (
+    windows_file_is_restricted as _windows_file_is_restricted,
 )
 
 __all__ = [
@@ -85,167 +88,6 @@ __all__ = [
 HEARTBEAT_REFRESH_SECONDS = 15
 
 _SERVICE_JSON_NAME = "service.json"
-
-
-class _AclSizeInformation(ctypes.Structure):
-    _fields_ = (
-        ("ace_count", ctypes.c_uint32),
-        ("acl_bytes_in_use", ctypes.c_uint32),
-        ("acl_bytes_free", ctypes.c_uint32),
-    )
-
-
-class _AceHeader(ctypes.Structure):
-    _fields_ = (
-        ("ace_type", ctypes.c_ubyte),
-        ("ace_flags", ctypes.c_ubyte),
-        ("ace_size", ctypes.c_ushort),
-    )
-
-
-@cache
-def _windows_system_executable(name: str) -> str:
-    """Resolve a trusted executable directly from the native system directory."""
-    if os.name != "nt" or Path(name).name != name:
-        raise OSError("trusted Windows executable resolution is unavailable")
-    buffer = ctypes.create_unicode_buffer(32_768)
-    length = ctypes.windll.kernel32.GetSystemDirectoryW(buffer, len(buffer))
-    if length <= 0 or length >= len(buffer):
-        raise ctypes.WinError(ctypes.get_last_error())
-    executable = Path(buffer.value) / name
-    if not executable.is_file():
-        raise FileNotFoundError(executable)
-    return str(executable)
-
-
-@cache
-def _windows_current_user_sid() -> str:
-    """Resolve the current Windows account SID without localized name parsing."""
-    completed = subprocess.run(
-        [_windows_system_executable("whoami.exe"), "/user", "/fo", "csv", "/nh"],
-        check=True,
-        capture_output=True,
-        text=True,
-        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
-    )
-    row = next(csv_reader([completed.stdout.strip()]))
-    if len(row) != 2 or not row[1].startswith("S-1-"):
-        msg = "unable to resolve current Windows account SID"
-        raise OSError(msg)
-    return row[1]
-
-
-def _restrict_windows_file(path: Path) -> None:
-    """Replace the DACL with user, SYSTEM, and administrators full access."""
-    if os.name != "nt":
-        return
-    current_sid = _windows_current_user_sid()
-    advapi32 = ctypes.WinDLL("advapi32", use_last_error=True)
-    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
-    descriptor = ctypes.c_void_p()
-    inheritance = "OICI" if path.is_dir() else ""
-    sddl = (
-        f"D:P(A;{inheritance};FA;;;{current_sid})"
-        f"(A;{inheritance};FA;;;SY)(A;{inheritance};FA;;;BA)"
-    )
-    if not advapi32.ConvertStringSecurityDescriptorToSecurityDescriptorW(
-        sddl,
-        1,  # SDDL_REVISION_1
-        ctypes.byref(descriptor),
-        None,
-    ):
-        raise ctypes.WinError(ctypes.get_last_error())
-    try:
-        dacl = ctypes.c_void_p()
-        present = ctypes.c_int()
-        defaulted = ctypes.c_int()
-        if not advapi32.GetSecurityDescriptorDacl(
-            descriptor,
-            ctypes.byref(present),
-            ctypes.byref(dacl),
-            ctypes.byref(defaulted),
-        ):
-            raise ctypes.WinError(ctypes.get_last_error())
-        if not present.value or not dacl.value:
-            raise OSError("private Windows DACL is absent")
-        result = advapi32.SetNamedSecurityInfoW(
-            str(path),
-            1,  # SE_FILE_OBJECT
-            0x00000004 | 0x80000000,  # DACL + PROTECTED_DACL
-            None,
-            None,
-            dacl,
-            None,
-        )
-        if result:
-            raise OSError(result, ctypes.FormatError(result), path)
-    finally:
-        kernel32.LocalFree(descriptor)
-
-
-def _windows_file_is_restricted(path: Path) -> bool:
-    """Return whether *path* has exactly the private publication DACL.
-
-    Discovery uses native ACL APIs and stays read-only. Every ACE must be a
-    non-inherited allow for the current user, SYSTEM, or administrators.
-    """
-    if os.name != "nt":
-        return True
-    advapi32 = ctypes.WinDLL("advapi32", use_last_error=True)
-    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
-    descriptor = ctypes.c_void_p()
-    dacl = ctypes.c_void_p()
-    result = advapi32.GetNamedSecurityInfoW(
-        str(path),
-        1,  # SE_FILE_OBJECT
-        0x00000004,  # DACL_SECURITY_INFORMATION
-        None,
-        None,
-        ctypes.byref(dacl),
-        None,
-        ctypes.byref(descriptor),
-    )
-    if result:
-        raise OSError(result, ctypes.FormatError(result), path)
-    try:
-        if not dacl.value:
-            return False
-        information = _AclSizeInformation()
-        if not advapi32.GetAclInformation(
-            dacl,
-            ctypes.byref(information),
-            ctypes.sizeof(information),
-            2,  # AclSizeInformation
-        ):
-            raise ctypes.WinError(ctypes.get_last_error())
-        principals: set[str] = set()
-        for index in range(information.ace_count):
-            ace = ctypes.c_void_p()
-            if not advapi32.GetAce(dacl, index, ctypes.byref(ace)):
-                raise ctypes.WinError(ctypes.get_last_error())
-            header = ctypes.cast(ace, ctypes.POINTER(_AceHeader)).contents
-            if header.ace_type != 0 or header.ace_flags & 0x10:
-                return False
-            ace_address = ace.value
-            if ace_address is None:
-                return False
-            sid = ctypes.c_void_p(ace_address + ctypes.sizeof(_AceHeader) + 4)
-            rendered = ctypes.c_wchar_p()
-            if not advapi32.ConvertSidToStringSidW(sid, ctypes.byref(rendered)):
-                raise ctypes.WinError(ctypes.get_last_error())
-            try:
-                if rendered.value is None:
-                    return False
-                principals.add(rendered.value)
-            finally:
-                kernel32.LocalFree(rendered)
-        return principals == {
-            _windows_current_user_sid(),
-            "S-1-5-18",
-            "S-1-5-32-544",
-        }
-    finally:
-        kernel32.LocalFree(descriptor)
 
 
 class DiscoveryState(StrEnum):

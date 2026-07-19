@@ -63,10 +63,11 @@ class HarnessMcpResolution:
 
 
 # Known MCP server name -> registry entry. Explicit and closed by design.
-# ``uvx --from vaultspec-rag vaultspec-search-mcp`` is used rather than the repo
-# ``.mcp.json``'s ``uv run vaultspec-search-mcp`` because the ACP subprocess is
-# spawned in the run workspace with no uv project cwd; uvx resolves the published
-# package's console script independent of the cwd.
+# ``uvx --from vaultspec-rag[mcp]==0.3.2 vaultspec-search-mcp`` is used rather
+# than the repo ``.mcp.json``'s ``uv run vaultspec-search-mcp`` because the ACP
+# subprocess is spawned in the run workspace with no uv project cwd. The exact
+# package extra and version deliberately reproduce the project lock's MCP
+# capability while remaining independent of the cwd.
 #
 # ``tools`` is registry metadata, NOT part of the ACP ``session/new`` mcpServer
 # shape: it names the server's READ-ONLY tools that may join the autonomous
@@ -85,11 +86,12 @@ class HarnessMcpResolution:
 # authoring bridge relies on) — registry env values must be literals, never
 # accidental ``${...}`` strings.
 _LAUNCH_SPEC_KEYS = ("name", "command", "args", "env")
+_LOCKED_RAG_MCP_REQUIREMENT = "vaultspec-rag[mcp]==0.3.2"
 _KNOWN_MCP_SERVERS: dict[str, dict[str, Any]] = {
     "vaultspec-rag": {
         "name": "vaultspec-rag",
         "command": "uvx",
-        "args": ["--from", "vaultspec-rag", "vaultspec-search-mcp"],
+        "args": ["--from", _LOCKED_RAG_MCP_REQUIREMENT, "vaultspec-search-mcp"],
         "tools": ("search_vault", "search_codebase", "get_code_file"),
         "read_only": True,
         "runtime_acquisition": True,

@@ -9,9 +9,9 @@ fixtures call it instead of hand-rolling the recipe.
 Two honesty guarantees carry from the design constraints:
 
 - **Version skew is surfaced, not hidden**: the vaultspec-core the environment
-  pins (``importlib.metadata``) and the vaultspec-core the CLI resolves to on
-  PATH can diverge (the uvx-divergence lesson). Provisioning reports the skew; it
-  never silently proceeds as if they agree.
+  pins (``importlib.metadata``) and the vaultspec-core command selected for
+  provisioning can diverge (the uvx-divergence lesson). Provisioning reports the
+  skew; it never silently proceeds as if they agree.
 - **Harness completeness is verified, not assumed**: install can succeed and the
   harness still be incomplete (a required template or skill absent), so the
   returned verdict is the verifier's, not the installer's exit code.
@@ -22,6 +22,7 @@ from __future__ import annotations
 import re
 import shutil
 import subprocess
+import sys
 from dataclasses import dataclass
 from importlib import metadata
 from typing import TYPE_CHECKING
@@ -113,12 +114,17 @@ def provision_workspace(
 
 
 def _core_base_command() -> list[str]:
-    """The argv prefix that runs vaultspec-core: the console script or the uvx shim.
+    """Return the argv prefix for the environment's deliberate Core authority.
 
-    Mirrors the S01 verifier's resolution order (the console script on PATH, else
-    the ``uvx --from vaultspec-core`` shim). Raises :class:`ProvisionError` when
-    neither resolves so the caller reports a provisioning failure, not a crash.
+    When the active Python environment contains the declared Core distribution,
+    invoke that exact environment with ``python -m vaultspec_core``. This keeps a
+    project-locked application from drifting to a different console script on
+    ``PATH``. A standalone installed application can have no declared Core
+    dependency, so it retains the console-script and ``uvx`` compatibility paths.
+    Raises :class:`ProvisionError` when none resolves.
     """
+    if _pinned_version() is not None:
+        return [sys.executable, "-m", "vaultspec_core"]
     if shutil.which(_CORE_DIST) is not None:
         return [_CORE_DIST]
     if shutil.which("uvx") is not None:

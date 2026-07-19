@@ -42,7 +42,7 @@ Define explicit dependency profiles and make the lock authoritative for every Va
 Expose deterministic setup, upgrade, synchronization, and diagnosis without ambient-latest fallbacks.
 
 - [x] `W01.P02.S02` - Add locked setup, sync, upgrade, status, and service recipes for Core and RAG; `just/dev/deps.just, just/dev/vault.just, just/dev/rag.just`.
-- [ ] `W01.P02.S03` - Route workspace provisioning and agent RAG acquisition through deliberate locked versions with real subprocess tests; `src/vaultspec_a2a/cli/provision.py, src/vaultspec_a2a/providers/_acp_mcp.py, tests`.
+- [x] `W01.P02.S03` - Route workspace provisioning and agent RAG acquisition through deliberate locked versions with real subprocess tests; `src/vaultspec_a2a/cli/provision.py, src/vaultspec_a2a/providers/_acp_mcp.py, tests`.
 
 ## Wave `W02` - reconcile governance and redesign the command facade
 
@@ -52,7 +52,7 @@ Land clone-persistent governance and then replace dynamic dispatch with owner-th
 
 Converge effective Git policy and canonical rules through Vaultspec Core ownership.
 
-- [ ] `W02.P03.S04` - Remove obsolete broad framework ignores and prove Core-managed policy convergence; `.gitignore`.
+- [x] `W02.P03.S04` - Remove obsolete broad framework ignores and prove Core-managed policy convergence; `.gitignore`.
 - [ ] `W02.P03.S05` - Reconcile the compact custom rule corpus and regenerate provider projections through owning verbs; `.vaultspec/rules, generated provider projections`.
 
 ### Phase `W02.P04` - native Just modules

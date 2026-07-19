@@ -6,6 +6,8 @@ runs against a real ``AcpChatModel`` and a real non-ACP stand-in.
 
 from __future__ import annotations
 
+import subprocess
+
 import pytest
 from langchain_core.language_models.fake_chat_models import FakeListChatModel
 
@@ -27,7 +29,26 @@ def test_resolve_known_server_returns_stdio_spec() -> None:
     assert spec["name"] == "vaultspec-rag"
     assert spec["command"] == "uvx"
     # uvx invokes the published package's console script, cwd-independent.
-    assert spec["args"] == ["--from", "vaultspec-rag", "vaultspec-search-mcp"]
+    assert spec["args"] == [
+        "--from",
+        "vaultspec-rag[mcp]==0.3.2",
+        "vaultspec-search-mcp",
+    ]
+
+
+def test_locked_rag_runtime_acquisition_executes_the_published_cli() -> None:
+    """The resolved production launch command acquires a runnable locked MCP CLI."""
+    spec = resolve_harness_mcp_servers(["vaultspec-rag"])[0]
+    proc = subprocess.run(
+        [spec["command"], *spec["args"], "--help"],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=120,
+    )
+
+    assert proc.returncode == 0, proc.stderr
+    assert "vaultspec-search-mcp" in proc.stdout
 
 
 def test_resolve_launch_spec_excludes_registry_only_tools_metadata() -> None:
@@ -193,22 +214,32 @@ def test_config_home_servers_selects_registry_known_shapes_for_claude_json() -> 
     # registry-known harness server is selected and shaped for .claude.json.
     session = [
         {"name": "vaultspec-authoring", "command": "node", "args": ["bridge.js"]},
-        {"name": "vaultspec-rag", "command": "uvx",
-         "args": ["--from", "vaultspec-rag", "vaultspec-search-mcp"]},
+        {
+            "name": "vaultspec-rag",
+            "command": "uvx",
+            "args": [
+                "--from",
+                "vaultspec-rag[mcp]==0.3.2",
+                "vaultspec-search-mcp",
+            ],
+        },
     ]
     home = config_home_mcp_servers(session)
     assert set(home) == {"vaultspec-rag"}
     assert home["vaultspec-rag"] == {
         "type": "stdio",
         "command": "uvx",
-        "args": ["--from", "vaultspec-rag", "vaultspec-search-mcp"],
+        "args": [
+            "--from",
+            "vaultspec-rag[mcp]==0.3.2",
+            "vaultspec-search-mcp",
+        ],
     }
 
 
 def test_config_home_servers_preserves_env_when_present() -> None:
     session = [
-        {"name": "vaultspec-rag", "command": "uvx", "args": ["x"],
-         "env": {"K": "V"}},
+        {"name": "vaultspec-rag", "command": "uvx", "args": ["x"], "env": {"K": "V"}},
     ]
     home = config_home_mcp_servers(session)
     assert home["vaultspec-rag"]["env"] == {"K": "V"}
@@ -293,7 +324,11 @@ def test_codex_specs_resolves_read_only_registry_entry_with_tools() -> None:
     spec = specs[0]
     assert spec["name"] == "vaultspec-rag"
     assert spec["command"] == "uvx"
-    assert spec["args"] == ["--from", "vaultspec-rag", "vaultspec-search-mcp"]
+    assert spec["args"] == [
+        "--from",
+        "vaultspec-rag[mcp]==0.3.2",
+        "vaultspec-search-mcp",
+    ]
     # The read tools ride along for the Codex enabled_tools allowlist (S19).
     assert spec["tools"] == ["search_vault", "search_codebase", "get_code_file"]
 

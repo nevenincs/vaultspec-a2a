@@ -12,13 +12,14 @@ related:
 
 Phase P01 separated the desktop dependency profile: the base install metadata
 is now Torch- and RAG-free with explicit `server` and `rag` optional groups,
-the locked graph resolves CPython 3.13 on every accepted target, the Node
+the locked base and server graphs resolve CPython 3.13 on every accepted
+target, the Node
 closure pins ACP 0.59.0, runtime uvx acquisition is disabled in the desktop
 profile, and a source-side certification gate proves the boundary from built
 artifacts. All six Steps (S01, S93, S02, S03, S04, S05) are closed.
 
-- Modified: `pyproject.toml`, `uv.lock`, `package.json`, `package-lock.json`,
-  `src/vaultspec_a2a/telemetry`, `src/vaultspec_a2a/providers/_acp_mcp.py`
+- Modified: `pyproject.toml`, `uv.lock`, `src/vaultspec_a2a/telemetry`,
+  `src/vaultspec_a2a/providers/_acp_mcp.py`
 - Created: `src/vaultspec_a2a/desktop_tests/test_dependency_closure.py`
 
 ## Description
@@ -43,6 +44,9 @@ The S05 gate collected five tests, all passing, using real wheel builds, uv
 exports, clean-environment installs, and child interpreters — no fakes,
 mocks, stubs, patches, skips, or expected failures. Ruff lint and format and
 scoped ty checks pass for the new `desktop_tests` package. Independent code
-review returned PASS with no critical or high findings; the single medium
-note (test tree currently ships in the wheel) is owned by S06 and proven
-excluded by S12.
+review returned PASS with no unresolved critical, high, or medium findings.
+The test tree currently ships in the wheel; its exclusion is owned by S06 and
+must be proven from the built artifact by S12.
+
+The rolling phase audit is recorded in
+`.vault/audit/2026-07-19-desktop-product-profile-audit.md`.

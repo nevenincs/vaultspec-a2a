@@ -140,3 +140,40 @@ production resolver and real ACP and Codex model objects; the impacted provider
 and configuration suites, Ruff, and scoped type checking also pass. Application
 selection of the desktop policy remains explicitly assigned to S16, so this
 step does not claim end-to-end desktop runtime closure.
+
+## `W01 P01 S05` installed dependency-closure review
+
+Status: PASS
+
+The source-side certification gate builds the real production wheel, exports
+the locked base, server, and RAG closures, installs the base closure and wheel
+into an isolated CPython 3.13 environment, and checks the installed graph with
+`uv pip check`. Its isolated child interpreters import the installed gateway
+and worker entrypoints rather than a packaged test module. Both initialize the
+OpenTelemetry SDK with the expected service identity while the optional OTLP
+exporter remains absent.
+
+The built and installed metadata agree on exactly the `server` and `rag`
+extras. The direct server roots are exactly AsyncPG, the Postgres LangGraph
+checkpointer, the OTLP gRPC exporter, and Psycopg; the direct RAG roots are
+exactly Torch and `vaultspec-rag`. The installed base is disjoint from every
+package added only by the optional closures. Server resolution passes on the
+native interpreter, while RAG resolution is deliberately bounded to the
+supported CPython 3.13 x86-64 Windows target and preserves S02's recorded
+manylinux and macOS limitations.
+
+Initial architecture review required locked rather than frozen export
+validation, exact optional-root assertions, target-bounded RAG resolution,
+marker-aware installed-environment validation, and removal of mechanically
+guaranteed success assertions. A transitive parser import was replaced with an
+explicit dev-only `packaging` declaration. The resulting lock change affects
+only root-project dev metadata: all 171 package records and the published base,
+server, and RAG closures retain their prior identities and fingerprints.
+
+Independent follow-up review found no unresolved critical, high, or medium
+issues. Five real-artifact tests, the combined 34-test telemetry and desktop
+suite, Ruff, formatting, scoped type checking, focused dependency lint, and
+`uv lock --check` pass. The source-side test package is still present in the
+current wheel; excluding it is explicitly owned by S06 and must be verified
+from the built artifact by S12. Because the probe imports only installed
+production modules, that later exclusion will not weaken this regression gate.

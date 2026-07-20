@@ -33,6 +33,10 @@ from typing import TYPE_CHECKING
 import httpx
 import pytest
 
+from vaultspec_a2a.desktop.credentials import (
+    ATTACH_CREDENTIAL_NAME,
+    OWNERSHIP_CAPABILITY_NAME,
+)
 from vaultspec_a2a.desktop.profile import derive_state_paths
 from vaultspec_a2a.utils import kill_pid_tree_async
 
@@ -47,6 +51,7 @@ from .harness import (
     port_listening,
     seat_valid_database,
     seed_credentials,
+    seed_workspace_preset,
     write_migration_descriptor,
 )
 
@@ -263,6 +268,8 @@ def test_drain_and_graceful_shutdown_reaps_worker(
     app_home, attach, ownership = _arm_home(
         installed_capsule, tmp_path, "drain-shutdown-txn-1", "drain"
     )
+    # Seed the workspace-override preset so the installed capsule can resolve it.
+    workspace = seed_workspace_preset(tmp_path / "workspace")
     gw_port = free_port()
     wk_port = free_port()
     env = gateway_env(app_home, gw_port, wk_port, auto_spawn=True)
@@ -291,6 +298,9 @@ def test_drain_and_graceful_shutdown_reaps_worker(
                     "actor_tokens": {
                         "tokens": {"coder": "tok-coder"},
                         "engine_bearer": "bearer",
+                    },
+                    "metadata": {
+                        "workspace_root": str(workspace),
                     },
                 },
             )
@@ -398,12 +408,19 @@ def test_data_preserving_capsule_removal(
 
     state = derive_state_paths(app_home)
 
+    # Confirm discovery record was written during the brief boot.
+    assert state.discovery_path.is_file(), (
+        "gateway lifespan must write a discovery record before shutdown"
+    )
+
     # Capture the paths and sizes of all user-data files before removal.
+    # Credential filenames use the canonical constants from credentials.py.
     user_data_files = {
         "database": state.database_path,
         "checkpoint": state.checkpoint_path,
-        "attach_cred": state.credentials_dir / "attach-control.cred",
-        "ownership_cred": state.credentials_dir / "ownership-capability.cred",
+        "attach_cred": state.credentials_dir / ATTACH_CREDENTIAL_NAME,
+        "ownership_cred": state.credentials_dir / OWNERSHIP_CAPABILITY_NAME,
+        "discovery": state.discovery_path,
     }
     pre_sizes = {
         label: path.stat().st_size
@@ -434,4 +451,7 @@ def test_data_preserving_capsule_removal(
     )
     assert state.checkpoint_path.is_file(), (
         "checkpoint database must survive capsule removal"
+    )
+    assert state.discovery_path.is_file(), (
+        "discovery record must survive capsule removal"
     )

@@ -19,12 +19,15 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
-from urllib.parse import urlsplit
 
 import click
 import httpx
 
 from ..control.config import settings
+from ..control.gateway_auth import (
+    read_desktop_attach_credential,
+    resolve_gateway_bearer,
+)
 from ..utils import configure_logging, package_version, reconfigure_console_utf8
 
 if TYPE_CHECKING:
@@ -57,52 +60,22 @@ def _emit(response: httpx.Response) -> None:
         sys.exit(1)
 
 
-def _read_desktop_attach_credential() -> str | None:
-    """Read the owner-scoped attach credential file for the armed desktop profile.
-
-    Operator calls authenticate with the same dashboard-created attach credential
-    the gateway reads, sourced from its owner-restricted file rather than any
-    command-line argument. Returns ``None`` when the profile is unarmed or the file
-    is absent or malformed, so the caller falls through to its other credential
-    sources.
-    """
-    if not settings.desktop_profile_armed:
-        return None
-    references = settings.desktop_credential_paths
-    if references is None:
-        return None
-    from ..desktop.credentials import CredentialError, load_attach_credential
-
-    try:
-        return load_attach_credential(references.credentials_dir)
-    except CredentialError:
-        return None
+# The operator credential-resolution rule lives in the shared gateway-auth
+# authority so this client and the standalone MCP adapter authenticate
+# identically. The alias preserves the module-local name used by existing tests.
+_read_desktop_attach_credential = read_desktop_attach_credential
 
 
 def _request(method: str, url: str, **kwargs: Any) -> httpx.Response:
     """Issue one authenticated gateway request or report a transport failure.
 
-    A directly configured token is authoritative. Under the armed desktop profile
-    the operator reads the owner-scoped attach credential file next; no secret is
-    ever accepted as a command-line argument. Otherwise a local request may reuse
-    the fresh resident discovery token, but only when the URL's loopback port
-    matches that discovery record; a user-supplied remote URL never receives a
-    machine-local discovery credential.
+    The bearer is resolved by the shared gateway-auth authority: a configured
+    token is authoritative, then the armed desktop profile's owner-scoped attach
+    credential, then a matching fresh resident discovery token - the latter two
+    for a loopback target only. No secret is accepted as a command-line argument
+    and a remote URL never receives a machine-local credential.
     """
-    token = settings.gateway_service_token
-    parsed = urlsplit(url)
-    if token is None and parsed.hostname in {"127.0.0.1", "localhost", "::1"}:
-        token = _read_desktop_attach_credential()
-    if token is None and parsed.hostname in {"127.0.0.1", "localhost", "::1"}:
-        from ..lifecycle.discovery import DiscoveryState, read_resident_service
-
-        state, info = read_resident_service(settings.a2a_home)
-        if (
-            state is DiscoveryState.FRESH
-            and info is not None
-            and info.port == parsed.port
-        ):
-            token = info.service_token
+    token = resolve_gateway_bearer(url)
 
     headers = dict(kwargs.pop("headers", {}))
     if token is not None:

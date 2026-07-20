@@ -19,10 +19,25 @@ from httpx import HTTPStatusError as HTTPStatusError
 from mcp.server.fastmcp.exceptions import ToolError
 
 from ...control.config import settings
+from ...control.gateway_auth import resolve_gateway_bearer
 
 __all__: list[str] = []
 
 logger = logging.getLogger(__name__)
+
+
+def _auth_headers() -> dict[str, str]:
+    """Return the ``Authorization`` header for a gateway request, or empty.
+
+    The standalone adapter authenticates to a gated gateway with the same
+    attach credential the operator command line uses, resolved by the shared
+    gateway-auth authority. When no credential resolves the adapter sends no
+    header, preserving the unauthenticated path a development gateway permits.
+    """
+    token = resolve_gateway_bearer(settings.gateway_url)
+    if token is None:
+        return {}
+    return {"Authorization": f"Bearer {token}"}
 
 
 # ---------------------------------------------------------------------------
@@ -121,6 +136,7 @@ async def _get_known_presets() -> frozenset[str]:
         client = _get_client()
         resp = await client.get(
             f"{api_base}/api/teams",
+            headers=_auth_headers(),
             timeout=settings.mcp_query_timeout_seconds,
         )
         resp.raise_for_status()
@@ -172,7 +188,12 @@ async def _mcp_request(
     try:
         client = _get_client()
         resp = await client.request(
-            method, url, json=json, params=params, timeout=timeout
+            method,
+            url,
+            json=json,
+            params=params,
+            headers=_auth_headers(),
+            timeout=timeout,
         )
         resp.raise_for_status()
         return resp.json()

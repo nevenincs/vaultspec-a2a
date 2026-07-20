@@ -46,6 +46,13 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 
 # Non-root user
 RUN groupadd -g 1001 app && useradd -u 1001 -g app -m appuser
+# The SQLite database and checkpoint files live under /app/data, which Compose
+# backs with a named volume. Create the directory owned by the non-root user
+# while still root: Docker seeds a fresh named volume from the image mountpoint,
+# so this ownership carries into the volume and lets the runtime open the
+# database (SQLite reports "unable to open database file" against a root-owned
+# mount otherwise).
+RUN mkdir -p /app/data && chown appuser:app /app/data
 USER appuser
 
 # ── Stage 2b: Gateway (control surface) ─────────────────────────────────────

@@ -172,6 +172,8 @@ def process_start_fingerprint(pid: int) -> str | None:
 
 
 def _windows_start_fingerprint(pid: int) -> str | None:
+    if sys.platform != "win32":
+        return None
     import ctypes
     from ctypes import wintypes
 

@@ -218,6 +218,8 @@ class ProcessContainment:
 
     @staticmethod
     def _create_win_job() -> Any:
+        if sys.platform != "win32":
+            raise OSError("job objects require Windows")
         import ctypes
         from ctypes import wintypes
 
@@ -368,11 +370,11 @@ class ProcessContainment:
         via the job's own accounting information, never a parent-pid tree walk -
         until it reaches zero or *kill_timeout* elapses.
         """
+        if sys.platform != "win32" or self._job is None:
+            return True
         import ctypes
         from ctypes import wintypes
 
-        if self._job is None:
-            return True
         kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
         kernel32.TerminateJobObject.restype = wintypes.BOOL
         kernel32.TerminateJobObject.argtypes = (wintypes.HANDLE, wintypes.UINT)
@@ -457,7 +459,7 @@ class ProcessContainment:
         reaps any still-running assigned process, so it doubles as a crash-safe
         backstop. POSIX holds no handle.
         """
-        if self._job is None:
+        if sys.platform != "win32" or self._job is None:
             return
         import ctypes
 

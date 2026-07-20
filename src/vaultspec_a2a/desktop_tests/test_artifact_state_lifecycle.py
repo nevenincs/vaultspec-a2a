@@ -311,7 +311,7 @@ def test_tamper_detection_real_byte_flip(
         candidate = site_packages / rel
         if candidate.is_file():
             target_file = candidate
-            expected_hash = digest_field[len("sha256="):]
+            expected_hash = digest_field[len("sha256=") :]
             break
 
     assert target_file is not None, "no .py file with sha256 found in RECORD"

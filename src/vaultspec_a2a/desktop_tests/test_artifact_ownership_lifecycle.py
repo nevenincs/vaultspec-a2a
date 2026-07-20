@@ -88,9 +88,7 @@ def _arm_home(
     app_home = tmp_path / "app-home"
     app_home.mkdir()
     attach, ownership = seed_credentials(app_home, prefix=prefix)
-    descriptor = write_migration_descriptor(
-        tmp_path / "txn.json", app_home, txn_id
-    )
+    descriptor = write_migration_descriptor(tmp_path / "txn.json", app_home, txn_id)
     seat_valid_database(capsule.python, app_home, descriptor)
     return app_home, attach, ownership
 

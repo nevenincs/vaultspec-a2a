@@ -87,9 +87,7 @@ def _seat_app_home(
     app_home = tmp_path / "app-home"
     app_home.mkdir()
     attach, ownership = seed_credentials(app_home, prefix=txn_id[:16])
-    descriptor = write_migration_descriptor(
-        tmp_path / "txn.json", app_home, txn_id
-    )
+    descriptor = write_migration_descriptor(tmp_path / "txn.json", app_home, txn_id)
     seat_valid_database(capsule.python, app_home, descriptor)
     return app_home, attach, ownership
 

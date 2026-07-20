@@ -177,9 +177,7 @@ def test_health_accepts_valid_internal_token() -> None:
         ),
         TestClient(app, raise_server_exceptions=False) as client,
     ):
-        resp = client.get(
-            "/health", headers={"Authorization": "Bearer secret-token"}
-        )
+        resp = client.get("/health", headers={"Authorization": "Bearer secret-token"})
 
     assert resp.status_code == 200
     assert resp.json()["service"] == "worker"
@@ -189,9 +187,7 @@ def test_health_open_in_development_without_token() -> None:
     """A DEVELOPMENT worker with no token leaves /health open (bearer rule)."""
     app = _make_app_without_lifespan()
     with (
-        _SettingsOverride(
-            environment=Environment.DEVELOPMENT, internal_token=None
-        ),
+        _SettingsOverride(environment=Environment.DEVELOPMENT, internal_token=None),
         TestClient(app, raise_server_exceptions=False) as client,
     ):
         resp = client.get("/health")

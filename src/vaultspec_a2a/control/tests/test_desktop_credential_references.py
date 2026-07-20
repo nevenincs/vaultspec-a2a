@@ -45,8 +45,7 @@ def test_armed_profile_models_three_distinct_planes(tmp_path: Path) -> None:
         references.ownership_path == state.credentials_dir / OWNERSHIP_CAPABILITY_NAME
     )
     assert (
-        references.worker_ipc_path
-        == state.credentials_dir / WORKER_IPC_CREDENTIAL_NAME
+        references.worker_ipc_path == state.credentials_dir / WORKER_IPC_CREDENTIAL_NAME
     )
     assert (
         len(

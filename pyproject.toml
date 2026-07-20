@@ -65,6 +65,7 @@ tooling = [
   "pytest-timeout>=2.4.0",
   "ruff>=0.15.2",
   "tenacity>=9.0.0",
+  "tomlkit>=0.15.0",
   "ty>=0.0.15",
   "vaultspec-core>=0.1.48,<0.2",
   "websockets>=16.0",

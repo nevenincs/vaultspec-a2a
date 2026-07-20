@@ -1830,3 +1830,71 @@ reviewers matched all eight implementation/test SHA-256 identities and unanimous
 approved with no remaining critical, high, medium, or low S100 blocker. This closes only
 S100. Whole-generation assembly, verification, publication, trusted component-lock joins,
 and dashboard receipt-bound activation remain mandatory under S13 through S15.
+
+## `W01.P03.S101` retained capsule-input authority review
+
+Status: PASS AFTER THREE FORMAL REVIEW ROUNDS; S13 REMAINS OPEN.
+
+S101 establishes one exact-byte capability for assembly inputs. It does not publish a
+generation, install the component tree, establish trusted dashboard component-lock
+membership, or activate anything. Those duties remain queued under S102, S103, S13,
+S14, and S15.
+
+### complete-input-authority-not-retained | high | Resolved
+
+Type: authority lifetime and TOCTOU. The first session retained the descriptor, locks,
+and source artifacts but re-opened inventories, packages, and external licenses by
+mutable cache paths. The final session retains every input class before yielding and
+serves package and license access only from session-owned snapshots.
+
+### path-capabilities-escaped-the-session | high | Resolved
+
+Type: capability leakage. Public session properties exposed closure and artifact records
+that contained reopenable paths. The session now exposes only immutable, path-free
+inventory and package evidence, with every byte accessor guarded by the parent lifetime.
+
+### descriptor-null-serialization-rejected-valid-target-neutral-sources | high | Resolved
+
+Type: descriptor-v2 serialization contract. TOML omits null fields, while target-neutral
+A2A and ACP sources had optional fields without model defaults. The descriptor model now
+accepts omitted optional fields and the real TOML descriptor regression proves the
+round-trip.
+
+### retained-snapshot-cardinality-and-byte-budget-unbounded | medium | Resolved
+
+Type: resource safety and availability. Retaining every logical input could consume
+thousands of simultaneous temporary-file handles and unbounded temporary storage. The
+session now deduplicates by verified digest and size, limits retained snapshots to 512 and
+deduplicated bytes to 8 GiB, rejects declared overloads before closure work, and has real
+count, byte, and duplicate-retention regressions.
+
+### teardown-error-left-a-partially-unwound-session-active | medium | Resolved
+
+Type: lifetime error state. A raw OS error while `ExitStack` unwound could consume cleanup
+callbacks while leaving the session apparently usable. The lifecycle lock now makes
+teardown terminal before callbacks run, normalizes supported cleanup errors, and a real
+`os.close(-1)` regression proves that post-error access rejects.
+
+### test-only-toml-writer-was-transitive | medium | Resolved
+
+Type: dependency hygiene. Descriptor serialization tests imported `tomlkit` only because
+the optional RAG environment happened to provide it. It is now an explicit tooling
+dependency and isolated tooling import succeeds.
+
+### session-to-manifest-and-license-matrix-was-incomplete | medium | Resolved
+
+Type: real-behavior coverage. The final integration case mutates every descriptor, lock,
+source, inventory, installed-inventory, Python package, ACP package, and both Python and
+ACP external-license paths after session creation. It still emits the real built-wheel
+manifest and reads the retained original bytes.
+
+### direct-bound-api-input-normalization | low | Resolved
+
+Type: public-boundary robustness. Invalid enum-like kinds, unhashable digests,
+non-binary streams, and malformed descriptor digest identities now fail as domain errors
+rather than leaking Python type errors.
+
+Three independent final reviewers rechecked the exact frozen artifacts and approved with
+no critical, high, medium, or low S101 finding. Focused verification passed 57 tests;
+the complete desktop campaign passed 367 tests with the known POSIX credential-permission
+skip. This closes only S101 and leaves S102 onward open.

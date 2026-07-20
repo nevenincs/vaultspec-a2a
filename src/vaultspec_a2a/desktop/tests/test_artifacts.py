@@ -4,13 +4,20 @@ import base64
 import hashlib
 import io
 import json
+import os
+import shutil
+import subprocess
 import tarfile
 import zipfile
-from typing import TYPE_CHECKING, Literal
+from contextlib import ExitStack
+from pathlib import Path
+from typing import Literal, cast
 
 import pytest
 from pydantic import ValidationError
+from tomlkit import dumps as toml_dumps
 
+from vaultspec_a2a.desktop import artifacts as desktop_artifacts
 from vaultspec_a2a.desktop.artifacts import (
     AcpClosureDescriptor,
     AcpClosureInventory,
@@ -30,6 +37,7 @@ from vaultspec_a2a.desktop.artifacts import (
     load_capsule_input_descriptor,
     load_python_closure_inventory,
     open_verified_a2a_wheel,
+    open_verified_capsule_inputs,
     open_verified_external_license,
     validate_portable_archive_path,
     verify_acp_tarballs,
@@ -37,7 +45,11 @@ from vaultspec_a2a.desktop.artifacts import (
     verify_python_wheelhouse,
 )
 from vaultspec_a2a.desktop.closure_inventory import ExternalLicenseArtifact
-from vaultspec_a2a.desktop.contract import ComponentAssetKind, TargetTriple
+from vaultspec_a2a.desktop.contract import (
+    ApiVersionRange,
+    ComponentAssetKind,
+    TargetTriple,
+)
 from vaultspec_a2a.desktop.installed_inventory import (
     InstalledClosureDescriptor,
     InstalledClosureInventory,
@@ -48,9 +60,6 @@ from vaultspec_a2a.desktop.installed_inventory import (
     license_component_token,
 )
 
-if TYPE_CHECKING:
-    from pathlib import Path
-
 
 def _sha256(payload: bytes) -> str:
     return hashlib.sha256(payload).hexdigest()
@@ -59,6 +68,66 @@ def _sha256(payload: bytes) -> str:
 def _sha512_sri(payload: bytes) -> str:
     digest = hashlib.sha512(payload).digest()
     return f"sha512-{base64.b64encode(digest).decode('ascii')}"
+
+
+def test_retained_snapshot_pool_deduplicates_and_bounds_resources(
+    tmp_path: Path,
+) -> None:
+    shared = b"shared retained source"
+    distinct = b"distinct retained source"
+    first_path = tmp_path / "first"
+    second_path = tmp_path / "second"
+    third_path = tmp_path / "third"
+    first_path.write_bytes(shared)
+    second_path.write_bytes(shared)
+    third_path.write_bytes(distinct)
+
+    with ExitStack() as stack:
+        pool = desktop_artifacts._RetainedSnapshotPool(
+            stack,
+            maximum_snapshots=1,
+            maximum_bytes=len(shared),
+        )
+        first = pool.retain(
+            first_path,
+            label="first retained source",
+            expected_size=len(shared),
+            expected_sha256=_sha256(shared),
+        )
+        duplicate = pool.retain(
+            second_path,
+            label="duplicate retained source",
+            expected_size=len(shared),
+            expected_sha256=_sha256(shared),
+        )
+        assert duplicate is first
+        with pytest.raises(ArtifactInputError, match="snapshot capacity"):
+            pool.retain(
+                third_path,
+                label="distinct retained source",
+                expected_size=len(distinct),
+                expected_sha256=_sha256(distinct),
+            )
+
+    with ExitStack() as stack:
+        pool = desktop_artifacts._RetainedSnapshotPool(
+            stack,
+            maximum_snapshots=2,
+            maximum_bytes=len(shared),
+        )
+        pool.retain(
+            first_path,
+            label="first retained source",
+            expected_size=len(shared),
+            expected_sha256=_sha256(shared),
+        )
+        with pytest.raises(ArtifactInputError, match="byte capacity"):
+            pool.retain(
+                third_path,
+                label="distinct retained source",
+                expected_size=len(distinct),
+                expected_sha256=_sha256(distinct),
+            )
 
 
 def _installed_descriptor(
@@ -272,12 +341,15 @@ def _python_wheel(
     )
 
 
-def _acp_packages() -> tuple[tuple[AcpPackageArtifact, ...], dict[str, bytes]]:
+def _acp_packages(
+    *, root_external_license: ExternalLicenseArtifact | None = None
+) -> tuple[tuple[AcpPackageArtifact, ...], dict[str, bytes]]:
     root_bytes = _npm_tarball(
         "@agentclientprotocol/claude-agent-acp",
         "0.59.0",
         "Apache-2.0",
         "package/LICENSE",
+        include_license=root_external_license is None,
     )
     sdk_bytes = _npm_tarball(
         "@anthropic-ai/claude-agent-sdk-win32-x64",
@@ -297,8 +369,20 @@ def _acp_packages() -> tuple[tuple[AcpPackageArtifact, ...], dict[str, bytes]]:
             sha256=_sha256(root_bytes),
             size=len(root_bytes),
             license_expression="Apache-2.0",
-            license_members=("package/LICENSE",),
-            redistribution_evidence=("tarball-license:LICENSE",),
+            license_members=("package/LICENSE",)
+            if root_external_license is None
+            else (),
+            external_licenses=(root_external_license,)
+            if root_external_license is not None
+            else (),
+            redistribution_evidence=(
+                ("tarball-license:LICENSE",)
+                if root_external_license is None
+                else (
+                    "curated-license-expression:Apache-2.0",
+                    f"external-license:{root_external_license.source_id}",
+                )
+            ),
             dependency_paths=("node_modules/@anthropic-ai/claude-agent-sdk-win32-x64",),
         ),
         AcpPackageArtifact(
@@ -321,12 +405,17 @@ def _acp_packages() -> tuple[tuple[AcpPackageArtifact, ...], dict[str, bytes]]:
 
 
 def _npm_tarball(
-    name: str, version: str, license_expression: str, license_path: str
+    name: str,
+    version: str,
+    license_expression: str,
+    license_path: str,
+    *,
+    include_license: bool = True,
 ) -> bytes:
     identity = f"node_modules/{name}"
     buffer = io.BytesIO()
     with tarfile.open(fileobj=buffer, mode="w:gz") as archive:
-        for path, payload in (
+        members = [
             (
                 "package/package.json",
                 json.dumps(
@@ -336,9 +425,11 @@ def _npm_tarball(
                         "version": version,
                     }
                 ).encode(),
-            ),
-            (license_path, _license_payload(identity, license_path)),
-        ):
+            )
+        ]
+        if include_license:
+            members.append((license_path, _license_payload(identity, license_path)))
+        for path, payload in members:
             member = tarfile.TarInfo(path)
             member.size = len(payload)
             member.mtime = 0
@@ -983,8 +1074,24 @@ def test_capsule_closure_loader_reconciles_the_exact_lock_snapshots(
 def test_capsule_closure_loader_cannot_omit_package_archive_verification(
     tmp_path: Path,
 ) -> None:
-    wheel, wheel_bytes = _python_wheel()
-    packages, package_bytes = _acp_packages()
+    license_bytes = b"curated upstream click license\n"
+    external_license = ExternalLicenseArtifact(
+        source_id="external/click/LICENSE.txt",
+        declared_member="LICENSE.txt",
+        url="https://files.pythonhosted.org/click-8.3.1.tar.gz",
+        sha256=_sha256(license_bytes),
+        size=len(license_bytes),
+    )
+    wheel, wheel_bytes = _python_wheel(external_license=external_license)
+    acp_license_bytes = b"curated upstream ACP license\n"
+    acp_external_license = ExternalLicenseArtifact(
+        source_id="external/acp/LICENSE.txt",
+        declared_member="LICENSE.txt",
+        url="https://registry.npmjs.org/claude-agent-acp-0.59.0.tgz",
+        sha256=_sha256(acp_license_bytes),
+        size=len(acp_license_bytes),
+    )
+    packages, package_bytes = _acp_packages(root_external_license=acp_external_license)
     uv_bytes = f'''version = 1
 revision = 3
 requires-python = ">=3.13"
@@ -1056,6 +1163,10 @@ wheels = [
     (cache / acp_digest).write_bytes(acp_payload)
     wheel_path = cache / wheel.sha256
     wheel_path.write_bytes(wheel_bytes)
+    external_license_path = cache / external_license.sha256
+    external_license_path.write_bytes(license_bytes)
+    acp_external_license_path = cache / acp_external_license.sha256
+    acp_external_license_path.write_bytes(acp_license_bytes)
     for digest, payload in package_bytes.items():
         (cache / digest).write_bytes(payload)
     python_closure = PythonClosureDescriptor(
@@ -1096,6 +1207,39 @@ wheels = [
         else source
         for source in sources
     )
+    uv = shutil.which("uv")
+    assert uv is not None, "uv is required to build the production wheel"
+    distribution_dir = tmp_path / "distribution"
+    build = subprocess.run(
+        [uv, "build", "--wheel", "--out-dir", str(distribution_dir), "--no-sources"],
+        cwd=Path(__file__).resolve().parents[4],
+        capture_output=True,
+        text=True,
+        timeout=180,
+    )
+    assert build.returncode == 0, build.stdout + build.stderr
+    distribution_wheels = tuple(distribution_dir.glob("vaultspec_a2a-*.whl"))
+    assert len(distribution_wheels) == 1
+    distribution_bytes = distribution_wheels[0].read_bytes()
+    source_payloads = {
+        source.kind: (
+            distribution_bytes
+            if source.kind is ComponentAssetKind.A2A_DISTRIBUTION
+            else f"retained:{source.kind.value}\n".encode()
+        )
+        for source in sources
+    }
+    sources = tuple(
+        source.model_copy(
+            update={
+                "sha256": _sha256(source_payloads[source.kind]),
+                "size": len(source_payloads[source.kind]),
+            }
+        )
+        for source in sources
+    )
+    for source in sources:
+        (cache / source.sha256).write_bytes(source_payloads[source.kind])
     descriptor = CapsuleInputDescriptor(
         descriptor_version="2",
         target=TargetTriple.WINDOWS_X86_64,
@@ -1112,6 +1256,58 @@ wheels = [
     uv_path.write_bytes(uv_bytes)
     package_path = tmp_path / "package-lock.json"
     package_path.write_bytes(package_lock_bytes)
+    descriptor_payload = toml_dumps(
+        descriptor.model_dump(mode="json", exclude_none=True)
+    ).encode()
+    descriptor_path = tmp_path / "capsule-inputs.toml"
+    descriptor_path.write_bytes(descriptor_payload)
+
+    with (
+        pytest.raises(ArtifactInputError, match="paths and identity are invalid"),
+        open_verified_capsule_inputs(
+            descriptor_path,
+            expected_descriptor_sha256="A" * 64,
+            input_dir=cache,
+            uv_lock_path=uv_path,
+            package_lock_path=package_path,
+        ),
+    ):
+        pass
+    with (
+        pytest.raises(ArtifactInputError, match="paths and identity are invalid"),
+        open_verified_capsule_inputs(
+            descriptor_path,
+            expected_descriptor_sha256=cast("str", None),
+            input_dir=cache,
+            uv_lock_path=uv_path,
+            package_lock_path=package_path,
+        ),
+    ):
+        pass
+
+    over_capacity_descriptor = descriptor.model_copy(
+        update={
+            "python_closure": descriptor.python_closure.model_copy(
+                update={"package_count": 2_048}
+            )
+        }
+    )
+    over_capacity_payload = toml_dumps(
+        over_capacity_descriptor.model_dump(mode="json", exclude_none=True)
+    ).encode()
+    over_capacity_path = tmp_path / "over-capacity-capsule-inputs.toml"
+    over_capacity_path.write_bytes(over_capacity_payload)
+    with (
+        pytest.raises(ArtifactInputError, match="retained snapshot capacity"),
+        open_verified_capsule_inputs(
+            over_capacity_path,
+            expected_descriptor_sha256=_sha256(over_capacity_payload),
+            input_dir=cache,
+            uv_lock_path=uv_path,
+            package_lock_path=package_path,
+        ),
+    ):
+        pass
 
     loaded = load_capsule_closures(
         descriptor,
@@ -1132,6 +1328,123 @@ wheels = [
     ):
         assert hashlib.sha256(source.read()).hexdigest() == packages[0].sha256
 
+    root_source = next(
+        source
+        for source in sources
+        if source.kind is ComponentAssetKind.A2A_DISTRIBUTION
+    )
+    python_inventory_path = cache / python_digest
+    acp_inventory_path = cache / acp_digest
+    python_installed_path = cache / python_closure.installed.inventory_sha256
+    acp_installed_path = cache / acp_closure.installed.inventory_sha256
+    python_installed_payload = python_installed_path.read_bytes()
+    acp_installed_payload = acp_installed_path.read_bytes()
+    with open_verified_capsule_inputs(
+        descriptor_path,
+        expected_descriptor_sha256=_sha256(descriptor_payload),
+        input_dir=cache,
+        uv_lock_path=uv_path,
+        package_lock_path=package_path,
+    ) as session:
+        descriptor_path.write_bytes(b"replacement descriptor")
+        uv_path.write_bytes(b"replacement uv lock")
+        package_path.write_bytes(b"replacement package lock")
+        python_inventory_path.write_bytes(b"replacement Python inventory")
+        acp_inventory_path.write_bytes(b"replacement ACP inventory")
+        python_installed_path.write_bytes(b"replacement Python installed inventory")
+        acp_installed_path.write_bytes(b"replacement ACP installed inventory")
+        wheel_path.write_bytes(b"replacement Python package")
+        for package in packages:
+            (cache / package.sha256).write_bytes(b"replacement ACP package")
+        external_license_path.write_bytes(b"replacement external license")
+        acp_external_license_path.write_bytes(b"replacement ACP external license")
+        for source in sources:
+            (cache / source.sha256).write_bytes(b"replacement component source")
+        with (
+            session.open_descriptor() as retained_descriptor,
+            session.open_uv_lock() as retained_uv,
+            session.open_package_lock() as retained_package,
+            session.open_python_inventory() as retained_python_inventory,
+            session.open_acp_inventory() as retained_acp_inventory,
+            session.open_python_installed_inventory() as retained_python_installed,
+            session.open_acp_installed_inventory() as retained_acp_installed,
+            session.open_source(ComponentAssetKind.A2A_DISTRIBUTION) as retained_root,
+        ):
+            assert retained_descriptor.read() == descriptor_payload
+            assert retained_uv.read() == uv_bytes
+            assert retained_package.read() == package_lock_bytes
+            assert retained_python_inventory.read() == python_payload
+            assert retained_acp_inventory.read() == acp_payload
+            assert retained_python_installed.read() == python_installed_payload
+            assert retained_acp_installed.read() == acp_installed_payload
+            assert retained_root.read() == source_payloads[root_source.kind]
+            expired_root = retained_root
+        assert session.descriptor == descriptor
+        assert session.sources == descriptor.sources
+        assert session.python_inventory == python_inventory
+        assert session.acp_inventory == acp_inventory
+        with (
+            session.open_python_package(wheel.name) as package_session,
+            package_session.open_snapshot() as retained_wheel,
+        ):
+            assert package_session.archive.descriptor == wheel
+            assert retained_wheel.read() == wheel_bytes
+            python_package_evidence = package_session.archive
+        for package in packages:
+            with (
+                session.open_acp_package(package.install_path) as acp_session,
+                acp_session.open_snapshot() as retained_acp_package,
+            ):
+                assert acp_session.archive.descriptor == package
+                assert retained_acp_package.read() == package_bytes[package.sha256]
+                if package is packages[0]:
+                    acp_root_evidence = acp_session.archive
+        with session.open_external_license(
+            python_package_evidence, external_license.source_id
+        ) as retained_license:
+            assert retained_license.read() == license_bytes
+        with session.open_external_license(
+            acp_root_evidence, acp_external_license.source_id
+        ) as retained_license:
+            assert retained_license.read() == acp_license_bytes
+        manifest = session.emit_component_manifest(
+            api_versions=ApiVersionRange(minimum="v1", maximum="v1")
+        )
+        assert manifest.identity.name == "vaultspec-a2a"
+        assert manifest.identity.version == "0.1.0"
+        with session.open_source(ComponentAssetKind.PYTHON_RUNTIME):
+            with pytest.raises(ArtifactInputError, match="has an active reader"):
+                session.close()
+            assert session.descriptor == descriptor
+        session._stack.callback(os.close, -1)
+        with pytest.raises(ArtifactInputError):
+            session.close()
+        with pytest.raises(ArtifactInputError, match="session is closed"):
+            _ = session.descriptor
+    with pytest.raises(ValueError, match="no longer active"):
+        expired_root.read(1)
+    with pytest.raises(ArtifactInputError, match="session is closed"):
+        _ = session.descriptor
+    with pytest.raises(ArtifactInputError, match="session is closed"):
+        _ = package_session.archive
+    with (
+        pytest.raises(ArtifactInputError, match="descriptor digest does not match"),
+        open_verified_capsule_inputs(
+            descriptor_path,
+            expected_descriptor_sha256=_sha256(descriptor_payload),
+            input_dir=cache,
+            uv_lock_path=uv_path,
+            package_lock_path=package_path,
+        ),
+    ):
+        pass
+
+    uv_path.write_bytes(uv_bytes)
+    package_path.write_bytes(package_lock_bytes)
+    python_inventory_path.write_bytes(python_payload)
+    acp_inventory_path.write_bytes(acp_payload)
+    python_installed_path.write_bytes(python_installed_payload)
+    acp_installed_path.write_bytes(acp_installed_payload)
     wheel_path.unlink()
     with pytest.raises(ArtifactInputError, match="cannot read package archive"):
         load_capsule_closures(

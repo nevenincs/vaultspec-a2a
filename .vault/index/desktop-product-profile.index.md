@@ -22,6 +22,7 @@ related:
   - '[[2026-07-18-desktop-product-profile-W01-P02-S12]]'
   - '[[2026-07-18-desktop-product-profile-W01-P02-summary]]'
   - '[[2026-07-18-desktop-product-profile-W01-P03-S100]]'
+  - '[[2026-07-18-desktop-product-profile-W01-P03-S101]]'
   - '[[2026-07-18-desktop-product-profile-W01-P03-S13]]'
   - '[[2026-07-18-desktop-product-profile-W01-P03-S14]]'
   - '[[2026-07-18-desktop-product-profile-W01-P03-S15]]'
@@ -232,6 +233,7 @@ Auto-generated index of all documents tagged with `#desktop-product-profile`.
 - `2026-07-18-desktop-product-profile-W04-P12-S69` - Prove prepare timeout cancellation and failed commit release capacity without a run token or run-owned child process
 - `2026-07-18-desktop-product-profile-W04-P12-S70` - Prove attach-control-authenticated terminal callback retry rejects worker IPC and unrelated credentials while status reconciliation revokes exactly one run-scoped lease without raw tokens
 - `2026-07-18-desktop-product-profile-W01-P03-S100` - Consolidate bounded archive inspection and retained consume authority
+- `2026-07-18-desktop-product-profile-W01-P03-S101` - Retain one exact capsule descriptor both locks all four sources closure inventories package archives and external licenses through scope-bound input sessions and emit the component manifest from bound evidence without reopening mutable paths
 - `2026-07-18-desktop-product-profile-W04-P12-S71` - Certify a clean installed capsule starts and stops the standalone vaultspec-mcp adapter under caller ownership
 - `2026-07-18-desktop-product-profile-W04-P12-summary` - `desktop-product-profile` `W04.P12` summary
 - `2026-07-18-desktop-product-profile-W05-P13-S72` - Build a real-process harness that installs invokes relocates and inspects a published desktop capsule

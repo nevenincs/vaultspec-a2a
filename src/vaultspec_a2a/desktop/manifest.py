@@ -2,9 +2,13 @@
 
 The immutable agent-to-agent (A2A) wheel is the sole authority for component
 identity, version, console entry points, and the A2A source-artifact digest.
-Every other capsule
-asset is an explicitly pinned immutable source artifact. The emitter performs
-no discovery, network access, or wall-clock reads.
+Every other capsule asset is an explicitly pinned immutable source artifact.
+The path-based emitter verifies ordinary files directly; the bound emitter
+consumes evidence and wheel bytes retained by
+:mod:`vaultspec_a2a.desktop.artifacts` without reopening mutable paths. Neither
+form performs discovery, network access, or wall-clock reads. Exact retained
+bytes authorize manifest construction only, not provenance, licensing,
+publication, receipt, or activation.
 """
 
 from __future__ import annotations
@@ -71,10 +75,12 @@ from .snapshot import consistency_group_specifications
 __all__ = [
     "CANONICAL_JSON_VERSION",
     "AssetSource",
+    "BoundAssetSource",
     "ManifestEmissionError",
     "component_manifest_canonical_bytes",
     "component_manifest_digest",
     "emit_component_manifest",
+    "emit_component_manifest_from_bound_inputs",
 ]
 
 CANONICAL_JSON_VERSION: Final = "vaultspec-canonical-json-v1"
@@ -173,6 +179,21 @@ class AssetSource:
 
     kind: ComponentAssetKind
     path: Path
+    license: str | None = None
+    version: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class BoundAssetSource:
+    """Path-independent identity for one already-retained source artifact.
+
+    The A2A distribution still derives its version and license from the retained
+    wheel metadata. Every digest is evidence established by the caller's exact-byte
+    authority; this value grants no filesystem or acquisition authority itself.
+    """
+
+    kind: ComponentAssetKind
+    digest: str
     license: str | None = None
     version: str | None = None
 
@@ -591,6 +612,65 @@ def _validate_source_closure(assets: object) -> tuple[AssetSource, ...]:
     return sources
 
 
+def _validate_bound_source_closure(
+    assets: object,
+) -> tuple[BoundAssetSource, ...]:
+    if not isinstance(assets, (list, tuple)):
+        raise ManifestEmissionError("bound assets must be a bounded list or tuple")
+    if len(assets) != len(ComponentAssetKind):
+        raise ManifestEmissionError("bound asset closure must contain four sources")
+    if any(not isinstance(source, BoundAssetSource) for source in assets):
+        raise ManifestEmissionError(
+            "bound asset closure members must be BoundAssetSource values"
+        )
+    sources = cast("tuple[BoundAssetSource, ...]", tuple(assets))
+    if any(not isinstance(source.kind, ComponentAssetKind) for source in sources):
+        raise ManifestEmissionError("bound asset source kinds are invalid")
+    if any(not isinstance(source.digest, str) for source in sources):
+        raise ManifestEmissionError("bound source digests are invalid")
+    kinds = tuple(source.kind for source in sources)
+    if len(set(kinds)) != len(kinds) or set(kinds) != set(ComponentAssetKind):
+        raise ManifestEmissionError(
+            "bound asset closure must contain each source kind once"
+        )
+    if len({source.digest for source in sources}) != len(sources):
+        raise ManifestEmissionError("bound source digests must be distinct")
+
+    for source in sources:
+        if source.kind is ComponentAssetKind.A2A_DISTRIBUTION:
+            if (source.version is None) != (source.license is None):
+                raise ManifestEmissionError(
+                    "bound A2A version and license evidence must be paired"
+                )
+            version = "0" if source.version is None else source.version
+            license_expression = (
+                "NOASSERTION" if source.license is None else source.license
+            )
+        else:
+            if not isinstance(source.version, str) or not isinstance(
+                source.license, str
+            ):
+                raise ManifestEmissionError(
+                    "bound non-A2A version and license must be strings"
+                )
+            if source.version != _REQUIRED_SOURCE_VERSIONS[source.kind]:
+                raise ManifestEmissionError(
+                    f"{source.kind.value} source version is not pinned"
+                )
+            version = source.version
+            license_expression = source.license
+        try:
+            ComponentAsset(
+                kind=source.kind,
+                version=version,
+                license=license_expression,
+                digest=source.digest,
+            )
+        except ValidationError:
+            raise ManifestEmissionError("bound source evidence is invalid") from None
+    return sources
+
+
 def _resolve_regular_file(path: Path, *, label: str) -> Path:
     try:
         resolved = path.resolve(strict=True)
@@ -687,6 +767,154 @@ def _digest_file(
     return hasher.hexdigest()
 
 
+def _digest_bound_stream(
+    source: BinaryIO,
+    algorithm: DigestAlgorithm,
+    *,
+    label: str,
+    maximum_size: int,
+) -> str:
+    hasher = _HASHERS[algorithm]()
+    consumed = 0
+    try:
+        source.seek(0)
+        while True:
+            block = source.read(_DIGEST_CHUNK)
+            if block == b"":
+                break
+            if not isinstance(block, bytes):
+                raise ManifestEmissionError(f"cannot read retained {label} bytes")
+            consumed += len(block)
+            if consumed > maximum_size:
+                raise ManifestEmissionError(f"{label} exceeds its size bound")
+            hasher.update(block)
+        source.seek(0)
+    except ManifestEmissionError:
+        raise
+    except (OSError, RuntimeError, ValueError):
+        raise ManifestEmissionError(f"cannot read retained {label} bytes") from None
+    return hasher.hexdigest()
+
+
+def emit_component_manifest_from_bound_inputs(
+    *,
+    target: TargetTriple,
+    api_versions: ApiVersionRange,
+    assets: Sequence[BoundAssetSource],
+    a2a_wheel: BinaryIO,
+    uv_lock_digest: str,
+    package_lock_digest: str,
+    digest_algorithm: DigestAlgorithm = DigestAlgorithm.SHA256,
+) -> ComponentManifest:
+    """Emit from exact retained evidence without resolving a filesystem path."""
+    sources = _validate_bound_source_closure(assets)
+    if not isinstance(target, TargetTriple):
+        raise ManifestEmissionError("target must be a TargetTriple")
+    if not isinstance(api_versions, ApiVersionRange):
+        raise ManifestEmissionError("api_versions must be an ApiVersionRange")
+    if not isinstance(digest_algorithm, DigestAlgorithm):
+        raise ManifestEmissionError("digest_algorithm must be a DigestAlgorithm")
+    if not hasattr(a2a_wheel, "read") or not hasattr(a2a_wheel, "seek"):
+        raise ManifestEmissionError("retained A2A wheel must be seekable binary input")
+    try:
+        validated_api_versions = ApiVersionRange.model_validate(
+            api_versions.model_dump(mode="json")
+        )
+        dependency_lock = DependencyLockIdentity(
+            uv_lock_digest=uv_lock_digest,
+            package_lock_digest=package_lock_digest,
+        )
+    except ValidationError:
+        raise ManifestEmissionError("bound manifest evidence is invalid") from None
+
+    a2a_source = next(
+        source
+        for source in sources
+        if source.kind is ComponentAssetKind.A2A_DISTRIBUTION
+    )
+    wheel_digest = _digest_bound_stream(
+        a2a_wheel,
+        digest_algorithm,
+        label="A2A wheel",
+        maximum_size=_MAX_WHEEL_BYTES,
+    )
+    if wheel_digest != a2a_source.digest:
+        raise ManifestEmissionError("retained A2A wheel digest does not match evidence")
+
+    try:
+        with tempfile.TemporaryDirectory(prefix="vaultspec-a2a-manifest-") as temp:
+            wheel, migrations = _read_wheel_contract(
+                a2a_wheel, Path(temp) / "migrations"
+            )
+        if a2a_source.version is not None and (
+            wheel.version != a2a_source.version or wheel.license != a2a_source.license
+        ):
+            raise ManifestEmissionError(
+                "A2A wheel metadata does not match bound source evidence"
+            )
+        gateway_name, gateway_reference = _required_console_script(
+            wheel.console_scripts, _GATEWAY_SCRIPT, _GATEWAY_REFERENCE
+        )
+        mcp_name, mcp_reference = _required_console_script(
+            wheel.console_scripts, _MCP_SCRIPT, _MCP_REFERENCE
+        )
+        component_assets = tuple(
+            sorted(
+                (
+                    ComponentAsset(
+                        kind=source.kind,
+                        version=(
+                            wheel.version
+                            if source.kind is ComponentAssetKind.A2A_DISTRIBUTION
+                            else cast("str", source.version)
+                        ),
+                        license=(
+                            wheel.license
+                            if source.kind is ComponentAssetKind.A2A_DISTRIBUTION
+                            else cast("str", source.license)
+                        ),
+                        digest=source.digest,
+                    )
+                    for source in sources
+                ),
+                key=lambda asset: asset.kind.value,
+            )
+        )
+        return ComponentManifest(
+            contract_version=CONTRACT_VERSION,
+            identity=ComponentIdentity(name=wheel.name, version=wheel.version),
+            target=target,
+            compatibility=ComponentCompatibility(
+                api_versions=validated_api_versions,
+                migration_range=migrations,
+            ),
+            consistency_group=_manifest_consistency_group(migrations),
+            entrypoints=ComponentEntrypoints(
+                gateway=GatewayEntrypoint(
+                    kind=EntrypointKind.GATEWAY,
+                    console_script=gateway_name,
+                    reference=gateway_reference,
+                    relative_command=_relative_command(gateway_name, target),
+                ),
+                standalone_mcp=StandaloneMcpEntrypoint(
+                    kind=EntrypointKind.STANDALONE_MCP,
+                    console_script=mcp_name,
+                    reference=mcp_reference,
+                    relative_command=_relative_command(mcp_name, target),
+                ),
+            ),
+            digest_algorithm=digest_algorithm,
+            assets=component_assets,
+            dependency_lock=dependency_lock,
+        )
+    except ManifestEmissionError:
+        raise
+    except OSError:
+        raise ManifestEmissionError("cannot create private wheel snapshot") from None
+    except ValidationError:
+        raise ManifestEmissionError("component manifest input is invalid") from None
+
+
 def emit_component_manifest(
     *,
     target: TargetTriple,
@@ -711,84 +939,36 @@ def emit_component_manifest(
         digest_algorithm=digest_algorithm,
     )
     sources = validated.sources
-    a2a_source = next(
-        source
-        for source in sources
-        if source.kind is ComponentAssetKind.A2A_DISTRIBUTION
-    )
     try:
-        with tempfile.TemporaryDirectory(prefix="vaultspec-a2a-manifest-") as temp:
-            private_root = Path(temp)
-            with _retained_wheel(a2a_source.path) as snapshot:
-                wheel_digest = snapshot.sha256
-                with snapshot.open() as wheel_source:
-                    wheel, migrations = _read_wheel_contract(
-                        wheel_source, private_root / "migrations"
-                    )
-            gateway_name, gateway_reference = _required_console_script(
-                wheel.console_scripts, _GATEWAY_SCRIPT, _GATEWAY_REFERENCE
-            )
-            mcp_name, mcp_reference = _required_console_script(
-                wheel.console_scripts, _MCP_SCRIPT, _MCP_REFERENCE
-            )
-            component_assets = tuple(
-                sorted(
-                    (
-                        ComponentAsset(
-                            kind=source.kind,
-                            version=(
-                                wheel.version
-                                if source.kind is ComponentAssetKind.A2A_DISTRIBUTION
-                                else cast("str", source.version)
-                            ),
-                            license=(
-                                wheel.license
-                                if source.kind is ComponentAssetKind.A2A_DISTRIBUTION
-                                else cast("str", source.license)
-                            ),
-                            digest=(
-                                wheel_digest
-                                if source.kind is ComponentAssetKind.A2A_DISTRIBUTION
-                                else _digest_file(
-                                    source.path,
-                                    validated.digest_algorithm,
-                                    label=f"{source.kind.value} source artifact",
-                                )
-                            ),
+        a2a_source = next(
+            source
+            for source in sources
+            if source.kind is ComponentAssetKind.A2A_DISTRIBUTION
+        )
+        with _retained_wheel(a2a_source.path) as snapshot:
+            bound = tuple(
+                BoundAssetSource(
+                    kind=source.kind,
+                    digest=(
+                        snapshot.sha256
+                        if source.kind is ComponentAssetKind.A2A_DISTRIBUTION
+                        else _digest_file(
+                            source.path,
+                            validated.digest_algorithm,
+                            label=f"{source.kind.value} source artifact",
                         )
-                        for source in sources
                     ),
-                    key=lambda asset: asset.kind.value,
+                    license=source.license,
+                    version=source.version,
                 )
+                for source in sources
             )
-            return ComponentManifest(
-                contract_version=CONTRACT_VERSION,
-                identity=ComponentIdentity(name=wheel.name, version=wheel.version),
-                target=validated.target,
-                compatibility=ComponentCompatibility(
+            with snapshot.open() as wheel_source:
+                return emit_component_manifest_from_bound_inputs(
+                    target=validated.target,
                     api_versions=validated.api_versions,
-                    migration_range=migrations,
-                ),
-                consistency_group=_manifest_consistency_group(migrations),
-                entrypoints=ComponentEntrypoints(
-                    gateway=GatewayEntrypoint(
-                        kind=EntrypointKind.GATEWAY,
-                        console_script=gateway_name,
-                        reference=gateway_reference,
-                        relative_command=_relative_command(
-                            gateway_name, validated.target
-                        ),
-                    ),
-                    standalone_mcp=StandaloneMcpEntrypoint(
-                        kind=EntrypointKind.STANDALONE_MCP,
-                        console_script=mcp_name,
-                        reference=mcp_reference,
-                        relative_command=_relative_command(mcp_name, validated.target),
-                    ),
-                ),
-                digest_algorithm=validated.digest_algorithm,
-                assets=component_assets,
-                dependency_lock=DependencyLockIdentity(
+                    assets=bound,
+                    a2a_wheel=wheel_source,
                     uv_lock_digest=_digest_file(
                         validated.uv_lock_path,
                         validated.digest_algorithm,
@@ -799,8 +979,8 @@ def emit_component_manifest(
                         validated.digest_algorithm,
                         label="package lock",
                     ),
-                ),
-            )
+                    digest_algorithm=validated.digest_algorithm,
+                )
     except ManifestEmissionError:
         raise
     except OSError:

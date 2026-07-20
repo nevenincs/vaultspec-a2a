@@ -5,6 +5,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import inspect
+import io
 import json
 import shutil
 import subprocess
@@ -12,7 +13,7 @@ import tomllib
 import zipfile
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, BinaryIO, cast
 
 import pytest
 
@@ -39,8 +40,10 @@ from ..contract import (
 )
 from ..manifest import (
     AssetSource,
+    BoundAssetSource,
     ManifestEmissionError,
     emit_component_manifest,
+    emit_component_manifest_from_bound_inputs,
 )
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[4]
@@ -200,6 +203,104 @@ def test_emitter_derives_identity_entrypoints_and_digest_from_exact_built_wheel(
     assert [asset.kind.value for asset in manifest.assets] == sorted(
         kind.value for kind in ComponentAssetKind
     )
+
+
+def test_bound_emitter_never_reopens_mutable_source_or_lock_paths(
+    built_wheel: WheelEvidence,
+    tmp_path: Path,
+) -> None:
+    sources = _source_closure(tmp_path / "sources", built_wheel.path)
+    bound = tuple(
+        BoundAssetSource(
+            kind=source.kind,
+            digest=_sha256(source.path),
+            license=source.license,
+            version=source.version,
+        )
+        for source in sources
+    )
+    expected = _emit(built_wheel.path, tmp_path / "legacy", assets=sources)
+    wheel_bytes = built_wheel.path.read_bytes()
+    for source in sources:
+        if source.kind is not ComponentAssetKind.A2A_DISTRIBUTION:
+            source.path.write_bytes(b"replacement bytes")
+
+    actual = emit_component_manifest_from_bound_inputs(
+        target=TargetTriple.LINUX_X86_64,
+        api_versions=_API_RANGE,
+        assets=bound,
+        a2a_wheel=io.BytesIO(wheel_bytes),
+        uv_lock_digest=_sha256(_PROJECT_ROOT / "uv.lock"),
+        package_lock_digest=_sha256(_PROJECT_ROOT / "package-lock.json"),
+    )
+
+    assert actual == expected
+    mismatched = tuple(
+        source
+        if source.kind is not ComponentAssetKind.A2A_DISTRIBUTION
+        else BoundAssetSource(kind=source.kind, digest="0" * 64)
+        for source in bound
+    )
+    with pytest.raises(ManifestEmissionError, match="digest does not match"):
+        emit_component_manifest_from_bound_inputs(
+            target=TargetTriple.LINUX_X86_64,
+            api_versions=_API_RANGE,
+            assets=mismatched,
+            a2a_wheel=io.BytesIO(wheel_bytes),
+            uv_lock_digest=_sha256(_PROJECT_ROOT / "uv.lock"),
+            package_lock_digest=_sha256(_PROJECT_ROOT / "package-lock.json"),
+        )
+
+    malformed = tuple(
+        BoundAssetSource(
+            kind=cast("ComponentAssetKind", source.kind.value),
+            digest=source.digest,
+            license=source.license,
+            version=source.version,
+        )
+        for source in bound
+    )
+    with pytest.raises(ManifestEmissionError, match="source kinds are invalid"):
+        emit_component_manifest_from_bound_inputs(
+            target=TargetTriple.LINUX_X86_64,
+            api_versions=_API_RANGE,
+            assets=malformed,
+            a2a_wheel=io.BytesIO(wheel_bytes),
+            uv_lock_digest=_sha256(_PROJECT_ROOT / "uv.lock"),
+            package_lock_digest=_sha256(_PROJECT_ROOT / "package-lock.json"),
+        )
+
+    unhashable_digest = tuple(
+        BoundAssetSource(
+            kind=source.kind,
+            digest=(
+                cast("str", [])
+                if source.kind is ComponentAssetKind.A2A_DISTRIBUTION
+                else source.digest
+            ),
+            license=source.license,
+            version=source.version,
+        )
+        for source in bound
+    )
+    with pytest.raises(ManifestEmissionError, match="source digests are invalid"):
+        emit_component_manifest_from_bound_inputs(
+            target=TargetTriple.LINUX_X86_64,
+            api_versions=_API_RANGE,
+            assets=unhashable_digest,
+            a2a_wheel=io.BytesIO(wheel_bytes),
+            uv_lock_digest=_sha256(_PROJECT_ROOT / "uv.lock"),
+            package_lock_digest=_sha256(_PROJECT_ROOT / "package-lock.json"),
+        )
+    with pytest.raises(ManifestEmissionError, match="cannot read retained A2A wheel"):
+        emit_component_manifest_from_bound_inputs(
+            target=TargetTriple.LINUX_X86_64,
+            api_versions=_API_RANGE,
+            assets=bound,
+            a2a_wheel=cast("BinaryIO", io.StringIO("not wheel bytes")),
+            uv_lock_digest=_sha256(_PROJECT_ROOT / "uv.lock"),
+            package_lock_digest=_sha256(_PROJECT_ROOT / "package-lock.json"),
+        )
 
 
 def test_windows_commands_are_typed_and_capsule_relative(

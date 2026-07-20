@@ -15,10 +15,11 @@ import os
 import re
 import stat
 import tomllib
-from contextlib import contextmanager
+from contextlib import ExitStack, contextmanager
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
+from threading import RLock
 from typing import TYPE_CHECKING, Annotated, BinaryIO, Final, Literal, cast
 
 from pydantic import (
@@ -30,7 +31,11 @@ from pydantic import (
     model_validator,
 )
 
-from ._archive_authority import ArchiveAuthorityError, retain_file_snapshot
+from ._archive_authority import (
+    ArchiveAuthorityError,
+    RetainedFileSnapshot,
+    retain_file_snapshot,
+)
 from .closure_inventory import (
     _ACP_ROOT_PACKAGE,
     _MAX_ARTIFACT_BYTES,
@@ -52,11 +57,14 @@ from .contract import (
     ACP_VERSION_PIN,
     CPYTHON_VERSION_PIN,
     NODEJS_VERSION_PIN,
+    ApiVersionRange,
     ComponentAssetKind,
+    ComponentManifest,
     TargetTriple,
 )
 from .installed_inventory import (
     InstalledClosureDescriptor,
+    InstalledClosureInventory,
     InstalledLicenseRecord,
     LoadedInstalledClosureInventory,
     load_installed_closure_inventory,
@@ -68,6 +76,7 @@ from .lock_reconciliation import (
     reconcile_python_closure_lock_bytes,
 )
 from .package_archives import (
+    LicenseMemberEvidence,
     PackageArchiveError,
     VerifiedPackageArchive,
     VerifiedPackageArchiveSession,
@@ -89,6 +98,8 @@ __all__ = [
     "ArchiveKind",
     "ArtifactInputError",
     "CapsuleInputDescriptor",
+    "CapsulePackageEvidence",
+    "CapsulePackageSession",
     "ExternalLicenseArtifact",
     "LoadedAcpClosureInventory",
     "LoadedCapsuleClosures",
@@ -100,6 +111,7 @@ __all__ = [
     "PythonWheelArtifact",
     "SourceArtifactDescriptor",
     "VerifiedArtifact",
+    "VerifiedCapsuleInputSession",
     "VerifiedPackageArchive",
     "VerifiedPackageArchiveSession",
     "canonical_closure_inventory_bytes",
@@ -109,6 +121,7 @@ __all__ = [
     "load_python_closure_inventory",
     "open_verified_a2a_wheel",
     "open_verified_acp_package_archive",
+    "open_verified_capsule_inputs",
     "open_verified_external_license",
     "open_verified_python_wheel_archive",
     "validate_portable_archive_path",
@@ -122,6 +135,9 @@ _SHA256_PATTERN: Final = re.compile(r"^[0-9a-f]{64}$")
 _MAX_DESCRIPTOR_BYTES: Final = 1 << 20
 _MAX_SOURCE_BYTES: Final = _MAX_ARTIFACT_BYTES
 _MAX_LOCK_BYTES: Final = 32 << 20
+_MAX_RETAINED_INPUT_SNAPSHOTS: Final = 512
+_FIXED_RETAINED_INPUT_SNAPSHOTS: Final = 11
+_MAX_RETAINED_INPUT_BYTES: Final = 8 << 30
 _READ_CHUNK: Final = 1 << 20
 _SOURCE_COMMIT_PATTERN: Final = re.compile(r"^[0-9a-f]{40}$")
 _REQUIRED_VERSIONS: Final = {
@@ -246,7 +262,7 @@ class SourceArtifactDescriptor(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     kind: ComponentAssetKind
-    target: TargetTriple | None
+    target: TargetTriple | None = None
     version: str = Field(min_length=1, max_length=128)
     release: str = Field(min_length=1, max_length=128)
     build: str = Field(min_length=1, max_length=128)
@@ -254,7 +270,7 @@ class SourceArtifactDescriptor(BaseModel):
     sha256: HexDigest
     size: int = Field(gt=0, le=_MAX_SOURCE_BYTES)
     archive_kind: ArchiveKind
-    archive_root: str | None
+    archive_root: str | None = None
     license_expression: str = Field(min_length=1, max_length=128)
     license_members: tuple[str, ...] = Field(min_length=1, max_length=64)
     redistribution_evidence: tuple[str, ...] = Field(min_length=1, max_length=32)
@@ -565,6 +581,366 @@ class VerifiedArtifact:
     path: Path
 
 
+@dataclass(frozen=True, slots=True)
+class CapsulePackageEvidence:
+    """Path-free package evidence bound to retained session-owned bytes."""
+
+    descriptor: PythonWheelArtifact | AcpPackageArtifact
+    members: tuple[str, ...]
+    license_members: tuple[LicenseMemberEvidence, ...]
+
+
+class CapsulePackageSession:
+    """One child capability borrowing package bytes from a capsule session."""
+
+    __slots__ = ("_archive", "_closed", "_label", "_owner", "_snapshot")
+
+    def __init__(
+        self,
+        *,
+        archive: CapsulePackageEvidence,
+        snapshot: RetainedFileSnapshot,
+        owner: VerifiedCapsuleInputSession,
+        label: str,
+    ) -> None:
+        self._archive = archive
+        self._snapshot = snapshot
+        self._owner = owner
+        self._label = label
+        self._closed = False
+
+    def __enter__(self) -> CapsulePackageSession:
+        self._require_active()
+        return self
+
+    def __exit__(self, *_args: object) -> None:
+        self.close()
+
+    def _require_active(self) -> None:
+        self._owner._require_active()
+        if self._closed:
+            raise ArtifactInputError("capsule package session is closed")
+
+    @property
+    def archive(self) -> CapsulePackageEvidence:
+        self._require_active()
+        return self._archive
+
+    @contextmanager
+    def open_snapshot(self) -> Iterator[BinaryIO]:
+        self._require_active()
+        with self._owner._open_retained(self._snapshot, label=self._label) as source:
+            yield source
+
+    def close(self) -> None:
+        self._closed = True
+
+
+class VerifiedCapsuleInputSession:
+    """One scope owning every exact byte authority needed by capsule assembly."""
+
+    __slots__ = (
+        "_acp_installed",
+        "_acp_inventory",
+        "_acp_package_snapshots",
+        "_acp_packages",
+        "_active_readers",
+        "_closed",
+        "_descriptor",
+        "_descriptor_snapshot",
+        "_external_license_snapshots",
+        "_inventory_snapshots",
+        "_lifecycle_lock",
+        "_package_lock_snapshot",
+        "_python_installed",
+        "_python_inventory",
+        "_python_package_snapshots",
+        "_python_packages",
+        "_source_snapshots",
+        "_stack",
+        "_uv_lock_snapshot",
+    )
+
+    def __init__(
+        self,
+        *,
+        descriptor: CapsuleInputDescriptor,
+        descriptor_snapshot: RetainedFileSnapshot,
+        python_inventory: PythonClosureInventory,
+        acp_inventory: AcpClosureInventory,
+        python_installed: InstalledClosureInventory,
+        acp_installed: InstalledClosureInventory,
+        inventory_snapshots: dict[str, RetainedFileSnapshot],
+        python_packages: dict[str, CapsulePackageEvidence],
+        acp_packages: dict[str, CapsulePackageEvidence],
+        python_package_snapshots: dict[str, RetainedFileSnapshot],
+        acp_package_snapshots: dict[str, RetainedFileSnapshot],
+        external_license_snapshots: dict[tuple[str, str, str], RetainedFileSnapshot],
+        source_snapshots: dict[ComponentAssetKind, RetainedFileSnapshot],
+        uv_lock_snapshot: RetainedFileSnapshot,
+        package_lock_snapshot: RetainedFileSnapshot,
+        stack: ExitStack,
+    ) -> None:
+        self._descriptor = descriptor
+        self._descriptor_snapshot = descriptor_snapshot
+        self._python_inventory = python_inventory
+        self._acp_inventory = acp_inventory
+        self._python_installed = python_installed
+        self._acp_installed = acp_installed
+        self._inventory_snapshots = inventory_snapshots
+        self._python_packages = python_packages
+        self._acp_packages = acp_packages
+        self._python_package_snapshots = python_package_snapshots
+        self._acp_package_snapshots = acp_package_snapshots
+        self._external_license_snapshots = external_license_snapshots
+        self._source_snapshots = source_snapshots
+        self._uv_lock_snapshot = uv_lock_snapshot
+        self._package_lock_snapshot = package_lock_snapshot
+        self._stack = stack
+        self._closed = False
+        self._active_readers = 0
+        self._lifecycle_lock = RLock()
+
+    def __enter__(self) -> VerifiedCapsuleInputSession:
+        self._require_active()
+        return self
+
+    def __exit__(self, *_args: object) -> None:
+        self.close()
+
+    def _require_active(self) -> None:
+        with self._lifecycle_lock:
+            if self._closed:
+                raise ArtifactInputError("verified capsule input session is closed")
+
+    @property
+    def descriptor(self) -> CapsuleInputDescriptor:
+        self._require_active()
+        return self._descriptor
+
+    @property
+    def sources(self) -> tuple[SourceArtifactDescriptor, ...]:
+        self._require_active()
+        return self._descriptor.sources
+
+    @property
+    def python_inventory(self) -> PythonClosureInventory:
+        self._require_active()
+        return self._python_inventory
+
+    @property
+    def acp_inventory(self) -> AcpClosureInventory:
+        self._require_active()
+        return self._acp_inventory
+
+    @property
+    def python_installed(self) -> InstalledClosureInventory:
+        self._require_active()
+        return self._python_installed
+
+    @property
+    def acp_installed(self) -> InstalledClosureInventory:
+        self._require_active()
+        return self._acp_installed
+
+    @property
+    def python_packages(self) -> tuple[CapsulePackageEvidence, ...]:
+        self._require_active()
+        return tuple(self._python_packages.values())
+
+    @property
+    def acp_packages(self) -> tuple[CapsulePackageEvidence, ...]:
+        self._require_active()
+        return tuple(self._acp_packages.values())
+
+    @contextmanager
+    def _open_retained(
+        self, snapshot: RetainedFileSnapshot, *, label: str
+    ) -> Iterator[BinaryIO]:
+        with self._lifecycle_lock:
+            self._require_active()
+            self._active_readers += 1
+        try:
+            with snapshot.open() as source:
+                yield source
+        except ArchiveAuthorityError as error:
+            raise ArtifactInputError(f"{label}: {error}") from None
+        finally:
+            with self._lifecycle_lock:
+                self._active_readers -= 1
+
+    @contextmanager
+    def open_descriptor(self) -> Iterator[BinaryIO]:
+        """Open the exact descriptor bytes retained by this session."""
+        with self._open_retained(
+            self._descriptor_snapshot, label="capsule input descriptor"
+        ) as source:
+            yield source
+
+    @contextmanager
+    def open_uv_lock(self) -> Iterator[BinaryIO]:
+        """Open the exact uv lock reconciled to the Python closure."""
+        with self._open_retained(self._uv_lock_snapshot, label="uv lock") as source:
+            yield source
+
+    @contextmanager
+    def open_package_lock(self) -> Iterator[BinaryIO]:
+        """Open the exact package lock reconciled to the ACP closure."""
+        with self._open_retained(
+            self._package_lock_snapshot, label="package lock"
+        ) as source:
+            yield source
+
+    @contextmanager
+    def open_python_inventory(self) -> Iterator[BinaryIO]:
+        """Open the exact retained Python closure inventory bytes."""
+        with self._open_retained(
+            self._inventory_snapshots["python-closure"],
+            label="Python closure inventory",
+        ) as source:
+            yield source
+
+    @contextmanager
+    def open_acp_inventory(self) -> Iterator[BinaryIO]:
+        """Open the exact retained ACP closure inventory bytes."""
+        with self._open_retained(
+            self._inventory_snapshots["acp-closure"],
+            label="ACP closure inventory",
+        ) as source:
+            yield source
+
+    @contextmanager
+    def open_python_installed_inventory(self) -> Iterator[BinaryIO]:
+        """Open the exact retained Python installed-tree inventory bytes."""
+        with self._open_retained(
+            self._inventory_snapshots["python-installed"],
+            label="Python installed inventory",
+        ) as source:
+            yield source
+
+    @contextmanager
+    def open_acp_installed_inventory(self) -> Iterator[BinaryIO]:
+        """Open the exact retained ACP installed-tree inventory bytes."""
+        with self._open_retained(
+            self._inventory_snapshots["acp-installed"],
+            label="ACP installed inventory",
+        ) as source:
+            yield source
+
+    @contextmanager
+    def open_source(self, kind: ComponentAssetKind) -> Iterator[BinaryIO]:
+        """Open one exact retained base-closure source by contract kind."""
+        self._require_active()
+        if not isinstance(kind, ComponentAssetKind):
+            raise ArtifactInputError("capsule source kind is invalid")
+        with self._open_retained(
+            self._source_snapshots[kind], label=f"{kind.value} source"
+        ) as source:
+            yield source
+
+    @contextmanager
+    def open_python_package(self, package_name: str) -> Iterator[CapsulePackageSession]:
+        self._require_active()
+        if (
+            not isinstance(package_name, str)
+            or package_name not in self._python_packages
+        ):
+            raise ArtifactInputError("Python package session identity is invalid")
+        package = CapsulePackageSession(
+            archive=self._python_packages[package_name],
+            snapshot=self._python_package_snapshots[package_name],
+            owner=self,
+            label="retained Python package archive",
+        )
+        with package:
+            yield package
+
+    @contextmanager
+    def open_acp_package(self, install_path: str) -> Iterator[CapsulePackageSession]:
+        self._require_active()
+        if not isinstance(install_path, str) or install_path not in self._acp_packages:
+            raise ArtifactInputError("ACP package session identity is invalid")
+        package = CapsulePackageSession(
+            archive=self._acp_packages[install_path],
+            snapshot=self._acp_package_snapshots[install_path],
+            owner=self,
+            label="retained ACP package archive",
+        )
+        with package:
+            yield package
+
+    @contextmanager
+    def open_external_license(
+        self, archive: CapsulePackageEvidence, source_id: str
+    ) -> Iterator[BinaryIO]:
+        self._require_active()
+        if not isinstance(archive, CapsulePackageEvidence) or not isinstance(
+            source_id, str
+        ):
+            raise ArtifactInputError("external license session identity is invalid")
+        descriptor = archive.descriptor
+        if isinstance(descriptor, PythonWheelArtifact):
+            closure_kind = "python"
+            identity = descriptor.name
+            expected = self._python_packages.get(identity)
+        else:
+            closure_kind = "acp"
+            identity = descriptor.install_path
+            expected = self._acp_packages.get(identity)
+        key = (closure_kind, identity, source_id)
+        if expected != archive or key not in self._external_license_snapshots:
+            raise ArtifactInputError("external license session identity is invalid")
+        with self._open_retained(
+            self._external_license_snapshots[key], label="retained external license"
+        ) as source:
+            yield source
+
+    def emit_component_manifest(
+        self, *, api_versions: ApiVersionRange
+    ) -> ComponentManifest:
+        """Emit from retained source and lock evidence without reopening a path."""
+        self._require_active()
+        from .manifest import (
+            BoundAssetSource,
+            emit_component_manifest_from_bound_inputs,
+        )
+
+        bound = tuple(
+            BoundAssetSource(
+                kind=source.kind,
+                digest=source.sha256,
+                license=source.license_expression,
+                version=source.version,
+            )
+            for source in self._descriptor.sources
+        )
+        with self.open_source(ComponentAssetKind.A2A_DISTRIBUTION) as wheel:
+            return emit_component_manifest_from_bound_inputs(
+                target=self._descriptor.target,
+                api_versions=api_versions,
+                assets=bound,
+                a2a_wheel=wheel,
+                uv_lock_digest=self._descriptor.uv_lock.sha256,
+                package_lock_digest=self._descriptor.package_lock.sha256,
+            )
+
+    def close(self) -> None:
+        with self._lifecycle_lock:
+            if not self._closed:
+                if self._active_readers:
+                    raise ArtifactInputError(
+                        "verified capsule input session has an active reader"
+                    )
+                # No new session operation can observe a partially unwound
+                # ExitStack. The active-reader guard above preserves retryable
+                # close only for a still-live consume scope.
+                self._closed = True
+                try:
+                    self._stack.close()
+                except (ArchiveAuthorityError, OSError, ValueError) as error:
+                    raise ArtifactInputError(str(error)) from None
+
+
 @contextmanager
 def open_verified_a2a_wheel(artifact: VerifiedArtifact) -> Iterator[BinaryIO]:
     """Retain the exact root A2A wheel bytes for one caller consume scope."""
@@ -683,19 +1059,43 @@ def load_capsule_input_descriptor(
     path: Path, *, expected_sha256: str
 ) -> LoadedDescriptor:
     """Load one exact descriptor snapshot after verifying its expected digest."""
-    if not isinstance(path, Path) or _SHA256_PATTERN.fullmatch(expected_sha256) is None:
+    if (
+        not isinstance(path, Path)
+        or not isinstance(expected_sha256, str)
+        or _SHA256_PATTERN.fullmatch(expected_sha256) is None
+    ):
         raise ArtifactInputError("descriptor path and sha256 identity are invalid")
     payload, digest = _read_and_digest(
         path, label="capsule input descriptor", maximum_size=_MAX_DESCRIPTOR_BYTES
     )
     if digest != expected_sha256:
         raise ArtifactInputError("capsule input descriptor digest does not match")
+    return _parse_capsule_input_descriptor(payload, digest=digest)
+
+
+def _parse_capsule_input_descriptor(payload: bytes, *, digest: str) -> LoadedDescriptor:
+    """Parse one already digest-bound descriptor byte snapshot."""
     try:
         document = tomllib.loads(payload.decode("utf-8"))
         descriptor = CapsuleInputDescriptor.model_validate(document)
     except (UnicodeDecodeError, tomllib.TOMLDecodeError, ValidationError):
         raise ArtifactInputError("capsule input descriptor is invalid") from None
+    _assert_retained_snapshot_capacity(descriptor)
     return LoadedDescriptor(value=descriptor, sha256=digest)
+
+
+def _assert_retained_snapshot_capacity(
+    descriptor: CapsuleInputDescriptor, *, external_license_count: int = 0
+) -> None:
+    """Refuse a session whose exact retained handles exceed the hard bound."""
+    retained = (
+        _FIXED_RETAINED_INPUT_SNAPSHOTS
+        + descriptor.python_closure.package_count
+        + descriptor.acp_closure.package_count
+        + external_license_count
+    )
+    if retained > _MAX_RETAINED_INPUT_SNAPSHOTS:
+        raise ArtifactInputError("capsule input retained snapshot capacity is exceeded")
 
 
 def load_python_closure_inventory(
@@ -1015,6 +1415,26 @@ def load_capsule_closures(
         descriptor=descriptor.package_lock,
         label="package lock",
     )
+    return _load_capsule_closures_from_lock_bytes(
+        descriptor,
+        input_dir=input_dir,
+        uv_lock_path=verified_uv_path,
+        package_lock_path=verified_package_path,
+        uv_bytes=uv_bytes,
+        package_bytes=package_bytes,
+    )
+
+
+def _load_capsule_closures_from_lock_bytes(
+    descriptor: CapsuleInputDescriptor,
+    *,
+    input_dir: Path,
+    uv_lock_path: Path,
+    package_lock_path: Path,
+    uv_bytes: bytes,
+    package_bytes: bytes,
+) -> LoadedCapsuleClosures:
+    """Reconcile closures to exact caller-retained lock byte snapshots."""
     python = load_python_closure_inventory(
         descriptor.python_closure, input_dir=input_dir
     )
@@ -1057,7 +1477,307 @@ def load_capsule_closures(
         acp=acp,
         python_packages=python_packages,
         acp_packages=acp_packages,
-        uv_lock_path=verified_uv_path,
-        package_lock_path=verified_package_path,
+        uv_lock_path=uv_lock_path,
+        package_lock_path=package_lock_path,
         input_dir=_resolved_input_root(input_dir),
     )
+
+
+def _retained_payload(
+    snapshot: RetainedFileSnapshot, *, expected_size: int, label: str
+) -> bytes:
+    try:
+        with snapshot.open() as source:
+            payload = source.read(expected_size + 1)
+    except ArchiveAuthorityError as error:
+        raise ArtifactInputError(str(error)) from None
+    if len(payload) != expected_size:
+        raise ArtifactInputError(f"{label} retained size does not match")
+    return payload
+
+
+def _path_free_package_evidence(
+    archive: VerifiedPackageArchive,
+) -> CapsulePackageEvidence:
+    return CapsulePackageEvidence(
+        descriptor=archive.descriptor,
+        members=archive.members,
+        license_members=archive.license_members,
+    )
+
+
+class _RetainedSnapshotPool:
+    """Deduplicate and bound all anonymous snapshots owned by one session."""
+
+    __slots__ = (
+        "_maximum_bytes",
+        "_maximum_snapshots",
+        "_snapshots",
+        "_stack",
+        "_total_bytes",
+    )
+
+    def __init__(
+        self,
+        stack: ExitStack,
+        *,
+        maximum_snapshots: int = _MAX_RETAINED_INPUT_SNAPSHOTS,
+        maximum_bytes: int = _MAX_RETAINED_INPUT_BYTES,
+    ) -> None:
+        if (
+            not isinstance(maximum_snapshots, int)
+            or maximum_snapshots <= 0
+            or not isinstance(maximum_bytes, int)
+            or maximum_bytes <= 0
+        ):
+            raise ArtifactInputError("retained snapshot pool limits are invalid")
+        self._stack = stack
+        self._snapshots: dict[tuple[str, int], RetainedFileSnapshot] = {}
+        self._total_bytes = 0
+        self._maximum_snapshots = maximum_snapshots
+        self._maximum_bytes = maximum_bytes
+
+    def retain(
+        self,
+        path: Path,
+        *,
+        label: str,
+        expected_size: int | None,
+        expected_sha256: str,
+        maximum_size: int | None = None,
+    ) -> RetainedFileSnapshot:
+        if expected_size is not None:
+            key = (expected_sha256, expected_size)
+            retained = self._snapshots.get(key)
+            if retained is not None:
+                return retained
+        if len(self._snapshots) >= self._maximum_snapshots:
+            raise ArtifactInputError(
+                "capsule input session exceeds its retained snapshot capacity"
+            )
+        if (
+            expected_size is not None
+            and self._total_bytes + expected_size > self._maximum_bytes
+        ):
+            raise ArtifactInputError(
+                "capsule input session exceeds its retained byte capacity"
+            )
+        if maximum_size is None:
+            if expected_size is None:
+                raise ArtifactInputError("retained snapshot size bound is invalid")
+            maximum_size = expected_size
+        snapshot = retain_file_snapshot(
+            path,
+            label=label,
+            maximum_size=maximum_size,
+            expected_size=expected_size,
+            expected_sha256=expected_sha256,
+        )
+        key = (snapshot.sha256, snapshot.size)
+        retained = self._snapshots.get(key)
+        if retained is not None:
+            snapshot.close()
+            return retained
+        if self._total_bytes + snapshot.size > self._maximum_bytes:
+            snapshot.close()
+            raise ArtifactInputError(
+                "capsule input session exceeds its retained byte capacity"
+            )
+        self._snapshots[key] = snapshot
+        self._total_bytes += snapshot.size
+        self._stack.callback(snapshot.close)
+        return snapshot
+
+
+@contextmanager
+def open_verified_capsule_inputs(
+    descriptor_path: Path,
+    *,
+    expected_descriptor_sha256: str,
+    input_dir: Path,
+    uv_lock_path: Path,
+    package_lock_path: Path,
+) -> Iterator[VerifiedCapsuleInputSession]:
+    """Retain one complete exact input authority for capsule assembly."""
+    if (
+        not isinstance(descriptor_path, Path)
+        or not isinstance(expected_descriptor_sha256, str)
+        or _SHA256_PATTERN.fullmatch(expected_descriptor_sha256) is None
+        or not isinstance(input_dir, Path)
+        or not isinstance(uv_lock_path, Path)
+        or not isinstance(package_lock_path, Path)
+    ):
+        raise ArtifactInputError(
+            "verified capsule input session paths and identity are invalid"
+        )
+    stack = ExitStack()
+    pool = _RetainedSnapshotPool(stack)
+    session: VerifiedCapsuleInputSession | None = None
+    try:
+        descriptor_snapshot = pool.retain(
+            descriptor_path,
+            label="capsule input descriptor",
+            expected_sha256=expected_descriptor_sha256,
+            expected_size=None,
+            maximum_size=_MAX_DESCRIPTOR_BYTES,
+        )
+        loaded_descriptor = _parse_capsule_input_descriptor(
+            _retained_payload(
+                descriptor_snapshot,
+                expected_size=descriptor_snapshot.size,
+                label="capsule input descriptor",
+            ),
+            digest=descriptor_snapshot.sha256,
+        )
+        descriptor = loaded_descriptor.value
+
+        uv_snapshot = pool.retain(
+            uv_lock_path,
+            label="uv lock",
+            expected_size=descriptor.uv_lock.size,
+            expected_sha256=descriptor.uv_lock.sha256,
+        )
+        package_snapshot = pool.retain(
+            package_lock_path,
+            label="package lock",
+            expected_size=descriptor.package_lock.size,
+            expected_sha256=descriptor.package_lock.sha256,
+        )
+        uv_bytes = _retained_payload(
+            uv_snapshot, expected_size=descriptor.uv_lock.size, label="uv lock"
+        )
+        package_bytes = _retained_payload(
+            package_snapshot,
+            expected_size=descriptor.package_lock.size,
+            label="package lock",
+        )
+
+        root = _resolved_input_root(input_dir)
+        source_snapshots: dict[ComponentAssetKind, RetainedFileSnapshot] = {}
+        for source in descriptor.sources:
+            snapshot = pool.retain(
+                root / source.sha256,
+                label=f"cached {source.kind.value} source",
+                expected_size=source.size,
+                expected_sha256=source.sha256,
+            )
+            source_snapshots[source.kind] = snapshot
+
+        closures = _load_capsule_closures_from_lock_bytes(
+            descriptor,
+            input_dir=root,
+            uv_lock_path=uv_lock_path.absolute(),
+            package_lock_path=package_lock_path.absolute(),
+            uv_bytes=uv_bytes,
+            package_bytes=package_bytes,
+        )
+        external_license_count = sum(
+            len(package.external_licenses)
+            for package in (
+                *closures.python.value.packages,
+                *closures.acp.value.packages,
+            )
+        )
+        _assert_retained_snapshot_capacity(
+            descriptor, external_license_count=external_license_count
+        )
+        inventory_snapshots = {
+            "python-closure": pool.retain(
+                closures.python.path,
+                label="Python closure inventory",
+                expected_size=descriptor.python_closure.wheel_inventory_size,
+                expected_sha256=descriptor.python_closure.wheel_inventory_sha256,
+            ),
+            "acp-closure": pool.retain(
+                closures.acp.path,
+                label="ACP closure inventory",
+                expected_size=descriptor.acp_closure.tarball_inventory_size,
+                expected_sha256=descriptor.acp_closure.tarball_inventory_sha256,
+            ),
+            "python-installed": pool.retain(
+                closures.python.installed.path,
+                label="Python installed inventory",
+                expected_size=descriptor.python_closure.installed.inventory_size,
+                expected_sha256=descriptor.python_closure.installed.inventory_sha256,
+            ),
+            "acp-installed": pool.retain(
+                closures.acp.installed.path,
+                label="ACP installed inventory",
+                expected_size=descriptor.acp_closure.installed.inventory_size,
+                expected_sha256=descriptor.acp_closure.installed.inventory_sha256,
+            ),
+        }
+
+        python_packages: dict[str, CapsulePackageEvidence] = {}
+        python_package_snapshots: dict[str, RetainedFileSnapshot] = {}
+        acp_packages: dict[str, CapsulePackageEvidence] = {}
+        acp_package_snapshots: dict[str, RetainedFileSnapshot] = {}
+        external_license_snapshots: dict[
+            tuple[str, str, str], RetainedFileSnapshot
+        ] = {}
+        for archive in closures.python_packages:
+            package = cast("PythonWheelArtifact", archive.descriptor)
+            python_packages[package.name] = _path_free_package_evidence(archive)
+            python_package_snapshots[package.name] = pool.retain(
+                archive.path,
+                label="Python package archive",
+                expected_size=package.size,
+                expected_sha256=package.sha256,
+            )
+            for item in package.external_licenses:
+                external_license_snapshots[("python", package.name, item.source_id)] = (
+                    pool.retain(
+                        root / item.sha256,
+                        label="Python external license",
+                        expected_size=item.size,
+                        expected_sha256=item.sha256,
+                    )
+                )
+        for archive in closures.acp_packages:
+            package = cast("AcpPackageArtifact", archive.descriptor)
+            acp_packages[package.install_path] = _path_free_package_evidence(archive)
+            acp_package_snapshots[package.install_path] = pool.retain(
+                archive.path,
+                label="ACP package archive",
+                expected_size=package.size,
+                expected_sha256=package.sha256,
+            )
+            for item in package.external_licenses:
+                external_license_snapshots[
+                    ("acp", package.install_path, item.source_id)
+                ] = pool.retain(
+                    root / item.sha256,
+                    label="ACP external license",
+                    expected_size=item.size,
+                    expected_sha256=item.sha256,
+                )
+        session = VerifiedCapsuleInputSession(
+            descriptor=descriptor,
+            descriptor_snapshot=descriptor_snapshot,
+            python_inventory=closures.python.value,
+            acp_inventory=closures.acp.value,
+            python_installed=closures.python.installed.value,
+            acp_installed=closures.acp.installed.value,
+            inventory_snapshots=inventory_snapshots,
+            python_packages=python_packages,
+            acp_packages=acp_packages,
+            python_package_snapshots=python_package_snapshots,
+            acp_package_snapshots=acp_package_snapshots,
+            external_license_snapshots=external_license_snapshots,
+            source_snapshots=source_snapshots,
+            uv_lock_snapshot=uv_snapshot,
+            package_lock_snapshot=package_snapshot,
+            stack=stack.pop_all(),
+        )
+        with session:
+            yield session
+    except ArtifactInputError:
+        raise
+    except ArchiveAuthorityError as error:
+        raise ArtifactInputError(str(error)) from None
+    finally:
+        if session is None:
+            try:
+                stack.close()
+            except ArchiveAuthorityError as error:
+                raise ArtifactInputError(str(error)) from None

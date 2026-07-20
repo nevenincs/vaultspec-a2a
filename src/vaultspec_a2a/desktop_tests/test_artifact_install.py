@@ -53,6 +53,7 @@ from .harness import (
     relocate,
     seat_valid_database,
     seed_credentials,
+    seed_workspace_preset,
     write_migration_descriptor,
 )
 
@@ -258,12 +259,18 @@ def test_lazy_worker_from_installed_capsule(
     """Concurrent first demand creates one real worker; idle boot creates none.
 
     Proved through the installed capsule's python: the gateway is booted via the
-    installed package so every code path — auth loading, worker spawner, run-start
-    dispatch — runs from the installed environment.
+    installed package so every code path - auth loading, worker spawner, run-start
+    dispatch - runs from the installed environment.
+
+    The mock-success-single preset is seeded into a workspace override directory
+    and passed via run-start metadata.workspace_root, using the documented
+    workspace-precedence seam (team_config.py discovery order), because the
+    product wheel deliberately excludes mock presets.
     """
     app_home, attach, _ = _seat_app_home(
         installed_capsule, tmp_path, "lazy-worker-installed-txn-1"
     )
+    workspace = seed_workspace_preset(tmp_path / "workspace")
     gw_port = free_port()
     wk_port = free_port()
     env = gateway_env(app_home, gw_port, wk_port, auto_spawn=True)
@@ -303,6 +310,9 @@ def test_lazy_worker_from_installed_capsule(
                             "tokens": {"coder": "tok-coder"},
                             "engine_bearer": "bearer",
                         },
+                        "metadata": {
+                            "workspace_root": str(workspace),
+                        },
                     },
                 ).status_code
 
@@ -336,16 +346,18 @@ def test_default_acp_execution_mock_seam(
 ) -> None:
     """A run executes from the installed capsule gateway via the mock-provider seam.
 
-    The external Claude CLI is not installable offline; this test follows the
-    established mock-success-single preset pattern (used by all gateway gates)
-    to prove the full run-start path — worker boot, dispatch, durable run
-    creation — from the installed capsule's production code.  The mock preset is
-    disclosed as the MOCK-provider-at-the-uninstalled-CLI-seam precedent
-    referenced in the S73 step record.
+    The external Claude CLI is not installable offline; this test exercises the
+    full run-start path (worker boot, dispatch, durable run creation) from the
+    installed capsule's production code using the mock-success-single preset.
+    The preset is not bundled in the product wheel; it is seeded into a workspace
+    override directory and supplied via run-start metadata.workspace_root, using
+    the documented workspace-precedence seam.  This is disclosed as the
+    MOCK-provider-at-the-uninstalled-CLI-seam used by all installed-capsule gates.
     """
     app_home, attach, _ = _seat_app_home(
         installed_capsule, tmp_path, "acp-execution-mock-txn-1"
     )
+    workspace = seed_workspace_preset(tmp_path / "workspace")
     gw_port = free_port()
     wk_port = free_port()
     env = gateway_env(app_home, gw_port, wk_port, auto_spawn=True)
@@ -373,6 +385,9 @@ def test_default_acp_execution_mock_seam(
                     "actor_tokens": {
                         "tokens": {"coder": "tok-coder"},
                         "engine_bearer": "bearer",
+                    },
+                    "metadata": {
+                        "workspace_root": str(workspace),
                     },
                 },
             )

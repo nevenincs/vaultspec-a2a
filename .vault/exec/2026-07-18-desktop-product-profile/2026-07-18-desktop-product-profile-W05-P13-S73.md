@@ -59,12 +59,12 @@ related:
 
 ## Outcome
 
-REVISION REQUIRED. Code reviewer ran the service suite; tests failed (4 failed, 10 passed total across the trio). `ruff check` and `ty check` are clean; baseline (32 non-service) passes. Service gate was not green at first submission.
+Service gate: **14 passed, 0 failed** (full trio run, 2026-07-20). `ruff check` clean, `ty check` clean, baseline (32 non-service) passes.
 
-Failures diagnosed:
-1. Run-start tests (`test_lazy_worker_from_installed_capsule`, `test_default_acp_execution_mock_seam`): `mock-success-single` preset is deliberately excluded from the product wheel; the tests must seed the preset via the workspace-override seam (`{workspace}/.vaultspec/teams/mock-success-single.toml`) and pass `workspace_root` in run-start `metadata`.
-2. `gateway_env()` used `dict(os.environ)` instead of `clean_env()`.
+Revision fixed two issues from initial FAIL verdict:
+1. Both `mock-success-single` (team) and `mock-coder-success` (agent) configs are excluded from the product wheel; workspace-override seam is now used via `seed_workspace_preset()` which writes both TOMLs to `{workspace}/.vaultspec/teams/` and `.vaultspec/agents/`, and run-start requests pass `metadata.workspace_root` pointing there.
+2. `gateway_env()` now derives from `clean_env()` rather than `dict(os.environ)`.
 
 ## Notes
 
-Step unchecked and revision in progress. Disclosure: `mock-success-single` is a non-product test preset seeded via the workspace override, not bundled in the installed wheel.
+`mock-success-single` and `mock-coder-success` are non-product test presets seeded exclusively via the workspace-override seam (team_config.py discovery order, workspace takes precedence). Disclosed in module docstring and `seed_workspace_preset` docstring. External ACP provider (Claude CLI) remains the production execution path and is not installable offline; this gate proves the installed package's run-start wiring end-to-end using the mock-provider seam.

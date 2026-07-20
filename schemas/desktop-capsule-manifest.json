@@ -154,7 +154,7 @@
                     "const": false
                   },
                   "schema_version": {
-                    "const": "0008"
+                    "const": "0009"
                   }
                 },
                 "required": [
@@ -323,7 +323,7 @@
           "type": "string"
         },
         "head": {
-          "const": "0008",
+          "const": "0009",
           "description": "Alembic head (target) revision identifier.",
           "maxLength": 64,
           "minLength": 1,

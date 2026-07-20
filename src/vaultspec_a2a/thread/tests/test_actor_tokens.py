@@ -22,7 +22,7 @@ def test_actor_token_bundle_accepts_production_role_grammar_and_redacts() -> Non
 
 @pytest.mark.parametrize("role", ["", "has space", "9starts-numeric", "a" * 64])
 def test_actor_token_bundle_rejects_out_of_contract_role_keys(role: str) -> None:
-    with pytest.raises(ValidationError, match="actor token role"):
+    with pytest.raises(ValidationError, match="empty role key|actor token role"):
         ActorTokenBundle(tokens={role: "actor-secret"})
 
 

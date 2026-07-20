@@ -280,7 +280,7 @@ async def _win_tree_kill(pid: int, *, timeout: float) -> bool:
     # hang the caller. The caller's own handle wait confirms the reap.
     try:
         returncode = await asyncio.wait_for(killer.wait(), timeout=timeout)
-        return returncode == 0 or not _pid_alive(pid)
+        return returncode == 0 or not pid_is_live(pid)
     except TimeoutError:
         killer.kill()
         with contextlib.suppress(TimeoutError):
@@ -302,7 +302,7 @@ async def kill_pid_tree_async(
     """
     if pid <= 0:
         return True
-    if not _pid_alive(pid):
+    if not pid_is_live(pid):
         return True
     if sys.platform == "win32":
         return await _win_tree_kill(pid, timeout=term_timeout + kill_timeout)

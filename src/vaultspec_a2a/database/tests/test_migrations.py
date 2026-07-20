@@ -128,7 +128,7 @@ class TestAlembicUpgradeDowngrade:
         row = conn.execute("SELECT version_num FROM alembic_version").fetchone()
         conn.close()
         assert row is not None
-        assert row[0] == "0008"
+        assert row[0] == "0009"
 
     def test_upgrade_head_rewrites_legacy_created_status(
         self, runtime_dir: Path
@@ -365,7 +365,7 @@ class TestRunMigrations:
             conn.close()
 
         assert version is not None
-        assert version[0] == "0008"
+        assert version[0] == "0009"
 
     @pytest.mark.asyncio
     async def test_run_migrations_with_percent_directory_reaches_head(
@@ -385,7 +385,7 @@ class TestRunMigrations:
             conn.close()
 
         assert version is not None
-        assert version[0] == "0008"
+        assert version[0] == "0009"
 
     @pytest.mark.asyncio
     async def test_concurrent_run_migrations_upgrades_both_databases(
@@ -411,5 +411,5 @@ class TestRunMigrations:
                 conn.close()
 
             assert version is not None
-            assert version[0] == "0008"
+            assert version[0] == "0009"
             assert _get_tables(database) >= _APP_TABLES

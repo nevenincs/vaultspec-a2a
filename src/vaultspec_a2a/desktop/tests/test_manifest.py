@@ -165,7 +165,7 @@ def test_emitter_derives_identity_entrypoints_and_digest_from_exact_built_wheel(
     assert manifest.identity.name == built_wheel.project["name"]
     assert manifest.identity.version == built_wheel.project["version"]
     assert manifest.compatibility.migration_range.base == "0001"
-    assert manifest.compatibility.migration_range.head == "0008"
+    assert manifest.compatibility.migration_range.head == "0009"
     assert [
         store.model_dump(mode="json") for store in manifest.consistency_group.stores
     ] == [
@@ -173,7 +173,7 @@ def test_emitter_derives_identity_entrypoints_and_digest_from_exact_built_wheel(
             "kind": "primary-database",
             "derivable": False,
             "schema_authority": "alembic-migration-range",
-            "schema_version": "0008",
+            "schema_version": "0009",
         },
         {
             "kind": "checkpoint-database",
@@ -850,7 +850,7 @@ def test_canonical_json_v1_matches_cross_language_golden_vector() -> None:
     assert not golden_bytes.endswith(b"\n")
     assert (
         expected_digest
-        == "07a0ae0dbedb99f18a5903718ec1b5a3dd5c3bbe14385f2458348dadf75d00e6"
+        == "0e2717cd0689edd35ccf2f11367c55ab24e772cc2bba6a945198b6bf0e546dc1"
     )
     assert component_manifest_canonical_bytes(manifest) == golden_bytes
     assert component_manifest_digest(manifest) == expected_digest

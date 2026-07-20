@@ -395,6 +395,12 @@ def test_data_preserving_capsule_removal(
         await_gateway_health(base)
         # Give the lifespan a moment to write the discovery record.
         time.sleep(1.0)
+        # Publication is asserted while the gateway is LIVE: a clean shutdown
+        # deliberately removes the record it owns, so its presence afterwards
+        # would only mean the process was killed too hard to run its cleanup.
+        assert derive_state_paths(app_home).discovery_path.is_file(), (
+            "gateway lifespan must publish a discovery record while serving"
+        )
     finally:
         with contextlib.suppress(Exception):
             asyncio.run(

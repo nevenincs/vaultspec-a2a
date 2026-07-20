@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import subprocess
 from typing import TYPE_CHECKING
 
 import pytest
@@ -102,27 +103,64 @@ def test_directory_in_place_of_file_rejected(tmp_path: Path) -> None:
         load_attach_credential(tmp_path)
 
 
-@pytest.mark.skipif(os.name != "posix", reason="POSIX permission-bit enforcement")
-def test_group_readable_file_rejected(tmp_path: Path) -> None:
-    """A group- or world-accessible file is not owner-restricted and is rejected."""
+def _make_windows_junction(link: Path, target: Path) -> None:
+    """Create a directory junction at *link* pointing to *target*.
+
+    A junction is the reparse point every Windows host can create without holding
+    ``SeCreateSymbolicLinkPrivilege`` or Developer Mode, so it is the privilege-free
+    stand-in for a symlink when certifying reparse rejection. ``mklink`` is a
+    ``cmd.exe`` built-in rather than a standalone executable, so it is invoked
+    through the command interpreter.
+    """
+    interpreter = os.environ.get("COMSPEC", "cmd.exe")
+    completed = subprocess.run(
+        [interpreter, "/c", "mklink", "/J", str(link), str(target)],
+        capture_output=True,
+        text=True,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+    )
+    if completed.returncode != 0 or not link.is_junction():
+        detail = completed.stderr.strip()
+        raise OSError(f"could not create a directory junction: {detail}")
+
+
+def test_non_owner_restricted_file_rejected(tmp_path: Path) -> None:
+    """A file whose permissions are not owner-restricted is rejected on every host.
+
+    On POSIX the file is made group- and world-readable (``0o644``); on Windows a
+    plainly written file inherits its parent directory's discretionary access-control
+    list, so its access-control entries carry the inherited flag and fail the private
+    owner-only predicate. Both branches confirm the predicate reports the file as not
+    owner-restricted before asserting the loader fails closed.
+    """
     path = tmp_path / ATTACH_CREDENTIAL_NAME
     path.write_text(_VALID_TOKEN, encoding="utf-8")
-    os.chmod(path, 0o644)
+    if os.name == "posix":
+        os.chmod(path, 0o644)
+    assert not credential_file_is_owner_restricted(path)
     with pytest.raises(CredentialError):
         load_attach_credential(tmp_path)
 
 
-@pytest.mark.skipif(not hasattr(os, "symlink"), reason="requires symlink support")
-def test_symlinked_credential_rejected(tmp_path: Path) -> None:
-    """A symlink standing in for the credential file is rejected."""
-    real = tmp_path / "real_secret"
-    real.write_text(_VALID_TOKEN, encoding="utf-8")
-    harden_credential_file(real)
+def test_reparse_credential_rejected(tmp_path: Path) -> None:
+    """A reparse point standing in for the credential file is rejected on every host.
+
+    On POSIX a real symbolic link points at a hardened secret; on Windows a directory
+    junction - the privilege-free reparse point - stands in its place. Both branches
+    confirm the owner-restriction predicate rejects the reparse point and that the
+    loader fails closed rather than following it.
+    """
     link = tmp_path / ATTACH_CREDENTIAL_NAME
-    try:
-        link.symlink_to(real)
-    except (OSError, NotImplementedError):
-        pytest.skip("symlink creation not permitted in this environment")
+    if os.name == "posix":
+        real = tmp_path / "real_secret"
+        real.write_text(_VALID_TOKEN, encoding="utf-8")
+        harden_credential_file(real)
+        os.symlink(real, link)
+    else:
+        target = tmp_path / "reparse_target"
+        target.mkdir()
+        _make_windows_junction(link, target)
+    assert not credential_file_is_owner_restricted(link)
     with pytest.raises(CredentialError):
         load_attach_credential(tmp_path)
 

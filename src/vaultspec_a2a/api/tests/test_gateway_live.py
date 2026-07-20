@@ -28,12 +28,20 @@ import uvicorn
 from ...graph.enums import Provider
 from ...providers.model_profiles import probe_provider_readiness
 from ...streaming.aggregator import EventAggregator
+from ..routes.gateway import _persisted_lease_id
 from .conftest import make_app
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
 
 _PRESET = "mock-success-single"
+
+
+def test_legacy_lease_only_metadata_remains_status_visible() -> None:
+    """The additive status reader preserves the preceding persisted shape."""
+    legacy = json.dumps({"run_lease": {"lease_id": "lease-legacy123"}})
+    assert _persisted_lease_id(legacy) == "lease-legacy123"
+    assert _persisted_lease_id('{"run_lease":{"lease_id":"not/addressable"}}') is None
 
 
 @contextlib.asynccontextmanager

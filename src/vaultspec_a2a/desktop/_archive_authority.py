@@ -1,4 +1,11 @@
-"""Shared bounded archive structure authority for desktop inputs."""
+"""Shared bounded archive structure authority for desktop inputs.
+
+The scanners and retained snapshots back
+:mod:`vaultspec_a2a.desktop.package_archives`,
+:mod:`vaultspec_a2a.desktop.artifacts`, and
+:mod:`vaultspec_a2a.desktop.manifest`; they grant byte authority only, never
+acquisition, provenance, licensing, publication, or activation authority.
+"""
 
 from __future__ import annotations
 

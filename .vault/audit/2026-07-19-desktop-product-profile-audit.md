@@ -1898,3 +1898,20 @@ Three independent final reviewers rechecked the exact frozen artifacts and appro
 no critical, high, medium, or low S101 finding. Focused verification passed 57 tests;
 the complete desktop campaign passed 367 tests with the known POSIX credential-permission
 skip. This closes only S101 and leaves S102 onward open.
+
+## `W01.P03.S101` supported-target resource re-review
+
+Status: REOPENED; ONE HIGH RESOURCE-COMPATIBILITY FINDING IS OPEN. The historical PASS
+above records the review that occurred and is not rewritten, but it is superseded for
+completion purposes by the supported-target evidence below.
+
+### retained-snapshot-target-budget | high | Open
+
+Type: supported-target resource compatibility. Each unique retained snapshot keeps one
+temporary-file descriptor open for the complete assembly scope, while the implementation
+admits as many as 512 retained snapshots and 8 GiB of deduplicated bytes. Existing tests
+exercise only one- and two-snapshot limits plus a small Windows-targeted closure. They do
+not prove the near-boundary contract on every supported native target, and the simultaneous
+retention model conflicts with S100's sequential-session rationale for avoiding descriptor
+exhaustion. The implementation and its exact-byte tests remain preserved, but S101 is open
+until a bounded-window design or a lower supported-target budget is proved natively.

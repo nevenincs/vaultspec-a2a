@@ -3,6 +3,10 @@
 These models describe the exact target-selected Python wheels and ACP npm
 tarballs supplied through the content-addressed release input cache. They carry
 no acquisition behavior and make no independent redistribution conclusion.
+
+:mod:`vaultspec_a2a.desktop.lock_reconciliation` checks these source inventories
+against exact lock bytes. :mod:`vaultspec_a2a.desktop.artifacts` then joins them
+to :mod:`vaultspec_a2a.desktop.installed_inventory` and verified package bytes.
 """
 
 from __future__ import annotations

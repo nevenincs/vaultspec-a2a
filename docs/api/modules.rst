@@ -144,6 +144,15 @@ API application
    Require the service-discovery bearer token for an engine-facing request.
    See :func:`vaultspec_a2a.api.app.create_app` for application wiring.
 
+.. py:module:: vaultspec_a2a.api.routes.gateway
+   :synopsis: Versioned start, prepare, commit, release, status, and stream routes.
+
+.. py:module:: vaultspec_a2a.api.schemas.gateway
+   :synopsis: Bounded gateway lifecycle and lease-status wire models.
+
+.. py:module:: vaultspec_a2a.api.body_limit
+   :synopsis: Pre-parser memory bound for authenticated v1 write bodies.
+
 .. py:module:: vaultspec_a2a.api.websocket
    :synopsis: WebSocket connection and command handling.
 
@@ -182,7 +191,11 @@ Desktop capsule contract
 
 .. py:class:: AssetSource
 
+.. py:class:: BoundAssetSource
+
 .. py:function:: emit_component_manifest(*, target, api_versions, assets, uv_lock_path, package_lock_path, digest_algorithm=DigestAlgorithm.SHA256)
+
+.. py:function:: emit_component_manifest_from_bound_inputs(*, target, api_versions, assets, a2a_wheel, uv_lock_digest, package_lock_digest, digest_algorithm=DigestAlgorithm.SHA256)
 
 .. py:function:: component_manifest_canonical_bytes(manifest)
 
@@ -281,7 +294,22 @@ the package-root component-manifest API and may change with the release
 workflow.
 
 .. py:module:: vaultspec_a2a.desktop.artifacts
-   :synopsis: Exact local-input descriptor and byte-identity verification.
+   :synopsis: Exact retained local-input authority and byte-identity verification.
+
+.. py:module:: vaultspec_a2a.desktop.package_archives
+   :synopsis: Verified Python and ACP package archive sessions.
+
+.. py:module:: vaultspec_a2a.desktop.closure_inventory
+   :synopsis: Canonical Python and ACP source-closure inventories.
+
+.. py:module:: vaultspec_a2a.desktop.installed_inventory
+   :synopsis: Canonical expected installed-tree inventories.
+
+.. py:module:: vaultspec_a2a.desktop.lock_reconciliation
+   :synopsis: Closure reconciliation against exact dependency-lock bytes.
+
+.. py:module:: vaultspec_a2a.desktop._archive_authority
+   :synopsis: Bounded archive scanning and retained regular-file snapshots.
 
 .. py:module:: vaultspec_a2a.desktop.capsule
    :synopsis: Bounded archive projection into private staging trees.
@@ -391,6 +419,12 @@ Control services
 .. py:module:: vaultspec_a2a.control.run_start_policy
    :synopsis: Run-start eligibility policy.
 
+.. py:module:: vaultspec_a2a.control.admission
+   :synopsis: Readiness-gated prepared reservations and exact commit binding.
+
+.. py:module:: vaultspec_a2a.control.health
+   :synopsis: Gateway diagnostics and desktop admission-readiness authority.
+
 .. py:module:: vaultspec_a2a.control.run_discovery_service
    :synopsis: Bounded durable identity projection for active-run rebinding.
 
@@ -402,6 +436,9 @@ Control services
 
 .. py:module:: vaultspec_a2a.control.verdict_subscriber
    :synopsis: Authoring verdict delivery.
+
+.. py:module:: vaultspec_a2a.worker.app
+   :synopsis: Authenticated worker dispatch and accepted-dispatch logging.
 
 Persistence
 ~~~~~~~~~~~
@@ -519,6 +556,9 @@ Team and telemetry
 
 Thread and workspace support
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. py:module:: vaultspec_a2a.thread.actor_tokens
+   :synopsis: Bounded and redacted engine-provisioned per-role token bundles.
 
 .. py:module:: vaultspec_a2a.thread.snapshots
    :synopsis: Thread snapshot projection.

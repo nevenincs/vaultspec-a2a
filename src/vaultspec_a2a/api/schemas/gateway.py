@@ -12,6 +12,11 @@ reinventing it:
 ``/api`` surface uses, ``run-status`` composes the recovery snapshot, active-run
 discovery projects bounded durable identities, and the operator verbs roll up
 cancel, preset listing, and health.
+
+The run-start models expose ``start``, ``prepare``, ``commit``, and ``release``
+for :mod:`vaultspec_a2a.api.routes.gateway`. Commit binds the exact role set to
+the exact replay request. ``lease_id`` is non-secret coordination metadata, not
+a bearer credential; release applies only to an uncommitted reservation.
 """
 
 from __future__ import annotations
@@ -20,7 +25,7 @@ import re
 from enum import StrEnum
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from ...context.metadata import ThreadMetadata
 from ...thread.actor_tokens import ActorTokenBundle
@@ -46,6 +51,7 @@ __all__ = [
     "RunCancelResponse",
     "RunCommitResponse",
     "RunPrepareResponse",
+    "RunReleaseResponse",
     "RunStage",
     "RunStartRequest",
     "RunStartResponse",
@@ -131,7 +137,8 @@ class RunAdmission(StrEnum):
 
     ``ready`` means execution-ready: a reachable worker and an eligible provider.
     ``deferred`` means gateway-ready but not yet execution-ready - the worker is
-    cold or starting and will start on demand (informational, not a failure).
+    cold or starting and will start on demand. It remains informational on the
+    readiness surface, while staged ``prepare`` admission refuses it fail-closed.
     ``blocked`` means a hard gateway dependency (the database) is unavailable.
     """
 
@@ -143,19 +150,16 @@ class RunAdmission(StrEnum):
 class RunStage(StrEnum):
     """Which stage of the run-start verb a request drives.
 
-    The desktop admission protocol splits run-start into two authenticated
-    stages that share the single ``POST /v1/runs`` verb: ``prepare`` reserves a
-    bounded, expiring admission slot and validates worker and provider
-    eligibility without accepting tokens or creating any durable run, and
-    ``commit`` binds the dashboard-minted actor tokens to a stable run under a
-    prepared reservation. ``start`` is the pre-existing one-shot path (the engine
-    pass-through and Compose profile), preserved verbatim as the default so a
-    caller that omits the stage keeps the direct-start contract.
+    The single ``POST /v1/runs`` verb supports ``prepare`` for readiness-gated,
+    expiring capacity; ``commit`` for exact request and actor-role binding;
+    ``release`` for an uncommitted reservation; and the pre-existing one-shot
+    ``start`` compatibility path.
     """
 
     START = "start"
     PREPARE = "prepare"
     COMMIT = "commit"
+    RELEASE = "release"
 
 
 class RunStartRequest(BaseModel):
@@ -165,6 +169,8 @@ class RunStartRequest(BaseModel):
     the run's preset and opening message. The gateway threads this onto the same
     dispatch path the internal thread-create flow uses — no second code path.
     """
+
+    model_config = ConfigDict(extra="forbid")
 
     # The stage this request drives. Absent means ``start`` - the direct one-shot
     # path - so every pre-existing caller keeps its contract unchanged.
@@ -188,9 +194,9 @@ class RunStartRequest(BaseModel):
     # policy requires it for document-authoring presets. Falls back to
     # metadata.feature_tag when the field is omitted.
     feature_tag: str | None = Field(default=None, max_length=128)
-    # Client-supplied stable run/idempotency id. When present the verb is
-    # dispatch-exactly-once: a retry with the same id returns the existing run
-    # instead of starting a second. Absent, the gateway mints a server-side id.
+    # Client-supplied stable run/idempotency id. Staged prepare, commit, and
+    # release require it so a lost acknowledgement can be replayed; direct start
+    # keeps the compatibility shape and may mint a server-side id when absent.
     run_id: PathSafeRunId | None = None
     # model-profiles: the selected model profile id. Defaults to the implicit
     # team-defaults profile (the team's normal resolution). An unknown or
@@ -219,8 +225,20 @@ class RunStartRequest(BaseModel):
                 raise ValueError("prepare must not carry actor tokens")
             if self.reservation_id is not None:
                 raise ValueError("prepare must not carry a reservation id")
-        if self.stage == RunStage.COMMIT and self.reservation_id is None:
-            raise ValueError("commit requires a reservation id")
+            if self.run_id is None:
+                raise ValueError("prepare requires a stable run id")
+        if self.stage == RunStage.COMMIT:
+            if self.reservation_id is None:
+                raise ValueError("commit requires a reservation id")
+            if self.run_id is None:
+                raise ValueError("commit requires a stable run id")
+        if self.stage == RunStage.RELEASE:
+            if self.reservation_id is None:
+                raise ValueError("release requires a reservation id")
+            if self.run_id is None:
+                raise ValueError("release requires a stable run id")
+            if self.actor_tokens is not None:
+                raise ValueError("release must not carry actor tokens")
         return self
 
     @field_validator("run_id")
@@ -256,9 +274,10 @@ class RunPrepareResponse(BaseModel):
     """Acknowledge a prepared admission reservation.
 
     Returned by the ``prepare`` stage of run-start. It carries the server-minted
-    reservation identity a later ``commit`` binds to, the bounded validated set of
-    roles that commit's actor-token bundle must cover, and the reservation's hard
-    expiry. The three readiness facts report why admission is or is not
+    reservation identity a later ``commit`` binds to, its non-secret run-scoped
+    lease identity, the bounded validated set of roles that commit's actor-token
+    bundle must cover, and the reservation's hard expiry. The three readiness
+    facts report why admission is or is not
     execution-ready right now. No durable run exists yet and no token was
     accepted; a reservation that is never committed simply expires.
     """
@@ -266,6 +285,7 @@ class RunPrepareResponse(BaseModel):
     api_version: Literal["v1"] = _API_VERSION
     stage: Literal["prepared"] = "prepared"
     reservation_id: str
+    lease_id: LeaseId
     # The roles commit's actor-token bundle must cover, one per required role.
     required_roles: list[str] = Field(default_factory=list, max_length=64)
     # ISO-8601 hard expiry; the slot is released automatically at this instant.
@@ -295,6 +315,15 @@ class RunCommitResponse(BaseModel):
     nickname: str | None = None
     profile_id: str | None = None
     assignments: list[RoleAssignmentSummary] = Field(default_factory=list)
+
+
+class RunReleaseResponse(BaseModel):
+    """Acknowledge explicit release of an uncommitted reservation."""
+
+    api_version: Literal["v1"] = _API_VERSION
+    stage: Literal["released"] = "released"
+    reservation_id: ReservationId
+    released: bool
 
 
 class ActiveRunRecord(BaseModel):
@@ -373,6 +402,13 @@ class RunStatusResponse(BaseModel):
     # restarts (additive v1; absent for runs started before profiles landed).
     profile_id: str | None = None
     assignments: list[RoleAssignmentSummary] = Field(default_factory=list)
+    # Non-secret staged-admission lease identity. It lets the dashboard repair
+    # a locally reserved hash bundle after a process crash that followed remote
+    # commit but preceded the local binding write.
+    lease_id: LeaseId | None = None
+    # The persisted prepare reservation paired with ``lease_id``. This lets a
+    # dashboard reconcile only the exact local reservation after a lost reply.
+    reservation_id: ReservationId | None = None
 
 
 class RunCancelResponse(BaseModel):

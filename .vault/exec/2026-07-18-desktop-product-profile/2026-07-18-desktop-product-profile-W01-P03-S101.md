@@ -38,18 +38,27 @@ related:
 
 ## Outcome
 
-S101 is complete. Capsule assembly receives only retained, digest-bound byte authority;
-public session evidence cannot reopen a mutable cache path. The session is read-only,
-scope-bound, terminal after teardown starts, and rejects active-reader close attempts
-without losing the live session. It refuses input sets beyond 512 retained snapshots or
-8 GiB of deduplicated retained bytes.
+Status: OPEN AFTER FORMAL RE-REVIEW.
+
+The implementation exists and capsule assembly receives only retained, digest-bound byte
+authority; public session evidence cannot reopen a mutable cache path. The session is
+read-only, scope-bound, terminal after teardown starts, and rejects active-reader close
+attempts without losing the live session. It currently refuses input sets beyond 512
+retained snapshots or 8 GiB of deduplicated retained bytes.
+
+The completion claim is withdrawn because every unique retained snapshot holds one
+temporary-file descriptor for the complete assembly scope. The 512-descriptor and 8 GiB
+envelope has no near-boundary proof on each supported target and conflicts with S100's
+sequential-retention rationale. S101 remains open until the design restores bounded-window
+authority or a supported-target descriptor budget is selected and proved natively.
 
 The dashboard contract remains unchanged: the component manifest still derives the A2A
 distribution identity, entrypoints, migrations, and digest from the retained wheel and
 uses descriptor-bound lock and source facts.
 
-Verification passed: 57 focused tests, Ruff, formatting, locked Ty on the touched
-modules, isolated tooling import, diff hygiene, and three final exact-hash reviews.
+The earlier verification remains valid for exact-byte and lifetime behavior: 57 focused
+tests, Ruff, formatting, locked Ty on the touched modules, isolated tooling import, and
+diff hygiene passed. It did not establish the advertised supported-target resource bound.
 
 ## Notes
 

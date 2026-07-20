@@ -17,6 +17,7 @@ from sqlalchemy import (
     Text,
     TypeDecorator,
     UniqueConstraint,
+    text,
 )
 from sqlalchemy.engine.interfaces import Dialect
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
@@ -87,31 +88,35 @@ class ThreadModel(Base):
         Index("ix_threads_nickname", "nickname", unique=True),
         Index(
             "ix_threads_active_order",
-            "is_active",
             "created_at",
             "id",
+            sqlite_where=text("is_active IS 1"),
+            postgresql_where=text("is_active IS true"),
         ),
         Index(
             "ix_threads_active_workspace_order",
-            "is_active",
-            "workspace_root",
+            "workspace_key",
             "created_at",
             "id",
+            sqlite_where=text("is_active IS 1"),
+            postgresql_where=text("is_active IS true"),
         ),
         Index(
             "ix_threads_active_feature_order",
-            "is_active",
             "feature_tag",
             "created_at",
             "id",
+            sqlite_where=text("is_active IS 1"),
+            postgresql_where=text("is_active IS true"),
         ),
         Index(
             "ix_threads_active_workspace_feature_order",
-            "is_active",
-            "workspace_root",
+            "workspace_key",
             "feature_tag",
             "created_at",
             "id",
+            sqlite_where=text("is_active IS 1"),
+            postgresql_where=text("is_active IS true"),
         ),
     )
 
@@ -139,6 +144,7 @@ class ThreadModel(Base):
     recovery_epoch: Mapped[int] = mapped_column(default=0)
     thread_metadata: Mapped[str | None] = mapped_column(Text, default=None)
     workspace_root: Mapped[str | None] = mapped_column(String(4096), default=None)
+    workspace_key: Mapped[str | None] = mapped_column(String(64), default=None)
     feature_tag: Mapped[str | None] = mapped_column(String(128), default=None)
     nickname: Mapped[str | None] = mapped_column(default=None)
     team_preset: Mapped[str | None] = mapped_column(default=None)

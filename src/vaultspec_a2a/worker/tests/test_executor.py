@@ -518,8 +518,8 @@ class TestGraphInputBuilding:
         assert inp["vault_index"] == {"specs": ["auth.md"]}
         assert inp["validation_errors"] == ["missing tests"]
 
-    def test_empty_sdd_fields_omitted_on_first_ingest(self) -> None:
-        """SDD fields with default/empty values are not included in graph_input."""
+    def test_empty_sdd_fields_materialized_on_first_ingest(self) -> None:
+        """Fresh checkpoints carry every restart-required SDD field."""
         req = DispatchRequest(
             action="ingest",
             thread_id="t-sdd-empty",
@@ -529,11 +529,11 @@ class TestGraphInputBuilding:
         )
         inp = GraphLifecycleManager.build_graph_input(req, is_first_ingest=True)
 
-        assert "active_feature" not in inp
-        assert "feedback_batch_id" not in inp
-        assert "pipeline_phase" not in inp
-        assert "vault_index" not in inp
-        assert "validation_errors" not in inp
+        assert inp["active_feature"] is None
+        assert inp["feedback_batch_id"] is None
+        assert inp["pipeline_phase"] is None
+        assert inp["vault_index"] == {}
+        assert inp["validation_errors"] == []
 
     def test_context_preamble_prepended_as_system_message(self) -> None:
         """context_preamble is prepended as a SystemMessage before HumanMessage."""

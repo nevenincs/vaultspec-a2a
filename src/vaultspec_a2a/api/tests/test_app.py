@@ -28,7 +28,52 @@ from ..ws_dispatch import create_dispatch_message_handler
 from .conftest import make_app
 
 if TYPE_CHECKING:
+    from collections.abc import AsyncIterator
     from pathlib import Path
+
+
+@pytest.mark.asyncio
+async def test_v1_write_body_limit_rejects_declared_oversize(
+    session_factory,
+    checkpointer,
+) -> None:
+    """The production app rejects an oversized v1 body before model parsing."""
+    app, _aggregator, _worker, _checkpointer = make_app(session_factory, checkpointer)
+
+    async with httpx.AsyncClient(
+        transport=ASGITransport(app=app),
+        base_url="http://test",
+    ) as client:
+        response = await client.post("/v1/runs", content=b"x" * (1024 * 1024 + 1))
+
+    assert response.status_code == 413
+    assert response.json() == {"detail": "v1 request body exceeds 1048576 bytes"}
+
+
+@pytest.mark.asyncio
+async def test_v1_write_body_limit_rejects_streamed_oversize(
+    session_factory,
+    checkpointer,
+) -> None:
+    """Chunked input cannot bypass the same pre-parser memory bound."""
+    app, _aggregator, _worker, _checkpointer = make_app(session_factory, checkpointer)
+
+    async def chunks() -> AsyncIterator[bytes]:
+        yield b"x" * 600_000
+        yield b"y" * 600_000
+
+    async with httpx.AsyncClient(
+        transport=ASGITransport(app=app),
+        base_url="http://test",
+    ) as client:
+        response = await client.post(
+            "/v1/runs",
+            content=chunks(),
+            headers={"content-type": "application/json"},
+        )
+
+    assert response.status_code == 413
+    assert response.json() == {"detail": "v1 request body exceeds 1048576 bytes"}
 
 
 def test_build_worker_restart_detail_includes_log_tail(tmp_path: Path) -> None:

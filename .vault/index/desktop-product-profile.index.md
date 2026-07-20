@@ -90,6 +90,7 @@ related:
   - '[[2026-07-18-desktop-product-profile-W04-P11-S91]]'
   - '[[2026-07-18-desktop-product-profile-W04-P11-S92]]'
   - '[[2026-07-18-desktop-product-profile-W04-P11-summary]]'
+  - '[[2026-07-18-desktop-product-profile-W04-P12-S104]]'
   - '[[2026-07-18-desktop-product-profile-W04-P12-S63]]'
   - '[[2026-07-18-desktop-product-profile-W04-P12-S64]]'
   - '[[2026-07-18-desktop-product-profile-W04-P12-S65]]'
@@ -121,6 +122,7 @@ related:
   - '[[2026-07-18-desktop-product-profile-review-audit]]'
   - '[[2026-07-19-desktop-product-profile-audit]]'
   - '[[2026-07-19-desktop-product-profile-w01-p03-capsule-review-audit]]'
+  - '[[2026-07-20-desktop-product-profile-s101-lost-ack-audit]]'
 ---
 
 # `desktop-product-profile` feature index
@@ -139,6 +141,7 @@ Auto-generated index of all documents tagged with `#desktop-product-profile`.
 - `2026-07-18-desktop-product-profile-review-audit` - `desktop-product-profile` audit: `review`
 - `2026-07-19-desktop-product-profile-audit` - `desktop-product-profile` audit: `W01 P01 S01 dependency profile review`
 - `2026-07-19-desktop-product-profile-w01-p03-capsule-review-audit` - `desktop-product-profile` audit: `w01 p03 capsule review`
+- `2026-07-20-desktop-product-profile-s101-lost-ack-audit` - `desktop-product-profile` audit: `S101 retained inputs and lost-ack hardening`
 
 ### exec
 
@@ -234,6 +237,7 @@ Auto-generated index of all documents tagged with `#desktop-product-profile`.
 - `2026-07-18-desktop-product-profile-W04-P12-S70` - Prove attach-control-authenticated terminal callback retry rejects worker IPC and unrelated credentials while status reconciliation revokes exactly one run-scoped lease without raw tokens
 - `2026-07-18-desktop-product-profile-W01-P03-S100` - Consolidate bounded archive inspection and retained consume authority
 - `2026-07-18-desktop-product-profile-W01-P03-S101` - Retain one exact capsule descriptor both locks all four sources closure inventories package archives and external licenses through scope-bound input sessions and emit the component manifest from bound evidence without reopening mutable paths
+- `2026-07-18-desktop-product-profile-W04-P12-S104` - Make prepared commit and release crash-recoverable under one stable run identity with a pre-minted lease, a recoverable committing transition, durable exact replay, backward-compatible status, and real failure, restart, race, and lost-ack proofs
 - `2026-07-18-desktop-product-profile-W04-P12-S71` - Certify a clean installed capsule starts and stops the standalone vaultspec-mcp adapter under caller ownership
 - `2026-07-18-desktop-product-profile-W04-P12-summary` - `desktop-product-profile` `W04.P12` summary
 - `2026-07-18-desktop-product-profile-W05-P13-S72` - Build a real-process harness that installs invokes relocates and inspects a published desktop capsule

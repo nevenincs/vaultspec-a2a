@@ -523,8 +523,9 @@ class GraphLifecycleManager:
         ``current_plan=[]`` would trigger the ``_replace_plan`` reducer's
         "clear" sentinel and wipe the supervisor's execution plan).
 
-        SDD blackboard fields are passed through on the
-        first ingest only and only when non-empty.
+        SDD blackboard fields are always materialized on the first ingest. This
+        is the fresh-checkpoint half of the desktop compatibility contract: an
+        ordinary restart validates those keys and never runs a migration.
 
         Args:
             req: The incoming ``DispatchRequest``.
@@ -553,18 +554,11 @@ class GraphLifecycleManager:
                     "artifacts": [],
                     "current_plan": [],
                     "token_usage": {},
+                    "active_feature": req.active_feature,
+                    "feedback_batch_id": req.feedback_batch_id,
+                    "pipeline_phase": req.pipeline_phase,
+                    "vault_index": req.vault_index or {},
+                    "validation_errors": req.validation_errors or [],
                 }
             )
-            # SDD blackboard fields: pass through to TeamState
-            # so vault context reaches the graph on initial thread creation.
-            if req.active_feature:
-                graph_input["active_feature"] = req.active_feature
-            if req.feedback_batch_id:
-                graph_input["feedback_batch_id"] = req.feedback_batch_id
-            if req.pipeline_phase:
-                graph_input["pipeline_phase"] = req.pipeline_phase
-            if req.vault_index:
-                graph_input["vault_index"] = req.vault_index
-            if req.validation_errors:
-                graph_input["validation_errors"] = req.validation_errors
         return graph_input

@@ -248,6 +248,7 @@ DEP004 = [
   "pytest_asyncio",
   "sphinx",
   "tenacity",
+  "tomlkit",
 ]
 
 [tool.ty.environment]

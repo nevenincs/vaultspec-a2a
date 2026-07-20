@@ -6,6 +6,11 @@ v3 is authoritative for tarball URL, SHA-512 SRI, version, target constraints,
 and the dependency graph.  Standard npm lockfiles do not record tarball size or
 SHA-256; those remain bound by the digest-pinned closure inventory and must be
 verified against the real tarball bytes by the artifact verifier.
+
+This module reconciles :mod:`vaultspec_a2a.desktop.closure_inventory`; exact lock
+snapshots and verified package bytes are owned by
+:mod:`vaultspec_a2a.desktop.artifacts` and
+:mod:`vaultspec_a2a.desktop.package_archives`.
 """
 
 from __future__ import annotations

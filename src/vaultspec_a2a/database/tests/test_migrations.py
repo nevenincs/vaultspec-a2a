@@ -9,6 +9,7 @@ Verifies:
 """
 
 import asyncio
+import hashlib
 import json
 import os
 import sqlite3
@@ -258,22 +259,35 @@ class TestAlembicUpgradeDowngrade:
 
         conn = sqlite3.connect(str(db))
         rows = conn.execute(
-            "SELECT id, workspace_root, feature_tag, is_active FROM threads ORDER BY id"
+            "SELECT id, workspace_root, workspace_key, feature_tag, is_active "
+            "FROM threads ORDER BY id"
         ).fetchall()
-        indexes = {
-            row[1] for row in conn.execute("PRAGMA index_list(threads)").fetchall()
-        }
+        index_rows = conn.execute("PRAGMA index_list(threads)").fetchall()
+        indexes = {row[1] for row in index_rows}
+        partial_indexes = {row[1] for row in index_rows if row[4] == 1}
         conn.close()
 
         assert rows == [
-            ("active-run", canonical_workspace, "a2a", 1),
-            ("completed-run", None, None, 0),
+            (
+                "active-run",
+                canonical_workspace,
+                hashlib.sha256(canonical_workspace.encode("utf-8")).hexdigest(),
+                "a2a",
+                1,
+            ),
+            ("completed-run", None, None, None, 0),
         ]
         assert {
             "ix_threads_active_order",
             "ix_threads_active_workspace_order",
             "ix_threads_active_workspace_feature_order",
         } <= indexes
+        assert {
+            "ix_threads_active_order",
+            "ix_threads_active_workspace_order",
+            "ix_threads_active_feature_order",
+            "ix_threads_active_workspace_feature_order",
+        } <= partial_indexes
 
 
 class TestPackageResourceResolution:

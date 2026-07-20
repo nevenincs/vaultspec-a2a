@@ -9,6 +9,11 @@ which was previously inlined in ``api/app.py``.
 ``build_full_health()`` is the async service function that runs all probes
 (database, worker HTTP, checkpoint, circuit breaker) and returns the
 complete readiness payload consumed by ``/api/health``.
+
+``assemble_desktop_readiness()`` is also the single readiness authority used by
+:mod:`vaultspec_a2a.control.admission` through
+:mod:`vaultspec_a2a.api.routes.gateway`; a prepare refuses admission unless its
+worker, provider, and admission facts are execution-ready.
 """
 
 from __future__ import annotations
@@ -311,7 +316,16 @@ def assemble_desktop_readiness(
         worker_state = WorkerLifecycleState.COLD
         reasons.append("worker is cold; starts on first execution demand")
     elif worker_status == "pending":
-        worker_state = WorkerLifecycleState.STARTING
+        # A demand-side caller can complete the worker's real HTTP probe before
+        # the watchdog has advanced its cached lifecycle label.  In that narrow
+        # window the live probe is the stronger fact: refusing admission as
+        # ``starting`` after an exact authenticated 200 would make first demand
+        # fail even though ``ensure_worker`` has already completed successfully.
+        worker_state = (
+            WorkerLifecycleState.READY
+            if worker_probe_ready is True
+            else WorkerLifecycleState.STARTING
+        )
     elif worker_status in {"down", "restarting"}:
         worker_state = WorkerLifecycleState.UNAVAILABLE
         reasons.append(f"worker is {worker_status}")

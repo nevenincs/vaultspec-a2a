@@ -21,7 +21,7 @@ from sqlalchemy.ext.asyncio import (
 
 from ...control.run_discovery_service import discover_active_runs
 from ..models import Base, ThreadModel
-from ..thread_repository import _active_thread_page_statement
+from ..thread_repository import _active_thread_page_statement, _workspace_key
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator
@@ -74,6 +74,9 @@ async def test_active_discovery_stays_indexed_and_bounded_at_large_history(
                     "status": "running",
                     "is_active": True,
                     "workspace_root": workspace if matching else foreign_workspace,
+                    "workspace_key": _workspace_key(
+                        workspace if matching else foreign_workspace
+                    ),
                     "feature_tag": "a2a" if matching else "other",
                 }
             )

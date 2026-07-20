@@ -71,6 +71,7 @@ from ..telemetry.aggregator_hook import OTelAggregatorHook
 from ..utils import configure_logging, package_version, reconfigure_console_utf8
 from ..utils.asyncio_compat import configure_asyncio_runtime
 from ._utils import trace_headers
+from .body_limit import BoundedV1WriteBodyMiddleware
 from .internal import internal_router
 from .routes import register_routes
 from .schemas.gateway import LivenessResponse
@@ -638,6 +639,7 @@ def create_app(
         allow_headers=["*"],
     )
 
+    app.add_middleware(cast("Any", BoundedV1WriteBodyMiddleware))
     app.add_middleware(cast("Any", TelemetryMiddleware))
 
     register_routes(app)

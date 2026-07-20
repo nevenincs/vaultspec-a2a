@@ -1,15 +1,22 @@
 """The versioned gateway surface.
 
-Mounts ``run-start``, ``run-status``, ``run-cancel``, ``presets-list``, and
-``service-state`` under ``/v1`` as the engine-facing edge, plus bounded active
-run discovery and ``run-stream``
-(GET ``/runs/{run_id}/stream``) - the droppable SSE progress companion to the
-authoritative ``run-status`` snapshot. Each verb reshapes an existing service
+Mounts the run, preset, and service verbs under ``/v1`` as the engine-facing
+edge, including bounded discovery and the droppable ``run-stream`` companion to
+the authoritative status snapshot. Each verb reshapes an existing service
 rather than reinventing it, so there is a single code path: the richer internal
 ``/api`` surface and these verbs call the same services beneath.
+
+Run start composes :mod:`vaultspec_a2a.control.admission` and
+:mod:`vaultspec_a2a.control.health` into ``start``, readiness-gated ``prepare``,
+exact ``commit``, and uncommitted-reservation ``release`` stages. A committed
+run persists its non-secret lease identifier and exact replay digest. Dispatch
+exactly once under that replay contract is not end-to-end exactly-once delivery,
+and a lease identifier is never a bearer credential.
 """
 
 import asyncio
+import hmac
+import json
 import logging
 import os
 from dataclasses import dataclass
@@ -67,6 +74,7 @@ from ..dependencies import (
     get_worker_spawner,
     require_attach,
 )
+from ..run_admission import commit_singleflight, request_digest
 from ..schemas.gateway import (
     ActiveRunRecord,
     ActiveRunsResponse,
@@ -79,6 +87,7 @@ from ..schemas.gateway import (
     RunCancelResponse,
     RunCommitResponse,
     RunPrepareResponse,
+    RunReleaseResponse,
     RunStage,
     RunStartRequest,
     RunStartResponse,
@@ -137,7 +146,9 @@ def admission_broker(app: FastAPI) -> AdmissionBroker:
     return broker
 
 
-def _admission_readiness(app_state: Any) -> AdmissionReadiness:
+def _admission_readiness(
+    app_state: Any, *, worker_probe_ready: bool | None = None
+) -> AdmissionReadiness:
     """Project the seated desktop readiness facts into an admission-readiness view.
 
     Reads the single readiness authority (``assemble_desktop_readiness``) over the
@@ -145,7 +156,9 @@ def _admission_readiness(app_state: Any) -> AdmissionReadiness:
     prepare reports the same worker, provider, and admission facts the readiness
     model and service-state verb serve, never a second computation.
     """
-    readiness = assemble_desktop_readiness(app_state=app_state)
+    readiness = assemble_desktop_readiness(
+        app_state=app_state, worker_probe_ready=worker_probe_ready
+    )
     return AdmissionReadiness(
         worker_state=readiness.worker_state,
         provider_eligibility=readiness.provider_eligibility,
@@ -155,6 +168,15 @@ def _admission_readiness(app_state: Any) -> AdmissionReadiness:
     )
 
 
+async def _probe_admission_readiness(
+    app_state: Any, worker_client: httpx.AsyncClient
+) -> AdmissionReadiness:
+    from ...control.worker_management import _check_worker_health
+
+    reachable = await _check_worker_health(settings.worker_url, client=worker_client)
+    return _admission_readiness(app_state, worker_probe_ready=reachable)
+
+
 # ---------------------------------------------------------------------------
 # run-start
 # ---------------------------------------------------------------------------
@@ -162,7 +184,9 @@ def _admission_readiness(app_state: Any) -> AdmissionReadiness:
 
 @router.post(
     "/runs",
-    response_model=RunStartResponse | RunPrepareResponse | RunCommitResponse,
+    response_model=(
+        RunStartResponse | RunPrepareResponse | RunCommitResponse | RunReleaseResponse
+    ),
     status_code=201,
 )
 async def run_start_endpoint(
@@ -173,24 +197,24 @@ async def run_start_endpoint(
     ] = Depends(get_services),
     circuit_breaker: Any = Depends(get_circuit_breaker),
     worker_spawner: Any = Depends(get_worker_spawner),
-) -> RunStartResponse | RunPrepareResponse | RunCommitResponse:
-    """Start, prepare, or commit a run through the single run-start verb.
+) -> RunStartResponse | RunPrepareResponse | RunCommitResponse | RunReleaseResponse:
+    """Start, prepare, commit, or release through the single run-start verb.
 
-    The ``stage`` selector splits one verb into three shapes without growing the
-    verb set: ``prepare`` reserves a bounded admission slot and starts the
-    gateway-owned worker on demand, creating no durable run and accepting no
-    token; ``commit`` binds the actor tokens to a stable run under a prepared
-    reservation; and ``start`` (the default) is the one-shot engine/Compose path,
-    unchanged. Every stage refuses before creating durable state rather than
-    drafting a non-running run.
+    The ``stage`` selector splits one verb into four shapes without growing the
+    verb set: ``prepare`` reserves bounded capacity without tokens or a durable
+    run; ``commit`` binds the exact actor-token role set to that reservation;
+    ``release`` frees only an uncommitted reservation; and ``start`` (the
+    default) preserves the one-shot engine/Compose path.
     """
     db, _aggregator, _checkpointer, worker_client = services
     if body.stage == RunStage.PREPARE:
-        return await _run_prepare(request, body, worker_spawner)
+        return await _run_prepare(request, body, worker_spawner, worker_client)
     if body.stage == RunStage.COMMIT:
         return await _run_commit(
             request, body, db, circuit_breaker, worker_spawner, worker_client
         )
+    if body.stage == RunStage.RELEASE:
+        return await _run_release(request, body)
     return await _run_direct_start(
         request, body, db, circuit_breaker, worker_spawner, worker_client
     )
@@ -208,6 +232,13 @@ class _RunDispatchResult:
     replayed: bool
 
 
+@dataclass(frozen=True, slots=True)
+class _RunLeaseBinding:
+    lease_id: str
+    reservation_id: str
+    commit_digest: str
+
+
 async def _create_run_core(
     request: Request,
     body: RunStartRequest,
@@ -216,17 +247,17 @@ async def _create_run_core(
     worker_spawner: Any,
     worker_client: httpx.AsyncClient,
     *,
-    lease_id: str | None,
+    commit_binding: _RunLeaseBinding | None,
 ) -> _RunDispatchResult:
     """Create and dispatch one durable run - the shared start/commit core.
 
     Refuses before any durable state is created: an unloadable preset, a
     document-authoring preset with no target feature, or an actor-token bundle
     that does not cover the preset's roles all raise a 4xx. A client-supplied
-    ``run_id`` makes creation dispatch-exactly-once under retry. When *lease_id*
-    is supplied (the commit path) it is persisted into the run's metadata so a
-    terminal settlement - and reconciliation after a restart - can recover the
-    run's non-secret lease identity durably.
+    ``run_id`` makes creation dispatch-exactly-once under retry. When
+    *commit_binding* is supplied, the commit path persists it into the run's
+    metadata so terminal settlement and restart reconciliation can recover the
+    run's non-secret lease and replay identity durably.
     """
     # Client idempotency: a retry with the same stable run id returns the
     # existing run rather than starting a second one (dispatch-exactly-once).
@@ -298,8 +329,8 @@ async def _create_run_core(
     metadata_json = _persist_frozen(metadata_json, frozen)
     # Bind the committed reservation's non-secret lease identity to the run,
     # durably, so terminal settlement and post-restart reconciliation recover it.
-    if lease_id is not None:
-        metadata_json = _persist_lease(metadata_json, lease_id)
+    if commit_binding is not None:
+        metadata_json = _persist_lease(metadata_json, commit_binding)
 
     # Admission gate: a draining gateway refuses a new run before any durable
     # state is created, so drain closes admission ahead of bounded cancellation.
@@ -405,7 +436,7 @@ async def _run_direct_start(
         circuit_breaker,
         worker_spawner,
         worker_client,
-        lease_id=None,
+        commit_binding=None,
     )
     return RunStartResponse(
         run_id=result.thread_id,
@@ -423,6 +454,7 @@ async def _run_prepare(
     request: Request,
     body: RunStartRequest,
     worker_spawner: Any,
+    worker_client: httpx.AsyncClient,
 ) -> RunPrepareResponse:
     """Reserve a bounded admission slot and report execution readiness.
 
@@ -439,13 +471,21 @@ async def _run_prepare(
     outcome = await broker.prepare(
         required_roles=required_role_ids(team_config),
         ensure_worker=worker_spawner.ensure_worker,
-        probe_readiness=lambda: _admission_readiness(request.app.state),
+        probe_readiness=lambda: _probe_admission_readiness(
+            request.app.state, worker_client
+        ),
+        binding_digest=request_digest(body, prepared=True),
     )
-    if not outcome.admitted or outcome.reservation_id is None:
+    if (
+        not outcome.admitted
+        or outcome.reservation_id is None
+        or outcome.lease_id is None
+    ):
         raise HTTPException(status_code=503, detail=outcome.reason)
     readiness = outcome.readiness
     return RunPrepareResponse(
         reservation_id=outcome.reservation_id,
+        lease_id=outcome.lease_id,
         required_roles=list(outcome.required_roles),
         expires_at=outcome.expires_at or "",
         worker_state=readiness.worker_state,
@@ -465,16 +505,94 @@ async def _run_commit(
 ) -> RunCommitResponse:
     """Bind actor tokens to a stable run under a prepared reservation.
 
-    Consumes the reservation first - refusing an unknown, expired, released, or
-    already-committed one with a 409 before any run is created - then runs the
-    shared creation core, which evaluates eligibility and accepts the tokens only
-    as it creates the durable run. The reservation's non-secret lease identity is
-    returned and persisted with the run for terminal settlement.
+    Re-evaluates execution eligibility and handles an exact durable replay before
+    moving the reservation into its recoverable ``committing`` state. A new
+    commit must match the prepared request and role set before the shared creation
+    core receives its tokens. The reservation is consumed only after the exact
+    run binding is durable; a proven pre-durability failure restores it. The
+    non-secret lease identity is returned and persisted for terminal settlement.
     """
     if body.reservation_id is None:  # pragma: no cover - guarded by the schema
         raise HTTPException(status_code=422, detail="commit requires a reservation id")
+    run_id = body.run_id
+    if run_id is None:  # pragma: no cover - guarded by the schema
+        raise HTTPException(status_code=422, detail="commit requires a stable run id")
+    async with commit_singleflight(request.app).hold(run_id):
+        return await _run_commit_locked(
+            request,
+            body,
+            db,
+            circuit_breaker,
+            worker_spawner,
+            worker_client,
+        )
+
+
+async def _run_commit_locked(
+    request: Request,
+    body: RunStartRequest,
+    db: AsyncSession,
+    circuit_breaker: Any,
+    worker_spawner: Any,
+    worker_client: httpx.AsyncClient,
+) -> RunCommitResponse:
+    """Linearized commit implementation; caller holds its per-run stripe."""
+    reservation_id = body.reservation_id
+    if reservation_id is None:  # pragma: no cover - guarded by the schema
+        raise HTTPException(status_code=422, detail="commit requires a reservation id")
+    run_id = body.run_id
+    if run_id is None:  # pragma: no cover - guarded by the schema
+        raise HTTPException(status_code=422, detail="commit requires a stable run id")
+    commit_digest = request_digest(body, prepared=False)
     broker = admission_broker(request.app)
 
+    # A commit acknowledgement can be lost after the durable run is created.
+    # Recover that exact replay before consulting the now-consumed reservation,
+    # returning the persisted non-secret gateway lease identity.
+    existing = await get_thread(db, run_id)
+    if existing is not None:
+        existing_frozen = _read_persisted_frozen(existing.thread_metadata)
+        if existing_frozen is None:
+            raise HTTPException(
+                status_code=409,
+                detail="existing run has no committed model profile binding",
+            )
+        existing_profile = existing_frozen.profile_id
+        if existing_profile != body.profile_id:
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    f"Run {existing.id!r} was already started with profile "
+                    f"{existing_profile!r}; cannot re-start with "
+                    f"{body.profile_id!r}"
+                ),
+            )
+        binding = _persisted_lease_binding(existing.thread_metadata)
+        if binding is None:
+            raise HTTPException(
+                status_code=409,
+                detail="existing run was not committed under a prepared lease",
+            )
+        if binding.reservation_id != reservation_id or not hmac.compare_digest(
+            binding.commit_digest, commit_digest
+        ):
+            raise HTTPException(
+                status_code=409,
+                detail="commit replay does not exactly match the accepted request",
+            )
+        # Repair any in-memory ACTIVE/COMMITTING reservation left by a failure
+        # after the exact durable row was written but before the response path
+        # completed. A process restart simply has no in-memory row, so false is
+        # benign here.
+        await broker.complete_commit(reservation_id, binding.lease_id)
+        return RunCommitResponse(
+            run_id=existing.id,
+            status=existing.status,
+            lease_id=binding.lease_id,
+            nickname=existing.nickname,
+            profile_id=existing_profile,
+            assignments=_frozen_disclosure(existing_frozen),
+        )
     # Evaluate worker and provider eligibility BEFORE consuming the reservation,
     # accepting the actor tokens, or creating a run (ADR: mint run credentials only
     # after the runtime and provider are eligible). The worker reachability is
@@ -491,21 +609,88 @@ async def _run_commit(
         provider_eligibility=readiness.provider_eligibility,
     )
     if not execution.eligible:
-        await broker.release(body.reservation_id)
+        await broker.release(
+            reservation_id,
+            binding_digest=request_digest(body, prepared=True),
+        )
         raise HTTPException(status_code=503, detail=execution.reason)
 
-    outcome = await broker.commit(body.reservation_id)
+    presented_roles = (
+        set(body.actor_tokens.tokens) if body.actor_tokens is not None else set()
+    )
+    outcome = await broker.commit(
+        reservation_id,
+        binding_digest=request_digest(body, prepared=True),
+        presented_roles=presented_roles,
+    )
     if not outcome.committed or outcome.lease_id is None:
         raise HTTPException(status_code=409, detail=outcome.reason)
-    result = await _create_run_core(
-        request,
-        body,
-        db,
-        circuit_breaker,
-        worker_spawner,
-        worker_client,
+    binding = _RunLeaseBinding(
         lease_id=outcome.lease_id,
+        reservation_id=reservation_id,
+        commit_digest=commit_digest,
     )
+    try:
+        result = await _create_run_core(
+            request,
+            body,
+            db,
+            circuit_breaker,
+            worker_spawner,
+            worker_client,
+            commit_binding=binding,
+        )
+    except BaseException:
+        # Dispatch can fail after `_create_run_core` has committed the exact run
+        # row. Never reopen that reservation: a replay will recover the durable
+        # binding. Roll back the request session first because a pre-durability
+        # conflict can leave SQLAlchemy's transaction unusable for the
+        # authoritative read. Abort only when the run is authoritatively absent;
+        # on a rollback/read error or conflicting durable row, retain COMMITTING
+        # rather than create duplicate admission authority.
+        try:
+            await db.rollback()
+            persisted = await get_thread(db, run_id)
+        except Exception:
+            logger.exception(
+                "Could not classify failed commit durability for run %s reservation %s",
+                run_id,
+                reservation_id,
+            )
+        else:
+            persisted_binding = (
+                _persisted_lease_binding(persisted.thread_metadata)
+                if persisted is not None
+                else None
+            )
+            if (
+                persisted_binding is not None
+                and persisted_binding.lease_id == outcome.lease_id
+                and persisted_binding.reservation_id == reservation_id
+                and hmac.compare_digest(persisted_binding.commit_digest, commit_digest)
+            ):
+                await broker.complete_commit(reservation_id, outcome.lease_id)
+            elif persisted is None:
+                if not await broker.abort_commit(reservation_id, outcome.lease_id):
+                    logger.error(
+                        "Could not restore failed commit reservation %s for run %s",
+                        reservation_id,
+                        run_id,
+                    )
+            else:
+                logger.error(
+                    "Failed commit for run %s found a conflicting durable binding; "
+                    "reservation %s remains committing until expiry",
+                    run_id,
+                    reservation_id,
+                )
+        raise
+    if not await broker.complete_commit(reservation_id, outcome.lease_id):
+        logger.error(
+            "Durable run %s lost its in-memory committing reservation %s",
+            result.thread_id,
+            reservation_id,
+        )
     return RunCommitResponse(
         run_id=result.thread_id,
         status=result.status,
@@ -516,6 +701,22 @@ async def _run_commit(
         if result.frozen is not None
         else [],
     )
+
+
+async def _run_release(request: Request, body: RunStartRequest) -> RunReleaseResponse:
+    """Explicitly free a prepared slot after a dashboard-side failure."""
+    reservation_id = body.reservation_id
+    if reservation_id is None:  # pragma: no cover - guarded by the schema
+        raise HTTPException(status_code=422, detail="release requires a reservation id")
+    run_id = body.run_id
+    if run_id is None:  # pragma: no cover - guarded by the schema
+        raise HTTPException(status_code=422, detail="release requires a stable run id")
+    async with commit_singleflight(request.app).hold(run_id):
+        released = await admission_broker(request.app).release(
+            reservation_id,
+            binding_digest=request_digest(body, prepared=True),
+        )
+    return RunReleaseResponse(reservation_id=reservation_id, released=released)
 
 
 def _prepare_workspace_root(body: RunStartRequest) -> Path | None:
@@ -540,10 +741,8 @@ def _prepare_workspace_root(body: RunStartRequest) -> Path | None:
 _RUN_LEASE_METADATA_KEY = "run_lease"
 
 
-def _persist_lease(metadata_json: str | None, lease_id: str) -> str:
-    """Embed the run's non-secret lease identity into the thread metadata JSON."""
-    import json
-
+def _persist_lease(metadata_json: str | None, binding: _RunLeaseBinding) -> str:
+    """Embed the non-secret lease and exact replay binding into run metadata."""
     data: dict[str, Any] = {}
     if metadata_json:
         try:
@@ -552,8 +751,66 @@ def _persist_lease(metadata_json: str | None, lease_id: str) -> str:
             loaded = {}
         if isinstance(loaded, dict):
             data = loaded
-    data[_RUN_LEASE_METADATA_KEY] = {"lease_id": lease_id}
+    data[_RUN_LEASE_METADATA_KEY] = {
+        "lease_id": binding.lease_id,
+        "reservation_id": binding.reservation_id,
+        "commit_digest": binding.commit_digest,
+    }
     return json.dumps(data)
+
+
+def _persisted_lease_id(metadata_json: str | None) -> str | None:
+    """Read current or legacy non-secret lease metadata from a durable run."""
+    binding = _persisted_lease_binding(metadata_json)
+    if binding is not None:
+        return binding.lease_id
+    if not metadata_json:
+        return None
+    try:
+        data = json.loads(metadata_json)
+    except (TypeError, json.JSONDecodeError):
+        return None
+    lease = data.get(_RUN_LEASE_METADATA_KEY) if isinstance(data, dict) else None
+    lease_id = lease.get("lease_id") if isinstance(lease, dict) else None
+    if (
+        not isinstance(lease_id, str)
+        or not 1 <= len(lease_id) <= 128
+        or not lease_id[0].isalnum()
+        or not all(
+            character.isascii() and (character.isalnum() or character in {"_", "-"})
+            for character in lease_id
+        )
+    ):
+        return None
+    return lease_id
+
+
+def _persisted_lease_binding(metadata_json: str | None) -> _RunLeaseBinding | None:
+    """Read the exact staged-commit replay binding from durable metadata."""
+    if not metadata_json:
+        return None
+    try:
+        data = json.loads(metadata_json)
+    except (TypeError, json.JSONDecodeError):
+        return None
+    if not isinstance(data, dict):
+        return None
+    lease = data.get(_RUN_LEASE_METADATA_KEY)
+    if not isinstance(lease, dict):
+        return None
+    lease_id = lease.get("lease_id")
+    reservation_id = lease.get("reservation_id")
+    commit_digest = lease.get("commit_digest")
+    if not all(
+        isinstance(value, str) and value
+        for value in (lease_id, reservation_id, commit_digest)
+    ):
+        return None
+    return _RunLeaseBinding(
+        lease_id=lease_id,
+        reservation_id=reservation_id,
+        commit_digest=commit_digest,
+    )
 
 
 def _load_preset_or_refuse(team_preset: str, ws_root: Path | None) -> Any:
@@ -846,6 +1103,19 @@ async def run_status_endpoint(
         degraded_reasons=snapshot.degraded_reasons,
         profile_id=frozen.profile_id if frozen is not None else None,
         assignments=_frozen_disclosure(frozen) if frozen is not None else [],
+        lease_id=_persisted_lease_id(
+            thread.thread_metadata if thread is not None else None
+        ),
+        reservation_id=(
+            binding.reservation_id
+            if (
+                binding := _persisted_lease_binding(
+                    thread.thread_metadata if thread is not None else None
+                )
+            )
+            is not None
+            else None
+        ),
     )
 
 

@@ -5,6 +5,13 @@ content-addressed input directory. This module never performs acquisition,
 follows no release aliases, and has no online fallback. A descriptor binds the
 bytes a caller selected; it does not independently qualify an upstream origin,
 license conclusion, or redistribution authorization.
+
+The session joins :mod:`vaultspec_a2a.desktop.closure_inventory`,
+:mod:`vaultspec_a2a.desktop.installed_inventory`, and
+:mod:`vaultspec_a2a.desktop.lock_reconciliation`; package bytes are verified by
+:mod:`vaultspec_a2a.desktop.package_archives` and retained through
+:mod:`vaultspec_a2a.desktop._archive_authority` before
+:mod:`vaultspec_a2a.desktop.manifest` consumes bound evidence.
 """
 
 from __future__ import annotations

@@ -3,6 +3,11 @@
 Whole-archive digests select the bytes. This module additionally proves that
 those bytes are an unambiguous wheel or npm package and derives immutable
 digest evidence for every declared license member.
+
+Descriptors come from :mod:`vaultspec_a2a.desktop.closure_inventory`; bounded
+member scanning and exact snapshots belong to
+:mod:`vaultspec_a2a.desktop._archive_authority`. The resulting path-free evidence
+is retained by :mod:`vaultspec_a2a.desktop.artifacts`.
 """
 
 from __future__ import annotations

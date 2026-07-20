@@ -230,6 +230,15 @@ def create_worker_app(lifespan: Any | None = None) -> FastAPI:
         # Fire-and-forget: the task group keeps the task alive even after
         # this endpoint handler returns.
         tg.start_soon(executor.handle_dispatch, req)
+        logger.info(
+            "Worker dispatch accepted",
+            extra={
+                "action": "dispatch_accepted",
+                "dispatch_id": req.dispatch_id,
+                "dispatch_action": req.action,
+                "thread_id": req.thread_id,
+            },
+        )
 
         return DispatchResponse(
             status="dispatched",

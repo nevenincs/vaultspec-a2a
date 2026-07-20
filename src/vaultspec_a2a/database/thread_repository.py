@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 from dataclasses import dataclass
@@ -106,6 +107,13 @@ def _discovery_selectors(metadata: str | None) -> tuple[str | None, str | None]:
     return workspace, feature
 
 
+def _workspace_key(workspace_root: str | None) -> str | None:
+    """Return an index-safe identity for an already-canonical workspace path."""
+    if workspace_root is None:
+        return None
+    return hashlib.sha256(workspace_root.encode("utf-8")).hexdigest()
+
+
 async def create_thread(
     session: AsyncSession,
     *,
@@ -143,6 +151,7 @@ async def create_thread(
         execution_readiness=execution_readiness,
         thread_metadata=metadata,
         workspace_root=workspace_root,
+        workspace_key=_workspace_key(workspace_root),
         feature_tag=feature_tag,
         nickname=nickname,
         team_preset=team_preset,
@@ -274,7 +283,7 @@ def _active_thread_page_statement(
         .limit(limit)
     )
     if workspace_root is not None:
-        stmt = stmt.where(ThreadModel.workspace_root == workspace_root)
+        stmt = stmt.where(ThreadModel.workspace_key == _workspace_key(workspace_root))
     if feature_tag is not None:
         stmt = stmt.where(ThreadModel.feature_tag == feature_tag)
     if after_created_at is not None and after_id is not None:
@@ -498,6 +507,7 @@ async def update_thread_metadata(
     workspace_root, feature_tag = _discovery_selectors(metadata)
     thread.thread_metadata = metadata
     thread.workspace_root = workspace_root
+    thread.workspace_key = _workspace_key(workspace_root)
     thread.feature_tag = feature_tag
     thread.updated_at = _utcnow()
     await session.flush()

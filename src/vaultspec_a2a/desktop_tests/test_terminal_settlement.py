@@ -220,11 +220,17 @@ def _await_health(base: str, *, timeout: float = 40.0) -> None:
 
 def _prepare_and_commit(base: str, auth: str) -> dict[str, Any]:
     """Prepare then commit one mock run; return the commit response body."""
+    run_id = "run-terminal-settlement"
     with httpx.Client(base_url=base, timeout=60.0) as client:
         prep = client.post(
             "/v1/runs",
             headers={"Authorization": auth},
-            json={"team_preset": _PRESET, "stage": "prepare"},
+            json={
+                "team_preset": _PRESET,
+                "stage": "prepare",
+                "run_id": run_id,
+                "autonomous": True,
+            },
         )
         assert prep.status_code == 201, prep.text
         reservation_id = prep.json()["reservation_id"]
@@ -235,6 +241,7 @@ def _prepare_and_commit(base: str, auth: str) -> dict[str, Any]:
                 "team_preset": _PRESET,
                 "stage": "commit",
                 "reservation_id": reservation_id,
+                "run_id": run_id,
                 "message": "build it",
                 "autonomous": True,
                 "actor_tokens": {

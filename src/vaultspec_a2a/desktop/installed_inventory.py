@@ -3,6 +3,10 @@
 The source package inventories bind downloaded artifacts.  This module binds
 the different, expanded result that capsule assembly is allowed to install.
 It performs no extraction and grants no authority to acquire package bytes.
+
+Each inventory joins one source inventory from
+:mod:`vaultspec_a2a.desktop.closure_inventory`; the complete relationship is
+validated and retained by :mod:`vaultspec_a2a.desktop.artifacts`.
 """
 
 from __future__ import annotations

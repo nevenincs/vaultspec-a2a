@@ -63,6 +63,11 @@ def _decode_checkpoint(type_name: object, payload: object) -> dict[str, object]:
 
 def _needs_sdd_backfill(checkpoint: dict[str, object]) -> bool:
     channel_values = cast("dict[str, object]", checkpoint["channel_values"])
+    # LangGraph persists one input-staging checkpoint whose sole channel is
+    # ``__start__`` before TeamState exists. It is not a legacy TeamState row and
+    # cannot carry top-level SDD channels; later execution checkpoints do.
+    if set(channel_values) == {"__start__"}:
+        return False
     return any(key not in channel_values for key in _SDD_DEFAULTS)
 
 

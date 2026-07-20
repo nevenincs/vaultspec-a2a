@@ -52,7 +52,7 @@ services:
           'CMD',
           'python',
           '-c',
-          "import urllib.request; urllib.request.urlopen('http://localhost:18001/health')",
+          "import os, urllib.request; tok = os.environ.get('VAULTSPEC_INTERNAL_TOKEN'); req = urllib.request.Request('http://localhost:18001/health', headers={'Authorization': 'Bearer ' + tok} if tok else {}); urllib.request.urlopen(req)",
         ]
       interval: 10s
       timeout: 5s

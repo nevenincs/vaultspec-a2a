@@ -273,7 +273,7 @@ Certify Compose gateway-worker separation, PostgreSQL, Jaeger, and the mandatory
 - [x] `W05.P14.S81` - Authenticate the Compose worker healthcheck without changing its independently managed worker topology; `service/docker-compose.prod.yml`.
 - [x] `W05.P14.S82` - Authenticate the development Compose worker healthcheck without adopting it into desktop lifecycle; `service/docker-compose.dev.yml`.
 - [x] `W05.P14.S83` - Authenticate the integration Compose worker healthcheck while retaining VidaiMock and Jaeger certification; `service/docker-compose.integration.yml`.
-- [ ] `W05.P14.S84` - Prove Compose gateway-worker separation PostgreSQL overlay Jaeger and operator lifecycle remain production-capable; `src/vaultspec_a2a/service_tests/test_compose_profile_regression.py`.
+- [x] `W05.P14.S84` - Prove Compose gateway-worker separation PostgreSQL overlay Jaeger and operator lifecycle remain production-capable; `src/vaultspec_a2a/service_tests/test_compose_profile_regression.py`.
 - [ ] `W05.P14.S85` - Run desktop target and Compose certification as required release checks without expected-failure shortcuts; `.github/workflows/test.yml`.
 - [ ] `W05.P14.S86` - Perform the mandatory architecture security resource-bound and real-behavior code review; `.vault/audit/2026-07-18-desktop-product-profile-review-audit.md`.
 - [ ] `W05.P14.S87` - Report 2026-07-14-adr-authoring-orchestration-plan ownership of vaultspec-adr-research-mock.toml AUTO MIXED HUMAN reruns checkpoint_permission_without_durable_row and execution_state_projection_missing separately from provider gates; `.vault/audit/2026-07-18-desktop-product-profile-certification-audit.md`.

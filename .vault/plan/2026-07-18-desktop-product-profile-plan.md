@@ -270,7 +270,7 @@ Run real-behavior capsule, security, state, process, and default-provider scenar
 
 Certify Compose gateway-worker separation, PostgreSQL, Jaeger, and the mandatory implementation review while reporting upstream provider gates honestly.
 
-- [ ] `W05.P14.S81` - Authenticate the Compose worker healthcheck without changing its independently managed worker topology; `service/docker-compose.prod.yml`.
+- [x] `W05.P14.S81` - Authenticate the Compose worker healthcheck without changing its independently managed worker topology; `service/docker-compose.prod.yml`.
 - [ ] `W05.P14.S82` - Authenticate the development Compose worker healthcheck without adopting it into desktop lifecycle; `service/docker-compose.dev.yml`.
 - [ ] `W05.P14.S83` - Authenticate the integration Compose worker healthcheck while retaining VidaiMock and Jaeger certification; `service/docker-compose.integration.yml`.
 - [ ] `W05.P14.S84` - Prove Compose gateway-worker separation PostgreSQL overlay Jaeger and operator lifecycle remain production-capable; `src/vaultspec_a2a/service_tests/test_compose_profile_regression.py`.

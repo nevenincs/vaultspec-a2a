@@ -170,6 +170,76 @@ def test_closure_license_presence_requires_every_package() -> None:
         inventory, package_names={"click"}
     )
 
+    # The predicate feeds the fail-closed coverage bound: an uncovered package
+    # raises, a fully covered set does not.
+    with pytest.raises(CapsuleAssemblyPlanError, match="Python closure omits"):
+        capsule_assembly._assert_closure_license_coverage(
+            inventory,
+            package_names={"click", "rich"},
+            closure_label="Python",
+        )
+    capsule_assembly._assert_closure_license_coverage(
+        inventory,
+        package_names={"click"},
+        closure_label="Python",
+    )
+
+
+def test_source_license_bound_rejects_an_asset_without_license_bytes() -> None:
+    with pytest.raises(
+        CapsuleAssemblyPlanError, match="node-runtime source omits its license bytes"
+    ):
+        capsule_assembly._assert_declared_source_licenses(
+            (
+                ("python-runtime", ("python/LICENSE",)),
+                ("node-runtime", ()),  # a source that declares no license member
+            )
+        )
+    capsule_assembly._assert_declared_source_licenses(
+        (
+            ("python-runtime", ("python/LICENSE",)),
+            ("node-runtime", ("node/LICENSE",)),
+        )
+    )
+
+
+def test_aggregate_size_bound_rejects_an_over_bound_capsule() -> None:
+    # Each reservation stays within the per-file bound; their sum exceeds the
+    # aggregate bound, so the fail-closed aggregate check must raise.
+    oversized = tuple(
+        ReservedTreeFile(
+            path=f"runtime/python/blob-{index}.bin",
+            role=PlanReservationRole.PYTHON_CLOSURE_FILE,
+            mode=0o644,
+            size=_MAX_FILE_BYTES,
+        )
+        for index in range(5)
+    )
+    assert (
+        sum(file.size for file in oversized)
+        > capsule_assembly._MAX_KNOWN_AGGREGATE_BYTES
+    )
+    with pytest.raises(
+        CapsuleAssemblyPlanError, match="aggregate known-file size bound"
+    ):
+        capsule_assembly._enforce_aggregate_size(oversized)
+
+    within_bound = (
+        ReservedTreeFile(
+            path="runtime/python/small.bin",
+            role=PlanReservationRole.PYTHON_CLOSURE_FILE,
+            mode=0o644,
+            size=1024,
+        ),
+        ReservedTreeFile(
+            path="Scripts/vaultspec-a2a.exe",
+            role=PlanReservationRole.GATEWAY_LAUNCHER,
+            mode=0o755,
+            size=None,
+        ),
+    )
+    assert capsule_assembly._enforce_aggregate_size(within_bound) == 1024
+
 
 def test_derive_plan_reserves_every_destination_from_a_real_session(
     tmp_path: Path,

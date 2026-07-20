@@ -258,6 +258,16 @@ def _enforce_whole_capsule_collision(paths: Iterable[str]) -> None:
                 )
 
 
+def _enforce_aggregate_size(ordered_files: Iterable[ReservedTreeFile]) -> int:
+    """Sum every sized reservation and reject an over-bound capsule aggregate."""
+    known_aggregate = sum(file.size for file in ordered_files if file.size is not None)
+    if known_aggregate > _MAX_KNOWN_AGGREGATE_BYTES:
+        raise CapsuleAssemblyPlanError(
+            "capsule plan exceeds its aggregate known-file size bound"
+        )
+    return known_aggregate
+
+
 def _closure_files(
     inventory: InstalledClosureInventory,
     *,
@@ -315,31 +325,47 @@ def _missing_license_packages(
     return {name for name in package_names if name not in licensed}
 
 
+def _assert_closure_license_coverage(
+    inventory: InstalledClosureInventory,
+    *,
+    package_names: Iterable[str],
+    closure_label: str,
+) -> None:
+    """Require every declared closure package to bind an installed license."""
+    if _missing_license_packages(inventory, package_names=package_names):
+        raise CapsuleAssemblyPlanError(
+            f"{closure_label} closure omits a per-package license reservation"
+        )
+
+
+def _assert_declared_source_licenses(
+    entries: Iterable[tuple[str, tuple[str, ...]]],
+) -> None:
+    """Require every base-closure source to declare at least one license member."""
+    for label, license_members in entries:
+        if not license_members:
+            raise CapsuleAssemblyPlanError(f"{label} source omits its license bytes")
+
+
 def _assert_license_presence(
     session: VerifiedCapsuleInputSession,
 ) -> None:
     """Require every closure package and base-closure source to bind licenses."""
-    if _missing_license_packages(
+    _assert_closure_license_coverage(
         session.python_installed,
         package_names={package.name for package in session.python_inventory.packages},
-    ):
-        raise CapsuleAssemblyPlanError(
-            "Python closure omits a per-package license reservation"
-        )
-    if _missing_license_packages(
+        closure_label="Python",
+    )
+    _assert_closure_license_coverage(
         session.acp_installed,
         package_names={
             package.install_path for package in session.acp_inventory.packages
         },
-    ):
-        raise CapsuleAssemblyPlanError(
-            "ACP closure omits a per-package license reservation"
-        )
-    for source in session.sources:
-        if not source.license_members:
-            raise CapsuleAssemblyPlanError(
-                f"{source.kind.value} source omits its license bytes"
-            )
+        closure_label="ACP",
+    )
+    _assert_declared_source_licenses(
+        (source.kind.value, source.license_members) for source in session.sources
+    )
 
 
 def _runtime_subtrees(
@@ -467,11 +493,7 @@ def derive_capsule_assembly_plan(
         )
     )
 
-    known_aggregate = sum(file.size for file in ordered_files if file.size is not None)
-    if known_aggregate > _MAX_KNOWN_AGGREGATE_BYTES:
-        raise CapsuleAssemblyPlanError(
-            "capsule plan exceeds its aggregate known-file size bound"
-        )
+    known_aggregate = _enforce_aggregate_size(ordered_files)
 
     return CapsuleAssemblyPlan(
         target=descriptor.target,

@@ -85,9 +85,14 @@ related:
   planner adds only path derivation and bound enforcement and duplicates none of
   the byte-level machinery.
 - `ruff check`, `ruff format`, and `ty check` pass on the touched files.
-- `pytest src/vaultspec_a2a/desktop/tests/test_capsule_assembly.py` passes (15
+- `pytest src/vaultspec_a2a/desktop/tests/test_capsule_assembly.py` passes (17
   passed); the full `pytest src/vaultspec_a2a/desktop -m "not service"` suite
-  stays green (382 passed, 1 pre-existing platform skip).
+  stays green (384 passed, 1 pre-existing platform skip).
+- Review follow-up: extracted `_enforce_aggregate_size` and split the
+  license-presence check into `_assert_closure_license_coverage` and
+  `_assert_declared_source_licenses` so each fail-closed bound has a negative
+  test that executes its raise with real constructed inputs (over-bound
+  aggregate, uncovered closure package, source without a license member).
 
 ## Notes
 

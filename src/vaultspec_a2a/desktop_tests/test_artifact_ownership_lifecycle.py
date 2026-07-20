@@ -419,12 +419,13 @@ def test_data_preserving_capsule_removal(
 
     # Capture the paths and sizes of all user-data files before removal.
     # Credential filenames use the canonical constants from credentials.py.
+    # The discovery record is a gateway-owned runtime artifact removed on clean
+    # shutdown, not user data, so it is deliberately absent from this set.
     user_data_files = {
         "database": state.database_path,
         "checkpoint": state.checkpoint_path,
         "attach_cred": state.credentials_dir / ATTACH_CREDENTIAL_NAME,
         "ownership_cred": state.credentials_dir / OWNERSHIP_CAPABILITY_NAME,
-        "discovery": state.discovery_path,
     }
     pre_sizes = {
         label: path.stat().st_size
@@ -455,7 +456,4 @@ def test_data_preserving_capsule_removal(
     )
     assert state.checkpoint_path.is_file(), (
         "checkpoint database must survive capsule removal"
-    )
-    assert state.discovery_path.is_file(), (
-        "discovery record must survive capsule removal"
     )

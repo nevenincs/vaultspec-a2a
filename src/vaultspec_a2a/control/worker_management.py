@@ -25,6 +25,7 @@ if TYPE_CHECKING:
     import httpx
 
 from ..utils import kill_pid_tree_async
+from ..utils.process import ProcessContainment, ProcessContainmentError
 from .config import GATEWAY_URL_ENV, INTERNAL_TOKEN_ENV, settings
 
 __all__ = [
@@ -175,6 +176,18 @@ async def _tcp_port_ready(host: str, port: int) -> bool:
     return True
 
 
+def _internal_auth_headers() -> dict[str, str] | None:
+    """Return the worker-IPC bearer header when the internal token is configured.
+
+    The gateway-worker pair authenticates every probe and command with the shared
+    worker interprocess-communication credential; a DEVELOPMENT gateway with no
+    token sends none, matching the bearer rule the worker enforces.
+    """
+    if settings.internal_token is None:
+        return None
+    return {"Authorization": f"Bearer {settings.internal_token}"}
+
+
 async def _check_worker_health(
     url: str,
     timeout: float = 2.0,
@@ -185,10 +198,12 @@ async def _check_worker_health(
 
     The single worker-health primitive for every caller - the boot/spawn paths,
     the watchdog's authoritative crash check, and ``/api/health``. Request-path
-    callers pass the app-pooled *client* to reuse its connection pool; the watchdog
-    and boot paths pass none and get a self-contained one-shot client. "Healthy" is
-    an exact ``200`` for all of them, so ``/api/health`` can never silently disagree
-    with the watchdog's restart decision (a ``204`` fails both, not one).
+    callers pass the app-pooled *client* to reuse its connection pool (already
+    carrying the worker IPC bearer); the watchdog and boot paths pass none and get
+    a self-contained one-shot client that presents the same bearer, so a worker
+    that enforces the credential on ``/health`` still answers its owner. "Healthy"
+    is an exact ``200`` for all of them, so ``/api/health`` can never silently
+    disagree with the watchdog's restart decision (a ``204`` fails both, not one).
     """
     import httpx
 
@@ -199,7 +214,7 @@ async def _check_worker_health(
     try:
         if client is not None:
             return await _probe(client)
-        async with httpx.AsyncClient() as owned:
+        async with httpx.AsyncClient(headers=_internal_auth_headers()) as owned:
             return await _probe(owned)
     except Exception:
         return False
@@ -219,7 +234,7 @@ async def _fetch_worker_health(
     import httpx
 
     try:
-        async with httpx.AsyncClient() as client:
+        async with httpx.AsyncClient(headers=_internal_auth_headers()) as client:
             resp = await client.get(f"{url}/health", timeout=timeout)
             if resp.status_code != 200:
                 return None
@@ -261,15 +276,12 @@ async def _evict_stale_worker(
     """
     import httpx
 
-    headers = (
-        {"Authorization": f"Bearer {settings.internal_token}"}
-        if settings.internal_token is not None
-        else None
-    )
     with contextlib.suppress(Exception):
         async with httpx.AsyncClient() as client:
             await client.post(
-                f"{worker_url}/admin/shutdown", headers=headers, timeout=2.0
+                f"{worker_url}/admin/shutdown",
+                headers=_internal_auth_headers(),
+                timeout=2.0,
             )
 
     deadline = asyncio.get_event_loop().time() + timeout
@@ -295,39 +307,55 @@ async def _evict_stale_worker(
 async def _spawn_worker(
     worker_url: str,
     worker_port: int,
+    *,
+    containment: ProcessContainment | None = None,
 ) -> subprocess.Popen[bytes] | None:
     """Spawn the worker as a child process if not already running.
 
     Returns the ``Process`` handle on success, or ``None`` if the worker
     was already running or failed to start within 30 seconds.
+
+    When *containment* is supplied (the armed desktop gateway owning its worker),
+    the worker is spawned inside it - a new POSIX session/process group or a
+    Windows Job Object - and assigned before it does any descendant work, so the
+    whole worker tree is reaped as one on shutdown. A Windows assignment failure
+    is logged and downgraded to the per-pid fallback rather than failing the spawn.
     """
-    existing = await _fetch_worker_health(worker_url)
-    if existing is not None:
-        if _same_gateway(existing.get("gateway_url"), settings.gateway_url):
-            logger.info(
-                "Worker already running at %s targeting this gateway (%s)"
-                " — skipping auto-spawn",
+    # The armed desktop gateway owns its worker exclusively. Its runtime directory
+    # and worker port are private to this application home, so there is never a
+    # foreign or shared worker to discover, adopt, or evict: it spawns and owns
+    # unconditionally. Only the Compose and development band profiles probe the
+    # port for an already-running same-gateway worker (adopt) or a stale foreign
+    # orphan (evict) before spawning.
+    if not settings.desktop_profile_armed:
+        existing = await _fetch_worker_health(worker_url)
+        if existing is not None:
+            if _same_gateway(existing.get("gateway_url"), settings.gateway_url):
+                logger.info(
+                    "Worker already running at %s targeting this gateway (%s)"
+                    " — skipping auto-spawn",
+                    worker_url,
+                    settings.gateway_url,
+                )
+                return None
+            # A stale orphan from a dead dev-band gateway is squatting the worker
+            # port: it heartbeats a gateway that no longer exists and would never
+            # be re-pointed. Evict it and spawn a fresh worker wired to THIS
+            # gateway.
+            logger.warning(
+                "Worker at %s targets a foreign gateway (%s != %s) — evicting the"
+                " stale orphan before spawning a fresh worker",
                 worker_url,
+                existing.get("gateway_url"),
                 settings.gateway_url,
             )
-            return None
-        # A stale orphan from a dead dev-band gateway is squatting the worker
-        # port: it heartbeats a gateway that no longer exists and would never be
-        # re-pointed. Evict it and spawn a fresh worker wired to THIS gateway.
-        logger.warning(
-            "Worker at %s targets a foreign gateway (%s != %s) — evicting the"
-            " stale orphan before spawning a fresh worker",
-            worker_url,
-            existing.get("gateway_url"),
-            settings.gateway_url,
-        )
-        if not await _evict_stale_worker(worker_url, worker_port):
-            logger.error(
-                "Stale worker at %s did not release port %d — new spawn will"
-                " likely fail to bind; manual reap may be required",
-                worker_url,
-                worker_port,
-            )
+            if not await _evict_stale_worker(worker_url, worker_port):
+                logger.error(
+                    "Stale worker at %s did not release port %d — new spawn will"
+                    " likely fail to bind; manual reap may be required",
+                    worker_url,
+                    worker_port,
+                )
 
     logger.info(
         "Auto-spawning worker on port %d",
@@ -359,6 +387,13 @@ async def _spawn_worker(
 
     stderr_log_path = _worker_stderr_log_path(worker_port)
     stderr_log_path.parent.mkdir(parents=True, exist_ok=True)
+    # POSIX containment seats the worker in a new session/process group at fork;
+    # passed explicitly (rather than via ``**kwargs``) so the ``Popen[bytes]``
+    # overload is preserved. Windows contributes no spawn-time flag - it assigns
+    # the job after spawn.
+    new_session = containment is not None and bool(
+        containment.spawn_kwargs().get("start_new_session")
+    )
     with stderr_log_path.open("wb") as stderr_handle:
         process = subprocess.Popen(
             [
@@ -370,7 +405,21 @@ async def _spawn_worker(
             stdin=subprocess.DEVNULL,
             stderr=stderr_handle,
             env=spawn_env,
+            start_new_session=new_session,
         )
+    if containment is not None:
+        # Assign the worker to its containment before it boots far enough to spawn
+        # any descendant (provider roots, MCP bridges). A failed Windows
+        # assignment downgrades to the per-pid fallback rather than failing boot.
+        try:
+            containment.assign(process.pid)
+        except ProcessContainmentError:
+            logger.warning(
+                "Could not seat worker PID %d in its OS containment; shutdown will"
+                " fall back to a per-pid tree kill",
+                process.pid,
+                exc_info=True,
+            )
     logger.info(
         "Worker process spawned (PID %d) via"
         " `%s -c from vaultspec_a2a.worker.app import main; main()`"
@@ -415,6 +464,10 @@ async def _spawn_worker(
                 "Worker exited prematurely: %s",
                 detail,
             )
+            if containment is not None:
+                # The worker died on its own; release the containment handle
+                # (Windows KILL_ON_JOB_CLOSE reaps any straggler it left behind).
+                containment.close()
             return None
 
         await asyncio.sleep(interval)
@@ -427,28 +480,41 @@ async def _spawn_worker(
         "Worker failed to become ready within 30 seconds; stderr_log=%s",
         stderr_log_path,
     )
-    process.terminate()
+    if containment is not None:
+        # Reap the whole half-started worker tree via its containment, not just
+        # the immediate process.
+        await containment.terminate(term_timeout=5.0, kill_timeout=5.0)
+    else:
+        process.terminate()
     return None
 
 
 async def _shutdown_worker_process(
     process: subprocess.Popen[bytes],
+    containment: ProcessContainment | None = None,
 ) -> None:
-    """Shut down the worker child process.
+    """Shut down the worker child process and its whole tree.
 
-    On Windows, ``process.terminate()`` only kills the immediate process
-    and leaves grandchildren orphaned.  Use ``taskkill /T /F`` to kill
-    the entire process tree.
+    When *containment* is present (the armed desktop worker), the tree is reaped
+    through its OS containment - a POSIX process-group ``killpg`` escalation or a
+    Windows Job Object termination - never a parent-pid tree walk. Without a
+    containment (Compose / development band), the shared per-pid tree kill
+    (Windows ``taskkill /T /F``, POSIX SIGTERM->SIGKILL) is used unchanged.
     """
     if process.poll() is not None:
+        if containment is not None:
+            containment.close()
         return  # Already exited
     logger.info(
         "Shutting down worker process (PID %d)",
         process.pid,
     )
-    # Shared async tree-kill (Windows taskkill /T /F, POSIX SIGTERM->SIGKILL); the
-    # Popen handle is reaped here since the primitive works by pid.
-    await kill_pid_tree_async(process.pid, term_timeout=10.0, kill_timeout=5.0)
+    if containment is not None:
+        await containment.terminate(term_timeout=10.0, kill_timeout=5.0)
+    else:
+        # Shared async tree-kill (Windows taskkill /T /F, POSIX SIGTERM->SIGKILL);
+        # the Popen handle is reaped here since the primitive works by pid.
+        await kill_pid_tree_async(process.pid, term_timeout=10.0, kill_timeout=5.0)
     with contextlib.suppress(Exception):
         await asyncio.to_thread(process.wait, 5.0)
     logger.info("Worker process stopped")
@@ -481,11 +547,21 @@ class LazyWorkerSpawner:
         self._worker_port = worker_port
         self._auto_spawn = auto_spawn
         self._process: subprocess.Popen[bytes] | None = None
+        # OS containment for the worker tree, created only for the armed desktop
+        # gateway that exclusively owns its worker. Compose and development-band
+        # spawns leave it None and keep the unchanged per-pid shutdown path.
+        self._containment: ProcessContainment | None = None
         self._stderr_log_path = (
             _worker_stderr_log_path(worker_port) if auto_spawn else None
         )
         self._spawned = False
         self._lock = asyncio.Lock()
+        # Optional demand-readiness signal wired by the armed desktop gateway. It
+        # is fired once, on the authenticated demand path, after the single-flight
+        # worker start reaches readiness, so deferred boot reconciliation runs only
+        # after real execution demand. Unset (``None``) for Compose and dev, whose
+        # boot reconciliation is eager.
+        self.demand_ready_event: asyncio.Event | None = None
         if auto_spawn:
             # Startup sweep (once per gateway process, before this port's own log
             # is ever (re)opened): clear stale worker-autospawn stderr logs left
@@ -530,10 +606,21 @@ class LazyWorkerSpawner:
                 "First dispatch received — starting worker at %s...",
                 self._worker_url,
             )
+            # The armed desktop gateway owns its worker exclusively, so it spawns
+            # the worker inside an OS containment and reaps the whole tree on
+            # shutdown. Other profiles keep the unchanged per-pid path.
+            self._containment = (
+                ProcessContainment.create() if settings.desktop_profile_armed else None
+            )
             self._process = await _spawn_worker(
                 self._worker_url,
                 self._worker_port,
+                containment=self._containment,
             )
+            if self._process is None:
+                # The spawn failed and already released its containment; drop the
+                # stale reference so shutdown does not double-reap.
+                self._containment = None
             # Mark as spawned even if _spawn_worker found it already running
             # (returns None when worker was already healthy).
             self._spawned = self._process is not None or (
@@ -570,16 +657,29 @@ class LazyWorkerSpawner:
     def replace_process(
         self,
         process: subprocess.Popen[bytes] | None,
+        containment: ProcessContainment | None = None,
     ) -> None:
-        """Replace the worker process handle (used by watchdog after restart)."""
+        """Replace the worker process handle (used by watchdog after restart).
+
+        The restart supplies the new tree's containment so shutdown reaps the
+        replacement worker's tree, not a stale one; an adopted worker (no owned
+        process) carries no containment.
+        """
         self._process = process
+        self._containment = containment
         self._spawned = True
 
+    @property
+    def containment(self) -> ProcessContainment | None:
+        """The OS containment owning the worker tree, if this gateway spawned it."""
+        return self._containment
+
     async def shutdown(self) -> None:
-        """Shut down the worker process if we spawned it."""
+        """Shut down the worker process (and its whole tree) if we spawned it."""
         if self._process is not None:
-            await _shutdown_worker_process(self._process)
+            await _shutdown_worker_process(self._process, self._containment)
             self._process = None
+            self._containment = None
 
 
 # ---------------------------------------------------------------------------
@@ -814,18 +914,24 @@ class WorkerWatchdog:
             )
             await asyncio.sleep(delay)
 
-            # Clean up the old process handle.
+            # Clean up the old process handle and reap its whole tree through the
+            # containment it was spawned in (if any).
             old_proc = self._spawner.process
             if old_proc is not None and old_proc.returncode is None:
-                await _shutdown_worker_process(old_proc)
+                await _shutdown_worker_process(old_proc, self._spawner.containment)
 
-            # Spawn a new worker.
+            # Spawn a new worker inside a fresh containment (armed desktop only),
+            # and hand it to the spawner so shutdown reaps the replacement's tree.
+            new_containment = (
+                ProcessContainment.create() if settings.desktop_profile_armed else None
+            )
             new_proc = await _spawn_worker(
                 self._spawner.worker_url,
                 self._spawner.worker_port,
+                containment=new_containment,
             )
             if new_proc is not None:
-                self._spawner.replace_process(new_proc)
+                self._spawner.replace_process(new_proc, new_containment)
                 return True, attempt + 1
 
             # Check if an external worker came up.

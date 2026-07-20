@@ -48,7 +48,7 @@ def _stacks_config() -> ProcsConfig:
     # Two role bands inside the committed scratch range (18900-18999), so this
     # proof never contends the real dev bands or the live acceptance stack.
     return ProcsConfig(
-        resident={"engine": 8767, "gateway": 8000},
+        resident={"engine": 8767, "gateway": 18000, "worker": 18001},
         roles={
             "engine-dev": _role("engine-dev", (18960, 18969)),
             "gateway-dev": _role("gateway-dev", (18970, 18979)),

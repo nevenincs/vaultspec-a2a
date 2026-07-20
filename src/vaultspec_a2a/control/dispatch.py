@@ -147,6 +147,15 @@ async def dispatch_to_worker(
     """
     await spawner.ensure_worker()
 
+    # Desktop deferred reconciliation: the first authenticated execution demand to
+    # complete the single-flight worker start releases the parked boot
+    # reconciliation. Fire the demand-readiness signal once, only after the worker
+    # is genuinely up. The signal is unset on Compose and development, whose boot
+    # reconciliation is eager.
+    demand_ready = spawner.demand_ready_event
+    if demand_ready is not None and spawner.spawned and not demand_ready.is_set():
+        demand_ready.set()
+
     if not bypass_circuit_breaker and not circuit_breaker.pre_dispatch():
         raise WorkerCircuitOpenError(circuit_breaker.rejection_detail)
 

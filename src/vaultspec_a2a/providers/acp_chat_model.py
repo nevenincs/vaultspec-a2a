@@ -350,9 +350,7 @@ class AcpChatModel(BaseChatModel):
             # home we just created on that path so the refusal does not leak it; a
             # successful projection is inverted in the finally with the home.
             try:
-                projected_mcp = project_declared_mcp(
-                    _ws_path, self._config.mcp_servers
-                )
+                projected_mcp = project_declared_mcp(_ws_path, self._config.mcp_servers)
             except ProjectionRefusedError:
                 cleanup_isolated_config_home(config_home)
                 raise

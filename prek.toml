@@ -1,0 +1,84 @@
+# Repository-owned read-only checks. Vaultspec Core detects prek.toml and leaves
+# this policy untouched while continuing to manage its other workspace surfaces.
+#:schema https://www.schemastore.org/prek.json
+
+[[repos]]
+repo = "local"
+
+  [[repos.hooks]]
+  entry = "uv run --no-sync --frozen --no-default-groups --group tooling ruff check"
+  id = "ruff-check"
+  language = "system"
+  name = "Lint Python code (Ruff)"
+  pass_filenames = true
+  types = ["python"]
+
+  [[repos.hooks]]
+  entry = "uv run --no-sync --frozen --no-default-groups --group tooling ruff format --check"
+  id = "ruff-format-check"
+  language = "system"
+  name = "Check Python formatting (Ruff)"
+  pass_filenames = true
+  types = ["python"]
+
+  [[repos.hooks]]
+  additional_dependencies = ["@taplo/cli@0.7.0"]
+  entry = "taplo fmt --check"
+  id = "taplo-format-check"
+  language = "node"
+  name = "Check TOML formatting (Taplo)"
+  pass_filenames = true
+  types = ["toml"]
+
+  [[repos.hooks]]
+  additional_dependencies = ["@taplo/cli@0.7.0"]
+  entry = "taplo lint"
+  id = "taplo-lint"
+  language = "node"
+  name = "Lint TOML files (Taplo)"
+  pass_filenames = true
+  types = ["toml"]
+
+  [[repos.hooks]]
+  entry = "uv run --no-sync --frozen --no-default-groups --group tooling ty check src/vaultspec_a2a"
+  id = "ty"
+  language = "system"
+  name = "Type-check Python codebase (Ty)"
+  pass_filenames = false
+  types = ["python"]
+
+  [[repos.hooks]]
+  additional_dependencies = ["markdownlint-cli@0.44.0"]
+  args = ["--config", ".markdownlint.json"]
+  entry = "markdownlint"
+  exclude = '''^\.(?:agents|claude|codex|gemini)/(?:agents|rules|skills)/'''
+  id = "markdownlint"
+  language = "node"
+  name = "Lint Markdown style (markdownlint)"
+  pass_filenames = true
+  types = ["markdown"]
+
+  [[repos.hooks]]
+  entry = "uv run --no-sync --frozen --no-default-groups --group tooling actionlint"
+  files = '''^\.github/workflows/.*\.ya?ml$'''
+  id = "actionlint"
+  language = "system"
+  name = "Lint GitHub Actions workflows (actionlint)"
+  pass_filenames = true
+  types = ["yaml"]
+
+  [[repos.hooks]]
+  entry = "uv run --no-sync --frozen --no-default-groups --group tooling vaultspec-core vault check all"
+  id = "vault-doctor"
+  language = "system"
+  name = "Vault Doctor"
+  pass_filenames = false
+  types = ["markdown"]
+
+  [[repos.hooks]]
+  always_run = true
+  entry = "uv run --no-sync --frozen --no-default-groups --group tooling vaultspec-core check-providers"
+  id = "check-provider-artifacts"
+  language = "system"
+  name = "Check provider artifacts"
+  pass_filenames = false

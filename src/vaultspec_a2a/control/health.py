@@ -29,10 +29,12 @@ if TYPE_CHECKING:
     import httpx
     from sqlalchemy.ext.asyncio import AsyncSession
 
+    from ..api.schemas.gateway import DesktopReadiness
     from .circuit_breaker import WorkerCircuitBreaker
     from .worker_management import LazyWorkerSpawner, WorkerState
 
 __all__ = [
+    "assemble_desktop_readiness",
     "assemble_health_status",
     "build_full_health",
     "build_sqlite_fallback_diagnostics",
@@ -224,6 +226,138 @@ def assemble_health_status(
         "sqlite_fallback": sqlite_fallback_diagnostics,
         "dispatch_pairing_warning": dispatch_pairing_warning,
     }
+
+
+def _eligible_provider_names() -> list[str]:
+    """Return the subprocess providers whose launch command resolves on this host.
+
+    Uses ``classify_provider_command`` - the no-instantiation seam that resolves a
+    provider's command purely from filesystem and configuration, constructing no
+    model and spawning no subprocess. Z.ai is omitted because it launches the same
+    ACP wrapper as Claude; counting it again would double-count one backend. A
+    provider whose command cannot be resolved is simply left out.
+    """
+    from ..graph.enums import Provider
+    from ..providers.factory import classify_provider_command
+    from ..thread.errors import ConfigError
+
+    candidates = (Provider.CLAUDE, Provider.GEMINI, Provider.CODEX, Provider.KIMI)
+    eligible: list[str] = []
+    for provider in candidates:
+        try:
+            classify_provider_command(provider)
+        except (ValueError, ConfigError):
+            continue
+        eligible.append(provider.value)
+    return eligible
+
+
+def assemble_desktop_readiness(
+    *,
+    app_state: Any,
+    database_ready: bool | None = None,
+    worker_probe_ready: bool | None = None,
+) -> DesktopReadiness:
+    """Assemble the five separate desktop readiness facts from one authority.
+
+    This is the single place readiness is computed: the unauthenticated liveness
+    surface and the service-state verb both call it, so gateway readiness, worker
+    state, provider eligibility, and run admission can never drift between the two.
+
+    Gateway readiness turns only on a valid database - a live gateway with a valid
+    database is ready even while its worker is cold, because worker absence before
+    demand is informational, not degradation. Callers that have already run the
+    live database and worker probes pass their verdicts in (``database_ready``,
+    ``worker_probe_ready``); the cheap sync surface leaves them ``None`` and the
+    fact is derived from seated application state. Run admission is the distinct
+    execution-readiness fact: a reachable worker plus an eligible provider is
+    ``ready``; a cold or starting worker over a ready gateway is ``deferred``; a
+    failed hard dependency is ``blocked``.
+    """
+    import os
+
+    from ..api.schemas.gateway import (
+        DesktopReadiness,
+        GatewayReadiness,
+        LivenessState,
+        ProviderEligibility,
+        RunAdmission,
+        WorkerLifecycleState,
+    )
+    from ..utils import package_version
+
+    shared = assemble_health_status(app_state=app_state)
+    reasons: list[str] = []
+
+    # --- Gateway readiness: a valid database, worker state notwithstanding. ---
+    # Under the armed desktop profile the schema is validated at boot and the
+    # gateway fails closed otherwise, so a seated engine is a valid database. A
+    # caller that already ran the live probe passes its verdict in instead.
+    if database_ready is None:
+        database_valid = getattr(app_state, "db_engine", None) is not None
+    else:
+        database_valid = database_ready
+    if database_valid:
+        gateway_readiness = GatewayReadiness.READY
+    else:
+        gateway_readiness = GatewayReadiness.NOT_READY
+        reasons.append("database is not valid")
+
+    # --- Worker lifecycle: the cold-to-execution ladder. ---
+    worker_spawned = bool(shared["worker_spawned"])
+    worker_status = shared["worker_status"]
+    if not worker_spawned:
+        # No worker exists yet; one starts on first execution demand.
+        worker_state = WorkerLifecycleState.COLD
+        reasons.append("worker is cold; starts on first execution demand")
+    elif worker_status == "pending":
+        worker_state = WorkerLifecycleState.STARTING
+    elif worker_status in {"down", "restarting"}:
+        worker_state = WorkerLifecycleState.UNAVAILABLE
+        reasons.append(f"worker is {worker_status}")
+    else:
+        worker_reachable = (
+            worker_probe_ready
+            if worker_probe_ready is not None
+            else bool(shared["worker_connected"])
+        )
+        worker_state = (
+            WorkerLifecycleState.READY
+            if worker_reachable
+            else WorkerLifecycleState.STARTING
+        )
+
+    # --- Provider eligibility via the no-instantiation classify seam. ---
+    eligible_providers = _eligible_provider_names()
+    if eligible_providers:
+        provider_eligibility = ProviderEligibility.ELIGIBLE
+    else:
+        provider_eligibility = ProviderEligibility.INELIGIBLE
+        reasons.append("no subprocess provider command resolves on this host")
+
+    # --- Run admission: execution readiness, distinct from gateway readiness. ---
+    if gateway_readiness is not GatewayReadiness.READY:
+        run_admission = RunAdmission.BLOCKED
+    elif (
+        worker_state is WorkerLifecycleState.READY
+        and provider_eligibility is ProviderEligibility.ELIGIBLE
+    ):
+        run_admission = RunAdmission.READY
+    else:
+        run_admission = RunAdmission.DEFERRED
+
+    return DesktopReadiness(
+        gateway_pid=os.getpid(),
+        generation=package_version(),
+        profile="desktop" if settings.desktop_profile_armed else "compose",
+        liveness=LivenessState.ALIVE,
+        gateway_readiness=gateway_readiness,
+        worker_state=worker_state,
+        provider_eligibility=provider_eligibility,
+        eligible_providers=eligible_providers,
+        run_admission=run_admission,
+        reasons=reasons[:16],
+    )
 
 
 async def build_full_health(

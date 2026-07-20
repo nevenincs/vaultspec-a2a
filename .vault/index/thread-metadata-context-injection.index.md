@@ -3,8 +3,8 @@ generated: true
 tags:
   - '#index'
   - '#thread-metadata-context-injection'
-date: '2026-07-15'
-modified: '2026-07-15'
+date: '2026-07-19'
+modified: '2026-07-19'
 related:
   - '[[2026-02-28-thread-metadata-context-injection-adr]]'
 ---

@@ -28,6 +28,10 @@ COMPOSE_FILE = REPO_ROOT / "service" / "docker-compose.integration.yml"
 # Service-test runtime lives in the machine-global A2A home, not inside
 # .vault/ — vaultspec firmware rejects foreign directories inside the vault.
 RUNTIME_ROOT = settings.a2a_home / "runtime" / "service-tests"
+# The worker interprocess-communication token the harness gives its production
+# worker. It is the single source: injected into the worker env and presented on
+# the harness's own worker probes, which the gated worker surface now requires.
+_INTERNAL_TOKEN = "vaultspec-integration-token"
 
 
 def _pick_free_port() -> int:
@@ -182,7 +186,14 @@ class ServiceStack:
         return self._client(timeout=timeout)
 
     def _worker_client(self) -> httpx.Client:
-        return httpx.Client(base_url=self.worker_url, timeout=10.0)
+        # The worker surface (dispatch, health, admin) requires the worker IPC
+        # bearer; the harness probes it as the paired gateway would, presenting the
+        # same token it injected into the worker env.
+        return httpx.Client(
+            base_url=self.worker_url,
+            timeout=10.0,
+            headers={"Authorization": f"Bearer {_INTERNAL_TOKEN}"},
+        )
 
     def _jaeger_client(self) -> httpx.Client:
         return httpx.Client(base_url=self.jaeger_url, timeout=10.0)
@@ -245,7 +256,7 @@ class ServiceStack:
                 "VAULTSPEC_WORKER_HOST": "127.0.0.1",
                 "VAULTSPEC_WORKER_PORT": str(self.ports["worker"]),
                 "VAULTSPEC_PORT": str(self.ports["gateway"]),
-                "VAULTSPEC_INTERNAL_TOKEN": "vaultspec-integration-token",
+                "VAULTSPEC_INTERNAL_TOKEN": _INTERNAL_TOKEN,
                 "VAULTSPEC_AUTO_SPAWN_WORKER": "false",
                 "VAULTSPEC_PROJECT_ROOT": str(REPO_ROOT),
                 "MOCK_API_BASE": self.vidaimock_url,

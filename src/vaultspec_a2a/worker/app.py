@@ -7,7 +7,7 @@ and heartbeat loop.
 Run standalone::
 
     python -m uvicorn vaultspec_a2a.worker.app:create_worker_app \
-        --factory --host 127.0.0.1 --port 8001
+        --factory --host 127.0.0.1 --port 18001
 
 Or via the ``vaultspec-worker`` console script (once registered in
 ``pyproject.toml``).
@@ -41,6 +41,7 @@ from ..telemetry import TelemetryMiddleware, configure_telemetry
 from ..utils import (
     BearerVerdict,
     configure_logging,
+    package_version,
     reconfigure_console_utf8,
     verify_internal_bearer,
 )
@@ -197,7 +198,7 @@ def create_worker_app(lifespan: Any | None = None) -> FastAPI:
     """
     app = FastAPI(
         title="Vaultspec Worker",
-        version="0.1.0",
+        version=package_version(),
         lifespan=lifespan or _lifespan,
     )
 
@@ -235,9 +236,15 @@ def create_worker_app(lifespan: Any | None = None) -> FastAPI:
             thread_id=req.thread_id,
         )
 
-    @app.get("/health")
+    @app.get("/health", dependencies=[Depends(_verify_dispatch_token)])
     async def health_endpoint() -> dict[str, object]:
         """Worker health check.
+
+        Worker interprocess-communication is private to the gateway-worker pair,
+        so ``/health`` requires the same worker IPC credential as dispatch: a
+        foreign or unpaired probe is rejected, and only the paired gateway (whose
+        probes present the shared bearer) reads the worker's provenance. In a
+        DEVELOPMENT gateway with no token the shared bearer rule leaves it open.
 
         Reports the worker's configured heartbeat target (``gateway_url``) so
         a spawning gateway can tell a worker that points at *this* gateway apart

@@ -1,8 +1,9 @@
 Python module reference
 =======================
 
-This reference documents the supported public APIs and their runtime ownership
-boundaries. Import concrete features from the module that owns them.
+This reference documents the supported public application programming
+interfaces (APIs) and their runtime ownership boundaries. Import concrete
+features from the module that owns them.
 
 Major package surfaces
 ----------------------
@@ -55,6 +56,11 @@ Database
 ~~~~~~~~
 
 .. automoduledoc:: vaultspec_a2a.database
+
+Desktop capsule
+~~~~~~~~~~~~~~~
+
+.. automoduledoc:: vaultspec_a2a.desktop
 
 Graph
 ~~~~~
@@ -125,7 +131,18 @@ API application
 .. py:module:: vaultspec_a2a.api.app
    :synopsis: FastAPI application construction.
 
-.. py:function:: create_app(lifespan=None)
+.. py:function:: create_app(lifespan=None, *, allow_unauthenticated_v1_for_testing=False)
+
+   Construct the gateway application. Production callers must leave the
+   unauthenticated ``/v1`` test bypass disabled.
+
+.. py:module:: vaultspec_a2a.api.auth
+   :synopsis: Bearer authentication for engine-facing gateway routes.
+
+.. py:function:: authenticate_request(request, authorization=None)
+
+   Require the service-discovery bearer token for an engine-facing request.
+   See :func:`vaultspec_a2a.api.app.create_app` for application wiring.
 
 .. py:module:: vaultspec_a2a.api.websocket
    :synopsis: WebSocket connection and command handling.
@@ -145,6 +162,135 @@ Command-line entry point
 
 .. py:module:: vaultspec_a2a.context.harness
    :synopsis: Agent-harness discovery and verification.
+
+Desktop capsule contract
+~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. py:module:: vaultspec_a2a.desktop.contract
+   :synopsis: Versioned desktop component-manifest models and compatibility.
+
+.. py:class:: ComponentManifest
+
+.. py:function:: component_manifest_schema()
+
+.. py:function:: contract_versions_compatible(declared, supported)
+
+.. py:function:: export_component_manifest_schema()
+
+.. py:module:: vaultspec_a2a.desktop.manifest
+   :synopsis: Deterministic desktop component-manifest emission and hashing.
+
+.. py:class:: AssetSource
+
+.. py:function:: emit_component_manifest(*, target, api_versions, assets, uv_lock_path, package_lock_path, digest_algorithm=DigestAlgorithm.SHA256)
+
+.. py:function:: component_manifest_canonical_bytes(manifest)
+
+.. py:function:: component_manifest_digest(manifest)
+
+Desktop product profile
+~~~~~~~~~~~~~~~~~~~~~~~
+
+.. py:module:: vaultspec_a2a.desktop.profile
+   :synopsis: Explicit immutable-runtime and mutable-state authorities.
+
+.. py:class:: DesktopProfile
+
+.. py:class:: DesktopStatePaths
+
+.. py:function:: derive_state_paths(app_home)
+
+Staged desktop migration
+~~~~~~~~~~~~~~~~~~~~~~~~
+
+The external updater supplies a one-time descriptor to
+:func:`vaultspec_a2a.desktop.migration.run_staged_migration`. Descriptor
+validation is owned by :mod:`vaultspec_a2a.desktop.transaction`; schema work
+is owned by :mod:`vaultspec_a2a.desktop.migration`.
+
+.. py:module:: vaultspec_a2a.desktop.transaction
+   :synopsis: One-time staged-generation transaction descriptors.
+
+.. py:class:: TransactionDescriptor
+
+.. py:class:: TransactionDescriptorError
+
+.. py:function:: load_transaction_descriptor(path)
+
+.. py:function:: mark_transaction_consumed(transaction)
+
+.. py:module:: vaultspec_a2a.desktop.migration
+   :synopsis: Quiescent desktop-store migration execution.
+
+.. py:class:: MigrationResult
+
+.. py:class:: StoreOutcome
+
+.. py:function:: run_staged_migration(descriptor_path)
+
+Desktop consistency-group snapshots
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Snapshot capture and restore operate on the complete mutable desktop state
+group and require the gateway to be quiescent. See
+:mod:`vaultspec_a2a.desktop.snapshot` for the durable descriptor and interrupted
+restore-marker contracts.
+
+.. py:module:: vaultspec_a2a.desktop.snapshot
+   :synopsis: Capture, inspect, and restore desktop consistency groups.
+
+.. py:class:: ConsistencyGroupStore
+
+.. py:class:: ConsistencyGroupStoreSpecification
+
+.. py:class:: StoreSnapshot
+
+.. py:class:: GroupDescriptor
+
+.. py:class:: RestoreMarker
+
+.. py:class:: RestoreOutcome
+
+.. py:class:: SnapshotError
+
+.. py:class:: SnapshotIntegrityError
+
+.. py:class:: SnapshotStoreLockedError
+
+.. py:class:: RestorePendingError
+
+.. py:function:: consistency_group_specifications()
+
+.. py:function:: consistency_group_members(state)
+
+.. py:function:: create_snapshot(app_home, group_id, *, now=None)
+
+.. py:function:: inspect_snapshot(app_home, group_id)
+
+.. py:function:: list_snapshots(app_home)
+
+.. py:function:: pending_restore(app_home)
+
+.. py:function:: restore_snapshot(app_home, group_id, *, resume=False, now=None)
+
+Desktop assembly internals
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+These workflow-facing modules implement capsule assembly. They aren't part of
+the package-root component-manifest API and may change with the release
+workflow.
+
+.. py:module:: vaultspec_a2a.desktop.artifacts
+   :synopsis: Exact local-input descriptor and byte-identity verification.
+
+.. py:module:: vaultspec_a2a.desktop.capsule
+   :synopsis: Bounded archive projection into private staging trees.
+
+.. py:module:: vaultspec_a2a.desktop.capsule_evidence
+   :synopsis: Installed-tree evidence and deterministic archive publication.
+
+.. py:module:: vaultspec_a2a.desktop._filesystem_authority
+   :synopsis: Native descriptor and handle authority for no-replace publication.
 
 Graph construction
 ~~~~~~~~~~~~~~~~~~
@@ -204,7 +350,7 @@ API and protocols
 ~~~~~~~~~~~~~~~~~
 
 .. py:module:: vaultspec_a2a.api.schemas
-   :synopsis: HTTP and WebSocket wire schemas.
+   :synopsis: Hypertext Transfer Protocol (HTTP) and WebSocket wire schemas.
 
 .. py:module:: vaultspec_a2a.protocols.mcp
    :synopsis: Model Context Protocol package boundary.
@@ -245,11 +391,33 @@ Control services
 .. py:module:: vaultspec_a2a.control.run_start_policy
    :synopsis: Run-start eligibility policy.
 
+.. py:module:: vaultspec_a2a.control.run_discovery_service
+   :synopsis: Bounded durable identity projection for active-run rebinding.
+
+.. py:class:: ActiveRunSummary
+
+.. py:class:: ActiveRunDiscoveryResult
+
+.. py:function:: discover_active_runs(db, *, workspace_root=None, feature_tag=None, limit=50)
+
 .. py:module:: vaultspec_a2a.control.verdict_subscriber
    :synopsis: Authoring verdict delivery.
 
 Persistence
 ~~~~~~~~~~~
+
+.. py:module:: vaultspec_a2a.database.checkpoint_schema
+   :synopsis: Version and validate the desktop checkpoint database schema.
+
+.. py:class:: CheckpointSchemaError
+
+.. py:function:: install_checkpoint_schema_identity(checkpoint_path)
+
+.. py:function:: open_checkpoint_read_only(checkpoint_path)
+
+.. py:function:: validate_checkpoint_schema_connection(connection)
+
+.. py:function:: validate_checkpoint_schema_identity(checkpoint_path)
 
 .. py:module:: vaultspec_a2a.database.models
    :synopsis: SQLAlchemy persistence models.
@@ -304,6 +472,23 @@ IPC and streaming
 
 Process lifecycle
 ~~~~~~~~~~~~~~~~~
+
+.. py:module:: vaultspec_a2a.lifecycle.discovery
+   :synopsis: Secret-free resident discovery and owner-restricted credential handoff.
+
+``service.json`` carries a non-secret ``handoff_reference``. The referenced
+adjacent ``service.token`` file carries the bearer credential and is validated
+as an owner-restricted handoff before :func:`read_resident_service` returns it.
+
+.. py:class:: DiscoveryState
+
+.. py:class:: ServiceInfo
+
+.. py:function:: service_json_path(a2a_home)
+
+.. py:function:: read_resident_service(a2a_home)
+
+.. py:function:: write_service_json(path, *, port, pid, service_token=None, now_ms=None)
 
 .. py:module:: vaultspec_a2a.lifecycle.procs_config
    :synopsis: Development-process configuration.

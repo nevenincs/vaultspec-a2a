@@ -4,8 +4,9 @@ Each sub-module defines its own ``APIRouter``. The ``register_routes``
 helper includes them all under the ``/api`` prefix.
 """
 
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
 
+from ..dependencies import require_attach
 from .admin import router as admin_router
 from .cancel import router as cancel_router
 from .gateway import router as gateway_router
@@ -24,12 +25,17 @@ def register_routes(app: FastAPI) -> None:
     """Include per-resource routers.
 
     The internal ``/api`` surface (thread CRUD, permissions, messages, WS
-    replay) stays for dashboard-internal and operator use; the versioned
-    ``/v1`` five-verb surface is the engine-facing edge and carries
-    its own ``/v1`` prefix.
+    replay) is the dashboard product surface: every product router carries the
+    attach-control gate, so an unauthenticated local client can no longer reach
+    it. The aggregate readiness probe stays ungated as the minimal liveness
+    surface. The versioned ``/v1`` surface is the engine-facing edge and carries
+    its own ``/v1`` prefix and attach gate.
     """
+    # Minimal liveness is ungated: the readiness probe proves neither ownership
+    # nor product state and must answer an unauthenticated caller.
+    app.include_router(health_router, prefix="/api")
+
     for sub_router in (
-        health_router,
         threads_router,
         thread_stream_router,
         thread_state_router,
@@ -39,7 +45,9 @@ def register_routes(app: FastAPI) -> None:
         permissions_router,
         admin_router,
     ):
-        app.include_router(sub_router, prefix="/api")
+        app.include_router(
+            sub_router, prefix="/api", dependencies=[Depends(require_attach)]
+        )
 
-    # The five-verb gateway is the versioned engine edge.
+    # The v1 gateway is the versioned engine edge.
     app.include_router(gateway_router)

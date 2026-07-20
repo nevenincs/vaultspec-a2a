@@ -1,0 +1,24 @@
+{
+  "mcpServers": {
+    "playwright": {
+      "command": "npx",
+      "args": ["@playwright/mcp@latest"]
+    },
+
+    "shadcn-ui": {
+      "command": "npx",
+      "args": ["-y", "shadcn-ui-mcp-server@latest"]
+    },
+    "chrome-devtools": {
+      "command": "npx",
+      "args": ["-y", "chrome-devtools-mcp@latest", "--no-usage-statistics"]
+    },
+    "context7": {
+      "command": "npx",
+      "args": ["-y", "@upstash/context7-mcp@latest"]
+    },
+    "figma": {
+      "url": "http://127.0.0.1:3845/mcp"
+    }
+  }
+}

@@ -102,6 +102,20 @@ NON_ACTIVE_STATUSES: frozenset[ThreadStatus] = TERMINAL_STATUSES | frozenset(
     }
 )
 
+# Active-run discovery is an explicit allowlist. A new lifecycle state remains
+# undiscoverable until it is deliberately classified here and in the invariant
+# test covering the complete vocabulary.
+ACTIVE_STATUSES: frozenset[ThreadStatus] = frozenset(
+    {
+        ThreadStatus.SUBMITTED,
+        ThreadStatus.RUNNING,
+        ThreadStatus.INPUT_REQUIRED,
+        ThreadStatus.CANCELLING,
+        ThreadStatus.REPAIR_NEEDED,
+        ThreadStatus.RECONCILING,
+    }
+)
+
 
 class InvalidTransitionError(ValueError):
     """Raised when a thread status transition is not allowed."""

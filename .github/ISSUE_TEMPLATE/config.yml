@@ -1,0 +1,5 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Report a vulnerability
+    url: https://github.com/nevenincs/vaultspec-a2a/security/advisories/new
+    about: Use private vulnerability reporting for sensitive security findings.

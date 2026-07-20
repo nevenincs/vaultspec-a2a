@@ -1,38 +1,45 @@
-"""API authentication module — module hierarchy requirement.
+"""Authentication for the engine-facing gateway surface."""
 
-Authentication is not yet implemented. This module provides the module
-structure and stub function required by the module hierarchy. When authentication is
-implemented, this module will provide request verification, token validation,
-and principal extraction.
+from __future__ import annotations
 
-Future implementation will likely support:
-- Bearer token validation (JWT or opaque tokens)
-- API key authentication for local IDE clients
-- Optional — the local-first design means auth may remain no-op for v1
-"""
+import secrets
 
-from fastapi import Request
+from fastapi import Header, HTTPException, Request
 
 __all__ = ["authenticate_request"]
 
 
-async def authenticate_request(_request: Request) -> None:
-    """Authenticate an incoming HTTP request.
+async def authenticate_request(
+    request: Request,
+    authorization: str | None = Header(default=None),
+) -> None:
+    """Require the service-discovery bearer on an engine-facing request.
 
-    This is a no-op stub. When authentication is implemented, this function
-    will validate Bearer tokens or API keys and raise ``HTTPException(401)``
-    for unauthenticated requests.
-
-    Usage (when wired)::
-
-        from vaultspec_a2a.api.auth import authenticate_request
-        from fastapi import Depends
-
-
-        @router.get("/protected")
-        async def endpoint(auth=Depends(authenticate_request)): ...
+    The application snapshots either the explicitly configured gateway token or
+    a generated per-process token. Lifecycle discovery publishes that bearer in
+    an adjacent owner-restricted handoff file; ``service.json`` carries only its
+    non-secret reference. Comparing encoded bytes with
+    :func:`secrets.compare_digest` avoids data-dependent string comparison. A
+    missing runtime token is corrupted application state and fails closed; only
+    an app created with the explicit test-only bypass may run without one.
     """
-    # TODO(vaultspec): implement authentication — validate Bearer token / API key
-    # https://github.com/vaultspec/vaultspec-a2a/issues/1
-    # For now this is a no-op; the API is intended for local use only.
-    return
+    expected = getattr(request.app.state, "v1_service_token", None)
+    test_bypass = bool(
+        getattr(request.app.state, "allow_unauthenticated_v1_for_testing", False)
+    )
+    if test_bypass:
+        return
+    if not isinstance(expected, str) or not expected:
+        raise HTTPException(
+            status_code=503,
+            detail="Gateway service token is not configured",
+        )
+
+    supplied = (authorization or "").encode("utf-8")
+    required = f"Bearer {expected}".encode()
+    if not secrets.compare_digest(supplied, required):
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid gateway service token",
+            headers={"WWW-Authenticate": "Bearer"},
+        )

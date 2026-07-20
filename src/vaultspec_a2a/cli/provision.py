@@ -9,9 +9,9 @@ fixtures call it instead of hand-rolling the recipe.
 Two honesty guarantees carry from the design constraints:
 
 - **Version skew is surfaced, not hidden**: the vaultspec-core the environment
-  pins (``importlib.metadata``) and the vaultspec-core the CLI resolves to on
-  PATH can diverge (the uvx-divergence lesson). Provisioning reports the skew; it
-  never silently proceeds as if they agree.
+  pins (``importlib.metadata``) and the vaultspec-core command selected for
+  provisioning can diverge (the uvx-divergence lesson). Provisioning reports the
+  skew; it never silently proceeds as if they agree.
 - **Harness completeness is verified, not assumed**: install can succeed and the
   harness still be incomplete (a required template or skill absent), so the
   returned verdict is the verifier's, not the installer's exit code.
@@ -20,8 +20,8 @@ Two honesty guarantees carry from the design constraints:
 from __future__ import annotations
 
 import re
-import shutil
 import subprocess
+import sys
 from dataclasses import dataclass
 from importlib import metadata
 from typing import TYPE_CHECKING
@@ -85,9 +85,9 @@ def provision_workspace(
 
     Runs ``vaultspec-core install --target <workspace_root>`` (unless
     ``install=False``, which verifies an already-provisioned tree), surfaces any
-    pinned-vs-resolved vaultspec-core version skew, then returns the S01 harness
+    pinned-vs-resolved vaultspec-core version skew, then returns the harness
     verifier's verdict over the result. Raises :class:`ProvisionError` only when
-    provisioning could not be attempted (CLI unresolvable) or the installer
+    provisioning could not be attempted (Core is not installed) or the installer
     exited non-zero; an incomplete harness is a normal verdict, not a raise.
     """
     installed = False
@@ -113,19 +113,19 @@ def provision_workspace(
 
 
 def _core_base_command() -> list[str]:
-    """The argv prefix that runs vaultspec-core: the console script or the uvx shim.
+    """Return the argv prefix for the environment's deliberate Core authority.
 
-    Mirrors the S01 verifier's resolution order (the console script on PATH, else
-    the ``uvx --from vaultspec-core`` shim). Raises :class:`ProvisionError` when
-    neither resolves so the caller reports a provisioning failure, not a crash.
+    Invoke Core only through the active environment with
+    ``python -m vaultspec_core``. Falling back to ``PATH`` or an unversioned
+    ``uvx`` acquisition would make the provisioning authority unverifiable.
+    Raises :class:`ProvisionError` when Core is not installed.
     """
-    if shutil.which(_CORE_DIST) is not None:
-        return [_CORE_DIST]
-    if shutil.which("uvx") is not None:
-        return ["uvx", "--from", _CORE_DIST, _CORE_DIST]
-    raise ProvisionError(
-        "vaultspec-core CLI does not resolve in this environment; cannot provision"
-    )
+    if _pinned_version() is None:
+        raise ProvisionError(
+            "vaultspec-core is not installed in the active environment; "
+            "install the repository's locked tooling profile before provisioning"
+        )
+    return [sys.executable, "-m", "vaultspec_core"]
 
 
 def _run_install(workspace_root: Path) -> str:

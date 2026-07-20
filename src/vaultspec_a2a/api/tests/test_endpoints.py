@@ -1859,7 +1859,7 @@ class TestPermissionRespond:
         with (
             caplog.at_level(
                 logging.INFO,
-                logger="vaultspec_a2a.api.routes.permissions",
+                logger="vaultspec_a2a.control.permission_service",
             ),
             TestClient(app, raise_server_exceptions=True) as client,
         ):

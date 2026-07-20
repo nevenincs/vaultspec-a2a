@@ -152,6 +152,7 @@ async def init_db(
     database: Path | str | None = None,
     *,
     echo: bool = False,
+    apply_migrations: bool = True,
 ) -> AsyncEngine:
     """Initialise the database engine, session factory, and schema.
 
@@ -163,6 +164,12 @@ async def init_db(
     Args:
         database: Database URL or a SQLite path.
         echo: Enable SQL statement logging.
+        apply_migrations: When ``False``, the engine and session factory are
+            created but no schema mutation is performed. The desktop product
+            profile uses this to keep ordinary boot non-mutating; the caller is
+            responsible for validating schema compatibility separately. In-memory
+            databases always create their schema, since they are ephemeral test
+            stores with no external migration authority.
 
     Returns:
         The initialised ``AsyncEngine``.
@@ -174,7 +181,7 @@ async def init_db(
     if url == "sqlite+aiosqlite:///:memory:":
         async with engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
-    else:
+    elif apply_migrations:
         from .migrate import run_migrations
 
         await run_migrations(url)

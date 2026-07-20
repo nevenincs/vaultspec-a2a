@@ -6,9 +6,10 @@ date: '2026-07-19'
 related:
   - "[[2026-07-19-repository-tooling-hardening-research]]"
   - "[[2026-07-19-repository-tooling-hardening-reference]]"
+  - '[[2026-03-20-service-lifecycle-architecture-adr]]'
+  - '[[2026-07-15-dev-process-registry-adr]]'
 supersedes:
   - '2026-03-19-control-layer-cli-justfile-separation-adr'
-  - '2026-03-20-service-lifecycle-architecture-adr'
 modified: '2026-07-19'
 ---
 # `repository-tooling-hardening` adr: `one modular, locked, and reproducible repository control surface` | (**status:** `accepted`)
@@ -17,8 +18,9 @@ modified: '2026-07-19'
 
 The repository has incompatible owners for development process lifecycle,
 validation, Vaultspec provisioning, generated governance, and hosted
-automation. Legacy control-layer records prescribe direct foreground processes
-while the accepted process registry requires named lifecycle verbs. Tool
+automation. The superseded control-layer record and historical development
+guidance prescribe direct foreground processes, while the accepted process
+registry requires named lifecycle verbs. Tool
 versions, Git-ignore policy, hooks, and CI also vary by entry point, so a working
 environment cannot be reproduced reliably from the Git tree. We need one
 repository control-surface decision that preserves product/tooling separation
@@ -62,8 +64,11 @@ while reconciling these ownership conflicts. Grounding:
   independently spawns, finds, or kills a managed gateway, worker, or engine.
 - `2026-07-15-agent-harness-provisioning-adr` remains a stable parent:
   provisioning does not widen agent-reachable write or MCP surfaces.
-- Compose's stack ownership is retained from the superseded service-lifecycle
-  decision.
+- `2026-03-20-service-lifecycle-architecture-adr` remains the accepted owner of
+  Compose's product topology and stack lifecycle.
+- `2026-07-15-dev-process-registry-adr` exclusively owns named host-process
+  identity, port allocation, registration, and lifecycle verbs. This record
+  owns only the repository command surface that delegates to those verbs.
 - Core's marker-bounded Git-ignore writer is the only framework-ignore owner.
 - Package upgrades are deliberate lockfile mutations followed by convergence
   checks; validation never installs an ambient latest version.
@@ -78,6 +83,10 @@ while reconciling these ownership conflicts. Grounding:
 - Route named host processes through `vaultspec-a2a procs` and stacks through
   Compose. Remove substring process discovery, port-wide force-kill behavior,
   and direct managed-service spawning from recipes.
+- Supersede the legacy control-layer `just` contract. Delegate named
+  host-process lifecycle to the dev-process registry, which refines the
+  service-lifecycle record's historical development boundary. This record does
+  not supersede its Compose or product-lifecycle decisions.
 - Define one read-only CI contract for local runs, hooks, and GitHub Actions.
   Separate repair commands own formatting, synchronization, indexing, and
   generated-file updates.

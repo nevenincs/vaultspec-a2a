@@ -55,11 +55,20 @@ class _LoggingSettings(Protocol):
     at call sites.
     """
 
-    log_level: Any
-    no_color: bool
-    ci: bool
-    is_dev: bool
-    a2a_home: Path
+    @property
+    def log_level(self) -> Any: ...
+
+    @property
+    def no_color(self) -> bool: ...
+
+    @property
+    def ci(self) -> bool: ...
+
+    @property
+    def is_dev(self) -> bool: ...
+
+    @property
+    def a2a_home(self) -> Path: ...
 
 
 # Standard LogRecord attributes that should not be included as extra fields.
@@ -172,7 +181,7 @@ def _resolve_settings(settings_override: _LoggingSettings | None) -> _LoggingSet
         return settings_override
     from ..control.config import settings
 
-    return settings  # ty: ignore[invalid-return-type]
+    return settings
 
 
 def _numeric_level(level: Any) -> int:

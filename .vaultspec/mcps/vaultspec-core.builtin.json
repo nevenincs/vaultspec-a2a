@@ -1,0 +1,4 @@
+{
+  "command": "@@VAULTSPEC_INSTALL_MODE_COMMAND@@",
+  "args": ["@@VAULTSPEC_INSTALL_MODE_ARGS@@"]
+}

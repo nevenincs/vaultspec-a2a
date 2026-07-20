@@ -33,6 +33,7 @@ async def test_redispatch_dedups_repeated_circuit_open_failures(
     tmp_path, caplog: pytest.LogCaptureFixture
 ) -> None:
     db_file = tmp_path / "redispatch-dedup.db"
+    await close_db()
     await init_db(str(db_file))
     try:
         thread_count = 2 * _REDISPATCH_LOG_EVERY_N + 2  # 12 for N=5
@@ -100,6 +101,7 @@ async def test_redispatch_logs_once_for_a_single_failure_with_no_summary(
 ) -> None:
     """A lone failure logs in full with no batch-end summary noise."""
     db_file = tmp_path / "redispatch-single.db"
+    await close_db()
     await init_db(str(db_file))
     try:
         session_factory = get_session_factory()

@@ -9,23 +9,21 @@ not shell the real installer would prove nothing about provisioning.
 
 from __future__ import annotations
 
-import shutil
+import subprocess
+import sys
 from typing import TYPE_CHECKING
-
-import pytest
 
 from ..provision import (
     _compute_skew,
+    _core_base_command,
     _parse_version,
+    _pinned_version,
+    _resolved_version,
     provision_workspace,
 )
 
 if TYPE_CHECKING:
     from pathlib import Path
-
-_CORE_ON_PATH = (
-    shutil.which("vaultspec-core") is not None or shutil.which("uvx") is not None
-)
 
 
 class TestVersionSkew:
@@ -60,9 +58,9 @@ class TestVerifyOnly:
     def test_bare_workspace_is_not_harness_ready(self, tmp_path: Path) -> None:
         """verify-only over an unprovisioned dir yields an incomplete harness.
 
-        Post-Path-B (architect arbitration): rules resolve via the bundled
-        in-process defaults, so an unprovisioned dir's incompleteness surfaces on
-        the templates surface (no bundled fallback), never the rules corpus.
+        Rules resolve via the bundled in-process defaults, so an unprovisioned
+        directory's incompleteness surfaces on templates, which have no bundled
+        fallback, rather than on the rules corpus.
         """
         result = provision_workspace(tmp_path, install=False)
         assert result.installed is False
@@ -71,10 +69,23 @@ class TestVerifyOnly:
         assert not any("rules corpus" in r for r in result.harness.reasons)
 
 
-@pytest.mark.skipif(
-    not _CORE_ON_PATH, reason="vaultspec-core CLI not resolvable in this environment"
-)
 class TestRealInstall:
+    def test_core_command_uses_the_active_project_environment(self) -> None:
+        """The declared Core dependency runs from this interpreter, not PATH."""
+        assert _pinned_version() is not None
+        assert _core_base_command() == [sys.executable, "-m", "vaultspec_core"]
+
+        proc = subprocess.run(
+            [*_core_base_command(), "--version"],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=30,
+        )
+
+        assert proc.returncode == 0, proc.stderr
+        assert _resolved_version() == _pinned_version()
+
     def test_install_makes_a_bare_workspace_harness_ready(self, tmp_path: Path) -> None:
         """A REAL vaultspec-core install turns a bare dir into a ready harness."""
         ws = tmp_path / "ws"

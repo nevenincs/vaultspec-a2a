@@ -1,24 +1,28 @@
 """Versioned desktop component-manifest contract.
 
-The desktop capsule is a target-specific, immutable A2A generation carried
-inside the dashboard's composite installation. The dashboard packages and
-activates that generation without importing A2A packages or inferring the
-capsule layout; the only thing it may read is the component manifest defined
-here. These Pydantic models are the single authority for that manifest. The
-committed ``schemas/desktop-capsule-manifest.json`` snapshot is the exported
-form of :func:`component_manifest_schema`, and a certification gate proves the
-two stay equal.
+The desktop capsule is a target-specific, immutable agent-to-agent (A2A)
+generation inside the dashboard's composite installation. The dashboard
+packages and activates that generation without importing A2A packages or
+inferring the capsule layout. It may read only the component manifest defined
+here.
 
-Each generation declares component identity, target, compatibility (the gateway
-API range plus the Alembic migration range), the dashboard-owned gateway
-entrypoint and the caller-owned standalone MCP entrypoint, per-asset SHA-256
-digests, the pinned runtime assets, per-asset license identifiers, and the
-dependency-lock identity. The contract is versioned: ``contract_version`` names
-the manifest grammar the emitter speaks. A consumer accepts only a syntactically
-valid version with the same major and a minor no newer than the consumer
-implements. This directional rule matters because the strict models reject
-unknown fields; an older parser cannot safely assume it understands a
-newer-minor document.
+These Pydantic models are the single authority for that manifest. The committed
+``schemas/desktop-capsule-manifest.json`` snapshot is the exported form of
+:func:`component_manifest_schema`. A certification gate proves that the models
+and snapshot stay equal.
+
+Each generation declares component identity and target. It binds the gateway
+application programming interface (API) range and Alembic migration range. It
+also declares the dashboard-owned gateway entry point and the caller-owned
+standalone Model Context Protocol (MCP) entry point. Per-asset Secure Hash
+Algorithm 256-bit (SHA-256) digests bind the pinned runtime assets, license
+identifiers, and dependency-lock identity.
+
+``contract_version`` names the manifest version the emitter produces. A consumer
+accepts only a syntactically valid version with the same major and a minor
+version no newer than the consumer supports. This directional rule matters
+because the strict models reject unknown fields. An older parser cannot safely
+assume it understands a document with a newer minor version.
 """
 
 from __future__ import annotations
@@ -27,15 +31,19 @@ import json
 import re
 from enum import StrEnum
 from pathlib import PurePosixPath, PureWindowsPath
-from typing import Annotated, Final
+from typing import Annotated, Final, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+
+from vaultspec_a2a.database.checkpoint_schema import CHECKPOINT_SCHEMA_VERSION
+from vaultspec_a2a.database.compatibility import supported_migration_head
 
 __all__ = [
     "ACP_VERSION_PIN",
     "CONTRACT_VERSION",
     "CPYTHON_VERSION_PIN",
     "NODEJS_VERSION_PIN",
+    "PRIMARY_SCHEMA_VERSION",
     "ApiVersionRange",
     "ComponentAsset",
     "ComponentAssetKind",
@@ -44,19 +52,29 @@ __all__ = [
     "ComponentEntrypoints",
     "ComponentIdentity",
     "ComponentManifest",
+    "ConsistencyGroup",
     "DependencyLockIdentity",
     "DigestAlgorithm",
     "EntrypointKind",
+    "GatewayApiVersion",
+    "GatewayEntrypoint",
     "MigrationRange",
+    "MutableStore",
+    "MutableStoreKind",
+    "StandaloneMcpEntrypoint",
+    "StoreSchemaAuthority",
     "TargetTriple",
     "component_manifest_schema",
     "contract_versions_compatible",
     "export_component_manifest_schema",
 ]
 
-# The manifest grammar version. A minor bump remains readable by consumers at
-# that minor or newer; it is not readable by an older-minor strict parser.
-CONTRACT_VERSION: Final = "1.0"
+# The required consistency-group declaration cannot be read from a 1.x manifest,
+# so this generation uses a breaking major instead of claiming minor-version
+# compatibility with documents that lack updater safety evidence.
+CONTRACT_VERSION: Final = "2.0"
+PRIMARY_SCHEMA_VERSION: Final = supported_migration_head("sqlite+aiosqlite:///:memory:")
+"""Alembic head carried by the installed producer package."""
 
 # Pinned base-closure runtime versions declared by the ADR. These are the
 # accepted asset versions; a capsule that ships other majors is a different
@@ -74,17 +92,49 @@ HexDigest = Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")]
 _VERSION_COMPONENT: Final = r"(?:0|[1-9][0-9]{0,5})"
 _VERSION_PATTERN: Final = rf"^{_VERSION_COMPONENT}\.{_VERSION_COMPONENT}$"
 _VERSION_RE: Final = re.compile(_VERSION_PATTERN)
-_API_VERSION_PATTERN: Final = r"^v[1-9][0-9]{0,5}$"
-_API_VERSION_RE: Final = re.compile(_API_VERSION_PATTERN)
+_STORE_SCHEMA_VERSION_PATTERN: Final = r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$"
+
+# Windows applies these filename restrictions even when the capsule is built on
+# another operating system. Keep the JSON-Schema expressions ECMA-262 compatible
+# so dashboard consumers enforce the same path boundary.
+_COMMAND_SEGMENT_PATTERN: Final = (
+    r'^[^\x00-\x1f\x7f<>:"/\\|?*]*[^\x00-\x1f\x7f<>:"/\\|?*. ]$'
+)
+_WINDOWS_DEVICE_PATTERN: Final = (
+    r"^(?:[Cc][Oo][Nn](?:[Ii][Nn]\$|[Oo][Uu][Tt]\$)?|[Pp][Rr][Nn]|"
+    r"[Aa][Uu][Xx]|[Nn][Uu][Ll]|[Cc][Oo][Mm][1-9¹²³]|"
+    r"[Ll][Pp][Tt][1-9¹²³])"
+    r"(?:\..*)?$"
+)
+_WINDOWS_DEVICE_NAMES: Final = {
+    "con",
+    "conin$",
+    "conout$",
+    "prn",
+    "aux",
+    "nul",
+    *(f"com{suffix}" for suffix in (*map(str, range(1, 10)), "¹", "²", "³")),
+    *(f"lpt{suffix}" for suffix in (*map(str, range(1, 10)), "¹", "²", "³")),
+}
 
 RelativeCommandSegment = Annotated[
     str,
     Field(
         min_length=1,
         max_length=128,
-        pattern=r"^[^/\\:\x00]+$",
-        description="One non-rooted capsule path segment.",
-        json_schema_extra={"not": {"enum": [".", ".."]}},
+        pattern=_COMMAND_SEGMENT_PATTERN,
+        description=(
+            "One portable, non-rooted capsule path segment; Windows device "
+            "basenames and platform-invalid characters are forbidden."
+        ),
+        json_schema_extra={
+            "not": {
+                "anyOf": [
+                    {"enum": [".", ".."]},
+                    {"pattern": _WINDOWS_DEVICE_PATTERN},
+                ]
+            }
+        },
     ),
 ]
 
@@ -123,6 +173,17 @@ class DigestAlgorithm(StrEnum):
     """The digest algorithm governing every hash in a manifest."""
 
     SHA256 = "sha256"
+
+
+class GatewayApiVersion(StrEnum):
+    """Gateway API versions implemented by the production route surface."""
+
+    V1 = "v1"
+
+
+_API_VERSION_ORDER: Final = {
+    version: index for index, version in enumerate(GatewayApiVersion)
+}
 
 
 class ComponentAssetKind(StrEnum):
@@ -179,7 +240,7 @@ class EntrypointKind(StrEnum):
     """The two launch surfaces the contract declares.
 
     ``gateway`` is the dashboard-owned desktop gateway launch. ``standalone_mcp``
-    is the caller-owned ``vaultspec-mcp`` adapter, which the desktop lifecycle
+    is the caller-owned ``vaultspec-a2a-mcp`` adapter, which the desktop lifecycle
     never launches or adopts.
     """
 
@@ -203,36 +264,18 @@ class ComponentIdentity(BaseModel):
 class ApiVersionRange(BaseModel):
     """The inclusive gateway API version range this generation serves."""
 
-    model_config = ConfigDict(
-        extra="forbid",
-        frozen=True,
-        json_schema_extra={
-            "x-vaultspec-invariant": "minimum must not exceed maximum numerically"
-        },
-    )
+    model_config = ConfigDict(extra="forbid", frozen=True)
 
-    minimum: str = Field(
-        min_length=2,
-        max_length=7,
-        pattern=_API_VERSION_PATTERN,
-        description="Lowest served gateway API version in canonical vN form.",
+    minimum: GatewayApiVersion = Field(
+        description="Lowest served gateway API version from the supported enum.",
     )
-    maximum: str = Field(
-        min_length=2,
-        max_length=7,
-        pattern=_API_VERSION_PATTERN,
-        description="Highest served gateway API version in canonical vN form.",
+    maximum: GatewayApiVersion = Field(
+        description="Highest served gateway API version from the supported enum.",
     )
 
     @model_validator(mode="after")
     def _ordered(self) -> ApiVersionRange:
-        minimum = _API_VERSION_RE.fullmatch(self.minimum)
-        maximum = _API_VERSION_RE.fullmatch(self.maximum)
-        # Field validation establishes both matches; retain the guard so this
-        # invariant stays local if construction semantics ever change.
-        if minimum is None or maximum is None:
-            return self
-        if int(self.minimum[1:]) > int(self.maximum[1:]):
+        if _API_VERSION_ORDER[self.minimum] > _API_VERSION_ORDER[self.maximum]:
             raise ValueError("minimum API version must not exceed maximum")
         return self
 
@@ -251,6 +294,7 @@ class MigrationRange(BaseModel):
         min_length=1,
         max_length=64,
         description="Alembic head (target) revision identifier.",
+        json_schema_extra={"const": PRIMARY_SCHEMA_VERSION},
     )
 
 
@@ -296,12 +340,11 @@ class ComponentEntrypoint(BaseModel):
             if (
                 not segment
                 or segment in {".", ".."}
-                or "\x00" in segment
-                or "/" in segment
-                or "\\" in segment
+                or segment.split(".", 1)[0].casefold() in _WINDOWS_DEVICE_NAMES
             ):
                 raise ValueError(
-                    "relative_command must contain only capsule-relative segments"
+                    "relative_command must contain only portable capsule-relative "
+                    "segments"
                 )
             posix_segment = PurePosixPath(segment)
             windows_segment = PureWindowsPath(segment)
@@ -316,37 +359,37 @@ class ComponentEntrypoint(BaseModel):
         return value
 
 
+class GatewayEntrypoint(ComponentEntrypoint):
+    """The dashboard-owned gateway launch surface."""
+
+    kind: Literal[EntrypointKind.GATEWAY] = Field(
+        description="The gateway launch-surface discriminator."
+    )
+
+
+class StandaloneMcpEntrypoint(ComponentEntrypoint):
+    """The caller-owned standalone MCP launch surface."""
+
+    kind: Literal[EntrypointKind.STANDALONE_MCP] = Field(
+        description="The standalone MCP launch-surface discriminator."
+    )
+
+
 class ComponentEntrypoints(BaseModel):
     """The dashboard-owned gateway launch and the caller-owned MCP launch."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
-    gateway: ComponentEntrypoint = Field(
+    gateway: GatewayEntrypoint = Field(
         description="Dashboard-owned desktop gateway launch entrypoint."
     )
-    standalone_mcp: ComponentEntrypoint = Field(
-        description="Caller-owned standalone vaultspec-mcp entrypoint."
+    standalone_mcp: StandaloneMcpEntrypoint = Field(
+        description="Caller-owned standalone vaultspec-a2a-mcp entrypoint."
     )
-
-    @field_validator("gateway")
-    @classmethod
-    def _gateway_kind(cls, value: ComponentEntrypoint) -> ComponentEntrypoint:
-        if value.kind is not EntrypointKind.GATEWAY:
-            raise ValueError("gateway entrypoint must declare the gateway kind")
-        return value
-
-    @field_validator("standalone_mcp")
-    @classmethod
-    def _mcp_kind(cls, value: ComponentEntrypoint) -> ComponentEntrypoint:
-        if value.kind is not EntrypointKind.STANDALONE_MCP:
-            raise ValueError(
-                "standalone_mcp entrypoint must declare the standalone-mcp kind"
-            )
-        return value
 
 
 class ComponentAsset(BaseModel):
-    """One base-closure asset: its kind, pinned version, license, and digest."""
+    """One immutable source artifact used to assemble the base closure."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -360,7 +403,11 @@ class ComponentAsset(BaseModel):
         description="SPDX-style license identifier for the asset.",
     )
     digest: HexDigest = Field(
-        description="Asset content digest under the manifest digest algorithm."
+        description=(
+            "Digest of the immutable source artifact bytes used for assembly "
+            "(runtime archive, A2A wheel, or ACP package); installed-tree "
+            "integrity is governed by later release/SBOM contracts."
+        )
     )
 
 
@@ -375,6 +422,144 @@ class DependencyLockIdentity(BaseModel):
     )
 
 
+class MutableStoreKind(StrEnum):
+    """The schema-bearing mutable stores forming the desktop consistency group.
+
+    These are the stores the dashboard's external updater snapshots and restores
+    as one receipt-verifiable group across a generation change.
+    ``PRIMARY_DATABASE`` is the Alembic-versioned application database;
+    ``CHECKPOINT_DATABASE`` is the LangGraph checkpoint database carrying the
+    state-driven-development state.
+    """
+
+    PRIMARY_DATABASE = "primary-database"
+    CHECKPOINT_DATABASE = "checkpoint-database"
+
+
+class StoreSchemaAuthority(StrEnum):
+    """What governs a mutable store's schema revision.
+
+    ``ALEMBIC_MIGRATION_RANGE`` reconciles with the manifest's
+    :attr:`ComponentCompatibility.migration_range`, which is the single authority
+    for the primary database's schema-revision facts; a store bearing this
+    authority does not restate the base and head. ``CHECKPOINTER_SCHEMA`` denotes
+    the LangGraph checkpointer's own schema, which the migration range does not
+    cover.
+    """
+
+    ALEMBIC_MIGRATION_RANGE = "alembic-migration-range"
+    CHECKPOINTER_SCHEMA = "checkpointer-schema"
+
+
+_STORE_AUTHORITY_BY_KIND: Final = {
+    MutableStoreKind.PRIMARY_DATABASE: StoreSchemaAuthority.ALEMBIC_MIGRATION_RANGE,
+    MutableStoreKind.CHECKPOINT_DATABASE: StoreSchemaAuthority.CHECKPOINTER_SCHEMA,
+}
+
+_CONSISTENCY_GROUP_SCHEMA: Final = {
+    "minItems": len(MutableStoreKind),
+    "maxItems": len(MutableStoreKind),
+    "allOf": [
+        {
+            "contains": {
+                "properties": {
+                    "kind": {"const": kind.value},
+                    "schema_authority": {"const": authority.value},
+                    "derivable": {"const": False},
+                    **(
+                        {"schema_version": {"const": CHECKPOINT_SCHEMA_VERSION}}
+                        if kind is MutableStoreKind.CHECKPOINT_DATABASE
+                        else {"schema_version": {"const": PRIMARY_SCHEMA_VERSION}}
+                    ),
+                },
+                "required": [
+                    "kind",
+                    "schema_authority",
+                    "schema_version",
+                    "derivable",
+                ],
+            },
+            "minContains": 1,
+            "maxContains": 1,
+        }
+        for kind, authority in _STORE_AUTHORITY_BY_KIND.items()
+    ],
+}
+
+
+class MutableStore(BaseModel):
+    """One declared mutable, schema-bearing consistency-group store."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    kind: MutableStoreKind = Field(
+        description="Which schema-bearing mutable store this declares."
+    )
+    derivable: Literal[False] = Field(
+        description=(
+            "Current stores are mandatory and cannot be omitted. A future "
+            "derivable form requires a separate tagged evidence contract."
+        )
+    )
+    schema_authority: StoreSchemaAuthority = Field(
+        description=(
+            "Authority governing this store's schema revision. The Alembic "
+            "authority reconciles with compatibility.migration_range rather than "
+            "duplicating the base and head."
+        )
+    )
+    schema_version: str = Field(
+        min_length=1,
+        max_length=64,
+        pattern=_STORE_SCHEMA_VERSION_PATTERN,
+        description=(
+            "Exact schema revision required by this generation: the packaged "
+            "Alembic head or the project-owned checkpoint semantic version."
+        ),
+    )
+
+    @model_validator(mode="after")
+    def _authority_matches_kind(self) -> MutableStore:
+        expected = _STORE_AUTHORITY_BY_KIND[self.kind]
+        if self.schema_authority is not expected:
+            raise ValueError(
+                f"{self.kind.value} schema authority must be {expected.value}"
+            )
+        return self
+
+
+class ConsistencyGroup(BaseModel):
+    """The mutable stores the updater snapshots and restores as one group.
+
+    The declaration binds membership, per-store derivability, and each store's
+    schema authority into the manifest so a consumer knows exactly which mutable
+    stores move together across a generation change, and which (if any) may be
+    omitted because they are provably derivable. The current generation declares
+    both stores non-derivable, so both are mandatory members.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    stores: tuple[MutableStore, ...] = Field(
+        min_length=len(MutableStoreKind),
+        max_length=len(MutableStoreKind),
+        description="The declared consistency-group members, one per store kind.",
+        json_schema_extra=_CONSISTENCY_GROUP_SCHEMA,
+    )
+
+    @field_validator("stores")
+    @classmethod
+    def _complete_unique_membership(
+        cls, value: tuple[MutableStore, ...]
+    ) -> tuple[MutableStore, ...]:
+        kinds = [store.kind for store in value]
+        if len(set(kinds)) != len(kinds):
+            raise ValueError("consistency group must declare each store kind once")
+        if set(kinds) != set(MutableStoreKind):
+            raise ValueError("consistency group must declare every mutable store kind")
+        return value
+
+
 class ComponentManifest(BaseModel):
     """The versioned desktop component manifest consumed by dashboard packaging.
 
@@ -384,7 +569,27 @@ class ComponentManifest(BaseModel):
     pin a generation by manifest digest.
     """
 
-    model_config = ConfigDict(extra="forbid", frozen=True)
+    model_config = ConfigDict(
+        extra="forbid",
+        frozen=True,
+        json_schema_extra={
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "x-vaultspec-invariants": [
+                (
+                    "identity.version must equal the a2a-distribution asset "
+                    "version; enforced by the production model because JSON "
+                    "Schema Draft 2020-12 has no standard cross-field equality "
+                    "keyword"
+                ),
+                (
+                    "the primary-database schema_version must equal "
+                    "compatibility.migration_range.head; enforced by the "
+                    "production model because JSON Schema Draft 2020-12 has "
+                    "no standard cross-field equality keyword"
+                ),
+            ],
+        },
+    )
 
     contract_version: str = Field(
         min_length=3,
@@ -399,6 +604,13 @@ class ComponentManifest(BaseModel):
     target: TargetTriple = Field(description="The capsule's target triple.")
     compatibility: ComponentCompatibility = Field(
         description="Served API range and packaged Alembic migration range."
+    )
+    consistency_group: ConsistencyGroup = Field(
+        description=(
+            "The mutable, schema-bearing stores the external updater snapshots "
+            "and restores as one group; the primary store's schema authority "
+            "reconciles with compatibility.migration_range."
+        )
     )
     entrypoints: ComponentEntrypoints = Field(
         description="Gateway and standalone MCP launch surfaces."
@@ -436,6 +648,36 @@ class ComponentManifest(BaseModel):
                     f"{kind.value} version must be pinned to {pinned_version}"
                 )
         return value
+
+    @model_validator(mode="after")
+    def _identity_matches_distribution_asset(self) -> ComponentManifest:
+        distribution = next(
+            asset
+            for asset in self.assets
+            if asset.kind is ComponentAssetKind.A2A_DISTRIBUTION
+        )
+        if self.identity.version != distribution.version:
+            raise ValueError(
+                "identity.version must equal a2a-distribution asset version"
+            )
+        if self.compatibility.migration_range.head != PRIMARY_SCHEMA_VERSION:
+            raise ValueError(
+                "migration_range.head must equal packaged Alembic head "
+                f"{PRIMARY_SCHEMA_VERSION}"
+            )
+        stores = {store.kind: store for store in self.consistency_group.stores}
+        primary = stores[MutableStoreKind.PRIMARY_DATABASE]
+        if primary.schema_version != self.compatibility.migration_range.head:
+            raise ValueError(
+                "primary-database schema_version must equal migration_range.head"
+            )
+        checkpoint = stores[MutableStoreKind.CHECKPOINT_DATABASE]
+        if checkpoint.schema_version != CHECKPOINT_SCHEMA_VERSION:
+            raise ValueError(
+                "checkpoint-database schema_version must equal supported checkpoint "
+                f"schema version {CHECKPOINT_SCHEMA_VERSION}"
+            )
+        return self
 
     def is_contract_compatible(self, supported: str = CONTRACT_VERSION) -> bool:
         """Return whether a ``supported`` consumer can read this manifest."""

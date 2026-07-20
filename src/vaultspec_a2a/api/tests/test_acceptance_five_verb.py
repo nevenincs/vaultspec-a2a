@@ -1,9 +1,9 @@
-"""Acceptance coverage for the five-verb edge.
+"""Acceptance coverage for the six-member gateway whitelist.
 
 In-process, real-component coverage of the acceptance criteria that do NOT need
 the live dashboard engine or Docker (both absent here). No mocks: a real
 ``Executor`` runs a real multi-role compiled graph against a real file-backed
-``AsyncSqliteSaver``; the five-verb gateway then reads that durable state back
+``AsyncSqliteSaver``; the gateway control surface then reads that durable state back
 over a real TCP socket.
 
 Covers: per-role run through the surface, ``run-status`` as the authoritative
@@ -186,7 +186,7 @@ async def test_multirole_run_status_recovery_and_zero_vault_writes(
         # No actor token appears in any log record captured during the run.
         _assert_no_token(records)
 
-        # run-status over the five-verb surface reads the durable recovery snapshot.
+        # run-status over the control surface reads the durable recovery snapshot.
         app, _agg, _worker, _cp = make_app(session_factory, cp)
         async with (
             _live_server(app) as base,

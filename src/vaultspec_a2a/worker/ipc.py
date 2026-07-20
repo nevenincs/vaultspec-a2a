@@ -40,7 +40,7 @@ class WorkerBridge:
     Parameters
     ----------
     api_url:
-        Base URL of the gateway (e.g. ``http://localhost:8000``).
+        Base URL of the gateway (e.g. ``http://localhost:18000``).
     worker_id:
         Unique identifier for this worker instance (hex string).
     """

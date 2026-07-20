@@ -28,6 +28,7 @@ from httpx import ASGITransport
 from langchain_core.messages import AIMessage
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from langgraph.graph import END, START, StateGraph
+from langgraph.types import interrupt
 
 from ...ipc.schemas import DispatchRequest
 from ...thread.actor_tokens import ActorTokenBundle
@@ -121,6 +122,125 @@ async def test_tokens_injected_during_run_and_dropped_after() -> None:
             # Disposal: the active window closed, so the run holds nothing now.
             assert executor.token_store.has(thread_id) is False
             assert executor.token_store.actor_token(thread_id, "coder") is None
+        finally:
+            await bridge.close()
+            await executor.shutdown()
+
+
+def _install_interrupting_graph(
+    executor: Executor,
+    thread_id: str,
+) -> None:
+    """Compile a real one-node graph that parks on ``interrupt`` then completes.
+
+    First ingest hits the interrupt and parks (LangGraph writes an interrupt
+    task; the ingest reports ``"interrupted"``). A later resume passes the
+    interrupt and reaches ``END``, completing the run.
+    """
+
+    async def gate_node(state: TeamState) -> dict[str, Any]:
+        decision = interrupt({"type": "plan_approval_request", "prompt": "ok?"})
+        return {
+            "messages": [AIMessage(content=f"resumed:{decision}")],
+            "next": "FINISH",
+        }
+
+    builder = StateGraph(cast("Any", TeamState))
+    builder.add_node("gate", gate_node)
+    builder.add_edge(START, "gate")
+    builder.add_edge("gate", END)
+    graph = builder.compile(checkpointer=executor._checkpointer)
+
+    cache_key = ("gate-preset", None, False)
+    executor._graph_cache[cache_key] = graph
+    executor._thread_to_cache_key[thread_id] = cache_key
+    executor.aggregator.register_graph(cast("Any", graph))
+
+
+def _bundle() -> ActorTokenBundle:
+    return ActorTokenBundle(
+        tokens={"coder": _CODER_TOKEN, "reviewer": _REVIEWER_TOKEN},
+        engine_bearer=_BEARER,
+    )
+
+
+@pytest.mark.asyncio(loop_scope="function")
+async def test_tokens_retained_through_interrupt_and_dropped_on_resume() -> None:
+    """A parked (INPUT_REQUIRED) run keeps its tokens; a terminal resume drops them."""
+    thread_id = "run-parked"
+    async with AsyncSqliteSaver.from_conn_string(":memory:") as cp:
+        await cp.setup()
+        bridge = _make_bridge()
+        try:
+            executor = Executor(checkpointer=cp, bridge=bridge)
+            _install_interrupting_graph(executor, thread_id)
+
+            ingest = DispatchRequest(
+                action="ingest",
+                thread_id=thread_id,
+                content="build it",
+                team_preset="gate-preset",
+                recursion_limit=10,
+                actor_tokens=_bundle(),
+            )
+            await executor.handle_dispatch(ingest)
+
+            # Retained across the park: the run interrupted, not terminated, so its
+            # tokens must survive to serve a later gate resume.
+            assert executor.token_store.has(thread_id) is True
+            assert executor.token_store.actor_token(thread_id, "coder") == _CODER_TOKEN
+
+            resume = DispatchRequest(
+                action="resume",
+                thread_id=thread_id,
+                option_id="approved",
+                team_preset="gate-preset",
+                recursion_limit=10,
+                actor_tokens=_bundle(),
+            )
+            await executor.handle_dispatch(resume)
+
+            # Terminal (completed): the active window truly closed, tokens dropped.
+            assert executor.token_store.has(thread_id) is False
+        finally:
+            await bridge.close()
+            await executor.shutdown()
+
+
+@pytest.mark.asyncio(loop_scope="function")
+async def test_cancel_of_parked_run_drops_tokens_at_terminal() -> None:
+    """Cancelling a parked (no active ingest) run is terminal and releases tokens."""
+    thread_id = "run-parked-cancel"
+    async with AsyncSqliteSaver.from_conn_string(":memory:") as cp:
+        await cp.setup()
+        bridge = _make_bridge()
+        try:
+            executor = Executor(checkpointer=cp, bridge=bridge)
+            _install_interrupting_graph(executor, thread_id)
+
+            await executor.handle_dispatch(
+                DispatchRequest(
+                    action="ingest",
+                    thread_id=thread_id,
+                    content="build it",
+                    team_preset="gate-preset",
+                    recursion_limit=10,
+                    actor_tokens=_bundle(),
+                )
+            )
+            assert executor.token_store.has(thread_id) is True
+
+            # No ingest is active for the parked run, so the cancel is itself the
+            # terminal boundary and releases the tokens here.
+            await executor.handle_dispatch(
+                DispatchRequest(
+                    action="cancel",
+                    thread_id=thread_id,
+                    team_preset="gate-preset",
+                    recursion_limit=10,
+                )
+            )
+            assert executor.token_store.has(thread_id) is False
         finally:
             await bridge.close()
             await executor.shutdown()

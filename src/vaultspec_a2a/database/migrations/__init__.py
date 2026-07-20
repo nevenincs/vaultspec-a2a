@@ -1,102 +1,136 @@
-"""Database migrations for backfilling new schema fields.
+"""Checkpoint-state migrations owned by the A2A package."""
 
-Idempotent migration functions that can be run safely multiple times.
-"""
+from __future__ import annotations
 
-import json
 import logging
 import sqlite3
 from pathlib import Path
+from typing import Final, cast
 
-__all__ = ["backfill_teamstate_sdd_fields"]
+from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
 
+__all__ = [
+    "CheckpointStateMigrationError",
+    "backfill_teamstate_sdd_fields",
+    "count_pending_sdd_backfill",
+    "count_pending_sdd_backfill_connection",
+]
 
 logger = logging.getLogger(__name__)
 
-_SDD_DEFAULTS: dict[str, object] = {
+_SDD_DEFAULTS: Final[dict[str, object]] = {
     "active_feature": None,
     "pipeline_phase": None,
     "vault_index": {},
     "validation_errors": [],
 }
+_SERIALIZER: Final = JsonPlusSerializer()
+
+
+class CheckpointStateMigrationError(RuntimeError):
+    """A stored LangGraph checkpoint cannot be safely inspected or migrated."""
+
+
+def _checkpoint_table_present(connection: sqlite3.Connection) -> bool:
+    row = connection.execute(
+        "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'checkpoints'"
+    ).fetchone()
+    return row is not None
+
+
+def _decode_checkpoint(type_name: object, payload: object) -> dict[str, object]:
+    if not isinstance(type_name, str) or not isinstance(payload, bytes):
+        raise CheckpointStateMigrationError(
+            "checkpoint row has no supported serialization type or payload"
+        )
+    try:
+        checkpoint = _SERIALIZER.loads_typed((type_name, payload))
+    except Exception as exc:
+        raise CheckpointStateMigrationError(
+            f"checkpoint row uses unreadable {type_name!r} serialized state"
+        ) from exc
+    if not isinstance(checkpoint, dict):
+        raise CheckpointStateMigrationError(
+            "checkpoint payload is not a mapping and cannot carry channel_values"
+        )
+    channel_values = checkpoint.get("channel_values")
+    if not isinstance(channel_values, dict):
+        raise CheckpointStateMigrationError(
+            "checkpoint payload has no mapping-valued channel_values"
+        )
+    return cast("dict[str, object]", checkpoint)
+
+
+def _needs_sdd_backfill(checkpoint: dict[str, object]) -> bool:
+    channel_values = cast("dict[str, object]", checkpoint["channel_values"])
+    return any(key not in channel_values for key in _SDD_DEFAULTS)
 
 
 def backfill_teamstate_sdd_fields(db_path: Path | str) -> int:
-    """Backfill new state fields into existing checkpoint rows.
+    """Backfill SDD fields inside real serialized LangGraph checkpoints.
 
-    Scans the LangGraph checkpoint table for rows whose ``channel_values``
-    JSON blob is missing any of the four new keys and patches them with
-    zero-value defaults. Safe to run on fresh databases (table may not
-    exist yet) and idempotent on already-patched databases.
-
-    Args:
-        db_path: Path to the SQLite database file.
-
-    Returns:
-        Number of rows patched.
+    Fresh stores with no checkpoint table are left untouched. Existing rows are
+    decoded and re-encoded through LangGraph's production serializer; unreadable
+    or structurally foreign rows fail loud instead of being labelled compatible.
     """
+    path = Path(db_path)
+    if not path.is_file():
+        return 0
+    connection = sqlite3.connect(str(path))
     patched = 0
     try:
-        conn = sqlite3.connect(str(db_path))
-    except Exception:
-        logger.warning(
-            "Could not open checkpoint DB at %s; skipping backfill",
-            db_path,
-            exc_info=True,
-        )
-        return 0
-
-    try:
-        cursor = conn.cursor()
-        try:
-            cursor.execute("SELECT rowid, channel_values FROM checkpoints")
-            rows = cursor.fetchall()
-        except sqlite3.OperationalError as exc:
-            msg = str(exc).lower()
-            if "no such table" in msg:
-                # Table does not exist yet (fresh database).
-                return 0
-            if "no such column" in msg:
-                # LangGraph schema version does not use channel_values column.
-                # Backfill not applicable — skip silently.
-                logger.debug(
-                    "Checkpoint backfill skipped at %s: "
-                    "schema has no channel_values column",
-                    db_path,
-                )
-                return 0
-            logger.exception(
-                "Checkpoint backfill could not read checkpoints table at %s",
-                db_path,
-            )
-            raise
-
-        for rowid, channel_values_raw in rows:
-            if not channel_values_raw:
+        if not _checkpoint_table_present(connection):
+            return 0
+        rows = connection.execute(
+            "SELECT rowid, type, checkpoint FROM checkpoints"
+        ).fetchall()
+        for row_id, type_name, payload in rows:
+            checkpoint = _decode_checkpoint(type_name, payload)
+            if not _needs_sdd_backfill(checkpoint):
                 continue
-            try:
-                channel_values = json.loads(channel_values_raw)
-            except (json.JSONDecodeError, TypeError):
-                continue
-
-            needs_update = any(k not in channel_values for k in _SDD_DEFAULTS)
-            if not needs_update:
-                continue
-
+            channel_values = cast("dict[str, object]", checkpoint["channel_values"])
             for key, default in _SDD_DEFAULTS.items():
-                if key not in channel_values:
-                    channel_values[key] = default
-
-            cursor.execute(
-                "UPDATE checkpoints SET channel_values = ? WHERE rowid = ?",
-                (json.dumps(channel_values), rowid),
+                channel_values.setdefault(key, default)
+            encoded_type, encoded_payload = _SERIALIZER.dumps_typed(checkpoint)
+            connection.execute(
+                "UPDATE checkpoints SET type = ?, checkpoint = ? WHERE rowid = ?",
+                (encoded_type, encoded_payload, row_id),
             )
             patched += 1
-
-        conn.commit()
+        connection.commit()
+    except Exception:
+        connection.rollback()
+        raise
     finally:
-        conn.close()
-
+        connection.close()
     if patched:
-        logger.info("Checkpoint backfill: patched %d row(s)", patched)
+        logger.info("Checkpoint SDD backfill patched %d row(s)", patched)
     return patched
+
+
+def count_pending_sdd_backfill_connection(connection: sqlite3.Connection) -> int:
+    """Count pending SDD rows through an already-open database authority."""
+    if not _checkpoint_table_present(connection):
+        return 0
+    pending = 0
+    for type_name, payload in connection.execute(
+        "SELECT type, checkpoint FROM checkpoints"
+    ):
+        checkpoint = _decode_checkpoint(type_name, payload)
+        if _needs_sdd_backfill(checkpoint):
+            pending += 1
+    return pending
+
+
+def count_pending_sdd_backfill(db_path: Path | str) -> int:
+    """Read the number of serialized checkpoints still missing SDD fields."""
+    from ..checkpoint_schema import open_checkpoint_read_only
+
+    path = Path(db_path)
+    if not path.is_file():
+        return 0
+    connection = open_checkpoint_read_only(path)
+    try:
+        return count_pending_sdd_backfill_connection(connection)
+    finally:
+        connection.close()

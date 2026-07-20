@@ -1,71 +1,76 @@
-# service/
+# Service containers
 
-Docker Compose files, Dockerfiles, and environment configuration for
-running the Vaultspec A2A orchestrator as containerised services.
+This directory contains the headless gateway, worker, telemetry, mock-provider,
+and database container definitions. It does not contain or start a user
+interface.
 
-## Compose files
+## Docker Compose profiles
 
-| File | Type | Description |
-|---|---|---|
-| `docker-compose.dev.yml` | Standalone | Frontend-ready dev environment: gateway + worker + Vite HMR |
-| `docker-compose.integration.yml` | Standalone | Deterministic certification stack: gateway + worker + VidaiMock + Jaeger |
-| `docker-compose.prod.yml` | Standalone | Single-node SQLite deployment: gateway + worker + Jaeger |
-| `docker-compose.prod.postgres.yml` | Overlay | Adds Postgres to the prod stack (replaces SQLite) |
+| File | Role |
+| --- | --- |
+| `docker-compose.dev.yml` | Gateway and worker with shared SQLite storage |
+| `docker-compose.integration.yml` | Gateway, worker, VidaiMock, and Jaeger certification stack |
+| `docker-compose.prod.yml` | Gateway, worker, and Jaeger with shared SQLite storage |
+| `docker-compose.prod.postgres.yml` | Overlay that adds PostgreSQL and switches both application services to it |
 
-## Usage
+Run every command from the repository root. Use `just doctor` to check Docker,
+then validate a Docker Compose (Compose) configuration before starting it.
 
-All commands run from the **repository root** (not `service/`).
+## Development stack
 
-### Development (gateway + worker + Vite)
-
-```sh
-docker compose -f service/docker-compose.dev.yml up --build
+```console
+just dev stack dev-config
+just dev stack dev-up
+just dev stack dev-status
+just dev stack dev-down
 ```
 
-- Gateway: <http://localhost:8000>
-- Frontend: <http://localhost:5173> (HMR, proxied to the gateway)
+The gateway is published at <http://localhost:18000>. The worker remains on the
+Compose network and is not published to the host.
 
-### Deterministic certification stack
+## Integration stack
 
-```sh
-just dev service start integration
+```console
+just dev stack integration-config
+just dev stack integration-up
+just dev stack integration-status
+just dev stack integration-down
 ```
 
-- Gateway: <http://localhost:8000>
-- Worker: <http://localhost:8001>
-- VidaiMock: <http://localhost:8100>
-- Jaeger UI: <http://localhost:16686>
+The stack publishes the gateway at <http://localhost:18000>, VidaiMock at
+<http://localhost:8100>, and the Jaeger user interface (UI) at
+<http://localhost:16686>.
 
-Useful follow-up commands:
+## Production-image stack
 
-```sh
-just dev service logs integration
-just dev service stop integration
+Set a non-empty `VAULTSPEC_INTERNAL_TOKEN` in the repository-root `.env`, then
+run the SQLite-backed production images:
+
+```console
+just dev stack prod-config
+just dev stack prod-up
+just dev stack prod-status
+just dev stack prod-down
 ```
 
-### Production with SQLite
+For PostgreSQL, also set `POSTGRES_PASSWORD`. The `database-*` recipes validate
+the combined production configuration but start and manage only PostgreSQL:
 
-```sh
-docker compose -f service/docker-compose.prod.yml up --build
+```console
+just dev stack database-config
+just dev stack database-up
+just dev stack database-status
+just dev stack database-down
 ```
 
-- Gateway: <http://localhost:8000>
-- Jaeger UI: <http://localhost:16686>
+To run the complete PostgreSQL-backed application stack, combine the base file
+and overlay in one isolated Compose project:
 
-### Production with Postgres (recommended)
-
-```sh
-docker compose \
-  -f service/docker-compose.prod.yml \
-  -f service/docker-compose.prod.postgres.yml \
-  up --build
+```console
+docker compose --project-name vaultspec-a2a-prod-postgres -f service/docker-compose.prod.yml -f service/docker-compose.prod.postgres.yml config
+docker compose --project-name vaultspec-a2a-prod-postgres -f service/docker-compose.prod.yml -f service/docker-compose.prod.postgres.yml up -d --build --wait
+docker compose --project-name vaultspec-a2a-prod-postgres -f service/docker-compose.prod.yml -f service/docker-compose.prod.postgres.yml down --remove-orphans
 ```
 
-The Postgres overlay file **must** be combined with the base prod file.
-It overrides database environment variables and adds the Postgres service.
-
-## Environment
-
-Copy `service/.env.example` to `.env` in the repo root and fill in the
-required values. The Justfile `dotenv-load` reads `.env` from the repo
-root automatically.
+See [`service/.env.example`](.env.example) for supported settings and the
+[operator reference](../docs/operations.rst) for lifecycle ownership.

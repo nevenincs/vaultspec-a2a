@@ -9,9 +9,11 @@ from datetime import UTC, datetime
 from typing import override
 
 from sqlalchemy import (
+    Boolean,
     DateTime,
     ForeignKey,
     Index,
+    String,
     Text,
     TypeDecorator,
     UniqueConstraint,
@@ -81,7 +83,37 @@ class ThreadModel(Base):
 
     __tablename__ = "threads"
 
-    __table_args__ = (Index("ix_threads_nickname", "nickname", unique=True),)
+    __table_args__ = (
+        Index("ix_threads_nickname", "nickname", unique=True),
+        Index(
+            "ix_threads_active_order",
+            "is_active",
+            "created_at",
+            "id",
+        ),
+        Index(
+            "ix_threads_active_workspace_order",
+            "is_active",
+            "workspace_root",
+            "created_at",
+            "id",
+        ),
+        Index(
+            "ix_threads_active_feature_order",
+            "is_active",
+            "feature_tag",
+            "created_at",
+            "id",
+        ),
+        Index(
+            "ix_threads_active_workspace_feature_order",
+            "is_active",
+            "workspace_root",
+            "feature_tag",
+            "created_at",
+            "id",
+        ),
+    )
 
     id: Mapped[str] = mapped_column(primary_key=True)
     title: Mapped[str | None] = mapped_column(default=None)
@@ -90,6 +122,7 @@ class ThreadModel(Base):
         UTCDateTime(), default=_utcnow, onupdate=_utcnow
     )
     status: Mapped[str] = mapped_column(default=ThreadStatus.SUBMITTED)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     repair_status: Mapped[str] = mapped_column(default="healthy")
     repair_reason: Mapped[str | None] = mapped_column(Text, default=None)
     execution_readiness: Mapped[str] = mapped_column(default="healthy")
@@ -105,6 +138,8 @@ class ThreadModel(Base):
     repair_generation: Mapped[int] = mapped_column(default=0)
     recovery_epoch: Mapped[int] = mapped_column(default=0)
     thread_metadata: Mapped[str | None] = mapped_column(Text, default=None)
+    workspace_root: Mapped[str | None] = mapped_column(String(4096), default=None)
+    feature_tag: Mapped[str | None] = mapped_column(String(128), default=None)
     nickname: Mapped[str | None] = mapped_column(default=None)
     team_preset: Mapped[str | None] = mapped_column(default=None)
 

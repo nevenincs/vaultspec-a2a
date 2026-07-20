@@ -17,8 +17,10 @@ from uuid import uuid4
 from langgraph.errors import GraphBubbleUp
 
 from ..control.config import settings
+from ..utils.process import ProcessContainment, ProcessContainmentError
 from ..workspace.environment import resolve_env_vars
 from ._acp_types import _AcpModelConfig, _AcpSessionContext
+from ._subprocess import _CONTAINMENT_ATTR
 from ._subprocess import kill_process_tree as _kill_process_tree
 
 __all__: list[str] = []
@@ -455,6 +457,13 @@ async def on_terminal_create(
         creation_flags = (
             subprocess.CREATE_NEW_PROCESS_GROUP if sys.platform == "win32" else 0
         )
+        # Seat the terminal child in its own OS containment before it runs, so the
+        # whole terminal subtree (a shell and anything it spawns) is reaped as one
+        # by `_kill_process_tree` - a POSIX process-group killpg escalation or a
+        # Windows Job Object - not a per-pid kill that would orphan a POSIX shell's
+        # grandchildren. Without this the terminal child carried no containment and
+        # fell back to the single-pid POSIX path.
+        containment = ProcessContainment.create()
         process = await asyncio.create_subprocess_exec(
             command,
             *args,
@@ -464,7 +473,18 @@ async def on_terminal_create(
             cwd=str(resolved_cwd),
             env=terminal_env,
             creationflags=creation_flags,
+            **containment.spawn_kwargs(),
         )
+        try:
+            containment.assign(process.pid)
+        except ProcessContainmentError:
+            logger.warning(
+                "Could not seat terminal child PID %d in its OS containment;"
+                " termination will fall back to a per-pid tree kill",
+                process.pid,
+                exc_info=True,
+            )
+        setattr(process, _CONTAINMENT_ATTR, containment)
         terminal_id = uuid4().hex[:8]
         ctx.terminals[terminal_id] = process
         return {

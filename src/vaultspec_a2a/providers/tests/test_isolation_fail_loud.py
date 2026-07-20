@@ -5,9 +5,9 @@ claude-family model with no env auth token resolves ``should_isolate`` False, so
 no isolated config home is created, and ``_astream`` must raise
 ``IsolationRequiredError`` BEFORE spawning any subprocess. No mocks, no
 monkeypatch - the model is real and the raise fires ahead of ``_spawn_acp_process``
-so nothing is launched. Relies on the canonical no-ambient-token test environment
-(the same assumption the harness wiring tests make). The one-sided guard (a
-NON-armed run does not trip) is covered by the pure-predicate tests in
+so nothing is launched. The model supplies explicit empty token values, masking
+any operator ambient token without mutating process state. The one-sided guard
+(a NON-armed run does not trip) is covered by the pure-predicate tests in
 ``test_acp_config_home.py``.
 """
 
@@ -37,7 +37,10 @@ async def test_armed_run_without_token_raises_isolation_required(
 ) -> None:
     model = AcpChatModel(
         command=_CLAUDE_CMD,
-        env_vars={},  # no lane token -> should_isolate False -> no config home
+        env_vars={
+            "CLAUDE_CODE_OAUTH_TOKEN": "",
+            "ANTHROPIC_AUTH_TOKEN": "",
+        },  # explicit empty lane overrides any operator ambient token
         mcp_servers=[
             {
                 "name": "vaultspec-rag",

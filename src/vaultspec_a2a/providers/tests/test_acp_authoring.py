@@ -238,9 +238,7 @@ class TestConfigHomeAuthoringEntry:
             ENV_ACTOR_TOKEN: "SECRET-ACTOR",
             ENV_RUN_ID: "run-777",
             ENV_SERVER_NAME: AUTHORING_MCP_SERVER_NAME,
-            ENV_CATALOG_JSON: json.dumps(
-                snapshot_to_catalog_payload(binding.snapshot)
-            ),
+            ENV_CATALOG_JSON: json.dumps(snapshot_to_catalog_payload(binding.snapshot)),
         }
         assert set(home_env) == set(expected_values)
         assert spawn_env == expected_values

@@ -1,44 +1,161 @@
-"""Versioned five-verb gateway wire models.
+"""Versioned gateway wire models.
 
-The engine pass-through forwards exactly five verbs across the frozen edge:
-``run-start``, ``run-status``, ``run-cancel``, ``presets-list``, and
-``service-state``. These models are the versioned, bounded, self-describing
-shapes those verbs speak. Every response carries an explicit ``api_version`` so
-the engine can wrap it verbatim inside its own tiers envelope and fence event
-shape drift; every field is bounded so a response is always safe to wrap under
-the engine's 8 MiB / 120 s caps.
+The engine pass-through forwards versioned, bounded, self-describing run and
+service operations across the edge. Every response carries an explicit
+``api_version`` so the engine can wrap it verbatim inside its own tiers envelope
+and fence event-shape drift; every field is bounded so a response is always safe
+to wrap under the engine's 8 MiB / 120 s caps.
 
-The verbs reshape the existing service surface rather than reinventing it:
+The gateway contract reshapes the existing service surface rather than
+reinventing it:
 ``run-start`` delegates to the same thread-create/dispatch flow the internal
-``/api`` surface uses, ``run-status`` composes the recovery snapshot, and the
-remaining three roll up cancel, preset listing, and health.
+``/api`` surface uses, ``run-status`` composes the recovery snapshot, active-run
+discovery projects bounded durable identities, and the operator verbs roll up
+cancel, preset listing, and health.
 """
 
 from __future__ import annotations
 
-from typing import Literal
+import re
+from enum import StrEnum
+from typing import Annotated, Literal
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from ...context.metadata import ThreadMetadata
 from ...thread.actor_tokens import ActorTokenBundle
 from ...thread.enums import ThreadStatus
 
 __all__ = [
+    "ActiveRunRecord",
+    "ActiveRunsResponse",
+    "DesktopReadiness",
+    "GatewayReadiness",
+    "LeaseId",
+    "LivenessResponse",
+    "LivenessState",
+    "PathSafeRunId",
     "PresetSummary",
     "PresetsListResponse",
     "ProfileSummary",
+    "ProviderEligibility",
+    "ReservationId",
     "RoleAssignmentSummary",
     "RoleState",
+    "RunAdmission",
     "RunCancelResponse",
+    "RunCommitResponse",
+    "RunPrepareResponse",
+    "RunStage",
     "RunStartRequest",
     "RunStartResponse",
     "RunStatusResponse",
     "ServiceStateResponse",
+    "TerminalSettlement",
     "TopologyPosition",
+    "WorkerLifecycleState",
 ]
 
 _API_VERSION = "v1"
+_PATH_SAFE_RUN_ID = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9_-]{0,127}$")
+PathSafeRunId = Annotated[
+    str,
+    Field(min_length=1, max_length=128, pattern=_PATH_SAFE_RUN_ID.pattern),
+]
+# A reservation identity is a server-minted opaque handle for a prepared
+# admission slot; a lease identity is the non-secret, run-scoped handle the
+# dashboard revokes at terminal settlement. Both share the run-id path-safe
+# shape so they are addressable and log-safe, and neither is ever a bearer.
+ReservationId = Annotated[
+    str,
+    Field(min_length=1, max_length=128, pattern=_PATH_SAFE_RUN_ID.pattern),
+]
+LeaseId = Annotated[
+    str,
+    Field(min_length=1, max_length=128, pattern=_PATH_SAFE_RUN_ID.pattern),
+]
+
+
+class LivenessState(StrEnum):
+    """Minimal process-liveness fact: the gateway answered, or it did not.
+
+    This is the only fact an unauthenticated caller ever observes. It proves
+    neither ownership nor readiness and discloses no product state.
+    """
+
+    ALIVE = "alive"
+    NOT_ALIVE = "not_alive"
+
+
+class GatewayReadiness(StrEnum):
+    """Whether a live gateway with a valid database is ready to be attached.
+
+    Independent of worker state: a live gateway with a valid database and a cold,
+    startable worker is ``ready``. A gateway-owned dependency failure - an invalid
+    or unreachable database - is ``not_ready``.
+    """
+
+    READY = "ready"
+    NOT_READY = "not_ready"
+
+
+class WorkerLifecycleState(StrEnum):
+    """The gateway-owned worker's rung on the cold-to-execution ladder.
+
+    ``cold`` is the pre-demand resting state: no worker exists yet and one is
+    startable on first execution demand. It is informational, never degradation.
+    ``starting`` is the single-flight startup window, ``ready`` is an up and
+    reachable worker, and ``unavailable`` is a worker that started but is down or
+    restarting after demand.
+    """
+
+    COLD = "cold"
+    STARTING = "starting"
+    READY = "ready"
+    UNAVAILABLE = "unavailable"
+
+
+class ProviderEligibility(StrEnum):
+    """Whether at least one subprocess provider command resolves on this host.
+
+    Computed through the no-instantiation classify seam: no provider is
+    constructed and no subprocess is spawned to determine it.
+    """
+
+    ELIGIBLE = "eligible"
+    INELIGIBLE = "ineligible"
+
+
+class RunAdmission(StrEnum):
+    """Whether the gateway would admit a run right now - the execution-ready fact.
+
+    ``ready`` means execution-ready: a reachable worker and an eligible provider.
+    ``deferred`` means gateway-ready but not yet execution-ready - the worker is
+    cold or starting and will start on demand (informational, not a failure).
+    ``blocked`` means a hard gateway dependency (the database) is unavailable.
+    """
+
+    READY = "ready"
+    DEFERRED = "deferred"
+    BLOCKED = "blocked"
+
+
+class RunStage(StrEnum):
+    """Which stage of the run-start verb a request drives.
+
+    The desktop admission protocol splits run-start into two authenticated
+    stages that share the single ``POST /v1/runs`` verb: ``prepare`` reserves a
+    bounded, expiring admission slot and validates worker and provider
+    eligibility without accepting tokens or creating any durable run, and
+    ``commit`` binds the dashboard-minted actor tokens to a stable run under a
+    prepared reservation. ``start`` is the pre-existing one-shot path (the engine
+    pass-through and Compose profile), preserved verbatim as the default so a
+    caller that omits the stage keeps the direct-start contract.
+    """
+
+    START = "start"
+    PREPARE = "prepare"
+    COMMIT = "commit"
 
 
 class RunStartRequest(BaseModel):
@@ -49,12 +166,20 @@ class RunStartRequest(BaseModel):
     dispatch path the internal thread-create flow uses — no second code path.
     """
 
+    # The stage this request drives. Absent means ``start`` - the direct one-shot
+    # path - so every pre-existing caller keeps its contract unchanged.
+    stage: RunStage = RunStage.START
+    # The prepared reservation a ``commit`` binds to. Required on ``commit``,
+    # forbidden on ``prepare`` and ``start`` (there is nothing to bind yet).
+    reservation_id: ReservationId | None = None
     # A non-empty preset is mandatory on the v1 verb: the engine-facing contract
     # never creates the internal surface's non-dispatched draft.
     team_preset: str = Field(min_length=1, max_length=64)
     # 64 KB cap bounds LLM token consumption and keeps the run-start payload safe
-    # to wrap under the engine pass-through caps.
-    message: str = Field(max_length=65536)
+    # to wrap under the engine pass-through caps. Empty is permitted only on a
+    # ``prepare``, which carries no opening message; ``start``/``commit`` require
+    # a non-empty prompt (enforced stage-aware below).
+    message: str = Field(default="", max_length=65536)
     actor_tokens: ActorTokenBundle | None = None
     metadata: ThreadMetadata | None = None
     autonomous: bool | None = None
@@ -66,7 +191,7 @@ class RunStartRequest(BaseModel):
     # Client-supplied stable run/idempotency id. When present the verb is
     # dispatch-exactly-once: a retry with the same id returns the existing run
     # instead of starting a second. Absent, the gateway mints a server-side id.
-    run_id: str | None = Field(default=None, min_length=1, max_length=128)
+    run_id: PathSafeRunId | None = None
     # model-profiles: the selected model profile id. Defaults to the implicit
     # team-defaults profile (the team's normal resolution). An unknown or
     # ineligible profile is refused before dispatch - never silently replaced.
@@ -77,12 +202,33 @@ class RunStartRequest(BaseModel):
     # batch read route. Bounded; content-addressed ("feedback-batch:<digest>").
     feedback_batch_id: str | None = Field(default=None, min_length=1, max_length=256)
 
-    @field_validator("message")
-    @classmethod
-    def _message_must_be_non_empty(cls, value: str) -> str:
-        """Reject an empty or whitespace-only prompt before dispatch."""
-        if not value.strip():
+    @model_validator(mode="after")
+    def _enforce_stage_invariants(self) -> RunStartRequest:
+        """Enforce the per-stage shape of the split run-start verb.
+
+        ``start`` and ``commit`` carry the run's opening prompt, so an empty or
+        whitespace-only message is refused as it always was. ``prepare`` accepts
+        no tokens and reserves nothing to bind, so a token bundle or a
+        reservation id on a prepare is a malformed request; ``commit`` must name
+        the reservation it binds.
+        """
+        if self.stage in (RunStage.START, RunStage.COMMIT) and not self.message.strip():
             raise ValueError("message must not be empty")
+        if self.stage == RunStage.PREPARE:
+            if self.actor_tokens is not None:
+                raise ValueError("prepare must not carry actor tokens")
+            if self.reservation_id is not None:
+                raise ValueError("prepare must not carry a reservation id")
+        if self.stage == RunStage.COMMIT and self.reservation_id is None:
+            raise ValueError("commit requires a reservation id")
+        return self
+
+    @field_validator("run_id")
+    @classmethod
+    def _run_id_must_be_path_safe(cls, value: str | None) -> str | None:
+        """Keep client identities addressable by every per-run gateway route."""
+        if value is not None and _PATH_SAFE_RUN_ID.fullmatch(value) is None:
+            raise ValueError("run_id must be a path-safe token")
         return value
 
 
@@ -104,6 +250,68 @@ class RunStartResponse(BaseModel):
     # path where the response is reconstructed from the existing run row.
     profile_id: str | None = None
     assignments: list[RoleAssignmentSummary] = Field(default_factory=list)
+
+
+class RunPrepareResponse(BaseModel):
+    """Acknowledge a prepared admission reservation.
+
+    Returned by the ``prepare`` stage of run-start. It carries the server-minted
+    reservation identity a later ``commit`` binds to, the bounded validated set of
+    roles that commit's actor-token bundle must cover, and the reservation's hard
+    expiry. The three readiness facts report why admission is or is not
+    execution-ready right now. No durable run exists yet and no token was
+    accepted; a reservation that is never committed simply expires.
+    """
+
+    api_version: Literal["v1"] = _API_VERSION
+    stage: Literal["prepared"] = "prepared"
+    reservation_id: str
+    # The roles commit's actor-token bundle must cover, one per required role.
+    required_roles: list[str] = Field(default_factory=list, max_length=64)
+    # ISO-8601 hard expiry; the slot is released automatically at this instant.
+    expires_at: str
+    worker_state: WorkerLifecycleState
+    provider_eligibility: ProviderEligibility
+    run_admission: RunAdmission
+    # Bounded, path-free reasons explaining a deferred or blocked admission.
+    reasons: list[str] = Field(default_factory=list, max_length=16)
+
+
+class RunCommitResponse(BaseModel):
+    """Acknowledge a run committed against a prepared reservation.
+
+    Returned by the ``commit`` stage. The reservation is consumed and a stable
+    run is created and dispatched with the bound actor tokens. ``lease_id`` is the
+    non-secret, run-scoped lease identity the dashboard revokes at terminal
+    settlement; it is an identifier, never a bearer.
+    """
+
+    api_version: Literal["v1"] = _API_VERSION
+    stage: Literal["committed"] = "committed"
+    run_id: str
+    status: str
+    lease_id: str
+    semantic_status: str = "starting"
+    nickname: str | None = None
+    profile_id: str | None = None
+    assignments: list[RoleAssignmentSummary] = Field(default_factory=list)
+
+
+class ActiveRunRecord(BaseModel):
+    """Minimal durable run identity used to recover a viewing binding."""
+
+    run_id: str = Field(min_length=1, max_length=128)
+    status: ThreadStatus
+    feature_tag: str | None = Field(default=None, max_length=128)
+
+
+class ActiveRunsResponse(BaseModel):
+    """Bounded, non-authoritative discovery result for active runs."""
+
+    api_version: Literal["v1"] = _API_VERSION
+    state: Literal["active"] = "active"
+    runs: list[ActiveRunRecord] = Field(default_factory=list, max_length=100)
+    truncated: bool = False
 
 
 class TopologyPosition(BaseModel):
@@ -296,3 +504,69 @@ class ServiceStateResponse(BaseModel):
     # process started before a route landed - there is no hot-reload, so a
     # stale resident silently 404s otherwise.
     routes: list[str] = Field(default_factory=list)
+    # The separated desktop readiness projection: process and product identity
+    # plus the five bounded facts. Built by the single readiness authority
+    # (``assemble_desktop_readiness``) so service-state and the authenticated
+    # liveness surface never compute readiness twice. Additive v1; absent on any
+    # response constructed before the readiness authority ran.
+    readiness: "DesktopReadiness | None" = None
+
+
+class LivenessResponse(BaseModel):
+    """The unauthenticated liveness body.
+
+    Deliberately minimal: it carries only the liveness fact and discloses no
+    process identity, product identity, or product state. An unauthenticated
+    caller of the desktop gateway observes this and nothing more.
+    """
+
+    liveness: LivenessState = LivenessState.ALIVE
+
+
+class DesktopReadiness(BaseModel):
+    """The authenticated desktop readiness projection.
+
+    Carries process and product identity alongside the five separate bounded
+    readiness facts. The facts are never collapsed into a single boolean: a cold,
+    startable worker leaves ``gateway_readiness`` ``ready`` while ``run_admission``
+    stays ``deferred``, so gateway-readiness and execution-readiness remain
+    distinct. Served only to an attach-authenticated caller.
+    """
+
+    api_version: Literal["v1"] = _API_VERSION
+    # Process identity.
+    gateway_pid: int
+    # Product identity: the running product generation and its profile.
+    generation: str
+    profile: str
+    # The five separate bounded facts.
+    liveness: LivenessState = LivenessState.ALIVE
+    gateway_readiness: GatewayReadiness
+    worker_state: WorkerLifecycleState
+    provider_eligibility: ProviderEligibility
+    eligible_providers: list[str] = Field(default_factory=list, max_length=16)
+    run_admission: RunAdmission
+    # Bounded, path-free reasons explaining a not-ready, cold, or deferred fact.
+    reasons: list[str] = Field(default_factory=list, max_length=16)
+
+
+class TerminalSettlement(BaseModel):
+    """The bounded terminal-settlement callback body.
+
+    Emitted by the gateway to the dashboard after a run reaches a durable
+    terminal state, authenticated with the dashboard-created attach-control
+    credential. It carries only non-secret identities - the run and its lease -
+    plus the terminal status, so the dashboard can revoke exactly that run's
+    lease. It never carries an actor token, the worker interprocess-communication
+    secret, or any other bearer.
+    """
+
+    api_version: Literal["v1"] = _API_VERSION
+    run_id: str = Field(min_length=1, max_length=128)
+    lease_id: str = Field(min_length=1, max_length=128)
+    terminal_status: ThreadStatus
+
+
+# ``ServiceStateResponse.readiness`` forward-references ``DesktopReadiness``,
+# defined below it; rebuild the model now that the target is in scope.
+ServiceStateResponse.model_rebuild()

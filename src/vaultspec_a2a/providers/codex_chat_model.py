@@ -41,6 +41,7 @@ from pydantic import Field, PrivateAttr
 
 from ..control.config import settings
 from ..team.team_config import AgentConfig
+from ..utils import package_version
 from ..workspace.environment import resolve_env_vars
 from ._acp_mcp import codex_mcp_server_specs
 from ._codex_config_home import build_codex_config_home, cleanup_codex_config_home
@@ -56,7 +57,7 @@ __all__ = ["CodexChatModel"]
 _CLIENT_INFO: dict[str, str] = {
     "title": "Vaultspec A2A",
     "name": "vaultspec-a2a",
-    "version": "0.1.0",
+    "version": package_version(),
 }
 # Opt out of the reasoning-summary delta firehose but keep agent-message deltas
 # for genuine token streaming (verified against codex-cli 0.144.4).

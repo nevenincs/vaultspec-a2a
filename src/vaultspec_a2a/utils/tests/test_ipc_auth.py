@@ -44,3 +44,30 @@ def test_missing_header_is_unauthorized() -> None:
         None, token="s3cr3t", environment=Environment.PRODUCTION
     )
     assert verdict is BearerVerdict.UNAUTHORIZED
+
+
+def test_wrong_tokens_of_every_length_are_rejected() -> None:
+    """A wrong bearer is rejected whether it is shorter, equal, or longer.
+
+    The constant-time compare handles unequal-length inputs without leaking, so
+    each of these must reject identically rather than one path short-circuiting.
+    """
+    for supplied in ("Bearer", "Bearer wrong0", "Bearer s3cr3tX", "Bearer " + "x" * 64):
+        verdict, detail = verify_internal_bearer(
+            supplied, token="s3cr3t", environment=Environment.TESTING
+        )
+        assert verdict is BearerVerdict.UNAUTHORIZED
+        assert detail == "Invalid internal token"
+
+
+def test_comparison_path_uses_the_constant_time_helper() -> None:
+    """The secret comparison routes through ``hmac.compare_digest``.
+
+    Certified at the source level so a future refactor cannot silently reintroduce
+    a data-dependent ``==``/``!=`` compare of the worker-IPC secret.
+    """
+    import inspect
+
+    source = inspect.getsource(verify_internal_bearer)
+    assert "hmac.compare_digest" in source
+    assert 'f"Bearer {token}"' in source

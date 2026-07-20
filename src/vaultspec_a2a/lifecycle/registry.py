@@ -115,11 +115,11 @@ class ProcRecord:
     internal_token_file: str = ""
     # The paired gateway base URL (VAULTSPEC_GATEWAY_URL) a worker heartbeats to. A
     # plain URL, not a secret; recorded so a procs-managed worker targets the dev
-    # gateway rather than auto-deriving the owner's resident gateway (port 8000).
+    # gateway rather than auto-deriving the owner's resident gateway (port 18000).
     gateway_url: str = ""
     # The paired worker base URL (VAULTSPEC_WORKER_URL) a gateway DISPATCHES to. A
     # plain URL; recorded so a procs-managed gateway targets the dev worker rather
-    # than auto-deriving the owner's resident worker (port 8001) - the campaign's
+    # than auto-deriving the owner's resident worker (port 18001) - the campaign's
     # master bug, where dispatch silently ran to a foreign worker.
     worker_url: str = ""
 

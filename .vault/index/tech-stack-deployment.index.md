@@ -3,8 +3,8 @@ generated: true
 tags:
   - '#index'
   - '#tech-stack-deployment'
-date: '2026-07-15'
-modified: '2026-07-15'
+date: '2026-07-19'
+modified: '2026-07-19'
 related:
   - '[[2026-02-26-tech-stack-deployment-adr]]'
 ---

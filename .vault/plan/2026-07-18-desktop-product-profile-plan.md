@@ -3,13 +3,23 @@ tags:
   - '#plan'
   - '#desktop-product-profile'
 date: '2026-07-18'
-modified: '2026-07-19'
+modified: '2026-07-20'
 tier: L3
 related:
   - '[[2026-07-18-desktop-product-profile-adr]]'
   - '[[2026-07-18-desktop-product-profile-research]]'
   - '[[2026-07-18-desktop-product-profile-reference]]'
 ---
+
+<!-- LINK RULES:
+     - [[wiki-links]] are ONLY for .vault/ documents in the
+       related: field above.
+     - The related: field carries the AUTHORISING documents
+       (ADR, research, reference, prior plan) for every Step in
+       this plan. Steps inherit this chain; per-row reference
+       footers do not exist.
+     - NEVER use [[wiki-links]] or markdown links in the
+       document body. -->
 
 <!-- RETIRED: P15, S88 -->
 
@@ -96,17 +106,23 @@ Move migrations, presets, Node.js adapter resolution, and component metadata beh
 - [x] `W01.P02.S07` - Resolve Alembic configuration and migration scripts from installed package resources; `src/vaultspec_a2a/database/migrate.py`.
 - [x] `W01.P02.S08` - Load bundled agent and team presets through package-owned resource paths; `src/vaultspec_a2a/team/team_config.py`.
 - [x] `W01.P02.S09` - Resolve the default Node and ACP adapter only from capsule-owned assets in the desktop profile; `src/vaultspec_a2a/providers/factory.py`.
-- [ ] `W01.P02.S10` - Define the versioned desktop component manifest contract consumed by dashboard packaging; `schemas/desktop-capsule-manifest.json`.
-- [ ] `W01.P02.S11` - Emit pinned component identity target compatibility gateway and standalone MCP entrypoints digests assets licenses and dependency-lock identity; `src/vaultspec_a2a/desktop/manifest.py`.
-- [ ] `W01.P02.S12` - Prove a clean built wheel contains package assets excludes tests and satisfies a real dashboard release-manifest fixture by pinned identity; `src/vaultspec_a2a/desktop_tests/test_component_contract.py`.
+- [x] `W01.P02.S10` - Define the versioned desktop component manifest contract consumed by dashboard packaging; `schemas/desktop-capsule-manifest.json`.
+- [x] `W01.P02.S11` - Emit pinned component identity target compatibility gateway and standalone MCP entrypoints digests assets licenses and dependency-lock identity; `src/vaultspec_a2a/desktop/manifest.py`.
+- [x] `W01.P02.S12` - Prove a clean built wheel contains package assets excludes tests and satisfies a real dashboard release-manifest fixture by pinned identity; `src/vaultspec_a2a/desktop_tests/test_component_contract.py`.
 
 ### Phase `W01.P03` - assemble and verify five target capsules
 
 Produce reproducible component artifacts for each accepted target triple with digests, licenses, and software bill of materials evidence.
 
-- [ ] `W01.P03.S13` - Assemble a deterministic target capsule from pinned Python Node ACP and package-owned inputs; `scripts/build_desktop_capsule.py`.
-- [ ] `W01.P03.S14` - Verify capsule identity target closure entrypoints digests licenses and software bill of materials without a source checkout; `scripts/verify_desktop_capsule.py`.
-- [ ] `W01.P03.S15` - Create the artifact workflow that publishes deterministic component archives and manifests for dashboard consumption; `.github/workflows/desktop-capsule.yml`.
+- [ ] `W01.P03.S13` - Assemble each deterministic target capsule directly inside one caller-owned final-name unpublished generation from verified retained Python Node ACP and package-owned inputs enforce aggregate dashboard path file license and cross-closure collision bounds and emit complete machine-readable installed-tree evidence without inner publication; `scripts/build_desktop_capsule.py`.
+- [ ] `W01.P03.S14` - Verify the complete caller-owned unpublished generation identity target closure entrypoints installed bytes digests licenses software bill of materials and evidence without a source checkout; `scripts/verify_desktop_capsule.py`.
+- [ ] `W01.P03.S15` - Publish only target-native unpublished generations and component evidence that passed producer verification for dashboard consumption; `.github/workflows/desktop-capsule.yml`.
+- [x] `W01.P03.S94` - Project archive payloads directly into one exclusively claimed prefix of a caller-owned unpublished generation through continuously leased descriptor or handle authority and return deterministic evidence without inner rename or cleanup; `src/vaultspec_a2a/desktop/capsule.py`.
+- [x] `W01.P03.S95` - Write deterministic capsule archives through one exact create-new file inside a caller-owned unpublished generation while sharing the bounded emitter and retaining fail-closed legacy publication behavior; `src/vaultspec_a2a/desktop/capsule_evidence.py, src/vaultspec_a2a/desktop/tests/test_unpublished_generation.py`.
+- [x] `W01.P03.S96` - Prove direct-generation projection and archive writing with real files and competing processes including collisions source and parent swaps partial failure evidence bounds and unchanged POSIX legacy-publication refusal; `src/vaultspec_a2a/desktop/tests/test_unpublished_generation.py, src/vaultspec_a2a/desktop/tests/test_capsule_archives.py, src/vaultspec_a2a/desktop/tests/test_capsule_publication_races.py`.
+- [x] `W01.P03.S97` - Atomically require one absent child name then acquire and continuously retain a no-follow exact lease of the current empty child before any write while leaving every failed or pre-lease-substituted unpublished generation inert for complete verification instead of cleanup or publication; `src/vaultspec_a2a/desktop/_filesystem_authority.py`.
+- [x] `W01.P03.S99` - Define versioned offline Python and ACP closure inventories that bind every content-addressed package target selection lock identity license claim and expected installed inventory before generation assembly; `src/vaultspec_a2a/desktop/closure_inventory.py, src/vaultspec_a2a/desktop/installed_inventory.py, src/vaultspec_a2a/desktop/lock_reconciliation.py, src/vaultspec_a2a/desktop/package_archives.py, src/vaultspec_a2a/desktop/wheel_compatibility.py, src/vaultspec_a2a/desktop/artifacts.py, src/vaultspec_a2a/desktop/tests/test_artifacts.py, src/vaultspec_a2a/desktop/tests/test_installed_inventory.py, src/vaultspec_a2a/desktop/tests/test_lock_reconciliation.py, src/vaultspec_a2a/desktop/tests/test_package_archives.py`.
+- [ ] `W01.P03.S100` - Consolidate package capsule and manifest archive scanning behind shared bounded member path ancestor collision expansion-ratio central-directory raw-tar and retained-session authorities before extraction; `src/vaultspec_a2a/desktop/_archive_authority.py, src/vaultspec_a2a/desktop/_capsule_archive_io.py, src/vaultspec_a2a/desktop/package_archives.py, src/vaultspec_a2a/desktop/capsule.py, src/vaultspec_a2a/desktop/manifest.py, src/vaultspec_a2a/desktop/artifacts.py, src/vaultspec_a2a/desktop/tests/test_artifacts.py, src/vaultspec_a2a/desktop/tests/test_package_archives.py, src/vaultspec_a2a/desktop/tests/test_capsule_archives.py, src/vaultspec_a2a/desktop/tests/test_manifest.py`.
 
 ## Wave `W02` - establish transactional desktop state
 
@@ -116,30 +132,30 @@ Deliver explicit mutable-state seating, schema validation, staged migration, and
 
 Define one desktop profile whose databases, checkpoints, credentials, discovery, receipts, logs, workspaces, temporary homes, and snapshots never derive from the launch directory.
 
-- [ ] `W02.P04.S16` - Define the desktop profile and validate explicit immutable and mutable product roots; `src/vaultspec_a2a/desktop/profile.py`.
-- [ ] `W02.P04.S17` - Derive database checkpoint log credential discovery receipt workspace temporary-home and snapshot paths only from the explicit desktop app home; `src/vaultspec_a2a/control/config.py`.
-- [ ] `W02.P04.S18` - Add the manifest-declared desktop gateway invocation without changing Compose or foreground serve defaults; `src/vaultspec_a2a/cli/main.py`.
-- [ ] `W02.P04.S19` - Prove desktop state remains app-home-seated across launch-directory changes and capsule relocation; `src/vaultspec_a2a/desktop_tests/test_profile_paths.py`.
+- [x] `W02.P04.S16` - Define the desktop profile and validate explicit immutable and mutable product roots; `src/vaultspec_a2a/desktop/profile.py`.
+- [x] `W02.P04.S17` - Derive database checkpoint log credential discovery receipt workspace temporary-home and snapshot paths only from the explicit desktop app home; `src/vaultspec_a2a/control/config.py`.
+- [x] `W02.P04.S18` - Add the manifest-declared desktop gateway invocation without changing Compose or foreground serve defaults; `src/vaultspec_a2a/cli/main.py`.
+- [x] `W02.P04.S19` - Prove desktop state remains app-home-seated across launch-directory changes and capsule relocation; `src/vaultspec_a2a/desktop_tests/test_profile_paths.py`.
 
 ### Phase `W02.P05` - separate schema validation from migration
 
 Keep ordinary desktop gateway boot non-mutating while exposing one package-local staged-generation migration entrypoint for the external updater.
 
-- [ ] `W02.P05.S20` - Make ordinary desktop database checkpointer and SDD initialization validate compatibility without schema mutation; `src/vaultspec_a2a/database/`.
-- [ ] `W02.P05.S21` - Validate the updater one-time descriptor owned state roots and compatible schema range before lifecycle mutation; `src/vaultspec_a2a/desktop/transaction.py`.
-- [ ] `W02.P05.S22` - Implement the staged-generation Alembic SDD-backfill and checkpoint migration entrypoint with bounded machine-readable results; `src/vaultspec_a2a/desktop/migration.py`.
-- [ ] `W02.P05.S23` - Expose the internal desktop migrate command while keeping lifecycle verbs off the public run-control API; `src/vaultspec_a2a/cli/main.py`.
-- [ ] `W02.P05.S24` - Run package-local migrations from a clean installed capsule and reject incompatible or live-store attempts; `src/vaultspec_a2a/desktop_tests/test_migration_entrypoint.py`.
+- [x] `W02.P05.S20` - Make ordinary desktop database checkpointer and SDD initialization validate compatibility without schema mutation; `src/vaultspec_a2a/database/`.
+- [x] `W02.P05.S21` - Validate the updater one-time descriptor owned state roots and compatible schema range before lifecycle mutation; `src/vaultspec_a2a/desktop/transaction.py`.
+- [x] `W02.P05.S22` - Implement the staged-generation Alembic SDD-backfill and checkpoint migration entrypoint with bounded machine-readable results; `src/vaultspec_a2a/desktop/migration.py`.
+- [x] `W02.P05.S23` - Expose the internal desktop migrate command while keeping lifecycle verbs off the public run-control API; `src/vaultspec_a2a/cli/main.py`.
+- [x] `W02.P05.S24` - Run package-local migrations from a clean installed capsule and reject incompatible or live-store attempts; `src/vaultspec_a2a/desktop_tests/test_migration_entrypoint.py`.
 
 ### Phase `W02.P06` - snapshot and restore a consistency group
 
 Capture and restore primary, checkpoint, and declared schema-bearing stores as one receipt-verifiable group after quiescence.
 
-- [ ] `W02.P06.S25` - Create temp-fsynced atomic snapshot descriptors and quiesced restore markers for every declared consistency-group store; `src/vaultspec_a2a/desktop/snapshot.py`.
-- [ ] `W02.P06.S26` - Bind mutable-store membership derivability and schema versions into the component manifest; `src/vaultspec_a2a/desktop/manifest.py`.
-- [ ] `W02.P06.S27` - Expose bounded snapshot inspect and restore commands for the external updater transaction; `src/vaultspec_a2a/cli/main.py`.
-- [ ] `W02.P06.S28` - Prove primary and checkpoint databases restore together from a real consistency group; `src/vaultspec_a2a/desktop_tests/test_snapshot_group.py`.
-- [ ] `W02.P06.S29` - Prove interrupted snapshot or restore never exposes a partially committed group; `src/vaultspec_a2a/desktop_tests/test_snapshot_recovery.py`.
+- [x] `W02.P06.S25` - Create temp-fsynced atomic snapshot descriptors and quiesced restore markers for every declared consistency-group store; `src/vaultspec_a2a/desktop/snapshot.py`.
+- [x] `W02.P06.S26` - Bind single-authority mutable-store membership, explicit schema versions, derivability evidence, compatibility rules, and exact generated-schema constraints into the component manifest; `src/vaultspec_a2a/desktop/snapshot.py, src/vaultspec_a2a/desktop/contract.py, src/vaultspec_a2a/desktop/manifest.py, src/vaultspec_a2a/desktop/migration.py, src/vaultspec_a2a/database/checkpoint_schema.py, src/vaultspec_a2a/database/compatibility.py, src/vaultspec_a2a/database/migrations/__init__.py, schemas/desktop-capsule-manifest.json, src/vaultspec_a2a/desktop/tests/fixtures/component-manifest-canonical-v1.b64, src/vaultspec_a2a/desktop/tests/fixtures/component-manifest-canonical-v1.sha256, src/vaultspec_a2a/desktop/tests/test_contract.py, src/vaultspec_a2a/desktop/tests/test_manifest.py, src/vaultspec_a2a/desktop/tests/test_migration.py, src/vaultspec_a2a/database/tests/test_checkpoint_schema.py, src/vaultspec_a2a/database/tests/test_checkpoint_state_migration.py, src/vaultspec_a2a/database/tests/test_compatibility.py`.
+- [x] `W02.P06.S27` - Expose bounded snapshot inspect and restore commands for the external updater transaction; `src/vaultspec_a2a/cli/main.py`.
+- [x] `W02.P06.S28` - Prove primary and checkpoint databases restore together from a real consistency group; `src/vaultspec_a2a/desktop_tests/test_snapshot_group.py`.
+- [x] `W02.P06.S29` - Prove interrupted snapshot or restore never exposes a partially committed group; `src/vaultspec_a2a/desktop_tests/test_snapshot_recovery.py`.
 
 ## Wave `W03` - bind runtime identity and authenticated readiness
 
@@ -149,38 +165,39 @@ Harden the desktop gateway with a lifetime singleton, secret-free discovery, spl
 
 Establish an operating-system-held runtime identity before listener publication and refuse live foreign or unverifiable residents without adopting them.
 
-- [ ] `W03.P07.S30` - Implement the cross-platform lifetime singleton and owner-matching stale-lock classification for one desktop app home; `src/vaultspec_a2a/lifecycle/singleton.py`.
-- [ ] `W03.P07.S31` - Replace token-bearing discovery with an atomic versioned profile generation protocol schema owner and ACL-reference record; `src/vaultspec_a2a/lifecycle/discovery.py`.
-- [ ] `W03.P07.S32` - Parse the versioned secret-free gateway discovery record without weakening engine authoring discovery; `src/vaultspec_a2a/authoring/discovery.py`.
-- [ ] `W03.P07.S33` - Acquire the desktop singleton before invoking Uvicorn socket bind and pass its ownership into gateway startup; `src/vaultspec_a2a/cli/main.py`.
-- [ ] `W03.P07.S34` - Prove two real desktop gateway processes cannot own or overwrite one app home; `src/vaultspec_a2a/desktop_tests/test_runtime_singleton.py`.
-- [ ] `W03.P07.S35` - Prove authenticated foreign attachment stale-owner recovery and immutable live-conflict behavior with real processes; `src/vaultspec_a2a/desktop_tests/test_discovery_ownership.py`.
+- [x] `W03.P07.S30` - Implement the cross-platform lifetime singleton and owner-matching stale-lock classification for one desktop app home; `src/vaultspec_a2a/lifecycle/singleton.py`.
+- [x] `W03.P07.S31` - Replace token-bearing discovery with an atomic versioned profile generation protocol schema owner and ACL-reference record; `src/vaultspec_a2a/lifecycle/discovery.py`.
+- [x] `W03.P07.S32` - Parse the versioned secret-free gateway discovery record without weakening engine authoring discovery; `src/vaultspec_a2a/authoring/discovery.py`.
+- [x] `W03.P07.S33` - Acquire the desktop singleton before invoking Uvicorn socket bind and pass its ownership into gateway startup; `src/vaultspec_a2a/cli/main.py`.
+- [x] `W03.P07.S34` - Prove two real desktop gateway processes cannot own or overwrite one app home; `src/vaultspec_a2a/desktop_tests/test_runtime_singleton.py`.
+- [x] `W03.P07.S35` - Prove authenticated foreign attachment stale-owner recovery and immutable live-conflict behavior with real processes; `src/vaultspec_a2a/desktop_tests/test_discovery_ownership.py`.
 
 ### Phase `W03.P08` - separate attach control and worker credentials
 
 Protect versioned product APIs and administrative operations with distinct owner-scoped credentials while keeping the worker IPC secret private to the gateway-worker pair.
 
-- [ ] `W03.P08.S36` - Validate dashboard-created attach and ownership files and create a distinct gateway-owned worker IPC credential with platform ACL checks; `src/vaultspec_a2a/desktop/credentials.py`.
-- [ ] `W03.P08.S37` - Model distinct attach credential worker IPC credential and receipt-bound lifecycle capability references; `src/vaultspec_a2a/control/config.py`.
-- [ ] `W03.P08.S38` - Implement constant-time attach and lifecycle capability dependencies with redacted failures; `src/vaultspec_a2a/api/dependencies.py`.
-- [ ] `W03.P08.S39` - Require the attach credential on the versioned five-verb run-control router without adding verbs; `src/vaultspec_a2a/api/routes/gateway.py`.
-- [ ] `W03.P08.S40` - Require attach authentication on dashboard product APIs while leaving minimal liveness ungated; `src/vaultspec_a2a/api/routes/__init__.py`.
-- [ ] `W03.P08.S41` - Require attach authentication before accepting desktop event WebSockets; `src/vaultspec_a2a/api/app.py`.
-- [ ] `W03.P08.S42` - Require both authenticated runtime control and receipt ownership for administrative shutdown; `src/vaultspec_a2a/api/routes/admin.py`.
-- [ ] `W03.P08.S43` - Enforce the worker IPC credential on dispatch events heartbeats health and administration; `src/vaultspec_a2a/worker/app.py`.
-- [ ] `W03.P08.S44` - Use only the worker IPC credential for gateway-facing event heartbeat and health traffic; `src/vaultspec_a2a/api/internal.py`.
-- [ ] `W03.P08.S45` - Read owner-scoped credential files for operator calls without accepting secret command-line arguments; `src/vaultspec_a2a/cli/main.py`.
-- [ ] `W03.P08.S46` - Prove attach-control worker IPC and lifecycle credentials are non-interchangeable rejected outside their planes and absent from discovery logs and responses; `src/vaultspec_a2a/desktop_tests/test_credential_boundaries.py`.
+- [x] `W03.P08.S36` - Validate dashboard-created attach and ownership files and create a distinct gateway-owned worker IPC credential with platform ACL checks; `src/vaultspec_a2a/desktop/credentials.py`.
+- [x] `W03.P08.S37` - Model distinct attach credential worker IPC credential and receipt-bound lifecycle capability references; `src/vaultspec_a2a/control/config.py`.
+- [x] `W03.P08.S38` - Implement constant-time attach and lifecycle capability dependencies with redacted failures; `src/vaultspec_a2a/api/dependencies.py`.
+- [x] `W03.P08.S39` - Require the attach credential on the versioned six-member whitelist (five run-control verbs plus bounded active-run discovery) without expanding it; `src/vaultspec_a2a/api/routes/gateway.py`.
+- [x] `W03.P08.S40` - Require attach authentication on dashboard product APIs while leaving minimal liveness ungated; `src/vaultspec_a2a/api/routes/__init__.py`.
+- [x] `W03.P08.S41` - Require attach authentication before accepting desktop event WebSockets; `src/vaultspec_a2a/api/app.py`.
+- [x] `W03.P08.S42` - Require both authenticated runtime control and receipt ownership for administrative shutdown; `src/vaultspec_a2a/api/routes/admin.py`.
+- [x] `W03.P08.S43` - Enforce the worker IPC credential on dispatch events heartbeats health and administration; `src/vaultspec_a2a/worker/app.py`.
+- [x] `W03.P08.S44` - Use only the worker IPC credential for gateway-facing event heartbeat and health traffic; `src/vaultspec_a2a/api/internal.py`.
+- [x] `W03.P08.S45` - Read owner-scoped credential files for operator calls without accepting secret command-line arguments; `src/vaultspec_a2a/cli/main.py`.
+- [x] `W03.P08.S46` - Prove attach-control worker IPC and lifecycle credentials are non-interchangeable rejected outside their planes and absent from discovery logs and responses; `src/vaultspec_a2a/desktop_tests/test_credential_boundaries.py`.
+- [ ] `W03.P08.S98` - Replace platform-skipped credential permission and link tests with real host-native assertions that never skip or xfail; `src/vaultspec_a2a/desktop/tests/test_credentials.py`.
 
 ### Phase `W03.P09` - serve one desktop readiness model
 
 Expose liveness, gateway readiness, worker state, provider eligibility, and run admission as separate bounded facts shared by discovery and service-state consumers.
 
-- [ ] `W03.P09.S47` - Define separate liveness gateway readiness worker state provider eligibility and run-admission fields; `src/vaultspec_a2a/api/schemas/gateway.py`.
-- [ ] `W03.P09.S48` - Make a valid desktop database with a cold startable worker gateway-ready without claiming execution readiness; `src/vaultspec_a2a/control/health.py`.
-- [ ] `W03.P09.S49` - Return only a minimal alive or not-alive signal from unauthenticated HTTP liveness and return process and product identity plus state only from authenticated readiness responses; `src/vaultspec_a2a/api/app.py`.
-- [ ] `W03.P09.S50` - Serve the same authenticated readiness facts through service-state and discovery probes; `src/vaultspec_a2a/api/routes/gateway.py`.
-- [ ] `W03.P09.S51` - Prove unauthenticated HTTP liveness exposes only the minimal alive or not-alive signal and authenticated readiness responses carry process and product identity plus cold-to-execution state; `src/vaultspec_a2a/desktop_tests/test_readiness_model.py`.
+- [x] `W03.P09.S47` - Define separate liveness gateway readiness worker state provider eligibility and run-admission fields; `src/vaultspec_a2a/api/schemas/gateway.py`.
+- [x] `W03.P09.S48` - Make a valid desktop database with a cold startable worker gateway-ready without claiming execution readiness; `src/vaultspec_a2a/control/health.py`.
+- [x] `W03.P09.S49` - Return only a minimal alive or not-alive signal from unauthenticated HTTP liveness and return process and product identity plus state only from authenticated readiness responses; `src/vaultspec_a2a/api/app.py`.
+- [x] `W03.P09.S50` - Serve the same authenticated readiness facts through service-state and discovery probes; `src/vaultspec_a2a/api/routes/gateway.py`.
+- [x] `W03.P09.S51` - Prove unauthenticated HTTP liveness exposes only the minimal alive or not-alive signal and authenticated readiness responses carry process and product identity plus cold-to-execution state; `src/vaultspec_a2a/desktop_tests/test_readiness_model.py`.
 
 ## Wave `W04` - enforce process and run ownership
 
@@ -190,10 +207,10 @@ Make the gateway the sole desktop worker owner, defer worker startup to executio
 
 Remove desktop boot and reconciliation spawn paths while preserving Compose standalone-worker behavior and atomic first-demand startup.
 
-- [ ] `W04.P10.S52` - Keep desktop boot and redispatch reconciliation from spawning a worker while preserving Compose startup behavior; `src/vaultspec_a2a/api/app.py`.
-- [ ] `W04.P10.S53` - Require a desktop gateway to spawn and own its worker without discovering adopting or evicting a Compose worker; `src/vaultspec_a2a/control/worker_management.py`.
-- [ ] `W04.P10.S54` - Trigger deferred reconciliation only after authenticated execution demand has completed worker single-flight readiness; `src/vaultspec_a2a/control/dispatch.py`.
-- [ ] `W04.P10.S55` - Prove concurrent first demand creates one real worker and idle desktop boot creates none; `src/vaultspec_a2a/desktop_tests/test_lazy_worker.py`.
+- [x] `W04.P10.S52` - Keep desktop boot and redispatch reconciliation from spawning a worker while preserving Compose startup behavior; `src/vaultspec_a2a/api/app.py`.
+- [x] `W04.P10.S53` - Require a desktop gateway to spawn and own its worker without discovering adopting or evicting a Compose worker; `src/vaultspec_a2a/control/worker_management.py`.
+- [x] `W04.P10.S54` - Trigger deferred reconciliation only after authenticated execution demand has completed worker single-flight readiness; `src/vaultspec_a2a/control/dispatch.py`.
+- [x] `W04.P10.S55` - Prove concurrent first demand creates one real worker and idle desktop boot creates none; `src/vaultspec_a2a/desktop_tests/test_lazy_worker.py`.
 
 ### Phase `W04.P11` - drain and terminate every owned descendant
 
@@ -205,31 +222,31 @@ The CLI-preserved `S89` through `S92` identifiers are intentionally interposed
 before `S62`; document order keeps each spawn or configuration hardening Step
 ahead of the integrated real-descendant proof.
 
-- [ ] `W04.P11.S56` - Implement a bounded drain gate that atomically closes admission tracks active runs and reports quiescence; `src/vaultspec_a2a/control/drain.py`.
-- [ ] `W04.P11.S57` - Apply the drain gate to run start cancellation and administrative stop paths; `src/vaultspec_a2a/api/routes/gateway.py`.
-- [ ] `W04.P11.S58` - Retain actor tokens through INPUT_REQUIRED and release active-run ownership tokens and child handles only on terminal outcomes; `src/vaultspec_a2a/worker/executor.py`.
-- [ ] `W04.P11.S59` - Spawn the desktop worker in a POSIX new session and owned process group or an assigned Windows Job Object or equivalently proven OS-owned job or tree before descendant work and retain containment for bounded shutdown; `src/vaultspec_a2a/control/worker_management.py`.
-- [ ] `W04.P11.S60` - Spawn each run-owned ACP or Codex provider root in a POSIX new session and owned process group or an assigned Windows Job Object or equivalently proven OS-owned job or tree before descendant work; `src/vaultspec_a2a/providers/_subprocess.py`.
-- [ ] `W04.P11.S61` - Terminate owned POSIX process groups with bounded killpg SIGTERM-to-SIGKILL escalation and assigned Windows Job Objects or equivalently proven OS-owned jobs or trees without recursive process discovery; `src/vaultspec_a2a/utils/process.py`.
-- [ ] `W04.P11.S89` - Audit and harden ACP terminal children to inherit the owning run containment and bounded reaper; `src/vaultspec_a2a/providers/_acp_rpc_handlers.py`.
-- [ ] `W04.P11.S90` - Audit and harden per-run authoring MCP launch specifications to remain descendants of the owning provider group; `src/vaultspec_a2a/providers/_acp_authoring.py`.
-- [ ] `W04.P11.S91` - Audit and harden projected project MCP configuration so only run-owned launch specifications enter the isolated provider tree; `src/vaultspec_a2a/providers/_acp_project_mcp.py`.
-- [ ] `W04.P11.S92` - Audit and harden declared harness MCP launch specifications to inherit the owning ACP or Codex provider group; `src/vaultspec_a2a/providers/_acp_mcp.py`.
-- [ ] `W04.P11.S62` - Prove real worker provider terminal authoring projected-project MCP and harness descendants are contained before work and reaped on every graceful and forced terminal path without recursive process discovery; `src/vaultspec_a2a/desktop_tests/test_owned_process_tree.py`.
+- [x] `W04.P11.S56` - Implement a bounded drain gate that atomically closes admission tracks active runs and reports quiescence; `src/vaultspec_a2a/control/drain.py`.
+- [x] `W04.P11.S57` - Apply the drain gate to run start cancellation and administrative stop paths; `src/vaultspec_a2a/api/routes/gateway.py`.
+- [x] `W04.P11.S58` - Retain actor tokens through INPUT_REQUIRED and release active-run ownership tokens and child handles only on terminal outcomes; `src/vaultspec_a2a/worker/executor.py`.
+- [x] `W04.P11.S59` - Spawn the desktop worker in a POSIX new session and owned process group or an assigned Windows Job Object or equivalently proven OS-owned job or tree before descendant work and retain containment for bounded shutdown; `src/vaultspec_a2a/control/worker_management.py`.
+- [x] `W04.P11.S60` - Spawn each run-owned ACP or Codex provider root in a POSIX new session and owned process group or an assigned Windows Job Object or equivalently proven OS-owned job or tree before descendant work; `src/vaultspec_a2a/providers/_subprocess.py`.
+- [x] `W04.P11.S61` - Terminate owned POSIX process groups with bounded killpg SIGTERM-to-SIGKILL escalation and assigned Windows Job Objects or equivalently proven OS-owned jobs or trees without recursive process discovery; `src/vaultspec_a2a/utils/process.py`.
+- [x] `W04.P11.S89` - Audit and harden ACP terminal children to inherit the owning run containment and bounded reaper; `src/vaultspec_a2a/providers/_acp_rpc_handlers.py`.
+- [x] `W04.P11.S90` - Audit and harden per-run authoring MCP launch specifications to remain descendants of the owning provider group; `src/vaultspec_a2a/providers/_acp_authoring.py`.
+- [x] `W04.P11.S91` - Audit and harden projected project MCP configuration so only run-owned launch specifications enter the isolated provider tree; `src/vaultspec_a2a/providers/_acp_project_mcp.py`.
+- [x] `W04.P11.S92` - Audit and harden declared harness MCP launch specifications to inherit the owning ACP or Codex provider group; `src/vaultspec_a2a/providers/_acp_mcp.py`.
+- [x] `W04.P11.S62` - Prove real worker provider terminal authoring projected-project MCP and harness descendants are contained before work and reaped on every graceful and forced terminal path without recursive process discovery; `src/vaultspec_a2a/desktop_tests/test_owned_process_tree.py`.
 
 ### Phase `W04.P12` - admit runs only after execution readiness
 
 Require worker and provider eligibility before durable run creation or actor-token acceptance, and keep standalone MCP outside the desktop lifecycle tree.
 
-- [ ] `W04.P12.S63` - Define prepare and commit variants bounded required-role output reservation identity lease identity and terminal settlement under run-start; `src/vaultspec_a2a/api/schemas/gateway.py`.
-- [ ] `W04.P12.S64` - Implement hard-bounded expiring prepare reservations that validate required roles capacity worker startup and provider readiness without run-owned children or durable runs; `src/vaultspec_a2a/control/admission.py`.
-- [ ] `W04.P12.S65` - Implement prepare and commit through the existing POST /v1/runs verb without durable state before commit; `src/vaultspec_a2a/api/routes/gateway.py`.
-- [ ] `W04.P12.S66` - Evaluate worker and provider eligibility before accepting actor tokens or creating a run; `src/vaultspec_a2a/control/run_start_policy.py`.
-- [ ] `W04.P12.S67` - Emit bounded terminal callbacks authenticated with the dashboard-created attach-control credential read by the gateway and containing run and non-secret lease identities only; `src/vaultspec_a2a/desktop/settlement.py`.
-- [ ] `W04.P12.S68` - Trigger the attach-control-authenticated settlement component idempotently after execution-state persistence on complete cancel and fail without exposing or requiring worker IPC; `src/vaultspec_a2a/control/event_handlers.py`.
-- [ ] `W04.P12.S69` - Prove prepare timeout cancellation and failed commit release capacity without a run token or run-owned child process; `src/vaultspec_a2a/desktop_tests/test_run_admission.py`.
-- [ ] `W04.P12.S70` - Prove attach-control-authenticated terminal callback retry rejects worker IPC and unrelated credentials while status reconciliation revokes exactly one run-scoped lease without raw tokens; `src/vaultspec_a2a/desktop_tests/test_terminal_settlement.py`.
-- [ ] `W04.P12.S71` - Certify a clean installed capsule starts and stops the standalone vaultspec-mcp adapter under caller ownership; `src/vaultspec_a2a/desktop_tests/test_standalone_mcp.py`.
+- [x] `W04.P12.S63` - Define prepare and commit variants bounded required-role output reservation identity lease identity and terminal settlement under run-start; `src/vaultspec_a2a/api/schemas/gateway.py`.
+- [x] `W04.P12.S64` - Implement hard-bounded expiring prepare reservations that validate required roles capacity worker startup and provider readiness without run-owned children or durable runs; `src/vaultspec_a2a/control/admission.py`.
+- [x] `W04.P12.S65` - Implement prepare and commit through the existing POST /v1/runs verb without durable state before commit; `src/vaultspec_a2a/api/routes/gateway.py`.
+- [x] `W04.P12.S66` - Evaluate worker and provider eligibility before accepting actor tokens or creating a run; `src/vaultspec_a2a/control/run_start_policy.py`.
+- [x] `W04.P12.S67` - Emit bounded terminal callbacks authenticated with the dashboard-created attach-control credential read by the gateway and containing run and non-secret lease identities only; `src/vaultspec_a2a/desktop/settlement.py`.
+- [x] `W04.P12.S68` - Trigger the attach-control-authenticated settlement component idempotently after execution-state persistence on complete cancel and fail without exposing or requiring worker IPC; `src/vaultspec_a2a/control/event_handlers.py`.
+- [x] `W04.P12.S69` - Prove prepare timeout cancellation and failed commit release capacity without a run token or run-owned child process; `src/vaultspec_a2a/desktop_tests/test_run_admission.py`.
+- [x] `W04.P12.S70` - Prove attach-control-authenticated terminal callback retry rejects worker IPC and unrelated credentials while status reconciliation revokes exactly one run-scoped lease without raw tokens; `src/vaultspec_a2a/desktop_tests/test_terminal_settlement.py`.
+- [x] `W04.P12.S71` - Certify a clean installed capsule starts and stops the standalone vaultspec-mcp adapter under caller ownership; `src/vaultspec_a2a/desktop_tests/test_standalone_mcp.py`.
 
 ## Wave `W05` - certify artifacts without regressing Compose
 
@@ -239,10 +256,10 @@ Exercise real installed artifacts, operating-system processes, mutable-state rec
 
 Run real-behavior capsule, security, state, process, and default-provider scenarios without fakes, mocks, stubs, patches, monkeypatches, skips, or expected failures.
 
-- [ ] `W05.P13.S72` - Build a real-process harness that installs invokes relocates and inspects a published desktop capsule; `src/vaultspec_a2a/desktop_tests/harness.py`.
-- [ ] `W05.P13.S73` - Prove clean offline install relocation cold readiness lazy worker and default ACP execution from one real capsule; `src/vaultspec_a2a/desktop_tests/test_artifact_install.py`.
-- [ ] `W05.P13.S74` - Prove migration rollback consistency restore tamper detection and immutable-file verification from real capsule state; `src/vaultspec_a2a/desktop_tests/test_artifact_state_lifecycle.py`.
-- [ ] `W05.P13.S75` - Prove authenticated attach owner-only shutdown drain and data-preserving capsule removal boundaries; `src/vaultspec_a2a/desktop_tests/test_artifact_ownership_lifecycle.py`.
+- [x] `W05.P13.S72` - Build a real-process harness that installs invokes relocates and inspects a published desktop capsule; `src/vaultspec_a2a/desktop_tests/harness.py`.
+- [x] `W05.P13.S73` - Prove clean offline install relocation cold readiness lazy worker and default ACP execution from one real capsule; `src/vaultspec_a2a/desktop_tests/test_artifact_install.py`.
+- [x] `W05.P13.S74` - Prove migration rollback consistency restore tamper detection and immutable-file verification from real capsule state; `src/vaultspec_a2a/desktop_tests/test_artifact_state_lifecycle.py`.
+- [x] `W05.P13.S75` - Prove authenticated attach owner-only shutdown drain and data-preserving capsule removal boundaries; `src/vaultspec_a2a/desktop_tests/test_artifact_ownership_lifecycle.py`.
 - [ ] `W05.P13.S76` - Certify Apple Silicon macOS capsule closure and upload its pinned component contract; `.github/workflows/desktop-capsule.yml`.
 - [ ] `W05.P13.S77` - Certify Intel macOS capsule closure and upload its pinned component contract; `.github/workflows/desktop-capsule.yml`.
 - [ ] `W05.P13.S78` - Certify Arm64 Linux capsule closure and upload its pinned component contract; `.github/workflows/desktop-capsule.yml`.
@@ -253,13 +270,13 @@ Run real-behavior capsule, security, state, process, and default-provider scenar
 
 Certify Compose gateway-worker separation, PostgreSQL, Jaeger, and the mandatory implementation review while reporting upstream provider gates honestly.
 
-- [ ] `W05.P14.S81` - Authenticate the Compose worker healthcheck without changing its independently managed worker topology; `service/docker-compose.prod.yml`.
-- [ ] `W05.P14.S82` - Authenticate the development Compose worker healthcheck without adopting it into desktop lifecycle; `service/docker-compose.dev.yml`.
-- [ ] `W05.P14.S83` - Authenticate the integration Compose worker healthcheck while retaining VidaiMock and Jaeger certification; `service/docker-compose.integration.yml`.
-- [ ] `W05.P14.S84` - Prove Compose gateway-worker separation PostgreSQL overlay Jaeger and operator lifecycle remain production-capable; `src/vaultspec_a2a/service_tests/test_compose_profile_regression.py`.
-- [ ] `W05.P14.S85` - Run desktop target and Compose certification as required release checks without expected-failure shortcuts; `.github/workflows/test.yml`.
-- [ ] `W05.P14.S86` - Perform the mandatory architecture security resource-bound and real-behavior code review; `.vault/audit/2026-07-18-desktop-product-profile-review-audit.md`.
-- [ ] `W05.P14.S87` - Report 2026-07-14-adr-authoring-orchestration-plan ownership of vaultspec-adr-research-mock.toml AUTO MIXED HUMAN reruns checkpoint_permission_without_durable_row and execution_state_projection_missing separately from provider gates; `.vault/audit/2026-07-18-desktop-product-profile-certification-audit.md`.
+- [x] `W05.P14.S81` - Authenticate the Compose worker healthcheck without changing its independently managed worker topology; `service/docker-compose.prod.yml`.
+- [x] `W05.P14.S82` - Authenticate the development Compose worker healthcheck without adopting it into desktop lifecycle; `service/docker-compose.dev.yml`.
+- [x] `W05.P14.S83` - Authenticate the integration Compose worker healthcheck while retaining VidaiMock and Jaeger certification; `service/docker-compose.integration.yml`.
+- [x] `W05.P14.S84` - Prove Compose gateway-worker separation PostgreSQL overlay Jaeger and operator lifecycle remain production-capable; `src/vaultspec_a2a/service_tests/test_compose_profile_regression.py`.
+- [x] `W05.P14.S85` - Run desktop target and Compose certification as required release checks without expected-failure shortcuts; `.github/workflows/test.yml`.
+- [x] `W05.P14.S86` - Perform the mandatory architecture security resource-bound and real-behavior code review; `.vault/audit/2026-07-18-desktop-product-profile-review-audit.md`.
+- [x] `W05.P14.S87` - Report 2026-07-14-adr-authoring-orchestration-plan ownership of vaultspec-adr-research-mock.toml AUTO MIXED HUMAN reruns checkpoint_permission_without_durable_row and execution_state_projection_missing separately from provider gates; `.vault/audit/2026-07-18-desktop-product-profile-certification-audit.md`.
 
 ## Parallelization
 

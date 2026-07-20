@@ -123,6 +123,13 @@ class DomainConfig(BaseModel):
         default=5,
         description="Max concurrent graph executions per worker.",
     )
+    admission_reservation_ttl_seconds: float = Field(
+        default=120.0,
+        description=(
+            "Seconds a desktop run-admission prepare reservation is held before it "
+            "expires and frees its bounded slot when no commit binds it."
+        ),
+    )
 
 
 class DomainSettingsConfig(BaseSettings, DomainConfig):

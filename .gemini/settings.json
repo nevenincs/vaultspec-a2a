@@ -1,0 +1,25 @@
+{
+  "experimental": {
+    "plan": true,
+    "enableAgents": true
+  },
+  "ui": {
+    "useAlternateBuffer": false,
+    "footer": {
+      "hideContextPercentage": false
+    },
+    "inlineThinkingMode": "full",
+    "hideBanner": true,
+    "showMemoryUsage": true,
+    "showCitations": true
+  },
+  "general": {
+    "enablePromptCompletion": true
+  },
+  "mcpServers": {
+    "context7": {
+      "command": "npx",
+      "args": ["-y", "@upstash/context7-mcp@latest"]
+    }
+  }
+}

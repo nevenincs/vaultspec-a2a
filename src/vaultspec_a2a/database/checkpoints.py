@@ -238,7 +238,12 @@ async def open_checkpointer() -> AsyncIterator[Checkpointer]:
         async with AsyncSqliteSaver.from_conn_string(
             settings.checkpoint_connection_string
         ) as checkpointer:
-            await checkpointer.setup()
+            # Desktop profile boot must not mutate schema: ``setup()`` creates the
+            # checkpointer tables, so it is suppressed when the profile is armed.
+            # The staged-generation migration entrypoint runs setup instead, and
+            # ordinary armed boot has already validated the schema is present.
+            if not settings.desktop_profile_armed:
+                await checkpointer.setup()
             # WAL lets the gateway's status reads run concurrently with the worker's
             # checkpoint writes on the shared file, instead of blocking on a writer's
             # lock (the recurring checkpoint_unavailable/missing degradations);

@@ -1,0 +1,11 @@
+{
+  "packages": {
+    "vaultspec-core": {
+      "install_mode": "dev"
+    },
+    "vaultspec-rag": {
+      "install_mode": "dependency"
+    }
+  },
+  "schema_version": "2.0"
+}

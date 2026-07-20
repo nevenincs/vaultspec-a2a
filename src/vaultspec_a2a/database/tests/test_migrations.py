@@ -9,6 +9,8 @@ Verifies:
 """
 
 import asyncio
+import json
+import os
 import sqlite3
 from pathlib import Path
 
@@ -125,7 +127,7 @@ class TestAlembicUpgradeDowngrade:
         row = conn.execute("SELECT version_num FROM alembic_version").fetchone()
         conn.close()
         assert row is not None
-        assert row[0] == "0007"
+        assert row[0] == "0008"
 
     def test_upgrade_head_rewrites_legacy_created_status(
         self, runtime_dir: Path
@@ -215,6 +217,64 @@ class TestAlembicUpgradeDowngrade:
             "degraded_reasons_json",
         } <= columns
 
+    def test_upgrade_head_backfills_active_run_selectors(
+        self, runtime_dir: Path
+    ) -> None:
+        """The selector migration projects metadata and terminal lifecycle state."""
+        db = runtime_dir / "active-run-selectors.db"
+        cfg = _make_config(db)
+        command.upgrade(cfg, "0007")
+        workspace = str((runtime_dir / "workspace").resolve())
+        canonical_workspace = os.path.normcase(os.path.realpath(workspace))
+
+        conn = sqlite3.connect(str(db))
+        conn.executemany(
+            """
+            INSERT INTO threads (
+                id, created_at, updated_at, status, thread_metadata
+            ) VALUES (?, ?, ?, ?, ?)
+            """,
+            [
+                (
+                    "active-run",
+                    "2026-07-19 00:00:00",
+                    "2026-07-19 00:00:00",
+                    "running",
+                    json.dumps({"workspace_root": workspace, "feature_tag": "a2a"}),
+                ),
+                (
+                    "completed-run",
+                    "2026-07-19 00:00:01",
+                    "2026-07-19 00:00:01",
+                    "completed",
+                    None,
+                ),
+            ],
+        )
+        conn.commit()
+        conn.close()
+
+        command.upgrade(cfg, "head")
+
+        conn = sqlite3.connect(str(db))
+        rows = conn.execute(
+            "SELECT id, workspace_root, feature_tag, is_active FROM threads ORDER BY id"
+        ).fetchall()
+        indexes = {
+            row[1] for row in conn.execute("PRAGMA index_list(threads)").fetchall()
+        }
+        conn.close()
+
+        assert rows == [
+            ("active-run", canonical_workspace, "a2a", 1),
+            ("completed-run", None, None, 0),
+        ]
+        assert {
+            "ix_threads_active_order",
+            "ix_threads_active_workspace_order",
+            "ix_threads_active_workspace_feature_order",
+        } <= indexes
+
 
 class TestPackageResourceResolution:
     """The runtime migration path resolves scripts from installed package data."""
@@ -291,7 +351,7 @@ class TestRunMigrations:
             conn.close()
 
         assert version is not None
-        assert version[0] == "0007"
+        assert version[0] == "0008"
 
     @pytest.mark.asyncio
     async def test_run_migrations_with_percent_directory_reaches_head(
@@ -311,7 +371,7 @@ class TestRunMigrations:
             conn.close()
 
         assert version is not None
-        assert version[0] == "0007"
+        assert version[0] == "0008"
 
     @pytest.mark.asyncio
     async def test_concurrent_run_migrations_upgrades_both_databases(
@@ -337,5 +397,5 @@ class TestRunMigrations:
                 conn.close()
 
             assert version is not None
-            assert version[0] == "0007"
+            assert version[0] == "0008"
             assert _get_tables(database) >= _APP_TABLES

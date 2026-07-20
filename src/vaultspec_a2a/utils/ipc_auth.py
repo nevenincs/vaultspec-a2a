@@ -11,6 +11,7 @@ with the caller while the rule itself lives in one place.
 
 from __future__ import annotations
 
+import hmac
 from enum import StrEnum
 
 from .enums import Environment
@@ -43,6 +44,10 @@ def verify_internal_bearer(
                 f"VAULTSPEC_INTERNAL_TOKEN required in {environment.value} environment"
             )
         return BearerVerdict.OK, ""
-    if authorization != f"Bearer {token}":
+    # Constant-time compare so verifying the worker-IPC secret never leaks its
+    # bytes through data-dependent timing; parity with the attach, lifecycle, and
+    # WebSocket gates on the same credential planes.
+    supplied = (authorization or "").encode("utf-8")
+    if not hmac.compare_digest(supplied, f"Bearer {token}".encode()):
         return BearerVerdict.UNAUTHORIZED, "Invalid internal token"
     return BearerVerdict.OK, ""

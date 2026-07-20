@@ -1,12 +1,13 @@
 [project]
 name = "vaultspec-a2a"
 version = "0.1.0"
-description = "Headless A2A agent orchestration for the vaultspec workflow (gateway + worker, engine-facing five-verb edge)"
+description = "Headless A2A agent orchestration for the vaultspec workflow (gateway + worker, engine-facing six-member whitelist)"
 requires-python = ">=3.13"
+license = "MIT"
+license-files = ["LICENSE"]
 
 dependencies = [
   "anyio>=4.9.0",
-  "apscheduler>=3.10",
   "aiosqlite>=0.20.0",
   "fastapi>=0.133.1",
   "httpx>=0.28.1",
@@ -19,6 +20,7 @@ dependencies = [
   "opentelemetry-instrumentation-fastapi>=0.60b0",
   "pydantic>=2.12.5",
   "pydantic-settings>=2.13.1",
+  "pyyaml>=6.0.2",
   "rich>=14.3.2",
   "sqlalchemy[asyncio]>=2.0.40",
   "starlette>=0.52.1",
@@ -43,15 +45,17 @@ rag = [
 
 [project.scripts]
 vaultspec-a2a = "vaultspec_a2a.cli.main:main"
-vaultspec-mcp = "vaultspec_a2a.protocols.mcp.__main__:main"
+vaultspec-a2a-mcp = "vaultspec_a2a.protocols.mcp.__main__:main"
 
 [dependency-groups]
 docs = [
   "sphinx>=8.2",
 ]
 tooling = [
+  "actionlint-py==1.7.12.24",
   "deptry>=0.23.0",
   "identify>=2.0.0",
+  "jsonschema>=4.26.0",
   "nodeenv>=1.0.0",
   "packaging>=25.0",
   "prek>=0.3.2",
@@ -64,6 +68,7 @@ tooling = [
   "ty>=0.0.15",
   "vaultspec-core>=0.1.48,<0.2",
   "websockets>=16.0",
+  "zstandard>=0.25.0",
 ]
 dev = [
   { include-group = "tooling" },
@@ -200,16 +205,19 @@ indent-style = "space"
 
 [tool.deptry]
 extend_exclude = ["knowledge"]
+known_first_party = ["vaultspec_a2a"]
 
 [tool.deptry.package_module_name_map]
 opentelemetry-sdk = "opentelemetry"
 opentelemetry-exporter-otlp-proto-grpc = "opentelemetry"
 opentelemetry-instrumentation-fastapi = "opentelemetry"
 pytest-asyncio = "pytest_asyncio"
+torch = "torch"
 
 [tool.deptry.per_rule_ignores]
 # DEP002: packages invoked as CLI tools or loaded via URL scheme (not direct Python imports)
 DEP002 = [
+  "actionlint-py",
   "ruff",
   "ty",
   "prek",
@@ -222,14 +230,22 @@ DEP002 = [
   # aiosqlite is loaded as the SQLAlchemy async driver via the URL scheme
   # "sqlite+aiosqlite://..." — never imported directly.
   "aiosqlite",
+  # Uvicorn loads websockets as its protocol backend.
+  "websockets",
+  # The server profile loads PostgreSQL drivers through SQLAlchemy URLs.
+  "asyncpg",
+  "psycopg",
+  # The RAG profile provisions its runtime and MCP service out of process.
+  "torch",
+  "vaultspec-rag",
 ]
-# DEP004: test files inside src/**/ import dev packages (pytest, tenacity) as expected.
-# This is the standard src-layout pattern; suppressing per-package is cleaner than
-# excluding all test directories from scanning.
+# DEP004: tests and documentation extensions import their owning development groups.
 DEP004 = [
+  "jsonschema",
   "packaging",
   "pytest",
   "pytest_asyncio",
+  "sphinx",
   "tenacity",
 ]
 

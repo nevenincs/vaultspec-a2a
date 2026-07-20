@@ -11,6 +11,12 @@ resolution-markers = [
 ]
 
 [[package]]
+name = "actionlint-py"
+version = "1.7.12.24"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/6f/0b/3f29683dfbe94208fb5c3806806a6ef419972892e25c3c4f95198f68c978/actionlint_py-1.7.12.24.tar.gz", hash = "sha256:7571b0724fde79b2572b98b2b53792c470249d4db29951b57fc49b9cd3eaf11e", size = 12071, upload-time = "2026-03-31T06:21:35.015Z" }
+
+[[package]]
 name = "aiosqlite"
 version = "0.22.1"
 source = { registry = "https://pypi.org/simple" }
@@ -70,18 +76,6 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/61/cc/a381afa6efea9f496eff839d4a6a1aed3bfafc7b3ab4b0d1b243a12573dd/anyio-4.14.2.tar.gz", hash = "sha256:cfa139f3ed1a23ee8f88a145ddb5ac7605b8bbfd8592baacd7ce3d8bb4313c7f", size = 260176, upload-time = "2026-07-12T20:29:07.082Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/da/35/f2287558c17e29fafc8ef3daf819bb9834061cfa43bff8014f7df7f63bdc/anyio-4.14.2-py3-none-any.whl", hash = "sha256:9f505dda5ac9f0c8309b5e8bd445a8c2bf7246f3ce950121e45ea15bc41d1494", size = 125813, upload-time = "2026-07-12T20:29:05.763Z" },
-]
-
-[[package]]
-name = "apscheduler"
-version = "3.11.3"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "tzlocal" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/8c/6b/eeff360196bb20b312c9e762a820fd1b2c6d809466c755ef57863478e454/apscheduler-3.11.3.tar.gz", hash = "sha256:cd2fcc9330039a81a5893472ad49facf23a6d5604cbe1d918c835c6de7834d5a", size = 110312, upload-time = "2026-06-28T19:39:22.493Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/42/c9/8638db32514dbb9157b3d82680c6faea89283523edf9ed2415ea3884f2ae/apscheduler-3.11.3-py3-none-any.whl", hash = "sha256:bbeb2ec02d23d3c06a6c07ed7f0f3939ada6680eb121fae809a69bb42c537a30", size = 66024, upload-time = "2026-06-28T19:39:20.982Z" },
 ]
 
 [[package]]
@@ -3037,18 +3031,6 @@ wheels = [
 ]
 
 [[package]]
-name = "tzlocal"
-version = "5.4.4"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "tzdata", marker = "sys_platform == 'win32'" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/81/5b/879b2f932adfa7a053c360d50bc896c977fa6426109185f7c12ebdd0cb9d/tzlocal-5.4.4.tar.gz", hash = "sha256:8dbb8660838688a7b6ba4fed31d18dedf842afb4d47ca050d6d891c2c15f3be4", size = 31170, upload-time = "2026-06-29T08:03:40.026Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/9e/a4/017a7a6cbe387d961a688ec31364ae60a5c4e22c96ae9921b79a947c855d/tzlocal-5.4.4-py3-none-any.whl", hash = "sha256:aae09f0126a8a86fa736be266eb4a471380d26a0de3bc14844e7821fee3e2a15", size = 18115, upload-time = "2026-06-29T08:03:38.666Z" },
-]
-
-[[package]]
 name = "urllib3"
 version = "2.7.0"
 source = { registry = "https://pypi.org/simple" }
@@ -3130,7 +3112,6 @@ dependencies = [
     { name = "aiosqlite" },
     { name = "alembic" },
     { name = "anyio" },
-    { name = "apscheduler" },
     { name = "click" },
     { name = "fastapi" },
     { name = "httpx" },
@@ -3144,6 +3125,7 @@ dependencies = [
     { name = "opentelemetry-sdk" },
     { name = "pydantic" },
     { name = "pydantic-settings" },
+    { name = "pyyaml" },
     { name = "rich" },
     { name = "sqlalchemy", extra = ["asyncio"] },
     { name = "starlette" },
@@ -3166,8 +3148,10 @@ server = [
 
 [package.dev-dependencies]
 all = [
+    { name = "actionlint-py" },
     { name = "deptry" },
     { name = "identify" },
+    { name = "jsonschema" },
     { name = "nodeenv" },
     { name = "packaging" },
     { name = "prek" },
@@ -3181,10 +3165,13 @@ all = [
     { name = "ty" },
     { name = "vaultspec-core" },
     { name = "websockets" },
+    { name = "zstandard" },
 ]
 dev = [
+    { name = "actionlint-py" },
     { name = "deptry" },
     { name = "identify" },
+    { name = "jsonschema" },
     { name = "nodeenv" },
     { name = "packaging" },
     { name = "prek" },
@@ -3197,13 +3184,16 @@ dev = [
     { name = "ty" },
     { name = "vaultspec-core" },
     { name = "websockets" },
+    { name = "zstandard" },
 ]
 docs = [
     { name = "sphinx" },
 ]
 tooling = [
+    { name = "actionlint-py" },
     { name = "deptry" },
     { name = "identify" },
+    { name = "jsonschema" },
     { name = "nodeenv" },
     { name = "packaging" },
     { name = "prek" },
@@ -3216,6 +3206,7 @@ tooling = [
     { name = "ty" },
     { name = "vaultspec-core" },
     { name = "websockets" },
+    { name = "zstandard" },
 ]
 
 [package.metadata]
@@ -3223,7 +3214,6 @@ requires-dist = [
     { name = "aiosqlite", specifier = ">=0.20.0" },
     { name = "alembic", specifier = ">=1.15.1" },
     { name = "anyio", specifier = ">=4.9.0" },
-    { name = "apscheduler", specifier = ">=3.10" },
     { name = "asyncpg", marker = "extra == 'server'", specifier = ">=0.30.0" },
     { name = "click", specifier = ">=8.1" },
     { name = "fastapi", specifier = ">=0.133.1" },
@@ -3241,6 +3231,7 @@ requires-dist = [
     { name = "psycopg", extras = ["binary", "pool"], marker = "extra == 'server'", specifier = ">=3.2.9" },
     { name = "pydantic", specifier = ">=2.12.5" },
     { name = "pydantic-settings", specifier = ">=2.13.1" },
+    { name = "pyyaml", specifier = ">=6.0.2" },
     { name = "rich", specifier = ">=14.3.2" },
     { name = "sqlalchemy", extras = ["asyncio"], specifier = ">=2.0.40" },
     { name = "starlette", specifier = ">=0.52.1" },
@@ -3254,8 +3245,10 @@ provides-extras = ["server", "rag"]
 
 [package.metadata.requires-dev]
 all = [
+    { name = "actionlint-py", specifier = "==1.7.12.24" },
     { name = "deptry", specifier = ">=0.23.0" },
     { name = "identify", specifier = ">=2.0.0" },
+    { name = "jsonschema", specifier = ">=4.26.0" },
     { name = "nodeenv", specifier = ">=1.0.0" },
     { name = "packaging", specifier = ">=25.0" },
     { name = "prek", specifier = ">=0.3.2" },
@@ -3269,10 +3262,13 @@ all = [
     { name = "ty", specifier = ">=0.0.15" },
     { name = "vaultspec-core", specifier = ">=0.1.48,<0.2" },
     { name = "websockets", specifier = ">=16.0" },
+    { name = "zstandard", specifier = ">=0.25.0" },
 ]
 dev = [
+    { name = "actionlint-py", specifier = "==1.7.12.24" },
     { name = "deptry", specifier = ">=0.23.0" },
     { name = "identify", specifier = ">=2.0.0" },
+    { name = "jsonschema", specifier = ">=4.26.0" },
     { name = "nodeenv", specifier = ">=1.0.0" },
     { name = "packaging", specifier = ">=25.0" },
     { name = "prek", specifier = ">=0.3.2" },
@@ -3285,11 +3281,14 @@ dev = [
     { name = "ty", specifier = ">=0.0.15" },
     { name = "vaultspec-core", specifier = ">=0.1.48,<0.2" },
     { name = "websockets", specifier = ">=16.0" },
+    { name = "zstandard", specifier = ">=0.25.0" },
 ]
 docs = [{ name = "sphinx", specifier = ">=8.2" }]
 tooling = [
+    { name = "actionlint-py", specifier = "==1.7.12.24" },
     { name = "deptry", specifier = ">=0.23.0" },
     { name = "identify", specifier = ">=2.0.0" },
+    { name = "jsonschema", specifier = ">=4.26.0" },
     { name = "nodeenv", specifier = ">=1.0.0" },
     { name = "packaging", specifier = ">=25.0" },
     { name = "prek", specifier = ">=0.3.2" },
@@ -3302,6 +3301,7 @@ tooling = [
     { name = "ty", specifier = ">=0.0.15" },
     { name = "vaultspec-core", specifier = ">=0.1.48,<0.2" },
     { name = "websockets", specifier = ">=16.0" },
+    { name = "zstandard", specifier = ">=0.25.0" },
 ]
 
 [[package]]

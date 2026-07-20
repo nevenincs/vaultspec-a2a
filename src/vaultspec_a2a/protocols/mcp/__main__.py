@@ -9,7 +9,7 @@ Run independently of the gateway via stdio or Streamable HTTP transport::
     python -m vaultspec_a2a.protocols.mcp --transport streamable-http
 
 Environment variables:
-    VAULTSPEC_GATEWAY_URL         Gateway API base URL (default: http://localhost:8000)
+    VAULTSPEC_GATEWAY_URL         Gateway API base URL (default: http://localhost:18000)
     VAULTSPEC_MCP_HOST            Bind host for streamable-http (default: 0.0.0.0)
     VAULTSPEC_MCP_PORT            Bind port for streamable-http (default: 8200)
 """

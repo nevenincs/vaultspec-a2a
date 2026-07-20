@@ -17,4 +17,4 @@ Auto-generated index of all documents tagged with `#control-layer-cli-justfile-s
 
 ### adr
 
-- `2026-03-19-control-layer-cli-justfile-separation-adr` - `control-layer-cli-justfile-separation` adr: `adr-038` | (**status:** `accepted`)
+- `2026-03-19-control-layer-cli-justfile-separation-adr` - `control-layer-cli-justfile-separation` adr: `adr-038` | (**status:** `superseded`)

@@ -17,7 +17,7 @@ def test_committed_procs_toml_matches_the_adr_bands() -> None:
     """The committed procs.toml declares exactly the pinned bands and residents."""
     config = load_procs_config()
 
-    assert config.resident == {"engine": 8767, "gateway": 8000}
+    assert config.resident == {"engine": 8767, "gateway": 18000, "worker": 18001}
 
     bands = {name: (rc.band.start, rc.band.end) for name, rc in config.roles.items()}
     assert bands["engine-dev"] == (18760, 18769)

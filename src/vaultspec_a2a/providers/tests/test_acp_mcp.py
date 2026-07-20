@@ -1,13 +1,15 @@
 """Unit tests for the harness MCP-server registry and composition.
 
-Real objects only, no mocks: the registry is a plain dict and the composition
-runs against a real ``AcpChatModel`` and a real non-ACP stand-in.
+Real objects only, no mocks: composition runs against production
+``AcpChatModel``, ``CodexChatModel``, and ``ChatOpenAI`` instances.
 """
 
 from __future__ import annotations
 
+import subprocess
+
 import pytest
-from langchain_core.language_models.fake_chat_models import FakeListChatModel
+from langchain_openai import ChatOpenAI
 
 from ...thread.errors import ConfigError
 from .._acp_mcp import (
@@ -27,7 +29,50 @@ def test_resolve_known_server_returns_stdio_spec() -> None:
     assert spec["name"] == "vaultspec-rag"
     assert spec["command"] == "uvx"
     # uvx invokes the published package's console script, cwd-independent.
-    assert spec["args"] == ["--from", "vaultspec-rag", "vaultspec-search-mcp"]
+    assert spec["args"] == [
+        "--from",
+        "vaultspec-rag[mcp]==0.3.2",
+        "vaultspec-search-mcp",
+    ]
+
+
+def test_harness_specs_are_provider_child_launch_specs_not_self_spawned() -> None:
+    """Audit lock: the harness registry emits launch SPECS only, never a spawn.
+
+    The ACP/Codex provider CLI spawns each declared harness server as its own
+    child, so the server is a descendant of the run-owned provider root and
+    inherits that root's OS containment. This registry module never spawns a
+    process itself, so there is no separate reaper to wire.
+    """
+    import vaultspec_a2a.providers._acp_mcp as mod
+
+    spec = resolve_harness_mcp_servers(["vaultspec-rag"])[0]
+    # A child-launch spec the provider spawns: command + args, no live process.
+    assert set(spec) <= {"name", "command", "args", "env"}
+    assert "command" in spec
+    for banned in (
+        "subprocess",
+        "Popen",
+        "spawn_acp_process",
+        "create_subprocess_exec",
+        "ProcessContainment",
+    ):
+        assert not hasattr(mod, banned), f"registry module must not spawn ({banned})"
+
+
+def test_locked_rag_runtime_acquisition_executes_the_published_cli() -> None:
+    """The resolved production launch command acquires a runnable locked MCP CLI."""
+    spec = resolve_harness_mcp_servers(["vaultspec-rag"])[0]
+    proc = subprocess.run(
+        [spec["command"], *spec["args"], "--help"],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=120,
+    )
+
+    assert proc.returncode == 0, proc.stderr
+    assert "vaultspec-search-mcp" in proc.stdout
 
 
 def test_resolve_launch_spec_excludes_registry_only_tools_metadata() -> None:
@@ -78,9 +123,10 @@ def test_compose_empty_names_is_a_noop() -> None:
 
 
 def test_compose_on_non_acp_model_returns_it_unchanged() -> None:
-    # A model without a ``with_mcp_servers`` surface (hosted API, fake) is a
-    # pass-through: composition never fabricates an MCP surface.
-    model = FakeListChatModel(responses=["ok"])
+    # Construction is network-free; the model is never invoked. A production
+    # hosted model has no local MCP delivery surface, so composition must remain
+    # an identity-preserving pass-through.
+    model = ChatOpenAI(model="gpt-4o-mini", api_key="unused-test-key")
     assert compose_harness_mcp_servers(model, ["vaultspec-rag"]) is model
 
 
@@ -102,13 +148,6 @@ def test_compose_dispatches_to_codex_harness_delivery() -> None:
     composed = compose_harness_mcp_servers(model, ["vaultspec-rag"])
     assert isinstance(composed, CodexChatModel)
     assert composed.harness_mcp_servers == ["vaultspec-rag"]
-
-
-def test_compose_still_noops_only_for_genuinely_no_mcp_models() -> None:
-    # A model with NEITHER delivery mechanism (no with_mcp_servers, no
-    # with_harness_mcp_servers) is the only one returned unchanged.
-    model = FakeListChatModel(responses=["ok"])
-    assert compose_harness_mcp_servers(model, ["vaultspec-rag"]) is model
 
 
 def test_compose_is_add_only_union_with_existing_servers() -> None:
@@ -193,22 +232,32 @@ def test_config_home_servers_selects_registry_known_shapes_for_claude_json() -> 
     # registry-known harness server is selected and shaped for .claude.json.
     session = [
         {"name": "vaultspec-authoring", "command": "node", "args": ["bridge.js"]},
-        {"name": "vaultspec-rag", "command": "uvx",
-         "args": ["--from", "vaultspec-rag", "vaultspec-search-mcp"]},
+        {
+            "name": "vaultspec-rag",
+            "command": "uvx",
+            "args": [
+                "--from",
+                "vaultspec-rag[mcp]==0.3.2",
+                "vaultspec-search-mcp",
+            ],
+        },
     ]
     home = config_home_mcp_servers(session)
     assert set(home) == {"vaultspec-rag"}
     assert home["vaultspec-rag"] == {
         "type": "stdio",
         "command": "uvx",
-        "args": ["--from", "vaultspec-rag", "vaultspec-search-mcp"],
+        "args": [
+            "--from",
+            "vaultspec-rag[mcp]==0.3.2",
+            "vaultspec-search-mcp",
+        ],
     }
 
 
 def test_config_home_servers_preserves_env_when_present() -> None:
     session = [
-        {"name": "vaultspec-rag", "command": "uvx", "args": ["x"],
-         "env": {"K": "V"}},
+        {"name": "vaultspec-rag", "command": "uvx", "args": ["x"], "env": {"K": "V"}},
     ]
     home = config_home_mcp_servers(session)
     assert home["vaultspec-rag"]["env"] == {"K": "V"}
@@ -217,9 +266,9 @@ def test_config_home_servers_preserves_env_when_present() -> None:
 def test_live_preset_harness_drives_read_only_rag_composition() -> None:
     """The live preset's declared harness composes exactly the read-only rag surface.
 
-    End-to-end proof of the P03.S12 activation: the real ``vaultspec-adr-research``
-    preset's ``[team.harness]`` declaration flows through ``effective_harness`` into
-    the composition, so the opt-in makes rag grounding LIVE for its document roles.
+    The real ``vaultspec-adr-research`` preset's ``[team.harness]`` declaration
+    flows through ``effective_harness`` into composition, so the opt-in makes RAG
+    grounding live for its document roles.
     Walks the full chain preset harness -> effective_harness -> harness allowlist ->
     compose, and asserts the composed session advertises the vaultspec-rag stdio
     server while exactly its READ tools join the autonomous allowlist - no write
@@ -269,55 +318,24 @@ def test_every_registry_entry_is_marked_read_only() -> None:
         assert entry.get("read_only") is True, name
 
 
-def test_config_home_refuses_a_non_read_only_registry_entry() -> None:
-    # Runtime fail-loud guard: even if a non-read-only entry drifts into the
-    # registry, config_home_mcp_servers refuses to write it into the surfacing
-    # home rather than silently exposing a write-capable server.
-    from .. import _acp_mcp
-
-    _acp_mcp._KNOWN_MCP_SERVERS["danger-writer"] = {
-        "name": "danger-writer",
-        "command": "x",
-        "tools": ("write_thing",),
-    }
-    try:
-        with pytest.raises(ConfigError):
-            config_home_mcp_servers([{"name": "danger-writer", "command": "x"}])
-    finally:
-        del _acp_mcp._KNOWN_MCP_SERVERS["danger-writer"]
-
-
 def test_codex_specs_resolves_read_only_registry_entry_with_tools() -> None:
     specs = codex_mcp_server_specs(["vaultspec-rag"])
     assert len(specs) == 1
     spec = specs[0]
     assert spec["name"] == "vaultspec-rag"
     assert spec["command"] == "uvx"
-    assert spec["args"] == ["--from", "vaultspec-rag", "vaultspec-search-mcp"]
-    # The read tools ride along for the Codex enabled_tools allowlist (S19).
+    assert spec["args"] == [
+        "--from",
+        "vaultspec-rag[mcp]==0.3.2",
+        "vaultspec-search-mcp",
+    ]
+    # The read tools ride along for the Codex enabled_tools allowlist.
     assert spec["tools"] == ["search_vault", "search_codebase", "get_code_file"]
 
 
 def test_codex_specs_unknown_name_raises() -> None:
     with pytest.raises(ConfigError):
         codex_mcp_server_specs(["does-not-exist"])
-
-
-def test_codex_specs_refuses_non_read_only_entry() -> None:
-    # Same trust-root guard as the Claude transport: registry drift toward a
-    # write-capable entry fails loud before it can reach the Codex config.toml.
-    from .. import _acp_mcp
-
-    _acp_mcp._KNOWN_MCP_SERVERS["danger-writer"] = {
-        "name": "danger-writer",
-        "command": "x",
-        "tools": ("write_thing",),
-    }
-    try:
-        with pytest.raises(ConfigError):
-            codex_mcp_server_specs(["danger-writer"])
-    finally:
-        del _acp_mcp._KNOWN_MCP_SERVERS["danger-writer"]
 
 
 def test_compose_unknown_name_raises() -> None:
@@ -330,6 +348,6 @@ def test_compose_unknown_name_raises_even_on_non_acp_model() -> None:
     # An unknown declared name is a configuration error even when composition is
     # inapplicable: the loud refusal is uniform across model types, not swallowed
     # by the non-ACP pass-through.
-    model = FakeListChatModel(responses=["ok"])
+    model = ChatOpenAI(model="gpt-4o-mini", api_key="unused-test-key")
     with pytest.raises(ConfigError):
         compose_harness_mcp_servers(model, ["totally-unknown"])

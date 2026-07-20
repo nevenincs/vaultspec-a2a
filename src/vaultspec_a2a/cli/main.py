@@ -1,6 +1,6 @@
 """The ``vaultspec-a2a`` operator CLI.
 
-A minimal operator surface restored as a thin client of the five-verb gateway —
+A minimal operator surface restored as a thin client of the gateway whitelist —
 ``serve``, ``doctor`` (service-state), ``presets`` (presets-list), and
 ``run start``/``status``/``cancel``. There is no second code path: every command
 except ``serve`` is a plain HTTP call to the same ``/v1`` endpoints the engine
@@ -14,15 +14,21 @@ overridable with ``--url`` for operators driving a non-default bind.
 from __future__ import annotations
 
 import json
+import os
 import sys
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
+from urllib.parse import urlsplit
 
 import click
 import httpx
 
 from ..control.config import settings
-from ..utils import configure_logging, reconfigure_console_utf8
+from ..utils import configure_logging, package_version, reconfigure_console_utf8
+
+if TYPE_CHECKING:
+    from ..lifecycle.singleton import RuntimeSingleton
 
 __all__ = ["main"]
 
@@ -51,10 +57,58 @@ def _emit(response: httpx.Response) -> None:
         sys.exit(1)
 
 
-def _request(method: str, url: str, **kwargs: Any) -> httpx.Response:
-    """Issue one gateway request, turning transport errors into a clean exit."""
+def _read_desktop_attach_credential() -> str | None:
+    """Read the owner-scoped attach credential file for the armed desktop profile.
+
+    Operator calls authenticate with the same dashboard-created attach credential
+    the gateway reads, sourced from its owner-restricted file rather than any
+    command-line argument. Returns ``None`` when the profile is unarmed or the file
+    is absent or malformed, so the caller falls through to its other credential
+    sources.
+    """
+    if not settings.desktop_profile_armed:
+        return None
+    references = settings.desktop_credential_paths
+    if references is None:
+        return None
+    from ..desktop.credentials import CredentialError, load_attach_credential
+
     try:
-        return httpx.request(method, url, **kwargs)
+        return load_attach_credential(references.credentials_dir)
+    except CredentialError:
+        return None
+
+
+def _request(method: str, url: str, **kwargs: Any) -> httpx.Response:
+    """Issue one authenticated gateway request or report a transport failure.
+
+    A directly configured token is authoritative. Under the armed desktop profile
+    the operator reads the owner-scoped attach credential file next; no secret is
+    ever accepted as a command-line argument. Otherwise a local request may reuse
+    the fresh resident discovery token, but only when the URL's loopback port
+    matches that discovery record; a user-supplied remote URL never receives a
+    machine-local discovery credential.
+    """
+    token = settings.gateway_service_token
+    parsed = urlsplit(url)
+    if token is None and parsed.hostname in {"127.0.0.1", "localhost", "::1"}:
+        token = _read_desktop_attach_credential()
+    if token is None and parsed.hostname in {"127.0.0.1", "localhost", "::1"}:
+        from ..lifecycle.discovery import DiscoveryState, read_resident_service
+
+        state, info = read_resident_service(settings.a2a_home)
+        if (
+            state is DiscoveryState.FRESH
+            and info is not None
+            and info.port == parsed.port
+        ):
+            token = info.service_token
+
+    headers = dict(kwargs.pop("headers", {}))
+    if token is not None:
+        headers.setdefault("Authorization", f"Bearer {token}")
+    try:
+        return httpx.request(method, url, headers=headers, **kwargs)
     except httpx.HTTPError as exc:
         raise click.ClickException(
             f"could not reach the gateway at {url}: {exc}"
@@ -62,6 +116,7 @@ def _request(method: str, url: str, **kwargs: Any) -> httpx.Response:
 
 
 @click.group()
+@click.version_option(package_version(), "--version", "-V", prog_name="vaultspec-a2a")
 def main() -> None:
     """Operator CLI for the vaultspec-a2a orchestration gateway."""
     # CLI lane: human diagnostics on stderr, stdout reserved for command output
@@ -71,12 +126,313 @@ def main() -> None:
     configure_logging("cli")
 
 
+def _acquire_desktop_singleton() -> RuntimeSingleton | None:
+    """Acquire the desktop runtime singleton before the gateway binds, or fail loud.
+
+    Ordering (per the desktop profile decision): the operating-system runtime
+    singleton is taken over the explicit application home *before* the listener
+    binds and *before* discovery is published, so two gateways can never own one
+    application home. A live foreign or unverifiable resident is an immutable
+    conflict — the caller must attach to it, not start a competitor — and this
+    raises a loud, non-zero ``ClickException`` carrying the classification.
+
+    Returns the held singleton (kept alive for the gateway's lifetime and released
+    on shutdown) or ``None`` when the desktop profile is not armed. The versioned
+    secret-free discovery record is published by the gateway lifetime after bind,
+    schema validation, and control-auth setup; it reads this held singleton for
+    its owner identity. That publication seam lands with the gateway credential
+    work; acquisition and ownership registration are wired here now.
+    """
+    if not settings.desktop_profile_armed:
+        return None
+    return _acquire_singleton_for_serve(settings.a2a_home)
+
+
+def _acquire_singleton_for_serve(app_home: Path) -> RuntimeSingleton:
+    """Take the runtime singleton over *app_home* or fail loud with the conflict.
+
+    Factored from :func:`_acquire_desktop_singleton` so the acquisition-and-fail
+    path can be exercised against a real held application home without booting the
+    gateway. Registers the held singleton as this process's active owner.
+    """
+    from ..lifecycle.singleton import (
+        SingletonConflictError,
+        acquire_singleton,
+        set_active_singleton,
+    )
+
+    try:
+        singleton = acquire_singleton(app_home)
+    except SingletonConflictError as exc:
+        raise click.ClickException(str(exc)) from exc
+    set_active_singleton(singleton)
+    return singleton
+
+
 @main.command()
 def serve() -> None:
-    """Start the local gateway (boots the existing app; no second code path)."""
+    """Start the local gateway (boots the existing app; no second code path).
+
+    Under the desktop profile the runtime singleton is acquired before the app
+    boots so the socket bind and discovery publication follow sole-ownership; it
+    is released when the gateway stops.
+    """
     from ..api.app import main as serve_gateway
 
-    serve_gateway()
+    singleton = _acquire_desktop_singleton()
+    try:
+        serve_gateway()
+    finally:
+        if singleton is not None:
+            from ..lifecycle.singleton import clear_active_singleton
+
+            singleton.release()
+            clear_active_singleton()
+
+
+@dataclass(frozen=True)
+class _DesktopServePlan:
+    """The armed environment and re-exec argv for a desktop gateway launch."""
+
+    env: dict[str, str]
+    argv: list[str]
+
+
+def _prepare_desktop_serve(
+    app_home: Path,
+    capsule_root: Path,
+    *,
+    host: str | None,
+    port: int | None,
+) -> _DesktopServePlan:
+    """Validate the desktop roots and build the armed serve re-exec plan.
+
+    Resolves and fail-closed validates the profile (both roots absolute and
+    distinct, the capsule carrying its runtime assets, the application home
+    writable or creatable), materialises the mutable-state directories, and
+    returns the environment that arms the desktop profile plus the argv that
+    re-execs the existing ``serve`` path. Path resolution and gateway boot stay
+    with the profile authority and the gateway; this only assembles the launch.
+
+    Raises:
+        DesktopProfileError: If either root or a required capsule asset is
+            invalid.
+    """
+    from ..desktop.profile import DesktopProfile
+
+    profile = DesktopProfile.resolve(app_home, capsule_root)
+    profile.ensure()
+
+    env = {
+        "VAULTSPEC_DESKTOP_APP_HOME": str(profile.app_home),
+        "VAULTSPEC_CAPSULE_ASSETS": str(profile.capsule_assets_root),
+    }
+    if host is not None:
+        env["VAULTSPEC_HOST"] = host
+    if port is not None:
+        env["VAULTSPEC_PORT"] = str(port)
+    argv = [sys.executable, "-m", "vaultspec_a2a.cli.main", "serve"]
+    return _DesktopServePlan(env=env, argv=argv)
+
+
+@main.command("desktop-serve")
+@click.option(
+    "--app-home",
+    required=True,
+    type=click.Path(path_type=Path),
+    help="Explicit absolute mutable-state root for the desktop profile.",
+)
+@click.option(
+    "--capsule-root",
+    required=True,
+    type=click.Path(path_type=Path),
+    help="Explicit absolute immutable capsule (runtime asset) root.",
+)
+@click.option("--host", default=None, help="Override the gateway bind host.")
+@click.option("--port", type=int, default=None, help="Override the gateway bind port.")
+def desktop_serve(
+    app_home: Path,
+    capsule_root: Path,
+    host: str | None,
+    port: int | None,
+) -> None:
+    """Arm the desktop profile and start the gateway via the existing serve path.
+
+    Seats every mutable path under the explicit application home and binds the
+    capsule assets root, then re-execs ``serve`` in a freshly armed interpreter
+    so the gateway boots with the desktop settings in force. Compose and plain
+    ``serve`` invocations are unaffected; no run-control lifecycle verb is added.
+    """
+    from ..desktop.profile import DesktopProfileError
+
+    try:
+        plan = _prepare_desktop_serve(app_home, capsule_root, host=host, port=port)
+    except DesktopProfileError as exc:
+        raise click.ClickException(str(exc)) from exc
+
+    os.environ.update(plan.env)
+    os.execv(plan.argv[0], plan.argv)
+
+
+@main.command("desktop-migrate")
+@click.option(
+    "--descriptor",
+    required=True,
+    type=click.Path(path_type=Path),
+    help="Path to the one-time migration transaction descriptor JSON.",
+)
+def desktop_migrate(descriptor: Path) -> None:
+    """Run the staged-generation desktop migration authorised by a descriptor.
+
+    Internal external-updater command: it applies the packaged Alembic upgrade,
+    checkpointer setup, and state-driven-development backfill against the
+    descriptor's own stores, then prints the bounded machine-readable result as
+    JSON to stdout. This lifecycle verb is deliberately CLI-only and is never
+    exposed on the run-control HTTP API; the exit status is zero only when the
+    migration succeeds.
+    """
+    import asyncio
+
+    from ..desktop.migration import run_staged_migration
+
+    result = asyncio.run(run_staged_migration(descriptor))
+    click.echo(json.dumps(result.model_dump(mode="json"), indent=2, sort_keys=True))
+    if result.status != "succeeded":
+        sys.exit(1)
+
+
+def _emit_snapshot_failure(operation: str, exc: Exception) -> None:
+    """Print a bounded machine-readable snapshot failure and exit non-zero.
+
+    The operator-facing detail names the offending store or descriptor so a
+    failed updater transaction is actionable; the exit status carries the failure
+    so automation need not parse the payload.
+    """
+    click.echo(
+        json.dumps(
+            {
+                "status": "failed",
+                "operation": operation,
+                "error_class": type(exc).__name__,
+                "detail": str(exc),
+            },
+            indent=2,
+            sort_keys=True,
+        )
+    )
+    sys.exit(1)
+
+
+@main.command("desktop-snapshot-create")
+@click.option(
+    "--app-home",
+    required=True,
+    type=click.Path(path_type=Path),
+    help="Explicit absolute mutable-state root for the desktop profile.",
+)
+@click.option(
+    "--group-id",
+    required=True,
+    help="Single-component identity for the new snapshot group.",
+)
+def desktop_snapshot_create(app_home: Path, group_id: str) -> None:
+    """Capture the desktop consistency group as one committed snapshot.
+
+    Internal external-updater command: after quiescence it captures the primary
+    and checkpoint stores as one receipt-verifiable group and prints the committed
+    group descriptor as JSON to stdout. It refuses a live or locked store and a
+    group id that is already committed. This lifecycle verb is CLI-only and is
+    never exposed on the run-control HTTP API; the exit status is zero only when
+    the group commits.
+    """
+    from ..desktop.snapshot import SnapshotError, create_snapshot
+
+    try:
+        descriptor = create_snapshot(app_home, group_id)
+    except SnapshotError as exc:
+        _emit_snapshot_failure("create", exc)
+        return
+    click.echo(json.dumps(descriptor.model_dump(mode="json"), indent=2, sort_keys=True))
+
+
+@main.command("desktop-snapshot-inspect")
+@click.option(
+    "--app-home",
+    required=True,
+    type=click.Path(path_type=Path),
+    help="Explicit absolute mutable-state root for the desktop profile.",
+)
+@click.option(
+    "--group-id",
+    required=True,
+    help="Identity of the committed snapshot group to inspect.",
+)
+def desktop_snapshot_inspect(app_home: Path, group_id: str) -> None:
+    """Print a committed snapshot group's descriptor after integrity-checking it.
+
+    Internal external-updater command: it reports a group only when its descriptor
+    is committed and every captured store still matches its recorded digest, and
+    prints the descriptor as JSON to stdout. An uncommitted or corrupt group makes
+    the command fail closed and exit non-zero. CLI-only; never HTTP-exposed.
+    """
+    from ..desktop.snapshot import SnapshotError, inspect_snapshot
+
+    try:
+        descriptor = inspect_snapshot(app_home, group_id)
+    except SnapshotError as exc:
+        _emit_snapshot_failure("inspect", exc)
+        return
+    click.echo(json.dumps(descriptor.model_dump(mode="json"), indent=2, sort_keys=True))
+
+
+@main.command("desktop-snapshot-restore")
+@click.option(
+    "--app-home",
+    required=True,
+    type=click.Path(path_type=Path),
+    help="Explicit absolute mutable-state root for the desktop profile.",
+)
+@click.option(
+    "--group-id",
+    required=True,
+    help="Identity of the committed snapshot group to restore.",
+)
+@click.option(
+    "--resume/--no-resume",
+    "resume",
+    default=False,
+    help="Roll forward an interrupted restore instead of refusing.",
+)
+def desktop_snapshot_restore(app_home: Path, group_id: str, resume: bool) -> None:
+    """Restore the desktop consistency group from a committed snapshot.
+
+    Internal external-updater command: after quiescence it restores every group
+    member from its verified captured copy under a quiesced-restore marker, then
+    prints a bounded JSON result to stdout. It requires the quiesced condition and
+    refuses a live or locked store; an interrupted restore is refused unless
+    ``--resume`` is given, which rolls it forward deterministically. CLI-only;
+    never HTTP-exposed. The exit status is zero only when the group is restored.
+    """
+    from ..desktop.snapshot import SnapshotError, restore_snapshot
+
+    try:
+        outcome = restore_snapshot(app_home, group_id, resume=resume)
+    except SnapshotError as exc:
+        _emit_snapshot_failure("restore", exc)
+        return
+    click.echo(
+        json.dumps(
+            {
+                "status": "succeeded",
+                "operation": "restore",
+                "group_id": outcome.group_id,
+                "restored": [store.value for store in outcome.restored],
+                "resumed": outcome.resumed,
+            },
+            indent=2,
+            sort_keys=True,
+        )
+    )
 
 
 def _expected_route_signature() -> list[str]:
@@ -396,7 +752,7 @@ def procs_reap() -> None:
     default="",
     help="Paired worker base URL (VAULTSPEC_WORKER_URL) a gateway dispatches to. "
     "Recorded per process so the gateway targets the dev worker rather than "
-    "auto-deriving the owner's resident worker (port 8001).",
+    "auto-deriving the owner's resident worker (port 18001).",
 )
 @click.option(
     "--log", "log_path", default=None, help="Append process output to this file."

@@ -24,6 +24,7 @@ __all__ = [
     "db",
     "diagnostics",
     "dispatch",
+    "drain",
     "event_handlers",
     "health",
     "hooks",

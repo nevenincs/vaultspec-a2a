@@ -3,8 +3,8 @@ generated: true
 tags:
   - '#index'
   - '#layer-2d'
-date: '2026-07-15'
-modified: '2026-07-15'
+date: '2026-07-19'
+modified: '2026-07-19'
 related:
   - '[[2026-03-28-layer-2d-phase1-track-a-exec]]'
   - '[[2026-03-28-layer-2d-phase2-track-a-exec]]'

@@ -1,0 +1,94 @@
+name: Bug report
+description: Report reproducible behavior that differs from what you expected.
+title: "[Bug]: "
+labels: ["bug"]
+assignees: []
+
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Don't include credentials, tokens, personal data, or vulnerability details.
+        Report vulnerabilities through [private vulnerability reporting](https://github.com/nevenincs/vaultspec-a2a/security/advisories/new).
+
+  - type: checkboxes
+    id: prerequisites
+    attributes:
+      label: Before submitting
+      options:
+        - label: This issue contains no sensitive information.
+          required: true
+        - label: I searched existing issues for this problem.
+          required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+      description: Describe what you expected to happen.
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+      description: Describe what happened instead, including error messages.
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction steps
+      description: Provide the shortest sequence that reproduces the problem.
+      placeholder: |
+        1. Run ...
+        2. Configure ...
+        3. Observe ...
+    validations:
+      required: true
+
+  - type: dropdown
+    id: affected_area
+    attributes:
+      label: Affected area
+      options:
+        - Product CLI
+        - Gateway
+        - Worker
+        - Just facade
+        - Process registry
+        - Compose stack
+        - Vaultspec Core or RAG tooling
+        - Documentation
+        - Other or unsure
+    validations:
+      required: true
+
+  - type: input
+    id: environment
+    attributes:
+      label: Environment
+      description: Provide your operating system and Python, Just, and uv versions.
+      placeholder: "OS: Windows 11; Python: 3.13; Just: 1.46; uv: 0.11"
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: Remove secrets and sensitive information before adding relevant logs.
+      render: shell
+
+  - type: textarea
+    id: validation
+    attributes:
+      label: Validation
+      description: List exact commands and results. If not run, explain why.
+      placeholder: |
+        Command: just ci
+        Result: ...
+    validations:
+      required: true

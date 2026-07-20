@@ -355,8 +355,9 @@ async def create_and_dispatch_thread(
 ) -> ThreadCreationResult:
     """Create a thread row, build dispatch payload, and dispatch to worker.
 
-    Commits the session before returning — the service owns its
-    transaction boundary.  Does **not** raise ``HTTPException`` — returns
+    Durably reserves the thread id before any external worker dispatch, then
+    commits final dispatch state before returning. The service owns both
+    transaction boundaries. Does **not** raise ``HTTPException`` — returns
     a result that the caller translates into HTTP status codes.
 
     Raises:
@@ -400,8 +401,14 @@ async def create_and_dispatch_thread(
     )
     await mark_ingest_requested(db, thread.id)
 
+    # The client-supplied id is the dispatch idempotency boundary. Commit the
+    # SUBMITTED row and requested control action before crossing the worker HTTP
+    # boundary: status confirmation after a lost POST acknowledgement can now
+    # always observe the reservation, and a concurrent same-id start loses the
+    # primary-key race before either request can dispatch twice.
+    await db.commit()
+
     if not requires_dispatch(req.team_preset):
-        await db.commit()
         return ThreadCreationResult(
             thread_id=thread.id,
             status=thread.status,

@@ -3,8 +3,8 @@ generated: true
 tags:
   - '#index'
   - '#react-tailwind-figma-migration'
-date: '2026-07-15'
-modified: '2026-07-15'
+date: '2026-07-19'
+modified: '2026-07-19'
 related:
   - '[[2026-02-28-react-tailwind-figma-migration-adr]]'
 ---

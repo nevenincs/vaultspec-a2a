@@ -1,7 +1,8 @@
-"""The versioned five-verb gateway surface.
+"""The versioned gateway surface.
 
 Mounts ``run-start``, ``run-status``, ``run-cancel``, ``presets-list``, and
-``service-state`` under ``/v1`` as the engine-facing edge, plus ``run-stream``
+``service-state`` under ``/v1`` as the engine-facing edge, plus bounded active
+run discovery and ``run-stream``
 (GET ``/runs/{run_id}/stream``) - the droppable SSE progress companion to the
 authoritative ``run-status`` snapshot. Each verb reshapes an existing service
 rather than reinventing it, so there is a single code path: the richer internal
@@ -11,8 +12,9 @@ rather than reinventing it, so there is a single code path: the richer internal
 import asyncio
 import logging
 import os
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import httpx
 from fastapi import APIRouter, Depends, FastAPI, Header, HTTPException, Query, Request
@@ -20,10 +22,21 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from ...control.admission import AdmissionBroker, AdmissionReadiness
 from ...control.cancel_service import cancel_thread
 from ...control.config import settings
-from ...control.health import build_full_health, probe_engine_discovery_freshness
-from ...control.run_start_policy import evaluate_run_start_eligibility
+from ...control.drain import DrainGate
+from ...control.health import (
+    assemble_desktop_readiness,
+    build_full_health,
+    probe_engine_discovery_freshness,
+)
+from ...control.run_discovery_service import discover_active_runs
+from ...control.run_start_policy import (
+    evaluate_execution_eligibility,
+    evaluate_run_start_eligibility,
+    required_role_ids,
+)
 from ...control.thread_service import (
     ThreadCreationRequest,
     create_and_dispatch_thread,
@@ -42,7 +55,7 @@ from ...database.session import get_db
 from ...domain_config import domain_config
 from ...streaming.aggregator import EventAggregator
 from ...thread.dispatch_policy import FailureType
-from ...thread.enums import ThreadStatus
+from ...thread.enums import TERMINAL_STATUSES, ThreadStatus
 from ...thread.errors import NicknameConflictError
 from .._utils import mark_worker_connected, trace_headers
 from ..dependencies import (
@@ -52,14 +65,21 @@ from ..dependencies import (
     get_services,
     get_worker_client,
     get_worker_spawner,
+    require_attach,
 )
 from ..schemas.gateway import (
+    ActiveRunRecord,
+    ActiveRunsResponse,
+    PathSafeRunId,
     PresetsListResponse,
     PresetSummary,
     ProfileSummary,
     RoleAssignmentSummary,
     RoleState,
     RunCancelResponse,
+    RunCommitResponse,
+    RunPrepareResponse,
+    RunStage,
     RunStartRequest,
     RunStartResponse,
     RunStatusResponse,
@@ -68,7 +88,10 @@ from ..schemas.gateway import (
 )
 from .thread_stream import build_thread_stream_response
 
-router = APIRouter(prefix="/v1")
+router = APIRouter(
+    prefix="/v1",
+    dependencies=[Depends(require_attach)],
+)
 logger = logging.getLogger(__name__)
 
 # Health-check statuses that represent a genuine dependency failure (as opposed
@@ -79,12 +102,69 @@ _DEGRADED_CHECK_STATUSES: frozenset[str] = frozenset(
 )
 
 
+def admission_gate(app: FastAPI) -> DrainGate:
+    """Return the process-wide run-admission drain gate, creating it once.
+
+    One :class:`DrainGate` per gateway process, seated on ``app.state`` so the
+    run verbs here and the administrative stop path (gateway shutdown /
+    receipt-bound admin shutdown, wired where those handlers live) share the
+    single authority: run-start admits against it, and the stop path closes
+    admission and drains it before bounded cancellation. Get-or-create is atomic
+    on the single event loop - there is no await between the read and the store.
+    """
+    gate = getattr(app.state, "drain_gate", None)
+    if gate is None:
+        gate = DrainGate()
+        app.state.drain_gate = gate
+    return gate
+
+
+def admission_broker(app: FastAPI) -> AdmissionBroker:
+    """Return the process-wide run-admission reservation broker, creating it once.
+
+    One :class:`AdmissionBroker` per gateway process, seated on ``app.state``
+    beside the drain gate. The prepare and commit stages of run-start share it: a
+    reservation is bounded by the configured concurrent-run capacity. Get-or-create
+    is atomic on the single event loop - there is no await between read and store.
+    """
+    broker = getattr(app.state, "admission_broker", None)
+    if broker is None:
+        broker = AdmissionBroker(
+            max_reservations=domain_config.max_concurrent_threads,
+            reservation_ttl_seconds=domain_config.admission_reservation_ttl_seconds,
+        )
+        app.state.admission_broker = broker
+    return broker
+
+
+def _admission_readiness(app_state: Any) -> AdmissionReadiness:
+    """Project the seated desktop readiness facts into an admission-readiness view.
+
+    Reads the single readiness authority (``assemble_desktop_readiness``) over the
+    seated worker and database state - the cheap, non-blocking surface - so a
+    prepare reports the same worker, provider, and admission facts the readiness
+    model and service-state verb serve, never a second computation.
+    """
+    readiness = assemble_desktop_readiness(app_state=app_state)
+    return AdmissionReadiness(
+        worker_state=readiness.worker_state,
+        provider_eligibility=readiness.provider_eligibility,
+        eligible_providers=tuple(readiness.eligible_providers),
+        run_admission=readiness.run_admission,
+        reasons=tuple(readiness.reasons),
+    )
+
+
 # ---------------------------------------------------------------------------
 # run-start
 # ---------------------------------------------------------------------------
 
 
-@router.post("/runs", response_model=RunStartResponse, status_code=201)
+@router.post(
+    "/runs",
+    response_model=RunStartResponse | RunPrepareResponse | RunCommitResponse,
+    status_code=201,
+)
 async def run_start_endpoint(
     request: Request,
     body: RunStartRequest,
@@ -93,17 +173,61 @@ async def run_start_endpoint(
     ] = Depends(get_services),
     circuit_breaker: Any = Depends(get_circuit_breaker),
     worker_spawner: Any = Depends(get_worker_spawner),
-) -> RunStartResponse:
-    """Start a run: reshaped thread-create + first message, accepting tokens.
+) -> RunStartResponse | RunPrepareResponse | RunCommitResponse:
+    """Start, prepare, or commit a run through the single run-start verb.
 
-    Unlike the internal ``/api`` surface, the v1 verb refuses before dispatch
-    rather than creating a non-running draft: an unloadable preset, a
-    document-authoring preset with no target feature, or an actor-token bundle
-    that does not cover the preset's roles all return a 4xx. A client-supplied
-    ``run_id`` makes the verb dispatch-exactly-once under retry.
+    The ``stage`` selector splits one verb into three shapes without growing the
+    verb set: ``prepare`` reserves a bounded admission slot and starts the
+    gateway-owned worker on demand, creating no durable run and accepting no
+    token; ``commit`` binds the actor tokens to a stable run under a prepared
+    reservation; and ``start`` (the default) is the one-shot engine/Compose path,
+    unchanged. Every stage refuses before creating durable state rather than
+    drafting a non-running run.
     """
     db, _aggregator, _checkpointer, worker_client = services
+    if body.stage == RunStage.PREPARE:
+        return await _run_prepare(request, body, worker_spawner)
+    if body.stage == RunStage.COMMIT:
+        return await _run_commit(
+            request, body, db, circuit_breaker, worker_spawner, worker_client
+        )
+    return await _run_direct_start(
+        request, body, db, circuit_breaker, worker_spawner, worker_client
+    )
 
+
+@dataclass(frozen=True, slots=True)
+class _RunDispatchResult:
+    """The normalised outcome of creating and dispatching one durable run."""
+
+    thread_id: str
+    status: str
+    nickname: str | None
+    profile_id: str | None
+    frozen: Any | None
+    replayed: bool
+
+
+async def _create_run_core(
+    request: Request,
+    body: RunStartRequest,
+    db: AsyncSession,
+    circuit_breaker: Any,
+    worker_spawner: Any,
+    worker_client: httpx.AsyncClient,
+    *,
+    lease_id: str | None,
+) -> _RunDispatchResult:
+    """Create and dispatch one durable run - the shared start/commit core.
+
+    Refuses before any durable state is created: an unloadable preset, a
+    document-authoring preset with no target feature, or an actor-token bundle
+    that does not cover the preset's roles all raise a 4xx. A client-supplied
+    ``run_id`` makes creation dispatch-exactly-once under retry. When *lease_id*
+    is supplied (the commit path) it is persisted into the run's metadata so a
+    terminal settlement - and reconciliation after a restart - can recover the
+    run's non-secret lease identity durably.
+    """
     # Client idempotency: a retry with the same stable run id returns the
     # existing run rather than starting a second one (dispatch-exactly-once).
     if body.run_id is not None:
@@ -121,12 +245,13 @@ async def run_start_endpoint(
                         f"{body.profile_id!r}"
                     ),
                 )
-            return RunStartResponse(
-                run_id=existing.id,
+            return _RunDispatchResult(
+                thread_id=existing.id,
                 status=existing.status,
                 nickname=existing.nickname,
-                eligible=True,
                 profile_id=existing_profile,
+                frozen=None,
+                replayed=True,
             )
     run_id = body.run_id or generate_thread_id()
 
@@ -171,63 +296,264 @@ async def run_start_endpoint(
         team_config, body.profile_id, ws_root
     )
     metadata_json = _persist_frozen(metadata_json, frozen)
+    # Bind the committed reservation's non-secret lease identity to the run,
+    # durably, so terminal settlement and post-restart reconciliation recover it.
+    if lease_id is not None:
+        metadata_json = _persist_lease(metadata_json, lease_id)
 
+    # Admission gate: a draining gateway refuses a new run before any durable
+    # state is created, so drain closes admission ahead of bounded cancellation.
+    # An admitted run joins the active set the drain waits on; it is released on
+    # a terminal outcome (the execution-state settlement path) or here, in the
+    # finally, on EVERY path that leaves no durable run.
+    gate = admission_gate(request.app)
+    admission = await gate.admit(run_id)
+    if not admission.admitted:
+        raise HTTPException(status_code=503, detail=admission.reason)
+
+    # A run is "persisted" once ``create_and_dispatch_thread`` returns (or an
+    # integrity race resolves to a durable winner); only then does the run own its
+    # admission until its terminal outcome. Any failure before that - a nickname
+    # conflict, a winnerless integrity race, or any unexpected exception - must
+    # release the admission in the finally, or the drain gate would carry a phantom
+    # active run forever and never quiesce.
+    persisted = False
     try:
-        result = await create_and_dispatch_thread(
-            db,
-            ThreadCreationRequest(
-                thread_id=run_id,
-                title=body.title,
-                initial_message=body.message,
-                team_preset=body.team_preset,
-                autonomous=body.autonomous,
-                nickname=nickname,
-                metadata=metadata,
-                metadata_json=metadata_json,
-                workspace_root=ws_root,
-                actor_tokens=body.actor_tokens,
-                profile_id=frozen.profile_id,
-                model_assignment=frozen.compiler_map(),
-            ),
-            circuit_breaker=circuit_breaker,
-            worker_spawner=worker_spawner,
-            worker_client=worker_client,
-            recursion_limit=domain_config.graph_recursion_limit,
-            trace_headers=trace_headers(),
-        )
-    except NicknameConflictError as exc:
-        raise HTTPException(
-            status_code=409, detail=f"Run nickname already exists: {exc.nickname!r}"
-        ) from exc
-    except IntegrityError:
-        # Insert-or-return idempotency: two simultaneous retries with the same
-        # run_id race past the check-then-act guard above; the loser's insert
-        # hits the primary-key unique violation. Roll back and return the winner's
-        # run as the dispatch-exactly-once response rather than a 500.
-        await db.rollback()
-        winner = await get_thread(db, run_id)
-        if winner is not None:
-            return RunStartResponse(
-                run_id=winner.id,
-                status=winner.status,
-                nickname=winner.nickname,
-                eligible=True,
-                profile_id=_persisted_profile_id(winner.thread_metadata),
+        try:
+            result = await create_and_dispatch_thread(
+                db,
+                ThreadCreationRequest(
+                    thread_id=run_id,
+                    title=body.title,
+                    initial_message=body.message,
+                    team_preset=body.team_preset,
+                    autonomous=body.autonomous,
+                    nickname=nickname,
+                    metadata=metadata,
+                    metadata_json=metadata_json,
+                    workspace_root=ws_root,
+                    actor_tokens=body.actor_tokens,
+                    profile_id=frozen.profile_id,
+                    model_assignment=frozen.compiler_map(),
+                ),
+                circuit_breaker=circuit_breaker,
+                worker_spawner=worker_spawner,
+                worker_client=worker_client,
+                recursion_limit=domain_config.graph_recursion_limit,
+                trace_headers=trace_headers(),
             )
-        raise
+        except NicknameConflictError as exc:
+            # No durable run was created; the finally drops the unused admission.
+            raise HTTPException(
+                status_code=409,
+                detail=f"Run nickname already exists: {exc.nickname!r}",
+            ) from exc
+        except IntegrityError:
+            # Insert-or-return idempotency: two simultaneous retries with the same
+            # run_id race past the check-then-act guard above; the loser's insert
+            # hits the primary-key unique violation. Roll back and return the
+            # winner's run as the dispatch-exactly-once response rather than a 500.
+            await db.rollback()
+            winner = await get_thread(db, run_id)
+            if winner is not None:
+                persisted = True
+                return _RunDispatchResult(
+                    thread_id=winner.id,
+                    status=winner.status,
+                    nickname=winner.nickname,
+                    profile_id=_persisted_profile_id(winner.thread_metadata),
+                    frozen=None,
+                    replayed=True,
+                )
+            raise
 
-    if result.dispatched:
-        mark_worker_connected(request)
+        # The durable run row now exists and owns its admission; a dispatch failure
+        # below leaves the run durable (released on its terminal outcome), so the
+        # admission is kept.
+        persisted = True
+        if result.dispatched:
+            mark_worker_connected(request)
 
-    _raise_for_dispatch_failure(result.failure_type, result.error_detail)
+        _raise_for_dispatch_failure(result.failure_type, result.error_detail)
 
+        return _RunDispatchResult(
+            thread_id=result.thread_id,
+            status=result.status,
+            nickname=result.nickname,
+            profile_id=frozen.profile_id,
+            frozen=frozen,
+            replayed=False,
+        )
+    finally:
+        if not persisted:
+            await gate.release(run_id)
+
+
+async def _run_direct_start(
+    request: Request,
+    body: RunStartRequest,
+    db: AsyncSession,
+    circuit_breaker: Any,
+    worker_spawner: Any,
+    worker_client: httpx.AsyncClient,
+) -> RunStartResponse:
+    """One-shot start: create and dispatch a run in a single call (unchanged path)."""
+    result = await _create_run_core(
+        request,
+        body,
+        db,
+        circuit_breaker,
+        worker_spawner,
+        worker_client,
+        lease_id=None,
+    )
     return RunStartResponse(
         run_id=result.thread_id,
         status=result.status,
         nickname=result.nickname,
-        profile_id=frozen.profile_id,
-        assignments=_frozen_disclosure(frozen),
+        eligible=True,
+        profile_id=result.profile_id,
+        assignments=_frozen_disclosure(result.frozen)
+        if result.frozen is not None
+        else [],
     )
+
+
+async def _run_prepare(
+    request: Request,
+    body: RunStartRequest,
+    worker_spawner: Any,
+) -> RunPrepareResponse:
+    """Reserve a bounded admission slot and report execution readiness.
+
+    Loads the preset only to derive the bounded required-role set the later
+    commit must cover, then reserves through the process-wide broker. The broker
+    triggers the gateway-owned worker's single-flight startup and probes seated
+    readiness before assigning capacity; no token is accepted and no durable run
+    is created. A capacity-exhausted or role-invalid prepare is refused with a
+    503 carrying the safe reason.
+    """
+    ws_root = _prepare_workspace_root(body)
+    team_config = _load_preset_or_refuse(body.team_preset, ws_root)
+    broker = admission_broker(request.app)
+    outcome = await broker.prepare(
+        required_roles=required_role_ids(team_config),
+        ensure_worker=worker_spawner.ensure_worker,
+        probe_readiness=lambda: _admission_readiness(request.app.state),
+    )
+    if not outcome.admitted or outcome.reservation_id is None:
+        raise HTTPException(status_code=503, detail=outcome.reason)
+    readiness = outcome.readiness
+    return RunPrepareResponse(
+        reservation_id=outcome.reservation_id,
+        required_roles=list(outcome.required_roles),
+        expires_at=outcome.expires_at or "",
+        worker_state=readiness.worker_state,
+        provider_eligibility=readiness.provider_eligibility,
+        run_admission=readiness.run_admission,
+        reasons=list(readiness.reasons),
+    )
+
+
+async def _run_commit(
+    request: Request,
+    body: RunStartRequest,
+    db: AsyncSession,
+    circuit_breaker: Any,
+    worker_spawner: Any,
+    worker_client: httpx.AsyncClient,
+) -> RunCommitResponse:
+    """Bind actor tokens to a stable run under a prepared reservation.
+
+    Consumes the reservation first - refusing an unknown, expired, released, or
+    already-committed one with a 409 before any run is created - then runs the
+    shared creation core, which evaluates eligibility and accepts the tokens only
+    as it creates the durable run. The reservation's non-secret lease identity is
+    returned and persisted with the run for terminal settlement.
+    """
+    if body.reservation_id is None:  # pragma: no cover - guarded by the schema
+        raise HTTPException(status_code=422, detail="commit requires a reservation id")
+    broker = admission_broker(request.app)
+
+    # Evaluate worker and provider eligibility BEFORE consuming the reservation,
+    # accepting the actor tokens, or creating a run (ADR: mint run credentials only
+    # after the runtime and provider are eligible). The worker reachability is
+    # probed live so the verdict never lags behind the watchdog's status ladder; a
+    # refusal releases the reservation so a failed commit leaks nothing.
+    from ...control.worker_management import _check_worker_health
+
+    worker_reachable = await _check_worker_health(
+        settings.worker_url, client=worker_client
+    )
+    readiness = _admission_readiness(request.app.state)
+    execution = evaluate_execution_eligibility(
+        worker_reachable=worker_reachable,
+        provider_eligibility=readiness.provider_eligibility,
+    )
+    if not execution.eligible:
+        await broker.release(body.reservation_id)
+        raise HTTPException(status_code=503, detail=execution.reason)
+
+    outcome = await broker.commit(body.reservation_id)
+    if not outcome.committed or outcome.lease_id is None:
+        raise HTTPException(status_code=409, detail=outcome.reason)
+    result = await _create_run_core(
+        request,
+        body,
+        db,
+        circuit_breaker,
+        worker_spawner,
+        worker_client,
+        lease_id=outcome.lease_id,
+    )
+    return RunCommitResponse(
+        run_id=result.thread_id,
+        status=result.status,
+        lease_id=outcome.lease_id,
+        nickname=result.nickname,
+        profile_id=result.profile_id,
+        assignments=_frozen_disclosure(result.frozen)
+        if result.frozen is not None
+        else [],
+    )
+
+
+def _prepare_workspace_root(body: RunStartRequest) -> Path | None:
+    """Resolve the preset-loading workspace for a prepare, or ``None``.
+
+    A prepare carries no run id, so it never mints a workspace; it only needs a
+    workspace context to resolve a workspace-local preset. When the request
+    metadata names an absolute workspace root it is used, otherwise the bundled
+    preset set is resolved (``None``).
+    """
+    metadata = body.metadata
+    workspace_root = getattr(metadata, "workspace_root", None) if metadata else None
+    if not workspace_root:
+        return None
+    candidate = Path(workspace_root)
+    return candidate if candidate.is_absolute() else None
+
+
+# The metadata key binding a run to its non-secret admission lease identity. The
+# gateway writes it at commit and the terminal handler reads it back; both restate
+# this key inline, matching the metadata convention used for the frozen profile.
+_RUN_LEASE_METADATA_KEY = "run_lease"
+
+
+def _persist_lease(metadata_json: str | None, lease_id: str) -> str:
+    """Embed the run's non-secret lease identity into the thread metadata JSON."""
+    import json
+
+    data: dict[str, Any] = {}
+    if metadata_json:
+        try:
+            loaded = json.loads(metadata_json)
+        except (json.JSONDecodeError, TypeError):
+            loaded = {}
+        if isinstance(loaded, dict):
+            data = loaded
+    data[_RUN_LEASE_METADATA_KEY] = {"lease_id": lease_id}
+    return json.dumps(data)
 
 
 def _load_preset_or_refuse(team_preset: str, ws_root: Path | None) -> Any:
@@ -399,6 +725,44 @@ def _raise_for_dispatch_failure(
 
 
 # ---------------------------------------------------------------------------
+# active-run discovery
+# ---------------------------------------------------------------------------
+
+
+@router.get("/runs", response_model=ActiveRunsResponse)
+async def active_runs_endpoint(
+    state: Literal["active"] = Query(default="active"),
+    workspace_root: str | None = Query(default=None, min_length=1, max_length=4096),
+    feature_tag: str | None = Query(default=None, min_length=1, max_length=128),
+    limit: int = Query(default=50, ge=1, le=100),
+    db: AsyncSession = Depends(get_db),
+) -> ActiveRunsResponse:
+    """Return a capped identity projection for durable non-terminal runs."""
+    workspace = Path(workspace_root) if workspace_root is not None else None
+    if workspace is not None and not workspace.is_absolute():
+        raise HTTPException(status_code=422, detail="workspace_root must be absolute")
+
+    result = await discover_active_runs(
+        db,
+        workspace_root=workspace,
+        feature_tag=feature_tag,
+        limit=limit,
+    )
+    return ActiveRunsResponse(
+        state=state,
+        runs=[
+            ActiveRunRecord(
+                run_id=run.run_id,
+                status=run.status,
+                feature_tag=run.feature_tag,
+            )
+            for run in result.runs
+        ],
+        truncated=result.truncated,
+    )
+
+
+# ---------------------------------------------------------------------------
 # run-status
 # ---------------------------------------------------------------------------
 
@@ -424,7 +788,7 @@ def _active_role(next_nodes: list[str], agents: list[Any]) -> str | None:
 
 @router.get("/runs/{run_id}", response_model=RunStatusResponse)
 async def run_status_endpoint(
-    run_id: str,
+    run_id: PathSafeRunId,
     db: AsyncSession = Depends(get_db),
     aggregator: EventAggregator = Depends(get_aggregator),
     checkpointer: Checkpointer = Depends(get_checkpointer),
@@ -492,7 +856,7 @@ async def run_status_endpoint(
 
 @router.get("/runs/{run_id}/stream")
 async def run_stream_endpoint(
-    run_id: str,
+    run_id: PathSafeRunId,
     db: AsyncSession = Depends(get_db),
     aggregator: EventAggregator = Depends(get_aggregator),
 ) -> StreamingResponse:
@@ -521,7 +885,7 @@ async def run_stream_endpoint(
 
 @router.post("/runs/{run_id}/cancel", response_model=RunCancelResponse)
 async def run_cancel_endpoint(
-    run_id: str,
+    run_id: PathSafeRunId,
     request: Request,
     db: AsyncSession = Depends(get_db),
     worker_client: httpx.AsyncClient = Depends(get_worker_client),
@@ -550,6 +914,13 @@ async def run_cancel_endpoint(
 
     if result.cancelled:
         mark_worker_connected(request)
+
+    # Cancellation is the drain's tool and is never itself admission-gated. When
+    # a cancel settles the run terminally here (e.g. a submitted-but-undispatched
+    # run), release it from the admission gate so a concurrent drain can quiesce;
+    # a run that only reaches CANCELLING is released on its terminal event.
+    if result.thread_status in TERMINAL_STATUSES:
+        await admission_gate(request.app).release(result.thread_id)
 
     return RunCancelResponse(
         run_id=result.thread_id,
@@ -806,6 +1177,16 @@ async def service_state_endpoint(
     else:
         status = "ready"
 
+    # The separated readiness facts come from the one readiness authority, fed the
+    # live database and worker probe verdicts just computed, so service-state and
+    # the liveness surface never compute readiness twice. This is also the
+    # projection a discovery contender probes to validate readiness before attach.
+    readiness = assemble_desktop_readiness(
+        app_state=request.app.state,
+        database_ready=database_ready,
+        worker_probe_ready=worker_ready,
+    )
+
     # Only genuine failure statuses degrade readiness; informational checks such
     # as worker_spawned ("yes"/"no") or worker_stderr_log ("configured") are not
     # degradation signals.
@@ -834,6 +1215,7 @@ async def service_state_endpoint(
         active_run_capacity=domain_config.max_concurrent_threads,
         degraded_reasons=degraded_reasons,
         routes=route_signature(request.app),
+        readiness=readiness,
     )
 
 

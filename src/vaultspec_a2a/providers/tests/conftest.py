@@ -14,6 +14,8 @@ _LIVE_FILES = frozenset(
         "test_authoring_stdio_bridge.py",
         "test_acp_migration_surface.py",
         "test_kimi_handshake_live.py",
+        "test_provider_containment.py",
+        "test_terminal_containment.py",
     }
 )
 

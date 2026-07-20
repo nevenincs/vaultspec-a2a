@@ -1,0 +1,18 @@
+{
+  "fixture_only": true,
+  "release_set_id": "fixture-vaultspec-desktop-win-x64",
+  "dashboard": {
+    "version": "0.1.4"
+  },
+  "components": [
+    {
+      "name": "vaultspec-a2a",
+      "version": "0.1.0",
+      "target": "x86_64-pc-windows-msvc",
+      "manifest_digest": {
+        "algorithm": "sha256",
+        "value": "66fc40b640ca995b7929bde3f3df2b7cc5b8634c17bd9c84d58ef46db409d5b4"
+      }
+    }
+  ]
+}

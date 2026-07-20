@@ -40,9 +40,14 @@ from .authoring_cursor_repository import (
 from .authoring_cursor_repository import (
     set_authoring_cursor as set_authoring_cursor,
 )
+from .compatibility import SchemaCompatibilityError as SchemaCompatibilityError
+from .compatibility import supported_migration_head as supported_migration_head
+from .compatibility import validate_desktop_schema as validate_desktop_schema
 from .migrate import build_migration_config as build_migration_config
 from .migrate import migration_script_location as migration_script_location
 from .migrate import run_migrations as run_migrations
+from .migrations import backfill_teamstate_sdd_fields as backfill_teamstate_sdd_fields
+from .migrations import count_pending_sdd_backfill as count_pending_sdd_backfill
 from .models import ArtifactModel as ArtifactModel
 from .models import AuthoringEventCursorModel as AuthoringEventCursorModel
 from .models import Base as Base
@@ -136,13 +141,16 @@ __all__ = [
     "PermissionLogModel",
     "PermissionRequestStatus",
     "RepairStatus",
+    "SchemaCompatibilityError",
     "TaskQueueEntryModel",
     "ThreadModel",
     "ThreadStatus",
     "append_cost_record",
     "append_permission_log",
+    "backfill_teamstate_sdd_fields",
     "build_migration_config",
     "close_db",
+    "count_pending_sdd_backfill",
     "create_artifact",
     "create_control_action",
     "create_thread",
@@ -186,7 +194,9 @@ __all__ = [
     "sum_cost_by_agent",
     "sum_cost_by_thread",
     "supersede_permission_requests",
+    "supported_migration_head",
     "update_thread_metadata",
     "update_thread_status",
+    "validate_desktop_schema",
     "verify_wal_mode",
 ]

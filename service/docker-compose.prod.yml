@@ -7,7 +7,7 @@
 # Postgres (recommended for production):
 #   docker compose -f service/docker-compose.prod.yml -f service/docker-compose.prod.postgres.yml up --build
 #
-# Gateway: http://localhost:8000 (headless FastAPI — REST/SSE + health)
+# Gateway: http://localhost:18000 (headless FastAPI — REST/SSE + health)
 # Jaeger UI: http://localhost:16686
 
 services:
@@ -18,7 +18,7 @@ services:
       target: gateway
     restart: unless-stopped
     ports:
-      - '${VAULTSPEC_PORT:-8000}:8000'
+      - '${VAULTSPEC_PORT:-18000}:18000'
     volumes:
       - db-data:/app/data
     environment:
@@ -26,7 +26,7 @@ services:
       VAULTSPEC_DATABASE_URL: 'sqlite+aiosqlite:////app/data/vaultspec.db'
       VAULTSPEC_DATABASE_BACKEND: sqlite
       VAULTSPEC_CHECKPOINT_BACKEND: sqlite
-      VAULTSPEC_WORKER_URL: 'http://worker:8001'
+      VAULTSPEC_WORKER_URL: 'http://worker:18001'
       VAULTSPEC_AUTO_SPAWN_WORKER: 'false'
       VAULTSPEC_INTERNAL_TOKEN: '${VAULTSPEC_INTERNAL_TOKEN:?VAULTSPEC_INTERNAL_TOKEN is required}'
       OTEL_EXPORTER_OTLP_ENDPOINT: 'http://jaeger:4317'
@@ -42,7 +42,7 @@ services:
           'CMD',
           'python',
           '-c',
-          "import json, sys, urllib.request; data = json.load(urllib.request.urlopen('http://localhost:8000/api/health')); sys.exit(0 if data.get('status') == 'ok' else 1)",
+          "import json, sys, urllib.request; data = json.load(urllib.request.urlopen('http://localhost:18000/api/health')); sys.exit(0 if data.get('status') == 'ok' else 1)",
         ]
       interval: 10s
       timeout: 5s
@@ -62,7 +62,7 @@ services:
       VAULTSPEC_DATABASE_URL: 'sqlite+aiosqlite:////app/data/vaultspec.db'
       VAULTSPEC_DATABASE_BACKEND: sqlite
       VAULTSPEC_CHECKPOINT_BACKEND: sqlite
-      VAULTSPEC_GATEWAY_URL: 'http://gateway:8000'
+      VAULTSPEC_GATEWAY_URL: 'http://gateway:18000'
       VAULTSPEC_INTERNAL_TOKEN: '${VAULTSPEC_INTERNAL_TOKEN:?VAULTSPEC_INTERNAL_TOKEN is required}'
       OTEL_EXPORTER_OTLP_ENDPOINT: 'http://jaeger:4317'
       OTEL_EXPORTER_OTLP_INSECURE: 'true'
@@ -75,7 +75,7 @@ services:
           'CMD',
           'python',
           '-c',
-          "import urllib.request; urllib.request.urlopen('http://localhost:8001/health')",
+          "import os, urllib.request; tok = os.environ['VAULTSPEC_INTERNAL_TOKEN']; req = urllib.request.Request('http://localhost:18001/health', headers={'Authorization': 'Bearer ' + tok}); urllib.request.urlopen(req)",
         ]
       interval: 10s
       timeout: 5s

@@ -391,9 +391,7 @@ def probe_provider_readiness(provider: Provider) -> ProviderReadiness:
         # either), so a ready result means the key is configured and the lane can
         # actually launch.
         key = (
-            settings.kimi_api_key.get_secret_value()
-            if settings.kimi_api_key
-            else None
+            settings.kimi_api_key.get_secret_value() if settings.kimi_api_key else None
         )
         if not _has_text(key):
             return ProviderReadiness(

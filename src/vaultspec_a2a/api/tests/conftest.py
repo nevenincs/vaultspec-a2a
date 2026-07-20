@@ -14,6 +14,7 @@ SQLite file so that gateway read-path enrichment exercises the real
 checkpointer implementation, not a ``MemorySaver`` stub.
 """
 
+import asyncio
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -40,9 +41,8 @@ from ..app import create_app
 _PACKAGE_DIR = str(Path(__file__).resolve().parent)
 
 
-# API tests are middleware-layer; most drive the real SQLite/ASGI fixtures below
-# and are impure.  These files test pure logic only (no I/O) and also earn ``unit``.
-_PURE_FILES = frozenset({"test_auth.py"})
+# API tests are middleware-layer; they drive the real SQLite/ASGI fixtures below.
+_PURE_FILES: frozenset[str] = frozenset()
 
 
 def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
@@ -125,6 +125,9 @@ class _InProcessWorker:
 
     def __init__(self) -> None:
         self.dispatches: list[dict] = []
+        self.dispatch_received = asyncio.Event()
+        self.release_dispatch = asyncio.Event()
+        self.release_dispatch.set()
 
         _app = FastAPI()
 
@@ -141,6 +144,8 @@ class _InProcessWorker:
                     )
             body = await request.json()
             self.dispatches.append(body)
+            self.dispatch_received.set()
+            await self.release_dispatch.wait()
             return {"status": "dispatched", "thread_id": body.get("thread_id", "")}
 
         @_app.get("/health")
@@ -165,6 +170,11 @@ class _InProcessWorker:
     def clear(self) -> None:
         """Clear all recorded dispatch requests."""
         self.dispatches.clear()
+
+    def hold_dispatch_response(self) -> None:
+        """Pause a real dispatch response after its request has been recorded."""
+        self.dispatch_received.clear()
+        self.release_dispatch.clear()
 
 
 # ---------------------------------------------------------------------------
@@ -191,7 +201,10 @@ def make_app(
     async def _test_lifespan(_app):
         yield
 
-    app = create_app(lifespan=_test_lifespan)
+    app = create_app(
+        lifespan=_test_lifespan,
+        allow_unauthenticated_v1_for_testing=True,
+    )
 
     if aggregator is None:
         aggregator = EventAggregator()

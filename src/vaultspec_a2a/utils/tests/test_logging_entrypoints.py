@@ -130,13 +130,7 @@ def test_service_entrypoint_creates_named_file_lane(
     child = _write_child(
         tmp_path,
         f"{which}_child.py",
-        (
-            f"{imp}\n"
-            "try:\n"
-            "    main()\n"
-            "except BaseException:\n"
-            "    pass\n"
-        ),
+        (f"{imp}\ntry:\n    main()\nexcept BaseException:\n    pass\n"),
     )
     # An invalid bind host makes uvicorn.run fail fast AFTER configure_logging has
     # already created the service file lane.
@@ -185,10 +179,7 @@ def test_mcp_stdio_entrypoint_keeps_stdout_clean(tmp_path: Path) -> None:
     child = _write_child(
         tmp_path,
         "mcp_stdio_child.py",
-        (
-            "from vaultspec_a2a.protocols.mcp.__main__ import main\n"
-            "main()\n"
-        ),
+        ("from vaultspec_a2a.protocols.mcp.__main__ import main\nmain()\n"),
     )
     # stdin is DEVNULL -> run_stdio_async hits EOF and exits; the protocol lane must
     # have kept stdout free of any log line.
@@ -200,6 +191,7 @@ def test_mcp_stdio_entrypoint_keeps_stdout_clean(tmp_path: Path) -> None:
         },
         timeout=40.0,
     )
+    assert p.returncode == 0, p.stderr
     assert not _has_log_json_on_stdout(p.stdout)
 
 
@@ -207,7 +199,8 @@ def test_cli_group_configures_cli_lane() -> None:
     from ...cli.main import main as cli
 
     # The group callback is the entrypoint's logging-wiring site; run it directly.
-    cli.callback()  # type: ignore[misc]
+    assert cli.callback is not None
+    cli.callback()
     root = logging.getLogger()
     assert root.level == logging.WARNING
     assert any(getattr(h, "stream", None) is sys.stderr for h in root.handlers)

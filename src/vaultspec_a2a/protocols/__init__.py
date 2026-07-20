@@ -1,6 +1,6 @@
 """Expose the lazy Model Context Protocol bridge.
 
-The ``vaultspec-mcp`` entry point enters :mod:`vaultspec_a2a.protocols.mcp`.
+The ``vaultspec-a2a-mcp`` entry point enters :mod:`vaultspec_a2a.protocols.mcp`.
 Importing this package must not eagerly load the FastMCP server.
 
 Server behavior belongs to :mod:`vaultspec_a2a.protocols.mcp.server`.

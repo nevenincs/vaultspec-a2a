@@ -9,7 +9,7 @@ a drop-in replacement for the former ``core.config.Settings``.
 """
 
 from pathlib import Path
-from typing import Literal, Self
+from typing import TYPE_CHECKING, Literal, Self
 
 from pydantic import (
     AliasChoices,
@@ -22,6 +22,9 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from ..domain_config import DomainSettingsConfig
 from ..utils.enums import Environment, LogLevel
+
+if TYPE_CHECKING:
+    from ..desktop.credentials import DesktopCredentialPaths
 
 # Defaults for path-override fields.  Computed once at module import relative to
 # this file: control/config.py → control → vaultspec_a2a → src → project-root.
@@ -141,6 +144,18 @@ class InfraConfig(BaseSettings):
             "resolution is checkout-relative as before."
         ),
     )
+    desktop_app_home: Path | None = Field(
+        default=None,
+        alias="VAULTSPEC_DESKTOP_APP_HOME",
+        description=(
+            "Explicit mutable-state root for the desktop product profile. When "
+            "set, the profile is armed: the database, checkpoint, workspace, and "
+            "A2A-home paths derive ONLY from this application home (via the "
+            "desktop profile authority), never from the launch directory. Must be "
+            "an absolute path. Unset for the Compose/dev profiles, whose path "
+            "resolution is unchanged."
+        ),
+    )
     mock_api_base: str | None = Field(
         default=None,
         alias="MOCK_API_BASE",
@@ -241,11 +256,11 @@ class InfraConfig(BaseSettings):
     )
 
     host: str = Field(
-        default="0.0.0.0",
+        default="127.0.0.1",
         description="Bind host for the uvicorn server (VAULTSPEC_HOST).",
     )
     port: int = Field(
-        default=8000,
+        default=18000,
         description="Bind port for the uvicorn server (VAULTSPEC_PORT).",
     )
 
@@ -274,8 +289,8 @@ class InfraConfig(BaseSettings):
 
     cors_allowed_origins: list[str] = Field(
         default=[
-            "http://localhost:8000",  # local gateway (operator tooling / health)
-            "http://127.0.0.1:8000",
+            "http://localhost:18000",  # local gateway (operator tooling / health)
+            "http://127.0.0.1:18000",
         ],
         description=(
             "Allowed CORS origins.  A2A is headless (no browser frontend); the "
@@ -286,7 +301,7 @@ class InfraConfig(BaseSettings):
 
     # Worker process settings
     worker_port: int = Field(
-        default=8001,
+        default=18001,
         description="Internal worker HTTP port",
         alias="VAULTSPEC_WORKER_PORT",
     )
@@ -307,7 +322,17 @@ class InfraConfig(BaseSettings):
         default=None,
         alias=INTERNAL_TOKEN_ENV,
         description=(
-            "Bearer token for worker<->control IPC. None disables auth (dev mode)."
+            "Bearer token for worker<->control IPC. It is never accepted by the "
+            "engine-facing /v1 gateway."
+        ),
+    )
+    gateway_service_token: str | None = Field(
+        default=None,
+        alias="VAULTSPEC_A2A_GATEWAY_TOKEN",
+        description=(
+            "Optional dedicated bearer for the engine-facing /v1 gateway. "
+            "When absent, the gateway generates a per-process credential; it "
+            "is never shared with worker IPC or embedded in discovery."
         ),
     )
     auto_spawn_worker: bool = Field(
@@ -597,10 +622,10 @@ class InfraConfig(BaseSettings):
         validation_alias=AliasChoices("VAULTSPEC_NO_COLOR", "NO_COLOR"),
     )
 
-    @field_validator("internal_token", mode="before")
+    @field_validator("internal_token", "gateway_service_token", mode="before")
     @classmethod
     def _normalize_blank_internal_token(cls, value: object) -> object:
-        """Treat blank env-var tokens as auth-disabled in dev/test stacks."""
+        """Treat blank configured tokens as absent."""
         if isinstance(value, str) and not value.strip():
             return None
         return value
@@ -622,6 +647,20 @@ class Settings(DomainSettingsConfig, InfraConfig):
     )
 
     @model_validator(mode="after")
+    def _separate_gateway_and_worker_credentials(self) -> Self:
+        """Reject configurations that collapse gateway and worker authority."""
+        if (
+            self.gateway_service_token is not None
+            and self.internal_token is not None
+            and self.gateway_service_token == self.internal_token
+        ):
+            msg = (
+                "VAULTSPEC_A2A_GATEWAY_TOKEN must differ from VAULTSPEC_INTERNAL_TOKEN"
+            )
+            raise ValueError(msg)
+        return self
+
+    @model_validator(mode="after")
     def _derive_service_urls(self) -> Self:
         """Auto-derive gateway_url and worker_url from host+port when not set."""
         if not self.gateway_url:
@@ -631,10 +670,78 @@ class Settings(DomainSettingsConfig, InfraConfig):
             self.worker_url = f"http://{self.worker_host}:{self.worker_port}"
         return self
 
+    @model_validator(mode="after")
+    def _seat_desktop_profile(self) -> Self:
+        """Seat every mutable path under the explicit desktop application home.
+
+        The desktop profile is armed only when ``desktop_app_home`` is set. While
+        unarmed (the Compose and development profiles), this is a no-op and the
+        configuration is byte-for-byte unchanged — including the import surface,
+        since the desktop path authority is imported only on the armed branch.
+
+        When armed, the database, checkpoint, workspace, and A2A-home paths derive
+        from the application home through the desktop profile's single derivation
+        authority, so no mutable path resolves relative to the launch directory.
+        """
+        if self.desktop_app_home is None:
+            return self
+
+        # Imported lazily and only when armed: unarmed construction never pulls
+        # the desktop package, preserving the Compose/dev import surface.
+        from ..desktop.profile import derive_state_paths
+
+        state = derive_state_paths(self.desktop_app_home)
+        self.a2a_home = state.app_home
+        self.workspace_root = state.workspaces_root
+        self.database_url = f"sqlite+aiosqlite:///{state.database_path.as_posix()}"
+        self.checkpoint_database_url = (
+            f"sqlite+aiosqlite:///{state.checkpoint_path.as_posix()}"
+        )
+        return self
+
     @property
     def is_dev(self) -> bool:
         """Check if running in development environment."""
         return self.environment == Environment.DEVELOPMENT
+
+    @property
+    def desktop_profile_armed(self) -> bool:
+        """Return whether the desktop product profile is armed.
+
+        This is the single authority for desktop-profile detection. The profile
+        is armed exactly when an explicit application home is configured; every
+        seam that must behave differently under the desktop profile (non-mutating
+        schema validation, checkpointer setup suppression) branches on this one
+        predicate rather than re-deriving arming from raw configuration.
+        """
+        return self.desktop_app_home is not None
+
+    @property
+    def desktop_credential_paths(self) -> "DesktopCredentialPaths | None":
+        """Return the three desktop credential file references, or ``None``.
+
+        The desktop profile authenticates three disjoint trust planes, each backed
+        by its own owner-restricted file beneath the application home's credentials
+        directory: the dashboard-created attach-control credential, the
+        receipt-bound ownership (lifecycle) capability, and the gateway-owned worker
+        interprocess-communication secret. This is the single settings-side
+        authority for those references; it derives them through the desktop profile
+        path authority rather than restating the layout.
+
+        Returns ``None`` while the profile is unarmed (the Compose and development
+        profiles), so no credential path resolves relative to a launch directory and
+        the unarmed import surface never pulls the desktop package.
+        """
+        if self.desktop_app_home is None:
+            return None
+
+        # Imported lazily and only when armed, mirroring the path-seating validator:
+        # unarmed construction never pulls the desktop credential package.
+        from ..desktop.credentials import credential_paths
+        from ..desktop.profile import derive_state_paths
+
+        state = derive_state_paths(self.desktop_app_home)
+        return credential_paths(state.credentials_dir)
 
     @property
     def resolved_database_backend(self) -> Literal["sqlite", "postgres"]:

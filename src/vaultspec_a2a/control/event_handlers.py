@@ -11,7 +11,9 @@ call sequence that previously appeared in 3 call sites.
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
+import json
 import logging
 from datetime import datetime
 from typing import Any
@@ -51,6 +53,92 @@ def _time_now_utc() -> Any:
     from datetime import datetime as _datetime
 
     return _datetime.now(UTC)
+
+
+# The metadata key binding a run to its non-secret admission lease identity,
+# written by the gateway at commit; restated inline here to read it back, matching
+# the metadata convention the frozen model profile uses.
+_RUN_LEASE_METADATA_KEY = "run_lease"
+
+# Strong references to in-flight settlement callbacks so a fire-and-forget task is
+# not garbage-collected before it completes; each removes itself when done.
+_settlement_tasks: set[asyncio.Task[None]] = set()
+
+
+def _schedule_terminal_settlement(
+    thread_id: str,
+    terminal_status: Any,
+    session_factory: Any,
+) -> None:
+    """Schedule the run's terminal-settlement callback without blocking the relay.
+
+    A no-op outside the armed desktop profile, where there is no dashboard to
+    settle with. Otherwise it fires the bounded callback as a background task so a
+    slow or unreachable dashboard never stalls worker event relay; the emitter is
+    itself bounded and never raises.
+    """
+    from ..control.config import settings
+
+    if not settings.desktop_profile_armed:
+        return
+    task = asyncio.create_task(
+        _settle_terminal_run(thread_id, terminal_status, session_factory)
+    )
+    _settlement_tasks.add(task)
+    task.add_done_callback(_settlement_tasks.discard)
+
+
+async def _settle_terminal_run(
+    thread_id: str,
+    terminal_status: Any,
+    session_factory: Any,
+) -> None:
+    """Recover the run's lease and deliver its attach-authenticated settlement."""
+    from ..desktop.settlement import emit_run_settlement
+
+    lease_id = await _read_run_lease(thread_id, session_factory)
+    if lease_id is None:
+        # A run created outside the two-stage admission protocol (the one-shot
+        # start path) carries no lease, so there is nothing to settle.
+        return
+    result = await emit_run_settlement(
+        run_id=thread_id,
+        lease_id=lease_id,
+        terminal_status=terminal_status,
+    )
+    if not result.delivered and not result.skipped:
+        logger.warning(
+            "Terminal settlement not delivered for run %s: %s",
+            thread_id,
+            result.reason,
+        )
+
+
+async def _read_run_lease(thread_id: str, session_factory: Any) -> str | None:
+    """Read a run's non-secret lease identity from its persisted metadata."""
+    from ..database import get_thread
+
+    if session_factory is None:
+        from ..database.session import get_session_factory
+
+        factory = get_session_factory()
+    else:
+        factory = session_factory
+    async with factory() as db:
+        thread = await get_thread(db, thread_id)
+    if thread is None or not thread.thread_metadata:
+        return None
+    try:
+        data = json.loads(thread.thread_metadata)
+    except (json.JSONDecodeError, TypeError):
+        return None
+    if not isinstance(data, dict):
+        return None
+    lease = data.get(_RUN_LEASE_METADATA_KEY)
+    if not isinstance(lease, dict):
+        return None
+    lease_id = lease.get("lease_id")
+    return lease_id if isinstance(lease_id, str) and lease_id else None
 
 
 async def _handle_terminal_event(
@@ -125,6 +213,13 @@ async def _handle_terminal_event(
                 "action": "thread_terminal_status_updated",
             },
         )
+        # The terminal status has just been persisted, and only the first terminal
+        # event for a run reaches this point (a duplicate raises
+        # InvalidTransitionError below), so this is the idempotent once-per-run
+        # settlement trigger for complete, cancel, and fail. It authenticates to
+        # the dashboard with attach-control only - never worker IPC - and carries
+        # only the run and its non-secret lease identity.
+        _schedule_terminal_settlement(thread_id, ThreadStatus(status_str), factory)
     except InvalidTransitionError:
         # Race condition — cancel endpoint already set terminal status.
         # This is expected and not an error.

@@ -18,7 +18,7 @@ from ..registry import ProcRecord, read_record, record_path, write_record
 
 def _config() -> ProcsConfig:
     return ProcsConfig(
-        resident={"engine": 8767, "gateway": 8000},
+        resident={"engine": 8767, "gateway": 18000, "worker": 18001},
         roles={
             "gateway-dev": RoleConfig(
                 name="gateway-dev",
@@ -172,8 +172,8 @@ def test_register_serve_refuses_convergence_under_foreign_live_owner(tmp_path) -
 
 
 def test_register_serve_ignores_a_resident_out_of_band_port(tmp_path) -> None:
-    # 8000 is the resident gateway port, outside gateway-dev's band -> no record.
-    record = register_serve("gateway-dev", 8000, home=tmp_path, config=_config())
+    # 18000 is the resident gateway port, outside gateway-dev's band -> no record.
+    record = register_serve("gateway-dev", 18000, home=tmp_path, config=_config())
     assert record is None
     assert not list(tmp_path.glob("*.json"))
 

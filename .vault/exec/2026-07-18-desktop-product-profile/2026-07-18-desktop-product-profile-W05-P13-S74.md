@@ -59,8 +59,12 @@ related:
 
 ## Outcome
 
-`ruff check` clean. `ty check` clean. Baseline (32 non-service tests) passes. Service tests require `uv build` and a real installed capsule.
+REVISION REQUIRED. Code reviewer ran the service suite; tests failed as part of the 4-failed run. `ruff check` and `ty check` are clean; baseline passes.
+
+Failures diagnosed:
+1. `test_snapshot_inspect_verifies_integrity`: snapshot captured-copy files are named `{store}.db` (not `*.snap`); the tamper glob produced an empty list so the fail-closed half never executed.
+2. `gateway_env()` used `dict(os.environ)` instead of `clean_env()`.
 
 ## Notes
 
-Tamper detection uses the Python wheel RECORD file (sha256 digests for all installed files) as the integrity authority for the installed-wheel form; the transport capsule format's `verify_desktop_capsule.py` asset-digest check is proved separately in `test_capsule_verify.py`.
+Step unchecked and revision in progress. The snapshot filename convention is `{store.value}.db` per `SnapshotGroupSpecification.snapshot_filename`.

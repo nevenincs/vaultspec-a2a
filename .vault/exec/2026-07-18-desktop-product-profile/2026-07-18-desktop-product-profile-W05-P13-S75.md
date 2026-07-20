@@ -58,8 +58,13 @@ related:
 
 ## Outcome
 
-`ruff check` clean. `ty check` clean. Baseline (32 non-service tests) passes. Service tests require a running gateway and are marked accordingly.
+REVISION REQUIRED. Code reviewer ran the service suite; failures included tests in this module. `ruff check` and `ty check` are clean; baseline passes.
+
+Failures diagnosed:
+1. `test_drain_and_graceful_shutdown_reaps_worker`: uses `mock-success-single` via run-start but preset is excluded from wheel; workspace seam not wired.
+2. `test_data_preserving_capsule_removal`: used wrong credential filenames (`attach-control.cred`, `ownership-capability.cred`) instead of the real constants `attach.cred` / `ownership.cap`; did not assert `discovery_path` survives capsule removal.
+3. `gateway_env()` used `dict(os.environ)` instead of `clean_env()`.
 
 ## Notes
 
-`test_data_preserving_capsule_removal` uses its own `build_and_install` call (not the module-scoped fixture) so the install root can be deleted without affecting other tests in the module.
+Step unchecked and revision in progress. Per revision plan: fix credential constants from `credentials.py`; add workspace seam for mock preset; add `discovery_path` assertion to the removal test.

@@ -59,8 +59,12 @@ related:
 
 ## Outcome
 
-`ruff check` clean. `ty check` clean. Baseline (32 non-service tests) passes. Service tests require `uv build` and a live gateway; marked `service` per project convention.
+REVISION REQUIRED. Code reviewer ran the service suite; tests failed (4 failed, 10 passed total across the trio). `ruff check` and `ty check` are clean; baseline (32 non-service) passes. Service gate was not green at first submission.
+
+Failures diagnosed:
+1. Run-start tests (`test_lazy_worker_from_installed_capsule`, `test_default_acp_execution_mock_seam`): `mock-success-single` preset is deliberately excluded from the product wheel; the tests must seed the preset via the workspace-override seam (`{workspace}/.vaultspec/teams/mock-success-single.toml`) and pass `workspace_root` in run-start `metadata`.
+2. `gateway_env()` used `dict(os.environ)` instead of `clean_env()`.
 
 ## Notes
 
-`mock-success-single` team preset is the only mock-shaped seam in use; it is an established pattern in W01-W04 gates and is disclosed in the module docstring. No test doubles, monkeypatch, skip, or xfail.
+Step unchecked and revision in progress. Disclosure: `mock-success-single` is a non-product test preset seeded via the workspace override, not bundled in the installed wheel.

@@ -412,10 +412,10 @@ def test_data_preserving_capsule_removal(
 
     state = derive_state_paths(app_home)
 
-    # Confirm discovery record was written during the brief boot.
-    assert state.discovery_path.is_file(), (
-        "gateway lifespan must write a discovery record before shutdown"
-    )
+    # Publication was asserted above while the gateway served. The record is not
+    # re-asserted here: a clean shutdown removes the record its owner published,
+    # so whether it survives the stop reflects only how hard the process was
+    # killed, not whether capsule removal preserves user data.
 
     # Capture the paths and sizes of all user-data files before removal.
     # Credential filenames use the canonical constants from credentials.py.

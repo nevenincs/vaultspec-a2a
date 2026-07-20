@@ -244,14 +244,33 @@ def compose_integration_stack() -> Any:
     ]
 
     try:
-        subprocess.run(
-            [*compose_cmd, "up", "-d", "--build", "--wait"],
-            env=compose_env,
-            cwd=REPO_ROOT,
-            check=True,
-            capture_output=True,
-            timeout=600,
-        )
+        try:
+            subprocess.run(
+                [*compose_cmd, "up", "-d", "--build", "--wait"],
+                env=compose_env,
+                cwd=REPO_ROOT,
+                check=True,
+                capture_output=True,
+                timeout=600,
+            )
+        except subprocess.CalledProcessError as error:
+            # ``--wait`` reports only WHICH container is unhealthy, never why. The
+            # container logs carry the reason and are gone after teardown, so they
+            # are surfaced on the failure itself.
+            logs = subprocess.run(
+                [*compose_cmd, "logs", "--no-color", "--tail", "80"],
+                env=compose_env,
+                cwd=REPO_ROOT,
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=120,
+            )
+            raise AssertionError(
+                "compose stack did not become healthy\n"
+                f"stderr:\n{(error.stderr or b'').decode(errors='replace')}\n"
+                f"container logs:\n{logs.stdout}\n{logs.stderr}"
+            ) from error
         # Double-check gateway readiness via the public health endpoint.
         gateway_url = f"http://127.0.0.1:{gateway_port}"
         _wait_for_url(f"{gateway_url}/api/health", timeout=60.0)

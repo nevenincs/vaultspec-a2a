@@ -146,13 +146,9 @@ def _read_owner_restricted_secret(path: Path, *, plane: CredentialPlane) -> str:
             f"{plane.value} credential file is not accessible"
         ) from exc
     if not stat.S_ISREG(named.st_mode):
-        raise CredentialError(
-            f"{plane.value} credential file is not a regular file"
-        )
+        raise CredentialError(f"{plane.value} credential file is not a regular file")
     if not credential_file_is_owner_restricted(path):
-        raise CredentialError(
-            f"{plane.value} credential file is not owner-restricted"
-        )
+        raise CredentialError(f"{plane.value} credential file is not owner-restricted")
     if named.st_size > _MAX_CREDENTIAL_BYTES:
         raise CredentialError(f"{plane.value} credential file exceeds its size bound")
 

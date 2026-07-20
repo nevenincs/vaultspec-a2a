@@ -73,6 +73,7 @@ __all__ = [
 
 _OWNER_ENV = "VAULTSPEC_PROCS_OWNER"
 _KILL_POLL_INTERVAL = 0.1
+_KILL_ESCALATION_WAIT = 5.0
 
 # A spawned process's redirect file is a raw append-mode file, not a Python
 # logging handler, so it cannot rotate on its own — a long-lived dev instance
@@ -121,12 +122,15 @@ def tree_kill(pid: int, *, timeout: float = 10.0) -> bool:
     """Kill *pid* and its whole process tree, returning ``True`` once it is dead.
 
     Windows uses ``taskkill /T /F /PID`` (a bare terminate orphans grandchildren
-    on Windows). POSIX escalates ``SIGTERM`` then
-    ``SIGKILL``. A pid that is already dead is a success. The call blocks up to
-    *timeout* seconds for the process to disappear before reporting.
+    on Windows). POSIX has no whole-tree signal, so it snapshots the descendants
+    before signalling anything - killing the root first would sever the parent
+    links the walk needs - and escalates ``SIGTERM`` then ``SIGKILL`` across the
+    root and that snapshot. A pid that is already dead is a success. The call
+    blocks up to *timeout* seconds for the tree to disappear before reporting.
     """
     if pid <= 0 or not _is_pid_alive(pid):
         return True
+    targets = [pid]
     if sys.platform == "win32":
         with contextlib.suppress(OSError):
             subprocess.run(
@@ -138,20 +142,41 @@ def tree_kill(pid: int, *, timeout: float = 10.0) -> bool:
     else:
         import signal
 
-        with contextlib.suppress(ProcessLookupError, PermissionError):
-            os.kill(pid, signal.SIGTERM)
+        from ..utils.process import posix_descendant_pids
+
+        targets = [pid, *posix_descendant_pids(pid)]
+        _signal_all(targets, signal.SIGTERM)
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
-        if not _is_pid_alive(pid):
+        if not _any_pid_alive(targets):
             return True
         time.sleep(_KILL_POLL_INTERVAL)
     if sys.platform != "win32":
         import signal
 
-        with contextlib.suppress(ProcessLookupError, PermissionError):
-            os.kill(pid, signal.SIGKILL)
-        time.sleep(_KILL_POLL_INTERVAL)
-    return not _is_pid_alive(pid)
+        _signal_all(targets, signal.SIGKILL)
+        # SIGKILL is immediate but not instantaneous: give the kernel a bounded
+        # window to tear the processes down before reporting the outcome.
+        kill_deadline = time.monotonic() + _KILL_ESCALATION_WAIT
+        while time.monotonic() < kill_deadline:
+            if not _any_pid_alive(targets):
+                return True
+            time.sleep(_KILL_POLL_INTERVAL)
+    return not _any_pid_alive(targets)
+
+
+def _any_pid_alive(pids: list[int]) -> bool:
+    return any(_is_pid_alive(pid) for pid in pids)
+
+
+def _signal_all(pids: list[int], signal_number: int) -> None:
+    """Send *signal_number* to each pid, skipping any that is not ours to signal."""
+    own_pid = os.getpid()
+    for target in pids:
+        if target <= 1 or target == own_pid:
+            continue
+        with contextlib.suppress(ProcessLookupError, PermissionError, OSError):
+            os.kill(target, signal_number)
 
 
 def _subst(value: str, *, port: int, workspace: str) -> str:

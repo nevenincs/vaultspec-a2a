@@ -8,9 +8,14 @@ wait/reap bookkeeping.
 
 Windows fells the whole tree with ``taskkill /T /F`` because a bare
 ``terminate()`` only kills the immediate process and orphans grandchildren
-(node.exe under a cmd.exe shim, an engine a worker spawned). POSIX escalates
-``SIGTERM`` then ``SIGKILL``. This module imports nothing from the rest of the
-package by design, so any layer can depend on it without an import cycle.
+(node.exe under a cmd.exe shim, an engine a worker spawned). POSIX has no
+equivalent call, so it snapshots the descendant set from the parent-pid map
+BEFORE it signals anything, then escalates ``SIGTERM`` then ``SIGKILL`` across
+the whole snapshot; signalling only the root would leave the same orphans
+Windows avoids. Liveness on POSIX also has to discount a zombie, which answers
+signal 0 for as long as its parent has not reaped it (see :func:`pid_is_live`).
+This module imports nothing from the rest of the package by design, so any layer
+can depend on it without an import cycle.
 """
 
 from __future__ import annotations
@@ -19,6 +24,7 @@ import asyncio
 import contextlib
 import logging
 import os
+import subprocess
 import sys
 from typing import TYPE_CHECKING, Any
 
@@ -29,11 +35,15 @@ __all__ = [
     "ProcessContainment",
     "ProcessContainmentError",
     "kill_pid_tree_async",
+    "pid_is_live",
+    "posix_descendant_pids",
+    "posix_parent_map",
 ]
 
 logger = logging.getLogger(__name__)
 
 _POLL_INTERVAL = 0.1
+_PS_TIMEOUT = 5.0
 
 # Windows Job Object constants (winnt.h). A job created with
 # KILL_ON_JOB_CLOSE terminates every assigned process when the job is terminated
@@ -46,26 +56,211 @@ _PROCESS_TERMINATE = 0x0001
 _PROCESS_SET_QUOTA = 0x0100
 
 
-def _pid_alive(pid: int) -> bool:
-    """Whether *pid* is still a live process (POSIX ``signal-0`` probe)."""
+def pid_is_live(pid: int) -> bool:
+    """Whether *pid* is a live process on this machine.
+
+    The single liveness probe behind every kill path and staleness verdict in the
+    package. Windows queries the process exit code; POSIX probes with signal 0 and
+    then rules out a zombie (see :func:`_posix_pid_is_zombie`).
+    """
+    if pid <= 0:
+        return False
+    if sys.platform == "win32":
+        import ctypes
+
+        process_query = 0x1000  # PROCESS_QUERY_LIMITED_INFORMATION
+        still_active = 259  # STILL_ACTIVE
+        kernel32 = ctypes.windll.kernel32
+        handle = kernel32.OpenProcess(process_query, False, pid)
+        if not handle:
+            return False
+        try:
+            code = ctypes.c_ulong()
+            if not kernel32.GetExitCodeProcess(handle, ctypes.byref(code)):
+                return False
+            return code.value == still_active
+        finally:
+            kernel32.CloseHandle(handle)
     try:
         os.kill(pid, 0)
     except ProcessLookupError:
         return False
     except PermissionError:
+        # Another user owns it, so it cannot be an unreaped child of ours: it exists.
         return True
-    return True
+    return not _posix_pid_is_zombie(pid)
+
+
+def _posix_pid_is_zombie(pid: int) -> bool:
+    """Whether *pid* has exited but has not yet been reaped by its parent.
+
+    A signal-0 probe is an existence test, not a liveness test: on POSIX an exited
+    child keeps its pid slot until its parent waits on it, and a zombie answers
+    signal 0 exactly like a running process. Without this distinction every caller
+    that kills a process it spawned waits out its full SIGTERM/SIGKILL escalation
+    against a process that is already dead and then reports failure, because the
+    reap only happens later in the caller's own ``wait()``. Windows has no
+    equivalent state, which is why the defect is POSIX-only.
+
+    A zombie runs no code, holds no port, and owns no handle, so every caller here
+    is right to read it as gone.
+    """
+    if sys.platform == "win32":  # pragma: no cover - Windows has no zombie state
+        return False
+    if _is_exited_child(pid):
+        return True
+    return _proc_stat_state(pid) in {"Z", "X"}
+
+
+def _is_exited_child(pid: int) -> bool:
+    """Whether *pid* is a child of this process that has exited and awaits a reap.
+
+    Uses ``waitid`` with ``WNOWAIT``, which reports the exit WITHOUT consuming it,
+    so the owner (a ``subprocess.Popen``, an asyncio child watcher) still collects
+    the real exit status afterwards. ``ChildProcessError`` means *pid* is not our
+    child at all, which this probe reports as "not a zombie we can see" and leaves
+    to :func:`_proc_stat_state`.
+    """
+    if sys.platform == "win32":  # pragma: no cover - POSIX-only wait semantics
+        return False
+    waitid = getattr(os, "waitid", None)
+    if waitid is None:  # pragma: no cover - waitid is absent on some POSIX hosts
+        return False
+    try:
+        return waitid(os.P_PID, pid, os.WEXITED | os.WNOHANG | os.WNOWAIT) is not None
+    except (ChildProcessError, OSError, ValueError):
+        return False
+
+
+def _proc_stat_state(pid: int) -> str:
+    """The single-letter ``/proc`` state of *pid*, or ``""`` where it is unreadable.
+
+    Covers the zombie that is NOT our child (a reparented grandchild whose new
+    parent has not reaped it yet), which ``waitid`` cannot see. Hosts without
+    ``/proc`` simply report no state and fall back to the signal-0 result.
+    """
+    try:
+        with open(f"/proc/{pid}/stat", encoding="ascii", errors="replace") as handle:
+            line = handle.read()
+    except OSError:
+        return ""
+    # The comm field is parenthesised and may itself contain spaces and
+    # parentheses, so the state is the first token after the LAST ')'.
+    _, _, rest = line.rpartition(")")
+    fields = rest.split()
+    return fields[0] if fields else ""
+
+
+def posix_parent_map() -> dict[int, int]:
+    """A ``{pid: parent pid}`` map of every process on this POSIX host.
+
+    Read from ``/proc`` where it exists (Linux), otherwise from ``ps``, which is
+    POSIX-specified and covers the hosts without a ``procfs``.
+    """
+    if sys.platform == "win32":  # pragma: no cover - Windows walks no parent map
+        return {}
+    mapping = _proc_parent_map()
+    return mapping if mapping else _ps_parent_map()
+
+
+def _proc_parent_map() -> dict[int, int]:
+    mapping: dict[int, int] = {}
+    try:
+        entries = os.listdir("/proc")
+    except OSError:
+        return {}
+    for entry in entries:
+        if not entry.isdigit():
+            continue
+        try:
+            with open(f"/proc/{entry}/stat", encoding="ascii", errors="replace") as fh:
+                line = fh.read()
+        except OSError:
+            # The process exited between the listing and the read: not an error.
+            continue
+        # State and parent pid are the first two tokens after the parenthesised
+        # comm field, which may itself contain spaces and parentheses.
+        fields = line.rpartition(")")[2].split()
+        if len(fields) < 2 or not fields[1].lstrip("-").isdigit():
+            continue
+        mapping[int(entry)] = int(fields[1])
+    return mapping
+
+
+def _ps_parent_map() -> dict[int, int]:
+    try:
+        completed = subprocess.run(
+            ["ps", "-A", "-o", "pid=,ppid="],
+            capture_output=True,
+            text=True,
+            timeout=_PS_TIMEOUT,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return {}
+    mapping: dict[int, int] = {}
+    for line in completed.stdout.splitlines():
+        parts = line.split()
+        if len(parts) < 2 or not parts[0].isdigit() or not parts[1].isdigit():
+            continue
+        mapping[int(parts[0])] = int(parts[1])
+    return mapping
+
+
+def posix_descendant_pids(pid: int) -> list[int]:
+    """Every descendant of *pid* on POSIX, as a snapshot taken before any signal.
+
+    The POSIX counterpart of ``taskkill /T``: POSIX has no "signal this process and
+    everything below it" call, and a bare ``SIGTERM`` to a parent leaves its
+    children running and reparented to init. The walk must therefore happen BEFORE
+    the root is signalled, because killing the root severs exactly the parent links
+    a later walk would need. Like ``taskkill /T`` this is a snapshot, so a
+    descendant spawned after the walk is not covered.
+    """
+    if sys.platform == "win32":  # pragma: no cover - Windows fells the tree natively
+        return []
+    children: dict[int, list[int]] = {}
+    for child, parent in posix_parent_map().items():
+        children.setdefault(parent, []).append(child)
+    descendants: list[int] = []
+    seen = {pid}
+    frontier = list(children.get(pid, ()))
+    while frontier:
+        current = frontier.pop()
+        if current in seen:
+            continue
+        seen.add(current)
+        descendants.append(current)
+        frontier.extend(children.get(current, ()))
+    return descendants
+
+
+def _posix_signal_all(pids: list[int], signal_number: int) -> None:
+    """Send *signal_number* to each pid, skipping any that is not safe to signal."""
+    own_pid = os.getpid()
+    for target in pids:
+        # pid 1 is init and a signal to it is never ours to send; signalling
+        # ourselves would fell the very process doing the killing.
+        if target <= 1 or target == own_pid:
+            continue
+        with contextlib.suppress(ProcessLookupError, PermissionError, OSError):
+            os.kill(target, signal_number)
 
 
 async def _await_pid_gone(pid: int, *, timeout: float) -> bool:
     """Poll until *pid* is gone or *timeout* elapses; return whether it is gone."""
+    return await _await_pids_gone([pid], timeout=timeout)
+
+
+async def _await_pids_gone(pids: list[int], *, timeout: float) -> bool:
+    """Poll until every pid is gone or *timeout* elapses; report whether all are."""
     loop = asyncio.get_running_loop()
     deadline = loop.time() + timeout
     while loop.time() < deadline:
-        if not _pid_alive(pid):
+        if not any(pid_is_live(pid) for pid in pids):
             return True
         await asyncio.sleep(_POLL_INTERVAL)
-    return not _pid_alive(pid)
+    return not any(pid_is_live(pid) for pid in pids)
 
 
 async def _win_tree_kill(pid: int, *, timeout: float) -> bool:
@@ -93,11 +288,12 @@ async def kill_pid_tree_async(
 ) -> bool:
     """Kill *pid* and its process tree; return ``True`` once it is gone.
 
-    Windows uses ``taskkill /T /F /PID`` (whole-tree force kill). POSIX sends
-    ``SIGTERM``, waits up to *term_timeout* for the process to exit, then escalates
-    to ``SIGKILL`` and waits up to *kill_timeout*. A pid that is already gone (or a
-    non-positive pid) is a success. The caller keeps its own handle wait/reap after
-    this returns.
+    Windows uses ``taskkill /T /F /PID`` (whole-tree force kill). POSIX snapshots
+    the descendants of *pid* (:func:`posix_descendant_pids`), sends ``SIGTERM`` to
+    the root and that snapshot, waits up to *term_timeout* for all of them to exit,
+    then escalates to ``SIGKILL`` and waits up to *kill_timeout*. A pid that is
+    already gone (or a non-positive pid) is a success. The caller keeps its own
+    handle wait/reap after this returns.
     """
     if pid <= 0:
         return True
@@ -107,13 +303,12 @@ async def kill_pid_tree_async(
     # ``signal`` to its POSIX members (``SIGKILL`` is absent on Windows).
     import signal
 
-    with contextlib.suppress(ProcessLookupError, PermissionError):
-        os.kill(pid, signal.SIGTERM)
-    if await _await_pid_gone(pid, timeout=term_timeout):
+    targets = [pid, *posix_descendant_pids(pid)]
+    _posix_signal_all(targets, signal.SIGTERM)
+    if await _await_pids_gone(targets, timeout=term_timeout):
         return True
-    with contextlib.suppress(ProcessLookupError, PermissionError):
-        os.kill(pid, signal.SIGKILL)
-    return await _await_pid_gone(pid, timeout=kill_timeout)
+    _posix_signal_all(targets, signal.SIGKILL)
+    return await _await_pids_gone(targets, timeout=kill_timeout)
 
 
 # ---------------------------------------------------------------------------

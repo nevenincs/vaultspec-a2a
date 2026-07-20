@@ -3,7 +3,7 @@ tags:
   - '#audit'
   - '#desktop-product-profile'
 date: '2026-07-19'
-modified: '2026-07-19'
+modified: '2026-07-20'
 related:
   - "[[2026-07-18-desktop-product-profile-plan]]"
 ---
@@ -1718,3 +1718,115 @@ campaign passes 384 tests with 26 deselected and the one pre-existing credential
 skip queued as S98. Ruff, formatting, Ty, and diff hygiene pass. Independent dashboard,
 contract, and code-health reviewers found no S99 blocker; the sole carried medium finding
 is assigned to S100 above. This closes only S99 and authorizes no release.
+
+## `W01.P03.S100` shared archive authority review
+
+Status: PASS AFTER THREE FORMAL REVIEW ROUNDS; ONE CONTROLLED-INPUT COMPATIBILITY
+LIMITATION CARRIED.
+
+S100 consolidates package, capsule, and manifest archive inspection behind one bounded
+authority. ZIP central-directory and raw TAR controls are inspected before high-level
+archive readers materialize members. Package verification can retain the exact regular
+file snapshot through a scope-bound, read-only consume session, and the combined closure
+loader exposes sequential retained handoffs for Python wheels, ACP packages, external
+licenses, and the root A2A wheel. These are assembly prerequisites only; they grant no
+publication, receipt, activation, provenance, or release authority.
+
+### zip-preflight-trusted-high-level-parser-too-early | high | Resolved
+
+Type: archive parser hardening. ZIP inputs previously reached `ZipFile` before independent
+central-directory validation. The shared authority now scans EOCD and central-directory
+records first, rejects multi-disk and ZIP64 overrides, reconciles the observed entry count,
+and bounds central-directory bytes before the high-level parser opens the archive.
+
+### forged-eocd-member-count-bypassed-cardinality | high | Resolved
+
+Type: resource exhaustion. An EOCD count could understate real central-directory entries.
+Preflight now counts every central record and requires exact agreement. Real forged-count
+and 80,001-member regression inputs fail before extraction.
+
+### wheel-record-verification-materialized-large-members | high | Resolved
+
+Type: memory safety. Wheel `RECORD` verification could allocate a complete member even
+when the archive-level bound permitted a very large file. Member digests are now streamed
+in bounded chunks after `RECORD` syntax and size declarations pass.
+
+### verified-evidence-did-not-retain-verified-bytes | high | Resolved
+
+Type: authority lifetime and TOCTOU. Detached package evidence exposed a diagnostic path
+that later consumers could reopen after replacement. Verification and consumption now
+share an anonymous retained snapshot. Read views are scope-bound, read-only, non-nestable,
+and invalid after scope exit; evidence is getter-only and cannot be rebound. Detached
+verification remains evidence only and is explicitly not extraction authority.
+
+### closure-handoff-reopened-unbound-package-and-license-paths | high | Resolved
+
+Type: integration authority. The complete closure loader originally returned detached
+evidence without a typed consume seam. It now retains the resolved input directory and
+opens one reverified Python package, ACP package, external license, or root A2A wheel at a
+time, comparing the full evidence object to the originally loaded result before yielding
+the exact bytes. Sequential scopes avoid retaining thousands of handles.
+
+### tar-control-records-had-no-cumulative-bound | high | Resolved
+
+Type: resource exhaustion. Individually bounded PAX and GNU extension records could still
+consume unbounded aggregate control bytes. Raw TAR preflight now charges every control
+record against per-record and cumulative expanded-byte limits, rejects sparse forms, and
+requires valid termination without non-zero trailing data.
+
+### archive-snapshot-and-scanner-duplication | medium | Resolved
+
+Type: duplicated code and contract drift. Package, capsule, and manifest paths carried
+overlapping snapshot, path, collision, type, ratio, and aggregate-size logic. The shared
+`_archive_authority` is now the single production home for retained regular-file snapshots,
+ZIP/TAR member validation, central-directory preflight, raw TAR control inspection, and
+bounded single-stream gzip decoding. Consumers retain only format-specific policy and
+error normalization.
+
+### zip-and-tar-cardinality-policy-was-accidentally-coupled | medium | Resolved
+
+Type: contract correctness. Applying ZIP's non-ZIP64 ceiling to TAR narrowed the intended
+TAR input domain. Ordinary ZIP remains capped at 65,534 entries, TAR at 100,000 entries,
+and the final projected dashboard tree remains capped independently at 80,000 files.
+
+### gzip-framing-boundary-lacked-persisted-evidence | medium | Resolved
+
+Type: security regression coverage. A production-importing real-byte test now proves one
+valid gzip member succeeds while raw trailing bytes and a concatenated second member fail.
+The shared decoder also bounds expanded bytes and emits an anonymous retained payload.
+
+### plan-metadata-leaked-into-delivered-code | high | Resolved
+
+Type: architecture independence. Four production docstrings and one test name referred to
+a plan Step instead of the product invariant. They now describe retained consume scopes in
+product language; no plan identifier remains in the delivered implementation or tests.
+
+### readonly-session-test-failed-the-type-gate | low | Resolved
+
+Type: repository verification. The evidence-rebinding regression originally used an
+incorrect type diagnostic suppression. It now attempts the runtime mutation through
+`object.__setattr__`, still proves `AttributeError`, and passes the locked repository-wide
+Ty gate without suppression.
+
+### dead-and-duplicated-local-archive-branches | low | Resolved
+
+Type: dead and duplicated code. Consolidation removed the duplicate local scanners,
+snapshot wrappers, gzip paths, and an unreachable compressed-size check. The final diff
+passes Ruff, formatting, Ty, and prohibited-test-pattern review.
+
+### eocd-signature-inside-zip-comment | low | Carried; controlled input rejects safely
+
+Type: compatibility. The independent EOCD search can identify a structurally plausible
+signature embedded in a ZIP comment that CPython's `ZipFile` later cannot open. The public
+boundary normalizes this as a safe archive rejection, so it is not a validation bypass or
+resource-safety defect. Supporting that unusual controlled input would require replacing
+or compensating for the runtime parser and is not required for desktop closure artifacts.
+
+The final focused package, artifact, capsule, and manifest campaign passes 117 tests. The
+complete desktop campaign passes 365 tests with the existing POSIX credential permission
+skip already tracked separately. Ruff lint and formatting, locked repository-wide Ty,
+diff hygiene, and the prohibited test-pattern scan pass. Three independent formal
+reviewers matched all eight implementation/test SHA-256 identities and unanimously
+approved with no remaining critical, high, medium, or low S100 blocker. This closes only
+S100. Whole-generation assembly, verification, publication, trusted component-lock joins,
+and dashboard receipt-bound activation remain mandatory under S13 through S15.

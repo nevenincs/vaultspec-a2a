@@ -17,6 +17,7 @@ import re
 import stat
 import tempfile
 import zipfile
+import zlib
 from contextlib import contextmanager
 from dataclasses import dataclass
 from email import policy
@@ -28,6 +29,15 @@ from alembic.script import ScriptDirectory
 from pydantic import ValidationError
 
 from vaultspec_a2a.database.checkpoint_schema import CHECKPOINT_SCHEMA_VERSION
+
+from ._archive_authority import (
+    ArchiveAuthorityError,
+    ArchiveLimits,
+    RetainedFileSnapshot,
+    preflight_zip_directory,
+    retain_file_snapshot,
+    scan_zip_archive,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Iterator, Sequence
@@ -114,6 +124,13 @@ _MAX_WHEEL_BYTES: Final = 128 << 20
 _MAX_ARCHIVE_ENTRIES: Final = 4096
 _MAX_ARCHIVE_BYTES: Final = 256 << 20
 _MAX_ARCHIVE_EXPANSION_RATIO: Final = 200
+_MANIFEST_ARCHIVE_LIMITS: Final = ArchiveLimits(
+    maximum_members=_MAX_ARCHIVE_ENTRIES,
+    maximum_member_bytes=_MAX_ARCHIVE_BYTES,
+    maximum_expanded_bytes=_MAX_ARCHIVE_BYTES,
+    maximum_expansion_ratio=_MAX_ARCHIVE_EXPANSION_RATIO,
+    expansion_floor_bytes=1 << 20,
+)
 _MAX_MIGRATION_ENTRIES: Final = 256
 _MAX_MIGRATION_FILE_BYTES: Final = 1 << 20
 _MAX_MIGRATION_BYTES: Final = 16 << 20
@@ -206,9 +223,13 @@ def _read_archive_member(
     if member.file_size > maximum_size:
         raise ManifestEmissionError(f"A2A wheel {label} exceeds its size bound")
     try:
-        return archive.read(member)
-    except (OSError, RuntimeError, zipfile.BadZipFile):
+        with archive.open(member, "r") as source:
+            payload = source.read(maximum_size + 1)
+    except (OSError, RuntimeError, zipfile.BadZipFile, zlib.error):
         raise ManifestEmissionError(f"cannot read A2A wheel {label}") from None
+    if len(payload) != member.file_size or len(payload) > maximum_size:
+        raise ManifestEmissionError(f"A2A wheel {label} exceeds its size bound")
+    return payload
 
 
 def _dist_info_members(
@@ -249,30 +270,6 @@ def _dist_info_members(
         entrypoints=entrypoints[0],
         wheel=wheel[0],
     )
-
-
-def _validate_archive_bounds(archive: zipfile.ZipFile) -> tuple[zipfile.ZipInfo, ...]:
-    members = tuple(archive.infolist())
-    if len(members) > _MAX_ARCHIVE_ENTRIES:
-        raise ManifestEmissionError("A2A wheel exceeds its entry-count bound")
-    names = tuple(member.filename for member in members)
-    if len(names) != len(set(names)):
-        raise ManifestEmissionError("A2A wheel contains duplicate archive members")
-
-    files = tuple(member for member in members if not member.is_dir())
-    if any(
-        member.file_size
-        > max(member.compress_size * _MAX_ARCHIVE_EXPANSION_RATIO, 1 << 20)
-        for member in files
-    ):
-        raise ManifestEmissionError("A2A wheel member exceeds its expansion bound")
-    expanded = sum(member.file_size for member in files)
-    compressed = sum(member.compress_size for member in files)
-    if expanded > _MAX_ARCHIVE_BYTES:
-        raise ManifestEmissionError("A2A wheel exceeds its expanded-size bound")
-    if expanded > max(compressed * _MAX_ARCHIVE_EXPANSION_RATIO, 1 << 20):
-        raise ManifestEmissionError("A2A wheel exceeds its expansion-ratio bound")
-    return members
 
 
 def _metadata_identity(payload: bytes) -> tuple[str, str, str]:
@@ -417,16 +414,27 @@ def _materialize_migrations(
             target = destination.joinpath(*relative)
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_bytes(archive.read(member))
-    except (OSError, RuntimeError, zipfile.BadZipFile):
+    except (OSError, RuntimeError, zipfile.BadZipFile, zlib.error):
         raise ManifestEmissionError("cannot read A2A wheel migration tree") from None
 
 
 def _read_wheel_contract(
-    path: Path, migration_destination: Path
+    source: BinaryIO, migration_destination: Path
 ) -> tuple[_WheelContract, MigrationRange]:
     try:
-        with zipfile.ZipFile(path) as archive:
-            members = _validate_archive_bounds(archive)
+        directory = preflight_zip_directory(
+            source,
+            limits=_MANIFEST_ARCHIVE_LIMITS,
+            label="A2A wheel",
+        )
+        with zipfile.ZipFile(source) as archive:
+            scanned = scan_zip_archive(
+                archive,
+                limits=_MANIFEST_ARCHIVE_LIMITS,
+                label="A2A wheel",
+                directory=directory,
+            )
+            members = scanned.members
             dist_info = _dist_info_members(members)
             metadata_payload = _read_archive_member(
                 archive,
@@ -452,7 +460,15 @@ def _read_wheel_contract(
             _materialize_migrations(archive, members, migration_destination)
     except ManifestEmissionError:
         raise
-    except (OSError, RuntimeError, zipfile.BadZipFile, zipfile.LargeZipFile):
+    except ArchiveAuthorityError as error:
+        raise ManifestEmissionError(str(error)) from None
+    except (
+        OSError,
+        RuntimeError,
+        zipfile.BadZipFile,
+        zipfile.LargeZipFile,
+        zlib.error,
+    ):
         raise ManifestEmissionError("cannot read A2A wheel artifact") from None
 
     contract = _WheelContract(
@@ -504,32 +520,25 @@ def _migration_range(script_location: Path) -> MigrationRange:
     return MigrationRange(base=bases[0], head=heads[0])
 
 
-def _snapshot_wheel(
-    source_path: Path,
-    destination: Path,
-    algorithm: DigestAlgorithm,
-) -> str:
-    """Copy and digest the wheel through one source handle with a hard bound."""
-    hasher = _HASHERS[algorithm]()
-    total = 0
+@contextmanager
+def _retained_wheel(source_path: Path) -> Iterator[RetainedFileSnapshot]:
+    """Retain the root A2A wheel through the shared exact-file authority."""
+    snapshot: RetainedFileSnapshot | None = None
     try:
-        with (
-            _regular_binary_reader(source_path, label="A2A wheel artifact") as source,
-            destination.open("xb") as snapshot,
-        ):
-            for block in iter(lambda: source.read(_DIGEST_CHUNK), b""):
-                total += len(block)
-                if total > _MAX_WHEEL_BYTES:
-                    raise ManifestEmissionError(
-                        "A2A wheel exceeds its source-size bound"
-                    )
-                hasher.update(block)
-                snapshot.write(block)
-    except ManifestEmissionError:
-        raise
-    except OSError:
-        raise ManifestEmissionError("cannot read A2A wheel artifact") from None
-    return hasher.hexdigest()
+        snapshot = retain_file_snapshot(
+            source_path,
+            label="A2A wheel artifact",
+            maximum_size=_MAX_WHEEL_BYTES,
+        )
+        yield snapshot
+    except ArchiveAuthorityError as error:
+        raise ManifestEmissionError(str(error)) from None
+    finally:
+        if snapshot is not None:
+            try:
+                snapshot.close()
+            except ArchiveAuthorityError as error:
+                raise ManifestEmissionError(str(error)) from None
 
 
 def _validate_source_closure(assets: object) -> tuple[AssetSource, ...]:
@@ -710,13 +719,12 @@ def emit_component_manifest(
     try:
         with tempfile.TemporaryDirectory(prefix="vaultspec-a2a-manifest-") as temp:
             private_root = Path(temp)
-            snapshot = private_root / "component.whl"
-            wheel_digest = _snapshot_wheel(
-                a2a_source.path, snapshot, validated.digest_algorithm
-            )
-            wheel, migrations = _read_wheel_contract(
-                snapshot, private_root / "migrations"
-            )
+            with _retained_wheel(a2a_source.path) as snapshot:
+                wheel_digest = snapshot.sha256
+                with snapshot.open() as wheel_source:
+                    wheel, migrations = _read_wheel_contract(
+                        wheel_source, private_root / "migrations"
+                    )
             gateway_name, gateway_reference = _required_console_script(
                 wheel.console_scripts, _GATEWAY_SCRIPT, _GATEWAY_REFERENCE
             )

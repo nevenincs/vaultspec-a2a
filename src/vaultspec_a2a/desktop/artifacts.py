@@ -30,6 +30,7 @@ from pydantic import (
     model_validator,
 )
 
+from ._archive_authority import ArchiveAuthorityError, retain_file_snapshot
 from .closure_inventory import (
     _ACP_ROOT_PACKAGE,
     _MAX_ARTIFACT_BYTES,
@@ -69,6 +70,10 @@ from .lock_reconciliation import (
 from .package_archives import (
     PackageArchiveError,
     VerifiedPackageArchive,
+    VerifiedPackageArchiveSession,
+    open_verified_acp_package_archive,
+    open_verified_external_license,
+    open_verified_python_wheel_archive,
     verify_acp_package_archive,
     verify_external_license_artifacts,
     verify_python_wheel_archive,
@@ -96,11 +101,16 @@ __all__ = [
     "SourceArtifactDescriptor",
     "VerifiedArtifact",
     "VerifiedPackageArchive",
+    "VerifiedPackageArchiveSession",
     "canonical_closure_inventory_bytes",
     "load_acp_closure_inventory",
     "load_capsule_closures",
     "load_capsule_input_descriptor",
     "load_python_closure_inventory",
+    "open_verified_a2a_wheel",
+    "open_verified_acp_package_archive",
+    "open_verified_external_license",
+    "open_verified_python_wheel_archive",
     "validate_portable_archive_path",
     "verify_acp_tarballs",
     "verify_cached_artifacts",
@@ -460,6 +470,91 @@ class LoadedCapsuleClosures:
     acp_packages: tuple[VerifiedPackageArchive, ...]
     uv_lock_path: Path
     package_lock_path: Path
+    input_dir: Path
+
+    @contextmanager
+    def open_python_package(
+        self, package_name: str
+    ) -> Iterator[VerifiedPackageArchiveSession]:
+        """Reverify and retain one wheel through the caller's consume scope."""
+        packages = tuple(
+            package
+            for package in self.python.value.packages
+            if package.name == package_name
+        )
+        expected = tuple(
+            archive
+            for archive in self.python_packages
+            if isinstance(archive.descriptor, PythonWheelArtifact)
+            and archive.descriptor.name == package_name
+        )
+        if len(packages) != 1 or len(expected) != 1:
+            raise ArtifactInputError("Python package session identity is invalid")
+        try:
+            with open_verified_python_wheel_archive(
+                self.input_dir / packages[0].sha256,
+                packages[0],
+                target=self.python.value.target,
+            ) as session:
+                complete = verify_external_license_artifacts(
+                    session.archive, input_dir=self.input_dir
+                )
+                if complete != expected[0]:
+                    raise ArtifactInputError(
+                        "retained Python package evidence changed after closure load"
+                    )
+                yield session
+        except PackageArchiveError as error:
+            raise ArtifactInputError(str(error)) from None
+
+    @contextmanager
+    def open_acp_package(
+        self, install_path: str
+    ) -> Iterator[VerifiedPackageArchiveSession]:
+        """Reverify and retain one npm tarball through the caller's consume scope."""
+        packages = tuple(
+            package
+            for package in self.acp.value.packages
+            if package.install_path == install_path
+        )
+        expected = tuple(
+            archive
+            for archive in self.acp_packages
+            if isinstance(archive.descriptor, AcpPackageArtifact)
+            and archive.descriptor.install_path == install_path
+        )
+        if len(packages) != 1 or len(expected) != 1:
+            raise ArtifactInputError("ACP package session identity is invalid")
+        try:
+            with open_verified_acp_package_archive(
+                self.input_dir / packages[0].sha256,
+                packages[0],
+            ) as session:
+                complete = verify_external_license_artifacts(
+                    session.archive, input_dir=self.input_dir
+                )
+                if complete != expected[0]:
+                    raise ArtifactInputError(
+                        "retained ACP package evidence changed after closure load"
+                    )
+                yield session
+        except PackageArchiveError as error:
+            raise ArtifactInputError(str(error)) from None
+
+    @contextmanager
+    def open_external_license(
+        self, archive: VerifiedPackageArchive, source_id: str
+    ) -> Iterator[BinaryIO]:
+        """Retain one exact external license for immediate materialization."""
+        try:
+            with open_verified_external_license(
+                archive,
+                source_id,
+                input_dir=self.input_dir,
+            ) as source:
+                yield source
+        except PackageArchiveError as error:
+            raise ArtifactInputError(str(error)) from None
 
 
 @dataclass(frozen=True, slots=True)
@@ -468,6 +563,38 @@ class VerifiedArtifact:
 
     descriptor: SourceArtifactDescriptor
     path: Path
+
+
+@contextmanager
+def open_verified_a2a_wheel(artifact: VerifiedArtifact) -> Iterator[BinaryIO]:
+    """Retain the exact root A2A wheel bytes for one caller consume scope."""
+    if not isinstance(artifact, VerifiedArtifact):
+        raise ArtifactInputError("verified A2A wheel artifact is invalid")
+    descriptor = artifact.descriptor
+    if (
+        descriptor.kind is not ComponentAssetKind.A2A_DISTRIBUTION
+        or descriptor.archive_kind is not ArchiveKind.WHEEL
+    ):
+        raise ArtifactInputError("verified artifact is not the root A2A wheel")
+    snapshot = None
+    try:
+        snapshot = retain_file_snapshot(
+            artifact.path,
+            label="root A2A wheel",
+            maximum_size=_MAX_SOURCE_BYTES,
+            expected_size=descriptor.size,
+            expected_sha256=descriptor.sha256,
+        )
+        with snapshot.open() as source:
+            yield source
+    except ArchiveAuthorityError as error:
+        raise ArtifactInputError(str(error)) from None
+    finally:
+        if snapshot is not None:
+            try:
+                snapshot.close()
+            except ArchiveAuthorityError as error:
+                raise ArtifactInputError(str(error)) from None
 
 
 @contextmanager
@@ -932,4 +1059,5 @@ def load_capsule_closures(
         acp_packages=acp_packages,
         uv_lock_path=verified_uv_path,
         package_lock_path=verified_package_path,
+        input_dir=_resolved_input_root(input_dir),
     )

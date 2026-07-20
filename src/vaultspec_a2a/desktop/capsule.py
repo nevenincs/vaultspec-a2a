@@ -15,23 +15,23 @@ import shutil
 import stat
 import tarfile
 import zipfile
+import zlib
 from contextlib import ExitStack, contextmanager, suppress
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, BinaryIO, Final, cast
 
 from ._capsule_archive_io import (
-    _MAX_ARCHIVE_MEMBERS,
     _MAX_EXPANDED_BYTES,
-    _MAX_EXPANSION_RATIO,
-    _MAX_MEMBER_BYTES,
     _READ_CHUNK,
-    _bounded_tar_members,
     _portable_key,
+    _preflight_tar_payload,
     _preflight_zip_directory,
     _read_tar_members,
     _read_zip_members,
     _relative_under_root,
+    _scan_tar_archive,
+    _scan_zip_archive,
     _snapshot_source,
     _tar_payload,
     _tar_target,
@@ -579,36 +579,11 @@ def _zip_projection(
     source_date_epoch: int,
 ) -> tuple[ProjectedFile, ...]:
     _assert_projection_authorities(generation_authority, destination_authority)
-    members = tuple(archive.infolist())
-    if len(members) > _MAX_ARCHIVE_MEMBERS:
-        raise CapsuleAssemblyError("zip archive exceeds its member-count bound")
-    names = tuple(member.filename.rstrip("/") for member in members)
-    try:
-        validated_names = tuple(validate_portable_archive_path(name) for name in names)
-    except ValueError:
-        raise CapsuleAssemblyError("zip archive contains an unsafe path") from None
-    if len({_portable_key(name) for name in validated_names}) != len(validated_names):
-        raise CapsuleAssemblyError("zip archive contains duplicate portable paths")
-    files = tuple(member for member in members if not member.is_dir())
-    if any(member.flag_bits & 1 for member in files):
-        raise CapsuleAssemblyError("encrypted zip members are not supported")
-    if any(member.file_size > _MAX_MEMBER_BYTES for member in files):
-        raise CapsuleAssemblyError("zip member exceeds its size bound")
-    expanded = sum(member.file_size for member in files)
-    compressed = sum(member.compress_size for member in files)
-    if expanded > _MAX_EXPANDED_BYTES or expanded > max(
-        compressed * _MAX_EXPANSION_RATIO, 1 << 20
-    ):
-        raise CapsuleAssemblyError("zip archive exceeds its expansion bound")
+    scanned = _scan_zip_archive(archive, label="zip archive")
 
     selected: list[tuple[zipfile.ZipInfo, _PlannedMember]] = []
-    for member in files:
+    for _, member in scanned.regular:
         mode = member.external_attr >> 16
-        file_type = stat.S_IFMT(mode)
-        if file_type not in {0, stat.S_IFREG}:
-            raise CapsuleAssemblyError(
-                "zip archive contains a special filesystem member"
-            )
         relative = _relative_under_root(member.filename, archive_root)
         if relative is not None:
             selected.append(
@@ -653,7 +628,7 @@ def _zip_projection(
                 )
         except CapsuleAssemblyError:
             raise
-        except (OSError, RuntimeError, zipfile.BadZipFile):
+        except (OSError, RuntimeError, zipfile.BadZipFile, zlib.error):
             raise CapsuleAssemblyError("cannot read zip archive member") from None
         projected.append(
             ProjectedFile(
@@ -680,24 +655,12 @@ def _tar_projection(
     source_date_epoch: int,
 ) -> tuple[ProjectedFile, ...]:
     _assert_projection_authorities(generation_authority, destination_authority)
-    members = _bounded_tar_members(archive, label="tar archive")
-    names = tuple(member.name.rstrip("/") for member in members)
-    try:
-        validated_names = tuple(validate_portable_archive_path(name) for name in names)
-    except ValueError:
-        raise CapsuleAssemblyError("tar archive contains an unsafe path") from None
-    if len({_portable_key(name) for name in validated_names}) != len(validated_names):
-        raise CapsuleAssemblyError("tar archive contains duplicate portable paths")
-    if any(
-        not (member.isfile() or member.isdir() or member.issym() or member.islnk())
-        for member in members
-    ):
-        raise CapsuleAssemblyError("tar archive contains a special filesystem member")
-    by_name = {member.name.rstrip("/"): member for member in members}
+    scanned = _scan_tar_archive(archive, label="tar archive")
+    by_name = {member.name.rstrip("/"): member for member in scanned.members}
 
     selected: list[tuple[tarfile.TarInfo, tarfile.TarInfo, _PlannedMember]] = []
     total = 0
-    for member in members:
+    for member in scanned.members:
         if member.isdir():
             continue
         relative = _relative_under_root(member.name, archive_root)
@@ -706,8 +669,6 @@ def _tar_projection(
         source_member = _tar_target(member, by_name)
         if _relative_under_root(source_member.name, archive_root) is None:
             raise CapsuleAssemblyError("archive link target escapes its declared root")
-        if source_member.size > _MAX_MEMBER_BYTES:
-            raise CapsuleAssemblyError("tar member exceeds its size bound")
         total += source_member.size
         if total > _MAX_EXPANDED_BYTES:
             raise CapsuleAssemblyError("tar archive exceeds its expanded-size bound")
@@ -797,20 +758,19 @@ def _project_archive_payload(
         _assert_projection_authorities(generation_authority, destination_authority)
         return projected
     _assert_projection_authorities(generation_authority, destination_authority)
-    with (
-        _tar_payload(snapshot, archive_kind) as tar_source,
-        tarfile.open(fileobj=tar_source, mode="r:") as archive,
-    ):
-        projected = _tar_projection(
-            archive,
-            archive_root=archive_root,
-            destination_root=destination_root,
-            generation_authority=generation_authority,
-            destination_authority=destination_authority,
-            destination_prefix=evidence_prefix,
-            materialization_prefix="",
-            source_date_epoch=source_date_epoch,
-        )
+    with _tar_payload(snapshot, archive_kind) as tar_source:
+        _preflight_tar_payload(tar_source, label="tar archive")
+        with tarfile.open(fileobj=tar_source, mode="r:") as archive:
+            projected = _tar_projection(
+                archive,
+                archive_root=archive_root,
+                destination_root=destination_root,
+                generation_authority=generation_authority,
+                destination_authority=destination_authority,
+                destination_prefix=evidence_prefix,
+                materialization_prefix="",
+                source_date_epoch=source_date_epoch,
+            )
     _assert_projection_authorities(generation_authority, destination_authority)
     return projected
 
@@ -891,7 +851,14 @@ def project_archive_into_unpublished_generation(
         ) from None
     except CapsuleAssemblyError:
         raise
-    except (OSError, EOFError, RuntimeError, tarfile.TarError, zipfile.BadZipFile):
+    except (
+        OSError,
+        EOFError,
+        RuntimeError,
+        tarfile.TarError,
+        zipfile.BadZipFile,
+        zlib.error,
+    ):
         raise CapsuleAssemblyError(
             "cannot project archive into unpublished generation"
         ) from None
@@ -1004,7 +971,14 @@ def project_archive(
         return projected
     except CapsuleAssemblyError:
         raise
-    except (OSError, EOFError, RuntimeError, tarfile.TarError, zipfile.BadZipFile):
+    except (
+        OSError,
+        EOFError,
+        RuntimeError,
+        tarfile.TarError,
+        zipfile.BadZipFile,
+        zlib.error,
+    ):
         raise CapsuleAssemblyError("cannot publish capsule projection") from None
     finally:
         try:
@@ -1071,14 +1045,19 @@ def read_archive_members(
                     return _read_zip_members(archive, validated_names)
             except CapsuleAssemblyError:
                 raise
-            except (OSError, RuntimeError, zipfile.BadZipFile, zipfile.LargeZipFile):
+            except (
+                OSError,
+                RuntimeError,
+                zipfile.BadZipFile,
+                zipfile.LargeZipFile,
+                zlib.error,
+            ):
                 raise CapsuleAssemblyError("cannot parse license zip archive") from None
         try:
-            with (
-                _tar_payload(snapshot, kind) as tar_source,
-                tarfile.open(fileobj=tar_source, mode="r:") as archive,
-            ):
-                return _read_tar_members(archive, validated_names)
+            with _tar_payload(snapshot, kind) as tar_source:
+                _preflight_tar_payload(tar_source, label="license tar")
+                with tarfile.open(fileobj=tar_source, mode="r:") as archive:
+                    return _read_tar_members(archive, validated_names)
         except (OSError, EOFError, tarfile.TarError):
             raise CapsuleAssemblyError("cannot parse license tar archive") from None
 

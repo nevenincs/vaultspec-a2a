@@ -23,11 +23,14 @@ from vaultspec_a2a.desktop.artifacts import (
     PythonClosureInventory,
     PythonWheelArtifact,
     SourceArtifactDescriptor,
+    VerifiedArtifact,
     canonical_closure_inventory_bytes,
     load_acp_closure_inventory,
     load_capsule_closures,
     load_capsule_input_descriptor,
     load_python_closure_inventory,
+    open_verified_a2a_wheel,
+    open_verified_external_license,
     validate_portable_archive_path,
     verify_acp_tarballs,
     verify_lock_input,
@@ -566,6 +569,26 @@ def test_a2a_distribution_binds_dashboard_commit_provenance() -> None:
         SourceArtifactDescriptor.model_validate(fields)
 
 
+def test_root_a2a_wheel_has_a_retained_byte_handoff(tmp_path: Path) -> None:
+    payload = b"exact root wheel bytes"
+    sources, _ = _source_descriptors()
+    descriptor = next(
+        source
+        for source in sources
+        if source.kind is ComponentAssetKind.A2A_DISTRIBUTION
+    ).model_copy(update={"sha256": _sha256(payload), "size": len(payload)})
+    path = tmp_path / descriptor.sha256
+    path.write_bytes(payload)
+    artifact = VerifiedArtifact(descriptor=descriptor, path=path)
+
+    with open_verified_a2a_wheel(artifact) as source:
+        path.write_bytes(b"replacement root bytes")
+        assert source.read() == payload
+        retained_view = source
+    with pytest.raises(ValueError, match="no longer active"):
+        retained_view.read(1)
+
+
 def test_python_inventory_rejects_cross_target_wheel_and_noncanonical_version() -> None:
     payload = b"mac-wheel"
     wheel = PythonWheelArtifact(
@@ -770,6 +793,15 @@ def test_wheelhouse_binds_external_license_bytes_for_deficient_wheel(
     verified = verify_python_wheelhouse(loaded, input_dir=cache)
     assert verified[0].license_members[0].path == external.source_id
     assert verified[0].license_members[0].sha256 == external.sha256
+
+    with open_verified_external_license(
+        verified[0], external.source_id, input_dir=cache
+    ) as source:
+        external_path.write_bytes(b"replacement license bytes"[: len(license_bytes)])
+        assert source.read() == license_bytes
+        retained_view = source
+    with pytest.raises(ValueError, match="no longer active"):
+        retained_view.read(1)
 
     external_path.write_bytes(license_bytes + b"changed")
     with pytest.raises(ArtifactInputError, match="size does not match"):
@@ -1089,6 +1121,16 @@ wheels = [
     )
     assert loaded.python_packages[0].path == wheel_path
     assert len(loaded.acp_packages) == len(packages)
+    with (
+        loaded.open_python_package(wheel.name) as session,
+        session.open_snapshot() as source,
+    ):
+        assert hashlib.sha256(source.read()).hexdigest() == wheel.sha256
+    with (
+        loaded.open_acp_package(packages[0].install_path) as session,
+        session.open_snapshot() as source,
+    ):
+        assert hashlib.sha256(source.read()).hexdigest() == packages[0].sha256
 
     wheel_path.unlink()
     with pytest.raises(ArtifactInputError, match="cannot read package archive"):

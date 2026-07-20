@@ -5,13 +5,21 @@ import gzip
 import hashlib
 import io
 import json
+import os
 import stat
+import struct
 import tarfile
 import zipfile
 from typing import TYPE_CHECKING
 
 import pytest
 
+from vaultspec_a2a.desktop._archive_authority import (
+    ArchiveAuthorityError,
+    ArchiveLimits,
+    bounded_gzip_payload,
+    preflight_tar_headers,
+)
 from vaultspec_a2a.desktop.closure_inventory import (
     AcpPackageArtifact,
     PythonWheelArtifact,
@@ -19,6 +27,8 @@ from vaultspec_a2a.desktop.closure_inventory import (
 from vaultspec_a2a.desktop.contract import TargetTriple
 from vaultspec_a2a.desktop.package_archives import (
     PackageArchiveError,
+    open_verified_acp_package_archive,
+    open_verified_python_wheel_archive,
     verify_acp_package_archive,
     verify_python_wheel_archive,
 )
@@ -499,3 +509,232 @@ def test_archive_verifiers_reject_compression_bombs_before_evidence_reads(
     )
     with pytest.raises(PackageArchiveError, match="expansion-ratio"):
         verify_acp_package_archive(npm_path, _npm_descriptor(npm_payload))
+
+
+def test_verified_wheel_session_retains_original_read_only_bytes(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "retained.whl"
+    payload = _write_wheel(path)
+    descriptor = _wheel_descriptor(payload)
+
+    with open_verified_python_wheel_archive(
+        path,
+        descriptor,
+        target=TargetTriple.WINDOWS_X86_64,
+    ) as session:
+        with pytest.raises(AttributeError):
+            object.__setattr__(session, "archive", session.archive)
+        replacement = tmp_path / "replacement.whl"
+        _write_wheel(replacement, version="9.9.9")
+        os.replace(replacement, path)
+        with session.open_snapshot() as source:
+            assert hashlib.sha256(source.read()).hexdigest() == descriptor.sha256
+            source.seek(0)
+            with pytest.raises(io.UnsupportedOperation, match="read-only"):
+                source.write(b"mutate")
+            with (
+                pytest.raises(PackageArchiveError, match="active reader"),
+                session.open_snapshot(),
+            ):
+                pass
+            retained_view = source
+        with pytest.raises(ValueError, match="no longer active"):
+            retained_view.read(1)
+
+    with (
+        pytest.raises(PackageArchiveError, match="session is closed"),
+        session.open_snapshot(),
+    ):
+        pass
+    with pytest.raises(PackageArchiveError, match=r"size|digest"):
+        verify_python_wheel_archive(
+            path,
+            descriptor,
+            target=TargetTriple.WINDOWS_X86_64,
+        )
+
+
+def test_verified_acp_session_retains_original_bytes(tmp_path: Path) -> None:
+    path = tmp_path / "retained.tgz"
+    payload = _write_npm_tarball(path)
+    descriptor = _npm_descriptor(payload)
+
+    with open_verified_acp_package_archive(path, descriptor) as session:
+        replacement = tmp_path / "replacement.tgz"
+        _write_npm_tarball(replacement, version="9.9.9")
+        os.replace(replacement, path)
+        with session.open_snapshot() as source:
+            assert hashlib.sha256(source.read()).hexdigest() == descriptor.sha256
+
+    with (
+        pytest.raises(PackageArchiveError, match="session is closed"),
+        session.open_snapshot(),
+    ):
+        pass
+
+
+def test_wheel_preflight_reconciles_real_central_directory_count(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "count.whl"
+    payload = bytearray(_write_wheel(path))
+    end_record = payload.rfind(b"PK\x05\x06")
+    declared = struct.unpack_from("<H", payload, end_record + 8)[0]
+    struct.pack_into("<H", payload, end_record + 8, declared - 1)
+    struct.pack_into("<H", payload, end_record + 10, declared - 1)
+    path.write_bytes(payload)
+
+    with pytest.raises(PackageArchiveError, match="entry count is inconsistent"):
+        verify_python_wheel_archive(
+            path,
+            _wheel_descriptor(bytes(payload)),
+            target=TargetTriple.WINDOWS_X86_64,
+        )
+
+
+def test_wheel_preflight_rejects_zip64_override_before_zipfile(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "zip64-override.whl"
+    payload = bytearray(_write_wheel(path))
+    end_record = payload.rfind(b"PK\x05\x06")
+    entries = struct.unpack_from("<H", payload, end_record + 10)[0]
+    directory_size = struct.unpack_from("<L", payload, end_record + 12)[0]
+    directory_offset = struct.unpack_from("<L", payload, end_record + 16)[0]
+    zip64_record = struct.pack(
+        "<4sQ2H2L4Q",
+        b"PK\x06\x06",
+        44,
+        45,
+        45,
+        0,
+        0,
+        entries,
+        entries,
+        directory_size,
+        directory_offset,
+    )
+    zip64_locator = struct.pack("<4sLQL", b"PK\x06\x07", 0, end_record, 1)
+    payload[end_record:end_record] = zip64_record + zip64_locator
+    path.write_bytes(payload)
+
+    with pytest.raises(PackageArchiveError, match="zip64 central directories"):
+        verify_python_wheel_archive(
+            path,
+            _wheel_descriptor(bytes(payload)),
+            target=TargetTriple.WINDOWS_X86_64,
+        )
+
+
+def test_wheel_comment_eocd_ambiguity_is_normalized(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "comment.whl"
+    _write_wheel(path)
+    with zipfile.ZipFile(path, "a") as archive:
+        archive.comment = b"bounded comment PK\x05\x06 not an end record"
+    payload = path.read_bytes()
+
+    with pytest.raises(PackageArchiveError, match="cannot parse wheel archive"):
+        verify_python_wheel_archive(
+            path,
+            _wheel_descriptor(payload),
+            target=TargetTriple.WINDOWS_X86_64,
+        )
+
+
+def test_wheel_codec_failure_is_normalized_to_package_error(tmp_path: Path) -> None:
+    path = tmp_path / "malformed-deflate.whl"
+    payload = bytearray(_write_wheel(path))
+    name_size, extra_size = struct.unpack_from("<2H", payload, 26)
+    compressed_offset = 30 + name_size + extra_size
+    payload[compressed_offset] |= 0x06
+    path.write_bytes(payload)
+
+    with pytest.raises(PackageArchiveError):
+        verify_python_wheel_archive(
+            path,
+            _wheel_descriptor(bytes(payload)),
+            target=TargetTriple.WINDOWS_X86_64,
+        )
+
+
+def test_package_scanners_reject_file_descendant_conflicts(tmp_path: Path) -> None:
+    wheel_path = tmp_path / "ancestor.whl"
+    wheel_payload = _write_wheel(
+        wheel_path,
+        extra=(
+            _wheel_member("example_package/conflict", b"file"),
+            _wheel_member("example_package/conflict/child", b"child"),
+        ),
+    )
+    with pytest.raises(PackageArchiveError, match="descendant path conflict"):
+        verify_python_wheel_archive(
+            wheel_path,
+            _wheel_descriptor(wheel_payload),
+            target=TargetTriple.WINDOWS_X86_64,
+        )
+
+    npm_path = tmp_path / "ancestor.tgz"
+    npm_payload = _write_npm_tarball(
+        npm_path,
+        extra=(
+            _tar_member("package/conflict", b"file"),
+            _tar_member("package/conflict/child", b"child"),
+        ),
+    )
+    with pytest.raises(PackageArchiveError, match="descendant path conflict"):
+        verify_acp_package_archive(npm_path, _npm_descriptor(npm_payload))
+
+
+def test_tar_preflight_bounds_cumulative_extension_metadata() -> None:
+    payload = io.BytesIO()
+    with tarfile.open(fileobj=payload, mode="w", format=tarfile.PAX_FORMAT) as archive:
+        for index in range(2):
+            member = tarfile.TarInfo(f"package/member-{index}")
+            member.size = 1
+            member.pax_headers = {"comment": "x" * 700}
+            archive.addfile(member, io.BytesIO(b"x"))
+    payload.seek(0)
+    limits = ArchiveLimits(
+        maximum_members=16,
+        maximum_member_bytes=1 << 20,
+        maximum_expanded_bytes=1024,
+        maximum_expansion_ratio=250,
+        maximum_tar_control_bytes=1024,
+    )
+
+    with pytest.raises(ArchiveAuthorityError, match="cumulative bound"):
+        preflight_tar_headers(payload, limits=limits, label="test tar")
+
+
+def test_bounded_gzip_payload_requires_one_complete_stream() -> None:
+    payload = b"bounded gzip payload"
+    encoded = gzip.compress(payload, mtime=0)
+    limits = ArchiveLimits(
+        maximum_members=16,
+        maximum_member_bytes=1 << 20,
+        maximum_expanded_bytes=1 << 20,
+        maximum_expansion_ratio=250,
+    )
+
+    with bounded_gzip_payload(
+        io.BytesIO(encoded),
+        compressed_size=len(encoded),
+        limits=limits,
+        label="test gzip",
+    ) as source:
+        assert source.read() == payload
+
+    for invalid in (encoded + b"trailing", encoded + encoded):
+        with (
+            pytest.raises(ArchiveAuthorityError, match="trailing or concatenated"),
+            bounded_gzip_payload(
+                io.BytesIO(invalid),
+                compressed_size=len(invalid),
+                limits=limits,
+                label="test gzip",
+            ),
+        ):
+            pass

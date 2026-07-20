@@ -13,19 +13,16 @@ import csv
 import hashlib
 import io
 import json
-import os
 import re
-import stat
 import tarfile
-import tempfile
-import unicodedata
 import zipfile
+import zlib
 from contextlib import contextmanager
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from email import policy
 from email.parser import BytesParser
 from pathlib import Path, PurePosixPath
-from typing import TYPE_CHECKING, BinaryIO, Final, cast
+from typing import TYPE_CHECKING, BinaryIO, Final
 
 from packaging.tags import parse_tag
 from packaging.utils import (
@@ -35,8 +32,20 @@ from packaging.utils import (
 )
 from packaging.version import InvalidVersion, Version
 
+from ._archive_authority import (
+    ArchiveAuthorityError,
+    ArchiveLimits,
+    RetainedFileSnapshot,
+    bounded_gzip_payload,
+    preflight_tar_headers,
+    preflight_zip_directory,
+    retain_file_snapshot,
+    scan_tar_archive,
+    scan_zip_archive,
+)
 from .closure_inventory import (
     AcpPackageArtifact,
+    ExternalLicenseArtifact,
     PythonWheelArtifact,
     validate_portable_archive_path,
 )
@@ -52,24 +61,41 @@ __all__ = [
     "LicenseMemberEvidence",
     "PackageArchiveError",
     "VerifiedPackageArchive",
+    "VerifiedPackageArchiveSession",
+    "open_verified_acp_package_archive",
+    "open_verified_external_license",
+    "open_verified_python_wheel_archive",
     "verify_acp_package_archive",
     "verify_external_license_artifacts",
     "verify_python_wheel_archive",
 ]
 
 _READ_CHUNK: Final = 1 << 20
-_SPOOL_MEMORY_LIMIT: Final = 8 << 20
 _MAX_ARCHIVE_SIZE: Final = 4 << 30
 _MAX_ARCHIVE_MEMBERS: Final = 100_000
+_MAX_ORDINARY_ZIP_MEMBERS: Final = 65_534
 _MAX_EXPANDED_SIZE: Final = 8 << 30
 _MAX_MEMBER_SIZE: Final = 2 << 30
 _MAX_EXPANSION_RATIO: Final = 250
-_MAX_ZIP_CENTRAL_DIRECTORY: Final = 64 << 20
 _MAX_METADATA_SIZE: Final = 1 << 20
 _MAX_LICENSE_SIZE: Final = 16 << 20
+_PACKAGE_ZIP_LIMITS: Final = ArchiveLimits(
+    maximum_members=_MAX_ORDINARY_ZIP_MEMBERS,
+    maximum_member_bytes=_MAX_MEMBER_SIZE,
+    maximum_expanded_bytes=_MAX_EXPANDED_SIZE,
+    maximum_expansion_ratio=_MAX_EXPANSION_RATIO,
+)
+_PACKAGE_TAR_LIMITS: Final = ArchiveLimits(
+    maximum_members=_MAX_ARCHIVE_MEMBERS,
+    maximum_member_bytes=_MAX_MEMBER_SIZE,
+    maximum_expanded_bytes=_MAX_EXPANDED_SIZE,
+    maximum_expansion_ratio=_MAX_EXPANSION_RATIO,
+)
 _LEGACY_LICENSE_BASENAME: Final = re.compile(
     r"^(?:licen[cs]e|copying|notice|authors)(?:[._-].*)?$", re.IGNORECASE
 )
+_RECORD_SHA256: Final = re.compile(r"^sha256=([A-Za-z0-9_-]{43})$")
+_RECORD_SIZE: Final = re.compile(r"^(?:0|[1-9][0-9]*)$")
 
 
 class PackageArchiveError(RuntimeError):
@@ -87,7 +113,7 @@ class LicenseMemberEvidence:
 
 @dataclass(frozen=True, slots=True)
 class VerifiedPackageArchive:
-    """Validated package identity, member set, and license evidence."""
+    """Detached package evidence; ``path`` is diagnostic, never extraction authority."""
 
     path: Path
     descriptor: PythonWheelArtifact | AcpPackageArtifact
@@ -95,120 +121,50 @@ class VerifiedPackageArchive:
     license_members: tuple[LicenseMemberEvidence, ...]
 
 
-def _collision_key(name: str) -> str:
-    return unicodedata.normalize("NFC", name).casefold()
+class VerifiedPackageArchiveSession:
+    """Context-owned verified evidence plus its immutable exact-byte capability."""
 
+    __slots__ = ("_archive", "_closed", "_snapshot")
 
-def _validated_member_name(name: str, *, directory: bool) -> str:
-    if directory:
-        name = name.removesuffix("/")
-    elif name.endswith("/"):
-        raise PackageArchiveError("archive regular-file member has a directory name")
-    try:
-        return validate_portable_archive_path(name)
-    except (TypeError, ValueError):
-        raise PackageArchiveError(
-            "package archive contains an unsafe member path"
-        ) from None
+    def __init__(
+        self,
+        archive: VerifiedPackageArchive,
+        snapshot: RetainedFileSnapshot,
+    ) -> None:
+        self._archive = archive
+        self._snapshot = snapshot
+        self._closed = False
 
+    def __enter__(self) -> VerifiedPackageArchiveSession:
+        if self._closed:
+            raise PackageArchiveError("verified package session is closed")
+        return self
 
-def _register_member(
-    name: str,
-    *,
-    directory: bool,
-    seen_exact: set[str],
-    seen_portable: set[str],
-) -> str:
-    validated = _validated_member_name(name, directory=directory)
-    portable = _collision_key(validated)
-    if validated in seen_exact:
-        raise PackageArchiveError("package archive contains a duplicate member")
-    if portable in seen_portable:
-        raise PackageArchiveError("package archive contains portably colliding members")
-    seen_exact.add(validated)
-    seen_portable.add(portable)
-    return validated
+    @property
+    def archive(self) -> VerifiedPackageArchive:
+        """Return evidence inseparably bound to this session's retained bytes."""
+        return self._archive
 
+    def __exit__(self, *_args: object) -> None:
+        self.close()
 
-@contextmanager
-def _verified_snapshot(
-    path: Path,
-    *,
-    expected_size: int,
-    expected_sha256: str,
-    expected_sha512: str | None = None,
-) -> Iterator[BinaryIO]:
-    if not isinstance(path, Path):
-        raise PackageArchiveError("package archive path is invalid")
-    flags = os.O_RDONLY
-    flags |= getattr(os, "O_BINARY", 0)
-    flags |= getattr(os, "O_NONBLOCK", 0)
-    flags |= getattr(os, "O_CLOEXEC", 0)
-    flags |= getattr(os, "O_NOFOLLOW", 0)
-    descriptor = -1
-    try:
-        before = path.lstat()
-        if stat.S_ISLNK(before.st_mode) or path.is_junction():
-            raise PackageArchiveError("package archive must not be a link-like path")
-        descriptor = os.open(path, flags)
-        opened = os.fstat(descriptor)
-        if not stat.S_ISREG(opened.st_mode):
-            raise PackageArchiveError(
-                "package archive must be an ordinary regular file"
-            )
-        if (before.st_dev, before.st_ino) != (opened.st_dev, opened.st_ino):
-            raise PackageArchiveError("package archive changed before it was opened")
-        if (
-            opened.st_size != expected_size
-            or not 0 < opened.st_size <= _MAX_ARCHIVE_SIZE
-        ):
-            raise PackageArchiveError(
-                "package archive size does not match its inventory"
-            )
+    @contextmanager
+    def open_snapshot(self) -> Iterator[BinaryIO]:
+        if self._closed:
+            raise PackageArchiveError("verified package session is closed")
+        try:
+            with self._snapshot.open() as source:
+                yield source
+        except ArchiveAuthorityError as error:
+            raise PackageArchiveError(str(error)) from None
 
-        source = os.fdopen(descriptor, "rb", closefd=True)
-        descriptor = -1
-        with (
-            source,
-            tempfile.SpooledTemporaryFile(
-                max_size=_SPOOL_MEMORY_LIMIT, mode="w+b"
-            ) as snapshot,
-        ):
-            sha256 = hashlib.sha256()
-            sha512 = hashlib.sha512() if expected_sha512 is not None else None
-            copied = 0
-            for chunk in iter(lambda: source.read(_READ_CHUNK), b""):
-                copied += len(chunk)
-                if copied > expected_size:
-                    raise PackageArchiveError(
-                        "package archive changed while being read"
-                    )
-                sha256.update(chunk)
-                if sha512 is not None:
-                    sha512.update(chunk)
-                snapshot.write(chunk)
-            after = os.fstat(source.fileno())
-            if copied != expected_size or after.st_size != opened.st_size:
-                raise PackageArchiveError("package archive changed while being read")
-            if sha256.hexdigest() != expected_sha256:
-                raise PackageArchiveError(
-                    "package archive digest does not match its inventory"
-                )
-            if sha512 is not None and sha512.digest() != _decoded_sha512_sri(
-                cast("str", expected_sha512)
-            ):
-                raise PackageArchiveError(
-                    "npm package integrity does not match its inventory"
-                )
-            snapshot.seek(0)
-            yield cast("BinaryIO", snapshot)
-    except PackageArchiveError:
-        raise
-    except OSError:
-        raise PackageArchiveError("cannot read package archive") from None
-    finally:
-        if descriptor >= 0:
-            os.close(descriptor)
+    def close(self) -> None:
+        if not self._closed:
+            try:
+                self._snapshot.close()
+            except ArchiveAuthorityError as error:
+                raise PackageArchiveError(str(error)) from None
+            self._closed = True
 
 
 def _decoded_sha512_sri(value: str) -> bytes:
@@ -222,6 +178,35 @@ def _decoded_sha512_sri(value: str) -> bytes:
     return digest
 
 
+def _retain_verified_snapshot(
+    path: Path,
+    *,
+    expected_size: int,
+    expected_sha256: str,
+    expected_sha512: str | None = None,
+) -> RetainedFileSnapshot:
+    try:
+        return retain_file_snapshot(
+            path,
+            label="package archive",
+            maximum_size=_MAX_ARCHIVE_SIZE,
+            expected_size=expected_size,
+            expected_sha256=expected_sha256,
+            expected_sha512=(
+                _decoded_sha512_sri(expected_sha512)
+                if expected_sha512 is not None
+                else None
+            ),
+        )
+    except ArchiveAuthorityError as error:
+        message = str(error)
+        if message == "cannot snapshot package archive":
+            message = "cannot read package archive"
+        elif "sha512 does not match" in message:
+            message = "npm package integrity does not match its inventory"
+        raise PackageArchiveError(message) from None
+
+
 def _bounded_zip_member(
     archive: zipfile.ZipFile, member: zipfile.ZipInfo, maximum: int
 ) -> bytes:
@@ -232,7 +217,7 @@ def _bounded_zip_member(
     try:
         with archive.open(member, "r") as source:
             payload = source.read(maximum + 1)
-    except (OSError, RuntimeError, zipfile.BadZipFile):
+    except (OSError, RuntimeError, zipfile.BadZipFile, zlib.error):
         raise PackageArchiveError(
             "cannot read package archive evidence member"
         ) from None
@@ -243,14 +228,28 @@ def _bounded_zip_member(
     return payload
 
 
-def _zip_regular_member(member: zipfile.ZipInfo) -> bool:
-    if member.is_dir():
-        return False
-    mode = member.external_attr >> 16
-    kind = stat.S_IFMT(mode)
-    if member.create_system == 3 and kind not in {0, stat.S_IFREG}:
-        raise PackageArchiveError("wheel contains a link or special filesystem member")
-    return True
+def _zip_member_sha256(
+    archive: zipfile.ZipFile, member: zipfile.ZipInfo
+) -> tuple[int, str]:
+    """Stream one already-scanned ZIP member into exact size/digest evidence."""
+    digest = hashlib.sha256()
+    consumed = 0
+    try:
+        with archive.open(member, "r") as source:
+            for chunk in iter(lambda: source.read(_READ_CHUNK), b""):
+                consumed += len(chunk)
+                if consumed > member.file_size:
+                    raise PackageArchiveError(
+                        "package archive member exceeds its declared size"
+                    )
+                digest.update(chunk)
+    except PackageArchiveError:
+        raise
+    except (OSError, RuntimeError, zipfile.BadZipFile, zlib.error):
+        raise PackageArchiveError("cannot read package archive member") from None
+    if consumed != member.file_size:
+        raise PackageArchiveError("package archive member size is inconsistent")
+    return consumed, digest.hexdigest()
 
 
 def _wheel_metadata_identity(
@@ -383,12 +382,16 @@ def verify_external_license_artifacts(
             raise PackageArchiveError(
                 "external license lacks an exact redistribution evidence reference"
             )
-        with _verified_snapshot(
+        snapshot = _retain_verified_snapshot(
             input_dir / item.sha256,
             expected_size=item.size,
             expected_sha256=item.sha256,
-        ):
-            pass
+        )
+        try:
+            with snapshot.open():
+                pass
+        finally:
+            snapshot.close()
         evidence.append(
             LicenseMemberEvidence(
                 path=item.source_id,
@@ -396,7 +399,53 @@ def verify_external_license_artifacts(
                 sha256=item.sha256,
             )
         )
-    return replace(archive, license_members=tuple(evidence))
+    return VerifiedPackageArchive(
+        path=archive.path,
+        descriptor=archive.descriptor,
+        members=archive.members,
+        license_members=tuple(evidence),
+    )
+
+
+@contextmanager
+def open_verified_external_license(
+    archive: VerifiedPackageArchive,
+    source_id: str,
+    *,
+    input_dir: Path,
+) -> Iterator[BinaryIO]:
+    """Retain one declared external-license source for an exact consume scope."""
+    if (
+        not isinstance(archive, VerifiedPackageArchive)
+        or not isinstance(source_id, str)
+        or not isinstance(input_dir, Path)
+    ):
+        raise PackageArchiveError("external license verification inputs are invalid")
+    matches = tuple(
+        item
+        for item in archive.descriptor.external_licenses
+        if item.source_id == source_id
+    )
+    if len(matches) != 1:
+        raise PackageArchiveError("external license source is not declared")
+    item: ExternalLicenseArtifact = matches[0]
+    if (
+        f"external-license:{item.source_id}"
+        not in archive.descriptor.redistribution_evidence
+    ):
+        raise PackageArchiveError(
+            "external license lacks an exact redistribution evidence reference"
+        )
+    snapshot = _retain_verified_snapshot(
+        input_dir / item.sha256,
+        expected_size=item.size,
+        expected_sha256=item.sha256,
+    )
+    try:
+        with snapshot.open() as source:
+            yield source
+    finally:
+        snapshot.close()
 
 
 def _expected_dist_info_root(filename: str) -> str:
@@ -463,22 +512,43 @@ def _verify_wheel_metadata_files(
             if digest_text or size_text:
                 raise PackageArchiveError("wheel RECORD self-entry must be empty")
             continue
-        payload = _bounded_zip_member(archive, member, _MAX_MEMBER_SIZE)
+        digest_match = _RECORD_SHA256.fullmatch(digest_text)
+        if (
+            digest_match is None
+            or _RECORD_SIZE.fullmatch(size_text) is None
+            or int(size_text) != member.file_size
+        ):
+            raise PackageArchiveError("wheel RECORD member identity is invalid")
+        try:
+            decoded = base64.b64decode(
+                digest_match.group(1) + "=",
+                altchars=b"-_",
+                validate=True,
+            )
+        except (ValueError, binascii.Error):
+            raise PackageArchiveError(
+                "wheel RECORD member identity is invalid"
+            ) from None
+        if len(decoded) != hashlib.sha256().digest_size:
+            raise PackageArchiveError("wheel RECORD member identity is invalid")
+    for path, member in members.items():
+        if path == record_path:
+            continue
+        digest_text, size_text = by_path[path]
+        size, digest = _zip_member_sha256(archive, member)
         encoded = (
-            base64.urlsafe_b64encode(hashlib.sha256(payload).digest())
-            .decode("ascii")
-            .rstrip("=")
+            base64.urlsafe_b64encode(bytes.fromhex(digest)).decode("ascii").rstrip("=")
         )
-        if digest_text != f"sha256={encoded}" or size_text != str(len(payload)):
+        if digest_text != f"sha256={encoded}" or size_text != str(size):
             raise PackageArchiveError("wheel RECORD member identity does not match")
 
 
-def verify_python_wheel_archive(
+def _create_verified_python_wheel_session(
     path: Path,
     descriptor: PythonWheelArtifact,
     *,
     target: TargetTriple,
-) -> VerifiedPackageArchive:
+) -> VerifiedPackageArchiveSession:
     """Verify one digest-selected wheel and bind its declared license bytes."""
     if not isinstance(descriptor, PythonWheelArtifact) or not isinstance(
         target, TargetTriple
@@ -488,51 +558,26 @@ def verify_python_wheel_archive(
         raise PackageArchiveError(
             "wheel filename is incompatible with the selected target"
         )
-    with _verified_snapshot(
+    retained = _retain_verified_snapshot(
         path,
         expected_size=descriptor.size,
         expected_sha256=descriptor.sha256,
-    ) as snapshot:
-        try:
+    )
+    try:
+        with retained.open() as snapshot:
+            directory = preflight_zip_directory(
+                snapshot,
+                limits=_PACKAGE_ZIP_LIMITS,
+                label="wheel",
+            )
             with zipfile.ZipFile(snapshot, mode="r") as archive:
-                members: dict[str, zipfile.ZipInfo] = {}
-                seen_exact: set[str] = set()
-                seen_portable: set[str] = set()
-                expanded_size = 0
-                for index, member in enumerate(archive.infolist(), start=1):
-                    if index > _MAX_ARCHIVE_MEMBERS:
-                        raise PackageArchiveError(
-                            "wheel exceeds its member-count bound"
-                        )
-                    name = _register_member(
-                        member.filename,
-                        directory=member.is_dir(),
-                        seen_exact=seen_exact,
-                        seen_portable=seen_portable,
-                    )
-                    if member.flag_bits & 0x1:
-                        raise PackageArchiveError("wheel contains an encrypted member")
-                    if member.is_dir():
-                        mode = member.external_attr >> 16
-                        if member.create_system == 3 and stat.S_IFMT(mode) not in {
-                            0,
-                            stat.S_IFDIR,
-                        }:
-                            raise PackageArchiveError(
-                                "wheel contains a link or special filesystem member"
-                            )
-                        continue
-                    _zip_regular_member(member)
-                    expanded_size += member.file_size
-                    if expanded_size > _MAX_EXPANDED_SIZE:
-                        raise PackageArchiveError(
-                            "wheel exceeds its expanded-size bound"
-                        )
-                    if expanded_size > descriptor.size * _MAX_EXPANSION_RATIO:
-                        raise PackageArchiveError(
-                            "wheel exceeds its expansion-ratio bound"
-                        )
-                    members[name] = member
+                scanned = scan_zip_archive(
+                    archive,
+                    limits=_PACKAGE_ZIP_LIMITS,
+                    label="wheel",
+                    directory=directory,
+                )
+                members = dict(scanned.regular)
 
                 metadata = tuple(
                     (name, member)
@@ -574,24 +619,54 @@ def verify_python_wheel_archive(
                     _zip_license_evidence(archive, members, name)
                     for name in descriptor.license_members
                 )
-                if (
-                    archive.start_dir < 0
-                    or (descriptor.size - archive.start_dir)
-                    > _MAX_ZIP_CENTRAL_DIRECTORY
-                ):
-                    raise PackageArchiveError(
-                        "wheel central directory exceeds its size bound"
-                    )
-        except PackageArchiveError:
-            raise
-        except (OSError, RuntimeError, zipfile.BadZipFile, zipfile.LargeZipFile):
-            raise PackageArchiveError("cannot parse wheel archive") from None
-    return VerifiedPackageArchive(
-        path=path,
-        descriptor=descriptor,
-        members=tuple(sorted(members)),
-        license_members=license_evidence,
-    )
+        return VerifiedPackageArchiveSession(
+            VerifiedPackageArchive(
+                path=path,
+                descriptor=descriptor,
+                members=tuple(sorted(members)),
+                license_members=license_evidence,
+            ),
+            retained,
+        )
+    except PackageArchiveError:
+        retained.close()
+        raise
+    except ArchiveAuthorityError as error:
+        retained.close()
+        raise PackageArchiveError(str(error)) from None
+    except (
+        OSError,
+        RuntimeError,
+        zipfile.BadZipFile,
+        zipfile.LargeZipFile,
+        zlib.error,
+    ):
+        retained.close()
+        raise PackageArchiveError("cannot parse wheel archive") from None
+
+
+@contextmanager
+def open_verified_python_wheel_archive(
+    path: Path,
+    descriptor: PythonWheelArtifact,
+    *,
+    target: TargetTriple,
+) -> Iterator[VerifiedPackageArchiveSession]:
+    """Retain verified wheel bytes for one bounded verify-and-consume session."""
+    session = _create_verified_python_wheel_session(path, descriptor, target=target)
+    with session:
+        yield session
+
+
+def verify_python_wheel_archive(
+    path: Path,
+    descriptor: PythonWheelArtifact,
+    *,
+    target: TargetTriple,
+) -> VerifiedPackageArchive:
+    """Return detached wheel evidence after a complete retained-session check."""
+    with open_verified_python_wheel_archive(path, descriptor, target=target) as session:
+        return session.archive
 
 
 def _zip_license_evidence(
@@ -692,55 +767,47 @@ def _tar_license_evidence(
     )
 
 
-def verify_acp_package_archive(
+def _create_verified_acp_package_session(
     path: Path, descriptor: AcpPackageArtifact
-) -> VerifiedPackageArchive:
+) -> VerifiedPackageArchiveSession:
     """Verify one digest-selected npm tarball and bind its license bytes."""
     if not isinstance(descriptor, AcpPackageArtifact):
         raise PackageArchiveError("npm package verification inputs are invalid")
-    with _verified_snapshot(
+    retained = _retain_verified_snapshot(
         path,
         expected_size=descriptor.size,
         expected_sha256=descriptor.sha256,
         expected_sha512=descriptor.integrity,
-    ) as snapshot:
-        try:
-            with tarfile.open(fileobj=snapshot, mode="r:gz") as archive:
-                members: dict[str, tarfile.TarInfo] = {}
-                seen_exact: set[str] = set()
-                seen_portable: set[str] = set()
-                expanded_size = 0
-                for index, member in enumerate(archive, start=1):
-                    if index > _MAX_ARCHIVE_MEMBERS:
-                        raise PackageArchiveError(
-                            "npm tarball exceeds its member-count bound"
-                        )
-                    if not (member.isdir() or member.isreg()):
-                        raise PackageArchiveError(
-                            "npm tarball contains a link or special filesystem member"
-                        )
-                    name = _register_member(
-                        member.name,
-                        directory=member.isdir(),
-                        seen_exact=seen_exact,
-                        seen_portable=seen_portable,
-                    )
+    )
+    try:
+        with (
+            retained.open() as snapshot,
+            bounded_gzip_payload(
+                snapshot,
+                compressed_size=descriptor.size,
+                limits=_PACKAGE_TAR_LIMITS,
+                label="npm tarball",
+            ) as tar_source,
+        ):
+            preflight_tar_headers(
+                tar_source,
+                limits=_PACKAGE_TAR_LIMITS,
+                label="npm tarball",
+            )
+            with tarfile.open(fileobj=tar_source, mode="r:") as archive:
+                scanned = scan_tar_archive(
+                    archive,
+                    limits=_PACKAGE_TAR_LIMITS,
+                    label="npm tarball",
+                    allow_links=False,
+                )
+                members = dict(scanned.regular)
+                for member in scanned.members:
+                    name = member.name.rstrip("/")
                     if name != "package" and not name.startswith("package/"):
                         raise PackageArchiveError(
                             "npm tarball member is outside package root"
                         )
-                    if member.isdir():
-                        continue
-                    expanded_size += member.size
-                    if expanded_size > _MAX_EXPANDED_SIZE:
-                        raise PackageArchiveError(
-                            "npm tarball exceeds its expanded-size bound"
-                        )
-                    if expanded_size > descriptor.size * _MAX_EXPANSION_RATIO:
-                        raise PackageArchiveError(
-                            "npm tarball exceeds its expansion-ratio bound"
-                        )
-                    members[name] = member
 
                 package_json = members.get("package/package.json")
                 if package_json is None:
@@ -762,13 +829,39 @@ def verify_acp_package_archive(
                     _tar_license_evidence(archive, members, name)
                     for name in descriptor.license_members
                 )
-        except PackageArchiveError:
-            raise
-        except (OSError, tarfile.TarError):
-            raise PackageArchiveError("cannot parse npm package tarball") from None
-    return VerifiedPackageArchive(
-        path=path,
-        descriptor=descriptor,
-        members=tuple(sorted(members)),
-        license_members=license_evidence,
-    )
+        return VerifiedPackageArchiveSession(
+            VerifiedPackageArchive(
+                path=path,
+                descriptor=descriptor,
+                members=tuple(sorted(members)),
+                license_members=license_evidence,
+            ),
+            retained,
+        )
+    except PackageArchiveError:
+        retained.close()
+        raise
+    except ArchiveAuthorityError as error:
+        retained.close()
+        raise PackageArchiveError(str(error)) from None
+    except (OSError, tarfile.TarError):
+        retained.close()
+        raise PackageArchiveError("cannot parse npm package tarball") from None
+
+
+@contextmanager
+def open_verified_acp_package_archive(
+    path: Path, descriptor: AcpPackageArtifact
+) -> Iterator[VerifiedPackageArchiveSession]:
+    """Retain verified npm bytes for one bounded verify-and-consume session."""
+    session = _create_verified_acp_package_session(path, descriptor)
+    with session:
+        yield session
+
+
+def verify_acp_package_archive(
+    path: Path, descriptor: AcpPackageArtifact
+) -> VerifiedPackageArchive:
+    """Return detached npm evidence after a complete retained-session check."""
+    with open_verified_acp_package_archive(path, descriptor) as session:
+        return session.archive

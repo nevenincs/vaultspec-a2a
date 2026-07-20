@@ -3,8 +3,8 @@ generated: true
 tags:
   - '#index'
   - '#desktop-product-profile'
-date: '2026-07-19'
-modified: '2026-07-19'
+date: '2026-07-20'
+modified: '2026-07-20'
 related:
   - '[[2026-07-18-desktop-product-profile-W01-P01-S01]]'
   - '[[2026-07-18-desktop-product-profile-W01-P01-S02]]'
@@ -21,6 +21,7 @@ related:
   - '[[2026-07-18-desktop-product-profile-W01-P02-S11]]'
   - '[[2026-07-18-desktop-product-profile-W01-P02-S12]]'
   - '[[2026-07-18-desktop-product-profile-W01-P02-summary]]'
+  - '[[2026-07-18-desktop-product-profile-W01-P03-S100]]'
   - '[[2026-07-18-desktop-product-profile-W01-P03-S13]]'
   - '[[2026-07-18-desktop-product-profile-W01-P03-S14]]'
   - '[[2026-07-18-desktop-product-profile-W01-P03-S15]]'
@@ -77,10 +78,46 @@ related:
   - '[[2026-07-18-desktop-product-profile-W04-P10-S55]]'
   - '[[2026-07-18-desktop-product-profile-W04-P10-summary]]'
   - '[[2026-07-18-desktop-product-profile-W04-P11-S56]]'
+  - '[[2026-07-18-desktop-product-profile-W04-P11-S57]]'
+  - '[[2026-07-18-desktop-product-profile-W04-P11-S58]]'
+  - '[[2026-07-18-desktop-product-profile-W04-P11-S59]]'
+  - '[[2026-07-18-desktop-product-profile-W04-P11-S60]]'
+  - '[[2026-07-18-desktop-product-profile-W04-P11-S61]]'
+  - '[[2026-07-18-desktop-product-profile-W04-P11-S62]]'
+  - '[[2026-07-18-desktop-product-profile-W04-P11-S89]]'
+  - '[[2026-07-18-desktop-product-profile-W04-P11-S90]]'
+  - '[[2026-07-18-desktop-product-profile-W04-P11-S91]]'
+  - '[[2026-07-18-desktop-product-profile-W04-P11-S92]]'
+  - '[[2026-07-18-desktop-product-profile-W04-P11-summary]]'
+  - '[[2026-07-18-desktop-product-profile-W04-P12-S63]]'
+  - '[[2026-07-18-desktop-product-profile-W04-P12-S64]]'
+  - '[[2026-07-18-desktop-product-profile-W04-P12-S65]]'
+  - '[[2026-07-18-desktop-product-profile-W04-P12-S66]]'
+  - '[[2026-07-18-desktop-product-profile-W04-P12-S67]]'
+  - '[[2026-07-18-desktop-product-profile-W04-P12-S68]]'
+  - '[[2026-07-18-desktop-product-profile-W04-P12-S69]]'
+  - '[[2026-07-18-desktop-product-profile-W04-P12-S70]]'
+  - '[[2026-07-18-desktop-product-profile-W04-P12-S71]]'
+  - '[[2026-07-18-desktop-product-profile-W04-P12-summary]]'
+  - '[[2026-07-18-desktop-product-profile-W05-P13-S72]]'
+  - '[[2026-07-18-desktop-product-profile-W05-P13-S73]]'
+  - '[[2026-07-18-desktop-product-profile-W05-P13-S74]]'
+  - '[[2026-07-18-desktop-product-profile-W05-P13-S75]]'
+  - '[[2026-07-18-desktop-product-profile-W05-P13-summary]]'
+  - '[[2026-07-18-desktop-product-profile-W05-P14-S81]]'
+  - '[[2026-07-18-desktop-product-profile-W05-P14-S82]]'
+  - '[[2026-07-18-desktop-product-profile-W05-P14-S83]]'
+  - '[[2026-07-18-desktop-product-profile-W05-P14-S84]]'
+  - '[[2026-07-18-desktop-product-profile-W05-P14-S85]]'
+  - '[[2026-07-18-desktop-product-profile-W05-P14-S86]]'
+  - '[[2026-07-18-desktop-product-profile-W05-P14-S87]]'
+  - '[[2026-07-18-desktop-product-profile-W05-P14-summary]]'
   - '[[2026-07-18-desktop-product-profile-adr]]'
+  - '[[2026-07-18-desktop-product-profile-certification-audit]]'
   - '[[2026-07-18-desktop-product-profile-plan]]'
   - '[[2026-07-18-desktop-product-profile-reference]]'
   - '[[2026-07-18-desktop-product-profile-research]]'
+  - '[[2026-07-18-desktop-product-profile-review-audit]]'
   - '[[2026-07-19-desktop-product-profile-audit]]'
   - '[[2026-07-19-desktop-product-profile-w01-p03-capsule-review-audit]]'
 ---
@@ -97,6 +134,8 @@ Auto-generated index of all documents tagged with `#desktop-product-profile`.
 
 ### audit
 
+- `2026-07-18-desktop-product-profile-certification-audit` - `desktop-product-profile` audit: `certification`
+- `2026-07-18-desktop-product-profile-review-audit` - `desktop-product-profile` audit: `review`
 - `2026-07-19-desktop-product-profile-audit` - `desktop-product-profile` audit: `W01 P01 S01 dependency profile review`
 - `2026-07-19-desktop-product-profile-w01-p03-capsule-review-audit` - `desktop-product-profile` audit: `w01 p03 capsule review`
 
@@ -173,6 +212,41 @@ Auto-generated index of all documents tagged with `#desktop-product-profile`.
 - `2026-07-18-desktop-product-profile-W04-P10-S55` - Prove concurrent first demand creates one real worker and idle desktop boot creates none
 - `2026-07-18-desktop-product-profile-W04-P10-summary` - `desktop-product-profile` `W04.P10` summary
 - `2026-07-18-desktop-product-profile-W04-P11-S56` - Implement a bounded drain gate that atomically closes admission tracks active runs and reports quiescence
+- `2026-07-18-desktop-product-profile-W04-P11-S57` - Apply the drain gate to run start cancellation and administrative stop paths
+- `2026-07-18-desktop-product-profile-W04-P11-S58` - Retain actor tokens through INPUT_REQUIRED and release active-run ownership tokens and child handles only on terminal outcomes
+- `2026-07-18-desktop-product-profile-W04-P11-S59` - Spawn the desktop worker in a POSIX new session and owned process group or an assigned Windows Job Object or equivalently proven OS-owned job or tree before descendant work and retain containment for bounded shutdown
+- `2026-07-18-desktop-product-profile-W04-P11-S60` - Spawn each run-owned ACP or Codex provider root in a POSIX new session and owned process group or an assigned Windows Job Object or equivalently proven OS-owned job or tree before descendant work
+- `2026-07-18-desktop-product-profile-W04-P11-S61` - Terminate owned POSIX process groups with bounded killpg SIGTERM-to-SIGKILL escalation and assigned Windows Job Objects or equivalently proven OS-owned jobs or trees without recursive process discovery
+- `2026-07-18-desktop-product-profile-W04-P11-S62` - Prove real worker provider terminal authoring projected-project MCP and harness descendants are contained before work and reaped on every graceful and forced terminal path without recursive process discovery
+- `2026-07-18-desktop-product-profile-W04-P11-S89` - Audit and harden ACP terminal children to inherit the owning run containment and bounded reaper
+- `2026-07-18-desktop-product-profile-W04-P11-S90` - Audit and harden per-run authoring MCP launch specifications to remain descendants of the owning provider group
+- `2026-07-18-desktop-product-profile-W04-P11-S91` - Audit and harden projected project MCP configuration so only run-owned launch specifications enter the isolated provider tree
+- `2026-07-18-desktop-product-profile-W04-P11-S92` - Audit and harden declared harness MCP launch specifications to inherit the owning ACP or Codex provider group
+- `2026-07-18-desktop-product-profile-W04-P11-summary` - `desktop-product-profile` `W04.P11` summary
+- `2026-07-18-desktop-product-profile-W04-P12-S63` - Define prepare and commit variants bounded required-role output reservation identity lease identity and terminal settlement under run-start
+- `2026-07-18-desktop-product-profile-W04-P12-S64` - Implement hard-bounded expiring prepare reservations that validate required roles capacity worker startup and provider readiness without run-owned children or durable runs
+- `2026-07-18-desktop-product-profile-W04-P12-S65` - Implement prepare and commit through the existing POST /v1/runs verb without durable state before commit
+- `2026-07-18-desktop-product-profile-W04-P12-S66` - Evaluate worker and provider eligibility before accepting actor tokens or creating a run
+- `2026-07-18-desktop-product-profile-W04-P12-S67` - Emit bounded terminal callbacks authenticated with the dashboard-created attach-control credential read by the gateway and containing run and non-secret lease identities only
+- `2026-07-18-desktop-product-profile-W04-P12-S68` - Trigger the attach-control-authenticated settlement component idempotently after execution-state persistence on complete cancel and fail without exposing or requiring worker IPC
+- `2026-07-18-desktop-product-profile-W04-P12-S69` - Prove prepare timeout cancellation and failed commit release capacity without a run token or run-owned child process
+- `2026-07-18-desktop-product-profile-W04-P12-S70` - Prove attach-control-authenticated terminal callback retry rejects worker IPC and unrelated credentials while status reconciliation revokes exactly one run-scoped lease without raw tokens
+- `2026-07-18-desktop-product-profile-W01-P03-S100` - Consolidate bounded archive inspection and retained consume authority
+- `2026-07-18-desktop-product-profile-W04-P12-S71` - Certify a clean installed capsule starts and stops the standalone vaultspec-mcp adapter under caller ownership
+- `2026-07-18-desktop-product-profile-W04-P12-summary` - `desktop-product-profile` `W04.P12` summary
+- `2026-07-18-desktop-product-profile-W05-P13-S72` - Build a real-process harness that installs invokes relocates and inspects a published desktop capsule
+- `2026-07-18-desktop-product-profile-W05-P13-S73` - Prove clean offline install relocation cold readiness lazy worker and default ACP execution from one real capsule
+- `2026-07-18-desktop-product-profile-W05-P13-S74` - Prove migration rollback consistency restore tamper detection and immutable-file verification from real capsule state
+- `2026-07-18-desktop-product-profile-W05-P13-S75` - Prove authenticated attach owner-only shutdown drain and data-preserving capsule removal boundaries
+- `2026-07-18-desktop-product-profile-W05-P13-summary` - `desktop-product-profile` `W05.P13` summary
+- `2026-07-18-desktop-product-profile-W05-P14-S81` - Authenticate the Compose worker healthcheck without changing its independently managed worker topology
+- `2026-07-18-desktop-product-profile-W05-P14-S82` - Authenticate the development Compose worker healthcheck without adopting it into desktop lifecycle
+- `2026-07-18-desktop-product-profile-W05-P14-S83` - Authenticate the integration Compose worker healthcheck while retaining VidaiMock and Jaeger certification
+- `2026-07-18-desktop-product-profile-W05-P14-S84` - Prove Compose gateway-worker separation PostgreSQL overlay Jaeger and operator lifecycle remain production-capable
+- `2026-07-18-desktop-product-profile-W05-P14-S85` - Run desktop target and Compose certification as required release checks without expected-failure shortcuts
+- `2026-07-18-desktop-product-profile-W05-P14-S86` - Perform the mandatory architecture security resource-bound and real-behavior code review
+- `2026-07-18-desktop-product-profile-W05-P14-S87` - Report 2026-07-14-adr-authoring-orchestration-plan ownership of vaultspec-adr-research-mock.toml AUTO MIXED HUMAN reruns checkpoint_permission_without_durable_row and execution_state_projection_missing separately from provider gates
+- `2026-07-18-desktop-product-profile-W05-P14-summary` - `desktop-product-profile` `W05.P14` summary
 
 ### plan
 

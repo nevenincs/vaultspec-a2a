@@ -3,7 +3,7 @@ tags:
   - '#exec'
   - '#repository-tooling-hardening'
 date: '2026-07-19'
-modified: '2026-07-19'
+modified: '2026-07-20'
 step_id: 'S12'
 related:
   - "[[2026-07-19-repository-tooling-hardening-plan]]"
@@ -37,11 +37,16 @@ configuration, and leave tracked files unchanged. The canonical code checks,
 package build, documentation tests and strict Sphinx build, workflow lint,
 workflow parsing, Compose configuration, and Windows diagnostics pass.
 
-The full unit selection executed 2,141 tests: 2,126 passed and 15 exposed
-pre-existing or concurrently owned product-contract failures. Those failures
-remain visible and are assigned to the codebase-health and owning feature audit
-queues. Formal review found no unresolved critical or high defect after the
-correction pass.
+The first full unit selection executed 2,141 tests: 2,126 passed and 15 exposed
+product-contract failures. After their owning changes and the terminal
+hardening corrections were committed, canonical `just ci` passed from exact
+commit `844cd0ca` in a clean, isolated workspace. It collected 2,706 tests,
+deselected the 141 service tests outside the unit contract, selected 2,565,
+passed 2,564, and skipped one existing POSIX-permission test on Windows. Ruff,
+formatting, Ty, Deptry, Actionlint, locked Node restoration, and npm audit also
+passed, and the clone remained clean. Formal review found no unresolved critical
+or high defect after the correction pass. Sol's terminal formal review of the
+complete implementation range passed with no findings at any severity.
 
 ## Notes
 
@@ -50,6 +55,11 @@ Core adoption. Formal review classified that design as critical; it was removed
 and replaced with disposable-clone adoption, byte verification, exclusive
 runtime-state creation, and non-destructive live sync. Clean-clone acceptance
 later caught a PowerShell quoting error in the RAG authority check before
-closure. Linux Docker execution was blocked by the local Docker Desktop engine
-returning HTTP 500, although CLI discovery and every resolved Compose
+closure. The terminal pass also found a missing Node restoration path, missing
+MCP bearer propagation, a stale provider assertion, and integrated formatter
+drift. Formal review then found that the first shared credential resolver could
+send an armed desktop credential to another loopback port; exact discovery,
+process identity, origin, and credential-reference checks corrected it before
+acceptance. Linux Docker execution was blocked by the local Docker Desktop
+engine returning HTTP 500, although CLI discovery and every resolved Compose
 configuration passed. No data loss occurred.

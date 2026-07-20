@@ -3,7 +3,7 @@ tags:
   - '#audit'
   - '#repository-tooling-hardening'
 date: '2026-07-19'
-modified: '2026-07-19'
+modified: '2026-07-20'
 related: []
 ---
 
@@ -630,19 +630,64 @@ contract. Core issue `nevenincs/vaultspec-core#230` owns its provider-native loc
 sentinels. No repository fallback duplicates either framework's single-writer
 boundary.
 
-### s12-unit-contract-failures | high | Full unit selection exposes 15 product-contract failures
+### s12-unit-contract-failures | high | Full unit selection exposed product-contract failures
 
-Type: product correctness and test drift. The clean-clone unit gate selected
-2,141 tests; 2,126 passed and 15 failed across gateway preset truthfulness, the
-real synchronized rule corpus, redispatch failure-ladder deduplication, MCP
-preset availability, ACP capsule resolution, Codex config-home behavior, thread
-error exports, and thread feedback state. Status: open and assigned to the
-accepted codebase-health plan and the relevant desktop, context, control,
-provider, protocol, and thread owner queues. The tooling gate preserves these
-failures without skips, fakes, mocks, or weakened selection. A later isolated
-rerun of the eight affected modules selected 229 tests and all passed in the
-current integrated worktree. Keep this item open until the owning changes are
-committed and the full clean-clone unit selection passes.
+Type: product correctness and test drift. The first clean-clone unit gate
+selected 2,141 tests; 2,126 passed and 15 failed across gateway preset
+truthfulness, the real synchronized rule corpus, redispatch failure-ladder
+deduplication, MCP preset availability, ACP capsule resolution, Codex
+config-home behavior, thread error exports, and thread feedback state. Status:
+resolved after the owning changes were committed. At exact commit `844cd0ca`,
+the canonical `just ci` selected 2,565 tests from 2,706 collected tests: 2,564
+passed, one existing POSIX-permission test was inapplicable and skipped on
+Windows, and 141 service tests were deliberately deselected by the canonical
+unit contract. The run used Python 3.13.11, Node.js 24.18.0, and npm 11.16.0 in
+an isolated workspace; every static gate passed and the clone remained clean.
+
+### s12-node-runtime-provisioning | high | Canonical CI omitted the locked ACP runtime
+
+Type: dependency authority and clone reproducibility. The first terminal gate
+did not restore `package-lock.json`, so MCP tests could not start the Node-based
+ACP runtime from a clean clone. Status: resolved. The repository now pins and
+verifies Node.js 24.18.0 with a platform-neutral version script, declares npm
+11.16.0 through the package-manager contract, runs `npm ci` from dependency
+setup and canonical CI, and provisions the same Node line in GitHub Actions.
+The authoritative run used npm 11.16.0, restored 104 packages, and `npm audit`
+reported zero vulnerabilities.
+
+### s12-mcp-gateway-auth | high | MCP transport omitted the gateway bearer credential
+
+Type: security-contract integration. Gateway authentication was enforced, but
+the MCP HTTP client did not resolve or send the operator credential, producing
+authorization failures in the real composition path. Status: resolved through
+one shared production credential resolver used by the CLI and MCP transport.
+Real authenticated application tests now exercise the bearer path directly.
+
+### s12-desktop-credential-origin | high | Initial resolver could disclose a desktop credential to another loopback port
+
+Type: credential confidentiality. Formal review found that an armed desktop
+attach credential could be sent to an arbitrary loopback origin because the
+first shared resolver trusted only the host class. Status: resolved before
+terminal acceptance. Desktop attachment now requires fresh versioned discovery,
+the current protocol, a live matching process identity, the exact HTTP host and
+port, and the exact resolved credential reference. Real filesystem and process
+tests prove matching-origin use and refusal for a different loopback port or a
+remote host.
+
+### s12-concurrent-format-drift | medium | Clean-clone validation found formatter drift in integrated product files
+
+Type: integration conformance. Six product and test files committed by adjacent
+work exposed Ruff formatting drift only after the hardening range was exercised
+from a clean clone. Status: resolved with formatter-only commits after focused
+tests and read-only review; the final canonical format check covered 519 files.
+Uncommitted concurrent work in the shared tree was not staged or overwritten.
+
+### s12-provider-reason-assertion | low | Provider test required an obsolete exact wrapper string
+
+Type: test-contract drift. A live gateway test asserted exact membership for a
+safe provider error even though the production boundary can add stable context
+around that reason. Status: resolved by asserting the preserved safe reason
+without duplicating the wrapper's presentation contract.
 
 ### s12-legacy-precommit-lock | low | Existing checkouts can expose an obsolete zero-byte lock
 
@@ -718,9 +763,8 @@ environment boundaries before it certifies global test-policy compliance.
 
 Preserve S10's manual self-hosted authorization, content-free bootstrap
 boundary, immutable action references, trusted Claude associations, and
-canonical hosted gate. During S12, rerun `just ci` after the concurrent
-formatter drift is resolved, exercise the organization-owned runner path, and
-decide whether repository policy should require SHA-pinned Actions globally.
+canonical hosted gate. Exercise the organization-owned runner path and decide
+whether repository policy should require SHA-pinned Actions globally.
 
 Preserve S11's platform-specific doctor variants as one public command contract.
 Exercise the Unix branch and build-clean parity on a healthy Unix Docker host
@@ -737,8 +781,9 @@ seeds use exclusive creation, and `prek.toml` remains repository-owned. Preserve
 the RAG authority check whenever either the project constraint or the ACP
 runtime requirement changes.
 
-Do not hide the 15 product-contract failures behind selection changes. Resolve
-them through the accepted codebase-health plan and their owning feature audits,
-then rerun the exact 2,141-test selection from a clean commit. Preserve the
-committed Core adoption and build-clean real-filesystem tests and the exact
-workflow-lint pin as repository-tooling regression gates.
+Preserve the exact Node.js and npm authorities, locked `npm ci` restoration,
+desktop credential origin binding, committed Core adoption and build-clean
+real-filesystem tests, and exact workflow-lint pin as repository-tooling
+regression gates. Repeat canonical `just ci` from a clean commit whenever those
+contracts change. Keep the single Windows skip limited to its existing
+POSIX-permission boundary; do not suppress any portable behavior.

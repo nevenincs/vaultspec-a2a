@@ -155,9 +155,7 @@ def test_prod_postgres_overlay_is_separate_file() -> None:
 def test_prod_jaeger_service_present() -> None:
     """Prod compose includes a Jaeger service for OTLP tracing."""
     doc = _load_compose(PROD_COMPOSE)
-    assert "jaeger" in doc["services"], (
-        "prod compose must declare a jaeger service"
-    )
+    assert "jaeger" in doc["services"], "prod compose must declare a jaeger service"
 
 
 def test_integration_jaeger_service_present() -> None:
@@ -282,9 +280,7 @@ def test_compose_gateway_health_is_ok(compose_integration_stack: Any) -> None:
     """Gateway reports status=ok when the independently managed worker is healthy."""
     gateway_url = compose_integration_stack["gateway_url"]
     resp = httpx.get(f"{gateway_url}/api/health", timeout=15.0)
-    assert resp.status_code == 200, (
-        f"expected 200, got {resp.status_code}: {resp.text}"
-    )
+    assert resp.status_code == 200, f"expected 200, got {resp.status_code}: {resp.text}"
     body = resp.json()
     assert body.get("status") == "ok", f"gateway health status not ok: {body}"
 

@@ -372,8 +372,14 @@ def gateway_env(
     *,
     auto_spawn: bool = True,
 ) -> dict[str, str]:
-    """Return an environment dict suitable for booting an armed desktop gateway."""
-    env = dict(os.environ)
+    """Return an environment dict suitable for booting an armed desktop gateway.
+
+    Derived from clean_env() (venv isolation vars stripped) rather than raw
+    os.environ, so installed-capsule tests cannot inherit the development
+    VIRTUAL_ENV or UV_PROJECT_ENVIRONMENT and accidentally resolve imports
+    from the dev tree instead of the installed venv.
+    """
+    env = clean_env()
     env["VAULTSPEC_DESKTOP_APP_HOME"] = str(app_home)
     env["VAULTSPEC_ENVIRONMENT"] = "production"
     env["VAULTSPEC_PORT"] = str(gateway_port)
@@ -381,3 +387,95 @@ def gateway_env(
     env["VAULTSPEC_AUTO_SPAWN_WORKER"] = "true" if auto_spawn else "false"
     env["VAULTSPEC_REPAIR_ON_STARTUP"] = "false"
     return env
+
+
+# Content of the mock-success-single team preset.  This preset is deliberately
+# excluded from the product wheel (it is a test-only artifact); the workspace-
+# override seam documented in team_config.py is the supported mechanism for
+# supplying workspace-local presets to a running gateway.  Seeding it here lets
+# the installed-capsule service gates prove the full run-start path without
+# requiring the external ACP provider or the Claude CLI (which is not
+# installable offline).  The preset is disclosed as the mock seam in every
+# test module that depends on it.
+_MOCK_SUCCESS_SINGLE_TOML: Final = """\
+[team]
+id           = "mock-success-single"
+display_name = "Mock Success Single"
+description  = "A single coder team that concludes work successfully."
+
+[team.defaults]
+provider   = "mock"
+capability = "mid"
+
+[team.topology]
+type  = "pipeline"
+order = ["mock-coder-success"]
+
+[team.permissions]
+auto_approve = true
+
+[team.persona]
+directive = "Simulate single agent success."
+
+[team.graph]
+step_timeout_seconds = 60
+recursion_limit      = 10
+
+[[team.workers]]
+agent_id = "mock-coder-success"
+
+[team.workers.defaults]
+provider   = "mock"
+capability = "mid"
+"""
+
+
+_MOCK_CODER_SUCCESS_TOML: Final = """\
+[agent]
+id           = "mock-coder-success"
+display_name = "Mock Coder Success"
+role         = "coder"
+description  = "Mock coder agent that simulates a successful task completion."
+
+[agent.persona]
+system_prompt = "You are a mock coder. Emit your programmed sequence."
+
+[agent.model]
+provider   = "mock"
+capability = "mid"
+
+[agent.capabilities]
+filesystem_read  = true
+filesystem_write = true
+terminal         = true
+
+[agent.permissions]
+require_approval_for = []
+"""
+
+
+def seed_workspace_preset(workspace: Path) -> Path:
+    """Write mock-success-single team and mock-coder-success agent TOMLs.
+
+    Both the team and its agent config are excluded from the product wheel.
+    This function seeds them into workspace-override directories using the
+    documented precedence seam from team_config.py:
+
+        {workspace}/.vaultspec/teams/{team_id}.toml   (team override)
+        {workspace}/.vaultspec/agents/{agent_id}.toml (agent override)
+
+    Returns the workspace root so callers can pass it as the ``workspace_root``
+    field in run-start ``metadata``.
+    """
+    vaultspec_dir = workspace / ".vaultspec"
+    teams_dir = vaultspec_dir / "teams"
+    agents_dir = vaultspec_dir / "agents"
+    teams_dir.mkdir(parents=True, exist_ok=True)
+    agents_dir.mkdir(parents=True, exist_ok=True)
+    (teams_dir / "mock-success-single.toml").write_text(
+        _MOCK_SUCCESS_SINGLE_TOML, encoding="utf-8"
+    )
+    (agents_dir / "mock-coder-success.toml").write_text(
+        _MOCK_CODER_SUCCESS_TOML, encoding="utf-8"
+    )
+    return workspace

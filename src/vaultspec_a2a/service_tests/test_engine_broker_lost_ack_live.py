@@ -444,6 +444,11 @@ def test_production_engine_recovers_lost_run_start_ack_exactly_once(
         }
         with engine_log.open("wb") as output:
             containment = ProcessContainment.create()
+            # Pass the containment's session flag explicitly rather than
+            # ``**spawn_kwargs()`` so the binary-stdout Popen resolves to
+            # ``Popen[bytes]`` (the sanctioned worker-management spawn pattern);
+            # ``start_new_session`` is a no-op on Windows where the flag is unset.
+            new_session = bool(containment.spawn_kwargs().get("start_new_session"))
             process: subprocess.Popen[bytes] | None = None
             token: str | None = None
             try:
@@ -453,7 +458,7 @@ def test_production_engine_recovers_lost_run_start_ack_exactly_once(
                     env=environment,
                     stdout=output,
                     stderr=subprocess.STDOUT,
-                    **containment.spawn_kwargs(),
+                    start_new_session=new_session,
                 )
                 containment.assign(process.pid)
                 token = _wait_for_engine(workspace, engine_base, process)

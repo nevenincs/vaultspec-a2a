@@ -60,27 +60,28 @@ def upgrade() -> None:
         )
 
     _drop_active_indexes()
-    partial = {
-        "sqlite_where": sa.text("is_active IS 1"),
-        "postgresql_where": sa.text("is_active IS true"),
-    }
+    _sqlite_active = sa.text("is_active IS 1")
+    _postgresql_active = sa.text("is_active IS true")
     op.create_index(
         "ix_threads_active_order",
         "threads",
         [sa.text("created_at DESC"), sa.text("id DESC")],
-        **partial,
+        sqlite_where=_sqlite_active,
+        postgresql_where=_postgresql_active,
     )
     op.create_index(
         "ix_threads_active_workspace_order",
         "threads",
         ["workspace_key", sa.text("created_at DESC"), sa.text("id DESC")],
-        **partial,
+        sqlite_where=_sqlite_active,
+        postgresql_where=_postgresql_active,
     )
     op.create_index(
         "ix_threads_active_feature_order",
         "threads",
         ["feature_tag", sa.text("created_at DESC"), sa.text("id DESC")],
-        **partial,
+        sqlite_where=_sqlite_active,
+        postgresql_where=_postgresql_active,
     )
     op.create_index(
         "ix_threads_active_workspace_feature_order",
@@ -91,7 +92,8 @@ def upgrade() -> None:
             sa.text("created_at DESC"),
             sa.text("id DESC"),
         ],
-        **partial,
+        sqlite_where=_sqlite_active,
+        postgresql_where=_postgresql_active,
     )
 
 

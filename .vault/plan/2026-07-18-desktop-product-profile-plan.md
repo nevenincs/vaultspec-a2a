@@ -260,11 +260,11 @@ Run real-behavior capsule, security, state, process, and default-provider scenar
 - [x] `W05.P13.S73` - Prove clean offline install relocation cold readiness lazy worker and default ACP execution from one real capsule; `src/vaultspec_a2a/desktop_tests/test_artifact_install.py`.
 - [x] `W05.P13.S74` - Prove migration rollback consistency restore tamper detection and immutable-file verification from real capsule state; `src/vaultspec_a2a/desktop_tests/test_artifact_state_lifecycle.py`.
 - [x] `W05.P13.S75` - Prove authenticated attach owner-only shutdown drain and data-preserving capsule removal boundaries; `src/vaultspec_a2a/desktop_tests/test_artifact_ownership_lifecycle.py`.
-- [ ] `W05.P13.S76` - Certify Apple Silicon macOS capsule closure and upload its pinned component contract; `.github/workflows/desktop-capsule.yml`.
-- [ ] `W05.P13.S77` - Certify Intel macOS capsule closure and upload its pinned component contract; `.github/workflows/desktop-capsule.yml`.
-- [ ] `W05.P13.S78` - Certify Arm64 Linux capsule closure and upload its pinned component contract; `.github/workflows/desktop-capsule.yml`.
-- [ ] `W05.P13.S79` - Certify x86-64 Linux capsule closure and upload its pinned component contract; `.github/workflows/desktop-capsule.yml`.
-- [ ] `W05.P13.S80` - Certify x86-64 Windows capsule closure and upload its pinned component contract; `.github/workflows/desktop-capsule.yml`.
+- [x] `W05.P13.S76` - Certify Apple Silicon macOS capsule closure and upload its pinned component contract; `.github/workflows/desktop-capsule.yml`.
+- [x] `W05.P13.S77` - Certify Intel macOS capsule closure and upload its pinned component contract; `.github/workflows/desktop-capsule.yml`.
+- [x] `W05.P13.S78` - Certify Arm64 Linux capsule closure and upload its pinned component contract; `.github/workflows/desktop-capsule.yml`.
+- [x] `W05.P13.S79` - Certify x86-64 Linux capsule closure and upload its pinned component contract; `.github/workflows/desktop-capsule.yml`.
+- [x] `W05.P13.S80` - Certify x86-64 Windows capsule closure and upload its pinned component contract; `.github/workflows/desktop-capsule.yml`.
 
 ### Phase `W05.P14` - retain server profile and review gates
 

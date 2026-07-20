@@ -279,6 +279,40 @@ class TestEventEmission:
         assert [event.request_id for event in pending] == ["perm-new"]
 
     @pytest.mark.asyncio
+    async def test_expire_thread_permissions_drops_a_freshly_recorded_request(
+        self, aggregator: EventAggregator
+    ) -> None:
+        """Thread expiry is age-independent, unlike the stale-age janitor.
+
+        A request recorded moments ago is not yet stale, but is already
+        unanswerable once its thread reaches a terminal state.
+        """
+        await aggregator.emit_permission_request(
+            thread_id="thread-1",
+            agent_id="agent-1",
+            request_id="perm-fresh",
+            description="Fresh request",
+            options=[{"option_id": "allow", "name": "Allow", "kind": "allow_once"}],
+        )
+        await aggregator.emit_permission_request(
+            thread_id="thread-2",
+            agent_id="agent-1",
+            request_id="perm-other-thread",
+            description="Other thread",
+            options=[{"option_id": "allow", "name": "Allow", "kind": "allow_once"}],
+        )
+
+        # The age-based janitor cannot touch a request this young.
+        assert aggregator.prune_stale_permissions() == 0
+
+        assert aggregator.expire_thread_permissions("thread-1") == 1
+        assert aggregator.get_pending_permissions("thread-1") == []
+        # A sibling thread's pending request is untouched.
+        assert [
+            event.request_id for event in aggregator.get_pending_permissions("thread-2")
+        ] == ["perm-other-thread"]
+
+    @pytest.mark.asyncio
     async def test_emit_error(self, aggregator: EventAggregator) -> None:
         """emit_error delivers an ErrorEvent with the supplied code."""
         queue = aggregator.add_subscriber("client-1")

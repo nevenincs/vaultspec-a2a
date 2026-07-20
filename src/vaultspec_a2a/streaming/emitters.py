@@ -150,6 +150,21 @@ class EventEmitters:
             self._pending_permissions.pop(stale_request_id, None)
         self._pending_permissions[request_id] = (event, time.monotonic())
 
+    def expire_thread_permissions(self, thread_id: str) -> int:
+        """Drop every pending permission belonging to ``thread_id``.
+
+        Age-independent: a terminal thread can never answer its requests,
+        so they are dropped regardless of how recently they were recorded.
+        """
+        expired = [
+            request_id
+            for request_id, (evt, _ts) in self._pending_permissions.items()
+            if evt.thread_id == thread_id
+        ]
+        for request_id in expired:
+            del self._pending_permissions[request_id]
+        return len(expired)
+
     def prune_stale_permissions(self, max_age_seconds: float = 300.0) -> int:
         """Remove permission requests older than *max_age_seconds*."""
         cutoff = time.monotonic() - max_age_seconds
@@ -180,13 +195,7 @@ class EventEmitters:
     def clear_thread_state(self, thread_id: str) -> None:
         """Purge all emitter-owned state scoped to ``thread_id``."""
         self._sequences.pop(thread_id, None)
-        stale_permissions = [
-            request_id
-            for request_id, (evt, _ts) in self._pending_permissions.items()
-            if evt.thread_id == thread_id
-        ]
-        for request_id in stale_permissions:
-            self._pending_permissions.pop(request_id, None)
+        self.expire_thread_permissions(thread_id)
         stale_tool_calls = [
             key for key in self._tool_call_states if key[0] == thread_id
         ]

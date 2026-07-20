@@ -17,6 +17,9 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --no-install-project --locked
 
 COPY src/vaultspec_a2a/ ./src/vaultspec_a2a/
+# The wheel force-includes the desktop component-manifest schema from the
+# repository root, so the build context must carry it or the project build fails.
+COPY schemas/ ./schemas/
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --frozen --no-editable
 

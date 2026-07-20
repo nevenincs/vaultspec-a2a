@@ -91,6 +91,40 @@ def _wait_for_url(
     raise TimeoutError(f"Timed out waiting for {url} to return HTTP {status}")
 
 
+def _wait_for_health_field(
+    health_url: str,
+    field: str,
+    expected: object,
+    *,
+    timeout: float = 90.0,
+    interval: float = 2.0,
+) -> dict[str, Any]:
+    """Poll gateway health until *field* equals *expected*; return the last body.
+
+    Container healthchecks gate only process liveness, not the asynchronous
+    gateway-worker registration, so a field like ``worker_connected`` flips true
+    a few heartbeats after both containers are healthy. Polling removes that race
+    without hiding a genuine failure: a worker that never registers still trips
+    the timeout, and the last observed body is raised for diagnosis.
+    """
+    deadline = time.monotonic() + timeout
+    body: dict[str, Any] = {}
+    while time.monotonic() < deadline:
+        try:
+            resp = httpx.get(health_url, timeout=5.0)
+            if resp.status_code == 200:
+                body = resp.json()
+                if body.get(field) == expected:
+                    return body
+        except Exception:
+            pass
+        time.sleep(interval)
+    raise TimeoutError(
+        f"gateway health {field!r} did not reach {expected!r} within {timeout}s; "
+        f"last body: {body}"
+    )
+
+
 # ---------------------------------------------------------------------------
 # Structural assertions — parse real YMLs, no Docker required
 # ---------------------------------------------------------------------------
@@ -244,14 +278,33 @@ def compose_integration_stack() -> Any:
     ]
 
     try:
-        subprocess.run(
-            [*compose_cmd, "up", "-d", "--build", "--wait"],
-            env=compose_env,
-            cwd=REPO_ROOT,
-            check=True,
-            capture_output=True,
-            timeout=600,
-        )
+        try:
+            subprocess.run(
+                [*compose_cmd, "up", "-d", "--build", "--wait"],
+                env=compose_env,
+                cwd=REPO_ROOT,
+                check=True,
+                capture_output=True,
+                timeout=600,
+            )
+        except subprocess.CalledProcessError as error:
+            # ``--wait`` reports only WHICH container is unhealthy, never why. The
+            # container logs carry the reason and are gone after teardown, so they
+            # are surfaced on the failure itself.
+            logs = subprocess.run(
+                [*compose_cmd, "logs", "--no-color", "--tail", "80"],
+                env=compose_env,
+                cwd=REPO_ROOT,
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=120,
+            )
+            raise AssertionError(
+                "compose stack did not become healthy\n"
+                f"stderr:\n{(error.stderr or b'').decode(errors='replace')}\n"
+                f"container logs:\n{logs.stdout}\n{logs.stderr}"
+            ) from error
         # Double-check gateway readiness via the public health endpoint.
         gateway_url = f"http://127.0.0.1:{gateway_port}"
         _wait_for_url(f"{gateway_url}/api/health", timeout=60.0)
@@ -288,12 +341,9 @@ def test_compose_gateway_health_is_ok(compose_integration_stack: Any) -> None:
 def test_compose_worker_is_connected(compose_integration_stack: Any) -> None:
     """Gateway reports worker_connected=True after attaching to compose worker."""
     gateway_url = compose_integration_stack["gateway_url"]
-    resp = httpx.get(f"{gateway_url}/api/health", timeout=15.0)
-    assert resp.status_code == 200
-    body = resp.json()
-    assert body.get("worker_connected") is True, (
-        f"gateway must report worker_connected=True; got: {body}"
-    )
+    # Registration is heartbeat-driven and lags the container healthcheck, so
+    # poll rather than sampling once; a worker that never connects still fails.
+    _wait_for_health_field(f"{gateway_url}/api/health", "worker_connected", True)
 
 
 def test_compose_gateway_did_not_spawn_worker(compose_integration_stack: Any) -> None:

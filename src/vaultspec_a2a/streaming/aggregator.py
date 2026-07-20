@@ -230,6 +230,9 @@ class EventAggregator:
     def resolve_permission(self, request_id: str) -> None:
         self._emitters.resolve_permission(request_id)
 
+    def expire_thread_permissions(self, thread_id: str) -> int:
+        return self._emitters.expire_thread_permissions(thread_id)
+
     def prune_stale_permissions(self, max_age_seconds: float = 300.0) -> int:
         return self._emitters.prune_stale_permissions(max_age_seconds)
 

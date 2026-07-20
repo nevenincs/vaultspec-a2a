@@ -51,37 +51,37 @@ class TestContextRef:
 class TestThreadMetadata:
     """Tests for ThreadMetadata model validation."""
 
-    def test_valid_nickname(self) -> None:
+    def test_valid_nickname(self, tmp_path: Path) -> None:
         """Valid slug nicknames are accepted."""
         meta = ThreadMetadata(
             nickname="auth-flow-star-a3f2",
-            workspace_root="Y:/code/vaultspec",
+            workspace_root=str(tmp_path),
         )
         assert meta.nickname == "auth-flow-star-a3f2"
 
-    def test_empty_nickname_allowed(self) -> None:
+    def test_empty_nickname_allowed(self, tmp_path: Path) -> None:
         """Empty nickname (auto-generate later) is allowed."""
-        meta = ThreadMetadata(nickname="", workspace_root="Y:/code/vaultspec")
+        meta = ThreadMetadata(nickname="", workspace_root=str(tmp_path))
         assert meta.nickname == ""
 
-    def test_invalid_nickname_uppercase(self) -> None:
+    def test_invalid_nickname_uppercase(self, tmp_path: Path) -> None:
         """Uppercase letters are rejected in nicknames."""
         with pytest.raises(ValueError, match="valid slug"):
-            ThreadMetadata(nickname="Auth-Flow", workspace_root="Y:/code/vaultspec")
+            ThreadMetadata(nickname="Auth-Flow", workspace_root=str(tmp_path))
 
-    def test_invalid_nickname_too_short(self) -> None:
+    def test_invalid_nickname_too_short(self, tmp_path: Path) -> None:
         """Two-character nicknames are rejected (minimum 3)."""
         with pytest.raises(ValueError, match="valid slug"):
-            ThreadMetadata(nickname="ab", workspace_root="Y:/code/vaultspec")
+            ThreadMetadata(nickname="ab", workspace_root=str(tmp_path))
 
-    def test_invalid_nickname_special_chars(self) -> None:
+    def test_invalid_nickname_special_chars(self, tmp_path: Path) -> None:
         """Underscores and other special chars are rejected."""
         with pytest.raises(ValueError, match="valid slug"):
-            ThreadMetadata(nickname="auth_flow", workspace_root="Y:/code/vaultspec")
+            ThreadMetadata(nickname="auth_flow", workspace_root=str(tmp_path))
 
-    def test_nickname_three_chars_valid(self) -> None:
+    def test_nickname_three_chars_valid(self, tmp_path: Path) -> None:
         """Three-character nicknames matching the pattern are valid."""
-        meta = ThreadMetadata(nickname="abc", workspace_root="Y:/code/vaultspec")
+        meta = ThreadMetadata(nickname="abc", workspace_root=str(tmp_path))
         assert meta.nickname == "abc"
 
     def test_workspace_root_absolute_required(self) -> None:
@@ -89,26 +89,27 @@ class TestThreadMetadata:
         with pytest.raises(ValueError, match="absolute path"):
             ThreadMetadata(workspace_root="relative/path")
 
-    def test_workspace_root_absolute_accepted(self) -> None:
+    def test_workspace_root_absolute_accepted(self, tmp_path: Path) -> None:
         """Absolute workspace_root paths are accepted."""
-        meta = ThreadMetadata(workspace_root="Y:/code/vaultspec")
-        assert meta.workspace_root == "Y:/code/vaultspec"
+        root = str(tmp_path)
+        meta = ThreadMetadata(workspace_root=root)
+        assert meta.workspace_root == root
 
-    def test_optional_fields_default(self) -> None:
+    def test_optional_fields_default(self, tmp_path: Path) -> None:
         """Optional fields default correctly."""
-        meta = ThreadMetadata(workspace_root="Y:/code/vaultspec")
+        meta = ThreadMetadata(workspace_root=str(tmp_path))
         assert meta.source_repo == ""
         assert meta.source_branch == ""
         assert meta.callee == ""
         assert meta.feature_tag == ""
         assert meta.context_refs == []
 
-    def test_full_metadata(self) -> None:
+    def test_full_metadata(self, tmp_path: Path) -> None:
         """All fields can be populated simultaneously."""
         ref = ContextRef(path=".vault/research/auth.md", stage="research")
         meta = ThreadMetadata(
             nickname="auth-flow-star-a3f2",
-            workspace_root="Y:/code/vaultspec",
+            workspace_root=str(tmp_path),
             source_repo="github.com/org/vaultspec",
             source_branch="feat/auth-flow",
             callee="claude-cli",

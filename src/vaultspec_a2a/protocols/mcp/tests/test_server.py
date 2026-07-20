@@ -188,6 +188,11 @@ def _make_test_client(
     touch the on-disk ``vaultspec.db`` or run Alembic migrations.  All
     required app state is set directly on ``app.state`` before the client
     context manager is entered.
+
+    The app is created with the sanctioned ``allow_unauthenticated_v1_for_testing``
+    escape hatch (the same seam ``api/tests/conftest.py`` uses) because the MCP
+    tool surface carries no gateway bearer; these are route-behaviour tests, not
+    tests of the ``/api`` attach gate, which is covered in ``api/tests``.
     """
 
     @asynccontextmanager

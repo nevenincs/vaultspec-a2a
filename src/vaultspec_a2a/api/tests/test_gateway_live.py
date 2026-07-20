@@ -340,9 +340,13 @@ async def test_presets_list_is_truthful_and_resilient(
         # credential value.
         if not zai_readiness.ready:
             assert zai_readiness.reason
+            # The reason must be carried, but the serving layer is free to nest it
+            # inside a composed role-eligibility entry: on a host whose agent
+            # harness is incomplete the provider reason arrives folded into that
+            # larger entry rather than standing alone.
             assert any(
-                zai_readiness.reason in reason
-                for reason in profiles["zai"]["unavailable_reasons"]
+                zai_readiness.reason in entry
+                for entry in profiles["zai"]["unavailable_reasons"]
             )
 
         # Eligibility is reported honestly: the production acceptance gate is open,

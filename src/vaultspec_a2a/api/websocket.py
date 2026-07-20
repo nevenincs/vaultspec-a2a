@@ -79,6 +79,10 @@ _SERVER_VERSION = package_version()
 # every Nth consecutive failure escalates to full WARNING detail again.
 _WS_HEARTBEAT_FAILURE_LOG_EVERY_N = 5
 
+# Mirrors the worker heartbeat ladder's cadence (worker/ipc.py heartbeat_loop):
+# every Nth consecutive failure escalates to full WARNING detail again.
+_WS_HEARTBEAT_FAILURE_LOG_EVERY_N = 5
+
 _client_message_adapter: TypeAdapter[ClientMessage] = TypeAdapter(ClientMessage)
 
 

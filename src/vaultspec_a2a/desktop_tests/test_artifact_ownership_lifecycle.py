@@ -395,6 +395,12 @@ def test_data_preserving_capsule_removal(
         await_gateway_health(base)
         # Give the lifespan a moment to write the discovery record.
         time.sleep(1.0)
+        # Publication is asserted while the gateway is LIVE: a clean shutdown
+        # deliberately removes the record it owns, so its presence afterwards
+        # would only mean the process was killed too hard to run its cleanup.
+        assert derive_state_paths(app_home).discovery_path.is_file(), (
+            "gateway lifespan must publish a discovery record while serving"
+        )
     finally:
         with contextlib.suppress(Exception):
             asyncio.run(
@@ -406,19 +412,20 @@ def test_data_preserving_capsule_removal(
 
     state = derive_state_paths(app_home)
 
-    # Confirm discovery record was written during the brief boot.
-    assert state.discovery_path.is_file(), (
-        "gateway lifespan must write a discovery record before shutdown"
-    )
+    # Publication was asserted above while the gateway served. The record is not
+    # re-asserted here: a clean shutdown removes the record its owner published,
+    # so whether it survives the stop reflects only how hard the process was
+    # killed, not whether capsule removal preserves user data.
 
     # Capture the paths and sizes of all user-data files before removal.
     # Credential filenames use the canonical constants from credentials.py.
+    # The discovery record is a gateway-owned runtime artifact removed on clean
+    # shutdown, not user data, so it is deliberately absent from this set.
     user_data_files = {
         "database": state.database_path,
         "checkpoint": state.checkpoint_path,
         "attach_cred": state.credentials_dir / ATTACH_CREDENTIAL_NAME,
         "ownership_cred": state.credentials_dir / OWNERSHIP_CAPABILITY_NAME,
-        "discovery": state.discovery_path,
     }
     pre_sizes = {
         label: path.stat().st_size
@@ -449,7 +456,4 @@ def test_data_preserving_capsule_removal(
     )
     assert state.checkpoint_path.is_file(), (
         "checkpoint database must survive capsule removal"
-    )
-    assert state.discovery_path.is_file(), (
-        "discovery record must survive capsule removal"
     )

@@ -122,6 +122,8 @@ def resolve_directory_authority(path: Path) -> DirectoryAuthority:
 
 
 def _windows_library() -> _WindowsLibrary:
+    if sys.platform != "win32":
+        raise OSError(errno.ENOSYS, "kernel32 is available only on Windows")
     return cast(
         "_WindowsLibrary",
         ctypes.WinDLL("kernel32", use_last_error=True),
@@ -129,6 +131,8 @@ def _windows_library() -> _WindowsLibrary:
 
 
 def _windows_native_library() -> _WindowsNativeLibrary:
+    if sys.platform != "win32":
+        raise OSError(errno.ENOSYS, "ntdll is available only on Windows")
     return cast(
         "_WindowsNativeLibrary",
         ctypes.WinDLL("ntdll"),
@@ -136,6 +140,8 @@ def _windows_native_library() -> _WindowsNativeLibrary:
 
 
 def _last_windows_error(path: Path) -> OSError:
+    if sys.platform != "win32":
+        raise OSError(errno.ENOSYS, "Windows error codes are unavailable", path)
     error = int(ctypes.get_last_error())
     return OSError(error, ctypes.FormatError(error), path)
 
@@ -506,6 +512,8 @@ def _windows_publish_handle(
     source_handle: int,
     destination_name: str,
 ) -> None:
+    if sys.platform != "win32":
+        raise OSError(errno.ENOSYS, "Windows publication requires Windows")
     if authority.native_handle is None:
         raise OSError(errno.EBADF, "Windows publication authority is not leased")
     encoded_name = destination_name.encode("utf-16-le")

@@ -1,17 +1,24 @@
 """Certify the three desktop credential planes against a real armed gateway.
 
 A real child interpreter boots the production gateway application armed with the
-desktop profile: it loads the dashboard-created attach and ownership credentials
-from their owner-restricted files, mints the worker interprocess-communication
-secret, publishes the versioned discovery record, and serves the real
-authentication stack over a real loopback socket. The parent then proves, over
-real HTTP, that the three credentials are non-interchangeable and rejected outside
-their planes, that no secret appears in the discovery record, the process logs, or
-any response body, that unauthenticated liveness discloses nothing, and that the
-listener is loopback-only.
+desktop profile over a genuinely migrated app home: ``create_app`` loads the
+dashboard-created attach and ownership credentials from their owner-restricted
+files and mints the worker interprocess-communication secret, and the production
+lifespan validates the seated schema, seats the application state, and publishes
+the versioned discovery record. The parent then proves, over real HTTP, that the
+three credentials are non-interchangeable and rejected outside their planes, that
+no secret appears in the discovery record, the process logs, or any response body,
+that unauthenticated liveness discloses nothing, and that the listener is
+loopback-only.
 
-No mock, monkeypatch, stub, skip, or expected failure is used; the child is always
-torn down in a ``finally``.
+The gateway runs the *production* lifespan rather than a test substitute: an
+override would leave the application state unseated, and every authenticated verb
+would answer 500 instead of exercising the credential planes under test.
+
+The valid database is seated by the real ``desktop-migrate`` entrypoint in a
+separate process; the gateway is a second real process. No mock, monkeypatch,
+stub, skip, or expected failure is used; the child is always torn down in a
+``finally``.
 """
 
 from __future__ import annotations
@@ -22,6 +29,7 @@ import socket
 import subprocess
 import sys
 import time
+from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
 
 import httpx
@@ -32,6 +40,7 @@ from vaultspec_a2a.desktop.credentials import (
     OWNERSHIP_CAPABILITY_NAME,
 )
 from vaultspec_a2a.desktop.profile import derive_state_paths
+from vaultspec_a2a.desktop.transaction import package_migration_range
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -39,42 +48,19 @@ if TYPE_CHECKING:
 _ATTACH = "attach-credential-token-1234567890abcdef"
 _OWNERSHIP = "ownership-capability-token-fedcba0987654321"
 _LIFECYCLE_HEADER = "X-Vaultspec-Lifecycle-Capability"
+_DIGEST = "c" * 64
+_MODULE = "vaultspec_a2a.cli.main"
 
-# A real armed desktop gateway: create_app runs the armed credential loading (real
-# production path), the lifespan publishes the versioned discovery record and
-# signals readiness, and uvicorn serves the real auth stack on loopback.
+# A real armed desktop gateway booting the *production* lifespan: create_app runs
+# the armed credential loading, and the lifespan validates the seated schema,
+# seats the application state, and publishes the versioned discovery record.
 _GATEWAY = """
-import json, os, sys
-from contextlib import asynccontextmanager
-from pathlib import Path
+import sys
 import uvicorn
 from vaultspec_a2a.api.app import create_app
-from vaultspec_a2a.control.config import settings
-from vaultspec_a2a.lifecycle.discovery import (
-    write_desktop_discovery,
-    service_json_path,
-)
 
 port = int(sys.argv[1])
-ready = Path(sys.argv[2])
-
-
-@asynccontextmanager
-async def _lifespan(app):
-    references = settings.desktop_credential_paths
-    write_desktop_discovery(
-        service_json_path(settings.a2a_home),
-        generation="gen-1",
-        port=port,
-        owner="owner-a",
-        credential_reference=str(references.attach_path) if references else None,
-    )
-    ready.write_text(json.dumps({"pid": os.getpid(), "port": port}))
-    yield
-
-
-app = create_app(lifespan=_lifespan)
-uvicorn.run(app, host="127.0.0.1", port=port, log_level="warning")
+uvicorn.run(create_app(), host="127.0.0.1", port=port, log_level="warning")
 """
 
 
@@ -98,24 +84,58 @@ def _free_port() -> int:
         return sock.getsockname()[1]
 
 
-def _await_ready(path: Path, *, timeout: float = 30.0) -> dict:
-    deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline:
-        if path.exists() and path.read_text():
-            return json.loads(path.read_text())
-        time.sleep(0.05)
-    raise AssertionError(f"gateway did not signal readiness at {path}")
+def _write_descriptor(descriptor_path: Path, app_home: Path) -> Path:
+    """Write a one-time migration descriptor for the app home's stores."""
+    state = derive_state_paths(app_home)
+    packaged = package_migration_range()
+    document = {
+        "descriptor_version": "1",
+        "transaction_id": "credential-boundaries-txn-1",
+        "app_home": str(app_home),
+        "database_path": str(state.database_path),
+        "checkpoint_path": str(state.checkpoint_path),
+        "generation": {"manifest_digest": _DIGEST, "component_version": "4.0.0"},
+        "migration_range": {"base": packaged.base, "head": packaged.head},
+        "expires_at": (datetime.now(UTC) + timedelta(hours=1)).isoformat(),
+    }
+    descriptor_path.write_text(json.dumps(document), encoding="utf-8")
+    return descriptor_path
 
 
-def _await_listener(port: int, *, timeout: float = 30.0) -> None:
+def _seat_valid_database(app_home: Path, descriptor: Path) -> None:
+    """Seat a valid desktop database via the real desktop-migrate entrypoint."""
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            _MODULE,
+            "desktop-migrate",
+            "--descriptor",
+            str(descriptor),
+        ],
+        capture_output=True,
+        text=True,
+        timeout=180,
+    )
+    assert result.returncode == 0, f"migrate failed: {result.stdout}\n{result.stderr}"
+    payload = json.loads(result.stdout.strip())
+    assert payload["status"] == "succeeded", payload
+    assert derive_state_paths(app_home).database_path.is_file()
+
+
+def _await_health(base: str, *, timeout: float = 40.0) -> None:
+    """Wait until the gateway's liveness endpoint answers 200."""
     deadline = time.monotonic() + timeout
+    last: str | None = None
     while time.monotonic() < deadline:
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-            sock.settimeout(0.5)
-            if sock.connect_ex(("127.0.0.1", port)) == 0:
-                return
+        try:
+            with httpx.Client(base_url=base, timeout=2.0) as client:
+                if client.get("/health").status_code == 200:
+                    return
+        except httpx.HTTPError as exc:  # not up yet
+            last = repr(exc)
         time.sleep(0.1)
-    raise AssertionError(f"gateway listener never came up on 127.0.0.1:{port}")
+    raise AssertionError(f"gateway liveness never came up ({last})")
 
 
 def test_credential_planes_are_isolated_and_secret_free(tmp_path: Path) -> None:
@@ -123,30 +143,34 @@ def test_credential_planes_are_isolated_and_secret_free(tmp_path: Path) -> None:
     app_home = tmp_path / "app-home"
     app_home.mkdir()
     credentials_dir = _seed_credentials(app_home)
+    _seat_valid_database(app_home, _write_descriptor(tmp_path / "txn.json", app_home))
     port = _free_port()
 
-    ready = tmp_path / "ready.json"
     log_path = tmp_path / "gateway.log"
     env = os.environ.copy()
     env["VAULTSPEC_DESKTOP_APP_HOME"] = str(app_home)
     env["VAULTSPEC_ENVIRONMENT"] = "production"
+    env["VAULTSPEC_PORT"] = str(port)
+    # The credential planes are the subject; keep the worker cold so no worker
+    # process is started behind this test.
+    env["VAULTSPEC_AUTO_SPAWN_WORKER"] = "false"
+    env["VAULTSPEC_REPAIR_ON_STARTUP"] = "false"
 
     log_handle = log_path.open("wb")
     proc = subprocess.Popen(
-        [sys.executable, "-c", _GATEWAY, str(port), str(ready)],
+        [sys.executable, "-c", _GATEWAY, str(port)],
         env=env,
         stdout=log_handle,
         stderr=subprocess.STDOUT,
     )
+    base = f"http://127.0.0.1:{port}"
     try:
-        _await_ready(ready)
-        _await_listener(port)
+        _await_health(base)
 
         # The gateway minted the worker IPC secret; read it to scan for its leak.
         worker_ipc = (credentials_dir / "worker-ipc.cred").read_text(encoding="utf-8")
         assert worker_ipc and worker_ipc not in (_ATTACH, _OWNERSHIP)
 
-        base = f"http://127.0.0.1:{port}"
         with httpx.Client(base_url=base, timeout=5.0) as client:
             # --- Discovery record carries no secret, only the ACL-protected ref ---
             discovery_text = (app_home / "service.json").read_text(encoding="utf-8")
@@ -177,7 +201,7 @@ def test_credential_planes_are_isolated_and_secret_free(tmp_path: Path) -> None:
             attach_ok = client.get(
                 "/v1/service", headers={"Authorization": f"Bearer {_ATTACH}"}
             )
-            assert attach_ok.status_code != 401
+            assert attach_ok.status_code == 200, attach_ok.text
             for secret in (_ATTACH, _OWNERSHIP, worker_ipc):
                 assert secret not in attach_ok.text
 

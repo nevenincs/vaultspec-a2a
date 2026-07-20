@@ -250,6 +250,10 @@ async def _handle_terminal_event(
     # GC aggregator state for the terminated thread.
     if aggregator is not None:
         try:
+            # The DB rows were expired above; mirror that in memory. Age-based
+            # pruning alone cannot do it — a request recorded seconds before the
+            # terminal event is not yet stale, but is already unanswerable.
+            aggregator.expire_thread_permissions(thread_id)
             aggregator.prune_stale_permissions()
             # Remove the sequence counter for the now-terminal thread.
             active: set[str] = set(

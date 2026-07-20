@@ -28,7 +28,6 @@ import secrets
 import socket
 import stat
 import subprocess
-import sys
 import time
 from dataclasses import dataclass
 from enum import StrEnum
@@ -320,35 +319,17 @@ def read_resident_service(a2a_home: Path) -> tuple[DiscoveryState, ServiceInfo |
 def is_pid_alive(pid: int | None) -> bool:
     """Return ``True`` when *pid* is a live process on this machine.
 
-    Cross-platform without a third-party dependency: an ``OpenProcess`` query on
-    Windows, a signal-0 probe on POSIX. A ``PermissionError`` (POSIX) means the
-    process exists but is owned by another user — still alive.
+    The lifecycle spelling of the package's single liveness probe, adding this
+    layer's ``None`` handling (an unrecorded pid is not alive) on top of
+    :func:`vaultspec_a2a.utils.process.pid_is_live`, which owns the platform
+    contract: an ``OpenProcess`` exit-code query on Windows, and on POSIX a
+    signal-0 probe that discounts an unreaped zombie.
     """
-    if pid is None or pid <= 0:
-        return False
-    if sys.platform == "win32":
-        import ctypes
+    from ..utils.process import pid_is_live
 
-        process_query = 0x1000  # PROCESS_QUERY_LIMITED_INFORMATION
-        still_active = 259  # STILL_ACTIVE
-        kernel32 = ctypes.windll.kernel32
-        handle = kernel32.OpenProcess(process_query, False, pid)
-        if not handle:
-            return False
-        try:
-            code = ctypes.c_ulong()
-            if not kernel32.GetExitCodeProcess(handle, ctypes.byref(code)):
-                return False
-            return code.value == still_active
-        finally:
-            kernel32.CloseHandle(handle)
-    try:
-        os.kill(pid, 0)
-    except ProcessLookupError:
+    if pid is None:
         return False
-    except PermissionError:
-        return True
-    return True
+    return pid_is_live(pid)
 
 
 def port_has_listener(port: int, *, timeout: float) -> bool:

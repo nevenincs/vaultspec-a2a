@@ -39,6 +39,17 @@ jobs:
       - name: Install Python
         run: uv python install 3.13
 
+      # The Agent Client Protocol adapter is a pinned product dependency that the
+      # provider classifier resolves from the project node_modules; without it the
+      # provider resolution tests cannot exercise the real installed adapter.
+      - name: Set up Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "22"
+
+      - name: Install locked Node dependencies
+        run: npm ci
+
       - name: Synchronize locked CI environment
         run: uv sync --locked --no-default-groups --extra server --group all
 

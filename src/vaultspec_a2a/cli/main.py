@@ -60,12 +60,11 @@ def _emit(response: httpx.Response) -> None:
 def _request(method: str, url: str, **kwargs: Any) -> httpx.Response:
     """Issue one authenticated gateway request or report a transport failure.
 
-    A directly configured token is authoritative. Under the armed desktop profile
-    the operator reads the owner-scoped attach credential file next; no secret is
-    ever accepted as a command-line argument. Otherwise a local request may reuse
-    the fresh resident discovery token, but only when the URL's loopback port
-    matches that discovery record; a user-supplied remote URL never receives a
-    machine-local discovery credential.
+    The bearer is resolved by the shared gateway-auth authority: a configured
+    token is authoritative, then the armed desktop profile's owner-scoped attach
+    credential, then a matching fresh resident discovery token - the latter two
+    for a loopback target only. No secret is accepted as a command-line argument
+    and a remote URL never receives a machine-local credential.
     """
     headers = dict(kwargs.pop("headers", {}))
     for name, value in gateway_auth_headers(url).items():

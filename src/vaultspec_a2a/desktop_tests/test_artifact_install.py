@@ -221,7 +221,7 @@ def test_cold_readiness_from_installed_capsule(
     try:
         await_gateway_health(base)
 
-        with httpx.Client(base_url=base, timeout=5.0) as client:
+        with httpx.Client(base_url=base, timeout=30.0) as client:
             # Unauthenticated liveness discloses only the minimal alive signal.
             live = client.get("/health")
             assert live.status_code == 200
@@ -291,7 +291,7 @@ def test_lazy_worker_from_installed_capsule(
         # --- Idle boot: worker port never listened, state is cold. ---
         time.sleep(1.0)
         assert not port_listening(wk_port), "idle boot must not start the worker"
-        with httpx.Client(base_url=base, timeout=5.0) as client:
+        with httpx.Client(base_url=base, timeout=30.0) as client:
             assert client.get("/health", headers=auth).json()["worker_state"] == "cold"
         log_text = log_path.read_text(encoding="utf-8", errors="replace")
         assert _SPAWN_LINE not in log_text
@@ -396,7 +396,7 @@ def test_default_acp_execution_mock_seam(
         assert body.get("run_id")
 
         # A durable run exists under the returned id.
-        with httpx.Client(base_url=base, timeout=10.0) as client:
+        with httpx.Client(base_url=base, timeout=30.0) as client:
             status_resp = client.get(f"/v1/runs/{body['run_id']}", headers=auth)
         assert status_resp.status_code == 200, status_resp.text
 

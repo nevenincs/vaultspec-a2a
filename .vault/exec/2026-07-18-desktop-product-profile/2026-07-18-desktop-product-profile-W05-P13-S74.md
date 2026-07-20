@@ -59,11 +59,11 @@ related:
 
 ## Outcome
 
-Service gate: **14 passed, 0 failed** (full trio run, 2026-07-20). `ruff check` clean, `ty check` clean, baseline (32 non-service) passes.
+Service gate: **14 passed, 0 failed** — run 1: 115.75s, run 2: 115.54s (two consecutive runs, 2026-07-20). `ruff check` clean, `ty check` clean, baseline (32 non-service) passes.
 
-Revision fixed two issues from initial FAIL verdict:
-1. `test_snapshot_inspect_verifies_integrity` tamper glob changed from `*.snap` to `*.db` matching the `SnapshotGroupSpecification.snapshot_filename` convention (`f"{store.value}.db"`).
-2. `gateway_env()` now derives from `clean_env()` rather than `dict(os.environ)`.
+Revision history:
+- Round 1 fixes: snapshot tamper glob `*.snap` → `*.db`; `gateway_env()` uses `clean_env()`.
+- Round 2 fix (flake): auth-plane probe timeouts raised to 30.0s across all three test files.
 
 ## Notes
 

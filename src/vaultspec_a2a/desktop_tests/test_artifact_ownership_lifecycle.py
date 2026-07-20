@@ -130,7 +130,7 @@ def test_unauthenticated_access_rejected(
     try:
         await_gateway_health(base)
 
-        with httpx.Client(base_url=base, timeout=5.0) as client:
+        with httpx.Client(base_url=base, timeout=30.0) as client:
             # Minimal liveness is public.
             live = client.get("/health")
             assert live.status_code == 200
@@ -205,7 +205,7 @@ def test_owner_only_shutdown_requires_ownership_capability(
     try:
         await_gateway_health(base)
 
-        with httpx.Client(base_url=base, timeout=10.0) as client:
+        with httpx.Client(base_url=base, timeout=30.0) as client:
             # Attach alone: 403.
             r1 = client.post("/api/admin/shutdown", headers=auth)
             assert r1.status_code == 403, r1.text
@@ -315,7 +315,7 @@ def test_drain_and_graceful_shutdown_reaps_worker(
         # Trigger owner-authenticated shutdown with drain.
         with (
             contextlib.suppress(httpx.HTTPError),
-            httpx.Client(base_url=base, timeout=10.0) as client,
+            httpx.Client(base_url=base, timeout=30.0) as client,
         ):
             shutdown = client.post(
                 "/api/admin/shutdown",

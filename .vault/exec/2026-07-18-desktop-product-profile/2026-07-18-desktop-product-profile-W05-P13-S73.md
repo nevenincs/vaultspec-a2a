@@ -59,11 +59,11 @@ related:
 
 ## Outcome
 
-Service gate: **14 passed, 0 failed** (full trio run, 2026-07-20). `ruff check` clean, `ty check` clean, baseline (32 non-service) passes.
+Service gate: **14 passed, 0 failed** — run 1: 115.75s, run 2: 115.54s (two consecutive runs, 2026-07-20). `ruff check` clean, `ty check` clean, baseline (32 non-service) passes.
 
-Revision fixed two issues from initial FAIL verdict:
-1. Both `mock-success-single` (team) and `mock-coder-success` (agent) configs are excluded from the product wheel; workspace-override seam is now used via `seed_workspace_preset()` which writes both TOMLs to `{workspace}/.vaultspec/teams/` and `.vaultspec/agents/`, and run-start requests pass `metadata.workspace_root` pointing there.
-2. `gateway_env()` now derives from `clean_env()` rather than `dict(os.environ)`.
+Revision history:
+- Round 1 fixes: workspace-override seam for mock presets, `gateway_env()` uses `clean_env()`.
+- Round 2 fix (flake): auth-plane probe timeouts raised from 5.0s/10.0s to 30.0s across all three test files so concurrent module-scoped capsule builds cannot cause spurious timeout failures on a loaded host.
 
 ## Notes
 

@@ -304,73 +304,89 @@ async def _create_run_core(
     # Admission gate: a draining gateway refuses a new run before any durable
     # state is created, so drain closes admission ahead of bounded cancellation.
     # An admitted run joins the active set the drain waits on; it is released on
-    # a terminal outcome (the execution-state settlement path) or here when
-    # creation itself fails without leaving a durable run.
+    # a terminal outcome (the execution-state settlement path) or here, in the
+    # finally, on EVERY path that leaves no durable run.
     gate = admission_gate(request.app)
     admission = await gate.admit(run_id)
     if not admission.admitted:
         raise HTTPException(status_code=503, detail=admission.reason)
 
+    # A run is "persisted" once ``create_and_dispatch_thread`` returns (or an
+    # integrity race resolves to a durable winner); only then does the run own its
+    # admission until its terminal outcome. Any failure before that - a nickname
+    # conflict, a winnerless integrity race, or any unexpected exception - must
+    # release the admission in the finally, or the drain gate would carry a phantom
+    # active run forever and never quiesce.
+    persisted = False
     try:
-        result = await create_and_dispatch_thread(
-            db,
-            ThreadCreationRequest(
-                thread_id=run_id,
-                title=body.title,
-                initial_message=body.message,
-                team_preset=body.team_preset,
-                autonomous=body.autonomous,
-                nickname=nickname,
-                metadata=metadata,
-                metadata_json=metadata_json,
-                workspace_root=ws_root,
-                actor_tokens=body.actor_tokens,
-                profile_id=frozen.profile_id,
-                model_assignment=frozen.compiler_map(),
-            ),
-            circuit_breaker=circuit_breaker,
-            worker_spawner=worker_spawner,
-            worker_client=worker_client,
-            recursion_limit=domain_config.graph_recursion_limit,
-            trace_headers=trace_headers(),
-        )
-    except NicknameConflictError as exc:
-        # No durable run was created, so drop the admission it never used.
-        await gate.release(run_id)
-        raise HTTPException(
-            status_code=409, detail=f"Run nickname already exists: {exc.nickname!r}"
-        ) from exc
-    except IntegrityError:
-        # Insert-or-return idempotency: two simultaneous retries with the same
-        # run_id race past the check-then-act guard above; the loser's insert
-        # hits the primary-key unique violation. Roll back and return the winner's
-        # run as the dispatch-exactly-once response rather than a 500.
-        await db.rollback()
-        winner = await get_thread(db, run_id)
-        if winner is not None:
-            return _RunDispatchResult(
-                thread_id=winner.id,
-                status=winner.status,
-                nickname=winner.nickname,
-                profile_id=_persisted_profile_id(winner.thread_metadata),
-                frozen=None,
-                replayed=True,
+        try:
+            result = await create_and_dispatch_thread(
+                db,
+                ThreadCreationRequest(
+                    thread_id=run_id,
+                    title=body.title,
+                    initial_message=body.message,
+                    team_preset=body.team_preset,
+                    autonomous=body.autonomous,
+                    nickname=nickname,
+                    metadata=metadata,
+                    metadata_json=metadata_json,
+                    workspace_root=ws_root,
+                    actor_tokens=body.actor_tokens,
+                    profile_id=frozen.profile_id,
+                    model_assignment=frozen.compiler_map(),
+                ),
+                circuit_breaker=circuit_breaker,
+                worker_spawner=worker_spawner,
+                worker_client=worker_client,
+                recursion_limit=domain_config.graph_recursion_limit,
+                trace_headers=trace_headers(),
             )
-        raise
+        except NicknameConflictError as exc:
+            # No durable run was created; the finally drops the unused admission.
+            raise HTTPException(
+                status_code=409,
+                detail=f"Run nickname already exists: {exc.nickname!r}",
+            ) from exc
+        except IntegrityError:
+            # Insert-or-return idempotency: two simultaneous retries with the same
+            # run_id race past the check-then-act guard above; the loser's insert
+            # hits the primary-key unique violation. Roll back and return the
+            # winner's run as the dispatch-exactly-once response rather than a 500.
+            await db.rollback()
+            winner = await get_thread(db, run_id)
+            if winner is not None:
+                persisted = True
+                return _RunDispatchResult(
+                    thread_id=winner.id,
+                    status=winner.status,
+                    nickname=winner.nickname,
+                    profile_id=_persisted_profile_id(winner.thread_metadata),
+                    frozen=None,
+                    replayed=True,
+                )
+            raise
 
-    if result.dispatched:
-        mark_worker_connected(request)
+        # The durable run row now exists and owns its admission; a dispatch failure
+        # below leaves the run durable (released on its terminal outcome), so the
+        # admission is kept.
+        persisted = True
+        if result.dispatched:
+            mark_worker_connected(request)
 
-    _raise_for_dispatch_failure(result.failure_type, result.error_detail)
+        _raise_for_dispatch_failure(result.failure_type, result.error_detail)
 
-    return _RunDispatchResult(
-        thread_id=result.thread_id,
-        status=result.status,
-        nickname=result.nickname,
-        profile_id=frozen.profile_id,
-        frozen=frozen,
-        replayed=False,
-    )
+        return _RunDispatchResult(
+            thread_id=result.thread_id,
+            status=result.status,
+            nickname=result.nickname,
+            profile_id=frozen.profile_id,
+            frozen=frozen,
+            replayed=False,
+        )
+    finally:
+        if not persisted:
+            await gate.release(run_id)
 
 
 async def _run_direct_start(

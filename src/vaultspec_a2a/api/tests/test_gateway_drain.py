@@ -12,6 +12,11 @@ from __future__ import annotations
 import httpx
 import pytest
 from httpx import ASGITransport
+from sqlalchemy.ext.asyncio import (
+    AsyncSession,
+    async_sessionmaker,
+    create_async_engine,
+)
 
 from ...control.drain import DrainGate
 from ..dependencies import LIFECYCLE_CAPABILITY_HEADER
@@ -102,6 +107,46 @@ async def test_admin_stop_closes_admission_and_refuses_new_runs(
         assert len(worker.dispatches) == dispatched, (
             "a run refused after admin stop must not reach the worker"
         )
+
+
+@pytest.mark.asyncio(loop_scope="function")
+async def test_unexpected_run_start_failure_releases_admission_and_drain_quiesces(
+    tmp_path, checkpointer
+) -> None:
+    """An unexpected run-start failure releases the admission so drain can quiesce.
+
+    A real, schemaless database - the ``threads`` table is never created - makes
+    the run-start INSERT raise a genuine ``OperationalError`` inside
+    ``create_and_dispatch_thread``: an unexpected failure that is neither a nickname
+    conflict nor an integrity race, occurring after the run was admitted to the
+    drain gate but before any durable run exists. No mock, monkeypatch, or fake is
+    used. Without the release-on-every-failure guard this would leave a phantom
+    active run that makes ``drain()`` hang forever.
+    """
+    db_file = tmp_path / "schemaless.db"
+    engine = create_async_engine(f"sqlite+aiosqlite:///{db_file}")
+    factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+    try:
+        app, _agg, worker, _cp = make_app(factory, checkpointer)
+        async with (
+            _live_server(app) as base,
+            httpx.AsyncClient(base_url=base, timeout=10.0) as client,
+        ):
+            resp = await client.post("/v1/runs", json=_run_body())
+            # The unexpected DB failure surfaces as a 500 and never dispatched.
+            assert resp.status_code == 500, resp.text
+            assert not worker.dispatches, "a failed create must not dispatch"
+
+            # The admission was released on the failure path: no phantom active run.
+            gate = app.state.drain_gate
+            assert isinstance(gate, DrainGate)
+            assert gate.active_run_count == 0
+
+            # A drain now quiesces at once instead of hanging on a phantom run.
+            result = await gate.drain(timeout=1.0)
+            assert result.quiescent and result.active_runs == 0, result
+    finally:
+        await engine.dispose()
 
 
 @pytest.mark.asyncio(loop_scope="function")

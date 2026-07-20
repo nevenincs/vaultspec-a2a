@@ -85,6 +85,18 @@ nor a run - are proven end to end.
 
 ## Notes
 
+Follow-up remediation (P11 review MEDIUM-2): the shared run-creation core now
+releases the drain-gate admission on EVERY non-durable failure path through a
+try/finally release-if-not-persisted, not only on a nickname conflict, so an
+unexpected exception from run creation can never leave a phantom active run that
+blocks drain quiescence. The real regression proof lives in the api drain suite
+(`test_gateway_drain.py`) rather than this subprocess desktop test, because it
+needs in-process drain-gate observability and a mock-free forced failure - a
+genuinely schemaless database makes the run-start insert raise a real
+`OperationalError`, after which the admission count is asserted zero and a bounded
+drain is asserted quiescent. The subprocess armed-gateway harness here cannot force
+that pre-persist failure because the armed gateway validates its schema at boot.
+
 The proof required a configurable reservation time-to-live: the broker default is
 production-sized, so a wall-clock timeout proof needs a short one. The knob was
 added to domain configuration (its proper home, and a tunable production benefits

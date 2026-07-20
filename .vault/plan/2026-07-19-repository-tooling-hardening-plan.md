@@ -3,13 +3,23 @@ tags:
   - '#plan'
   - '#repository-tooling-hardening'
 date: '2026-07-19'
-modified: '2026-07-19'
+modified: '2026-07-20'
 tier: L3
 related:
   - '[[2026-07-19-repository-tooling-hardening-adr]]'
   - '[[2026-07-19-repository-tooling-hardening-research]]'
   - '[[2026-07-19-repository-tooling-hardening-reference]]'
 ---
+
+<!-- LINK RULES:
+     - [[wiki-links]] are ONLY for .vault/ documents in the
+       related: field above.
+     - The related: field carries the AUTHORISING documents
+       (ADR, research, reference, prior plan) for every Step in
+       this plan. Steps inherit this chain; per-row reference
+       footers do not exist.
+     - NEVER use [[wiki-links]] or markdown links in the
+       document body. -->
 
 # `repository-tooling-hardening` plan
 
@@ -93,7 +103,7 @@ Ship separated onboarding, how-to, reference, and explanation surfaces that matc
 
 Run real-behavior acceptance, review the implementation, and queue every finding.
 
-- [x] `W04.P08.S12` - Run clone-to-CI acceptance, formal review, finding classification, audit queue updates, and execution summaries; `.vault/audit, .vault/exec`.
+- [ ] `W04.P08.S12` - Run clone-to-CI acceptance, formal review, finding classification, audit queue updates, and execution summaries; `.vault/audit, .vault/exec`.
 
 ## Parallelization
 

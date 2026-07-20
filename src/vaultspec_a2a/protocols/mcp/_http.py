@@ -19,6 +19,7 @@ from httpx import HTTPStatusError as HTTPStatusError
 from mcp.server.fastmcp.exceptions import ToolError
 
 from ...control.config import settings
+from ...gateway_auth import gateway_auth_headers
 
 __all__: list[str] = []
 
@@ -121,6 +122,7 @@ async def _get_known_presets() -> frozenset[str]:
         client = _get_client()
         resp = await client.get(
             f"{api_base}/api/teams",
+            headers=gateway_auth_headers(api_base),
             timeout=settings.mcp_query_timeout_seconds,
         )
         resp.raise_for_status()
@@ -172,7 +174,12 @@ async def _mcp_request(
     try:
         client = _get_client()
         resp = await client.request(
-            method, url, json=json, params=params, timeout=timeout
+            method,
+            url,
+            headers=gateway_auth_headers(url),
+            json=json,
+            params=params,
+            timeout=timeout,
         )
         resp.raise_for_status()
         return resp.json()

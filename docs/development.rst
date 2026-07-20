@@ -14,6 +14,7 @@ Install these prerequisites:
 * `Just 1.31 or later <https://just.systems/man/en/packages.html>`_
 * `uv <https://docs.astral.sh/uv/getting-started/installation/>`_
 * Python 3.13 or later; the project selects Python 3.13
+* `Node.js <https://nodejs.org/>`_ 24 with npm; ``.node-version`` selects the hosted version
 * Docker, only for container workflows
 
 Clone the repository and prepare its selected Python series:
@@ -30,21 +31,23 @@ Diagnose the host tools before synchronizing dependencies:
 
    just doctor
 
-``just doctor`` enforces Just 1.31 or later, requires ``uv``, and reports
-Docker as optional. It doesn't validate Git, Python, dependencies, framework
-enrollment, or application health.
+``just doctor`` enforces Just 1.31 or later and Node.js 24, requires ``uv`` and
+``npm``, and reports Docker as optional. It doesn't validate Git, Python,
+dependencies, framework enrollment, or application health.
 
 Install the continuous integration (CI) contributor environment:
 
 .. code-block:: console
 
    uv sync --locked --no-default-groups --extra server --group all
+   just dev deps node
 
 The ``base`` profile contains runtime dependencies. The ``tooling`` profile
 supports hooks and narrower repository checks. The composed ``all`` group adds
 documentation to tooling, while CI also selects the ``server`` extra. RAG and
 Torch remain isolated in the optional ``rag`` extra. ``just dev deps all`` is
-the explicit profile that selects every runtime extra.
+the explicit profile that selects every runtime extra. The separate Node recipe
+restores the exact Claude ACP dependency graph from ``package-lock.json``.
 
 Enroll Vaultspec Core and optional RAG
 --------------------------------------
@@ -122,7 +125,9 @@ The command is fail-fast and runs these stages in order:
 
 #. ``uv sync --locked --no-default-groups --extra server --group all`` prepares
    the exact locked environment.
-#. ``just dev code check`` runs Ruff lint, Ruff format checking, Ty, and Deptry.
+#. ``just dev deps node`` restores the pinned Claude ACP runtime.
+#. ``just dev code check`` runs Ruff lint, Ruff format checking, Ty, Deptry,
+   and Actionlint workflow validation.
 #. ``just dev test unit`` runs every test not marked ``service``.
 
 A failed stage reports a validation failure. Later stages are *not run*.

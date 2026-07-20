@@ -74,6 +74,8 @@ from ..tools.thread_query import (
     list_threads,
 )
 
+_GATEWAY_TOKEN = "mcp-gateway-attach-token-0123456789abcdef"
+
 # ---------------------------------------------------------------------------
 # Shared client reset — the module-level httpx.AsyncClient is bound to a
 # single event loop.  Between test functions the loop is recycled, so the
@@ -82,10 +84,18 @@ from ..tools.thread_query import (
 
 
 @pytest.fixture(autouse=True)
-def _reset_shared_state() -> None:
-    """Discard the shared httpx client and preset cache before each test."""
+def _reset_shared_state():
+    """Seat real gateway auth and discard shared MCP state around each test."""
+    original_gateway_token = settings.gateway_service_token
+    settings.gateway_service_token = _GATEWAY_TOKEN
     _reset_client()
     _reset_known_presets()
+    try:
+        yield
+    finally:
+        _reset_client()
+        _reset_known_presets()
+        settings.gateway_service_token = original_gateway_token
 
 
 # ---------------------------------------------------------------------------
@@ -185,6 +195,7 @@ def _make_test_client(
         yield
 
     app = create_app(lifespan=_test_lifespan)
+    app.state.v1_service_token = _GATEWAY_TOKEN
 
     if aggregator is None:
         aggregator = EventAggregator()
@@ -209,7 +220,11 @@ def _make_test_client(
     app.state.worker_spawner = spawner
 
     app.state.db_session_factory = session_factory
-    return TestClient(app, raise_server_exceptions=True)
+    return TestClient(
+        app,
+        headers={"Authorization": f"Bearer {_GATEWAY_TOKEN}"},
+        raise_server_exceptions=True,
+    )
 
 
 # ---------------------------------------------------------------------------

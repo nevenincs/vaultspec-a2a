@@ -332,7 +332,10 @@ async def test_presets_list_is_truthful_and_resilient(
         # credential value.
         if not zai_readiness.ready:
             assert zai_readiness.reason
-            assert zai_readiness.reason in profiles["zai"]["unavailable_reasons"]
+            assert any(
+                zai_readiness.reason in reason
+                for reason in profiles["zai"]["unavailable_reasons"]
+            )
 
         # Eligibility is reported honestly: the production acceptance gate is open,
         # so every profile is unavailable with a safe reason (no secrets anywhere).

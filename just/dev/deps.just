@@ -17,6 +17,10 @@ rag:
 tooling:
     uv sync --locked --no-default-groups --group tooling
 
+# Restore the project-pinned ACP runtime from the npm lock.
+node:
+    npm ci
+
 # Resolve every runtime extra plus the composed all dependency group.
 all:
     uv sync --locked --no-default-groups --all-extras --group all

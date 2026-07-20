@@ -33,6 +33,7 @@ Install these host prerequisites:
 - [Git](https://git-scm.com/)
 - [Just](https://just.systems/man/en/packages.html) 1.31 or later
 - [uv](https://docs.astral.sh/uv/getting-started/installation/)
+- [Node.js](https://nodejs.org/) 24 with npm, for the pinned Claude ACP runtime
 - Docker, only for container workflows
 
 The project requires Python 3.13 or later and currently selects the Python 3.13
@@ -44,6 +45,7 @@ cd vaultspec-a2a
 uv python install 3.13
 just doctor
 just dev deps tooling
+just dev deps node
 ```
 
 `just doctor` verifies the required command-line tools and reports Docker as
@@ -85,9 +87,10 @@ Run the canonical tracked-source-safe CI gate:
 just ci
 ```
 
-The gate first synchronizes its locked dependency selection. It then runs Ruff
-lint, Ruff format checking, Ty, Deptry, and every test not marked `service`.
-It stops at the first failure.
+The gate first synchronizes its locked Python dependency selection and restores
+the Claude ACP runtime from `package-lock.json`. It then runs Ruff lint, Ruff
+format checking, Ty, Deptry, Actionlint workflow validation, and every test not
+marked `service`. It stops at the first failure.
 
 Validate documentation separately:
 

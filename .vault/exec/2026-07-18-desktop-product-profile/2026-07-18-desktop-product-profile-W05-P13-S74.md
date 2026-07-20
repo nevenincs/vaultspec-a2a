@@ -59,12 +59,12 @@ related:
 
 ## Outcome
 
-REVISION REQUIRED. Code reviewer ran the service suite; tests failed as part of the 4-failed run. `ruff check` and `ty check` are clean; baseline passes.
+Service gate: **14 passed, 0 failed** (full trio run, 2026-07-20). `ruff check` clean, `ty check` clean, baseline (32 non-service) passes.
 
-Failures diagnosed:
-1. `test_snapshot_inspect_verifies_integrity`: snapshot captured-copy files are named `{store}.db` (not `*.snap`); the tamper glob produced an empty list so the fail-closed half never executed.
-2. `gateway_env()` used `dict(os.environ)` instead of `clean_env()`.
+Revision fixed two issues from initial FAIL verdict:
+1. `test_snapshot_inspect_verifies_integrity` tamper glob changed from `*.snap` to `*.db` matching the `SnapshotGroupSpecification.snapshot_filename` convention (`f"{store.value}.db"`).
+2. `gateway_env()` now derives from `clean_env()` rather than `dict(os.environ)`.
 
 ## Notes
 
-Step unchecked and revision in progress. The snapshot filename convention is `{store.value}.db` per `SnapshotGroupSpecification.snapshot_filename`.
+Tamper detection uses the Python wheel RECORD file (sha256 digests for all installed files) as the integrity authority for the installed-wheel form; the transport capsule format's `verify_desktop_capsule.py` asset-digest check is proved separately in `test_capsule_verify.py`.  Snapshot captured-copy files follow the `{store.value}.db` naming convention from `snapshot.py`.

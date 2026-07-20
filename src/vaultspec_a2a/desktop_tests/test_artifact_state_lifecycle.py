@@ -393,10 +393,13 @@ def test_snapshot_inspect_verifies_integrity(
     assert len(inspected["stores"]) > 0
 
     # Tamper one captured copy with a real byte flip.
+    # Snapshot filenames follow the convention established in snapshot.py:
+    # SnapshotGroupSpecification.snapshot_filename returns f"{store.value}.db",
+    # so captured copies are named like "primary.db", "checkpoint.db", etc.
     state = derive_state_paths(app_home)
     snapshots_dir = state.snapshots_dir / "inspect-group"
-    captured_files = list(snapshots_dir.glob("*.snap"))
-    assert captured_files, f"no .snap files found under {snapshots_dir}"
+    captured_files = list(snapshots_dir.glob("*.db"))
+    assert captured_files, f"no .db snapshot files found under {snapshots_dir}"
     target = captured_files[0]
     raw = target.read_bytes()
     flipped = bytearray(raw)

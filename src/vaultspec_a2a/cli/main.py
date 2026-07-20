@@ -24,9 +24,6 @@ import click
 import httpx
 
 from ..control.config import settings
-from ..gateway_auth import (
-    _read_desktop_attach_credential as _read_desktop_attach_credential,
-)
 from ..gateway_auth import gateway_auth_headers
 from ..utils import configure_logging, package_version, reconfigure_console_utf8
 

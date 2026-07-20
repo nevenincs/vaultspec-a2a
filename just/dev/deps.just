@@ -19,6 +19,7 @@ tooling:
 
 # Restore the project-pinned ACP runtime from the npm lock.
 node:
+    node scripts/check_node_version.mjs
     npm ci
 
 # Resolve every runtime extra plus the composed all dependency group.

@@ -3,8 +3,9 @@
   "name": "vaultspec-a2a",
   "description": "Node dependency host for the Claude Code ACP CLI used by the A2A worker",
   "type": "module",
+  "packageManager": "npm@11.16.0",
   "engines": {
-    "node": ">=24 <25"
+    "node": "24.18.0"
   },
   "dependencies": {
     "@agentclientprotocol/claude-agent-acp": "0.59.0"

@@ -61,13 +61,14 @@ related:
 - License placement receives no special-case code: license files are ordinary `InstalledFileRecord` entries (already grammar-validated by the model and by the plan's `ReservedTreeFile`), so they flow through the identical closure-file materialization path as any other member.
 - Add `tests/_materializer_inputs.py`: builds a real verified capsule session whose Python and ACP installed inventories are produced by the actual S107 production builders (`build_python_closure_installed_inventory` / `build_acp_closure_installed_inventory`) against real, RECORD-verified wheel and npm archives (including the real `uv build`-produced root A2A wheel), so every `source_sha256`/`source_member` pair is a real, resolvable archive member rather than fixture-fabricated provenance.
 - Add `tests/test_capsule_materializer.py`: byte/sha256/mode-exact placement of every reserved closure and launcher file against a real session; determinism across two independent generations; the Windows launcher fail-closed raise; a tampered-digest reconciliation failure; a missing-source-archive failure; a real subprocess import of a materialized module proving the `runtime/python` layout is import-correct.
+- Review follow-up (reviewer-s103, PASS-with-findings): fix `_extracted_member`'s zip branch so only the `archive.open(...)` call is exception-translated and the yielded stream is consumed outside that guard — mirrors the earlier `_opened_archive` fix, closing the same hazard class on the write-time path. Add a real fixture package declaring an `ExternalLicenseArtifact` (root ACP package) plus a positive test proving the external-license byte lands exact at its reserved path. Add a real write-time collision test (materialize the same closure twice into the same claimed capsule root) proving a genuine `_write_member` failure keeps its own message ("cannot materialize archive member") instead of being relabeled to a generic "cannot read member" string.
 
 ## Outcome
 
-- All new tests pass (6/6); the full `src/vaultspec_a2a/desktop` regression suite passes (426/426, 153.80s).
+- All tests pass (8/8 in the materializer module); the full `src/vaultspec_a2a/desktop` regression suite passes (428/428).
 - `ruff format --check`, `ruff check`, and `ty check` (default and `--python-platform linux`) are clean on every touched file.
 - `capsule.py` grows from 1079 to 1120 lines (the one additive wrapper); it was already over the project's 1000-line module guidance before this Step and remains tracked debt for a later split, not addressed here.
-- `capsule_materializer.py` is 574 lines, `tests/_materializer_inputs.py` is 492 lines, `tests/test_capsule_materializer.py` is 346 lines — all within bound.
+- `capsule_materializer.py` is 583 lines, `tests/_materializer_inputs.py` is 612 lines, `tests/test_capsule_materializer.py` is 439 lines — all within bound.
 
 ## Notes
 

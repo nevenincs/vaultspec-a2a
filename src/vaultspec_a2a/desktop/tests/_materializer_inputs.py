@@ -40,10 +40,14 @@ from vaultspec_a2a.desktop.artifacts import (
     open_verified_capsule_inputs,
     open_verified_python_wheel_archive,
 )
+from vaultspec_a2a.desktop.closure_inventory import ExternalLicenseArtifact
 from vaultspec_a2a.desktop.contract import ComponentAssetKind, TargetTriple
 from vaultspec_a2a.desktop.installed_inventory import (
+    InstalledClosureDescriptor,
     InstalledFileRecord,
     InstalledLicenseRecord,
+    build_verified_installed_closure_inventory,
+    canonical_installed_inventory_bytes,
     license_component_token,
 )
 from vaultspec_a2a.desktop.package_archives import verified_archive_member_evidence
@@ -64,6 +68,7 @@ if TYPE_CHECKING:
         VerifiedCapsuleInputSession,
         VerifiedPackageArchiveSession,
     )
+    from vaultspec_a2a.desktop.installed_inventory import InstalledClosureInventory
 
 __all__ = ["open_real_materializer_session"]
 
@@ -272,9 +277,88 @@ def _license_records(
     return tuple(licenses), tuple(files)
 
 
+def _augment_acp_installed_with_external_license(
+    acp_installed: InstalledClosureInventory,
+    external_artifact: ExternalLicenseArtifact,
+    *,
+    package_identity: str,
+    cache: Path,
+) -> InstalledClosureDescriptor:
+    """Add one real external-license file record beside a built ACP inventory.
+
+    ``build_acp_closure_installed_inventory`` derives its membership evidence
+    only from the tarball sessions' own archive members, so it cannot itself
+    bind an external license's separately cached bytes (a real, currently
+    open S107 gap this test works around rather than fixes). This augments an
+    already-built inventory directly through ``build_verified_installed_
+    closure_inventory``, with a hand-extended evidence mapping that legitimately
+    proves the external license's ``source_sha256``/``source_member`` pair,
+    then caches the result exactly as the production builder would.
+    """
+    evidence: dict[str, set[str]] = {}
+    for record in acp_installed.files:
+        evidence.setdefault(record.source_sha256, set()).add(record.source_member)
+    evidence[external_artifact.sha256] = {external_artifact.source_id}
+
+    relative_path = "licenses/9999/0000/LICENSE"
+    external_file = InstalledFileRecord(
+        relative_path=relative_path,
+        mode="0644",
+        size=external_artifact.size,
+        sha256=external_artifact.sha256,
+        source_sha256=external_artifact.sha256,
+        source_member=external_artifact.source_id,
+    )
+    external_license = InstalledLicenseRecord(
+        package=package_identity,
+        component=license_component_token("acp", package_identity),
+        license_expression="Apache-2.0",
+        source_member=external_artifact.source_id,
+        relative_path=relative_path,
+        sha256=external_artifact.sha256,
+    )
+    augmented = build_verified_installed_closure_inventory(
+        closure_kind=acp_installed.closure_kind,
+        target=acp_installed.target,
+        install_root=acp_installed.install_root,
+        source_inventory_sha256=acp_installed.source_inventory_sha256,
+        lock_sha256=acp_installed.lock_sha256,
+        entrypoints=acp_installed.entrypoints,
+        licenses=tuple(
+            sorted(
+                (*acp_installed.licenses, external_license),
+                key=lambda license: license.relative_path,
+            )
+        ),
+        files=tuple(
+            sorted((*acp_installed.files, external_file), key=lambda f: f.relative_path)
+        ),
+        verified_closure_members={
+            key: frozenset(value) for key, value in evidence.items()
+        },
+    )
+    payload = canonical_installed_inventory_bytes(augmented)
+    digest = _sha256(payload)
+    (cache / digest).write_bytes(payload)
+    return InstalledClosureDescriptor(
+        descriptor_version="vaultspec-installed-closure-descriptor-v1",
+        closure_kind=augmented.closure_kind,
+        target=augmented.target,
+        install_root=augmented.install_root,
+        source_inventory_sha256=augmented.source_inventory_sha256,
+        lock_sha256=augmented.lock_sha256,
+        inventory_sha256=digest,
+        inventory_size=len(payload),
+        file_count=augmented.file_count,
+        license_count=len(augmented.licenses),
+        expanded_size=augmented.expanded_size,
+        tree_digest=augmented.tree_digest,
+    )
+
+
 @contextmanager
 def open_real_materializer_session(
-    tmp_path: Path, *, target: TargetTriple
+    tmp_path: Path, *, target: TargetTriple, with_external_license: bool = False
 ) -> Iterator[VerifiedCapsuleInputSession]:
     """Open a real verified capsule session with production-provenance closures.
 
@@ -283,9 +367,36 @@ def open_real_materializer_session(
     root and target-native SDK npm packages. Every ``InstalledFileRecord`` in
     the resulting ``python_installed``/``acp_installed`` inventories names a
     real ``source_sha256``/``source_member`` pair a materializer can stream.
+    When ``with_external_license`` is set, the root ACP package additionally
+    declares one real external license, verified through
+    :func:`~vaultspec_a2a.desktop.package_archives.verified_archive_member_evidence`'s
+    sibling authority for standalone bytes rather than an archive member.
     """
     wheel, wheel_bytes = _python_wheel()
     packages, package_bytes = _acp_packages(target)
+    external_artifact: ExternalLicenseArtifact | None = None
+    external_bytes: bytes | None = None
+    if with_external_license:
+        external_bytes = b"Additional NOTICE terms for the root ACP package.\n"
+        external_artifact = ExternalLicenseArtifact(
+            source_id="external/claude-agent-acp-NOTICE",
+            declared_member="NOTICE",
+            url="https://example.invalid/claude-agent-acp/NOTICE",
+            sha256=_sha256(external_bytes),
+            size=len(external_bytes),
+        )
+        packages = (
+            packages[0].model_copy(
+                update={
+                    "external_licenses": (external_artifact,),
+                    "redistribution_evidence": (
+                        *packages[0].redistribution_evidence,
+                        f"external-license:{external_artifact.source_id}",
+                    ),
+                }
+            ),
+            packages[1],
+        )
     uv_bytes = f"""version = 1
 revision = 3
 requires-python = ">=3.13"
@@ -359,6 +470,8 @@ wheels = [
     (cache / wheel.sha256).write_bytes(wheel_bytes)
     for digest, payload in package_bytes.items():
         (cache / digest).write_bytes(payload)
+    if external_artifact is not None and external_bytes is not None:
+        (cache / external_artifact.sha256).write_bytes(external_bytes)
 
     a2a_wheel_bytes = _build_real_a2a_wheel(tmp_path / "distribution")
     a2a_descriptor = _real_a2a_wheel_descriptor(a2a_wheel_bytes)
@@ -415,6 +528,13 @@ wheels = [
             license_files=acp_license_files,
             input_dir=cache,
         )
+        if external_artifact is not None:
+            acp_descriptor = _augment_acp_installed_with_external_license(
+                _acp_installed,
+                external_artifact,
+                package_identity=packages[0].install_path,
+                cache=cache,
+            )
 
         python_closure = PythonClosureDescriptor(
             target=target,

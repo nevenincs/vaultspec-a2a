@@ -14,6 +14,7 @@ from vaultspec_a2a.desktop._filesystem_authority import (
     directory_lease,
     resolve_directory_authority,
 )
+from vaultspec_a2a.desktop.capsule import CapsuleAssemblyError
 from vaultspec_a2a.desktop.capsule_assembly import (
     PlanReservationRole,
     derive_capsule_assembly_plan,
@@ -303,6 +304,98 @@ def test_materialize_closure_fails_closed_on_an_unavailable_source(
                 parent_identities={},
                 source_date_epoch=_SOURCE_DATE_EPOCH,
             )
+
+
+def test_materialize_places_the_external_license_byte_exact(tmp_path: Path) -> None:
+    with open_real_materializer_session(
+        tmp_path, target=_POSIX_TARGET, with_external_license=True
+    ) as session:
+        plan = derive_capsule_assembly_plan(session, api_versions=_API_VERSIONS)
+        acp_installed = session.acp_installed
+        capsule_root, projected = _materialize(
+            tmp_path, session, plan, name="gen-extlic"
+        )
+
+    external_record = next(
+        record
+        for record in acp_installed.files
+        if record.relative_path == "licenses/9999/0000/LICENSE"
+    )
+    path = f"{acp_installed.install_root}/{external_record.relative_path}"
+    projected_by_path = {file.relative_path: file for file in projected}
+    emitted = projected_by_path[path]
+    assert emitted.sha256 == external_record.sha256
+    assert emitted.size == external_record.size
+
+    on_disk = capsule_root / path
+    payload = on_disk.read_bytes()
+    assert len(payload) == external_record.size
+    assert hashlib.sha256(payload).hexdigest() == external_record.sha256
+    assert payload == b"Additional NOTICE terms for the root ACP package.\n"
+
+
+def test_materialize_closure_surfaces_the_specific_write_time_failure(
+    tmp_path: Path,
+) -> None:
+    """A write-time ``CapsuleAssemblyError`` must keep its own message.
+
+    Materializing the same real closure twice into the same claimed capsule
+    root forces the second pass's file creation to collide (``O_EXCL``)
+    while the caller is still consuming the yielded zip member stream inside
+    ``_extracted_member`` — exactly the point at which a prior draft
+    re-caught and relabeled such an error to a generic "cannot read member"
+    message. It must surface unrelabeled here.
+    """
+    with open_real_materializer_session(tmp_path, target=_POSIX_TARGET) as session:
+        inventory = session.python_installed
+        plan_files = {
+            file.path: file
+            for file in capsule_assembly._closure_files(
+                inventory,
+                file_role=PlanReservationRole.PYTHON_CLOSURE_FILE,
+                license_role=PlanReservationRole.PYTHON_LICENSE,
+            )
+        }
+        allowed_roles = frozenset(
+            {
+                PlanReservationRole.PYTHON_CLOSURE_FILE,
+                PlanReservationRole.PYTHON_LICENSE,
+            }
+        )
+        closure_sources = capsule_materializer._indexed_closure_sources(session)
+        root = tmp_path / "gen-collide"
+        root.mkdir()
+        root_lease = resolve_directory_authority(root)
+        with (
+            directory_lease(root_lease) as generation,
+            claim_new_directory(generation, "capsule") as capsule,
+        ):
+            parent_identities: dict[tuple[str, ...], tuple[int, int]] = {}
+            capsule_materializer._materialize_closure(
+                inventory,
+                plan_files=plan_files,
+                allowed_roles=allowed_roles,
+                closure_sources=closure_sources,
+                destination_root=capsule.path,
+                generation_authority=generation,
+                destination_authority=capsule,
+                parent_identities=parent_identities,
+                source_date_epoch=_SOURCE_DATE_EPOCH,
+            )
+            with pytest.raises(
+                CapsuleAssemblyError, match="cannot materialize archive member"
+            ):
+                capsule_materializer._materialize_closure(
+                    inventory,
+                    plan_files=plan_files,
+                    allowed_roles=allowed_roles,
+                    closure_sources=closure_sources,
+                    destination_root=capsule.path,
+                    generation_authority=generation,
+                    destination_authority=capsule,
+                    parent_identities=parent_identities,
+                    source_date_epoch=_SOURCE_DATE_EPOCH,
+                )
 
 
 def test_materialized_runtime_python_root_is_really_importable(

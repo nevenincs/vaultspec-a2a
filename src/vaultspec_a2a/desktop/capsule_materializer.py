@@ -279,6 +279,14 @@ def _extracted_member(
     *,
     expected_size: int,
 ) -> Iterator[BinaryIO]:
+    """Locate and open one member stream, yielded outside any exception guard.
+
+    Only the lookup and ``open`` calls are exception-translated (mirrors
+    :func:`_opened_archive`): the caller consumes the yielded stream through
+    :func:`~vaultspec_a2a.desktop.capsule.materialize_verified_member`, whose
+    own ``CapsuleAssemblyError`` (a ``RuntimeError``) must propagate with its
+    specific message rather than being re-caught here and relabeled.
+    """
     if closure_source.archive_format == "zip":
         archive = cast("zipfile.ZipFile", opened)
         try:
@@ -292,12 +300,13 @@ def _extracted_member(
                 f"materializer source member {member!r} size does not match"
             )
         try:
-            with archive.open(info, "r") as source:
-                yield cast("BinaryIO", source)
+            source = archive.open(info, "r")
         except (OSError, RuntimeError, zipfile.BadZipFile, zlib.error):
             raise CapsuleMaterializationError(
                 f"cannot read materializer source member {member!r}"
             ) from None
+        with source:
+            yield cast("BinaryIO", source)
     elif closure_source.archive_format == "tar":
         archive = cast("tarfile.TarFile", opened)
         try:

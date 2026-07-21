@@ -356,12 +356,31 @@ def write_service_json(
     pid: int,
     service_token: str | None = None,
     now_ms: int | None = None,
+    allow_tokenless: bool = False,
 ) -> None:
     """Atomically publish the discovery record with a fresh heartbeat.
 
     Writes to a sibling temp file then ``os.replace`` so a concurrent reader
     never observes a partially written record.
+
+    A publication without *service_token* is destructive rather than inert: it
+    strips the handoff reference from the record and unlinks the credential
+    beside it, downgrading a healthy authenticated record to one a reader
+    resolves with no bearer.  Because the gateway always mints a credential, a
+    tokenless call is a defect at every production call site, so it must be
+    opted into explicitly via *allow_tokenless* - the un-publish case is real
+    but rare, and silence is what let an unauthenticated record persist
+    unnoticed.
+
+    Raises:
+        ValueError: If *service_token* is absent and *allow_tokenless* is not set.
     """
+    if not service_token and not allow_tokenless:
+        raise ValueError(
+            "refusing to publish a discovery record without a service token: "
+            "this would unlink the credential and downgrade the record to "
+            "unauthenticated; pass allow_tokenless=True to un-publish on purpose"
+        )
     path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
     if os.name == "posix":
         path.parent.chmod(0o700)

@@ -69,7 +69,8 @@ Make the hard-thread-delete file removal refuse to act outside a managed root.
 Determine by an armed run whether the gateway publishes a service token.
 
 - [x] `W01.P02.S03` - Run an armed gateway and record whether the published discovery record carries a handoff reference; `src/vaultspec_a2a/lifecycle/discovery.py`.
-- [ ] `W01.P02.S04` - Make a tokenless discovery publication fail loudly instead of silently unlinking the credential; `src/vaultspec_a2a/lifecycle/discovery.py`.
+- [x] `W01.P02.S04` - Make a tokenless discovery publication fail loudly instead of silently unlinking the credential; `src/vaultspec_a2a/lifecycle/discovery.py`.
+- [ ] `W01.P02.S23` - Remove the discovery record when the gateway that published it exits; `src/vaultspec_a2a/lifecycle/discovery.py`.
 
 ## Wave `W02` - declaration and shared seams
 

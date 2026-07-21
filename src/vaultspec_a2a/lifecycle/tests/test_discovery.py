@@ -121,7 +121,9 @@ def test_classifier_covers_absent_fresh_stale_malformed(tmp_path) -> None:
         assert "(I)" not in acl
 
     old = int(time.time() * 1000) - 10_000_000
-    write_service_json(path, port=8000, pid=os.getpid(), now_ms=old)
+    write_service_json(
+        path, port=8000, pid=os.getpid(), now_ms=old, allow_tokenless=True
+    )
     assert classify_discovery(path)[0] is DiscoveryState.STALE
 
     path.write_text("{ not json", encoding="utf-8")
@@ -240,13 +242,13 @@ def test_pid_liveness_and_ownership(tmp_path) -> None:
     assert is_pid_alive(None) is False
 
     path = service_json_path(tmp_path)
-    write_service_json(path, port=8000, pid=os.getpid())
+    write_service_json(path, port=8000, pid=os.getpid(), allow_tokenless=True)
     # A file owned by another pid is never reclaimed by us.
-    write_service_json(path, port=8000, pid=424242)
+    write_service_json(path, port=8000, pid=424242, allow_tokenless=True)
     assert remove_service_json_if_owned(path, os.getpid()) is False
     assert path.exists()
     # Our own record is dropped on exit.
-    write_service_json(path, port=8000, pid=os.getpid())
+    write_service_json(path, port=8000, pid=os.getpid(), allow_tokenless=True)
     assert remove_service_json_if_owned(path, os.getpid()) is True
     assert not path.exists()
 
@@ -255,7 +257,7 @@ def test_stale_pid_is_not_a_live_resident(tmp_path) -> None:
     """A fresh heartbeat with a dead pid reads as Crashed, not a live resident."""
     path = service_json_path(tmp_path)
     # Fresh heartbeat (now) but a pid that does not exist -> attach-never-own.
-    write_service_json(path, port=8000, pid=2**31 - 1)
+    write_service_json(path, port=8000, pid=2**31 - 1, allow_tokenless=True)
     state, _info = classify_discovery(path)
     assert state is DiscoveryState.FRESH  # heartbeat is fresh...
     assert another_resident_is_live(tmp_path) is False  # ...but the pid is dead.
@@ -264,7 +266,9 @@ def test_stale_pid_is_not_a_live_resident(tmp_path) -> None:
 def test_single_resident_true_only_when_fresh_live_and_healthy(tmp_path) -> None:
     with _HealthServer() as server:
         path = service_json_path(tmp_path)
-        write_service_json(path, port=server.port, pid=os.getpid())
+        write_service_json(
+            path, port=server.port, pid=os.getpid(), allow_tokenless=True
+        )
         # Fresh record + our (live) pid + a real answering /health = live resident.
         assert another_resident_is_live(tmp_path) is True
 
@@ -280,7 +284,9 @@ def test_health_while_degraded_still_counts_as_resident(tmp_path) -> None:
     """A degraded gateway (ready=false) is still a live resident: /health answers."""
     with _HealthServer(ready=False) as server:
         path = service_json_path(tmp_path)
-        write_service_json(path, port=server.port, pid=os.getpid())
+        write_service_json(
+            path, port=server.port, pid=os.getpid(), allow_tokenless=True
+        )
         body = httpx.get(f"http://127.0.0.1:{server.port}/health", timeout=2.0).json()
         assert body["ready"] is False
         assert another_resident_is_live(tmp_path) is True
@@ -290,3 +296,36 @@ def test_absent_file_licenses_a_start(tmp_path) -> None:
     """Only Absent means no resident — the caller may start and publish."""
     assert another_resident_is_live(tmp_path) is False
     assert read_resident_service(tmp_path)[0] is DiscoveryState.ABSENT
+
+
+def test_tokenless_publication_is_refused_by_default(tmp_path) -> None:
+    """A tokenless publish must raise rather than silently downgrade the record.
+
+    The destructive shape is what matters: without the refusal, this call would
+    strip the handoff reference and unlink the credential beside it, leaving a
+    record any reader resolves with no bearer.
+    """
+    path = service_json_path(tmp_path)
+    write_service_json(path, port=8000, pid=os.getpid(), service_token="live-secret")
+    credential = path.parent / "service.token"
+    assert credential.exists()
+
+    with pytest.raises(ValueError, match="without a service token"):
+        write_service_json(path, port=8000, pid=os.getpid())
+
+    # The healthy record and its credential survive the refused call.
+    assert credential.read_text(encoding="utf-8") == "live-secret"
+    assert "handoff_reference" in json.loads(path.read_text(encoding="utf-8"))
+
+
+def test_deliberate_unpublish_still_clears_the_credential(tmp_path) -> None:
+    """The opt-in keeps the un-publish case available for callers that mean it."""
+    path = service_json_path(tmp_path)
+    write_service_json(path, port=8000, pid=os.getpid(), service_token="live-secret")
+    credential = path.parent / "service.token"
+    assert credential.exists()
+
+    write_service_json(path, port=8000, pid=os.getpid(), allow_tokenless=True)
+
+    assert not credential.exists()
+    assert "handoff_reference" not in json.loads(path.read_text(encoding="utf-8"))

@@ -158,7 +158,7 @@ def create_isolated_config_home(
     The caller sets ``CLAUDE_CONFIG_DIR`` to the returned path and MUST call
     :func:`cleanup_isolated_config_home` after the subprocess is reaped.
     """
-    home = Path(tempfile.mkdtemp(prefix="vaultspec-acp-home-"))
+    home = Path(tempfile.mkdtemp(prefix="vaultspec-acp-home-", dir=_temp_home_root()))
     _write_config(home, mcp_servers=mcp_servers)
     declared = sorted(mcp_servers or {})
     declared_set = set(declared)
@@ -219,6 +219,37 @@ def _write_settings(
     (home / "settings.json").write_text(
         json.dumps(settings, indent=2), encoding="utf-8"
     )
+
+
+def _temp_home_root() -> Path | None:
+    """Return the directory per-run config homes are created inside.
+
+    An armed desktop install keeps its ephemeral homes under its own application
+    home, so an uninstall can account for them and a system-wide temporary sweep
+    cannot remove a home out from under a live run.  Every other profile returns
+    ``None``, which leaves the operating system temporary directory in charge -
+    the right default for development, where a system sweep reclaiming an
+    abandoned home is a feature rather than a hazard.
+
+    Falls back to the operating system temporary directory if the declared root
+    cannot be created: an unwritable state directory must not stop a run.
+    """
+    from ..control.config import settings
+
+    declared = settings.desktop_temp_homes_dir
+    if declared is None:
+        return None
+    try:
+        declared.mkdir(parents=True, exist_ok=True)
+    except OSError:
+        logger.warning(
+            "Could not create the declared temporary-home root %s; "
+            "falling back to the system temporary directory",
+            declared,
+            exc_info=True,
+        )
+        return None
+    return declared
 
 
 def preserved_session_root() -> Path:

@@ -744,6 +744,25 @@ class Settings(DomainSettingsConfig, InfraConfig):
         return credential_paths(state.credentials_dir)
 
     @property
+    def desktop_temp_homes_dir(self) -> Path | None:
+        """Return the armed desktop profile's root for per-run temporary homes.
+
+        A packaged desktop install keeps its ephemeral working directories inside
+        its own application home rather than scattering them through the operating
+        system temporary directory, so an uninstall can account for them and a
+        system-wide temp sweep cannot delete a home out from under a live run.
+
+        Returns ``None`` while the profile is unarmed, leaving the development and
+        Compose profiles on the operating system temporary directory.
+        """
+        if self.desktop_app_home is None:
+            return None
+
+        from ..desktop.profile import derive_state_paths
+
+        return derive_state_paths(self.desktop_app_home).temp_homes_dir
+
+    @property
     def resolved_database_backend(self) -> Literal["sqlite", "postgres"]:
         """Validate the configured application database backend against the URL."""
         url = self.database_url

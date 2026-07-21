@@ -68,6 +68,13 @@ related:
   through `build_acp_closure_installed_inventory` with no hand-extended evidence, and a
   negative test proving a forged external-license provenance pair (naming an artifact
   never verified) still raises the membership error.
+- Review fix: change the evidence map from per-session assignment to a per-digest
+  accumulator (`dict[str, set[str]]` via `setdefault(...).update(...)`/`.add(...)`,
+  frozen at the end) across both the archive-member and external-license branches, so
+  two distinct external licenses sharing one content digest both remain admissible
+  instead of the second silently displacing the first. Add a real two-package test
+  proving two external licenses with byte-identical content but distinct `source_id`s
+  both reconcile.
 
 ## Outcome
 
@@ -95,6 +102,15 @@ empty-evidence fail-closed guard in `_validated_verified_closure_members` is
 unmodified. `_installed_tree_is_exact` itself was not touched - the widening lives
 entirely in the evidence the production builders supply to it, not in the proof.
 
+Review finding closed: the evidence map keyed by content digest previously assigned
+rather than accumulated, so two external licenses sharing one digest (byte-identical
+license text across unrelated packages is the expected case at capsule scale, not an
+edge case) collapsed to one `source_id` and silently dropped the other, turning a
+legitimate build into a spurious membership-proof failure. Both the archive-member and
+external-license branches of `_verified_closure_member_evidence` now build a mutable
+`dict[str, set[str]]` accumulator and union members per digest before freezing to
+`frozenset`, so every real `source_id`/member sharing a digest is admitted.
+
 `installed_inventory.py` needed no change: its evidence-channel contract
 (`INSTALLED_PROVENANCE_EVIDENCE_KEY`, the membership branch in
 `_installed_tree_is_exact`) is already generic over what a `source_sha256` names: an
@@ -110,17 +126,18 @@ Gates run from the worktree root (`.venv` active):
 - `uv run --no-sync ruff check src/vaultspec_a2a/desktop/artifacts.py src/vaultspec_a2a/desktop/tests/test_installed_inventory_builder.py` - all checks passed
 - `uv run --no-sync ty check src/vaultspec_a2a/desktop/artifacts.py src/vaultspec_a2a/desktop/installed_inventory.py` - all checks passed
 - `uv run --no-sync ty check src/vaultspec_a2a/desktop/artifacts.py src/vaultspec_a2a/desktop/installed_inventory.py --python-platform linux` - all checks passed
-- `uv run --no-sync pytest src/vaultspec_a2a/desktop/tests/test_installed_inventory_builder.py src/vaultspec_a2a/desktop/tests/test_installed_inventory.py -q` - 25 passed
-- `uv run --no-sync pytest src/vaultspec_a2a/desktop -q` - 409 passed, 21 errors
+- `uv run --no-sync pytest src/vaultspec_a2a/desktop/tests/test_installed_inventory_builder.py src/vaultspec_a2a/desktop/tests/test_installed_inventory.py -q` - 26 passed (re-run after the review fix)
+- `uv run --no-sync pytest src/vaultspec_a2a/desktop -q` - 442 passed, 3 deselected, 0 errors (re-run on the settled tree after the review fix)
 
 ## Notes
 
-The 21 errors in the whole-tree regression run are all in `test_manifest.py`, every one
-failing inside a shared `uv build --wheel` fixture with
-`FileNotFoundError: ... capsule_materializer.py.tmp.<pid>.<hash>` - a transient race
+First-pass whole-tree run reported 409 passed, 21 errors, all confined to
+`test_manifest.py` inside a shared `uv build --wheel` fixture
+(`FileNotFoundError: ... capsule_materializer.py.tmp.<pid>.<hash>`) - a transient race
 against a concurrently editing peer's in-flight writes to `capsule_materializer.py`
-during the wheel build's source scan, not attributable to this Step's change. No test
-touched by this Step appears in that failure list.
+during the wheel build's source scan, not attributable to this Step's change; no test
+touched by this Step appeared in that failure list. The re-run on the settled tree
+after the review fix is clean (442 passed, 0 errors).
 
 `installed_inventory.py` is listed in this Step's plan-row scope but required no edit;
 the fix lives entirely in the evidence supplied to its already-generic membership

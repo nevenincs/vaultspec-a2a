@@ -146,6 +146,44 @@ def _npm_descriptor(payload: bytes) -> AcpPackageArtifact:
     )
 
 
+def _write_other_npm_tarball(path: Path) -> bytes:
+    members = {
+        "package/package.json": json.dumps(
+            {"license": "MIT", "name": "@scope/other", "version": "1.0.0"}
+        ).encode("utf-8"),
+        "package/index.js": b"export const other = true;\n",
+        "package/LICENSE": b"other npm license\n",
+    }
+    buffer = io.BytesIO()
+    with tarfile.open(fileobj=buffer, mode="w:gz") as archive:
+        for name in sorted(members):
+            payload = members[name]
+            info = tarfile.TarInfo(name)
+            info.size = len(payload)
+            info.mode = 0o644
+            info.mtime = 0
+            archive.addfile(info, io.BytesIO(payload))
+    path.write_bytes(buffer.getvalue())
+    return path.read_bytes()
+
+
+def _other_npm_descriptor(payload: bytes) -> AcpPackageArtifact:
+    return AcpPackageArtifact(
+        name="@scope/other",
+        version="1.0.0",
+        install_path="node_modules/@scope/other",
+        url="https://registry.example.invalid/other-1.0.0.tgz",
+        integrity=(
+            f"sha512-{base64.b64encode(hashlib.sha512(payload).digest()).decode('ascii')}"
+        ),
+        sha256=hashlib.sha256(payload).hexdigest(),
+        size=len(payload),
+        license_expression="MIT",
+        license_members=("package/LICENSE",),
+        redistribution_evidence=("tarball-license",),
+    )
+
+
 def test_build_verified_installed_closure_inventory_carries_real_provenance(
     tmp_path: Path,
 ) -> None:
@@ -606,3 +644,173 @@ def test_build_acp_closure_installed_inventory_rejects_a_forged_external_license
             license_files=(license_file, forged_file),
             input_dir=cache,
         )
+
+
+def test_build_acp_closure_installed_inventory_admits_two_licenses_sharing_a_digest(
+    tmp_path: Path,
+) -> None:
+    """Two distinct external licenses with byte-identical content both reconcile.
+
+    Packages routinely ship the same MIT/Apache-2.0/BSD boilerplate text, so two
+    unrelated packages' external licenses legitimately collapse to one sha256
+    while naming distinct source_ids; the evidence accumulator must admit both
+    rather than letting the second overwrite the first.
+    """
+    example_tarball_path = tmp_path / "example.tgz"
+    example_payload = _write_npm_tarball(example_tarball_path)
+    other_tarball_path = tmp_path / "other.tgz"
+    other_payload = _write_other_npm_tarball(other_tarball_path)
+    cache = tmp_path / "cache"
+    cache.mkdir()
+
+    shared_bytes = b"Shared MIT boilerplate text.\n"
+    shared_sha256 = hashlib.sha256(shared_bytes).hexdigest()
+    (cache / shared_sha256).write_bytes(shared_bytes)
+
+    example_external = ExternalLicenseArtifact(
+        source_id="external/example-NOTICE",
+        declared_member="NOTICE",
+        url="https://example.invalid/example/NOTICE",
+        sha256=shared_sha256,
+        size=len(shared_bytes),
+    )
+    other_external = ExternalLicenseArtifact(
+        source_id="external/other-NOTICE",
+        declared_member="NOTICE",
+        url="https://example.invalid/other/NOTICE",
+        sha256=shared_sha256,
+        size=len(shared_bytes),
+    )
+    example_descriptor = _npm_descriptor(example_payload).model_copy(
+        update={
+            "external_licenses": (example_external,),
+            "redistribution_evidence": (
+                "tarball-license",
+                f"external-license:{example_external.source_id}",
+            ),
+        }
+    )
+    other_descriptor = _other_npm_descriptor(other_payload).model_copy(
+        update={
+            "external_licenses": (other_external,),
+            "redistribution_evidence": (
+                "tarball-license",
+                f"external-license:{other_external.source_id}",
+            ),
+        }
+    )
+
+    example_license_file = InstalledFileRecord(
+        relative_path="licenses/scope-example/LICENSE",
+        mode="0644",
+        size=len(b"npm license\n"),
+        sha256=hashlib.sha256(b"npm license\n").hexdigest(),
+        source_sha256=example_descriptor.sha256,
+        source_member="package/LICENSE",
+    )
+    example_license_record = InstalledLicenseRecord(
+        package="node_modules/@scope/example",
+        component=license_component_token("acp", "node_modules/@scope/example"),
+        license_expression="Apache-2.0",
+        source_member="package/LICENSE",
+        relative_path=example_license_file.relative_path,
+        sha256=example_license_file.sha256,
+    )
+    example_notice_file = InstalledFileRecord(
+        relative_path="licenses/scope-example/NOTICE",
+        mode="0644",
+        size=example_external.size,
+        sha256=example_external.sha256,
+        source_sha256=example_external.sha256,
+        source_member=example_external.source_id,
+    )
+    example_notice_record = InstalledLicenseRecord(
+        package="node_modules/@scope/example",
+        component=license_component_token("acp", "node_modules/@scope/example"),
+        license_expression="Apache-2.0",
+        source_member=example_external.source_id,
+        relative_path=example_notice_file.relative_path,
+        sha256=example_notice_file.sha256,
+    )
+
+    other_license_file = InstalledFileRecord(
+        relative_path="licenses/scope-other/LICENSE",
+        mode="0644",
+        size=len(b"other npm license\n"),
+        sha256=hashlib.sha256(b"other npm license\n").hexdigest(),
+        source_sha256=other_descriptor.sha256,
+        source_member="package/LICENSE",
+    )
+    other_license_record = InstalledLicenseRecord(
+        package="node_modules/@scope/other",
+        component=license_component_token("acp", "node_modules/@scope/other"),
+        license_expression="MIT",
+        source_member="package/LICENSE",
+        relative_path=other_license_file.relative_path,
+        sha256=other_license_file.sha256,
+    )
+    other_notice_file = InstalledFileRecord(
+        relative_path="licenses/scope-other/NOTICE",
+        mode="0644",
+        size=other_external.size,
+        sha256=other_external.sha256,
+        source_sha256=other_external.sha256,
+        source_member=other_external.source_id,
+    )
+    other_notice_record = InstalledLicenseRecord(
+        package="node_modules/@scope/other",
+        component=license_component_token("acp", "node_modules/@scope/other"),
+        license_expression="MIT",
+        source_member=other_external.source_id,
+        relative_path=other_notice_file.relative_path,
+        sha256=other_notice_file.sha256,
+    )
+
+    with (
+        open_verified_acp_package_archive(
+            example_tarball_path, example_descriptor
+        ) as example_session,
+        open_verified_acp_package_archive(
+            other_tarball_path, other_descriptor
+        ) as other_session,
+    ):
+        resolved_descriptor, inventory = build_acp_closure_installed_inventory(
+            target=_TARGET,
+            source_inventory_sha256=_SOURCE_DIGEST,
+            lock_sha256=_LOCK_DIGEST,
+            tarball_sessions=(example_session, other_session),
+            bin_entrypoints=("node_modules/@scope/example/index.js",),
+            licenses=(
+                example_license_record,
+                example_notice_record,
+                other_license_record,
+                other_notice_record,
+            ),
+            license_files=(
+                example_license_file,
+                example_notice_file,
+                other_license_file,
+                other_notice_file,
+            ),
+            input_dir=cache,
+        )
+
+    notices = {
+        file.relative_path: file
+        for file in inventory.files
+        if file.relative_path
+        in {example_notice_file.relative_path, other_notice_file.relative_path}
+    }
+    assert notices[example_notice_file.relative_path].source_sha256 == shared_sha256
+    assert (
+        notices[example_notice_file.relative_path].source_member
+        == example_external.source_id
+    )
+    assert notices[other_notice_file.relative_path].source_sha256 == shared_sha256
+    assert (
+        notices[other_notice_file.relative_path].source_member
+        == other_external.source_id
+    )
+
+    loaded = load_installed_closure_inventory(resolved_descriptor, input_dir=cache)
+    assert loaded.value.tree_digest == inventory.tree_digest

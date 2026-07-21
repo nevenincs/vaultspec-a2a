@@ -1444,11 +1444,16 @@ def _verified_closure_member_evidence(
     cached bytes each ``descriptor.external_licenses`` entry declares before that
     entry's own ``sha256``/``source_id`` may act as a membership-proof evidence key,
     so an external license's provenance is proved, not asserted.
+
+    Evidence accumulates per digest rather than assigning: two external licenses
+    with byte-identical content (a common case - packages routinely ship the same
+    MIT/Apache-2.0/BSD boilerplate) legitimately share one ``sha256`` key while
+    naming distinct ``source_id``s, and both must remain admissible.
     """
-    evidence: dict[str, frozenset[str]] = {
-        session.archive.descriptor.sha256: frozenset(session.archive.members)
-        for session in sessions
-    }
+    accumulator: dict[str, set[str]] = {}
+    for session in sessions:
+        archive = session.archive
+        accumulator.setdefault(archive.descriptor.sha256, set()).update(archive.members)
     try:
         for session in sessions:
             descriptor = session.archive.descriptor
@@ -1456,10 +1461,10 @@ def _verified_closure_member_evidence(
                 continue
             verify_external_license_artifacts(session.archive, input_dir=input_dir)
             for external in descriptor.external_licenses:
-                evidence[external.sha256] = frozenset({external.source_id})
+                accumulator.setdefault(external.sha256, set()).add(external.source_id)
     except PackageArchiveError as error:
         raise ArtifactInputError(str(error)) from None
-    return evidence
+    return {key: frozenset(members) for key, members in accumulator.items()}
 
 
 def _python_closure_layout(

@@ -87,3 +87,18 @@ Python/
 
 # Built desktop capsules (large binary build output; reproducible via scripts/build_desktop_capsule.py)
 /dist/capsules/
+
+# Generated artifacts that escaped the rules above.
+# Each was emitted by this repo's own tooling and matched by nothing: the
+# blanket log rule covers *.log but not the .out suffix a redirected process
+# writes, and only /dist/capsules/ was ignored rather than the build output
+# beside it.
+*.out
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+/dist/*.whl
+/dist/*.tar.gz
+.capsule-cache/
+*.egg-info/

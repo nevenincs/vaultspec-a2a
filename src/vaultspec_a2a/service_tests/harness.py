@@ -136,6 +136,44 @@ def _wait_for(
     )
 
 
+RETAINED_RUNTIME_DIRS = 5
+"""How many service-test runtime directories to keep before evicting the oldest.
+
+Deleting a run's directory outright would destroy the compose logs and session
+summary the harness writes precisely so a failed run can be diagnosed after the
+fact. Bounding the count keeps recent post-mortems available while stopping the
+unbounded accumulation in the operator's machine-global home.
+"""
+
+
+def sweep_stale_runtime_dirs(*, keep: Path | None = None) -> list[Path]:
+    """Evict all but the most recent service-test runtime directories.
+
+    Args:
+        keep: A directory to retain regardless of age - the caller's own run.
+
+    Returns:
+        The directories removed.
+    """
+    try:
+        candidates = [entry for entry in RUNTIME_ROOT.iterdir() if entry.is_dir()]
+    except OSError:
+        return []
+    # Name breaks ties so several directories sharing one filesystem timestamp
+    # tick evict deterministically rather than in arbitrary order.
+    ordered = sorted(
+        candidates, key=lambda entry: (entry.stat().st_mtime, entry.name), reverse=True
+    )
+    removed: list[Path] = []
+    for stale in ordered[RETAINED_RUNTIME_DIRS:]:
+        if keep is not None and stale == keep:
+            continue
+        shutil.rmtree(stale, ignore_errors=True)
+        if not stale.exists():
+            removed.append(stale)
+    return removed
+
+
 @dataclass(slots=True)
 class ServiceStack:
     """Owns the docker-compose integration stack for a single test session."""
@@ -156,8 +194,17 @@ class ServiceStack:
     _stopped: bool = field(default=False, init=False, repr=False)
 
     def __post_init__(self) -> None:
+        # Resolve only. Creating the directory here meant constructing a stack -
+        # which several unit-shaped tests do purely to inspect env and header
+        # wiring, never starting anything - left a permanent directory in the
+        # operator's real machine-global home. A side effect that survives the
+        # process belongs behind an explicit action, not a constructor.
         self.runtime_dir = RUNTIME_ROOT / self.project_name
+
+    def _ensure_runtime_dir(self) -> None:
+        """Create the runtime directory at the point something will write to it."""
         self.runtime_dir.mkdir(parents=True, exist_ok=True)
+        sweep_stale_runtime_dirs(keep=self.runtime_dir)
 
     @property
     def gateway_url(self) -> str:
@@ -208,6 +255,7 @@ class ServiceStack:
 
     def start(self) -> None:
         """Bring the deterministic compose stack online and wait for readiness."""
+        self._ensure_runtime_dir()
         try:
             self._start_infra()
             self._start_gateway()

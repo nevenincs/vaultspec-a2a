@@ -27,6 +27,9 @@ related:
   - '[[2026-07-21-ecosystem-artifact-lifecycle-W03-P06-S17]]'
   - '[[2026-07-21-ecosystem-artifact-lifecycle-W03-P06-S18]]'
   - '[[2026-07-21-ecosystem-artifact-lifecycle-W03-P06-S19]]'
+  - '[[2026-07-21-ecosystem-artifact-lifecycle-W03-P07-S20]]'
+  - '[[2026-07-21-ecosystem-artifact-lifecycle-W03-P07-S21]]'
+  - '[[2026-07-21-ecosystem-artifact-lifecycle-W03-P07-S22]]'
   - '[[2026-07-21-ecosystem-artifact-lifecycle-adr]]'
   - '[[2026-07-21-ecosystem-artifact-lifecycle-artifact-delete-residual-risk-audit]]'
   - '[[2026-07-21-ecosystem-artifact-lifecycle-plan]]'
@@ -70,6 +73,9 @@ Auto-generated index of all documents tagged with `#ecosystem-artifact-lifecycle
 - `2026-07-21-ecosystem-artifact-lifecycle-W03-P06-S17` - Extend the clear action to cover control actions and permission requests
 - `2026-07-21-ecosystem-artifact-lifecycle-W03-P06-S18` - Extend the clear action to cover task queue entries and thread execution state
 - `2026-07-21-ecosystem-artifact-lifecycle-W03-P06-S19` - Extend the clear action to cover the checkpoint store
+- `2026-07-21-ecosystem-artifact-lifecycle-W03-P07-S20` - Move service test runtime directory creation out of the dataclass constructor into start
+- `2026-07-21-ecosystem-artifact-lifecycle-W03-P07-S21` - Add teardown that removes the service test runtime directory after a run
+- `2026-07-21-ecosystem-artifact-lifecycle-W03-P07-S22` - Add ignore rules for the generated artifacts that currently escape them
 
 ### plan
 

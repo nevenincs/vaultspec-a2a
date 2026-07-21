@@ -120,9 +120,9 @@ Cover every table and the checkpoint store.
 
 Remove test residue from the real state home and close ignore-rule gaps.
 
-- [ ] `W03.P07.S20` - Move service test runtime directory creation out of the dataclass constructor into start; `src/vaultspec_a2a/service_tests/harness.py`.
-- [ ] `W03.P07.S21` - Add teardown that removes the service test runtime directory after a run; `src/vaultspec_a2a/service_tests/harness.py`.
-- [ ] `W03.P07.S22` - Add ignore rules for the generated artifacts that currently escape them; `.gitignore`.
+- [x] `W03.P07.S20` - Move service test runtime directory creation out of the dataclass constructor into start; `src/vaultspec_a2a/service_tests/harness.py`.
+- [x] `W03.P07.S21` - Add teardown that removes the service test runtime directory after a run; `src/vaultspec_a2a/service_tests/harness.py`.
+- [x] `W03.P07.S22` - Add ignore rules for the generated artifacts that currently escape them; `.gitignore`.
 
 ## Parallelization
 

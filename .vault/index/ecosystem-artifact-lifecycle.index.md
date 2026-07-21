@@ -24,6 +24,9 @@ related:
   - '[[2026-07-21-ecosystem-artifact-lifecycle-W03-P05-S15]]'
   - '[[2026-07-21-ecosystem-artifact-lifecycle-W03-P05-S16]]'
   - '[[2026-07-21-ecosystem-artifact-lifecycle-W03-P05-S24]]'
+  - '[[2026-07-21-ecosystem-artifact-lifecycle-W03-P06-S17]]'
+  - '[[2026-07-21-ecosystem-artifact-lifecycle-W03-P06-S18]]'
+  - '[[2026-07-21-ecosystem-artifact-lifecycle-W03-P06-S19]]'
   - '[[2026-07-21-ecosystem-artifact-lifecycle-adr]]'
   - '[[2026-07-21-ecosystem-artifact-lifecycle-artifact-delete-residual-risk-audit]]'
   - '[[2026-07-21-ecosystem-artifact-lifecycle-plan]]'
@@ -64,6 +67,9 @@ Auto-generated index of all documents tagged with `#ecosystem-artifact-lifecycle
 - `2026-07-21-ecosystem-artifact-lifecycle-W03-P05-S15` - Resolve the isolated config home under the declared desktop temporary homes root
 - `2026-07-21-ecosystem-artifact-lifecycle-W03-P05-S16` - Add a sweeper for orphaned isolated config homes left by a crash
 - `2026-07-21-ecosystem-artifact-lifecycle-W03-P05-S24` - Call session preservation from the ACP teardown path before the config home is removed
+- `2026-07-21-ecosystem-artifact-lifecycle-W03-P06-S17` - Extend the clear action to cover control actions and permission requests
+- `2026-07-21-ecosystem-artifact-lifecycle-W03-P06-S18` - Extend the clear action to cover task queue entries and thread execution state
+- `2026-07-21-ecosystem-artifact-lifecycle-W03-P06-S19` - Extend the clear action to cover the checkpoint store
 
 ### plan
 

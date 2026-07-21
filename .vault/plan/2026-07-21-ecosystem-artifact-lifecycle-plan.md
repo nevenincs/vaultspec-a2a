@@ -112,9 +112,9 @@ Stop destroying the child session transcript unread.
 
 Cover every table and the checkpoint store.
 
-- [ ] `W03.P06.S17` - Extend the clear action to cover control actions and permission requests; `src/vaultspec_a2a/control/db.py`.
-- [ ] `W03.P06.S18` - Extend the clear action to cover task queue entries and thread execution state; `src/vaultspec_a2a/control/db.py`.
-- [ ] `W03.P06.S19` - Extend the clear action to cover the checkpoint store; `src/vaultspec_a2a/control/db.py`.
+- [x] `W03.P06.S17` - Extend the clear action to cover control actions and permission requests; `src/vaultspec_a2a/control/db.py`.
+- [x] `W03.P06.S18` - Extend the clear action to cover task queue entries and thread execution state; `src/vaultspec_a2a/control/db.py`.
+- [x] `W03.P06.S19` - Extend the clear action to cover the checkpoint store; `src/vaultspec_a2a/control/db.py`.
 
 ### Phase `W03.P07` - harness and hygiene residue
 

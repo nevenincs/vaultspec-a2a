@@ -846,6 +846,19 @@ class Settings(DomainSettingsConfig, InfraConfig):
             return self.database_url.replace("+aiosqlite", "", 1)
         return self.database_url.replace("+asyncpg", "+psycopg", 1)
 
+    @property
+    def checkpoint_sync_url(self) -> str:
+        """Return a synchronous SQLAlchemy URL for the checkpoint store.
+
+        Falls back to the application database when no dedicated checkpoint URL
+        is configured, matching the runtime savers: the two stores share one file
+        by default and split only when explicitly configured.
+        """
+        url = self.checkpoint_database_url or self.database_url
+        if self.resolved_checkpoint_backend == "sqlite":
+            return url.replace("+aiosqlite", "", 1)
+        return url.replace("+asyncpg", "+psycopg", 1)
+
     def validate_postgres_requirement(self) -> None:
         """Fail fast when Postgres-backed dependencies are required but absent."""
         if not self.postgres_required:

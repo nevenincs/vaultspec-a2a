@@ -188,9 +188,32 @@ def _action_restore(name: str, yes: bool) -> None:
     print(f"Restored from {name}.")
 
 
-_ALLOWED_TABLES = frozenset(
-    {"cost_tracking", "permission_logs", "artifacts", "threads"}
+# Child tables first, parent last: every table below except ``threads`` and
+# ``authoring_event_cursor`` carries a foreign key to ``threads``, so deleting the
+# parent first would be refused wherever foreign keys are enforced.
+#
+# The previous list covered four of these nine and no checkpoint state, so a
+# "clear" left control actions, permission requests, queued tasks, execution
+# state, the authoring cursor, and every conversation checkpoint in place - and
+# reported success. An incomplete truncation that announces completion is worse
+# than none, because the operator stops looking.
+_CLEAR_ORDER: tuple[str, ...] = (
+    "artifacts",
+    "permission_logs",
+    "permission_requests",
+    "control_actions",
+    "cost_tracking",
+    "task_queue_entries",
+    "thread_execution_state",
+    "authoring_event_cursor",
+    "threads",
 )
+
+_ALLOWED_TABLES = frozenset(_CLEAR_ORDER)
+
+# LangGraph owns these; they hold the only durable copy of agent conversation
+# content, so a clear that spares them leaves the bulk of the data behind.
+_CHECKPOINT_TABLES: tuple[str, ...] = ("writes", "checkpoints")
 
 
 def _action_clear(yes: bool) -> None:
@@ -207,12 +230,43 @@ def _action_clear(yes: bool) -> None:
     from ..control.config import settings
 
     engine = create_engine(settings.database_sync_url)
-    tables = ["cost_tracking", "permission_logs", "artifacts", "threads"]
+    cleared: list[str] = []
     with engine.begin() as conn:
-        for table in tables:
-            assert table in _ALLOWED_TABLES, f"table {table!r} not in allowlist"
+        for table in _CLEAR_ORDER:
+            if table not in _ALLOWED_TABLES:
+                raise ValueError(f"table {table!r} not in allowlist")
             conn.execute(text(f"DELETE FROM {table}"))
-    print(f"Cleared {len(tables)} tables.")
+            cleared.append(table)
+    cleared.extend(_clear_checkpoint_store())
+    print(f"Cleared {len(cleared)} tables.")
+
+
+def _clear_checkpoint_store() -> list[str]:
+    """Delete LangGraph checkpoint state, reporting which tables were cleared.
+
+    The checkpoint store may live in the application database or in a database of
+    its own, and it is created by LangGraph on first use rather than by this
+    project's migrations - so a fresh installation legitimately has no such
+    tables. A missing table is therefore skipped rather than treated as an error,
+    while a present one is always cleared.
+    """
+    from sqlalchemy import create_engine, inspect, text
+
+    from ..control.config import settings
+
+    engine = create_engine(settings.checkpoint_sync_url)
+    cleared: list[str] = []
+    try:
+        present = set(inspect(engine).get_table_names())
+        with engine.begin() as conn:
+            for table in _CHECKPOINT_TABLES:
+                if table not in present:
+                    continue
+                conn.execute(text(f"DELETE FROM {table}"))
+                cleared.append(table)
+    finally:
+        engine.dispose()
+    return cleared
 
 
 # ---------------------------------------------------------------------------

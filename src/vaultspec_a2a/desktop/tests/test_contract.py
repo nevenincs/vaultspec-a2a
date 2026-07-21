@@ -224,10 +224,9 @@ def test_api_version_range_rejects_unsupported_or_noncanonical_values(
         ApiVersionRange(minimum=version, maximum="v1")
 
 
-def test_target_triple_covers_exactly_the_five_accepted_targets() -> None:
+def test_target_triple_covers_exactly_the_four_accepted_targets() -> None:
     assert {target.value for target in TargetTriple} == {
         "aarch64-apple-darwin",
-        "x86_64-apple-darwin",
         "aarch64-unknown-linux-gnu",
         "x86_64-unknown-linux-gnu",
         "x86_64-pc-windows-msvc",

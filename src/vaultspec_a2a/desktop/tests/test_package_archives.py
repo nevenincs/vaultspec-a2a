@@ -357,7 +357,6 @@ def test_wheel_verifier_rejects_unsafe_links_and_portable_collisions(
     ("target", "filename"),
     (
         (TargetTriple.MACOS_ARM64, "demo-1.0-cp313-cp313-macosx_13_0_arm64.whl"),
-        (TargetTriple.MACOS_X86_64, "demo-1.0-cp313-cp313-macosx_13_0_x86_64.whl"),
         (TargetTriple.LINUX_ARM64, "demo-1.0-cp313-abi3-manylinux_2_28_aarch64.whl"),
         (
             TargetTriple.LINUX_X86_64,
@@ -408,7 +407,7 @@ def test_wheel_target_helper_accepts_universal_and_rejects_wrong_python() -> Non
 def test_wheel_target_helper_rejects_future_runtime_baselines(filename: str) -> None:
     assert not wheel_filename_supports_target(filename, TargetTriple.WINDOWS_X86_64)
     assert not wheel_filename_supports_target(filename, TargetTriple.LINUX_X86_64)
-    assert not wheel_filename_supports_target(filename, TargetTriple.MACOS_X86_64)
+    assert not wheel_filename_supports_target(filename, TargetTriple.MACOS_ARM64)
 
 
 def test_npm_verifier_binds_package_identity_members_and_license_bytes(

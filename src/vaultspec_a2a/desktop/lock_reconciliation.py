@@ -63,21 +63,18 @@ _ACP_ROOT_PACKAGE: Final = "@agentclientprotocol/claude-agent-acp"
 _TARGET_SDK_PREFIX: Final = "@anthropic-ai/claude-agent-sdk-"
 _TARGET_SDK: Final = {
     TargetTriple.MACOS_ARM64: f"{_TARGET_SDK_PREFIX}darwin-arm64",
-    TargetTriple.MACOS_X86_64: f"{_TARGET_SDK_PREFIX}darwin-x64",
     TargetTriple.LINUX_ARM64: f"{_TARGET_SDK_PREFIX}linux-arm64",
     TargetTriple.LINUX_X86_64: f"{_TARGET_SDK_PREFIX}linux-x64",
     TargetTriple.WINDOWS_X86_64: f"{_TARGET_SDK_PREFIX}win32-x64",
 }
 _TARGET_ENVIRONMENT: Final = {
     TargetTriple.MACOS_ARM64: ("posix", "arm64", "Darwin", "darwin"),
-    TargetTriple.MACOS_X86_64: ("posix", "x86_64", "Darwin", "darwin"),
     TargetTriple.LINUX_ARM64: ("posix", "aarch64", "Linux", "linux"),
     TargetTriple.LINUX_X86_64: ("posix", "x86_64", "Linux", "linux"),
     TargetTriple.WINDOWS_X86_64: ("nt", "AMD64", "Windows", "win32"),
 }
 _TARGET_NPM: Final = {
     TargetTriple.MACOS_ARM64: ("darwin", "arm64"),
-    TargetTriple.MACOS_X86_64: ("darwin", "x64"),
     TargetTriple.LINUX_ARM64: ("linux", "arm64"),
     TargetTriple.LINUX_X86_64: ("linux", "x64"),
     TargetTriple.WINDOWS_X86_64: ("win32", "x64"),

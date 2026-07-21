@@ -156,14 +156,16 @@ def contract_versions_compatible(declared: str, supported: str) -> bool:
 
 
 class TargetTriple(StrEnum):
-    """The five accepted desktop capsule targets, as Rust-style triples.
+    """The four accepted desktop capsule targets, as Rust-style triples.
 
     The triples match the platform vocabulary already used by the locked
     dependency closure (see ``desktop_tests/test_dependency_closure.py``).
+    Intel macOS is not a shipped target: ``cryptography`` publishes no
+    ``x86_64-apple-darwin`` wheel, and that package enters the closure through
+    a required ``mcp -> pyjwt[crypto]`` edge that cannot be pruned.
     """
 
     MACOS_ARM64 = "aarch64-apple-darwin"
-    MACOS_X86_64 = "x86_64-apple-darwin"
     LINUX_ARM64 = "aarch64-unknown-linux-gnu"
     LINUX_X86_64 = "x86_64-unknown-linux-gnu"
     WINDOWS_X86_64 = "x86_64-pc-windows-msvc"

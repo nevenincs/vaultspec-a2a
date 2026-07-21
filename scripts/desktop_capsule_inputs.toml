@@ -48,18 +48,6 @@ license = "MIT"
 url = "https://nodejs.org/dist/v22.17.0/node-v22.17.0-darwin-arm64.tar.gz"
 sha256 = "615dda58b5fb41fad2be43940b6398ca56554cbe05800953afadc724729cb09e"
 
-[targets.x86_64-apple-darwin.python]
-version = "3.13"
-license = "PSF-2.0"
-url = "https://github.com/astral-sh/python-build-standalone/releases/download/20250702/cpython-3.13.5+20250702-x86_64-apple-darwin-install_only.tar.gz"
-sha256 = "0682afbb238b4762b8f5e383fe19cc52969c780871016c50d4cb7088a536167c"
-
-[targets.x86_64-apple-darwin.node]
-version = "22"
-license = "MIT"
-url = "https://nodejs.org/dist/v22.17.0/node-v22.17.0-darwin-x64.tar.gz"
-sha256 = "c39c8ec3cdadedfcc75de0cb3305df95ae2aecebc5db8d68a9b67bd74616d2ad"
-
 [targets.aarch64-unknown-linux-gnu.python]
 version = "3.13"
 license = "PSF-2.0"

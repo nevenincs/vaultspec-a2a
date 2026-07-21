@@ -77,7 +77,6 @@ __all__ = ["open_real_materializer_session"]
 #: as plain literal data rather than reaching into that module's private name.
 _TARGET_SDK_PACKAGES: Final = {
     TargetTriple.MACOS_ARM64: "@anthropic-ai/claude-agent-sdk-darwin-arm64",
-    TargetTriple.MACOS_X86_64: "@anthropic-ai/claude-agent-sdk-darwin-x64",
     TargetTriple.LINUX_ARM64: "@anthropic-ai/claude-agent-sdk-linux-arm64",
     TargetTriple.LINUX_X86_64: "@anthropic-ai/claude-agent-sdk-linux-x64",
     TargetTriple.WINDOWS_X86_64: "@anthropic-ai/claude-agent-sdk-win32-x64",

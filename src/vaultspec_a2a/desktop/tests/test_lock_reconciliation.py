@@ -33,7 +33,6 @@ _PYTHON_RUNTIME = "3.13.5"
 _ACP_ROOT = "@agentclientprotocol/claude-agent-acp"
 _TARGET_SDK_SUFFIX = {
     TargetTriple.MACOS_ARM64: "darwin-arm64",
-    TargetTriple.MACOS_X86_64: "darwin-x64",
     TargetTriple.LINUX_ARM64: "linux-arm64",
     TargetTriple.LINUX_X86_64: "linux-x64",
     TargetTriple.WINDOWS_X86_64: "win32-x64",
@@ -42,26 +41,19 @@ _TARGET_SDK_SUFFIX = {
 # they are pinned so that such a move is a reviewed change rather than silent.
 _COMMITTED_PYTHON_CLOSURE = {
     TargetTriple.MACOS_ARM64: 82,
-    TargetTriple.MACOS_X86_64: 82,
     TargetTriple.LINUX_ARM64: 82,
     TargetTriple.LINUX_X86_64: 82,
     TargetTriple.WINDOWS_X86_64: 84,
 }
 _COMMITTED_ACP_CLOSURE = 104
-# cryptography 49.0.0 publishes macOS wheels for arm64 only, so the Intel-macOS
-# target has no compatible artifact.  It reaches the closure through the
-# required mcp -> pyjwt[crypto] edge, and preparation for that one target fails
-# closed until the lock, the target matrix, or that edge changes.
-_KNOWN_WHEEL_GAP = {TargetTriple.MACOS_X86_64: {"cryptography"}}
+# No target in the shipped matrix has a wheel gap: Intel macOS, the one target
+# where cryptography 49.0.0 published no wheel, is not a shipped target.
+_KNOWN_WHEEL_GAP: dict[TargetTriple, set[str]] = {}
 
 _PYTHON_TARGET = {
     TargetTriple.MACOS_ARM64: (
         "1.0.1",
         "sys_platform == 'darwin' and platform_machine == 'arm64'",
-    ),
-    TargetTriple.MACOS_X86_64: (
-        "1.0.2",
-        "sys_platform == 'darwin' and platform_machine == 'x86_64'",
     ),
     TargetTriple.LINUX_ARM64: (
         "1.0.3",
@@ -75,7 +67,6 @@ _PYTHON_TARGET = {
 }
 _NPM_TARGET = {
     TargetTriple.MACOS_ARM64: ("darwin", "arm64"),
-    TargetTriple.MACOS_X86_64: ("darwin", "x64"),
     TargetTriple.LINUX_ARM64: ("linux", "arm64"),
     TargetTriple.LINUX_X86_64: ("linux", "x64"),
     TargetTriple.WINDOWS_X86_64: ("win32", "x64"),
@@ -700,7 +691,6 @@ def test_committed_closure_compatible_wheels_exclude_foreign_platforms(
     # filename, so only the operating-system families are asserted here.
     foreign = {
         TargetTriple.MACOS_ARM64: ("manylinux", "musllinux", "win_amd64"),
-        TargetTriple.MACOS_X86_64: ("manylinux", "musllinux", "win_amd64"),
         TargetTriple.LINUX_ARM64: ("macosx", "musllinux", "win_amd64"),
         TargetTriple.LINUX_X86_64: ("macosx", "musllinux", "win_amd64"),
         TargetTriple.WINDOWS_X86_64: ("macosx", "manylinux", "musllinux"),

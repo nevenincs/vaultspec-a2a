@@ -454,10 +454,9 @@
       "type": "string"
     },
     "TargetTriple": {
-      "description": "The five accepted desktop capsule targets, as Rust-style triples.\n\nThe triples match the platform vocabulary already used by the locked\ndependency closure (see ``desktop_tests/test_dependency_closure.py``).",
+      "description": "The four accepted desktop capsule targets, as Rust-style triples.\n\nThe triples match the platform vocabulary already used by the locked\ndependency closure (see ``desktop_tests/test_dependency_closure.py``).\nIntel macOS is not a shipped target: ``cryptography`` publishes no\n``x86_64-apple-darwin`` wheel, and that package enters the closure through\na required ``mcp -> pyjwt[crypto]`` edge that cannot be pruned.",
       "enum": [
         "aarch64-apple-darwin",
-        "x86_64-apple-darwin",
         "aarch64-unknown-linux-gnu",
         "x86_64-unknown-linux-gnu",
         "x86_64-pc-windows-msvc"

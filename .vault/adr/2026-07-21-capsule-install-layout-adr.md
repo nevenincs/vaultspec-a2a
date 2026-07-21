@@ -184,7 +184,13 @@ provenance model, within the capsule boundary governed by
 - A package resolvable from the lock but lacking a target-compatible wheel, and
   a package lacking both a metadata license expression and a curated override,
   fail preparation closed; curated overrides are committed, reviewed inputs,
-  never runtime inference.
+  never runtime inference. This holds for both ecosystems: an ACP package whose
+  `package.json` license is a non-SPDX `SEE LICENSE IN <file>` reference and has
+  no curated override fails preparation closed. Every curated override key -
+  wheel or ACP - must resolve to a package that is in the lock at the pinned
+  version, checked against the full lock independent of any single target's
+  selection, so a stale override for an orphaned package is a validation error
+  rather than silently dead data.
 - Wheel selection is deterministic and reviewable: the per-target supported-tag
   list is a pure function of the target triple and the fixed compatibility
   baselines (CPython 3.13, glibc 2.28, macOS 13.0); the selection authority
@@ -279,7 +285,23 @@ preference order, from a hosted file of the exact locked release on the package
 index, an upstream repository URL at a full immutable commit hash, or, only
 when no stable upstream URL exists, a copy vendored beside the overrides input;
 in every case the committed sha256 is the integrity authority, verified before
-caching, so acquisition can never introduce unreviewed content. Pass two opens
+caching, so acquisition can never introduce unreviewed content. **ACP curated
+overrides:** the npm license contract mirrors the wheel curated fallback. An ACP
+package whose `package.json` `license` field is not a canonical SPDX expression -
+in particular the `SEE LICENSE IN <file>` reference form - is resolved by a
+curated override that supplies the SPDX expression (a standard identifier, or an
+SPDX `LicenseRef-` custom reference for a proprietary license) and binds the
+referenced license file as the package's license member; the ACP verifier
+accepts the curated expression in place of verbatim `package.json` equality
+exactly as the wheel verifier accepts a curated expression when metadata carries
+none. The required Anthropic SDK packages are the motivating case: their
+`package.json` declares `SEE LICENSE IN LICENSE.md`, and their bundled
+`LICENSE.md` is a proprietary "all rights reserved" grant deferring to Anthropic's
+external commercial terms, so they are recorded as `LicenseRef-Anthropic-Commercial`
+with that `LICENSE.md` bound and shipped as the license member. Bundling and
+offline redistribution of the proprietary SDK is authorized by the owner under
+those commercial terms; this record captures the license identity faithfully and
+does not itself adjudicate the commercial grant. Pass two opens
 verified archive sessions, invokes the production installed-inventory builder
 against the layout authority, authors the digest-pinned capsule input
 descriptor naming every artifact including the installed inventories, and hands
@@ -363,6 +385,16 @@ while supplying the spec-conformant path the refusal always implied
   further packages carry a legacy-recognizable member the verifier's existing
   path accepts without curation. Each entry is a one-time reviewed fact that
   recurs only when its package's locked version changes.
+- The ACP closure carries a proprietary dependency: the required Anthropic SDK
+  packages ship an "all rights reserved" `LICENSE.md`, so the capsule bundles a
+  non-open-source component recorded as `LicenseRef-Anthropic-Commercial`, with
+  that notice shipped inside the capsule. The shippable capsule therefore
+  depends on the owner's authorization to redistribute the SDK under Anthropic's
+  commercial terms; that authorization is a standing input to this record, not a
+  fact it can derive. Extending the ACP license contract to accept a curated
+  override for a non-SPDX `package.json` license is the mechanism that lets this
+  and any future non-SPDX-declaring ACP dependency reconcile without weakening
+  the verifier for the SPDX-clean majority.
 - On the measured lock the previously untied packages resolve to their compiled
   variants - `sqlalchemy` to its cp313 platform wheels over `py3-none-any`,
   `cryptography` to cp311-abi3 on `manylinux_2_28`, and `charset-normalizer`,

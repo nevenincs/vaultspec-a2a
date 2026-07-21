@@ -26,7 +26,11 @@ Beside the replayed closures this module generates the two product launchers
 the plan reserves. The POSIX pair is a rendered shell script; the Windows pair
 is composed from a pinned, content-addressed console stub plus a fixed shebang
 plus a deterministic zip payload, so the caller supplies the stub bytes
-(:func:`extract_windows_launcher_stub`) for a Windows target.
+(:func:`extract_windows_launcher_stub`) for a Windows target. The stub's
+donor also carries its own PSF-2.0 license notice
+(:func:`extract_windows_launcher_stub_license`), materialized beside the
+Windows launchers so the redistribution terms ship with the bytes they
+govern.
 
 Interpreter subtrees (``runtime/cpython``, ``runtime/node``) and the
 dependency locks, component manifest, and installed-tree evidence stay outside
@@ -63,10 +67,13 @@ if TYPE_CHECKING:
     from .installed_inventory import InstalledClosureInventory, InstalledFileRecord
 
 __all__ = [
+    "WINDOWS_LAUNCHER_STUB_LICENSE_MEMBER",
+    "WINDOWS_LAUNCHER_STUB_LICENSE_SHA256",
     "WINDOWS_LAUNCHER_STUB_MEMBER",
     "WINDOWS_LAUNCHER_STUB_SHA256",
     "CapsuleMaterializationError",
     "extract_windows_launcher_stub",
+    "extract_windows_launcher_stub_license",
     "materialize_capsule_closures",
 ]
 
@@ -121,6 +128,18 @@ _LAUNCHER_ZIP_EPOCH: Final = (1980, 1, 1, 0, 0, 0)
 WINDOWS_LAUNCHER_STUB_MEMBER: Final = "distlib/t64.exe"
 WINDOWS_LAUNCHER_STUB_SHA256: Final = (
     "81a618f21cb87db9076134e70388b6e9cb7c2106739011b6a51772d22cae06b7"
+)
+
+#: Donor archive member and pinned digest for the stub donor's own PSF-2.0
+#: license notice. The notice ships from the same donor wheel as the stub
+#: itself (no separate build input is declared): the donor is already a
+#: pinned, digest-verified download, and its license text is just another
+#: member of that same archive.
+WINDOWS_LAUNCHER_STUB_LICENSE_MEMBER: Final = (
+    "distlib-0.4.3.dist-info/licenses/LICENSE.txt"
+)
+WINDOWS_LAUNCHER_STUB_LICENSE_SHA256: Final = (
+    "808e10c8a6ab8deb149ff9b3fb19f447a808094606d712a9ca57fead3552599d"
 )
 
 
@@ -388,6 +407,23 @@ def _reserved_file(
     return reserved
 
 
+def _single_reservation(
+    plan_files: dict[str, ReservedTreeFile], role: PlanReservationRole
+) -> ReservedTreeFile | None:
+    """Return the sole reservation carrying ``role``, or ``None`` if absent.
+
+    Unlike :func:`_reserved_file`, the caller does not already know the
+    reserved path (the plan is its layout authority), so this scans by role
+    instead; a role the plan declares at most once is asserted so here too.
+    """
+    matches = [file for file in plan_files.values() if file.role is role]
+    if len(matches) > 1:
+        raise CapsuleMaterializationError(
+            f"capsule plan reserves multiple {role.value} destinations"
+        )
+    return matches[0] if matches else None
+
+
 def _materialize_closure(
     inventory: InstalledClosureInventory,
     *,
@@ -545,6 +581,48 @@ def extract_windows_launcher_stub(donor: BinaryIO) -> bytes:
     return _validated_launcher_stub(payload)
 
 
+def _validated_launcher_stub_license(notice: bytes | None) -> bytes:
+    """Content-address the stub donor's license notice before it is shipped.
+
+    Mirrors :func:`_validated_launcher_stub`: bytes that do not hash to the
+    pinned digest are refused rather than shipped as an unverifiable notice.
+    """
+    if notice is None:
+        raise CapsuleMaterializationError(
+            "Windows launcher stub license bytes were not supplied; cannot "
+            "materialize the launcher-stub license notice"
+        )
+    if hashlib.sha256(notice).hexdigest() != WINDOWS_LAUNCHER_STUB_LICENSE_SHA256:
+        raise CapsuleMaterializationError(
+            "Windows launcher stub license bytes do not match the pinned notice digest"
+        )
+    return notice
+
+
+def extract_windows_launcher_stub_license(donor: BinaryIO) -> bytes:
+    """Extract and content-address the stub donor's own license notice.
+
+    ``donor`` is the same pinned, already digest-verified donor wheel
+    :func:`extract_windows_launcher_stub` reads its console stub from; the
+    license text is just another member of that already-verified archive, so
+    surfacing its redistribution notice needs no separate build input.
+    """
+    try:
+        archive = zipfile.ZipFile(donor)
+    except (OSError, RuntimeError, zipfile.BadZipFile, zlib.error):
+        raise CapsuleMaterializationError(
+            "cannot open the Windows launcher stub donor archive"
+        ) from None
+    with archive:
+        try:
+            payload = archive.read(WINDOWS_LAUNCHER_STUB_LICENSE_MEMBER)
+        except (KeyError, OSError, RuntimeError, zipfile.BadZipFile, zlib.error):
+            raise CapsuleMaterializationError(
+                "Windows launcher stub license member is absent from its donor archive"
+            ) from None
+    return _validated_launcher_stub_license(payload)
+
+
 def _windows_launcher_shebang(depth: int) -> bytes:
     """Render the relocatable, quoted shebang line the console stub parses.
 
@@ -613,11 +691,60 @@ def _windows_launcher_bytes(entrypoint: ComponentEntrypoint, stub: bytes) -> byt
     )
 
 
+def _materialize_launcher_stub_license(
+    plan_files: dict[str, ReservedTreeFile],
+    *,
+    is_windows_target: bool,
+    windows_launcher_stub_license: bytes | None,
+    destination_root: Path,
+    generation_authority: DirectoryAuthority,
+    destination_authority: DirectoryAuthority,
+    parent_identities: dict[tuple[str, ...], tuple[int, int]],
+    source_date_epoch: int,
+) -> ProjectedFile | None:
+    """Materialize the donated launcher-stub license notice, Windows only.
+
+    Fails closed both ways: a Windows target with no plan reservation, or a
+    non-Windows target that somehow carries one, is a plan/materializer
+    mismatch and refuses rather than silently doing nothing or shipping an
+    unreserved file.
+    """
+    reserved = _single_reservation(
+        plan_files, PlanReservationRole.LAUNCHER_STUB_LICENSE
+    )
+    if not is_windows_target:
+        if reserved is not None:
+            raise CapsuleMaterializationError(
+                "capsule plan reserves a launcher-stub license destination "
+                "for a non-Windows target"
+            )
+        return None
+    if reserved is None:
+        raise CapsuleMaterializationError(
+            "capsule plan omits the launcher-stub license reservation for "
+            "a Windows target"
+        )
+    content = _validated_launcher_stub_license(windows_launcher_stub_license)
+    with io.BytesIO(content) as stream:
+        return materialize_verified_member(
+            stream,
+            reserved.path,
+            destination_root=destination_root,
+            generation_authority=generation_authority,
+            destination_authority=destination_authority,
+            parent_identities=parent_identities,
+            expected_size=len(content),
+            mode=reserved.mode,
+            source_date_epoch=source_date_epoch,
+        )
+
+
 def _materialize_launchers(
     session: VerifiedCapsuleInputSession,
     *,
     plan_files: dict[str, ReservedTreeFile],
     windows_launcher_stub: bytes | None,
+    windows_launcher_stub_license: bytes | None,
     api_versions: ApiVersionRange,
     destination_root: Path,
     generation_authority: DirectoryAuthority,
@@ -630,8 +757,9 @@ def _materialize_launchers(
         raise CapsuleMaterializationError(
             "component manifest target does not match the verified session"
         )
+    is_windows_target = manifest.target is TargetTriple.WINDOWS_X86_64
     stub: bytes | None = None
-    if manifest.target is TargetTriple.WINDOWS_X86_64:
+    if is_windows_target:
         stub = _validated_launcher_stub(windows_launcher_stub)
 
     projected: list[ProjectedFile] = []
@@ -664,6 +792,19 @@ def _materialize_launchers(
                 source_date_epoch=source_date_epoch,
             )
         projected.append(emitted)
+
+    notice = _materialize_launcher_stub_license(
+        plan_files,
+        is_windows_target=is_windows_target,
+        windows_launcher_stub_license=windows_launcher_stub_license,
+        destination_root=destination_root,
+        generation_authority=generation_authority,
+        destination_authority=destination_authority,
+        parent_identities=parent_identities,
+        source_date_epoch=source_date_epoch,
+    )
+    if notice is not None:
+        projected.append(notice)
     return tuple(projected)
 
 
@@ -677,6 +818,7 @@ def materialize_capsule_closures(
     destination_authority: DirectoryAuthority,
     source_date_epoch: int,
     windows_launcher_stub: bytes | None = None,
+    windows_launcher_stub_license: bytes | None = None,
 ) -> tuple[ProjectedFile, ...]:
     """Materialize every wheel-, npm-, and launcher-sourced capsule reservation.
 
@@ -692,7 +834,11 @@ def materialize_capsule_closures(
     ``windows_launcher_stub`` carries the pinned console stub bytes obtained
     through :func:`extract_windows_launcher_stub`; a Windows target without
     them fails loud rather than emitting a launcher pair nobody can execute.
-    Every other target ignores it.
+    Every other target ignores it. ``windows_launcher_stub_license`` carries
+    the stub donor's own license notice, obtained through
+    :func:`extract_windows_launcher_stub_license`; a Windows target without it
+    fails loud the same way, since the notice ships beside the stub bytes it
+    documents.
     """
     plan = _validated_plan(plan)
     session = _validated_session(session)
@@ -735,6 +881,7 @@ def materialize_capsule_closures(
             session,
             plan_files=plan_files,
             windows_launcher_stub=windows_launcher_stub,
+            windows_launcher_stub_license=windows_launcher_stub_license,
             api_versions=api_versions,
             destination_root=destination_root,
             generation_authority=generation_authority,

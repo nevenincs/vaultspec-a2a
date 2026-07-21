@@ -245,6 +245,23 @@ def test_aggregate_size_bound_rejects_an_over_bound_capsule() -> None:
     assert capsule_assembly._enforce_aggregate_size(within_bound) == 1024
 
 
+def test_launcher_stub_license_is_reserved_for_windows_and_absent_for_posix() -> None:
+    windows = capsule_assembly._launcher_stub_license_reservation(
+        TargetTriple.WINDOWS_X86_64
+    )
+    assert len(windows) == 1
+    reserved = windows[0]
+    assert reserved.path == "Scripts/LICENSE-launcher-stub.txt"
+    assert reserved.role == PlanReservationRole.LAUNCHER_STUB_LICENSE
+    assert reserved.mode == 0o644
+    assert reserved.size is None
+
+    assert (
+        capsule_assembly._launcher_stub_license_reservation(TargetTriple.LINUX_X86_64)
+        == ()
+    )
+
+
 def test_derive_plan_reserves_every_destination_from_a_real_session(
     tmp_path: Path,
 ) -> None:
@@ -268,6 +285,8 @@ def test_derive_plan_reserves_every_destination_from_a_real_session(
     # relocatable launchers (Windows target)
     assert "Scripts/vaultspec-a2a.exe" in reserved
     assert "Scripts/vaultspec-a2a-mcp.exe" in reserved
+    # the donated launcher-stub license notice ships beside them
+    assert "Scripts/LICENSE-launcher-stub.txt" in reserved
     # dependency locks, manifest, evidence
     assert {
         "locks/uv.lock",
@@ -283,6 +302,7 @@ def test_derive_plan_reserves_every_destination_from_a_real_session(
     assert PlanReservationRole.ACP_LICENSE in roles
     assert PlanReservationRole.GATEWAY_LAUNCHER in roles
     assert PlanReservationRole.STANDALONE_MCP_LAUNCHER in roles
+    assert PlanReservationRole.LAUNCHER_STUB_LICENSE in roles
 
     # known aggregate equals the sum of every sized reservation
     expected = sum(file.size for file in plan.files if file.size is not None)

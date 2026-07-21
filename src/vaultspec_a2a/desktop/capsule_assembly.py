@@ -29,6 +29,7 @@ from .closure_inventory import validate_portable_archive_path
 from .contract import (
     ComponentAssetKind,
     EntrypointKind,
+    TargetTriple,
 )
 
 if TYPE_CHECKING:
@@ -38,7 +39,6 @@ if TYPE_CHECKING:
     from .contract import (
         ApiVersionRange,
         ComponentManifest,
-        TargetTriple,
     )
     from .installed_inventory import InstalledClosureInventory
 
@@ -68,6 +68,10 @@ _PYTHON_CLOSURE_ROOT: Final = "runtime/python"
 _ACP_CLOSURE_ROOT: Final = "runtime/acp"
 _UV_LOCK_PATH: Final = "locks/uv.lock"
 _PACKAGE_LOCK_PATH: Final = "locks/package-lock.json"
+#: Where the Windows launcher stub's donated PSF-2.0 license notice ships,
+#: beside the console launchers whose bytes carry it. Reserved only for the
+#: Windows target: the stub is never concatenated into a POSIX launcher.
+_LAUNCHER_STUB_LICENSE_PATH: Final = "Scripts/LICENSE-launcher-stub.txt"
 _COMPONENT_MANIFEST_PATH: Final = "component-manifest.json"
 _CANONICAL_MANIFEST_PATH: Final = "component-manifest.canonical.bin"
 _MANIFEST_DIGEST_PATH: Final = "component-manifest.digest.sha256"
@@ -97,6 +101,7 @@ class PlanReservationRole(StrEnum):
     ACP_LICENSE = "acp-license"
     GATEWAY_LAUNCHER = "gateway-launcher"
     STANDALONE_MCP_LAUNCHER = "standalone-mcp-launcher"
+    LAUNCHER_STUB_LICENSE = "launcher-stub-license"
     DEPENDENCY_LOCK = "dependency-lock"
     COMPONENT_MANIFEST = "component-manifest"
     CANONICAL_MANIFEST = "canonical-manifest"
@@ -317,6 +322,27 @@ def _launcher_reservations(manifest: ComponentManifest) -> tuple[ReservedTreeFil
     return tuple(reserved)
 
 
+def _launcher_stub_license_reservation(
+    target: TargetTriple,
+) -> tuple[ReservedTreeFile, ...]:
+    """Reserve the donated launcher-stub license notice for a Windows target.
+
+    The stub's bytes are concatenated into the Windows product launchers
+    only; a non-Windows target never carries the stub, so it reserves no
+    notice for it.
+    """
+    if target is not TargetTriple.WINDOWS_X86_64:
+        return ()
+    return (
+        ReservedTreeFile(
+            path=_LAUNCHER_STUB_LICENSE_PATH,
+            role=PlanReservationRole.LAUNCHER_STUB_LICENSE,
+            mode=0o644,
+            size=None,
+        ),
+    )
+
+
 def _missing_license_packages(
     inventory: InstalledClosureInventory, *, package_names: Iterable[str]
 ) -> set[str]:
@@ -440,6 +466,7 @@ def derive_capsule_assembly_plan(
             license_role=PlanReservationRole.ACP_LICENSE,
         ),
         *_launcher_reservations(manifest),
+        *_launcher_stub_license_reservation(descriptor.target),
         ReservedTreeFile(
             path=_UV_LOCK_PATH,
             role=PlanReservationRole.DEPENDENCY_LOCK,

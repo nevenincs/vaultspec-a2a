@@ -17,6 +17,7 @@ from vaultspec_a2a.desktop._filesystem_authority import (
 from vaultspec_a2a.desktop.capsule import CapsuleAssemblyError
 from vaultspec_a2a.desktop.capsule_assembly import (
     PlanReservationRole,
+    ReservedTreeFile,
     derive_capsule_assembly_plan,
 )
 from vaultspec_a2a.desktop.capsule_materializer import (
@@ -179,6 +180,115 @@ def test_materialize_refuses_a_windows_target_without_the_pinned_stub(
                 source_date_epoch=_SOURCE_DATE_EPOCH,
                 windows_launcher_stub=stub,
             )
+
+
+def test_single_reservation_rejects_a_role_reserved_at_more_than_one_path() -> None:
+    plan_files = {
+        "a": ReservedTreeFile(
+            path="a",
+            role=PlanReservationRole.LAUNCHER_STUB_LICENSE,
+            mode=0o644,
+            size=None,
+        ),
+        "b": ReservedTreeFile(
+            path="b",
+            role=PlanReservationRole.LAUNCHER_STUB_LICENSE,
+            mode=0o644,
+            size=None,
+        ),
+    }
+    with pytest.raises(CapsuleMaterializationError, match="multiple"):
+        capsule_materializer._single_reservation(
+            plan_files, PlanReservationRole.LAUNCHER_STUB_LICENSE
+        )
+
+
+def test_single_reservation_returns_none_for_an_absent_role() -> None:
+    assert (
+        capsule_materializer._single_reservation(
+            {}, PlanReservationRole.LAUNCHER_STUB_LICENSE
+        )
+        is None
+    )
+
+
+def test_launcher_stub_license_rejects_a_reservation_on_a_non_windows_target(
+    tmp_path: Path,
+) -> None:
+    reserved = ReservedTreeFile(
+        path="Scripts/LICENSE-launcher-stub.txt",
+        role=PlanReservationRole.LAUNCHER_STUB_LICENSE,
+        mode=0o644,
+        size=None,
+    )
+    root = tmp_path / "gen-license-mismatch"
+    root.mkdir()
+    root_lease = resolve_directory_authority(root)
+    with (
+        directory_lease(root_lease) as generation,
+        claim_new_directory(generation, "capsule") as capsule,
+        pytest.raises(CapsuleMaterializationError, match="non-Windows target"),
+    ):
+        capsule_materializer._materialize_launcher_stub_license(
+            {reserved.path: reserved},
+            is_windows_target=False,
+            windows_launcher_stub_license=b"irrelevant",
+            destination_root=capsule.path,
+            generation_authority=generation,
+            destination_authority=capsule,
+            parent_identities={},
+            source_date_epoch=_SOURCE_DATE_EPOCH,
+        )
+
+
+def test_launcher_stub_license_requires_a_reservation_on_a_windows_target(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "gen-license-missing-reservation"
+    root.mkdir()
+    root_lease = resolve_directory_authority(root)
+    with (
+        directory_lease(root_lease) as generation,
+        claim_new_directory(generation, "capsule") as capsule,
+        pytest.raises(
+            CapsuleMaterializationError, match="omits the launcher-stub license"
+        ),
+    ):
+        capsule_materializer._materialize_launcher_stub_license(
+            {},
+            is_windows_target=True,
+            windows_launcher_stub_license=None,
+            destination_root=capsule.path,
+            generation_authority=generation,
+            destination_authority=capsule,
+            parent_identities={},
+            source_date_epoch=_SOURCE_DATE_EPOCH,
+        )
+
+
+def test_launcher_stub_license_returns_none_for_a_posix_target_without_a_reservation(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "gen-license-posix"
+    root.mkdir()
+    root_lease = resolve_directory_authority(root)
+    with (
+        directory_lease(root_lease) as generation,
+        claim_new_directory(generation, "capsule") as capsule,
+    ):
+        assert (
+            capsule_materializer._materialize_launcher_stub_license(
+                {},
+                is_windows_target=False,
+                windows_launcher_stub_license=None,
+                destination_root=capsule.path,
+                generation_authority=generation,
+                destination_authority=capsule,
+                parent_identities={},
+                source_date_epoch=_SOURCE_DATE_EPOCH,
+            )
+            is None
+        )
 
 
 def _ordinary_file(inventory: InstalledClosureInventory):

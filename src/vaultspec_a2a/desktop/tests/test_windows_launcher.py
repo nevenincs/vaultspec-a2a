@@ -40,10 +40,13 @@ from vaultspec_a2a.desktop.capsule_assembly import (
     derive_capsule_assembly_plan,
 )
 from vaultspec_a2a.desktop.capsule_materializer import (
+    WINDOWS_LAUNCHER_STUB_LICENSE_MEMBER,
+    WINDOWS_LAUNCHER_STUB_LICENSE_SHA256,
     WINDOWS_LAUNCHER_STUB_MEMBER,
     WINDOWS_LAUNCHER_STUB_SHA256,
     CapsuleMaterializationError,
     extract_windows_launcher_stub,
+    extract_windows_launcher_stub_license,
     materialize_capsule_closures,
 )
 from vaultspec_a2a.desktop.contract import (
@@ -125,6 +128,13 @@ def console_stub() -> bytes:
         return extract_windows_launcher_stub(handle)
 
 
+@pytest.fixture(scope="module")
+def console_stub_license() -> bytes:
+    """The real, digest-verified license notice extracted from the same donor."""
+    with _cached_donor_wheel().open("rb") as handle:
+        return extract_windows_launcher_stub_license(handle)
+
+
 def _probe_entrypoint() -> ComponentEntrypoint:
     return ComponentEntrypoint(
         kind=EntrypointKind.GATEWAY,
@@ -158,6 +168,18 @@ def test_the_declared_stub_input_matches_the_pinned_member() -> None:
     assert declaration["url"].endswith(".whl")
 
 
+def test_the_pinned_license_member_and_stub_member_share_no_digest() -> None:
+    """The notice and the stub are distinct members of the same donor archive.
+
+    No separate input-cache declaration exists for the notice (it ships from
+    the already-declared ``[launcher_stub]`` donor), so this is the only
+    static cross-check available offline: the two pinned digests must differ,
+    since they name two different bytes ranges of the one donor wheel.
+    """
+    assert WINDOWS_LAUNCHER_STUB_LICENSE_MEMBER != WINDOWS_LAUNCHER_STUB_MEMBER
+    assert WINDOWS_LAUNCHER_STUB_LICENSE_SHA256 != WINDOWS_LAUNCHER_STUB_SHA256
+
+
 def test_extraction_refuses_a_donor_without_the_pinned_member() -> None:
     with (
         _donor_archive({"distlib/__init__.py": b"# donor module\n"}) as donor,
@@ -180,6 +202,34 @@ def test_extraction_refuses_a_donor_that_is_not_an_archive() -> None:
         pytest.raises(CapsuleMaterializationError, match="cannot open the Windows"),
     ):
         extract_windows_launcher_stub(donor)
+
+
+def test_license_extraction_refuses_a_donor_without_the_pinned_member() -> None:
+    with (
+        _donor_archive({"distlib/__init__.py": b"# donor module\n"}) as donor,
+        pytest.raises(CapsuleMaterializationError, match="absent from its donor"),
+    ):
+        extract_windows_launcher_stub_license(donor)
+
+
+def test_license_extraction_refuses_a_donor_member_that_is_not_the_pinned_notice() -> (
+    None
+):
+    with (
+        _donor_archive(
+            {WINDOWS_LAUNCHER_STUB_LICENSE_MEMBER: b"not the pinned notice"}
+        ) as donor,
+        pytest.raises(CapsuleMaterializationError, match="pinned notice digest"),
+    ):
+        extract_windows_launcher_stub_license(donor)
+
+
+def test_license_extraction_refuses_a_donor_that_is_not_an_archive() -> None:
+    with (
+        io.BytesIO(b"this is not a zip archive") as donor,
+        pytest.raises(CapsuleMaterializationError, match="cannot open the Windows"),
+    ):
+        extract_windows_launcher_stub_license(donor)
 
 
 @pytest.mark.parametrize(
@@ -234,7 +284,7 @@ def test_the_composed_launcher_is_stub_plus_shebang_plus_deterministic_zipapp(
 
 @pytest.mark.service
 def test_the_windows_capsule_materializes_the_launcher_pair_byte_exact(
-    tmp_path: Path, console_stub: bytes
+    tmp_path: Path, console_stub: bytes, console_stub_license: bytes
 ) -> None:
     """A real Windows-target capsule writes both composed launchers, 0755."""
     generations: list[tuple[Path, dict[str, ProjectedFile]]] = []
@@ -260,6 +310,7 @@ def test_the_windows_capsule_materializes_the_launcher_pair_byte_exact(
                     destination_authority=capsule,
                     source_date_epoch=_SOURCE_DATE_EPOCH,
                     windows_launcher_stub=console_stub,
+                    windows_launcher_stub_license=console_stub_license,
                 )
             generations.append(
                 (capsule.path, {file.relative_path: file for file in projected})
@@ -293,6 +344,44 @@ def test_the_windows_capsule_materializes_the_launcher_pair_byte_exact(
         assert first[path].size == len(expected)
         assert (first_root / path).read_bytes() == expected
         assert first[path] == second[path]
+
+    # the donated launcher-stub license notice ships beside the launchers,
+    # byte-exact and content-addressed to the real donor member
+    notice_path = "Scripts/LICENSE-launcher-stub.txt"
+    assert first[notice_path].mode == 0o644
+    assert first[notice_path].sha256 == hashlib.sha256(console_stub_license).hexdigest()
+    assert first[notice_path].size == len(console_stub_license)
+    assert (first_root / notice_path).read_bytes() == console_stub_license
+    assert first[notice_path] == second[notice_path]
+
+
+@pytest.mark.service
+def test_the_windows_capsule_refuses_to_materialize_without_the_license_notice(
+    tmp_path: Path, console_stub: bytes
+) -> None:
+    """A Windows target reserves the notice, so materialization without it fails."""
+    with open_real_materializer_session(
+        tmp_path, target=TargetTriple.WINDOWS_X86_64
+    ) as session:
+        plan = derive_capsule_assembly_plan(session, api_versions=_API_VERSIONS)
+        root = tmp_path / "gen-win-no-notice"
+        root.mkdir()
+        root_lease = resolve_directory_authority(root)
+        with (
+            directory_lease(root_lease) as generation,
+            claim_new_directory(generation, "capsule") as capsule,
+            pytest.raises(CapsuleMaterializationError, match="license bytes were not"),
+        ):
+            materialize_capsule_closures(
+                plan,
+                session,
+                api_versions=_API_VERSIONS,
+                destination_root=capsule.path,
+                generation_authority=generation,
+                destination_authority=capsule,
+                source_date_epoch=_SOURCE_DATE_EPOCH,
+                windows_launcher_stub=console_stub,
+            )
 
 
 # ---------------------------------------------------------------------------

@@ -18,6 +18,7 @@ from pathlib import Path
 
 import pytest
 
+from vaultspec_a2a.desktop.capsule_input_authoring import emit_acp_closure_inventory
 from vaultspec_a2a.desktop.capsule_license import (
     AcpLicenseOverride,
     CapsuleInputAuthoringError,
@@ -27,9 +28,19 @@ from vaultspec_a2a.desktop.capsule_license import (
     load_license_overrides,
     validate_license_overrides,
 )
-from vaultspec_a2a.desktop.lock_reconciliation import AcpNodeSelection
+from vaultspec_a2a.desktop.closure_inventory import (
+    AcpClosureInventory,
+    canonical_closure_inventory_bytes,
+)
+from vaultspec_a2a.desktop.contract import TargetTriple
+from vaultspec_a2a.desktop.lock_reconciliation import (
+    AcpNodeSelection,
+    reconcile_acp_closure_lock_bytes,
+)
 
 _REPO_ROOT = Path(__file__).resolve().parents[4]
+_ACP_ROOT = "@agentclientprotocol/claude-agent-acp"
+_NODE_VERSION = "22.17.0"
 
 
 def _member(name: str, payload: bytes) -> tuple[tarfile.TarInfo, bytes]:
@@ -222,4 +233,189 @@ def test_an_orphaned_wheel_override_version_fails_closed() -> None:
             acp_overrides=acp_overrides,
             uv_lock_bytes=(_REPO_ROOT / "uv.lock").read_bytes(),
             package_lock_bytes=(_REPO_ROOT / "package-lock.json").read_bytes(),
+        )
+
+
+def _closure_member(
+    cache_root: Path,
+    *,
+    name: str,
+    version: str,
+    install_path: str,
+    dependency_paths: tuple[str, ...],
+) -> tuple[AcpNodeSelection, str, int, str]:
+    """Build one real tarball and its node; return node, sha256, size, integrity."""
+    payload = json.dumps({"license": "MIT", "name": name, "version": version}).encode()
+    members = [
+        _member("package/package.json", payload),
+        _member("package/index.js", b"export {};\n"),
+        _member("package/LICENSE", b"mit\n"),
+    ]
+    raw = io.BytesIO()
+    with tarfile.open(fileobj=raw, mode="w", format=tarfile.PAX_FORMAT) as archive:
+        for info, body in members:
+            archive.addfile(info, io.BytesIO(body))
+    tarball = gzip.compress(raw.getvalue(), mtime=0)
+    sha256 = hashlib.sha256(tarball).hexdigest()
+    (cache_root / sha256).write_bytes(tarball)
+    integrity = "sha512-" + base64.b64encode(hashlib.sha512(tarball).digest()).decode(
+        "ascii"
+    )
+    filename = name.rsplit("/", 1)[-1]
+    url = f"https://registry.npmjs.org/{name}/-/{filename}-{version}.tgz"
+    node = AcpNodeSelection(
+        name=name,
+        install_path=install_path,
+        version=version,
+        url=url,
+        integrity=integrity,
+        dependency_paths=dependency_paths,
+    )
+    return node, sha256, len(tarball), integrity
+
+
+def _linux_acp_closure(cache_root: Path) -> tuple[tuple, bytes]:
+    """Build a real 4-node ACP closure for the Linux x64 target plus its lock."""
+    native = "@anthropic-ai/claude-agent-sdk-linux-x64"
+    acp_path = f"node_modules/{_ACP_ROOT}"
+    sdk_path = "node_modules/@anthropic-ai/claude-agent-sdk"
+    native_path = f"node_modules/{native}"
+    peer_path = "node_modules/peer-runtime"
+
+    acp = _closure_member(
+        cache_root,
+        name=_ACP_ROOT,
+        version="0.59.0",
+        install_path=acp_path,
+        dependency_paths=(sdk_path,),
+    )
+    sdk = _closure_member(
+        cache_root,
+        name="@anthropic-ai/claude-agent-sdk",
+        version="0.3.207",
+        install_path=sdk_path,
+        dependency_paths=tuple(sorted((native_path, peer_path))),
+    )
+    native_member = _closure_member(
+        cache_root,
+        name=native,
+        version="0.3.207",
+        install_path=native_path,
+        dependency_paths=(),
+    )
+    peer = _closure_member(
+        cache_root,
+        name="peer-runtime",
+        version="2.1.0",
+        install_path=peer_path,
+        dependency_paths=(),
+    )
+
+    artifacts = tuple(
+        derive_acp_package_artifact(
+            node, cache_root=cache_root, sha256=sha256, size=size, overrides={}
+        )
+        for node, sha256, size, _ in (acp, sdk, native_member, peer)
+    )
+
+    packages = {
+        "": {"name": "vaultspec-a2a", "dependencies": {_ACP_ROOT: "0.59.0"}},
+        acp_path: {
+            "version": "0.59.0",
+            "resolved": acp[0].url,
+            "integrity": acp[3],
+            "dependencies": {"@anthropic-ai/claude-agent-sdk": "0.3.207"},
+        },
+        sdk_path: {
+            "version": "0.3.207",
+            "resolved": sdk[0].url,
+            "integrity": sdk[3],
+            "optionalDependencies": {native: "0.3.207"},
+            "peerDependencies": {"peer-runtime": ">=2"},
+        },
+        native_path: {
+            "version": "0.3.207",
+            "resolved": native_member[0].url,
+            "integrity": native_member[3],
+            "optional": True,
+            "os": ["linux"],
+            "cpu": ["x64"],
+        },
+        peer_path: {
+            "version": "2.1.0",
+            "resolved": peer[0].url,
+            "integrity": peer[3],
+            "peer": True,
+        },
+    }
+    lock = json.dumps(
+        {
+            "name": "vaultspec-a2a",
+            "lockfileVersion": 3,
+            "requires": True,
+            "packages": packages,
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode()
+    return artifacts, lock
+
+
+def test_emits_a_reconciling_deterministic_acp_inventory(tmp_path: Path) -> None:
+    artifacts, lock = _linux_acp_closure(tmp_path)
+
+    inventory, emitted = emit_acp_closure_inventory(
+        artifacts,
+        target=TargetTriple.LINUX_X86_64,
+        lock_bytes=lock,
+        root_package=_ACP_ROOT,
+        node_full_version=_NODE_VERSION,
+        cache_root=tmp_path,
+    )
+
+    assert emitted.path.name == emitted.sha256
+    assert emitted.path.read_bytes() == canonical_closure_inventory_bytes(inventory)
+    # The written inventory round-trips: it loads and reconciles through the real
+    # ACP reconciler, the same gate the consumer applies.
+    loaded = AcpClosureInventory.model_validate_json(emitted.path.read_bytes())
+    reconcile_acp_closure_lock_bytes(
+        loaded, lock_bytes=lock, root_package=_ACP_ROOT, node_full_version=_NODE_VERSION
+    )
+
+    _, again = emit_acp_closure_inventory(
+        artifacts,
+        target=TargetTriple.LINUX_X86_64,
+        lock_bytes=lock,
+        root_package=_ACP_ROOT,
+        node_full_version=_NODE_VERSION,
+        cache_root=tmp_path,
+    )
+    assert again.sha256 == emitted.sha256
+
+
+def test_acp_emission_fails_closed_when_the_inventory_does_not_reconcile(
+    tmp_path: Path,
+) -> None:
+    artifacts, _ = _linux_acp_closure(tmp_path)
+    broken = json.dumps(
+        {
+            "name": "vaultspec-a2a",
+            "lockfileVersion": 3,
+            "requires": True,
+            "packages": {
+                "": {"name": "vaultspec-a2a", "dependencies": {_ACP_ROOT: "0.59.0"}}
+            },
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode()
+
+    with pytest.raises(CapsuleInputAuthoringError, match="does not reconcile"):
+        emit_acp_closure_inventory(
+            artifacts,
+            target=TargetTriple.LINUX_X86_64,
+            lock_bytes=broken,
+            root_package=_ACP_ROOT,
+            node_full_version=_NODE_VERSION,
+            cache_root=tmp_path,
         )

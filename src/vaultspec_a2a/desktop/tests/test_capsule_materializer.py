@@ -141,18 +141,33 @@ def test_materialize_is_deterministic_across_two_generations(tmp_path: Path) -> 
     assert sorted(first, key=key) == sorted(second, key=key)
 
 
-def test_materialize_rejects_the_windows_launcher_stub(tmp_path: Path) -> None:
+@pytest.mark.parametrize(
+    ("stub", "message"),
+    [
+        (None, "stub bytes were not supplied"),
+        (b"not the pinned console stub", "do not match the pinned stub digest"),
+    ],
+)
+def test_materialize_refuses_a_windows_target_without_the_pinned_stub(
+    tmp_path: Path, stub: bytes | None, message: str
+) -> None:
+    """A Windows launcher is only composable from the content-addressed stub.
+
+    Absent bytes and bytes that are not the pinned stub are both refused
+    before anything is written, rather than emitting an executable nobody can
+    re-derive from the declared inputs.
+    """
     with open_real_materializer_session(
         tmp_path, target=TargetTriple.WINDOWS_X86_64
     ) as session:
         plan = derive_capsule_assembly_plan(session, api_versions=_API_VERSIONS)
-        root = tmp_path / "gen-windows"
+        root = tmp_path / f"gen-windows-{len(stub or b'')}"
         root.mkdir()
         root_lease = resolve_directory_authority(root)
         with (
             directory_lease(root_lease) as generation,
             claim_new_directory(generation, "capsule") as capsule,
-            pytest.raises(CapsuleMaterializationError, match="Windows launcher stub"),
+            pytest.raises(CapsuleMaterializationError, match=message),
         ):
             materialize_capsule_closures(
                 plan,
@@ -162,6 +177,7 @@ def test_materialize_rejects_the_windows_launcher_stub(tmp_path: Path) -> None:
                 generation_authority=generation,
                 destination_authority=capsule,
                 source_date_epoch=_SOURCE_DATE_EPOCH,
+                windows_launcher_stub=stub,
             )
 
 

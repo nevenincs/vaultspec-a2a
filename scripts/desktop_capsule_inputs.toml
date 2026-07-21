@@ -11,8 +11,24 @@
 # CPython source: astral-sh/python-build-standalone 20250702 (CPython 3.13.5),
 #   install_only variants (tar.gz, no dev headers or debug symbols).
 # Node.js source: nodejs.org/dist v22.17.0 official release archives.
+# Launcher stub source: PyPI distlib 0.4.3 wheel (PSF-2.0), donating only its
+#   x86-64 console simple-launcher binary to the Windows product launchers.
 # ACP source: registry.npmjs.org tarball matching package-lock.json integrity.
 #   npm integrity: sha512-GejLH5qxsI5IoSDfhyOVDEsRNxqi6y0Rcj5FstVeOwMACSht/...
+
+# Windows console-launcher stub donor.  The Scripts/{name}.exe product
+# launchers are composed at build time from `member` (the x86-64 console
+# simple-launcher binary) plus a fixed shebang plus a deterministic zipapp.
+# Only that single member is read: the donor's Python modules are never
+# imported, so the donor is not a build- or run-time dependency.  The stub is
+# architecture-specific; a Windows arm64 target would need its own member.
+[launcher_stub]
+version = "0.4.3"
+license = "PSF-2.0"
+url = "https://files.pythonhosted.org/packages/02/08/9c41fb51ab5b43eb21674aff13df270e8ba6c4b29c8624e328dc7a9482af/distlib-0.4.3-py2.py3-none-any.whl"
+sha256 = "4b0ce306c966eb73bc3a7b6abad017c556dadd92c44701562cd528ac7fde4d5b"
+member = "distlib/t64.exe"
+member_sha256 = "81a618f21cb87db9076134e70388b6e9cb7c2106739011b6a51772d22cae06b7"
 
 [acp]
 version = "0.59.0"

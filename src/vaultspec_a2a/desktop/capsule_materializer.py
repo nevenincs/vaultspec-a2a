@@ -22,6 +22,12 @@ inventory-build time, and again by :class:`vaultspec_a2a.desktop.
 capsule_assembly.ReservedTreeFile` at plan-derivation time — so they flow
 through the identical materialization path as non-license members.
 
+Beside the replayed closures this module generates the two product launchers
+the plan reserves. The POSIX pair is a rendered shell script; the Windows pair
+is composed from a pinned, content-addressed console stub plus a fixed shebang
+plus a deterministic zip payload, so the caller supplies the stub bytes
+(:func:`extract_windows_launcher_stub`) for a Windows target.
+
 Interpreter subtrees (``runtime/cpython``, ``runtime/node``) and the
 dependency locks, component manifest, and installed-tree evidence stay outside
 this module's scope; they are verbatim projections or directly-emitted bytes
@@ -30,6 +36,7 @@ the capsule build script assembles beside this module's output.
 
 from __future__ import annotations
 
+import hashlib
 import io
 import tarfile
 import zipfile
@@ -56,7 +63,10 @@ if TYPE_CHECKING:
     from .installed_inventory import InstalledClosureInventory, InstalledFileRecord
 
 __all__ = [
+    "WINDOWS_LAUNCHER_STUB_MEMBER",
+    "WINDOWS_LAUNCHER_STUB_SHA256",
     "CapsuleMaterializationError",
+    "extract_windows_launcher_stub",
     "materialize_capsule_closures",
 ]
 
@@ -78,6 +88,40 @@ _ACP_CLOSURE_ROLES: Final = frozenset(
 #: exercised only through generated launcher content, never dereferenced here.
 _CPYTHON_LAUNCHER_BINARY: Final = f"runtime/cpython/bin/python{CPYTHON_VERSION_PIN}"
 _PYTHON_LIBRARY_ROOT: Final = "runtime/python"
+
+#: The Windows standalone layout has no `bin/` segment and no version-suffixed
+#: interpreter name: the interpreter sits at the interpreter subtree root. The
+#: path is spelled with backslashes because it is consumed by the launcher
+#: stub's own shebang parser and by `CreateProcess`, not by this process.
+_WINDOWS_CPYTHON_LAUNCHER_BINARY: Final = "runtime\\cpython\\python.exe"
+
+#: Isolated-mode interpreter flags carried by both generated launchers: `-I`
+#: keeps every ambient Python environment variable, user site directory, and
+#: unsafe path out of the capsule's interpreter, and `-B` keeps it from
+#: writing `.pyc` files into the immutable capsule tree.
+_LAUNCHER_INTERPRETER_FLAGS: Final = "-I -B"
+
+#: Relocation token the console stub replaces with its own directory (the
+#: stub matches the token including its trailing separator). It makes the
+#: composed executable address the bundled interpreter relative to itself, so
+#: the capsule stays relocatable exactly as the POSIX launcher is.
+_WINDOWS_LAUNCHER_DIR_TOKEN: Final = "<launcher_dir>\\"
+
+#: Fixed epoch for the launcher's appended zip entries (the minimum ZIP
+#: timestamp, matching the capsule archive's own entry stamping): the composed
+#: launcher must be byte-identical from identical inputs regardless of when or
+#: on which host it is built.
+_LAUNCHER_ZIP_EPOCH: Final = (1980, 1, 1, 0, 0, 0)
+
+#: Donor archive member and pinned digest for the x86-64 console launcher
+#: stub. The stub is a content-addressed build input declared beside every
+#: other pinned download; the packaging library shipping it is a stub donor
+#: only and is never imported at build or run time. The single vendored binary
+#: is architecture-specific: another Windows architecture needs its own stub.
+WINDOWS_LAUNCHER_STUB_MEMBER: Final = "distlib/t64.exe"
+WINDOWS_LAUNCHER_STUB_SHA256: Final = (
+    "81a618f21cb87db9076134e70388b6e9cb7c2106739011b6a51772d22cae06b7"
+)
 
 
 class CapsuleMaterializationError(CapsuleAssemblyError):
@@ -422,6 +466,10 @@ def _validated_console_reference(reference: str) -> tuple[str, str]:
         raise CapsuleMaterializationError(
             "console-script reference is not directly importable"
         )
+    if not reference.isascii():
+        raise CapsuleMaterializationError(
+            "console-script reference is not representable in a launcher"
+        )
     return module, attribute
 
 
@@ -440,7 +488,7 @@ def _posix_launcher_bytes(entrypoint: ComponentEntrypoint) -> bytes:
 set -e
 capsule_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 export VAULTSPEC_A2A_CAPSULE_ROOT="$capsule_root"
-exec "$capsule_root/{_CPYTHON_LAUNCHER_BINARY}" -I -B -c '
+exec "$capsule_root/{_CPYTHON_LAUNCHER_BINARY}" {_LAUNCHER_INTERPRETER_FLAGS} -c '
 import os
 import sys
 
@@ -454,10 +502,122 @@ sys.exit(_entrypoint())
     return script.encode("ascii")
 
 
+def _validated_launcher_stub(stub: bytes | None) -> bytes:
+    """Content-address the console stub bytes before they enter a launcher.
+
+    The stub is a pinned build input like every other download, so bytes that
+    do not hash to the pinned digest are refused here rather than concatenated
+    into an executable nobody can re-derive.
+    """
+    if stub is None:
+        raise CapsuleMaterializationError(
+            "Windows launcher stub bytes were not supplied; cannot materialize "
+            "the Scripts launcher pair"
+        )
+    if hashlib.sha256(stub).hexdigest() != WINDOWS_LAUNCHER_STUB_SHA256:
+        raise CapsuleMaterializationError(
+            "Windows launcher stub bytes do not match the pinned stub digest"
+        )
+    return stub
+
+
+def extract_windows_launcher_stub(donor: BinaryIO) -> bytes:
+    """Extract and content-address the console stub from its donor archive.
+
+    ``donor`` is the pinned, already digest-verified donor wheel declared in
+    the capsule input cache. Only the single console stub member is read; the
+    donor's Python modules are never imported, so the library shipping the
+    stub is not a build- or run-time dependency of this project.
+    """
+    try:
+        archive = zipfile.ZipFile(donor)
+    except (OSError, RuntimeError, zipfile.BadZipFile, zlib.error):
+        raise CapsuleMaterializationError(
+            "cannot open the Windows launcher stub donor archive"
+        ) from None
+    with archive:
+        try:
+            payload = archive.read(WINDOWS_LAUNCHER_STUB_MEMBER)
+        except (KeyError, OSError, RuntimeError, zipfile.BadZipFile, zlib.error):
+            raise CapsuleMaterializationError(
+                "Windows launcher stub member is absent from its donor archive"
+            ) from None
+    return _validated_launcher_stub(payload)
+
+
+def _windows_launcher_shebang(depth: int) -> bytes:
+    """Render the relocatable, quoted shebang line the console stub parses.
+
+    ``depth`` is the launcher's own directory depth below the capsule root, so
+    the interpreter is addressed by walking back up from the stub's
+    substituted ``<launcher_dir>``. The executable is double-quoted because a
+    capsule may be installed under a path containing spaces.
+    """
+    interpreter = (
+        _WINDOWS_LAUNCHER_DIR_TOKEN + "..\\" * depth + _WINDOWS_CPYTHON_LAUNCHER_BINARY
+    )
+    return f'#!"{interpreter}" {_LAUNCHER_INTERPRETER_FLAGS}\n'.encode("ascii")
+
+
+def _windows_launcher_zipapp(module: str, attribute: str, *, depth: int) -> bytes:
+    """Render the deterministic zip payload the bundled interpreter executes.
+
+    The interpreter places the launcher archive itself at the head of the
+    import path, so ``__main__`` resolves the capsule root from its own
+    location and re-pins the materialized ``runtime/python`` library root
+    ahead of it before importing the entrypoint (the same runtime import-path
+    pin the POSIX launcher performs). ``depth + 2`` parents lead from
+    ``<launcher>/__main__.py`` back to the capsule root: one for the
+    ``__main__.py`` entry inside the launcher archive, one for the launcher
+    file itself, and ``depth`` for the directories holding it.
+    """
+    source = f"""import os
+import sys
+
+_capsule_root = __file__
+for _ in range({depth + 2}):
+    _capsule_root = os.path.dirname(_capsule_root)
+os.environ["VAULTSPEC_A2A_CAPSULE_ROOT"] = _capsule_root
+sys.path.insert(0, os.path.join(_capsule_root, "{_PYTHON_LIBRARY_ROOT}"))
+from {module} import {attribute} as _entrypoint
+
+sys.exit(_entrypoint())
+"""
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w", compression=zipfile.ZIP_STORED) as archive:
+        info = zipfile.ZipInfo("__main__.py", date_time=_LAUNCHER_ZIP_EPOCH)
+        info.compress_type = zipfile.ZIP_STORED
+        # ``ZipInfo`` defaults these to the *building* host's platform and
+        # umask; pinning them keeps a launcher built on Windows byte-identical
+        # to one built on a POSIX release runner.
+        info.create_system = 0
+        info.external_attr = 0
+        archive.writestr(info, source.encode("ascii"))
+    return buffer.getvalue()
+
+
+def _windows_launcher_bytes(entrypoint: ComponentEntrypoint, stub: bytes) -> bytes:
+    """Compose one relocatable Windows console launcher for a contract entrypoint.
+
+    The composition is the console stub's own documented format — stub bytes,
+    then one ASCII shebang line, then an appended zip whose ``__main__`` the
+    interpreter runs. Every part is fixed or content-addressed, so identical
+    inputs yield a byte-identical executable.
+    """
+    module, attribute = _validated_console_reference(entrypoint.reference)
+    depth = len(entrypoint.relative_command) - 1
+    return (
+        stub
+        + _windows_launcher_shebang(depth)
+        + _windows_launcher_zipapp(module, attribute, depth=depth)
+    )
+
+
 def _materialize_launchers(
     session: VerifiedCapsuleInputSession,
     *,
     plan_files: dict[str, ReservedTreeFile],
+    windows_launcher_stub: bytes | None,
     api_versions: ApiVersionRange,
     destination_root: Path,
     generation_authority: DirectoryAuthority,
@@ -470,17 +630,9 @@ def _materialize_launchers(
         raise CapsuleMaterializationError(
             "component manifest target does not match the verified session"
         )
+    stub: bytes | None = None
     if manifest.target is TargetTriple.WINDOWS_X86_64:
-        # The Windows Scripts/{name}.exe launcher stub source is a consciously
-        # open ADR sub-decision (no stub asset is declared in
-        # scripts/desktop_capsule_inputs.toml): fail loud rather than invent
-        # or best-effort a stub. Every other Windows capsule byte is still
-        # materialized by the caller through the other entry points of this
-        # module; only the launcher pair is blocked.
-        raise CapsuleMaterializationError(
-            "Windows launcher stub source is not yet grounded; cannot "
-            "materialize Scripts/{name}.exe"
-        )
+        stub = _validated_launcher_stub(windows_launcher_stub)
 
     projected: list[ProjectedFile] = []
     for entrypoint, role in (
@@ -494,7 +646,11 @@ def _materialize_launchers(
         reserved = _reserved_file(
             plan_files, capsule_path, allowed_roles=frozenset({role})
         )
-        content = _posix_launcher_bytes(entrypoint)
+        content = (
+            _posix_launcher_bytes(entrypoint)
+            if stub is None
+            else _windows_launcher_bytes(entrypoint, stub)
+        )
         with io.BytesIO(content) as stream:
             emitted = materialize_verified_member(
                 stream,
@@ -520,6 +676,7 @@ def materialize_capsule_closures(
     generation_authority: DirectoryAuthority,
     destination_authority: DirectoryAuthority,
     source_date_epoch: int,
+    windows_launcher_stub: bytes | None = None,
 ) -> tuple[ProjectedFile, ...]:
     """Materialize every wheel-, npm-, and launcher-sourced capsule reservation.
 
@@ -531,6 +688,11 @@ def materialize_capsule_closures(
     written byte is verified against its declared ``InstalledFileRecord``
     during the write; interpreter subtrees, dependency locks, the component
     manifest, and installed-tree evidence are the caller's responsibility.
+
+    ``windows_launcher_stub`` carries the pinned console stub bytes obtained
+    through :func:`extract_windows_launcher_stub`; a Windows target without
+    them fails loud rather than emitting a launcher pair nobody can execute.
+    Every other target ignores it.
     """
     plan = _validated_plan(plan)
     session = _validated_session(session)
@@ -572,6 +734,7 @@ def materialize_capsule_closures(
         _materialize_launchers(
             session,
             plan_files=plan_files,
+            windows_launcher_stub=windows_launcher_stub,
             api_versions=api_versions,
             destination_root=destination_root,
             generation_authority=generation_authority,

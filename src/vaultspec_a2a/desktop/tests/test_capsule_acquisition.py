@@ -12,15 +12,19 @@ from __future__ import annotations
 import base64
 import hashlib
 import io
+import threading
 import tomllib
 from contextlib import contextmanager
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import TYPE_CHECKING
+from urllib.request import Request
 
 import pytest
 
 from vaultspec_a2a.desktop.capsule_input_authoring import (
     CapsuleInputAuthoringError,
+    _https_opener,
     acquire_artifact,
 )
 
@@ -198,6 +202,66 @@ def test_acquire_rejects_a_malformed_sha256_pin(tmp_path: Path) -> None:
             expected_sha256="not-a-digest",
             open_stream=_stream_of(b"bytes"),
         )
+
+
+@contextmanager
+def _redirecting_server(location_by_path: dict[str, str]) -> Iterator[str]:
+    """Serve real 302 redirects from a loopback HTTP server on an ephemeral port."""
+
+    class _Handler(BaseHTTPRequestHandler):
+        def do_GET(self) -> None:
+            location = location_by_path.get(self.path)
+            if location is None:
+                self.send_error(404)
+                return
+            self.send_response(302)
+            self.send_header("Location", location)
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), _Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        yield f"http://127.0.0.1:{server.server_address[1]}"
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
+
+
+def test_redirect_to_plain_http_is_refused_at_the_network_boundary() -> None:
+    with (
+        _redirecting_server({"/start": "http://127.0.0.1:9/evil"}) as base,
+        pytest.raises(
+            CapsuleInputAuthoringError,
+            match="redirect target is not credential-free HTTPS",
+        ),
+    ):
+        _https_opener.open(Request(f"{base}/start", method="GET"), timeout=10)
+
+
+def test_redirect_to_a_credentialed_https_target_is_refused() -> None:
+    with (
+        _redirecting_server({"/start": "https://user:pass@127.0.0.1:9/evil"}) as base,
+        pytest.raises(
+            CapsuleInputAuthoringError,
+            match="redirect target is not credential-free HTTPS",
+        ),
+    ):
+        _https_opener.open(Request(f"{base}/start", method="GET"), timeout=10)
+
+
+def test_redirect_to_a_clean_https_target_passes_the_boundary_guard() -> None:
+    # A valid credential-free HTTPS redirect target is followed by the guard; the
+    # follow then fails to connect (unreachable host), proving the guard admitted
+    # it rather than refusing it at the boundary.
+    with (
+        _redirecting_server({"/start": "https://127.0.0.1:9/dest"}) as base,
+        pytest.raises(OSError) as caught,
+    ):
+        _https_opener.open(Request(f"{base}/start", method="GET"), timeout=10)
+    assert not isinstance(caught.value, CapsuleInputAuthoringError)
 
 
 @pytest.mark.service

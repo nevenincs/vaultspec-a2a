@@ -27,7 +27,7 @@ from dataclasses import dataclass
 from itertools import count
 from pathlib import Path
 from typing import TYPE_CHECKING, BinaryIO, Final, Protocol
-from urllib.request import Request, urlopen
+from urllib.request import HTTPRedirectHandler, Request, build_opener
 
 from packaging.tags import Tag, compatible_tags, cpython_tags, mac_platforms
 from packaging.utils import InvalidWheelFilename, parse_wheel_filename
@@ -50,6 +50,8 @@ class ByteReader(Protocol):
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator
     from contextlib import AbstractContextManager
+    from http.client import HTTPMessage
+    from typing import IO
 
     from .lock_reconciliation import LockedWheel, PythonPackageSelection
 
@@ -237,11 +239,43 @@ def _resolved_cache_root(cache_root: Path) -> Path:
         ) from None
 
 
+class _CredentialFreeHttpsRedirect(HTTPRedirectHandler):
+    """Re-apply the credential-free-HTTPS check to every redirect target.
+
+    The default handler follows 3xx redirects transparently, so a redirect to
+    ``http://`` or a credentialed URL would otherwise bypass the boundary check
+    the original URL passed.  Integrity still holds - bytes are pin-verified
+    before admission - but the network boundary must stay HTTPS-only in transit.
+    """
+
+    def redirect_request(
+        self,
+        req: Request,
+        fp: IO[bytes],
+        code: int,
+        msg: str,
+        headers: HTTPMessage,
+        newurl: str,
+    ) -> Request | None:
+        try:
+            _validate_https_url(newurl)
+        except ValueError:
+            raise CapsuleInputAuthoringError(
+                f"acquisition redirect target is not credential-free HTTPS: {newurl}"
+            ) from None
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+
+_https_opener = build_opener(_CredentialFreeHttpsRedirect)
+
+
 @contextmanager
 def _open_https_stream(url: str) -> Iterator[ByteReader]:
     """Open one credential-free HTTPS byte stream; the sole network boundary."""
     try:
-        with urlopen(Request(url, method="GET"), timeout=_DOWNLOAD_TIMEOUT) as response:
+        with _https_opener.open(
+            Request(url, method="GET"), timeout=_DOWNLOAD_TIMEOUT
+        ) as response:
             yield response
     except (urllib.error.URLError, OSError) as error:
         raise CapsuleInputAuthoringError(f"cannot acquire {url}: {error}") from None

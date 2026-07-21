@@ -496,14 +496,31 @@ def remove_service_json_if_owned(path: Path, pid: int) -> bool:
     if state in (DiscoveryState.ABSENT, DiscoveryState.MALFORMED):
         if state is DiscoveryState.MALFORMED:
             # A malformed file with no readable owner is ours to clear on exit.
+            # The credential goes with it: an unreadable record can never again
+            # reference its token, so leaving the token behind would strand a
+            # credential no reader can reach and no exit path would collect.
             path.unlink(missing_ok=True)
+            _remove_handoff_credential(path)
             return True
         return False
     if info is not None and info.pid == pid:
         path.unlink(missing_ok=True)
-        path.with_name("service.token").unlink(missing_ok=True)
+        _remove_handoff_credential(path)
         return True
     return False
+
+
+def _remove_handoff_credential(discovery_path: Path) -> None:
+    """Remove the credential beside *discovery_path*, refusing a link-like target.
+
+    The refusal matters: unlinking a symlink placed where the credential belongs
+    would let an attacker who can write the directory redirect the removal, so a
+    link-like destination is left alone rather than followed.
+    """
+    credential = discovery_path.with_name("service.token")
+    if path_is_link_like(credential):
+        return
+    credential.unlink(missing_ok=True)
 
 
 # ---------------------------------------------------------------------------

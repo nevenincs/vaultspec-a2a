@@ -10,6 +10,7 @@ related:
   - '[[2026-07-21-ecosystem-artifact-lifecycle-W01-P01-S02]]'
   - '[[2026-07-21-ecosystem-artifact-lifecycle-W01-P02-S03]]'
   - '[[2026-07-21-ecosystem-artifact-lifecycle-W01-P02-S04]]'
+  - '[[2026-07-21-ecosystem-artifact-lifecycle-W01-P02-S23]]'
   - '[[2026-07-21-ecosystem-artifact-lifecycle-W02-P03-S05]]'
   - '[[2026-07-21-ecosystem-artifact-lifecycle-W02-P03-S06]]'
   - '[[2026-07-21-ecosystem-artifact-lifecycle-W02-P03-S07]]'
@@ -45,6 +46,7 @@ Auto-generated index of all documents tagged with `#ecosystem-artifact-lifecycle
 - `2026-07-21-ecosystem-artifact-lifecycle-W01-P01-S02` - Record the residual risk that a confined delete still removes real files inside the user checkout
 - `2026-07-21-ecosystem-artifact-lifecycle-W01-P02-S03` - Run an armed gateway and record whether the published discovery record carries a handoff reference
 - `2026-07-21-ecosystem-artifact-lifecycle-W01-P02-S04` - Make a tokenless discovery publication fail loudly instead of silently unlinking the credential
+- `2026-07-21-ecosystem-artifact-lifecycle-W01-P02-S23` - Remove the discovery record when the gateway that published it exits
 - `2026-07-21-ecosystem-artifact-lifecycle-W02-P03-S05` - Define the retention disposition vocabulary and the declaration record type
 - `2026-07-21-ecosystem-artifact-lifecycle-W02-P03-S06` - Attach a retention declaration to each artifact-creating seam in the lifecycle package
 - `2026-07-21-ecosystem-artifact-lifecycle-W02-P03-S07` - Attach a retention declaration to the worker autospawn stderr log seam

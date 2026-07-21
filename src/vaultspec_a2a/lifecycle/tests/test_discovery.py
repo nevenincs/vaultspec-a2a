@@ -329,3 +329,43 @@ def test_deliberate_unpublish_still_clears_the_credential(tmp_path) -> None:
 
     assert not credential.exists()
     assert "handoff_reference" not in json.loads(path.read_text(encoding="utf-8"))
+
+
+def test_removing_a_malformed_record_also_clears_its_credential(tmp_path) -> None:
+    """A malformed record must not strand the credential beside it.
+
+    An unreadable record can never again reference its token, so a token left
+    behind is one no reader can reach and no exit path would ever collect.
+    """
+    path = service_json_path(tmp_path)
+    write_service_json(path, port=8000, pid=os.getpid(), service_token="stranded")
+    credential = path.parent / "service.token"
+    assert credential.exists()
+    path.write_text("{ not json", encoding="utf-8")
+
+    assert remove_service_json_if_owned(path, os.getpid()) is True
+
+    assert not path.exists()
+    assert not credential.exists()
+
+
+def test_credential_removal_refuses_a_link_like_destination(tmp_path) -> None:
+    """A symlink where the credential belongs must not be followed on removal.
+
+    Otherwise anyone able to write the discovery directory could redirect the
+    unlink at a file of their choosing.
+    """
+    path = service_json_path(tmp_path)
+    write_service_json(path, port=8000, pid=os.getpid(), allow_tokenless=True)
+    outsider = tmp_path / "outside.txt"
+    outsider.write_text("must-survive", encoding="utf-8")
+    link = path.parent / "service.token"
+    try:
+        link.symlink_to(outsider)
+    except (OSError, NotImplementedError) as exc:
+        pytest.skip(f"host cannot create symlinks: {exc}")
+
+    assert remove_service_json_if_owned(path, os.getpid()) is True
+
+    assert outsider.read_text(encoding="utf-8") == "must-survive"
+    assert link.is_symlink()

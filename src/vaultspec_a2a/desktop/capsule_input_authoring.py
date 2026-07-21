@@ -71,6 +71,7 @@ if TYPE_CHECKING:
     from typing import IO
 
     from .lock_reconciliation import (
+        AcpClosureSelection,
         LockedWheel,
         PythonClosureSelection,
         PythonPackageSelection,
@@ -80,10 +81,15 @@ if TYPE_CHECKING:
 
 __all__ = [
     "AcquiredArtifact",
+    "AcquiredWheel",
     "BuiltDistribution",
     "CapsuleInputAuthoringError",
     "EmittedInventory",
+    "PinnedSource",
+    "acquire_acp_closure",
     "acquire_artifact",
+    "acquire_pinned_sources",
+    "acquire_python_closure",
     "build_a2a_distribution_wheel",
     "emit_acp_closure_inventory",
     "emit_python_closure_inventory",
@@ -545,6 +551,90 @@ def _reuse_cached_artifact(
     ):
         return None
     return AcquiredArtifact(sha256=expected_sha256, size=total, path=cached)
+
+
+@dataclass(frozen=True, slots=True)
+class AcquiredWheel:
+    """One resolved-and-selected wheel acquired into the content cache."""
+
+    wheel: LockedWheel
+    acquired: AcquiredArtifact
+
+
+def acquire_python_closure(
+    selection: PythonClosureSelection,
+    *,
+    cache_root: Path,
+    open_stream: ArtifactStreamOpener | None = None,
+) -> dict[str, AcquiredWheel]:
+    """Select and acquire every wheel of one target's Python closure.
+
+    Selection chooses the one shipped wheel per package (the tag-priority
+    authority); acquisition verifies each wheel against its lock-pinned sha256
+    and size before admitting it to the cache.  Returns the acquired wheels
+    keyed by canonical package name.
+    """
+    acquired: dict[str, AcquiredWheel] = {}
+    for package in selection.packages:
+        wheel = select_target_wheel(package, target=selection.target)
+        result = acquire_artifact(
+            wheel.url,
+            cache_root=cache_root,
+            expected_sha256=wheel.sha256,
+            expected_size=wheel.size,
+            open_stream=open_stream,
+        )
+        acquired[package.name] = AcquiredWheel(wheel=wheel, acquired=result)
+    return acquired
+
+
+def acquire_acp_closure(
+    selection: AcpClosureSelection,
+    *,
+    cache_root: Path,
+    open_stream: ArtifactStreamOpener | None = None,
+) -> dict[str, AcquiredArtifact]:
+    """Acquire every tarball of one target's ACP closure, keyed by install path.
+
+    npm locks pin only a SHA-512 integrity, so each tarball is verified against
+    that SRI; the cache key is the verified sha256 the ACP verifier and the
+    descriptor later bind.
+    """
+    acquired: dict[str, AcquiredArtifact] = {}
+    for node in selection.packages:
+        acquired[node.install_path] = acquire_artifact(
+            node.url,
+            cache_root=cache_root,
+            expected_sha512_sri=node.integrity,
+            open_stream=open_stream,
+        )
+    return acquired
+
+
+@dataclass(frozen=True, slots=True)
+class PinnedSource:
+    """One pinned non-package source input (interpreter, adapter, or stub)."""
+
+    url: str
+    sha256: str
+
+
+def acquire_pinned_sources(
+    sources: tuple[PinnedSource, ...],
+    *,
+    cache_root: Path,
+    open_stream: ArtifactStreamOpener | None = None,
+) -> tuple[AcquiredArtifact, ...]:
+    """Acquire every committed pinned source, verifying each against its sha256."""
+    return tuple(
+        acquire_artifact(
+            source.url,
+            cache_root=cache_root,
+            expected_sha256=source.sha256,
+            open_stream=open_stream,
+        )
+        for source in sources
+    )
 
 
 @dataclass(frozen=True, slots=True)

@@ -22,6 +22,7 @@ related:
   - '[[2026-07-21-ecosystem-artifact-lifecycle-W02-P04-S13]]'
   - '[[2026-07-21-ecosystem-artifact-lifecycle-W03-P05-S14]]'
   - '[[2026-07-21-ecosystem-artifact-lifecycle-W03-P05-S15]]'
+  - '[[2026-07-21-ecosystem-artifact-lifecycle-W03-P05-S16]]'
   - '[[2026-07-21-ecosystem-artifact-lifecycle-W03-P05-S24]]'
   - '[[2026-07-21-ecosystem-artifact-lifecycle-adr]]'
   - '[[2026-07-21-ecosystem-artifact-lifecycle-artifact-delete-residual-risk-audit]]'
@@ -61,6 +62,7 @@ Auto-generated index of all documents tagged with `#ecosystem-artifact-lifecycle
 - `2026-07-21-ecosystem-artifact-lifecycle-W02-P04-S13` - Add a test that forces a write failure and asserts no temporary file survives
 - `2026-07-21-ecosystem-artifact-lifecycle-W03-P05-S14` - Export the child session record out of the isolated config home before teardown
 - `2026-07-21-ecosystem-artifact-lifecycle-W03-P05-S15` - Resolve the isolated config home under the declared desktop temporary homes root
+- `2026-07-21-ecosystem-artifact-lifecycle-W03-P05-S16` - Add a sweeper for orphaned isolated config homes left by a crash
 - `2026-07-21-ecosystem-artifact-lifecycle-W03-P05-S24` - Call session preservation from the ACP teardown path before the config home is removed
 
 ### plan

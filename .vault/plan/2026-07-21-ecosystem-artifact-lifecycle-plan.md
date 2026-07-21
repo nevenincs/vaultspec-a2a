@@ -105,7 +105,7 @@ Stop destroying the child session transcript unread.
 
 - [x] `W03.P05.S14` - Export the child session record out of the isolated config home before teardown; `src/vaultspec_a2a/providers/_acp_config_home.py`.
 - [x] `W03.P05.S15` - Resolve the isolated config home under the declared desktop temporary homes root; `src/vaultspec_a2a/desktop/profile.py`.
-- [ ] `W03.P05.S16` - Add a sweeper for orphaned isolated config homes left by a crash; `src/vaultspec_a2a/providers/_acp_config_home.py`.
+- [x] `W03.P05.S16` - Add a sweeper for orphaned isolated config homes left by a crash; `src/vaultspec_a2a/providers/_acp_config_home.py`.
 - [x] `W03.P05.S24` - Call session preservation from the ACP teardown path before the config home is removed; `src/vaultspec_a2a/providers/acp_chat_model.py`.
 
 ### Phase `W03.P06` - complete the truncation path

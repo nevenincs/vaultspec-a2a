@@ -29,6 +29,8 @@ import json
 import logging
 import shutil
 import tempfile
+import time
+from contextlib import suppress
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -39,6 +41,7 @@ from ..artifacts import ArtifactDeclaration, RetentionDisposition
 from ._acp_project_mcp import enumerate_ancestor_mcp_names
 
 __all__ = [
+    "ORPHAN_HOME_MIN_AGE_SECONDS",
     "PRESERVED_SESSION_LIMIT",
     "SESSION_RECORD_DECLARATION",
     "cleanup_isolated_config_home",
@@ -47,12 +50,34 @@ __all__ = [
     "preserve_session_record",
     "preserved_session_root",
     "should_isolate_config_home",
+    "sweep_orphan_config_homes",
 ]
 
 logger = logging.getLogger(__name__)
 
 PRESERVED_SESSION_LIMIT = 20
 """How many preserved session records to keep before evicting the oldest."""
+
+_HOME_PREFIX = "vaultspec-acp-home-"
+
+ORPHAN_HOME_MIN_AGE_SECONDS = 24 * 60 * 60
+"""How stale an abandoned home must be before the sweep reclaims it.
+
+A home carries no owning process id, so age stands in for liveness. The window is
+deliberately generous: deleting a live run's configuration is far worse than
+keeping residue for another cycle.
+"""
+
+ORPHAN_HOME_DECLARATION = ArtifactDeclaration(
+    name="acp-isolated-config-home",
+    root="<desktop temp homes root, else system temp>/vaultspec-acp-home-<random>",
+    owner="providers._acp_config_home",
+    disposition=RetentionDisposition.SESSION_SCOPED,
+    mechanism=(
+        "removed at teardown when the run unwinds; a home left by a crash is "
+        "reclaimed by sweep_orphan_config_homes once it is a day stale"
+    ),
+)
 
 # Preservation only became defensible once it was bounded. The record this keeps
 # is the agent's own account of a run, which is worth outliving the run - but an
@@ -68,7 +93,10 @@ SESSION_RECORD_DECLARATION = ArtifactDeclaration(
     ),
 )
 
-ARTIFACT_DECLARATIONS: tuple[ArtifactDeclaration, ...] = (SESSION_RECORD_DECLARATION,)
+ARTIFACT_DECLARATIONS: tuple[ArtifactDeclaration, ...] = (
+    SESSION_RECORD_DECLARATION,
+    ORPHAN_HOME_DECLARATION,
+)
 
 # Minimal flags that keep the freshly-created config home from stalling the CLI
 # on first-run onboarding / survey prompts in a non-interactive session.
@@ -158,7 +186,12 @@ def create_isolated_config_home(
     The caller sets ``CLAUDE_CONFIG_DIR`` to the returned path and MUST call
     :func:`cleanup_isolated_config_home` after the subprocess is reaped.
     """
-    home = Path(tempfile.mkdtemp(prefix="vaultspec-acp-home-", dir=_temp_home_root()))
+    home = Path(tempfile.mkdtemp(prefix=_HOME_PREFIX, dir=_temp_home_root()))
+    # Reclaim what earlier crashed runs left behind, once per home creation - the
+    # same boot-time cadence the worker-log sweep uses, and for the same reason:
+    # there is no supervisor to run it on a schedule.
+    with suppress(OSError):
+        sweep_orphan_config_homes(keep=home)
     _write_config(home, mcp_servers=mcp_servers)
     declared = sorted(mcp_servers or {})
     declared_set = set(declared)
@@ -219,6 +252,58 @@ def _write_settings(
     (home / "settings.json").write_text(
         json.dumps(settings, indent=2), encoding="utf-8"
     )
+
+
+def sweep_orphan_config_homes(
+    *, keep: Path | None = None, root: Path | None = None
+) -> list[Path]:
+    """Remove per-run config homes abandoned by a process that never unwound.
+
+    Teardown removes a home when the run unwinds, but a killed or crashed worker
+    leaves one behind and nothing collects it.  On an armed desktop install that
+    residue accumulates inside the application home, where no system-wide
+    temporary sweep will ever reach it.
+
+    A home carries no owning process id in its name, so liveness cannot be
+    established the way the worker-log sweep establishes it from the process
+    registry.  Age is the honest substitute: a home untouched for longer than
+    :data:`ORPHAN_HOME_MIN_AGE_SECONDS` belonged to a run that is no longer
+    writing to it.  The threshold is generous precisely because the cost of
+    deleting a live run's home far exceeds the cost of keeping residue one more
+    cycle.
+
+    Args:
+        keep: A home to leave alone regardless of age - the caller's own.
+        root: Directory to sweep; defaults to the profile's temporary-home root.
+
+    Returns:
+        The homes removed, for the caller to log.
+    """
+    search_root = root if root is not None else _temp_home_root()
+    if search_root is None:
+        search_root = Path(tempfile.gettempdir())
+    cutoff = time.time() - ORPHAN_HOME_MIN_AGE_SECONDS
+    removed: list[Path] = []
+    try:
+        candidates = list(search_root.glob(f"{_HOME_PREFIX}*"))
+    except OSError:
+        return removed
+    for candidate in candidates:
+        if not candidate.is_dir() or (keep is not None and candidate == keep):
+            continue
+        try:
+            if candidate.stat().st_mtime > cutoff:
+                continue
+        except OSError:
+            continue
+        shutil.rmtree(candidate, ignore_errors=True)
+        if not candidate.exists():
+            removed.append(candidate)
+    if removed:
+        logger.info(
+            "Swept %d orphaned ACP config home(s) from %s", len(removed), search_root
+        )
+    return removed
 
 
 def _temp_home_root() -> Path | None:

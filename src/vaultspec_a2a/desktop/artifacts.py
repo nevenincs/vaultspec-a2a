@@ -1433,12 +1433,33 @@ def _installed_file_records_from_layout(
 
 def _verified_closure_member_evidence(
     sessions: tuple[VerifiedPackageArchiveSession, ...],
+    *,
+    input_dir: Path,
 ) -> dict[str, frozenset[str]]:
-    """Bind every session's own whole-archive digest to its verified member names."""
-    return {
+    """Bind every session's own whole-archive digest to its verified member names.
+
+    A standalone external license is never an archive member, so it cannot borrow
+    a whole-archive digest's evidence entry; it names its own verified identity
+    instead. ``verify_external_license_artifacts`` re-reads and confirms the exact
+    cached bytes each ``descriptor.external_licenses`` entry declares before that
+    entry's own ``sha256``/``source_id`` may act as a membership-proof evidence key,
+    so an external license's provenance is proved, not asserted.
+    """
+    evidence: dict[str, frozenset[str]] = {
         session.archive.descriptor.sha256: frozenset(session.archive.members)
         for session in sessions
     }
+    try:
+        for session in sessions:
+            descriptor = session.archive.descriptor
+            if not descriptor.external_licenses:
+                continue
+            verify_external_license_artifacts(session.archive, input_dir=input_dir)
+            for external in descriptor.external_licenses:
+                evidence[external.sha256] = frozenset({external.source_id})
+    except PackageArchiveError as error:
+        raise ArtifactInputError(str(error)) from None
+    return evidence
 
 
 def _python_closure_layout(
@@ -1517,7 +1538,10 @@ def build_python_closure_installed_inventory(
     authority to derive every content file's
     destination and provenance, joins caller-supplied license placements, and
     persists canonical v2 inventory bytes into the content-addressed input cache.
-    License placement is a separate, not-yet-authoritative concern the caller owns.
+    License placement is a separate, not-yet-authoritative concern the caller owns;
+    a caller-placed external license still proves membership legitimately, since
+    the evidence this build enforces covers both real archive members and each
+    session's declared, re-verified external licenses.
     """
     layout = _python_closure_layout(wheel_sessions, console_scripts=console_scripts)
     files = tuple(
@@ -1535,7 +1559,9 @@ def build_python_closure_installed_inventory(
         entrypoints=layout.entrypoints,
         licenses=licenses,
         files=files,
-        verified_closure_members=_verified_closure_member_evidence(wheel_sessions),
+        verified_closure_members=_verified_closure_member_evidence(
+            wheel_sessions, input_dir=input_dir
+        ),
         input_dir=input_dir,
     )
 
@@ -1557,7 +1583,10 @@ def build_acp_closure_installed_inventory(
     applies the pure install-layout authority to derive every content file's
     destination and provenance, joins caller-supplied license placements, and
     persists canonical v2 inventory bytes into the content-addressed input cache.
-    License placement is a separate, not-yet-authoritative concern the caller owns.
+    License placement is a separate, not-yet-authoritative concern the caller owns;
+    a caller-placed external license still proves membership legitimately, since
+    the evidence this build enforces covers both real archive members and each
+    session's declared, re-verified external licenses.
     """
     layout = _acp_closure_layout(tarball_sessions, bin_entrypoints=bin_entrypoints)
     files = tuple(
@@ -1575,7 +1604,9 @@ def build_acp_closure_installed_inventory(
         entrypoints=layout.entrypoints,
         licenses=licenses,
         files=files,
-        verified_closure_members=_verified_closure_member_evidence(tarball_sessions),
+        verified_closure_members=_verified_closure_member_evidence(
+            tarball_sessions, input_dir=input_dir
+        ),
         input_dir=input_dir,
     )
 

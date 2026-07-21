@@ -24,6 +24,7 @@ from vaultspec_a2a.desktop.artifacts import (
 )
 from vaultspec_a2a.desktop.closure_inventory import (
     AcpPackageArtifact,
+    ExternalLicenseArtifact,
     PythonWheelArtifact,
 )
 from vaultspec_a2a.desktop.contract import TargetTriple
@@ -454,3 +455,154 @@ def test_build_acp_closure_installed_inventory_carries_real_npm_provenance(
 
     loaded = load_installed_closure_inventory(resolved_descriptor, input_dir=cache)
     assert loaded.value.tree_digest == inventory.tree_digest
+
+
+def _external_license(cache: Path) -> tuple[ExternalLicenseArtifact, bytes]:
+    payload = b"Additional NOTICE terms for the example package.\n"
+    artifact = ExternalLicenseArtifact(
+        source_id="external/example-NOTICE",
+        declared_member="NOTICE",
+        url="https://example.invalid/example/NOTICE",
+        sha256=hashlib.sha256(payload).hexdigest(),
+        size=len(payload),
+    )
+    (cache / artifact.sha256).write_bytes(payload)
+    return artifact, payload
+
+
+def test_build_acp_closure_installed_inventory_carries_real_external_license_provenance(
+    tmp_path: Path,
+) -> None:
+    """A standalone external license reconciles with no hand-extended evidence."""
+    tarball_path = tmp_path / "example.tgz"
+    payload = _write_npm_tarball(tarball_path)
+    cache = tmp_path / "cache"
+    cache.mkdir()
+    external, external_bytes = _external_license(cache)
+    descriptor = _npm_descriptor(payload).model_copy(
+        update={
+            "external_licenses": (external,),
+            "redistribution_evidence": (
+                "tarball-license",
+                f"external-license:{external.source_id}",
+            ),
+        }
+    )
+
+    license_file = InstalledFileRecord(
+        relative_path="licenses/scope-example/LICENSE",
+        mode="0644",
+        size=len(b"npm license\n"),
+        sha256=hashlib.sha256(b"npm license\n").hexdigest(),
+        source_sha256=descriptor.sha256,
+        source_member="package/LICENSE",
+    )
+    license_record = InstalledLicenseRecord(
+        package="node_modules/@scope/example",
+        component=license_component_token("acp", "node_modules/@scope/example"),
+        license_expression="Apache-2.0",
+        source_member="package/LICENSE",
+        relative_path=license_file.relative_path,
+        sha256=license_file.sha256,
+    )
+    external_file = InstalledFileRecord(
+        relative_path="licenses/scope-example/NOTICE",
+        mode="0644",
+        size=external.size,
+        sha256=external.sha256,
+        source_sha256=external.sha256,
+        source_member=external.source_id,
+    )
+    external_record = InstalledLicenseRecord(
+        package="node_modules/@scope/example",
+        component=license_component_token("acp", "node_modules/@scope/example"),
+        license_expression="Apache-2.0",
+        source_member=external.source_id,
+        relative_path=external_file.relative_path,
+        sha256=external_file.sha256,
+    )
+
+    with open_verified_acp_package_archive(tarball_path, descriptor) as session:
+        resolved_descriptor, inventory = build_acp_closure_installed_inventory(
+            target=_TARGET,
+            source_inventory_sha256=_SOURCE_DIGEST,
+            lock_sha256=_LOCK_DIGEST,
+            tarball_sessions=(session,),
+            bin_entrypoints=("node_modules/@scope/example/index.js",),
+            licenses=(license_record, external_record),
+            license_files=(license_file, external_file),
+            input_dir=cache,
+        )
+
+    notice = next(
+        file
+        for file in inventory.files
+        if file.relative_path == external_file.relative_path
+    )
+    assert notice.source_sha256 == external.sha256
+    assert notice.source_member == external.source_id
+    assert notice.sha256 == hashlib.sha256(external_bytes).hexdigest()
+
+    loaded = load_installed_closure_inventory(resolved_descriptor, input_dir=cache)
+    assert loaded.value.tree_digest == inventory.tree_digest
+
+
+def test_build_acp_closure_installed_inventory_rejects_a_forged_external_license(
+    tmp_path: Path,
+) -> None:
+    """A file naming an artifact never verified as an external license fails closed."""
+    tarball_path = tmp_path / "example.tgz"
+    payload = _write_npm_tarball(tarball_path)
+    cache = tmp_path / "cache"
+    cache.mkdir()
+    external, _external_bytes = _external_license(cache)
+    descriptor = _npm_descriptor(payload).model_copy(
+        update={
+            "external_licenses": (external,),
+            "redistribution_evidence": (
+                "tarball-license",
+                f"external-license:{external.source_id}",
+            ),
+        }
+    )
+
+    license_file = InstalledFileRecord(
+        relative_path="licenses/scope-example/LICENSE",
+        mode="0644",
+        size=len(b"npm license\n"),
+        sha256=hashlib.sha256(b"npm license\n").hexdigest(),
+        source_sha256=descriptor.sha256,
+        source_member="package/LICENSE",
+    )
+    license_record = InstalledLicenseRecord(
+        package="node_modules/@scope/example",
+        component=license_component_token("acp", "node_modules/@scope/example"),
+        license_expression="Apache-2.0",
+        source_member="package/LICENSE",
+        relative_path=license_file.relative_path,
+        sha256=license_file.sha256,
+    )
+    forged_bytes = b"a forged notice that was never verified\n"
+    forged_file = InstalledFileRecord(
+        relative_path="licenses/scope-example/FORGED-NOTICE",
+        mode="0644",
+        size=len(forged_bytes),
+        sha256=hashlib.sha256(forged_bytes).hexdigest(),
+        source_sha256=hashlib.sha256(b"never-verified-artifact").hexdigest(),
+        source_member="external/never-verified",
+    )
+
+    with (
+        open_verified_acp_package_archive(tarball_path, descriptor) as session,
+        pytest.raises(InstalledInventoryError, match="verified closure member"),
+    ):
+        build_acp_closure_installed_inventory(
+            target=_TARGET,
+            source_inventory_sha256=_SOURCE_DIGEST,
+            lock_sha256=_LOCK_DIGEST,
+            tarball_sessions=(session,),
+            bin_entrypoints=("node_modules/@scope/example/index.js",),
+            licenses=(license_record,),
+            license_files=(license_file, forged_file),
+            input_dir=cache,
+        )

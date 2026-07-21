@@ -58,6 +58,7 @@ from ..desktop._platform_acl import (
 from ..desktop._platform_acl import (
     windows_file_is_restricted as _windows_file_is_restricted,
 )
+from .atomic_write import atomic_write_text
 
 __all__ = [
     "ARTIFACT_DECLARATIONS",
@@ -446,9 +447,7 @@ def write_service_json(
         if path_is_link_like(credential_path):
             raise OSError("credential destination is link-like")
         credential_path.unlink(missing_ok=True)
-    tmp = path.with_name(f"{path.name}.{os.getpid()}.tmp")
-    tmp.write_text(json.dumps(record), encoding="utf-8")
-    os.replace(tmp, path)
+    atomic_write_text(path, json.dumps(record))
 
 
 def probe_health(base_url: str, *, timeout: float = 2.0) -> dict | None:
@@ -747,31 +746,5 @@ def write_desktop_discovery(
     path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
     if os.name == "posix":
         path.parent.chmod(0o700)
-    tmp = path.with_name(f"{path.name}.{os.getpid()}.tmp")
-    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-    try:
-        os.write(fd, json.dumps(payload).encode("utf-8"))
-        os.fsync(fd)
-    finally:
-        os.close(fd)
-    _atomic_replace(tmp, path)
+    atomic_write_text(path, json.dumps(payload), mode=0o600)
     return record
-
-
-def _atomic_replace(tmp: Path, path: Path) -> None:
-    """Rename *tmp* over *path*, riding out a transient Windows sharing violation.
-
-    ``os.replace`` is atomic, but on Windows a concurrent reader holding the target
-    open can briefly deny the rename with ``PermissionError``. The publication is
-    still all-or-nothing; this only retries the rename over the short contention
-    window rather than propagating a spurious failure to the heartbeat caller.
-    """
-    deadline = time.monotonic() + 2.0
-    while True:
-        try:
-            os.replace(tmp, path)
-            return
-        except PermissionError:
-            if time.monotonic() >= deadline:
-                raise
-            time.sleep(0.01)

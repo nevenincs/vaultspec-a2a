@@ -25,6 +25,7 @@ from dataclasses import asdict, dataclass, field
 from enum import StrEnum
 from typing import TYPE_CHECKING, Any
 
+from .atomic_write import atomic_write_text
 from .discovery import is_pid_alive, port_has_listener
 
 if TYPE_CHECKING:
@@ -262,9 +263,7 @@ def write_record(record: ProcRecord, *, home: Path | None = None) -> Path:
             f"(pid {existing.pid}, owner {existing.owner!r}); refusing to overwrite"
         )
     path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_name(f"{path.name}.{os.getpid()}.tmp")
-    tmp.write_text(json.dumps(record.to_dict(), indent=2), encoding="utf-8")
-    os.replace(tmp, path)
+    atomic_write_text(path, json.dumps(record.to_dict(), indent=2))
     return path
 
 

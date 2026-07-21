@@ -89,11 +89,11 @@ Introduce the declaration every artifact-creating seam must carry.
 
 Replace three independent write-and-rename implementations with one audited helper.
 
-- [ ] `W02.P04.S09` - Add one audited atomic write-and-rename helper that unlinks its temporary file on every failure path; `src/vaultspec_a2a/lifecycle/atomic_write.py`.
-- [ ] `W02.P04.S10` - Route the service discovery writer through the shared helper; `src/vaultspec_a2a/lifecycle/discovery.py`.
-- [ ] `W02.P04.S11` - Route the desktop discovery writer through the shared helper; `src/vaultspec_a2a/lifecycle/discovery.py`.
-- [ ] `W02.P04.S12` - Route the process registry record writer through the shared helper; `src/vaultspec_a2a/lifecycle/registry.py`.
-- [ ] `W02.P04.S13` - Add a test that forces a write failure and asserts no temporary file survives; `src/vaultspec_a2a/lifecycle/tests/test_atomic_write.py`.
+- [x] `W02.P04.S09` - Add one audited atomic write-and-rename helper that unlinks its temporary file on every failure path; `src/vaultspec_a2a/lifecycle/atomic_write.py`.
+- [x] `W02.P04.S10` - Route the service discovery writer through the shared helper; `src/vaultspec_a2a/lifecycle/discovery.py`.
+- [x] `W02.P04.S11` - Route the desktop discovery writer through the shared helper; `src/vaultspec_a2a/lifecycle/discovery.py`.
+- [x] `W02.P04.S12` - Route the process registry record writer through the shared helper; `src/vaultspec_a2a/lifecycle/registry.py`.
+- [x] `W02.P04.S13` - Add a test that forces a write failure and asserts no temporary file survives; `src/vaultspec_a2a/lifecycle/tests/test_atomic_write.py`.
 
 ## Wave `W03` - apply and close gaps
 

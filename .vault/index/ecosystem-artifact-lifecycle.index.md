@@ -14,6 +14,11 @@ related:
   - '[[2026-07-21-ecosystem-artifact-lifecycle-W02-P03-S06]]'
   - '[[2026-07-21-ecosystem-artifact-lifecycle-W02-P03-S07]]'
   - '[[2026-07-21-ecosystem-artifact-lifecycle-W02-P03-S08]]'
+  - '[[2026-07-21-ecosystem-artifact-lifecycle-W02-P04-S09]]'
+  - '[[2026-07-21-ecosystem-artifact-lifecycle-W02-P04-S10]]'
+  - '[[2026-07-21-ecosystem-artifact-lifecycle-W02-P04-S11]]'
+  - '[[2026-07-21-ecosystem-artifact-lifecycle-W02-P04-S12]]'
+  - '[[2026-07-21-ecosystem-artifact-lifecycle-W02-P04-S13]]'
   - '[[2026-07-21-ecosystem-artifact-lifecycle-adr]]'
   - '[[2026-07-21-ecosystem-artifact-lifecycle-artifact-delete-residual-risk-audit]]'
   - '[[2026-07-21-ecosystem-artifact-lifecycle-plan]]'
@@ -44,6 +49,11 @@ Auto-generated index of all documents tagged with `#ecosystem-artifact-lifecycle
 - `2026-07-21-ecosystem-artifact-lifecycle-W02-P03-S06` - Attach a retention declaration to each artifact-creating seam in the lifecycle package
 - `2026-07-21-ecosystem-artifact-lifecycle-W02-P03-S07` - Attach a retention declaration to the worker autospawn stderr log seam
 - `2026-07-21-ecosystem-artifact-lifecycle-W02-P03-S08` - Add a test asserting every declared seam names a disposition and an owner
+- `2026-07-21-ecosystem-artifact-lifecycle-W02-P04-S09` - Add one audited atomic write-and-rename helper that unlinks its temporary file on every failure path
+- `2026-07-21-ecosystem-artifact-lifecycle-W02-P04-S10` - Route the service discovery writer through the shared helper
+- `2026-07-21-ecosystem-artifact-lifecycle-W02-P04-S11` - Route the desktop discovery writer through the shared helper
+- `2026-07-21-ecosystem-artifact-lifecycle-W02-P04-S12` - Route the process registry record writer through the shared helper
+- `2026-07-21-ecosystem-artifact-lifecycle-W02-P04-S13` - Add a test that forces a write failure and asserts no temporary file survives
 
 ### plan
 

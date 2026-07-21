@@ -35,6 +35,7 @@ from pathlib import Path
 
 import httpx
 
+from ..artifacts import ArtifactDeclaration, RetentionDisposition
 from ..authoring.discovery import (
     HEARTBEAT_STALE_MS as HEARTBEAT_STALE_MS,
 )
@@ -59,11 +60,14 @@ from ..desktop._platform_acl import (
 )
 
 __all__ = [
+    "ARTIFACT_DECLARATIONS",
     "DESKTOP_DISCOVERY_VERSION",
     "DESKTOP_PROTOCOL_MAX",
     "DESKTOP_PROTOCOL_MIN",
     "HEARTBEAT_REFRESH_SECONDS",
     "HEARTBEAT_STALE_MS",
+    "SERVICE_CREDENTIAL_DECLARATION",
+    "SERVICE_DISCOVERY_DECLARATION",
     "DesktopDiscoveryRecord",
     "DesktopDiscoveryState",
     "DiscoveryState",
@@ -87,6 +91,39 @@ __all__ = [
 HEARTBEAT_REFRESH_SECONDS = 15
 
 _SERVICE_JSON_NAME = "service.json"
+
+# What this module leaves on disk, and who is answerable for it afterwards.
+# Both records are session-scoped in intent: they describe a running gateway and
+# are meaningless once it exits. Enforcement is currently partial, and the
+# mechanism text says so rather than implying a reaper that does not exist - a
+# record outliving its process is exactly how a pre-feature discovery file was
+# read as a live unauthenticated gateway two days after the process died.
+SERVICE_DISCOVERY_DECLARATION = ArtifactDeclaration(
+    name="service-discovery-record",
+    root="<a2a_home>/service.json",
+    owner="lifecycle.discovery",
+    disposition=RetentionDisposition.SESSION_SCOPED,
+    mechanism=(
+        "removed by remove_service_json_if_owned on a clean exit; NOT removed on "
+        "a crash, so a stale record can outlive its gateway indefinitely"
+    ),
+)
+
+SERVICE_CREDENTIAL_DECLARATION = ArtifactDeclaration(
+    name="service-handoff-credential",
+    root="<a2a_home>/service.token",
+    owner="lifecycle.discovery",
+    disposition=RetentionDisposition.SESSION_SCOPED,
+    mechanism=(
+        "replaced on each authenticated publication and unlinked by a deliberate "
+        "tokenless un-publish; shares the discovery record's crash exposure"
+    ),
+)
+
+ARTIFACT_DECLARATIONS: tuple[ArtifactDeclaration, ...] = (
+    SERVICE_DISCOVERY_DECLARATION,
+    SERVICE_CREDENTIAL_DECLARATION,
+)
 
 
 class DiscoveryState(StrEnum):

@@ -11,6 +11,9 @@ related:
   - '[[2026-07-21-ecosystem-artifact-lifecycle-W01-P02-S03]]'
   - '[[2026-07-21-ecosystem-artifact-lifecycle-W01-P02-S04]]'
   - '[[2026-07-21-ecosystem-artifact-lifecycle-W02-P03-S05]]'
+  - '[[2026-07-21-ecosystem-artifact-lifecycle-W02-P03-S06]]'
+  - '[[2026-07-21-ecosystem-artifact-lifecycle-W02-P03-S07]]'
+  - '[[2026-07-21-ecosystem-artifact-lifecycle-W02-P03-S08]]'
   - '[[2026-07-21-ecosystem-artifact-lifecycle-adr]]'
   - '[[2026-07-21-ecosystem-artifact-lifecycle-artifact-delete-residual-risk-audit]]'
   - '[[2026-07-21-ecosystem-artifact-lifecycle-plan]]'
@@ -38,6 +41,9 @@ Auto-generated index of all documents tagged with `#ecosystem-artifact-lifecycle
 - `2026-07-21-ecosystem-artifact-lifecycle-W01-P02-S03` - Run an armed gateway and record whether the published discovery record carries a handoff reference
 - `2026-07-21-ecosystem-artifact-lifecycle-W01-P02-S04` - Make a tokenless discovery publication fail loudly instead of silently unlinking the credential
 - `2026-07-21-ecosystem-artifact-lifecycle-W02-P03-S05` - Define the retention disposition vocabulary and the declaration record type
+- `2026-07-21-ecosystem-artifact-lifecycle-W02-P03-S06` - Attach a retention declaration to each artifact-creating seam in the lifecycle package
+- `2026-07-21-ecosystem-artifact-lifecycle-W02-P03-S07` - Attach a retention declaration to the worker autospawn stderr log seam
+- `2026-07-21-ecosystem-artifact-lifecycle-W02-P03-S08` - Add a test asserting every declared seam names a disposition and an owner
 
 ### plan
 

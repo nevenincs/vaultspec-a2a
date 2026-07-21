@@ -60,8 +60,8 @@ Remove the destructive and unverified conditions before any other work increases
 
 Make the hard-thread-delete file removal refuse to act outside a managed root.
 
-- [ ] `W01.P01.S01` - Add a managed-root containment guard that refuses artifact deletion outside the thread workspace root; `src/vaultspec_a2a/control/thread_service.py`.
-- [ ] `W01.P01.S02` - Add a test that executes the refusal against a path outside the managed root; `src/vaultspec_a2a/control/tests/test_thread_service_artifact_cleanup.py`.
+- [x] `W01.P01.S01` - Prove the existing workspace containment guard with a test that executes the escape refusal; `src/vaultspec_a2a/control/tests/test_thread_service_artifact_cleanup.py`.
+- [ ] `W01.P01.S02` - Record the residual risk that a confined delete still removes real files inside the user checkout; `.vault/audit`.
 
 ### Phase `W01.P02` - verify the desktop edge live
 

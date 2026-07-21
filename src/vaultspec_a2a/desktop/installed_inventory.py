@@ -51,6 +51,8 @@ __all__ = [
     "InstalledLicenseRecord",
     "LoadedInstalledClosureInventory",
     "build_installed_closure_inventory",
+    "build_verified_installed_closure_inventory",
+    "cache_verified_installed_closure_inventory",
     "canonical_installed_inventory_bytes",
     "installed_tree_digest",
     "license_component_token",
@@ -434,6 +436,146 @@ def build_installed_closure_inventory(
         licenses=licenses,
         files=files,
     )
+
+
+def _validated_verified_closure_members(value: object) -> dict[str, frozenset[str]]:
+    """Coerce and require non-empty verified closure-member evidence.
+
+    Production construction must supply this evidence; a build that omits it fails
+    closed instead of silently skipping the membership proof
+    ``_installed_tree_is_exact`` performs when evidence is present.
+    """
+    try:
+        evidence = _verified_member_evidence({INSTALLED_PROVENANCE_EVIDENCE_KEY: value})
+    except ValueError as error:
+        raise InstalledInventoryError(str(error)) from None
+    if not evidence:
+        raise InstalledInventoryError(
+            "installed inventory build requires verified closure-member evidence"
+        )
+    return evidence
+
+
+def build_verified_installed_closure_inventory(
+    *,
+    closure_kind: ClosureKind,
+    target: TargetTriple,
+    install_root: str,
+    source_inventory_sha256: str,
+    lock_sha256: str,
+    entrypoints: tuple[str, ...],
+    licenses: tuple[InstalledLicenseRecord, ...],
+    files: tuple[InstalledFileRecord, ...],
+    verified_closure_members: Mapping[str, Iterable[str]],
+) -> InstalledClosureInventory:
+    """Build the production installed inventory with its membership proof enforced.
+
+    Unlike :func:`build_installed_closure_inventory` (fixture-only: it constructs
+    the model directly, so ``_installed_tree_is_exact`` never receives evidence and
+    the membership branch can never fire), this routes construction through
+    ``model_validate`` with ``verified_closure_members`` bound into validation
+    context, so every file's ``source_sha256``/``source_member`` is proved to name a
+    real member of a verified closure package. Empty or missing evidence fails
+    closed rather than building an unprovenanced inventory.
+    """
+    evidence = _validated_verified_closure_members(verified_closure_members)
+    payload = {
+        "inventory_version": "vaultspec-installed-closure-v2",
+        "closure_kind": closure_kind,
+        "target": target,
+        "install_root": install_root,
+        "source_inventory_sha256": source_inventory_sha256,
+        "lock_sha256": lock_sha256,
+        "file_count": len(files),
+        "expanded_size": sum(file.size for file in files),
+        "tree_digest": _tree_digest(install_root, files),
+        "entrypoints": entrypoints,
+        "licenses": licenses,
+        "files": files,
+    }
+    try:
+        return InstalledClosureInventory.model_validate(
+            payload, context={INSTALLED_PROVENANCE_EVIDENCE_KEY: evidence}
+        )
+    except ValidationError as error:
+        raise InstalledInventoryError(str(error)) from None
+
+
+def _write_content_addressed(destination: Path, payload: bytes) -> None:
+    """Write ``payload`` to its content-addressed cache path, atomic and idempotent.
+
+    A pre-existing entry at the digest path must already carry these exact bytes (the
+    cache is content-addressed); anything else is a cache integrity failure, not a
+    conflict to resolve by overwriting.
+    """
+    if destination.exists() or destination.is_symlink():
+        existing, _ = _read_exact(destination, expected_size=len(payload))
+        if existing != payload:
+            raise InstalledInventoryError(
+                "installed inventory cache entry does not match its digest"
+            )
+        return
+    tmp = destination.with_name(f"{destination.name}.{os.getpid()}.tmp")
+    try:
+        with tmp.open("xb") as handle:
+            handle.write(payload)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(tmp, destination)
+    finally:
+        if tmp.exists():
+            tmp.unlink()
+
+
+def cache_verified_installed_closure_inventory(
+    *,
+    closure_kind: ClosureKind,
+    target: TargetTriple,
+    install_root: str,
+    source_inventory_sha256: str,
+    lock_sha256: str,
+    entrypoints: tuple[str, ...],
+    licenses: tuple[InstalledLicenseRecord, ...],
+    files: tuple[InstalledFileRecord, ...],
+    verified_closure_members: Mapping[str, Iterable[str]],
+    input_dir: Path,
+) -> tuple[InstalledClosureDescriptor, InstalledClosureInventory]:
+    """Build one production installed inventory and persist it into the input cache.
+
+    Emits canonical v2 inventory bytes keyed by their own digest, the shape every
+    ``load_installed_closure_inventory`` caller later reconciles against, and returns
+    the descriptor a capsule build script binds into its closure descriptor.
+    """
+    inventory = build_verified_installed_closure_inventory(
+        closure_kind=closure_kind,
+        target=target,
+        install_root=install_root,
+        source_inventory_sha256=source_inventory_sha256,
+        lock_sha256=lock_sha256,
+        entrypoints=entrypoints,
+        licenses=licenses,
+        files=files,
+        verified_closure_members=verified_closure_members,
+    )
+    payload = canonical_installed_inventory_bytes(inventory)
+    digest = hashlib.sha256(payload).hexdigest()
+    root = _resolved_cache(input_dir)
+    _write_content_addressed(root / digest, payload)
+    descriptor = InstalledClosureDescriptor(
+        descriptor_version="vaultspec-installed-closure-descriptor-v1",
+        closure_kind=inventory.closure_kind,
+        target=inventory.target,
+        install_root=inventory.install_root,
+        source_inventory_sha256=inventory.source_inventory_sha256,
+        lock_sha256=inventory.lock_sha256,
+        inventory_sha256=digest,
+        inventory_size=len(payload),
+        file_count=inventory.file_count,
+        license_count=len(inventory.licenses),
+        expanded_size=inventory.expanded_size,
+        tree_digest=inventory.tree_digest,
+    )
+    return descriptor, inventory
 
 
 def validate_dashboard_installed_closure_set(

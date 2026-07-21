@@ -69,11 +69,22 @@ from .contract import (
     ComponentManifest,
     TargetTriple,
 )
+from .install_layout import (
+    ArchiveMember,
+    ClosureLayout,
+    InstallLayoutError,
+    TarballSource,
+    WheelSource,
+    build_acp_closure_layout,
+    build_python_closure_layout,
+)
 from .installed_inventory import (
     InstalledClosureDescriptor,
     InstalledClosureInventory,
+    InstalledFileRecord,
     InstalledLicenseRecord,
     LoadedInstalledClosureInventory,
+    cache_verified_installed_closure_inventory,
     load_installed_closure_inventory,
     validate_dashboard_installed_closure_set,
 )
@@ -90,6 +101,7 @@ from .package_archives import (
     open_verified_acp_package_archive,
     open_verified_external_license,
     open_verified_python_wheel_archive,
+    verified_archive_member_evidence,
     verify_acp_package_archive,
     verify_external_license_artifacts,
     verify_python_wheel_archive,
@@ -121,6 +133,8 @@ __all__ = [
     "VerifiedCapsuleInputSession",
     "VerifiedPackageArchive",
     "VerifiedPackageArchiveSession",
+    "build_acp_closure_installed_inventory",
+    "build_python_closure_installed_inventory",
     "canonical_closure_inventory_bytes",
     "load_acp_closure_inventory",
     "load_capsule_closures",
@@ -1375,6 +1389,195 @@ def _verify_installed_license_sources(
                 raise ArtifactInputError(
                     f"installed license evidence does not match source for {identity}"
                 )
+
+
+def _wheel_filename_identity(filename: str) -> tuple[str, str]:
+    """Split one wheel filename into its distribution and version tokens.
+
+    The binary-distribution-format spec escapes non-alphanumeric runs to ``_`` in
+    both segments and reuses them verbatim for the ``.dist-info``/``.data`` directory
+    prefix; this is the same split :mod:`vaultspec_a2a.desktop.package_archives`
+    already performs to locate those directories during verification, so the layout
+    join derives the identical prefix rather than a second one.
+    """
+    parts = filename.removesuffix(".whl").split("-")
+    if len(parts) < 5:
+        raise ArtifactInputError("wheel filename identity is invalid")
+    return parts[0], parts[1]
+
+
+def _layout_archive_members(
+    evidence: tuple[LicenseMemberEvidence, ...],
+) -> tuple[ArchiveMember, ...]:
+    return tuple(
+        ArchiveMember(member=item.path, size=item.size, sha256=item.sha256)
+        for item in evidence
+    )
+
+
+def _installed_file_records_from_layout(
+    layout: ClosureLayout,
+) -> tuple[InstalledFileRecord, ...]:
+    return tuple(
+        InstalledFileRecord(
+            relative_path=file.relative_path,
+            mode=file.mode,
+            size=file.size,
+            sha256=file.sha256,
+            source_sha256=file.source_sha256,
+            source_member=file.source_member,
+        )
+        for file in layout.files
+    )
+
+
+def _verified_closure_member_evidence(
+    sessions: tuple[VerifiedPackageArchiveSession, ...],
+) -> dict[str, frozenset[str]]:
+    """Bind every session's own whole-archive digest to its verified member names."""
+    return {
+        session.archive.descriptor.sha256: frozenset(session.archive.members)
+        for session in sessions
+    }
+
+
+def _python_closure_layout(
+    wheel_sessions: tuple[VerifiedPackageArchiveSession, ...],
+    *,
+    console_scripts: tuple[tuple[str, str], ...],
+) -> ClosureLayout:
+    """Derive the Python closure's installed layout from open verified sessions."""
+    wheels = []
+    for session in wheel_sessions:
+        archive = session.archive
+        if not isinstance(archive.descriptor, PythonWheelArtifact):
+            raise ArtifactInputError("Python closure session descriptor is invalid")
+        distribution, version = _wheel_filename_identity(archive.descriptor.filename)
+        wheels.append(
+            WheelSource(
+                source_sha256=archive.descriptor.sha256,
+                distribution=distribution,
+                version=version,
+                members=_layout_archive_members(
+                    verified_archive_member_evidence(session)
+                ),
+            )
+        )
+    try:
+        return build_python_closure_layout(
+            wheels=tuple(wheels), console_scripts=console_scripts
+        )
+    except InstallLayoutError as error:
+        raise ArtifactInputError(str(error)) from None
+
+
+def _acp_closure_layout(
+    tarball_sessions: tuple[VerifiedPackageArchiveSession, ...],
+    *,
+    bin_entrypoints: tuple[str, ...],
+) -> ClosureLayout:
+    """Derive the ACP closure's installed layout from open verified sessions."""
+    tarballs = []
+    for session in tarball_sessions:
+        archive = session.archive
+        if not isinstance(archive.descriptor, AcpPackageArtifact):
+            raise ArtifactInputError("ACP closure session descriptor is invalid")
+        tarballs.append(
+            TarballSource(
+                source_sha256=archive.descriptor.sha256,
+                install_path=archive.descriptor.install_path,
+                members=_layout_archive_members(
+                    verified_archive_member_evidence(session)
+                ),
+            )
+        )
+    try:
+        return build_acp_closure_layout(
+            tarballs=tuple(tarballs), bin_entrypoints=bin_entrypoints
+        )
+    except InstallLayoutError as error:
+        raise ArtifactInputError(str(error)) from None
+
+
+def build_python_closure_installed_inventory(
+    *,
+    target: TargetTriple,
+    source_inventory_sha256: str,
+    lock_sha256: str,
+    wheel_sessions: tuple[VerifiedPackageArchiveSession, ...],
+    console_scripts: tuple[tuple[str, str], ...],
+    licenses: tuple[InstalledLicenseRecord, ...],
+    license_files: tuple[InstalledFileRecord, ...],
+    input_dir: Path,
+) -> tuple[InstalledClosureDescriptor, InstalledClosureInventory]:
+    """Build and cache the production Python closure's installed inventory.
+
+    Consumes still-open verified wheel sessions
+    (``open_verified_python_wheel_archive``), applies the pure install-layout
+    authority to derive every content file's
+    destination and provenance, joins caller-supplied license placements, and
+    persists canonical v2 inventory bytes into the content-addressed input cache.
+    License placement is a separate, not-yet-authoritative concern the caller owns.
+    """
+    layout = _python_closure_layout(wheel_sessions, console_scripts=console_scripts)
+    files = tuple(
+        sorted(
+            _installed_file_records_from_layout(layout) + license_files,
+            key=lambda file: file.relative_path,
+        )
+    )
+    return cache_verified_installed_closure_inventory(
+        closure_kind="python",
+        target=target,
+        install_root=layout.install_root,
+        source_inventory_sha256=source_inventory_sha256,
+        lock_sha256=lock_sha256,
+        entrypoints=layout.entrypoints,
+        licenses=licenses,
+        files=files,
+        verified_closure_members=_verified_closure_member_evidence(wheel_sessions),
+        input_dir=input_dir,
+    )
+
+
+def build_acp_closure_installed_inventory(
+    *,
+    target: TargetTriple,
+    source_inventory_sha256: str,
+    lock_sha256: str,
+    tarball_sessions: tuple[VerifiedPackageArchiveSession, ...],
+    bin_entrypoints: tuple[str, ...],
+    licenses: tuple[InstalledLicenseRecord, ...],
+    license_files: tuple[InstalledFileRecord, ...],
+    input_dir: Path,
+) -> tuple[InstalledClosureDescriptor, InstalledClosureInventory]:
+    """Build and cache the production ACP closure's installed inventory.
+
+    Consumes still-open verified npm sessions (``open_verified_acp_package_archive``),
+    applies the pure install-layout authority to derive every content file's
+    destination and provenance, joins caller-supplied license placements, and
+    persists canonical v2 inventory bytes into the content-addressed input cache.
+    License placement is a separate, not-yet-authoritative concern the caller owns.
+    """
+    layout = _acp_closure_layout(tarball_sessions, bin_entrypoints=bin_entrypoints)
+    files = tuple(
+        sorted(
+            _installed_file_records_from_layout(layout) + license_files,
+            key=lambda file: file.relative_path,
+        )
+    )
+    return cache_verified_installed_closure_inventory(
+        closure_kind="acp",
+        target=target,
+        install_root=layout.install_root,
+        source_inventory_sha256=source_inventory_sha256,
+        lock_sha256=lock_sha256,
+        entrypoints=layout.entrypoints,
+        licenses=licenses,
+        files=files,
+        verified_closure_members=_verified_closure_member_evidence(tarball_sessions),
+        input_dir=input_dir,
+    )
 
 
 def verify_lock_input(

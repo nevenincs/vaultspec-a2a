@@ -29,6 +29,7 @@ from vaultspec_a2a.desktop.package_archives import (
     PackageArchiveError,
     open_verified_acp_package_archive,
     open_verified_python_wheel_archive,
+    verified_archive_member_evidence,
     verify_acp_package_archive,
     verify_python_wheel_archive,
 )
@@ -572,6 +573,83 @@ def test_verified_acp_session_retains_original_bytes(tmp_path: Path) -> None:
         session.open_snapshot(),
     ):
         pass
+
+
+def test_verified_archive_member_evidence_matches_independent_wheel_digests(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "evidence.whl"
+    payload = _write_wheel(path)
+    descriptor = _wheel_descriptor(payload)
+
+    with open_verified_python_wheel_archive(
+        path, descriptor, target=TargetTriple.WINDOWS_X86_64
+    ) as session:
+        evidence = verified_archive_member_evidence(session)
+        members = session.archive.members
+
+    with zipfile.ZipFile(path) as archive:
+        independent = {}
+        for name in archive.namelist():
+            data = archive.read(name)
+            independent[name] = (len(data), hashlib.sha256(data).hexdigest())
+
+    assert tuple(item.path for item in evidence) == members
+    assert members == tuple(sorted(members))
+    for item in evidence:
+        expected_size, expected_sha256 = independent[item.path]
+        assert item.size == expected_size
+        assert item.sha256 == expected_sha256
+
+
+def test_verified_archive_member_evidence_matches_independent_npm_digests(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "evidence.tgz"
+    payload = _write_npm_tarball(path)
+    descriptor = _npm_descriptor(payload)
+
+    with open_verified_acp_package_archive(path, descriptor) as session:
+        evidence = verified_archive_member_evidence(session)
+        members = session.archive.members
+
+    independent = {}
+    with tarfile.open(path, "r:gz") as archive:
+        for entry in archive.getmembers():
+            if not entry.isfile():
+                continue
+            source = archive.extractfile(entry)
+            assert source is not None
+            data = source.read()
+            independent[entry.name] = (len(data), hashlib.sha256(data).hexdigest())
+
+    assert tuple(item.path for item in evidence) == members
+    assert members == tuple(sorted(members))
+    for item in evidence:
+        expected_size, expected_sha256 = independent[item.path]
+        assert item.size == expected_size
+        assert item.sha256 == expected_sha256
+
+
+def test_verified_archive_member_evidence_requires_an_open_session(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "closed.whl"
+    payload = _write_wheel(path)
+    descriptor = _wheel_descriptor(payload)
+
+    with open_verified_python_wheel_archive(
+        path, descriptor, target=TargetTriple.WINDOWS_X86_64
+    ) as session:
+        pass
+
+    with pytest.raises(PackageArchiveError, match="session is closed"):
+        verified_archive_member_evidence(session)
+
+
+def test_verified_archive_member_evidence_rejects_a_non_session_input() -> None:
+    with pytest.raises(PackageArchiveError, match="session is invalid"):
+        verified_archive_member_evidence(object())  # ty: ignore[invalid-argument-type]
 
 
 def test_wheel_preflight_reconciles_real_central_directory_count(

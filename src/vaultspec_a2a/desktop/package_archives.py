@@ -70,6 +70,7 @@ __all__ = [
     "open_verified_acp_package_archive",
     "open_verified_external_license",
     "open_verified_python_wheel_archive",
+    "verified_archive_member_evidence",
     "verify_acp_package_archive",
     "verify_external_license_artifacts",
     "verify_python_wheel_archive",
@@ -870,3 +871,99 @@ def verify_acp_package_archive(
     """Return detached npm evidence after a complete retained-session check."""
     with open_verified_acp_package_archive(path, descriptor) as session:
         return session.archive
+
+
+def _wheel_member_evidence(
+    snapshot: BinaryIO, members: tuple[str, ...]
+) -> tuple[LicenseMemberEvidence, ...]:
+    try:
+        with zipfile.ZipFile(snapshot, mode="r") as archive:
+            evidence = []
+            for name in members:
+                try:
+                    info = archive.getinfo(name)
+                except KeyError:
+                    raise PackageArchiveError(
+                        "verified wheel member is absent from its archive"
+                    ) from None
+                size, digest = _zip_member_sha256(archive, info)
+                evidence.append(
+                    LicenseMemberEvidence(path=name, size=size, sha256=digest)
+                )
+    except PackageArchiveError:
+        raise
+    except (OSError, RuntimeError, zipfile.BadZipFile, zlib.error):
+        raise PackageArchiveError("cannot read package archive member") from None
+    return tuple(evidence)
+
+
+def _tarball_member_evidence(
+    snapshot: BinaryIO, members: tuple[str, ...], *, compressed_size: int
+) -> tuple[LicenseMemberEvidence, ...]:
+    try:
+        with bounded_gzip_payload(
+            snapshot,
+            compressed_size=compressed_size,
+            limits=_PACKAGE_TAR_LIMITS,
+            label="npm tarball",
+        ) as tar_source:
+            preflight_tar_headers(
+                tar_source,
+                limits=_PACKAGE_TAR_LIMITS,
+                label="npm tarball",
+            )
+            with tarfile.open(fileobj=tar_source, mode="r:") as archive:
+                scanned = scan_tar_archive(
+                    archive,
+                    limits=_PACKAGE_TAR_LIMITS,
+                    label="npm tarball",
+                    allow_links=False,
+                )
+                by_name = dict(scanned.regular)
+                evidence = []
+                for name in members:
+                    member = by_name.get(name)
+                    if member is None:
+                        raise PackageArchiveError(
+                            "verified npm member is absent from its archive"
+                        )
+                    payload = _bounded_tar_member(archive, member, _MAX_MEMBER_SIZE)
+                    evidence.append(
+                        LicenseMemberEvidence(
+                            path=name,
+                            size=len(payload),
+                            sha256=hashlib.sha256(payload).hexdigest(),
+                        )
+                    )
+    except PackageArchiveError:
+        raise
+    except ArchiveAuthorityError as error:
+        raise PackageArchiveError(str(error)) from None
+    except (OSError, tarfile.TarError):
+        raise PackageArchiveError("cannot read package archive member") from None
+    return tuple(evidence)
+
+
+def verified_archive_member_evidence(
+    session: VerifiedPackageArchiveSession,
+) -> tuple[LicenseMemberEvidence, ...]:
+    """Return real size and sha256 evidence for every declared archive member.
+
+    Reads the session's still-open retained snapshot once, deriving each member's
+    evidence from the same whole-archive-verified bytes the session already holds
+    rather than any external or recomputed source. ``session`` must come from one
+    of the ``open_verified_*`` context-manager forms so its snapshot is live;
+    evidence is returned in ``session.archive.members`` order, which is already
+    sorted.
+    """
+    if not isinstance(session, VerifiedPackageArchiveSession):
+        raise PackageArchiveError("verified archive session is invalid")
+    archive = session.archive
+    with session.open_snapshot() as snapshot:
+        if isinstance(archive.descriptor, PythonWheelArtifact):
+            return _wheel_member_evidence(snapshot, archive.members)
+        if isinstance(archive.descriptor, AcpPackageArtifact):
+            return _tarball_member_evidence(
+                snapshot, archive.members, compressed_size=archive.descriptor.size
+            )
+        raise PackageArchiveError("verified archive descriptor is invalid")

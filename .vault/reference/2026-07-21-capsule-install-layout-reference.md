@@ -93,11 +93,25 @@ by explicit path under the bundled Node runtime.
    wheel ships `.data/` members or a non-trivial `Root-Is-Purelib: false`
    spread. The decision fails closed on unsupported `.data` keys, so
    correctness is safe today; relaxing that requires this audit first.
-2. **Windows launcher source.** The contract pins `Scripts/{name}.exe`
-   (`manifest.py:524-527`) but no launcher-stub asset exists in
-   `scripts/desktop_capsule_inputs.toml`. The `.exe` sourcing — a
-   content-addressed stub input versus a contract change to a script shim —
-   needs a grounded reference fact before the Windows launcher is materialized.
+2. **Windows launcher source — RESOLVED (2026-07-21) by the ADR revision.**
+   The contract pins `Scripts/{name}.exe` (`manifest.py:524-527`) and stays
+   unchanged; the launcher is composed from a content-addressed stub input.
+   Grounding facts, retrieved 2026-07-21: pip and distlib build every
+   `console_scripts` executable as stub bytes plus a shebang line plus a zipapp
+   (`launcher + shebang + zip_data` in distlib's `scripts.py` on master), and
+   CPython executes the appended zip so its `__main__` fully controls
+   `sys.path` before importing the entrypoint. The stub's shebang parser
+   accepts a `<launcher_dir>` token making the executable relocatable relative
+   to its own directory, and the shebang may carry interpreter arguments, so
+   isolated-mode parity with the POSIX launcher is expressible there. The
+   console stubs (`t32`, `t64`, `t64-arm`) ship inside the distlib wheel;
+   distlib 0.4.3 (2026-06-12) is licensed PSF-2.0, permitting redistribution
+   with notice retention. Only one Windows target exists among the five
+   (`x86_64-pc-windows-msvc`), so exactly one stub architecture is required.
+   The build concatenates the bytes itself, so distlib is a stub donor, never a
+   build- or run-time dependency, and output stays byte-identical. On Windows
+   the standalone interpreter layout has no `bin/` segment
+   (`runtime/cpython/python.exe`).
 3. **Entrypoints derivation.** The Python-closure `entrypoints` semantics
    (which installed file is promoted to 0755) are exercised only by test
    fixtures today (`src/vaultspec_a2a/desktop/tests/_capsule_inputs.py:228`);

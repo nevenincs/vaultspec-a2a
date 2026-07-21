@@ -124,10 +124,11 @@ provenance model, within the capsule boundary governed by
   leased-descriptor authorities; the generic projector's wheel refusal remains
   in force verbatim — this record adds the non-generic path beside it rather
   than overriding it.
-- Three sub-decisions are consciously left open and must be grounded before the
-  dependent step relies on them: the `.data` closure audit, the Windows
-  `Scripts/{name}.exe` launcher source, and the entrypoints 0755 derivation
-  (`2026-07-21-capsule-install-layout-reference`).
+- Two sub-decisions remain consciously open and must be grounded before the
+  dependent step relies on them: the `.data` closure audit and the entrypoints
+  0755 derivation (`2026-07-21-capsule-install-layout-reference`). The Windows
+  `Scripts/{name}.exe` launcher source is resolved by this revision: a
+  content-addressed stub input, not a contract change.
 
 ## Implementation
 
@@ -144,8 +145,23 @@ destination, with no `.bin` links. **Entrypoints:** the layout derives each
 closure's executable entrypoints (ACP root bin script; the Python module files
 backing the two contract console-script references), promoted to 0755.
 **Product launchers** stay outside the closures as plan-generated files at the
-contract-pinned `bin/{name}` and `Scripts/{name}.exe` paths; the Windows `.exe`
-stub sourcing is the open input-cache decision. **Installed inventory v2:** the
+contract-pinned `bin/{name}` and `Scripts/{name}.exe` paths. The Windows
+launcher is generated, not vendored whole: a content-addressed console stub -
+the x86_64 simple-launcher binary shipped inside the pinned PSF-2.0 distlib
+wheel, declared in the input cache by URL, sha256, version, and license like
+every other asset - is concatenated at build time with a fixed ASCII shebang
+addressing the bundled interpreter relative to the launcher's own directory
+(the stub's `<launcher_dir>` token, carrying the same isolated-mode interpreter
+flags as the POSIX launcher) and a deterministic epoch-stamped zip whose
+`__main__` resolves the capsule root from its own location, pins the
+`runtime/python` library root at the head of the import path, and calls the
+contract console-script entrypoint. Stub bytes plus fixed shebang plus
+canonical zip yield byte-identical launchers from identical inputs; the
+packaging library donating the stub is never a build- or run-time dependency.
+On Windows the bundled interpreter lives at the interpreter subtree root
+(`runtime/cpython/python.exe`; the standalone-build Windows layout has no
+`bin/` segment), and the launcher pair is written 0755 like its POSIX
+counterpart. **Installed inventory v2:** the
 file record gains `source_sha256` and `source_member`, the inventory version
 becomes `vaultspec-installed-closure-v2`, and the source-to-installed join
 additionally proves every provenance pair names a verified member of a closure
@@ -184,9 +200,16 @@ while supplying the spec-conformant path the refusal always implied
   no unprovenanced inventory can pass reconciliation.
 - Fail-closed `.data` handling may reject a future locked dependency; relaxing
   requires a closure audit and an amendment here, not an ad-hoc bypass.
-- The Windows `.exe` launcher sourcing is consciously left open; `S103` cannot
-  complete its Windows launcher until that input is grounded and added to the
-  input cache or the contract is amended.
+- The Windows launcher is unblocked as a stub-plus-generated-payload
+  concatenation; the launcher contract, manifest schema, and golden vectors are
+  unchanged. The materializing Step must add the stub asset to the input cache,
+  replace its fail-loud Windows refusal with the generator, and prove one
+  composed launcher by live execution on Windows; the stub's
+  relocatable-shebang behavior is documentation-verified until that run. The
+  single vendored binary is architecture-specific: a future Windows arm64
+  target requires its own stub asset through the same mechanism. Unsigned
+  launcher executables share the antivirus-flagging exposure of every
+  pip-installed script; code signing is not decided here.
 - Inventory bytes grow by two provenance fields per record within existing
   bounds; the dashboard-visible tree digest is unaffected.
 - The layout authority becomes the single place wheel/npm placement can change;

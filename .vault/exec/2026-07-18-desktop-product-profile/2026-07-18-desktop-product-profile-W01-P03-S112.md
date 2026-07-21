@@ -36,11 +36,7 @@ related:
 <!-- STEP RECORD:
      This file represents one Step from the originating plan. Identified
      by its canonical leaf identifier (S##) and ancestor display path.
-     The Reserve and place the donated launcher stub license notice inside the capsule so the redistribution terms ship with the product launchers and ## Scope
-
-- `src/vaultspec_a2a/desktop/capsule_assembly.py`
-- `src/vaultspec_a2a/desktop/capsule_materializer.py`
-- `src/vaultspec_a2a/desktop/tests/test_capsule_materializer.py` placeholders below are machine-filled
+     The heading and Scope placeholders below are machine-filled
      by `vaultspec-core vault add exec` from the originating Step row;
      do not fill them by hand. -->
 

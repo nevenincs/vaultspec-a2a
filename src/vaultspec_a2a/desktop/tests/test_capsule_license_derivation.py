@@ -22,10 +22,13 @@ from vaultspec_a2a.desktop.capsule_input_authoring import (
     ExternalLicenseOverride,
     LicenseOverride,
     derive_python_wheel_artifact,
+    emit_python_closure_inventory,
 )
+from vaultspec_a2a.desktop.closure_inventory import canonical_closure_inventory_bytes
 from vaultspec_a2a.desktop.contract import TargetTriple
 from vaultspec_a2a.desktop.lock_reconciliation import (
     LockedWheel,
+    PythonClosureSelection,
     PythonPackageSelection,
 )
 
@@ -231,4 +234,94 @@ def test_fails_closed_when_the_override_version_does_not_match_the_lock(
             target=_TARGET,
             cache_root=tmp_path,
             overrides=overrides,
+        )
+
+
+def _matching_lock(wheel: LockedWheel) -> bytes:
+    return (
+        "version = 1\n"
+        "revision = 3\n"
+        'requires-python = ">=3.13"\n\n'
+        "[[package]]\n"
+        'name = "vaultspec-a2a"\n'
+        'version = "0.1.0"\n'
+        'source = { editable = "." }\n'
+        "dependencies = [\n"
+        '  { name = "example-package" },\n'
+        "]\n\n"
+        "[[package]]\n"
+        'name = "example-package"\n'
+        'version = "1.2.3"\n'
+        'source = { registry = "https://pypi.org/simple" }\n'
+        "wheels = [\n"
+        f'  {{ url = "{wheel.url}", hash = "sha256:{wheel.sha256}", '
+        f"size = {wheel.size} }},\n"
+        "]\n"
+    ).encode()
+
+
+def _closure_selection(wheel: LockedWheel) -> PythonClosureSelection:
+    return PythonClosureSelection(
+        target=_TARGET, roots=("example-package",), packages=(_selection(wheel),)
+    )
+
+
+def test_emits_a_reconciling_deterministic_python_inventory(tmp_path: Path) -> None:
+    wheel = _build_wheel(tmp_path)
+    artifact = derive_python_wheel_artifact(
+        _selection(wheel), wheel, target=_TARGET, cache_root=tmp_path, overrides={}
+    )
+    lock = _matching_lock(wheel)
+
+    inventory, emitted = emit_python_closure_inventory(
+        _closure_selection(wheel),
+        (artifact,),
+        lock_bytes=lock,
+        root_package="vaultspec-a2a",
+        python_full_version="3.13.5",
+        cache_root=tmp_path,
+    )
+
+    assert emitted.path.name == emitted.sha256
+    assert emitted.path.read_bytes() == canonical_closure_inventory_bytes(inventory)
+    assert inventory.packages == (artifact,)
+    assert inventory.roots == ("example-package",)
+
+    _, again = emit_python_closure_inventory(
+        _closure_selection(wheel),
+        (artifact,),
+        lock_bytes=lock,
+        root_package="vaultspec-a2a",
+        python_full_version="3.13.5",
+        cache_root=tmp_path,
+    )
+    assert again.sha256 == emitted.sha256
+    assert again.size == emitted.size
+
+
+def test_emission_fails_closed_when_the_inventory_does_not_reconcile(
+    tmp_path: Path,
+) -> None:
+    wheel = _build_wheel(tmp_path)
+    artifact = derive_python_wheel_artifact(
+        _selection(wheel), wheel, target=_TARGET, cache_root=tmp_path, overrides={}
+    )
+    # A lock whose digest the inventory embeds but whose root omits the package.
+    lock = (
+        b"version = 1\nrevision = 3\n"
+        b'requires-python = ">=3.13"\n\n'
+        b"[[package]]\n"
+        b'name = "vaultspec-a2a"\n'
+        b'version = "0.1.0"\n'
+        b'source = { editable = "." }\n'
+    )
+
+    with pytest.raises(CapsuleInputAuthoringError, match="does not reconcile"):
+        emit_python_closure_inventory(
+            _closure_selection(wheel),
+            (artifact,),
+            lock_bytes=lock,
+            root_package="vaultspec-a2a",
+            python_full_version="3.13.5",
+            cache_root=tmp_path,
         )

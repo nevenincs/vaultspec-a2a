@@ -45,11 +45,17 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_valida
 
 from .closure_inventory import (
     ExternalLicenseArtifact,
+    PythonClosureInventory,
     PythonWheelArtifact,
     _validate_https_url,
+    canonical_closure_inventory_bytes,
     validate_portable_archive_path,
 )
 from .contract import TargetTriple
+from .lock_reconciliation import (
+    LockReconciliationError,
+    reconcile_python_closure_lock_bytes,
+)
 from .package_archives import (
     _LEGACY_LICENSE_BASENAME,
     PackageArchiveError,
@@ -75,17 +81,23 @@ if TYPE_CHECKING:
     from http.client import HTTPMessage
     from typing import IO
 
-    from .lock_reconciliation import LockedWheel, PythonPackageSelection
+    from .lock_reconciliation import (
+        LockedWheel,
+        PythonClosureSelection,
+        PythonPackageSelection,
+    )
 
     ArtifactStreamOpener = Callable[[str], AbstractContextManager[ByteReader]]
 
 __all__ = [
     "AcquiredArtifact",
     "CapsuleInputAuthoringError",
+    "EmittedInventory",
     "ExternalLicenseOverride",
     "LicenseOverride",
     "acquire_artifact",
     "derive_python_wheel_artifact",
+    "emit_python_closure_inventory",
     "load_license_overrides",
     "select_target_wheel",
     "target_platform_tags",
@@ -752,3 +764,69 @@ def derive_python_wheel_artifact(
             f"derived license identity for {package.name} fails verification: {error}"
         ) from None
     return artifact
+
+
+@dataclass(frozen=True, slots=True)
+class EmittedInventory:
+    """One canonical closure inventory written into the content-addressed cache."""
+
+    sha256: str
+    size: int
+    path: Path
+
+
+def emit_python_closure_inventory(
+    selection: PythonClosureSelection,
+    artifacts: tuple[PythonWheelArtifact, ...],
+    *,
+    lock_bytes: bytes,
+    root_package: str,
+    python_full_version: str,
+    cache_root: Path,
+) -> tuple[PythonClosureInventory, EmittedInventory]:
+    """Assemble and emit the canonical Python closure inventory.
+
+    The assembled inventory is reconciled against the exact lock bytes through
+    the production reconciler before it is written, so an inventory is emitted
+    only when it proves against the same lock the closure was resolved from.
+    Emission is content-addressed and deterministic: identical inputs yield
+    byte-identical canonical JSON under the same content address.
+    """
+    lock_sha256 = hashlib.sha256(lock_bytes).hexdigest()
+    try:
+        inventory = PythonClosureInventory(
+            inventory_version="vaultspec-python-wheelhouse-v1",
+            target=selection.target,
+            lock_sha256=lock_sha256,
+            roots=selection.roots,
+            packages=tuple(sorted(artifacts, key=lambda artifact: artifact.name)),
+        )
+    except ValidationError as error:
+        raise CapsuleInputAuthoringError(
+            f"assembled Python closure inventory is invalid: {error}"
+        ) from None
+    try:
+        reconcile_python_closure_lock_bytes(
+            inventory,
+            lock_bytes=lock_bytes,
+            root_package=root_package,
+            python_full_version=python_full_version,
+        )
+    except LockReconciliationError as error:
+        raise CapsuleInputAuthoringError(
+            f"assembled Python closure inventory does not reconcile: {error}"
+        ) from None
+    payload = canonical_closure_inventory_bytes(inventory)
+    sha256 = hashlib.sha256(payload).hexdigest()
+    root = _resolved_cache_root(cache_root)
+    temp = root / f".inventory-{os.getpid()}-{next(_temp_counter)}"
+    try:
+        temp.write_bytes(payload)
+        final = root / sha256
+        os.replace(temp, final)
+    except OSError as error:
+        temp.unlink(missing_ok=True)
+        raise CapsuleInputAuthoringError(
+            f"cannot write Python closure inventory: {error}"
+        ) from None
+    return inventory, EmittedInventory(sha256=sha256, size=len(payload), path=final)

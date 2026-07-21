@@ -646,6 +646,121 @@ def test_build_acp_closure_installed_inventory_rejects_a_forged_external_license
         )
 
 
+_DATA_DIR = "example_pkg-1.0.0.data"
+_DROPPED_HEADER = f"{_DATA_DIR}/headers/example_pkg/greenlet.h"
+_DROPPED_SCRIPT = f"{_DATA_DIR}/scripts/jsonpointer"
+_PURELIB_MEMBER = f"{_DATA_DIR}/purelib/example_pkg/pure.py"
+
+
+def _write_wheel_with_dropped_data(path: Path) -> bytes:
+    """A real wheel carrying greenlet-shaped headers and a jsonpointer-shaped script.
+
+    The ``.data/headers`` member and the ``#!python`` ``.data/scripts`` member are the
+    exact shapes the real closure audit found; the ``.data/purelib`` member is the
+    importable library code that must still install.
+    """
+    dist_info = "example_pkg-1.0.0.dist-info"
+    record_path = f"{dist_info}/RECORD"
+    contents = {
+        _MODULE_MEMBER: b"def main() -> None:\n    pass\n",
+        f"{dist_info}/METADATA": (
+            b"Metadata-Version: 2.4\nName: example-pkg\nVersion: 1.0.0\n"
+            b"License-Expression: MIT\nLicense-File: LICENSE\n"
+        ),
+        f"{dist_info}/WHEEL": (
+            b"Wheel-Version: 1.0\nRoot-Is-Purelib: true\nTag: py3-none-any\n"
+        ),
+        _LICENSE_MEMBER: b"wheel license\n",
+        _PURELIB_MEMBER: b"PURE = 1\n",
+        _DROPPED_HEADER: b"/* greenlet.h */\n",
+        _DROPPED_SCRIPT: b"#!python\nprint('jsonpointer cli')\n",
+    }
+    contents[record_path] = _record_bytes(contents, record_path=record_path)
+    with zipfile.ZipFile(path, "x", compression=zipfile.ZIP_DEFLATED) as archive:
+        for member in sorted(contents):
+            archive.writestr(member, contents[member])
+    return path.read_bytes()
+
+
+def test_build_python_closure_inventory_excludes_dropped_data_members(
+    tmp_path: Path,
+) -> None:
+    """End-to-end: a wheel with .data/headers and .data/scripts flows through the
+    production builder to an inventory that omits those members while the library
+    (purelib) code and importable module are present, and the drop evidence is
+    available at the layout seam the builder consumes.
+    """
+    wheel_path = tmp_path / "example_pkg.whl"
+    payload = _write_wheel_with_dropped_data(wheel_path)
+    descriptor = _wheel_descriptor(payload)
+    cache = tmp_path / "cache"
+    cache.mkdir()
+
+    license_file = InstalledFileRecord(
+        relative_path="licenses/example-pkg/LICENSE",
+        mode="0644",
+        size=len(b"wheel license\n"),
+        sha256=hashlib.sha256(b"wheel license\n").hexdigest(),
+        source_sha256=descriptor.sha256,
+        source_member=_LICENSE_MEMBER,
+    )
+    license_record = InstalledLicenseRecord(
+        package="example-pkg",
+        component=license_component_token("python", "example-pkg"),
+        license_expression="MIT",
+        source_member=_LICENSE_MEMBER,
+        relative_path=license_file.relative_path,
+        sha256=license_file.sha256,
+    )
+
+    with open_verified_python_wheel_archive(
+        wheel_path, descriptor, target=_TARGET
+    ) as session:
+        # (c) The drop evidence is present at the layout seam the builder consumes.
+        layout = build_python_closure_layout(
+            wheels=(
+                WheelSource(
+                    source_sha256=descriptor.sha256,
+                    distribution="example_pkg",
+                    version="1.0.0",
+                    members=tuple(
+                        ArchiveMember(
+                            member=item.path, size=item.size, sha256=item.sha256
+                        )
+                        for item in verified_archive_member_evidence(session)
+                    ),
+                ),
+            ),
+            console_scripts=_CONSOLE_SCRIPTS,
+        )
+        assert {member.source_member: member.reason for member in layout.dropped} == {
+            _DROPPED_HEADER: "data-headers",
+            _DROPPED_SCRIPT: "data-scripts",
+        }
+
+        _resolved_descriptor, inventory = build_python_closure_installed_inventory(
+            target=_TARGET,
+            source_inventory_sha256=_SOURCE_DIGEST,
+            lock_sha256=_LOCK_DIGEST,
+            wheel_sessions=(session,),
+            console_scripts=_CONSOLE_SCRIPTS,
+            licenses=(license_record,),
+            license_files=(license_file,),
+            input_dir=cache,
+        )
+
+    placed = {file.relative_path for file in inventory.files}
+    # (b) The importable library member and the console-script module are installed.
+    assert "example_pkg/pure.py" in placed
+    assert _MODULE_MEMBER in placed
+    # (a) No dropped member reached the built inventory - not the header, not the
+    # script, and nothing under a .data spread directory.
+    assert not any(".data" in path for path in placed)
+    assert not any("greenlet.h" in path for path in placed)
+    assert "jsonpointer" not in placed
+    assert not any(path.endswith("/jsonpointer") for path in placed)
+
+
 def test_build_acp_closure_installed_inventory_admits_two_licenses_sharing_a_digest(
     tmp_path: Path,
 ) -> None:

@@ -91,11 +91,24 @@ Gate results (whole touched surface):
 - `ty check` and `ty check --python-platform linux` on the module — passed both
   platforms (no OS branch).
 - `pytest src/vaultspec_a2a/desktop/tests/test_install_layout.py -q` — 21 passed.
-- `pytest src/vaultspec_a2a/desktop -q` — 530 passed, 5 deselected (no regressions;
+- `pytest src/vaultspec_a2a/desktop -q` — 533 passed, 5 deselected (no regressions;
   the assembled-closure import smoke test that exercises the library-root placement
   remains green).
 
 Module is 437 lines, under the 1000-line ceiling.
+
+Real-seam integration coverage (added on review request): a follow-up test drives a
+real wheel carrying a greenlet-shaped `.data/headers` member and a jsonpointer-shaped
+`.data/scripts` member with a `#!python` shebang through the production builder
+`build_python_closure_installed_inventory` end to end, asserting the dropped members
+are absent from the built inventory's files while the importable `purelib` member and
+the console-script module are present, and that the drop evidence is available at the
+layout seam the builder consumes. Finding surfaced (non-blocking): the production
+builder threads only the layout's placed files into the inventory and discards the
+`dropped` evidence, so the built inventory structurally excludes dropped members but
+does not itself carry the drop audit trail; if the build/publish pipeline needs the
+omission record surfaced, that is an additive extension of the builder or a sidecar,
+tracked for the pipeline step rather than this layout change.
 
 ## Notes
 

@@ -10,6 +10,10 @@ emission live in :mod:`vaultspec_a2a.desktop.capsule_input_authoring`.
 
 from __future__ import annotations
 
+import gzip
+import json
+import re
+import tarfile
 import tomllib
 import zipfile
 from dataclasses import dataclass
@@ -25,6 +29,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_valida
 
 from .capsule_input_authoring import CapsuleInputAuthoringError
 from .closure_inventory import (
+    AcpPackageArtifact,
     ExternalLicenseArtifact,
     PythonWheelArtifact,
     _validate_https_url,
@@ -33,22 +38,32 @@ from .closure_inventory import (
 from .package_archives import (
     _LEGACY_LICENSE_BASENAME,
     PackageArchiveError,
+    open_verified_acp_package_archive,
     open_verified_python_wheel_archive,
     verify_external_license_artifacts,
 )
 
 if TYPE_CHECKING:
     from .contract import TargetTriple
-    from .lock_reconciliation import LockedWheel, PythonPackageSelection
+    from .lock_reconciliation import (
+        AcpNodeSelection,
+        LockedWheel,
+        PythonPackageSelection,
+    )
 
 __all__ = [
+    "AcpLicenseOverride",
     "ExternalLicenseOverride",
     "LicenseOverride",
+    "derive_acp_package_artifact",
     "derive_python_wheel_artifact",
+    "load_acp_license_overrides",
     "load_license_overrides",
 ]
 
 _MAX_WHEEL_METADATA_BYTES: Final = 1 << 20
+_MAX_ACP_METADATA_BYTES: Final = 1 << 20
+_SEE_LICENSE_IN: Final = re.compile(r"^SEE LICENSE IN .+$")
 
 
 class ExternalLicenseOverride(BaseModel):
@@ -346,5 +361,211 @@ def derive_python_wheel_artifact(
     except PackageArchiveError as error:
         raise CapsuleInputAuthoringError(
             f"derived license identity for {package.name} fails verification: {error}"
+        ) from None
+    return artifact
+
+
+class AcpLicenseOverride(BaseModel):
+    """One curated license fact for an npm package with a non-SPDX license.
+
+    The ACP verifier accepts this curated SPDX expression - a standard id or an
+    SPDX ``LicenseRef-`` custom reference for a proprietary dependency - in place
+    of an npm ``package.json`` license that is a non-SPDX ``SEE LICENSE IN``
+    reference, and binds the named tarball member as the license bytes.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    version: str = Field(min_length=1, max_length=128)
+    expression: str = Field(min_length=1, max_length=128)
+    evidence: str = Field(min_length=1, max_length=1024)
+    justification: str | None = Field(default=None, max_length=1024)
+    license_member: str = Field(min_length=1, max_length=4096)
+
+    @model_validator(mode="after")
+    def _override_is_valid(self) -> AcpLicenseOverride:
+        try:
+            canonical = canonicalize_license_expression(self.expression)
+        except InvalidLicenseExpression:
+            raise ValueError("override expression is not valid SPDX") from None
+        if canonical != self.expression:
+            raise ValueError("override expression must be canonical SPDX")
+        try:
+            validate_portable_archive_path(self.license_member)
+        except ValueError:
+            raise ValueError("override license member is not a portable path") from None
+        if not self.license_member.startswith("package/"):
+            raise ValueError("override license member must live under package/")
+        return self
+
+
+def load_acp_license_overrides(path: Path) -> dict[str, AcpLicenseOverride]:
+    """Load the committed curated ACP license overrides, keyed by exact npm name."""
+    try:
+        document = tomllib.loads(path.read_bytes().decode("utf-8"))
+    except (OSError, UnicodeDecodeError, tomllib.TOMLDecodeError) as error:
+        raise CapsuleInputAuthoringError(
+            f"cannot read curated ACP license overrides: {error}"
+        ) from None
+    table = document.get("acp_license_overrides", {})
+    if not isinstance(table, dict):
+        raise CapsuleInputAuthoringError("acp_license_overrides must be a table")
+    overrides: dict[str, AcpLicenseOverride] = {}
+    for name, entry in table.items():
+        if name in overrides:
+            raise CapsuleInputAuthoringError(
+                f"curated ACP license overrides repeat package {name}"
+            )
+        try:
+            overrides[name] = AcpLicenseOverride.model_validate(entry)
+        except ValidationError as error:
+            raise CapsuleInputAuthoringError(
+                f"curated ACP license override for {name} is invalid: {error}"
+            ) from None
+    return overrides
+
+
+def _read_acp_facts(tarball_path: Path) -> tuple[str, str, str, frozenset[str]]:
+    """Read one acquired npm tarball's package.json identity and member names."""
+    try:
+        with tarfile.open(name=tarball_path, mode="r:gz") as archive:
+            member_names = frozenset(
+                member.name for member in archive.getmembers() if member.isfile()
+            )
+            if "package/package.json" not in member_names:
+                raise CapsuleInputAuthoringError(
+                    "npm tarball lacks package/package.json"
+                )
+            handle = archive.extractfile("package/package.json")
+            if handle is None:
+                raise CapsuleInputAuthoringError(
+                    "npm package.json is not a regular file"
+                )
+            with handle:
+                payload = handle.read(_MAX_ACP_METADATA_BYTES + 1)
+    except (OSError, tarfile.TarError, gzip.BadGzipFile, EOFError) as error:
+        raise CapsuleInputAuthoringError(f"cannot read npm tarball: {error}") from None
+    if len(payload) > _MAX_ACP_METADATA_BYTES:
+        raise CapsuleInputAuthoringError("npm package.json exceeds its size bound")
+    try:
+        document = json.loads(payload.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        raise CapsuleInputAuthoringError("npm package.json is invalid JSON") from None
+    name = document.get("name")
+    version = document.get("version")
+    package_license = document.get("license")
+    if (
+        not isinstance(name, str)
+        or not isinstance(version, str)
+        or not isinstance(package_license, str)
+        or not package_license
+    ):
+        raise CapsuleInputAuthoringError("npm package.json identity is invalid")
+    return name, version, package_license, member_names
+
+
+def _derive_acp_license(
+    *,
+    name: str,
+    package_license: str,
+    member_names: frozenset[str],
+    override: AcpLicenseOverride | None,
+) -> tuple[str, tuple[str, ...], tuple[str, ...]]:
+    try:
+        canonical = canonicalize_license_expression(package_license)
+        is_canonical_spdx = canonical == package_license
+    except InvalidLicenseExpression:
+        is_canonical_spdx = False
+    if is_canonical_spdx:
+        members = tuple(
+            member
+            for member in sorted(member_names)
+            if member.startswith("package/")
+            and _LEGACY_LICENSE_BASENAME.fullmatch(PurePosixPath(member).name)
+            is not None
+        )
+        if not members:
+            raise CapsuleInputAuthoringError(
+                f"{name} ships no recognizable license bytes and has no override"
+            )
+        evidence = tuple(f"tarball-license:{member}" for member in members)
+        return package_license, members, evidence
+    if _SEE_LICENSE_IN.fullmatch(package_license) is None:
+        raise CapsuleInputAuthoringError(
+            f"{name} package.json license is neither SPDX nor a SEE LICENSE reference"
+        )
+    if override is None:
+        raise CapsuleInputAuthoringError(
+            f"{name} has a non-SPDX license and no curated override"
+        )
+    if override.license_member not in member_names:
+        raise CapsuleInputAuthoringError(
+            f"{name} curated license member is absent from the tarball"
+        )
+    evidence = (
+        f"curated-license-expression:{override.expression}",
+        f"tarball-license:{override.license_member}",
+    )
+    return override.expression, (override.license_member,), evidence
+
+
+def derive_acp_package_artifact(
+    node: AcpNodeSelection,
+    *,
+    cache_root: Path,
+    sha256: str,
+    size: int,
+    overrides: dict[str, AcpLicenseOverride],
+) -> AcpPackageArtifact:
+    """Derive one npm package's license identity, proven through the verifier.
+
+    Mirrors the wheel path: the derived artifact is round-tripped through the
+    production ACP verifier rather than asserted against this function's output.
+    A canonical-SPDX ``package.json`` license is taken verbatim with its bundled
+    license members; a non-SPDX ``SEE LICENSE IN`` reference is resolved by the
+    curated override, which supplies the SPDX expression and binds the tarball
+    member carrying the license bytes.
+    """
+    override = overrides.get(node.name)
+    if override is not None and override.version != node.version:
+        raise CapsuleInputAuthoringError(
+            f"ACP license override for {node.name} pins {override.version}, "
+            f"but the closure locks {node.version}"
+        )
+    name, version, package_license, member_names = _read_acp_facts(cache_root / sha256)
+    if (name, version) != (node.name, node.version):
+        raise CapsuleInputAuthoringError(
+            f"npm package.json identity does not match the lock for {node.name}"
+        )
+    expression, members, evidence = _derive_acp_license(
+        name=node.name,
+        package_license=package_license,
+        member_names=member_names,
+        override=override,
+    )
+    try:
+        artifact = AcpPackageArtifact(
+            name=node.name,
+            version=node.version,
+            install_path=node.install_path,
+            url=node.url,
+            integrity=node.integrity,
+            sha256=sha256,
+            size=size,
+            license_expression=expression,
+            license_members=members,
+            redistribution_evidence=evidence,
+            dependency_paths=node.dependency_paths,
+        )
+    except ValidationError as error:
+        raise CapsuleInputAuthoringError(
+            f"derived ACP artifact for {node.name} is invalid: {error}"
+        ) from None
+    try:
+        with open_verified_acp_package_archive(cache_root / sha256, artifact):
+            pass
+    except PackageArchiveError as error:
+        raise CapsuleInputAuthoringError(
+            f"derived license identity for {node.name} fails verification: {error}"
         ) from None
     return artifact

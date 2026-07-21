@@ -34,6 +34,8 @@ from packaging.utils import InvalidWheelFilename, parse_wheel_filename
 from pydantic import ValidationError
 
 from .closure_inventory import (
+    AcpClosureInventory,
+    AcpPackageArtifact,
     PythonClosureInventory,
     PythonWheelArtifact,
     _validate_https_url,
@@ -42,6 +44,7 @@ from .closure_inventory import (
 from .contract import TargetTriple
 from .lock_reconciliation import (
     LockReconciliationError,
+    reconcile_acp_closure_lock_bytes,
     reconcile_python_closure_lock_bytes,
 )
 from .wheel_compatibility import (
@@ -76,6 +79,7 @@ __all__ = [
     "CapsuleInputAuthoringError",
     "EmittedInventory",
     "acquire_artifact",
+    "emit_acp_closure_inventory",
     "emit_python_closure_inventory",
     "select_target_wheel",
     "target_platform_tags",
@@ -492,6 +496,13 @@ def emit_python_closure_inventory(
         raise CapsuleInputAuthoringError(
             f"assembled Python closure inventory does not reconcile: {error}"
         ) from None
+    return inventory, _write_canonical_inventory(inventory, cache_root)
+
+
+def _write_canonical_inventory(
+    inventory: PythonClosureInventory | AcpClosureInventory, cache_root: Path
+) -> EmittedInventory:
+    """Write one canonical closure inventory into the content-addressed cache."""
     payload = canonical_closure_inventory_bytes(inventory)
     sha256 = hashlib.sha256(payload).hexdigest()
     root = _resolved_cache_root(cache_root)
@@ -503,6 +514,50 @@ def emit_python_closure_inventory(
     except OSError as error:
         temp.unlink(missing_ok=True)
         raise CapsuleInputAuthoringError(
-            f"cannot write Python closure inventory: {error}"
+            f"cannot write closure inventory: {error}"
         ) from None
-    return inventory, EmittedInventory(sha256=sha256, size=len(payload), path=final)
+    return EmittedInventory(sha256=sha256, size=len(payload), path=final)
+
+
+def emit_acp_closure_inventory(
+    artifacts: tuple[AcpPackageArtifact, ...],
+    *,
+    target: TargetTriple,
+    lock_bytes: bytes,
+    root_package: str,
+    node_full_version: str,
+    cache_root: Path,
+) -> tuple[AcpClosureInventory, EmittedInventory]:
+    """Assemble and emit the canonical ACP closure inventory.
+
+    The assembled inventory is reconciled against the exact package-lock bytes
+    through the production ACP reconciler before it is written, the same
+    round-trip gate the Python side uses; emission is content-addressed and
+    deterministic.
+    """
+    lock_sha256 = hashlib.sha256(lock_bytes).hexdigest()
+    try:
+        inventory = AcpClosureInventory(
+            inventory_version="vaultspec-acp-tarballs-v1",
+            target=target,
+            lock_sha256=lock_sha256,
+            packages=tuple(
+                sorted(artifacts, key=lambda artifact: artifact.install_path)
+            ),
+        )
+    except ValidationError as error:
+        raise CapsuleInputAuthoringError(
+            f"assembled ACP closure inventory is invalid: {error}"
+        ) from None
+    try:
+        reconcile_acp_closure_lock_bytes(
+            inventory,
+            lock_bytes=lock_bytes,
+            root_package=root_package,
+            node_full_version=node_full_version,
+        )
+    except LockReconciliationError as error:
+        raise CapsuleInputAuthoringError(
+            f"assembled ACP closure inventory does not reconcile: {error}"
+        ) from None
+    return inventory, _write_canonical_inventory(inventory, cache_root)

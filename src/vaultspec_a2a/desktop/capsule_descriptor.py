@@ -15,7 +15,9 @@ closure here, verified in full like every other wheel.
 
 from __future__ import annotations
 
+import hashlib
 from contextlib import ExitStack
+from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Final
 
@@ -36,6 +38,7 @@ from .package_archives import (
 )
 
 if TYPE_CHECKING:
+    from .artifacts import CapsuleInputDescriptor
     from .closure_inventory import (
         AcpPackageArtifact,
         ExternalLicenseArtifact,
@@ -50,9 +53,13 @@ if TYPE_CHECKING:
     from .package_archives import LicenseMemberEvidence
 
 __all__ = [
+    "AuthoredDescriptor",
+    "author_capsule_input_descriptor",
     "build_acp_installed_inventory",
     "build_python_installed_inventory",
 ]
+
+_MAX_DESCRIPTOR_BYTES: Final = 1 << 20
 
 # The two contract console-script entrypoints, backed by module files that live
 # in the A2A distribution wheel; the layout promotes them to 0755.
@@ -273,3 +280,43 @@ def build_acp_installed_inventory(
             raise CapsuleInputAuthoringError(
                 f"ACP installed inventory build failed: {error}"
             ) from None
+
+
+@dataclass(frozen=True, slots=True)
+class AuthoredDescriptor:
+    """One pinned capsule input descriptor written for the build stage."""
+
+    path: Path
+    sha256: str
+    size: int
+
+
+def author_capsule_input_descriptor(
+    descriptor: CapsuleInputDescriptor, *, output_dir: Path
+) -> AuthoredDescriptor:
+    """Serialize, digest, and write one validated capsule input descriptor.
+
+    The descriptor is emitted as canonical TOML (``exclude_none`` matching the
+    consumer's parse) and pinned by its own sha256 - the phase-boundary
+    attestation the build stage opens read-only.  The digest is over the exact
+    written bytes, so a caller round-tripping through ``open_verified_capsule_inputs``
+    with this sha256 proves the descriptor is well-formed rather than trusting
+    this authoring output.
+    """
+    # Lazy: the descriptor serializer is a build-time tool, so importing this
+    # module at capsule runtime never requires the tomlkit build dependency.
+    from tomlkit import dumps as toml_dumps
+
+    payload = toml_dumps(descriptor.model_dump(mode="json", exclude_none=True)).encode()
+    if len(payload) > _MAX_DESCRIPTOR_BYTES:
+        raise CapsuleInputAuthoringError("authored descriptor exceeds its size bound")
+    sha256 = hashlib.sha256(payload).hexdigest()
+    try:
+        output_dir.mkdir(parents=True, exist_ok=True)
+        path = output_dir / "capsule-inputs.toml"
+        path.write_bytes(payload)
+    except OSError as error:
+        raise CapsuleInputAuthoringError(
+            f"cannot write capsule input descriptor: {error}"
+        ) from None
+    return AuthoredDescriptor(path=path, sha256=sha256, size=len(payload))

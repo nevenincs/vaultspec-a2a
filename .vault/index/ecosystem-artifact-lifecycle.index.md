@@ -8,6 +8,7 @@ modified: '2026-07-21'
 related:
   - '[[2026-07-21-ecosystem-artifact-lifecycle-W01-P01-S01]]'
   - '[[2026-07-21-ecosystem-artifact-lifecycle-W01-P01-S02]]'
+  - '[[2026-07-21-ecosystem-artifact-lifecycle-W01-P02-S03]]'
   - '[[2026-07-21-ecosystem-artifact-lifecycle-adr]]'
   - '[[2026-07-21-ecosystem-artifact-lifecycle-artifact-delete-residual-risk-audit]]'
   - '[[2026-07-21-ecosystem-artifact-lifecycle-plan]]'
@@ -32,6 +33,7 @@ Auto-generated index of all documents tagged with `#ecosystem-artifact-lifecycle
 
 - `2026-07-21-ecosystem-artifact-lifecycle-W01-P01-S01` - Prove the existing workspace containment guard with a test that executes the escape refusal
 - `2026-07-21-ecosystem-artifact-lifecycle-W01-P01-S02` - Record the residual risk that a confined delete still removes real files inside the user checkout
+- `2026-07-21-ecosystem-artifact-lifecycle-W01-P02-S03` - Run an armed gateway and record whether the published discovery record carries a handoff reference
 
 ### plan
 

@@ -45,6 +45,7 @@ __all__ = [
     "create_isolated_config_home",
     "isolation_required_but_absent",
     "preserve_session_record",
+    "preserved_session_root",
     "should_isolate_config_home",
 ]
 
@@ -218,6 +219,19 @@ def _write_settings(
     (home / "settings.json").write_text(
         json.dumps(settings, indent=2), encoding="utf-8"
     )
+
+
+def preserved_session_root() -> Path:
+    """Return the declared root for preserved session records.
+
+    Resolved here rather than by the caller so the location the declaration
+    names and the location the code writes to cannot drift apart.  The import is
+    deferred because this module sits on the provider spawn path, which must stay
+    importable without pulling the settings model.
+    """
+    from ..control.config import settings
+
+    return settings.a2a_home / "runtime" / "transcripts"
 
 
 def preserve_session_record(

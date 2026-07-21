@@ -54,6 +54,8 @@ from ._acp_config_home import (
     cleanup_isolated_config_home,
     create_isolated_config_home,
     isolation_required_but_absent,
+    preserve_session_record,
+    preserved_session_root,
     should_isolate_config_home,
 )
 from ._acp_mcp import config_home_mcp_servers
@@ -456,6 +458,11 @@ class AcpChatModel(BaseChatModel):
         finally:
             if ctx is not None and stdout_task is not None and stderr_task is not None:
                 await self._cleanup_session(ctx, stdout_task, stderr_task)
+            # Carry the CLI's own transcript out before the home holding it is
+            # destroyed; without this the richest record of the run dies unread.
+            preserve_session_record(
+                config_home, destination_root=preserved_session_root()
+            )
             cleanup_isolated_config_home(config_home)
             cleanup_projected_mcp(projected_mcp)
 

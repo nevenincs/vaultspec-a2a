@@ -91,3 +91,30 @@ def test_the_archive_is_bounded_and_evicts_oldest_first(tmp_path: Path) -> None:
     assert preserved_names[-1] in remaining
     for evicted in preserved_names[:3]:
         assert evicted not in remaining
+
+
+def test_the_resolved_root_matches_its_own_declaration() -> None:
+    """The declared location and the written location must not drift apart.
+
+    A declaration that names one root while the code writes to another is worse
+    than no declaration: it makes an inventory that reads as authoritative and
+    is not.
+    """
+    from .._acp_config_home import SESSION_RECORD_DECLARATION, preserved_session_root
+
+    resolved = preserved_session_root()
+    declared_tail = SESSION_RECORD_DECLARATION.root.split(">", 1)[1].strip("/")
+    declared_parent = declared_tail.rsplit("/", 1)[0]
+
+    assert resolved.as_posix().endswith(declared_parent)
+
+
+def test_the_resolved_root_follows_the_configured_home() -> None:
+    """The root tracks the a2a home rather than a hardcoded path."""
+    from ...control.config import settings
+    from .._acp_config_home import preserved_session_root
+
+    resolved = preserved_session_root()
+
+    assert resolved.parent.parent == settings.a2a_home
+    assert resolved.parent.name == "runtime"

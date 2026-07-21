@@ -80,7 +80,7 @@ Build the machinery the contract requires: a retention declaration attached to e
 
 Introduce the declaration every artifact-creating seam must carry.
 
-- [ ] `W02.P03.S05` - Define the retention disposition vocabulary and the declaration record type; `src/vaultspec_a2a/artifacts/retention.py`.
+- [x] `W02.P03.S05` - Define the retention disposition vocabulary and the declaration record type; `src/vaultspec_a2a/artifacts/retention.py`.
 - [ ] `W02.P03.S06` - Attach a retention declaration to each artifact-creating seam in the lifecycle package; `src/vaultspec_a2a/lifecycle/discovery.py`.
 - [ ] `W02.P03.S07` - Attach a retention declaration to the worker autospawn stderr log seam; `src/vaultspec_a2a/control/worker_management.py`.
 - [ ] `W02.P03.S08` - Add a test asserting every declared seam names a disposition and an owner; `src/vaultspec_a2a/artifacts/tests/test_retention.py`.

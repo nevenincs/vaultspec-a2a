@@ -78,6 +78,7 @@ __all__ = [
     "canonical_evidence_bytes",
     "deterministic_tree_digest",
     "installed_tree_inventory",
+    "materialize_verified_member",
     "project_archive",
     "project_archive_into_unpublished_generation",
     "project_source_archive",
@@ -564,6 +565,46 @@ def _write_member(
         size=consumed,
         sha256=digest.hexdigest(),
         mode=mode,
+    )
+
+
+def materialize_verified_member(
+    source: BinaryIO,
+    relative_path: str,
+    *,
+    destination_root: Path,
+    generation_authority: DirectoryAuthority,
+    destination_authority: DirectoryAuthority,
+    parent_identities: dict[tuple[str, ...], tuple[int, int]],
+    expected_size: int,
+    mode: int,
+    source_date_epoch: int,
+) -> ProjectedFile:
+    """Write one already-open, already-verified byte source through the leased
+    nested-parent authority, verifying size and sha256 during the write.
+
+    This is the one non-generic write primitive: wheel-aware and npm-aware
+    closure materialization and generated launcher content share it rather than
+    each re-implementing parent-lease creation, identity tracking, and byte
+    verification. ``relative_path`` may be arbitrarily nested (unlike the
+    generic projector's single-segment ``destination_prefix``); the caller
+    retains one ``parent_identities`` mapping across every call in a
+    materialization pass so shared ancestor directories are created once and
+    checked for identity on every subsequent use.
+    """
+    source_date_epoch = _validate_source_date_epoch(source_date_epoch)
+    _assert_projection_authorities(generation_authority, destination_authority)
+    destination = _portable_destination(destination_root, "", relative_path)
+    return _write_member(
+        source,
+        destination,
+        destination_root=destination_root,
+        generation_authority=generation_authority,
+        destination_authority=destination_authority,
+        parent_identities=parent_identities,
+        expected_size=expected_size,
+        mode=mode,
+        source_date_epoch=source_date_epoch,
     )
 
 

@@ -104,6 +104,19 @@ provenance model, within the capsule boundary governed by
   a keyed sidecar splits one fact across two documents, reintroduces join drift,
   and prevents the model validator from atomically cross-checking file, license,
   and provenance identity as the inventory does today.
+- **Build-script self-minted descriptor pin.** Rejected: collapsing input
+  preparation and consumption into one process makes the digest pin attest only
+  that the process hashed what it had just written, inverts the input module's
+  stated contract that the workflow supplies a pinned descriptor, and re-grows
+  acquisition and derivation logic inside the build script - the
+  parallel-implementation defect this record exists to forbid.
+- **Repo-committed per-target descriptors verified by CI.** Rejected: the
+  descriptor pins the project wheel built from source head, so its digest (and
+  the installed inventories embedding it) changes with every commit; keeping
+  five per-target descriptors continuously committed is a regeneration
+  treadmill, not an attestation. Cross-run independence is instead recovered by
+  publishing the descriptor and its digest as build evidence for downstream
+  verification.
 
 ## Constraints
 
@@ -129,6 +142,20 @@ provenance model, within the capsule boundary governed by
   0755 derivation (`2026-07-21-capsule-install-layout-reference`). The Windows
   `Scripts/{name}.exe` launcher source is resolved by this revision: a
   content-addressed stub input, not a contract change.
+- Only the input preparation authority performs network access; the build,
+  verify, and publish stages consume the content-addressed cache and the pinned
+  descriptor exclusively.
+- The descriptor digest is a phase-boundary attestation, not an origin
+  attestation: within one release run it proves the build consumed exactly the
+  bytes preparation authored and nothing mutated between phases; the
+  supply-chain trust root remains the committed, human-reviewed lock and input
+  pins the preparation authority verifies against. Cross-run and downstream
+  independence come from the descriptor digest published as generation
+  evidence, which later verification checks without a source checkout.
+- A package resolvable from the lock but lacking a target-compatible wheel, and
+  a package lacking both a metadata license expression and a curated override,
+  fail preparation closed; curated overrides are committed, reviewed inputs,
+  never runtime inference.
 
 ## Implementation
 
@@ -165,11 +192,28 @@ counterpart. **Installed inventory v2:** the
 file record gains `source_sha256` and `source_member`, the inventory version
 becomes `vaultspec-installed-closure-v2`, and the source-to-installed join
 additionally proves every provenance pair names a verified member of a closure
-package; the tree-digest preimage is unchanged. **Production builder:** a
-builder beside the fixture-only one consumes verified archive sessions, applies
-the layout, and emits canonical inventory bytes into the content-addressed
-input cache, invoked by the capsule build script (closing `W01.P03.S13`'s input
-gap). **Materializer (`S103`):** consumes only the plan and the v2 inventories,
+package; the tree-digest preimage is unchanged. **Input preparation authority:** a new production module (proposed
+`capsule_input_authoring.py`, with a thin script entrypoint) is the sole author
+of capsule inputs, in two passes. Pass one resolves the target-selective Python
+closure from the committed `uv.lock` through the existing wheel-target
+primitive and the ACP closure from the committed `package-lock.json`, acquires
+every wheel, tarball, external-license blob, and pinned source into the
+sha256-keyed content-addressed input cache (verifying each byte against its
+committed pin), derives per-package license identity - expression, license
+members, redistribution evidence - from wheel metadata and tarball contents
+with a committed curated-overrides input for packages lacking a metadata
+license expression, and emits the canonical closure inventories. Pass two opens
+verified archive sessions, invokes the production installed-inventory builder
+against the layout authority, authors the digest-pinned capsule input
+descriptor naming every artifact including the installed inventories, and hands
+the descriptor path and digest to the consumer. This authority is the only
+production constructor of closure inventories and descriptors and the only
+component permitted network access. **Build script:** a read-only consumer: it
+opens the verified input session against the prepared descriptor and digest,
+derives the assembly plan, materializes the installed tree into one
+caller-owned unpublished generation with the capsule archive and manifest
+beside it, and emits the descriptor and its digest into the generation's
+published evidence; it acquires nothing, derives nothing, and mints nothing. **Materializer (`S103`):** consumes only the plan and the v2 inventories,
 streaming each record's `source_member` from the archive named by
 `source_sha256` through the leased nested-parent write path and verifying size
 and sha256 during the write; reconciliation is byte-exact because the inventory
@@ -215,3 +259,20 @@ while supplying the spec-conformant path the refusal always implied
 - The layout authority becomes the single place wheel/npm placement can change;
   any parallel placement logic in build or verify scripts is a defect by
   definition.
+- The build, verify, and publish stages flip output contract together: the
+  verifier is wired to the legacy single-archive layout and the workflow chains
+  build, verify, and publication, so the three stages land as one set (with
+  preparation preceding them); landing the build rework alone yields an
+  unverifiable artifact and a red workflow by construction.
+- The retention envelope of the input session (512 snapshots, 8 GiB) has no
+  supported-target proof; the preparation authority's first real closure run
+  for each target is that proof and must pass - or force a revision here -
+  before the build rework lands.
+- The first real license sweep across the locked closure will surface packages
+  without a metadata license expression; each needs a curated override with
+  recorded evidence before its target capsule can build. This is deliberate
+  fail-closed cost, not a defect.
+- The installed-inventory builder's invocation moves from the build script to
+  the preparation authority; the build script's role narrows to consumption,
+  which supersedes the earlier phrasing that the build script invokes the
+  builder.

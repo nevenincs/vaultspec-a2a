@@ -15,15 +15,18 @@ wheel-aware placement path beside that deliberate refusal.
 Both the production inventory builder and the record-replaying materializer consume
 this one definition, so the declared tree and the written tree are the same layout.
 The grammar, mode domain, and dashboard bounds are reused verbatim from
-:mod:`vaultspec_a2a.desktop.installed_inventory`; unsupported wheel features fail
-closed with a named error rather than being skipped or best-effort placed.
+:mod:`vaultspec_a2a.desktop.installed_inventory`.  The capsule is a library runtime, so
+``.data/headers`` and ``.data/scripts`` members are deterministically dropped as
+outside its executable surface and recorded as per-member evidence; every other
+unsupported wheel feature fails closed with a named error rather than being best-effort
+placed.
 """
 
 from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Final
+from typing import TYPE_CHECKING, Final, cast
 
 from .closure_inventory import validate_portable_archive_path
 from .installed_inventory import (
@@ -42,6 +45,7 @@ if TYPE_CHECKING:
 __all__ = [
     "ArchiveMember",
     "ClosureLayout",
+    "DroppedMember",
     "InstallLayoutError",
     "LayoutFile",
     "TarballSource",
@@ -55,6 +59,8 @@ _ACP_INSTALL_ROOT: Final = "runtime/acp"
 _NPM_ROOT: Final = "package"
 _WHEEL_DATA_SUFFIX: Final = ".data"
 _WHEEL_LIBRARY_DATA_KEYS: Final = frozenset({"purelib", "platlib"})
+_DROP_HEADERS: Final = "data-headers"
+_DROP_SCRIPTS: Final = "data-scripts"
 _SHA256: Final = re.compile(r"^[0-9a-f]{64}$")
 
 
@@ -84,6 +90,24 @@ class LayoutFile:
 
 
 @dataclass(frozen=True, slots=True)
+class DroppedMember:
+    """One verified member deliberately omitted from the installed tree.
+
+    The capsule is a library runtime whose only executable surface is its product
+    launchers, so ``.data/headers`` (build-time headers a frozen offline runtime never
+    compiles against) and ``.data/scripts`` (third-party CLIs and install helpers) are
+    dropped rather than placed.  The evidence is retained per member so the omission is
+    auditable, not silent, and its ``reason`` names the dropped ``.data`` key.
+    """
+
+    source_member: str
+    source_sha256: str
+    size: int
+    sha256: str
+    reason: str
+
+
+@dataclass(frozen=True, slots=True)
 class WheelSource:
     """One verified wheel: its whole-archive digest, identity, and members."""
 
@@ -110,6 +134,7 @@ class ClosureLayout:
     install_root: str
     entrypoints: tuple[str, ...]
     files: tuple[LayoutFile, ...]
+    dropped: tuple[DroppedMember, ...]
 
 
 def _validated_source_digest(value: str) -> str:
@@ -153,34 +178,49 @@ def _validated_member_evidence(member: object) -> ArchiveMember:
     return ArchiveMember(member=path, size=member.size, sha256=member.sha256)
 
 
-def _wheel_destination(member: str, *, data_dir: str) -> str:
-    """Map one archive-root wheel member to its library-root relative destination.
+@dataclass(frozen=True, slots=True)
+class _Disposition:
+    """The classification of one wheel member: placed at ``destination`` or dropped.
+
+    Exactly one of the two fields is set: ``destination`` names the library-root
+    relative install path for a placed member, ``drop_reason`` names the dropped
+    ``.data`` key for an omitted one.  Fail-closed members raise instead.
+    """
+
+    destination: str | None
+    drop_reason: str | None
+
+
+def _classify_wheel_member(member: str, *, data_dir: str) -> _Disposition:
+    """Classify one archive member as placed, dropped, or fail-closed.
 
     Every archive-root member lands verbatim under the one library root (the closure
-    install root; purelib and platlib coincide for the bundled interpreter).  The
+    install root; purelib and platlib coincide for the bundled interpreter), and the
     reserved ``.data`` directory spreads only its ``purelib`` and ``platlib`` subtrees
-    to that same root; every other ``.data`` key and any unplaceable member fails
-    closed.
+    to that same root.  ``.data/headers`` and ``.data/scripts`` are deterministically
+    dropped as outside the library-runtime surface; ``.data/data``,
+    ``.data/platinclude``, any unrecognized ``.data`` key, and any unplaceable member
+    fail closed.
     """
     first, slash, remainder = member.partition("/")
     if first != data_dir:
-        return member
+        return _Disposition(destination=member, drop_reason=None)
     if not slash:
         raise InstallLayoutError("wheel member is unplaceable")
     key, key_slash, subpath = remainder.partition("/")
-    if key == "scripts":
-        raise InstallLayoutError(
-            "wheel .data/scripts requires shebang rewriting and is unsupported"
-        )
     if key == "headers":
-        raise InstallLayoutError("wheel .data/headers is unsupported")
+        return _Disposition(destination=None, drop_reason=_DROP_HEADERS)
+    if key == "scripts":
+        return _Disposition(destination=None, drop_reason=_DROP_SCRIPTS)
     if key == "data":
         raise InstallLayoutError("wheel .data/data is unsupported")
+    if key == "platinclude":
+        raise InstallLayoutError("wheel .data/platinclude is unsupported")
     if key not in _WHEEL_LIBRARY_DATA_KEYS:
         raise InstallLayoutError("wheel .data key is unsupported")
     if not key_slash or not subpath:
         raise InstallLayoutError("wheel member is unplaceable")
-    return subpath
+    return _Disposition(destination=subpath, drop_reason=None)
 
 
 def _assembled_closure(
@@ -189,6 +229,7 @@ def _assembled_closure(
     install_root: str,
     placements: Iterable[tuple[str, str, ArchiveMember]],
     entrypoints: Iterable[str],
+    dropped: Iterable[DroppedMember] = (),
 ) -> ClosureLayout:
     """Assemble, deduplicate, bound, and sort one closure's placement."""
     by_path: dict[str, LayoutFile] = {}
@@ -226,11 +267,15 @@ def _assembled_closure(
             raise InstallLayoutError("closure entrypoint does not name a placed file")
 
     files = tuple(by_path[path] for path in sorted(by_path))
+    dropped_evidence = tuple(
+        sorted(dropped, key=lambda member: (member.source_sha256, member.source_member))
+    )
     return ClosureLayout(
         closure_kind=closure_kind,
         install_root=install_root,
         entrypoints=resolved_entrypoints,
         files=files,
+        dropped=dropped_evidence,
     )
 
 
@@ -265,15 +310,18 @@ def build_python_closure_layout(
     """Map every verified wheel member to its Python-closure destination.
 
     Members land under the single library root at ``runtime/python``; the reserved
-    ``.data`` directory contributes only its ``purelib``/``platlib`` subtrees, and
-    every other ``.data`` key, shebang-rewriting script, and unplaceable member fails
-    closed.  Entrypoints are the module files backing the contract console-script
-    references, promoted to ``0755``; all other files are ``0644``.
+    ``.data`` directory contributes only its ``purelib``/``platlib`` subtrees.
+    ``.data/headers`` and ``.data/scripts`` members are deterministically dropped as
+    outside the library-runtime surface and recorded as per-member evidence; every
+    other ``.data`` key and any unplaceable member fails closed.  Entrypoints are the
+    module files backing the contract console-script references, promoted to ``0755``;
+    all other files are ``0644``.
     """
     if not isinstance(wheels, tuple) or not wheels:
         raise InstallLayoutError("Python closure requires at least one verified wheel")
 
     placements: list[tuple[str, str, ArchiveMember]] = []
+    dropped: list[DroppedMember] = []
     for wheel in wheels:
         if not isinstance(wheel, WheelSource):
             raise InstallLayoutError("verified wheel input is invalid")
@@ -283,13 +331,24 @@ def build_python_closure_layout(
         data_dir = f"{wheel.distribution}-{wheel.version}{_WHEEL_DATA_SUFFIX}"
         for raw in wheel.members:
             member = _validated_member_evidence(raw)
-            destination = _wheel_destination(member.member, data_dir=data_dir)
+            disposition = _classify_wheel_member(member.member, data_dir=data_dir)
+            if disposition.drop_reason is not None:
+                dropped.append(
+                    DroppedMember(
+                        source_member=member.member,
+                        source_sha256=source_sha256,
+                        size=member.size,
+                        sha256=member.sha256,
+                        reason=disposition.drop_reason,
+                    )
+                )
+                continue
             placements.append(
                 (
                     source_sha256,
                     member.member,
                     ArchiveMember(
-                        member=destination,
+                        member=cast("str", disposition.destination),
                         size=member.size,
                         sha256=member.sha256,
                     ),
@@ -315,6 +374,7 @@ def build_python_closure_layout(
         install_root=_PYTHON_INSTALL_ROOT,
         placements=placements,
         entrypoints=entrypoints,
+        dropped=dropped,
     )
 
 

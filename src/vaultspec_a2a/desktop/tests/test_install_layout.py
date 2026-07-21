@@ -217,10 +217,8 @@ def test_cross_wheel_path_collision_fails_closed(tmp_path: Path) -> None:
 @pytest.mark.parametrize(
     ("member", "match"),
     [
-        ("example-1.0.data/headers/example/api.h", "\\.data/headers"),
         ("example-1.0.data/data/share/example/data.txt", "\\.data/data"),
-        ("example-1.0.data/scripts/example-tool", "shebang rewriting"),
-        ("example-1.0.data/scripts/rewrite-me", "shebang rewriting"),
+        ("example-1.0.data/platinclude/example/x.h", "\\.data/platinclude"),
         ("example-1.0.data/purelib", "unplaceable"),
         ("example-1.0.data/lib64/example/x.so", "\\.data key is unsupported"),
     ],
@@ -229,12 +227,73 @@ def test_unsupported_wheel_members_fail_closed(
     tmp_path: Path, member: str, match: str
 ) -> None:
     contents = {"example-1.0.dist-info/METADATA": b"Name: example\n"}
-    payload = b"#!python\nprint('x')\n" if "rewrite-me" in member else b"x\n"
-    contents[member] = payload
+    contents[member] = b"x\n"
     wheel = _wheel_source(tmp_path / "example-1.0-py3-none-any.whl", contents)
 
     with pytest.raises(InstallLayoutError, match=match):
         build_python_closure_layout(wheels=(wheel,), console_scripts=())
+
+
+def test_data_headers_and_scripts_are_dropped_with_evidence(tmp_path: Path) -> None:
+    # A real greenlet-shaped header and jsonpointer-shaped #!python script alongside
+    # importable library code: the header and script are dropped (not placed, not
+    # failed) while purelib/platlib still install in full, and each drop is recorded.
+    contents = {
+        "example-1.0.dist-info/METADATA": b"Name: example\n",
+        "example-1.0.data/purelib/example/pure.py": b"PURE = 1\n",
+        "example-1.0.data/platlib/example/_ext.py": b"EXT = 2\n",
+        "example-1.0.data/headers/example/greenlet.h": b"/* header */\n",
+        "example-1.0.data/scripts/jsonpointer": b"#!python\nprint('cli')\n",
+    }
+    wheel = _wheel_source(tmp_path / "example-1.0-py3-none-any.whl", contents)
+
+    layout = build_python_closure_layout(wheels=(wheel,), console_scripts=())
+
+    placed = {file.relative_path for file in layout.files}
+    # The importable library members still install in full.
+    assert "example/pure.py" in placed
+    assert "example/_ext.py" in placed
+    # Nothing from headers or scripts reached the tree.
+    assert not any("greenlet.h" in path for path in placed)
+    assert not any("jsonpointer" in path for path in placed)
+
+    dropped = {member.source_member: member for member in layout.dropped}
+    assert dropped.keys() == {
+        "example-1.0.data/headers/example/greenlet.h",
+        "example-1.0.data/scripts/jsonpointer",
+    }
+    header = dropped["example-1.0.data/headers/example/greenlet.h"]
+    assert header.reason == "data-headers"
+    assert header.source_sha256 == wheel.source_sha256
+    assert header.size == len(contents["example-1.0.data/headers/example/greenlet.h"])
+    assert header.sha256 == _digest(
+        contents["example-1.0.data/headers/example/greenlet.h"]
+    )
+    script = dropped["example-1.0.data/scripts/jsonpointer"]
+    assert script.reason == "data-scripts"
+    assert script.sha256 == _digest(contents["example-1.0.data/scripts/jsonpointer"])
+
+
+def test_dropped_evidence_is_deterministic(tmp_path: Path) -> None:
+    contents = {
+        "example-1.0.dist-info/METADATA": b"Name: example\n",
+        "example-1.0.data/purelib/example/pure.py": b"PURE = 1\n",
+        "example-1.0.data/headers/example/greenlet.h": b"/* header */\n",
+        "example-1.0.data/scripts/jsonpointer": b"#!python\nprint('cli')\n",
+    }
+    wheel = _wheel_source(tmp_path / "example-1.0-py3-none-any.whl", contents)
+    shuffled = WheelSource(
+        source_sha256=wheel.source_sha256,
+        distribution=wheel.distribution,
+        version=wheel.version,
+        members=tuple(reversed(wheel.members)),
+    )
+
+    first = build_python_closure_layout(wheels=(wheel,), console_scripts=())
+    second = build_python_closure_layout(wheels=(shuffled,), console_scripts=())
+
+    assert first == second
+    assert len(first.dropped) == 2
 
 
 def test_acp_layout_projects_verbatim_to_install_path(tmp_path: Path) -> None:

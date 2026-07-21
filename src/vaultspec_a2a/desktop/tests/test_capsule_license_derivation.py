@@ -19,10 +19,12 @@ import pytest
 
 from vaultspec_a2a.desktop.capsule_input_authoring import (
     CapsuleInputAuthoringError,
+    emit_python_closure_inventory,
+)
+from vaultspec_a2a.desktop.capsule_license import (
     ExternalLicenseOverride,
     LicenseOverride,
     derive_python_wheel_artifact,
-    emit_python_closure_inventory,
 )
 from vaultspec_a2a.desktop.closure_inventory import canonical_closure_inventory_bytes
 from vaultspec_a2a.desktop.contract import TargetTriple

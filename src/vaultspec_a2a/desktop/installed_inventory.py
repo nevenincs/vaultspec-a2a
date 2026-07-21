@@ -17,6 +17,7 @@ import os
 import re
 import stat
 import unicodedata
+from collections.abc import Iterable, Mapping
 from contextlib import contextmanager
 from pathlib import Path
 from typing import TYPE_CHECKING, Annotated, Final, Literal, cast
@@ -26,6 +27,7 @@ from pydantic import (
     ConfigDict,
     Field,
     ValidationError,
+    ValidationInfo,
     field_validator,
     model_validator,
 )
@@ -41,6 +43,7 @@ if TYPE_CHECKING:
     from typing import BinaryIO
 
 __all__ = [
+    "INSTALLED_PROVENANCE_EVIDENCE_KEY",
     "InstalledClosureDescriptor",
     "InstalledClosureInventory",
     "InstalledFileRecord",
@@ -54,6 +57,8 @@ __all__ = [
     "load_installed_closure_inventory",
     "validate_dashboard_installed_closure_set",
 ]
+
+INSTALLED_PROVENANCE_EVIDENCE_KEY: Final = "verified_closure_members"
 
 _READ_CHUNK: Final = 1 << 20
 _MAX_INVENTORY_BYTES: Final = 16 << 20
@@ -84,6 +89,48 @@ def _portable_nfc_path(value: str) -> str:
     if _DASHBOARD_PATH.fullmatch(validated) is None:
         raise ValueError("installed path must use the dashboard path grammar")
     return validated
+
+
+def _portable_source_member(value: str) -> str:
+    try:
+        validated = validate_portable_archive_path(value)
+    except (TypeError, ValueError):
+        raise ValueError("installed source member is not portable") from None
+    if unicodedata.normalize("NFC", validated) != validated:
+        raise ValueError("installed source member must use NFC")
+    return validated
+
+
+def _verified_member_evidence(context: object) -> dict[str, frozenset[str]] | None:
+    """Extract and normalize the verified closure-member join evidence, if any.
+
+    The source-to-installed join supplies each closure package's already
+    ``RECORD``-verified member set keyed by that package's exact ``sha256``.
+    Absent evidence (plain cache reconciliation) leaves the membership proof to
+    the join that owns it; malformed evidence fails closed.
+    """
+    if not isinstance(context, Mapping):
+        return None
+    raw = context.get(INSTALLED_PROVENANCE_EVIDENCE_KEY)
+    if raw is None:
+        return None
+    if not isinstance(raw, Mapping):
+        raise ValueError("installed provenance evidence is malformed")
+    evidence: dict[str, frozenset[str]] = {}
+    for key, members in raw.items():
+        if (
+            not isinstance(key, str)
+            or isinstance(members, (str, bytes))
+            or not isinstance(members, Iterable)
+        ):
+            raise ValueError("installed provenance evidence is malformed")
+        member_set: set[str] = set()
+        for member in members:
+            if not isinstance(member, str):
+                raise ValueError("installed provenance evidence is malformed")
+            member_set.add(member)
+        evidence[key] = frozenset(member_set)
+    return evidence
 
 
 def _portable_key(value: str) -> str:
@@ -126,11 +173,18 @@ class InstalledFileRecord(BaseModel):
     mode: FileMode
     size: int = Field(ge=0, le=_MAX_MEMBER_BYTES)
     sha256: HexDigest
+    source_sha256: HexDigest
+    source_member: str = Field(min_length=1, max_length=4096)
 
     @field_validator("relative_path")
     @classmethod
     def _path_is_portable_nfc(cls, value: str) -> str:
         return _portable_nfc_path(value)
+
+    @field_validator("source_member")
+    @classmethod
+    def _source_member_is_portable_nfc(cls, value: str) -> str:
+        return _portable_source_member(value)
 
 
 class InstalledLicenseRecord(BaseModel):
@@ -170,15 +224,7 @@ class InstalledLicenseRecord(BaseModel):
     @field_validator("source_member")
     @classmethod
     def _source_member_is_portable_nfc(cls, value: str) -> str:
-        try:
-            validated = validate_portable_archive_path(value)
-        except (TypeError, ValueError):
-            raise ValueError(
-                "installed license source member is not portable"
-            ) from None
-        if unicodedata.normalize("NFC", validated) != validated:
-            raise ValueError("installed license source member must use NFC")
-        return validated
+        return _portable_source_member(value)
 
     @field_validator("relative_path")
     @classmethod
@@ -217,7 +263,7 @@ class InstalledClosureInventory(BaseModel):
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
-    inventory_version: Literal["vaultspec-installed-closure-v1"]
+    inventory_version: Literal["vaultspec-installed-closure-v2"]
     closure_kind: ClosureKind
     target: TargetTriple
     install_root: str = Field(min_length=1, max_length=4096)
@@ -243,7 +289,9 @@ class InstalledClosureInventory(BaseModel):
         return tuple(_portable_nfc_path(path) for path in value)
 
     @model_validator(mode="after")
-    def _installed_tree_is_exact(self) -> InstalledClosureInventory:
+    def _installed_tree_is_exact(
+        self, info: ValidationInfo
+    ) -> InstalledClosureInventory:
         paths = tuple(file.relative_path for file in self.files)
         if paths != tuple(sorted(paths)):
             raise ValueError("installed files must be sorted by relative path")
@@ -285,6 +333,16 @@ class InstalledClosureInventory(BaseModel):
             installed = by_path.get(license.relative_path)
             if installed is None or installed.sha256 != license.sha256:
                 raise ValueError("installed license does not match a file digest")
+
+        evidence = _verified_member_evidence(info.context)
+        if evidence is not None:
+            for file in self.files:
+                members = evidence.get(file.source_sha256)
+                if members is None or file.source_member not in members:
+                    raise ValueError(
+                        "installed file provenance does not name a verified "
+                        "closure member"
+                    )
         return self
 
 
@@ -363,7 +421,7 @@ def build_installed_closure_inventory(
 ) -> InstalledClosureInventory:
     """Build validated installed authority while deriving every aggregate fact."""
     return InstalledClosureInventory(
-        inventory_version="vaultspec-installed-closure-v1",
+        inventory_version="vaultspec-installed-closure-v2",
         closure_kind=closure_kind,
         target=target,
         install_root=install_root,

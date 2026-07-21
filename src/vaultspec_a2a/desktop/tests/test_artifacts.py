@@ -164,6 +164,8 @@ def _cache_installed_descriptor(
             mode="0755",
             size=len(entry_bytes),
             sha256=_sha256(entry_bytes),
+            source_sha256=_sha256(b"closure-launcher"),
+            source_member="closure-launcher/entry",
         )
     ]
     licenses = []
@@ -189,6 +191,8 @@ def _cache_installed_descriptor(
                     mode="0644",
                     size=len(payload),
                     sha256=_sha256(payload),
+                    source_sha256=_sha256(identity.encode("utf-8")),
+                    source_member=source_member,
                 )
             )
             licenses.append(

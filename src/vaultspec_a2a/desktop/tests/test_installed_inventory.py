@@ -9,6 +9,7 @@ from pydantic import ValidationError
 
 from vaultspec_a2a.desktop.contract import TargetTriple
 from vaultspec_a2a.desktop.installed_inventory import (
+    INSTALLED_PROVENANCE_EVIDENCE_KEY,
     InstalledClosureDescriptor,
     InstalledClosureInventory,
     InstalledFileRecord,
@@ -29,8 +30,15 @@ _LOCK_DIGEST = "2" * 64
 _GATEWAY_DIGEST = "3" * 64
 _LIBRARY_DIGEST = "4" * 64
 _LICENSE_DIGEST = "5" * 64
+_PACKAGE_DIGEST = "8" * 64
 _TREE_DIGEST = "384d991a289784d373e98e1c6778c46a037845c26a1fb5cb435c1f825f2d8b1a"
 _ACP_TREE_DIGEST = "6d9b5cb70bb281938eec8ea6bb9922d4208b63fc7abab9f934860d20c2b654ea"
+_LICENSE_MEMBER = "example-1.0.dist-info/licenses/LICENSE"
+_GATEWAY_MEMBER = "example-1.0.data/scripts/gateway"
+_LIBRARY_MEMBER = "example-1.0/module.py"
+_VERIFIED_MEMBERS = {
+    _PACKAGE_DIGEST: frozenset({_GATEWAY_MEMBER, _LIBRARY_MEMBER, _LICENSE_MEMBER})
+}
 
 
 def _license(
@@ -40,7 +48,7 @@ def _license(
         package="example",
         component=license_component_token(kind, "example"),
         license_expression="MIT",
-        source_member="example-1.0.dist-info/licenses/LICENSE",
+        source_member=_LICENSE_MEMBER,
         relative_path="licenses/example/LICENSE",
         sha256=sha256,
     )
@@ -53,25 +61,32 @@ def _files() -> tuple[InstalledFileRecord, ...]:
             mode="0755",
             size=7,
             sha256=_GATEWAY_DIGEST,
+            source_sha256=_PACKAGE_DIGEST,
+            source_member=_GATEWAY_MEMBER,
         ),
         InstalledFileRecord(
             relative_path="lib/module.py",
             mode="0644",
             size=11,
             sha256=_LIBRARY_DIGEST,
+            source_sha256=_PACKAGE_DIGEST,
+            source_member=_LIBRARY_MEMBER,
         ),
         InstalledFileRecord(
             relative_path="licenses/example/LICENSE",
             mode="0644",
             size=13,
             sha256=_LICENSE_DIGEST,
+            source_sha256=_PACKAGE_DIGEST,
+            source_member=_LICENSE_MEMBER,
         ),
     )
 
 
 def _inventory(**changes: object) -> InstalledClosureInventory:
+    context = changes.pop("context", None)
     fields: dict[str, object] = {
-        "inventory_version": "vaultspec-installed-closure-v1",
+        "inventory_version": "vaultspec-installed-closure-v2",
         "closure_kind": "python",
         "target": TargetTriple.WINDOWS_X86_64,
         "install_root": "runtime/python",
@@ -85,7 +100,7 @@ def _inventory(**changes: object) -> InstalledClosureInventory:
         "files": _files(),
     }
     fields.update(changes)
-    return InstalledClosureInventory.model_validate(fields)
+    return InstalledClosureInventory.model_validate(fields, context=context)
 
 
 def _write_content_addressed(
@@ -164,6 +179,8 @@ def test_inventory_rejects_unsorted_non_nfc_and_casefold_colliding_paths() -> No
             mode="0644",
             size=1,
             sha256="7" * 64,
+            source_sha256=_PACKAGE_DIGEST,
+            source_member=_LIBRARY_MEMBER,
         )
 
     with pytest.raises(ValidationError, match="ASCII"):
@@ -172,6 +189,8 @@ def test_inventory_rejects_unsorted_non_nfc_and_casefold_colliding_paths() -> No
             mode="0644",
             size=1,
             sha256="7" * 64,
+            source_sha256=_PACKAGE_DIGEST,
+            source_member=_LIBRARY_MEMBER,
         )
 
     for invalid in ("lib/foo bar.py", "lib/foo~bar.py", "lib/foo#bar.py"):
@@ -181,6 +200,8 @@ def test_inventory_rejects_unsorted_non_nfc_and_casefold_colliding_paths() -> No
                 mode="0644",
                 size=1,
                 sha256="7" * 64,
+                source_sha256=_PACKAGE_DIGEST,
+                source_member=_LIBRARY_MEMBER,
             )
 
     collision = InstalledFileRecord(
@@ -188,6 +209,8 @@ def test_inventory_rejects_unsorted_non_nfc_and_casefold_colliding_paths() -> No
         mode="0644",
         size=1,
         sha256="7" * 64,
+        source_sha256=_PACKAGE_DIGEST,
+        source_member="example-1.0/collision.py",
     )
     with pytest.raises(ValidationError, match="collision"):
         _inventory(files=(collision, *_files()))
@@ -312,3 +335,89 @@ def test_loader_requires_an_ordinary_inventory_file(tmp_path: Path) -> None:
 
     with pytest.raises(InstalledInventoryError, match="ordinary regular file"):
         load_installed_closure_inventory(descriptor, input_dir=tmp_path)
+
+
+def test_provenance_membership_join_proves_verified_closure_members() -> None:
+    context = {INSTALLED_PROVENANCE_EVIDENCE_KEY: _VERIFIED_MEMBERS}
+    proven = _inventory(context=context)
+    assert proven.inventory_version == "vaultspec-installed-closure-v2"
+    assert proven.files[0].source_sha256 == _PACKAGE_DIGEST
+    assert proven.files[0].source_member == _GATEWAY_MEMBER
+
+    files = _files()
+    unverified = files[1].model_copy(update={"source_member": "example-1.0/unknown.py"})
+    with pytest.raises(
+        ValidationError, match="does not name a verified closure member"
+    ):
+        _inventory(files=(files[0], unverified, files[2]), context=context)
+
+    unknown_package = {INSTALLED_PROVENANCE_EVIDENCE_KEY: {"a" * 64: frozenset()}}
+    with pytest.raises(
+        ValidationError, match="does not name a verified closure member"
+    ):
+        _inventory(context=unknown_package)
+
+    with pytest.raises(ValidationError, match="provenance evidence is malformed"):
+        _inventory(context={INSTALLED_PROVENANCE_EVIDENCE_KEY: {_PACKAGE_DIGEST: 5}})
+
+
+def test_v2_literal_rejects_unprovenanced_v1_inventory(tmp_path: Path) -> None:
+    inventory = _inventory()
+    document = json.loads(canonical_installed_inventory_bytes(inventory))
+    document["inventory_version"] = "vaultspec-installed-closure-v1"
+    with pytest.raises(ValidationError, match="inventory_version"):
+        InstalledClosureInventory.model_validate(document)
+
+    downgraded = (
+        json.dumps(document, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+        + "\n"
+    ).encode("utf-8")
+    digest = hashlib.sha256(downgraded).hexdigest()
+    (tmp_path / digest).write_bytes(downgraded)
+    descriptor = InstalledClosureDescriptor(
+        descriptor_version="vaultspec-installed-closure-descriptor-v1",
+        closure_kind=inventory.closure_kind,
+        target=inventory.target,
+        install_root=inventory.install_root,
+        source_inventory_sha256=inventory.source_inventory_sha256,
+        lock_sha256=inventory.lock_sha256,
+        inventory_sha256=digest,
+        inventory_size=len(downgraded),
+        file_count=inventory.file_count,
+        license_count=len(inventory.licenses),
+        expanded_size=inventory.expanded_size,
+        tree_digest=inventory.tree_digest,
+    )
+    with pytest.raises(InstalledInventoryError, match="invalid"):
+        load_installed_closure_inventory(descriptor, input_dir=tmp_path)
+
+
+def test_tree_digest_is_byte_identical_across_provenance() -> None:
+    baseline = _inventory()
+    files = _files()
+    reprovenanced = tuple(
+        file.model_copy(
+            update={
+                "source_sha256": "9" * 64,
+                "source_member": f"other-2.0/{index}",
+            }
+        )
+        for index, file in enumerate(files)
+    )
+    shifted = _inventory(
+        files=reprovenanced,
+        licenses=(_license().model_copy(update={"source_member": "other-2.0/2"}),),
+    )
+
+    assert installed_tree_digest(baseline) == _TREE_DIGEST
+    assert installed_tree_digest(shifted) == _TREE_DIGEST
+    assert baseline.tree_digest == shifted.tree_digest
+    assert canonical_installed_inventory_bytes(
+        baseline
+    ) != canonical_installed_inventory_bytes(shifted)
+
+
+def test_canonical_inventory_bytes_are_deterministic() -> None:
+    assert canonical_installed_inventory_bytes(
+        _inventory()
+    ) == canonical_installed_inventory_bytes(_inventory())

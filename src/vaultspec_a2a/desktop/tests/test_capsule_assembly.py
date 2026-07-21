@@ -135,12 +135,16 @@ def test_closure_license_presence_requires_every_package() -> None:
             mode="0755",
             size=len(entry),
             sha256=hashlib.sha256(entry).hexdigest(),
+            source_sha256=hashlib.sha256(b"closure-launcher").hexdigest(),
+            source_member="closure-launcher/entry",
         ),
         InstalledFileRecord(
             relative_path="licenses/click/LICENSE",
             mode="0644",
             size=len(payload),
             sha256=digest,
+            source_sha256=hashlib.sha256(b"click").hexdigest(),
+            source_member="click-8.3.1.dist-info/licenses/LICENSE.txt",
         ),
     )
     licenses = (

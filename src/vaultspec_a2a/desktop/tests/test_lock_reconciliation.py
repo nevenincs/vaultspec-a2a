@@ -3,8 +3,12 @@ from __future__ import annotations
 import base64
 import hashlib
 import json
+import tomllib
+from pathlib import Path
 
 import pytest
+from packaging.requirements import Requirement
+from packaging.utils import canonicalize_name
 
 from vaultspec_a2a.desktop.closure_inventory import (
     AcpClosureInventory,
@@ -14,11 +18,41 @@ from vaultspec_a2a.desktop.closure_inventory import (
 )
 from vaultspec_a2a.desktop.contract import TargetTriple
 from vaultspec_a2a.desktop.lock_reconciliation import (
+    AcpClosureSelection,
     LockReconciliationError,
+    PythonClosureSelection,
     _npm_version_satisfies,
     reconcile_acp_closure_lock_bytes,
     reconcile_python_closure_lock_bytes,
+    resolve_acp_closure_selection,
+    resolve_python_closure_selection,
 )
+
+_REPO_ROOT = Path(__file__).resolve().parents[4]
+_PYTHON_RUNTIME = "3.13.5"
+_ACP_ROOT = "@agentclientprotocol/claude-agent-acp"
+_TARGET_SDK_SUFFIX = {
+    TargetTriple.MACOS_ARM64: "darwin-arm64",
+    TargetTriple.MACOS_X86_64: "darwin-x64",
+    TargetTriple.LINUX_ARM64: "linux-arm64",
+    TargetTriple.LINUX_X86_64: "linux-x64",
+    TargetTriple.WINDOWS_X86_64: "win32-x64",
+}
+# The committed closure sizes.  A lock update legitimately moves these numbers;
+# they are pinned so that such a move is a reviewed change rather than silent.
+_COMMITTED_PYTHON_CLOSURE = {
+    TargetTriple.MACOS_ARM64: 82,
+    TargetTriple.MACOS_X86_64: 82,
+    TargetTriple.LINUX_ARM64: 82,
+    TargetTriple.LINUX_X86_64: 82,
+    TargetTriple.WINDOWS_X86_64: 84,
+}
+_COMMITTED_ACP_CLOSURE = 104
+# cryptography 49.0.0 publishes macOS wheels for arm64 only, so the Intel-macOS
+# target has no compatible artifact.  It reaches the closure through the
+# required mcp -> pyjwt[crypto] edge, and preparation for that one target fails
+# closed until the lock, the target matrix, or that edge changes.
+_KNOWN_WHEEL_GAP = {TargetTriple.MACOS_X86_64: {"cryptography"}}
 
 _PYTHON_TARGET = {
     TargetTriple.MACOS_ARM64: (
@@ -560,6 +594,198 @@ def test_acp_lock_reconciliation_preserves_nested_install_identity() -> None:
         root_package="@agentclientprotocol/claude-agent-acp",
         node_full_version=_NODE_VERSION,
     )
+
+
+def _committed_uv_lock() -> bytes:
+    return (_REPO_ROOT / "uv.lock").read_bytes()
+
+
+def _committed_package_lock() -> bytes:
+    return (_REPO_ROOT / "package-lock.json").read_bytes()
+
+
+def _committed_python_selection(target: TargetTriple) -> PythonClosureSelection:
+    return resolve_python_closure_selection(
+        lock_bytes=_committed_uv_lock(),
+        target=target,
+        root_package="vaultspec-a2a",
+        python_full_version=_PYTHON_RUNTIME,
+    )
+
+
+def _committed_acp_selection(target: TargetTriple) -> AcpClosureSelection:
+    return resolve_acp_closure_selection(
+        lock_bytes=_committed_package_lock(),
+        target=target,
+        root_package=_ACP_ROOT,
+        node_full_version=_NODE_VERSION,
+    )
+
+
+def _declared_runtime_requirements() -> tuple[str, ...]:
+    """Read the project's own declared runtime dependencies from pyproject."""
+    document = tomllib.loads(
+        (_REPO_ROOT / "pyproject.toml").read_bytes().decode("utf-8")
+    )
+    return tuple(
+        sorted(
+            canonicalize_name(Requirement(entry).name)
+            for entry in document["project"]["dependencies"]
+        )
+    )
+
+
+@pytest.mark.parametrize("target", tuple(TargetTriple))
+def test_committed_uv_lock_resolves_one_exact_closure_per_target(
+    target: TargetTriple,
+) -> None:
+    selection = _committed_python_selection(target)
+
+    assert selection.target is target
+    assert len(selection.packages) == _COMMITTED_PYTHON_CLOSURE[target]
+    names = tuple(package.name for package in selection.packages)
+    assert names == tuple(sorted(names))
+    assert len(set(names)) == len(names)
+    assert "vaultspec-a2a" not in names
+    assert not {"torch", "vaultspec-rag"}.intersection(names)
+
+
+@pytest.mark.parametrize("target", tuple(TargetTriple))
+def test_committed_closure_roots_are_the_declared_runtime_requirements(
+    target: TargetTriple,
+) -> None:
+    selection = _committed_python_selection(target)
+
+    assert selection.roots == _declared_runtime_requirements()
+    assert set(selection.roots).issubset(package.name for package in selection.packages)
+
+
+@pytest.mark.parametrize("target", tuple(TargetTriple))
+def test_committed_closure_graph_reaches_every_selected_package(
+    target: TargetTriple,
+) -> None:
+    selection = _committed_python_selection(target)
+    by_name = selection.by_name()
+
+    reached: set[str] = set()
+    pending = list(selection.roots)
+    while pending:
+        name = pending.pop()
+        if name in reached:
+            continue
+        reached.add(name)
+        pending.extend(by_name[name].dependencies)
+
+    assert reached == set(by_name)
+
+
+@pytest.mark.parametrize("target", tuple(TargetTriple))
+def test_committed_closure_binds_a_target_compatible_wheel_per_package(
+    target: TargetTriple,
+) -> None:
+    selection = _committed_python_selection(target)
+
+    without_wheel = {
+        package.name for package in selection.packages if not package.compatible_wheels
+    }
+
+    assert without_wheel == _KNOWN_WHEEL_GAP.get(target, set())
+
+
+@pytest.mark.parametrize("target", tuple(TargetTriple))
+def test_committed_closure_compatible_wheels_exclude_foreign_platforms(
+    target: TargetTriple,
+) -> None:
+    # Compound platform tags legitimately name several architectures in one
+    # filename, so only the operating-system families are asserted here.
+    foreign = {
+        TargetTriple.MACOS_ARM64: ("manylinux", "musllinux", "win_amd64"),
+        TargetTriple.MACOS_X86_64: ("manylinux", "musllinux", "win_amd64"),
+        TargetTriple.LINUX_ARM64: ("macosx", "musllinux", "win_amd64"),
+        TargetTriple.LINUX_X86_64: ("macosx", "musllinux", "win_amd64"),
+        TargetTriple.WINDOWS_X86_64: ("macosx", "manylinux", "musllinux"),
+    }[target]
+    selection = _committed_python_selection(target)
+
+    for package in selection.packages:
+        assert set(package.compatible_wheels).issubset(package.wheels)
+        for wheel in package.compatible_wheels:
+            assert not any(token in wheel.filename for token in foreign), (
+                f"{package.name} selected {wheel.filename} for {target.value}"
+            )
+
+
+def test_committed_uv_lock_selection_is_deterministic() -> None:
+    first = _committed_python_selection(TargetTriple.LINUX_X86_64)
+    second = _committed_python_selection(TargetTriple.LINUX_X86_64)
+
+    assert first == second
+
+
+def test_windows_closure_adds_exactly_the_windows_marked_packages() -> None:
+    linux = _committed_python_selection(TargetTriple.LINUX_X86_64)
+    windows = _committed_python_selection(TargetTriple.WINDOWS_X86_64)
+
+    linux_names = {package.name for package in linux.packages}
+    windows_names = {package.name for package in windows.packages}
+
+    assert windows_names - linux_names == {"colorama", "pywin32"}
+    assert not linux_names - windows_names
+
+
+def test_python_selection_rejects_a_wheel_record_without_an_exact_pin() -> None:
+    lock_bytes = _python_lock().replace(b'hash = "sha256:', b'hash = "md5:')
+
+    with pytest.raises(LockReconciliationError, match="does not exactly pin"):
+        resolve_python_closure_selection(
+            lock_bytes=lock_bytes,
+            target=TargetTriple.LINUX_X86_64,
+            root_package="vaultspec-a2a",
+            python_full_version=_PYTHON_RUNTIME,
+        )
+
+
+@pytest.mark.parametrize("target", tuple(TargetTriple))
+def test_committed_package_lock_resolves_one_exact_closure_per_target(
+    target: TargetTriple,
+) -> None:
+    selection = _committed_acp_selection(target)
+
+    assert selection.target is target
+    assert selection.root_path == f"node_modules/{_ACP_ROOT}"
+    assert len(selection.packages) == _COMMITTED_ACP_CLOSURE
+    paths = tuple(package.install_path for package in selection.packages)
+    assert paths == tuple(sorted(paths))
+    assert selection.root_path in paths
+
+
+@pytest.mark.parametrize("target", tuple(TargetTriple))
+def test_committed_acp_closure_selects_exactly_one_native_sdk(
+    target: TargetTriple,
+) -> None:
+    selection = _committed_acp_selection(target)
+
+    natives = tuple(
+        package.name
+        for package in selection.packages
+        if package.name.startswith("@anthropic-ai/claude-agent-sdk-")
+    )
+
+    assert natives == (f"@anthropic-ai/claude-agent-sdk-{_TARGET_SDK_SUFFIX[target]}",)
+
+
+@pytest.mark.parametrize("target", tuple(TargetTriple))
+def test_committed_acp_closure_binds_every_tarball_identity(
+    target: TargetTriple,
+) -> None:
+    selection = _committed_acp_selection(target)
+    by_path = selection.by_install_path()
+
+    for package in selection.packages:
+        assert package.url.startswith("https://")
+        assert package.integrity.startswith("sha512-")
+        assert package.install_path.endswith(f"node_modules/{package.name}")
+        assert set(package.dependency_paths).issubset(by_path)
 
 
 def test_acp_lock_reconciliation_rejects_duplicate_json_keys() -> None:

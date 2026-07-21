@@ -1,4 +1,4 @@
-"""Fail-closed reconciliation of offline closure inventories with lock files.
+"""Fail-closed target-selective closure resolution and inventory reconciliation.
 
 The Python lock is authoritative for the selected wheel URL, SHA-256, size,
 version, target markers, requested extras, and dependency graph.  npm lockfile
@@ -6,6 +6,12 @@ v3 is authoritative for tarball URL, SHA-512 SRI, version, target constraints,
 and the dependency graph.  Standard npm lockfiles do not record tarball size or
 SHA-256; those remain bound by the digest-pinned closure inventory and must be
 verified against the real tarball bytes by the artifact verifier.
+
+Resolution is the single definition of what a target selects: marker
+evaluation, extras propagation, platform filtering, and graph closure all live
+in the selection core here.  Reconciliation is a comparison of a supplied
+inventory against that one selection, so a declared closure and a resolved
+closure can never drift apart into two readings of the same lock.
 
 This module reconciles :mod:`vaultspec_a2a.desktop.closure_inventory`; exact lock
 snapshots and verified package bytes are owned by
@@ -20,6 +26,7 @@ import json
 import re
 import tomllib
 from collections import deque
+from dataclasses import dataclass
 from pathlib import PurePosixPath
 from typing import TYPE_CHECKING, Any, Final, cast
 from urllib.parse import urlsplit
@@ -30,6 +37,7 @@ from packaging.utils import canonicalize_name
 from packaging.version import InvalidVersion, Version
 
 from .contract import TargetTriple
+from .wheel_compatibility import wheel_filename_supports_target
 
 if TYPE_CHECKING:
     from .closure_inventory import (
@@ -39,9 +47,16 @@ if TYPE_CHECKING:
     )
 
 __all__ = [
+    "AcpClosureSelection",
+    "AcpNodeSelection",
     "LockReconciliationError",
+    "LockedWheel",
+    "PythonClosureSelection",
+    "PythonPackageSelection",
     "reconcile_acp_closure_lock_bytes",
     "reconcile_python_closure_lock_bytes",
+    "resolve_acp_closure_selection",
+    "resolve_python_closure_selection",
 ]
 
 _ACP_ROOT_PACKAGE: Final = "@agentclientprotocol/claude-agent-acp"
@@ -80,6 +95,70 @@ _NPM_STABLE_VERSION: Final = re.compile(
 
 class LockReconciliationError(ValueError):
     """A lock cannot prove the supplied target-selected closure."""
+
+
+@dataclass(frozen=True, slots=True)
+class LockedWheel:
+    """One exactly pinned wheel artifact offered by a uv lock record."""
+
+    url: str
+    filename: str
+    sha256: str
+    size: int
+
+
+@dataclass(frozen=True, slots=True)
+class PythonPackageSelection:
+    """One resolved Python package with its lock-pinned wheel candidates.
+
+    ``compatible_wheels`` narrows ``wheels`` to those a target-native CPython
+    can load; choosing among several compatible candidates is a separate
+    concern and deliberately not decided here.
+    """
+
+    name: str
+    version: str
+    dependencies: tuple[str, ...]
+    wheels: tuple[LockedWheel, ...]
+    compatible_wheels: tuple[LockedWheel, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class PythonClosureSelection:
+    """The exact Python closure one target selects from uv lock bytes."""
+
+    target: TargetTriple
+    roots: tuple[str, ...]
+    packages: tuple[PythonPackageSelection, ...]
+
+    def by_name(self) -> dict[str, PythonPackageSelection]:
+        """Return the selected packages keyed by canonical package name."""
+        return {package.name: package for package in self.packages}
+
+
+@dataclass(frozen=True, slots=True)
+class AcpNodeSelection:
+    """One resolved npm node with its lock-pinned tarball identity."""
+
+    name: str
+    install_path: str
+    version: str
+    url: str
+    integrity: str
+    dependency_paths: tuple[str, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class AcpClosureSelection:
+    """The exact ACP closure one target selects from package-lock bytes."""
+
+    target: TargetTriple
+    root_path: str
+    packages: tuple[AcpNodeSelection, ...]
+
+    def by_install_path(self) -> dict[str, AcpNodeSelection]:
+        """Return the selected nodes keyed by their nested install path."""
+        return {package.install_path: package for package in self.packages}
 
 
 def _verify_lock_digest(payload: bytes, expected: str, *, label: str) -> None:
@@ -255,15 +334,69 @@ def _python_dependencies(
     return selected
 
 
-def reconcile_python_closure_lock_bytes(
-    inventory: PythonClosureInventory,
+def _locked_wheels(record: dict[str, Any], name: str) -> tuple[LockedWheel, ...]:
+    """Read one lock record's exactly pinned wheel artifacts."""
+    wheels = record.get("wheels")
+    if not isinstance(wheels, list) or any(
+        not isinstance(wheel, dict) for wheel in wheels
+    ):
+        raise LockReconciliationError(f"uv wheel records are invalid for {name}")
+    resolved: list[LockedWheel] = []
+    for wheel in cast("list[dict[str, Any]]", wheels):
+        url = wheel.get("url")
+        digest = wheel.get("hash")
+        size = wheel.get("size")
+        if (
+            not isinstance(url, str)
+            or not isinstance(digest, str)
+            or not digest.startswith("sha256:")
+            or not isinstance(size, int)
+            or isinstance(size, bool)
+        ):
+            raise LockReconciliationError(
+                f"uv lock does not exactly pin every wheel artifact for {name}"
+            )
+        resolved.append(
+            LockedWheel(
+                url=url,
+                filename=PurePosixPath(urlsplit(url).path).name,
+                sha256=digest.removeprefix("sha256:"),
+                size=size,
+            )
+        )
+    return tuple(resolved)
+
+
+def _python_package_selection(
+    record: dict[str, Any],
+    *,
+    target: TargetTriple,
+    dependencies: tuple[str, ...],
+) -> PythonPackageSelection:
+    name = record["name"]
+    version = record["version"]
+    wheels = _locked_wheels(record, name)
+    return PythonPackageSelection(
+        name=name,
+        version=version,
+        dependencies=dependencies,
+        wheels=wheels,
+        compatible_wheels=tuple(
+            wheel
+            for wheel in wheels
+            if wheel_filename_supports_target(wheel.filename, target)
+        ),
+    )
+
+
+def resolve_python_closure_selection(
     *,
     lock_bytes: bytes,
+    target: TargetTriple,
     root_package: str,
     python_full_version: str,
-) -> None:
-    """Prove a Python closure against exact uv.lock bytes for one target."""
-    _verify_lock_digest(lock_bytes, inventory.lock_sha256, label="uv lock")
+) -> PythonClosureSelection:
+    """Resolve the exact Python closure one target selects from uv.lock bytes."""
     try:
         lock = tomllib.loads(lock_bytes.decode("utf-8"))
     except (UnicodeDecodeError, tomllib.TOMLDecodeError) as exc:
@@ -295,7 +428,7 @@ def reconcile_python_closure_lock_bytes(
     root = _select_python_record(
         records,
         {"name": root_name},
-        inventory.target,
+        target,
         python_full_version,
     )
 
@@ -309,12 +442,12 @@ def reconcile_python_closure_lock_bytes(
         child_names: set[str] = set()
         for dependency in _python_dependencies(
             record,
-            inventory.target,
+            target,
             requested_extras[name],
             python_full_version,
         ):
             child = _select_python_record(
-                records, dependency, inventory.target, python_full_version
+                records, dependency, target, python_full_version
             )
             child_name = child["name"]
             if child_name in {"torch", "vaultspec-rag"}:
@@ -335,49 +468,71 @@ def reconcile_python_closure_lock_bytes(
                 pending.append(child_name)
         expected_graph[name] = child_names
 
+    return PythonClosureSelection(
+        target=target,
+        roots=tuple(sorted(expected_graph[root_name])),
+        packages=tuple(
+            _python_package_selection(
+                selected[name],
+                target=target,
+                dependencies=tuple(sorted(expected_graph.get(name, set()))),
+            )
+            for name in sorted(set(selected) - {root_name})
+        ),
+    )
+
+
+def reconcile_python_closure_lock_bytes(
+    inventory: PythonClosureInventory,
+    *,
+    lock_bytes: bytes,
+    root_package: str,
+    python_full_version: str,
+) -> None:
+    """Prove a Python closure against exact uv.lock bytes for one target."""
+    _verify_lock_digest(lock_bytes, inventory.lock_sha256, label="uv lock")
+    selection = resolve_python_closure_selection(
+        lock_bytes=lock_bytes,
+        target=inventory.target,
+        root_package=root_package,
+        python_full_version=python_full_version,
+    )
     inventory_by_name = {package.name: package for package in inventory.packages}
-    expected_names = set(selected) - {root_name}
-    if set(inventory_by_name) != expected_names:
+    selected_by_name = selection.by_name()
+    if set(inventory_by_name) != set(selected_by_name):
         raise LockReconciliationError(
             "Python inventory contains unreachable extras or omits reachable packages"
         )
-    if inventory.roots != tuple(sorted(expected_graph[root_name])):
+    if inventory.roots != selection.roots:
         raise LockReconciliationError(
             "Python inventory roots differ from the approved root dependencies"
         )
     for name, package in inventory_by_name.items():
-        record = selected[name]
-        if tuple(sorted(expected_graph.get(name, set()))) != package.dependencies:
+        resolved = selected_by_name[name]
+        if resolved.dependencies != package.dependencies:
             raise LockReconciliationError(
                 f"Python inventory dependency graph differs for {name}"
             )
-        _verify_python_artifact_fields(record, package)
+        _verify_python_artifact_fields(resolved, package)
 
 
 def _verify_python_artifact_fields(
-    record: dict[str, Any], package: PythonWheelArtifact
+    resolved: PythonPackageSelection, package: PythonWheelArtifact
 ) -> None:
-    if record.get("version") != package.version:
+    if resolved.version != package.version:
         raise LockReconciliationError(f"uv version does not match {package.name}")
-    wheels = record.get("wheels")
-    if not isinstance(wheels, list) or any(
-        not isinstance(wheel, dict) for wheel in wheels
-    ):
-        raise LockReconciliationError(
-            f"uv wheel records are invalid for {package.name}"
-        )
     matches = [
         wheel
-        for wheel in wheels
-        if wheel.get("url") == package.url
-        and wheel.get("hash") == f"sha256:{package.sha256}"
-        and wheel.get("size") == package.size
+        for wheel in resolved.wheels
+        if wheel.url == package.url
+        and wheel.sha256 == package.sha256
+        and wheel.size == package.size
     ]
     if len(matches) != 1:
         raise LockReconciliationError(
             f"uv lock does not bind the exact wheel artifact for {package.name}"
         )
-    if PurePosixPath(urlsplit(package.url).path).name != package.filename:
+    if matches[0].filename != package.filename:
         raise LockReconciliationError(
             f"wheel URL filename does not match {package.name}"
         )
@@ -657,20 +812,38 @@ def _verify_node_engine(record: dict[str, Any], node_full_version: str) -> None:
         )
 
 
-def reconcile_acp_closure_lock_bytes(
-    inventory: AcpClosureInventory,
+def _acp_node_selection(
+    path: str, record: dict[str, Any], dependency_paths: tuple[str, ...]
+) -> AcpNodeSelection:
+    version = record.get("version")
+    url = record.get("resolved")
+    integrity = record.get("integrity")
+    if (
+        not isinstance(version, str)
+        or not isinstance(url, str)
+        or not isinstance(integrity, str)
+    ):
+        raise LockReconciliationError(
+            f"package lock does not bind an exact tarball identity for {path}"
+        )
+    return AcpNodeSelection(
+        name=path.rsplit("node_modules/", 1)[-1],
+        install_path=path,
+        version=version,
+        url=url,
+        integrity=integrity,
+        dependency_paths=dependency_paths,
+    )
+
+
+def resolve_acp_closure_selection(
     *,
     lock_bytes: bytes,
+    target: TargetTriple,
     root_package: str,
     node_full_version: str,
-) -> None:
-    """Prove an ACP closure against exact package-lock v3 bytes.
-
-    SHA-256 and size are intentionally not checked here because standard npm
-    lockfile v3 does not carry those fields.  The digest-pinned inventory and
-    real-tarball artifact verifier jointly retain that authority.
-    """
-    _verify_lock_digest(lock_bytes, inventory.lock_sha256, label="package lock")
+) -> AcpClosureSelection:
+    """Resolve the exact ACP closure one target selects from package-lock bytes."""
     runtime_version = _stable_npm_version(node_full_version)
     if runtime_version.release[:2] != (22, 17):
         raise LockReconciliationError("Node runtime must be one exact 22.17 patch")
@@ -707,9 +880,7 @@ def reconcile_acp_closure_lock_bytes(
         path = pending.popleft()
         record = selected[path]
         _verify_node_engine(record, node_full_version)
-        dependencies = _selected_npm_dependencies(
-            packages, path, record, inventory.target
-        )
+        dependencies = _selected_npm_dependencies(packages, path, record, target)
         child_paths: set[str] = set()
         for _child_name, child_path, child in dependencies:
             child_paths.add(child_path)
@@ -723,10 +894,45 @@ def reconcile_acp_closure_lock_bytes(
                 )
         expected_graph[path] = child_paths
 
+    return AcpClosureSelection(
+        target=target,
+        root_path=root_path,
+        packages=tuple(
+            _acp_node_selection(
+                path,
+                selected[path],
+                tuple(sorted(expected_graph.get(path, set()))),
+            )
+            for path in sorted(selected)
+        ),
+    )
+
+
+def reconcile_acp_closure_lock_bytes(
+    inventory: AcpClosureInventory,
+    *,
+    lock_bytes: bytes,
+    root_package: str,
+    node_full_version: str,
+) -> None:
+    """Prove an ACP closure against exact package-lock v3 bytes.
+
+    SHA-256 and size are intentionally not checked here because standard npm
+    lockfile v3 does not carry those fields.  The digest-pinned inventory and
+    real-tarball artifact verifier jointly retain that authority.
+    """
+    _verify_lock_digest(lock_bytes, inventory.lock_sha256, label="package lock")
+    selection = resolve_acp_closure_selection(
+        lock_bytes=lock_bytes,
+        target=inventory.target,
+        root_package=root_package,
+        node_full_version=node_full_version,
+    )
     inventory_by_path = {
         package.install_path: package for package in inventory.packages
     }
-    if set(inventory_by_path) != set(selected):
+    selected_by_path = selection.by_install_path()
+    if set(inventory_by_path) != set(selected_by_path):
         raise LockReconciliationError(
             "ACP inventory contains unreachable extras or omits reachable packages"
         )
@@ -741,16 +947,16 @@ def reconcile_acp_closure_lock_bytes(
             "ACP inventory does not select exactly one target SDK"
         )
     for path, package in inventory_by_path.items():
-        record = selected[path]
+        resolved = selected_by_path[path]
         if (
-            record.get("version") != package.version
-            or record.get("resolved") != package.url
-            or record.get("integrity") != package.integrity
+            resolved.version != package.version
+            or resolved.url != package.url
+            or resolved.integrity != package.integrity
         ):
             raise LockReconciliationError(
                 f"package lock does not bind the exact tarball identity for {path}"
             )
-        if tuple(sorted(expected_graph.get(path, set()))) != package.dependency_paths:
+        if resolved.dependency_paths != package.dependency_paths:
             raise LockReconciliationError(
                 f"ACP inventory dependency graph differs for {path}"
             )

@@ -21,6 +21,10 @@ import base64
 import binascii
 import hashlib
 import os
+import re
+import shutil
+import subprocess
+import tarfile
 import urllib.error
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -76,9 +80,11 @@ if TYPE_CHECKING:
 
 __all__ = [
     "AcquiredArtifact",
+    "BuiltDistribution",
     "CapsuleInputAuthoringError",
     "EmittedInventory",
     "acquire_artifact",
+    "build_a2a_distribution_wheel",
     "emit_acp_closure_inventory",
     "emit_python_closure_inventory",
     "select_target_wheel",
@@ -105,10 +111,105 @@ _LEGACY_MANYLINUX: Final = {
 # packaging's per-architecture floor.
 _GLIBC_FLOOR: Final = {"x86_64": 5, "aarch64": 17}
 _MACOS_ARCH: Final = {"aarch64": "arm64", "x86_64": "x86_64"}
+_COMMIT_PATTERN: Final = re.compile(r"^[0-9a-f]{40}$")
+_BUILD_TIMEOUT: Final = 600.0
 
 
 class CapsuleInputAuthoringError(RuntimeError):
     """Raised when capsule inputs cannot be authored from the pinned sources."""
+
+
+@dataclass(frozen=True, slots=True)
+class BuiltDistribution:
+    """The project's own wheel built from source head, digested and pinned."""
+
+    path: Path
+    sha256: str
+    size: int
+    source_commit: str
+
+
+def _run_build_step(
+    command: list[str], *, cwd: Path, source_date_epoch: int
+) -> subprocess.CompletedProcess[str]:
+    env = {
+        **os.environ,
+        "SOURCE_DATE_EPOCH": str(source_date_epoch),
+        "PYTHONHASHSEED": "0",
+    }
+    try:
+        return subprocess.run(
+            command,
+            cwd=cwd,
+            env=env,
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=_BUILD_TIMEOUT,
+        )
+    except (OSError, subprocess.SubprocessError) as error:
+        raise CapsuleInputAuthoringError(
+            f"capsule wheel build step failed: {' '.join(command[:2])}: {error}"
+        ) from None
+
+
+def build_a2a_distribution_wheel(
+    *, repo_root: Path, sandbox: Path, source_date_epoch: int
+) -> BuiltDistribution:
+    """Build the target-neutral A2A wheel from a clean git archive of HEAD.
+
+    The project's own distribution is a capsule input the descriptor must pin,
+    so the preparation authority mints it: it archives HEAD, builds one wheel
+    deterministically, and returns its digest, size, and the exact source
+    commit.  The digest changes with every commit by design - it is a
+    phase-boundary attestation of what this run built, not an origin pin.
+    """
+    git = shutil.which("git")
+    uv = shutil.which("uv")
+    if git is None or uv is None:
+        raise CapsuleInputAuthoringError(
+            "git and uv must be on PATH to build the wheel"
+        )
+    commit = _run_build_step(
+        [git, "rev-parse", "HEAD"], cwd=repo_root, source_date_epoch=source_date_epoch
+    ).stdout.strip()
+    if _COMMIT_PATTERN.fullmatch(commit) is None:
+        raise CapsuleInputAuthoringError("git HEAD is not a full commit hash")
+    sandbox.mkdir(parents=True, exist_ok=True)
+    archive_path = sandbox / "source.tar"
+    _run_build_step(
+        [git, "archive", "--format=tar", "--output", str(archive_path), "HEAD"],
+        cwd=repo_root,
+        source_date_epoch=source_date_epoch,
+    )
+    source_root = sandbox / "source"
+    source_root.mkdir()
+    try:
+        with tarfile.open(archive_path, mode="r:") as archive:
+            archive.extractall(source_root, filter="data")
+    except (OSError, tarfile.TarError) as error:
+        raise CapsuleInputAuthoringError(
+            f"cannot extract the HEAD source archive: {error}"
+        ) from None
+    dist_dir = sandbox / "dist"
+    dist_dir.mkdir()
+    _run_build_step(
+        [uv, "build", "--wheel", "--out-dir", str(dist_dir), "--no-sources"],
+        cwd=source_root,
+        source_date_epoch=source_date_epoch,
+    )
+    wheels = sorted(dist_dir.glob("vaultspec_a2a-*.whl"))
+    if len(wheels) != 1:
+        raise CapsuleInputAuthoringError(
+            f"expected exactly one wheel from the build, got {len(wheels)}"
+        )
+    payload = wheels[0].read_bytes()
+    return BuiltDistribution(
+        path=wheels[0],
+        sha256=hashlib.sha256(payload).hexdigest(),
+        size=len(payload),
+        source_commit=commit,
+    )
 
 
 def _manylinux_platforms(architecture: str) -> tuple[str, ...]:

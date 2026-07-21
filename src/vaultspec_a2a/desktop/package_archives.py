@@ -29,6 +29,7 @@ from email.parser import BytesParser
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, BinaryIO, Final
 
+from packaging.licenses import InvalidLicenseExpression, canonicalize_license_expression
 from packaging.tags import parse_tag
 from packaging.utils import (
     InvalidWheelFilename,
@@ -102,6 +103,7 @@ _LEGACY_LICENSE_BASENAME: Final = re.compile(
 )
 _RECORD_SHA256: Final = re.compile(r"^sha256=([A-Za-z0-9_-]{43})$")
 _RECORD_SIZE: Final = re.compile(r"^(?:0|[1-9][0-9]*)$")
+_SEE_LICENSE_IN: Final = re.compile(r"^SEE LICENSE IN .+$")
 
 
 class PackageArchiveError(RuntimeError):
@@ -773,6 +775,44 @@ def _tar_license_evidence(
     )
 
 
+def _verify_acp_license_claim(
+    descriptor: AcpPackageArtifact, *, package_license: str
+) -> None:
+    """Prove an npm license claim, allowing a curated non-SPDX fallback.
+
+    When ``package.json`` declares a canonical SPDX license it must equal the
+    inventory verbatim.  When it declares a non-SPDX ``SEE LICENSE IN <file>``
+    reference, the inventory may instead carry a curated SPDX expression - a
+    standard id or an SPDX ``LicenseRef-`` custom reference for a proprietary
+    license - gated by an exact curated-fallback evidence marker, mirroring the
+    wheel verifier's fallback for metadata lacking a License-Expression.  The
+    referenced license bytes are bound through the descriptor's license members,
+    which are verified present in the archive.
+    """
+    try:
+        canonical = canonicalize_license_expression(package_license)
+        is_canonical_spdx = canonical == package_license
+    except InvalidLicenseExpression:
+        is_canonical_spdx = False
+    if is_canonical_spdx:
+        if package_license != descriptor.license_expression:
+            raise PackageArchiveError(
+                "npm package.json identity does not match inventory"
+            )
+        return
+    if _SEE_LICENSE_IN.fullmatch(package_license) is None:
+        raise PackageArchiveError(
+            "npm package.json license is neither SPDX nor a SEE LICENSE IN reference"
+        )
+    fallback = f"curated-license-expression:{descriptor.license_expression}"
+    if fallback not in descriptor.redistribution_evidence:
+        raise PackageArchiveError(
+            "npm curated license lacks exact curated fallback evidence"
+        )
+    if not descriptor.license_members and not descriptor.external_licenses:
+        raise PackageArchiveError("npm curated license binds no license bytes")
+
+
 def _create_verified_acp_package_session(
     path: Path, descriptor: AcpPackageArtifact
 ) -> VerifiedPackageArchiveSession:
@@ -820,17 +860,14 @@ def _create_verified_acp_package_session(
                     raise PackageArchiveError(
                         "npm tarball lacks regular package/package.json"
                     )
-                identity = _package_json_identity(
+                name, version, package_license = _package_json_identity(
                     _bounded_tar_member(archive, package_json, _MAX_METADATA_SIZE)
                 )
-                if identity != (
-                    descriptor.name,
-                    descriptor.version,
-                    descriptor.license_expression,
-                ):
+                if (name, version) != (descriptor.name, descriptor.version):
                     raise PackageArchiveError(
                         "npm package.json identity does not match inventory"
                     )
+                _verify_acp_license_claim(descriptor, package_license=package_license)
                 license_evidence = tuple(
                     _tar_license_evidence(archive, members, name)
                     for name in descriptor.license_members

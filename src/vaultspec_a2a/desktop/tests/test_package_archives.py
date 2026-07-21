@@ -456,6 +456,93 @@ def test_npm_verifier_rejects_identity_missing_license_and_digest_drift(
         verify_acp_package_archive(changed, descriptor)
 
 
+def _curated_npm_descriptor(
+    payload: bytes, *, expression: str, evidence: tuple[str, ...]
+) -> AcpPackageArtifact:
+    return AcpPackageArtifact(
+        name="@scope/example",
+        version="2.3.4",
+        install_path="node_modules/@scope/example",
+        url="https://registry.example.invalid/example.tgz",
+        integrity="sha512-"
+        + base64.b64encode(hashlib.sha512(payload).digest()).decode("ascii"),
+        sha256=hashlib.sha256(payload).hexdigest(),
+        size=len(payload),
+        license_expression=expression,
+        license_members=("package/LICENSE.md",),
+        redistribution_evidence=evidence,
+    )
+
+
+def test_npm_verifier_accepts_a_curated_fallback_for_a_see_license_reference(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "see-license.tgz"
+    payload = _write_npm_tarball(
+        path,
+        license_expression="SEE LICENSE IN LICENSE.md",
+        include_license=False,
+        extra=(_tar_member("package/LICENSE.md", b"(c) proprietary. all rights.\n"),),
+    )
+
+    verified = verify_acp_package_archive(
+        path,
+        _curated_npm_descriptor(
+            payload,
+            expression="LicenseRef-Anthropic-Commercial",
+            evidence=("curated-license-expression:LicenseRef-Anthropic-Commercial",),
+        ),
+    )
+
+    assert verified.license_members[0].path == "package/LICENSE.md"
+
+
+def test_npm_verifier_rejects_a_curated_fallback_without_evidence(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "no-evidence.tgz"
+    payload = _write_npm_tarball(
+        path,
+        license_expression="SEE LICENSE IN LICENSE.md",
+        include_license=False,
+        extra=(_tar_member("package/LICENSE.md", b"(c) proprietary.\n"),),
+    )
+
+    with pytest.raises(PackageArchiveError, match="curated fallback evidence"):
+        verify_acp_package_archive(
+            path,
+            _curated_npm_descriptor(
+                payload,
+                expression="LicenseRef-Anthropic-Commercial",
+                evidence=("tarball-license:LICENSE.md",),
+            ),
+        )
+
+
+def test_npm_verifier_rejects_a_non_spdx_license_that_is_not_a_see_reference(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "garbage-license.tgz"
+    payload = _write_npm_tarball(
+        path,
+        license_expression="totally not a license",
+        include_license=False,
+        extra=(_tar_member("package/LICENSE.md", b"(c) proprietary.\n"),),
+    )
+
+    with pytest.raises(PackageArchiveError, match="neither SPDX nor a SEE LICENSE"):
+        verify_acp_package_archive(
+            path,
+            _curated_npm_descriptor(
+                payload,
+                expression="LicenseRef-Anthropic-Commercial",
+                evidence=(
+                    "curated-license-expression:LicenseRef-Anthropic-Commercial",
+                ),
+            ),
+        )
+
+
 def test_npm_verifier_rejects_link_traversal_and_nfc_casefold_collision(
     tmp_path: Path,
 ) -> None:

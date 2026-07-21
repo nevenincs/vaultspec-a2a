@@ -28,7 +28,13 @@ from vaultspec_a2a.desktop.artifacts import (
     SourceArtifactDescriptor,
     load_capsule_input_descriptor,
 )
-from vaultspec_a2a.desktop.capsule_descriptor import author_capsule_input_descriptor
+from vaultspec_a2a.desktop.capsule_descriptor import (
+    RuntimeSourceInput,
+    author_capsule_descriptor,
+    author_capsule_input_descriptor,
+    author_source_descriptors,
+)
+from vaultspec_a2a.desktop.capsule_input_authoring import BuiltDistribution
 from vaultspec_a2a.desktop.contract import TargetTriple
 
 if TYPE_CHECKING:
@@ -209,3 +215,98 @@ def test_loader_rejects_a_tampered_descriptor(tmp_path: Path) -> None:
 
     with pytest.raises(ArtifactInputError, match="digest does not match"):
         load_capsule_input_descriptor(authored.path, expected_sha256="0" * 64)
+
+
+def test_source_and_descriptor_authoring_round_trip_through_the_loader(
+    tmp_path: Path,
+) -> None:
+    root_sri = _sri("acp-root-integrity")
+    sdk_sri = _sri("sdk-integrity")
+    uv = LockInputDescriptor(sha256=_digest("uv.lock"), size=1024)
+    pkg = LockInputDescriptor(sha256=_digest("package-lock.json"), size=2048)
+    py_inv = _digest("python-wheelhouse")
+    acp_inv = _digest("acp-tarballs")
+
+    sources = author_source_descriptors(
+        target=_TARGET,
+        python=RuntimeSourceInput(
+            version="3.13",
+            release="3.13.5",
+            build="20250702",
+            url="https://example.invalid/python.tar.gz",
+            sha256=_digest("python-runtime"),
+            size=1,
+            archive_kind=ArchiveKind.TAR_GZIP,
+            archive_root="python",
+            license_expression="PSF-2.0",
+            license_members=("python/LICENSE",),
+            redistribution_evidence=("python-license",),
+        ),
+        node=RuntimeSourceInput(
+            version="22",
+            release="22.17.0",
+            build="node-v22.17.0-win-x64",
+            url="https://nodejs.org/dist/v22.17.0/node-v22.17.0-win-x64.zip",
+            sha256=_digest("node-runtime"),
+            size=1,
+            archive_kind=ArchiveKind.ZIP,
+            archive_root="node-v22.17.0-win-x64",
+            license_expression="MIT",
+            license_members=("node-v22.17.0-win-x64/LICENSE",),
+            redistribution_evidence=("archive-license:LICENSE",),
+        ),
+        acp=RuntimeSourceInput(
+            version="0.59.0",
+            release="0.59.0",
+            build="npm",
+            url="https://example.invalid/claude-agent-acp.tgz",
+            sha256=_digest("acp-adapter"),
+            size=1,
+            archive_kind=ArchiveKind.TAR_GZIP,
+            archive_root="package",
+            license_expression="Apache-2.0",
+            license_members=("package/LICENSE",),
+            redistribution_evidence=("acp-license",),
+        ),
+        acp_root_integrity=root_sri,
+        a2a=BuiltDistribution(
+            path=tmp_path / "unused.whl",
+            sha256=_digest("a2a-distribution"),
+            size=1,
+            source_commit="7df84b1de4455ed79895136ab085c821ce988c9a",
+        ),
+        a2a_version="0.1.0",
+        a2a_license_expression="MIT",
+        a2a_license_members=("vaultspec_a2a-0.1.0.dist-info/licenses/LICENSE",),
+        a2a_redistribution_evidence=("wheel-license",),
+    )
+    assert tuple(s.kind for s in sources) == tuple(ComponentAssetKind)
+
+    descriptor = author_capsule_descriptor(
+        target=_TARGET,
+        source_date_epoch=1_700_000_000,
+        sources=sources,
+        uv_lock=uv,
+        package_lock=pkg,
+        python_installed=_installed(
+            "python", source_inventory_sha256=py_inv, lock_sha256=uv.sha256
+        ),
+        python_inventory_sha256=py_inv,
+        python_inventory_size=8192,
+        python_package_count=84,
+        acp_installed=_installed(
+            "acp", source_inventory_sha256=acp_inv, lock_sha256=pkg.sha256
+        ),
+        acp_inventory_sha256=acp_inv,
+        acp_inventory_size=8192,
+        acp_package_count=104,
+        acp_root_integrity=root_sri,
+        target_sdk_integrity=sdk_sri,
+    )
+
+    authored = author_capsule_input_descriptor(descriptor, output_dir=tmp_path)
+    loaded = load_capsule_input_descriptor(
+        authored.path, expected_sha256=authored.sha256
+    )
+    assert loaded.value == descriptor
+    assert loaded.value.acp_closure.target_sdk_package == _SDK

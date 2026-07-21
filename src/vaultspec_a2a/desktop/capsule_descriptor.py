@@ -22,11 +22,19 @@ from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Final
 
 from .artifacts import (
+    _TARGET_SDK_PACKAGES,
+    AcpClosureDescriptor,
+    ArchiveKind,
     ArtifactInputError,
+    CapsuleInputDescriptor,
+    ComponentAssetKind,
+    LockInputDescriptor,
+    PythonClosureDescriptor,
+    SourceArtifactDescriptor,
     build_acp_closure_installed_inventory,
     build_python_closure_installed_inventory,
 )
-from .capsule_input_authoring import CapsuleInputAuthoringError
+from .capsule_input_authoring import BuiltDistribution, CapsuleInputAuthoringError
 from .installed_inventory import (
     InstalledFileRecord,
     InstalledLicenseRecord,
@@ -38,7 +46,6 @@ from .package_archives import (
 )
 
 if TYPE_CHECKING:
-    from .artifacts import CapsuleInputDescriptor
     from .closure_inventory import (
         AcpPackageArtifact,
         ExternalLicenseArtifact,
@@ -54,7 +61,10 @@ if TYPE_CHECKING:
 
 __all__ = [
     "AuthoredDescriptor",
+    "RuntimeSourceInput",
+    "author_capsule_descriptor",
     "author_capsule_input_descriptor",
+    "author_source_descriptors",
     "build_acp_installed_inventory",
     "build_python_installed_inventory",
 ]
@@ -320,3 +330,154 @@ def author_capsule_input_descriptor(
             f"cannot write capsule input descriptor: {error}"
         ) from None
     return AuthoredDescriptor(path=path, sha256=sha256, size=len(payload))
+
+
+@dataclass(frozen=True, slots=True)
+class RuntimeSourceInput:
+    """One pinned runtime or adapter source, from the committed toml + acquisition."""
+
+    version: str
+    release: str
+    build: str
+    url: str
+    sha256: str
+    size: int
+    archive_kind: ArchiveKind
+    archive_root: str
+    license_expression: str
+    license_members: tuple[str, ...]
+    redistribution_evidence: tuple[str, ...]
+
+
+def _runtime_source(
+    kind: ComponentAssetKind,
+    facts: RuntimeSourceInput,
+    *,
+    target: TargetTriple | None,
+    package_lock_integrity: str | None = None,
+) -> SourceArtifactDescriptor:
+    return SourceArtifactDescriptor(
+        kind=kind,
+        target=target,
+        version=facts.version,
+        release=facts.release,
+        build=facts.build,
+        url=facts.url,
+        sha256=facts.sha256,
+        size=facts.size,
+        archive_kind=facts.archive_kind,
+        archive_root=facts.archive_root,
+        license_expression=facts.license_expression,
+        license_members=facts.license_members,
+        redistribution_evidence=facts.redistribution_evidence,
+        package_lock_integrity=package_lock_integrity,
+    )
+
+
+def author_source_descriptors(
+    *,
+    target: TargetTriple,
+    python: RuntimeSourceInput,
+    node: RuntimeSourceInput,
+    acp: RuntimeSourceInput,
+    acp_root_integrity: str,
+    a2a: BuiltDistribution,
+    a2a_version: str,
+    a2a_license_expression: str,
+    a2a_license_members: tuple[str, ...],
+    a2a_redistribution_evidence: tuple[str, ...],
+) -> tuple[SourceArtifactDescriptor, ...]:
+    """Author the four capsule source descriptors in canonical asset-kind order.
+
+    The A2A distribution's bytes are the locally built wheel (digest + source
+    commit from the build); its url is provenance metadata only.  The ACP source
+    binds the acquired root package-lock SRI.  Runtime sources carry their
+    committed pins and derived release/build identity.
+    """
+    try:
+        sources = (
+            _runtime_source(ComponentAssetKind.PYTHON_RUNTIME, python, target=target),
+            _runtime_source(ComponentAssetKind.NODE_RUNTIME, node, target=target),
+            _runtime_source(
+                ComponentAssetKind.ACP_ADAPTER,
+                acp,
+                target=None,
+                package_lock_integrity=acp_root_integrity,
+            ),
+            SourceArtifactDescriptor(
+                kind=ComponentAssetKind.A2A_DISTRIBUTION,
+                target=None,
+                version=a2a_version,
+                release=a2a_version,
+                build="wheel",
+                url=f"https://example.invalid/vaultspec_a2a-{a2a_version}.whl",
+                sha256=a2a.sha256,
+                size=a2a.size,
+                archive_kind=ArchiveKind.WHEEL,
+                archive_root=None,
+                license_expression=a2a_license_expression,
+                license_members=a2a_license_members,
+                redistribution_evidence=a2a_redistribution_evidence,
+                source_commit=a2a.source_commit,
+            ),
+        )
+    except (ValueError, TypeError) as error:
+        raise CapsuleInputAuthoringError(
+            f"capsule source descriptor is invalid: {error}"
+        ) from None
+    return tuple(
+        sorted(sources, key=lambda source: tuple(ComponentAssetKind).index(source.kind))
+    )
+
+
+def author_capsule_descriptor(
+    *,
+    target: TargetTriple,
+    source_date_epoch: int,
+    sources: tuple[SourceArtifactDescriptor, ...],
+    uv_lock: LockInputDescriptor,
+    package_lock: LockInputDescriptor,
+    python_installed: InstalledClosureDescriptor,
+    python_inventory_sha256: str,
+    python_inventory_size: int,
+    python_package_count: int,
+    acp_installed: InstalledClosureDescriptor,
+    acp_inventory_sha256: str,
+    acp_inventory_size: int,
+    acp_package_count: int,
+    acp_root_integrity: str,
+    target_sdk_integrity: str,
+) -> CapsuleInputDescriptor:
+    """Assemble the validated capsule input descriptor from authored components."""
+    try:
+        return CapsuleInputDescriptor(
+            descriptor_version="2",
+            target=target,
+            source_date_epoch=source_date_epoch,
+            sources=sources,
+            uv_lock=uv_lock,
+            package_lock=package_lock,
+            python_closure=PythonClosureDescriptor(
+                target=target,
+                lock_sha256=uv_lock.sha256,
+                package_count=python_package_count,
+                wheel_inventory_sha256=python_inventory_sha256,
+                wheel_inventory_size=python_inventory_size,
+                installed=python_installed,
+            ),
+            acp_closure=AcpClosureDescriptor(
+                target=target,
+                lock_sha256=package_lock.sha256,
+                package_count=acp_package_count,
+                tarball_inventory_sha256=acp_inventory_sha256,
+                tarball_inventory_size=acp_inventory_size,
+                installed=acp_installed,
+                root_package_integrity=acp_root_integrity,
+                target_sdk_package=_TARGET_SDK_PACKAGES[target],
+                target_sdk_integrity=target_sdk_integrity,
+            ),
+        )
+    except (ValueError, TypeError) as error:
+        raise CapsuleInputAuthoringError(
+            f"assembled capsule input descriptor is invalid: {error}"
+        ) from None

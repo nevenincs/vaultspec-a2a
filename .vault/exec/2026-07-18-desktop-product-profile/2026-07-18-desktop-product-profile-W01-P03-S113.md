@@ -36,10 +36,7 @@ related:
 <!-- STEP RECORD:
      This file represents one Step from the originating plan. Identified
      by its canonical leaf identifier (S##) and ancestor display path.
-     The Extract the pure closure selection core from the lock reconciliation authority so marker evaluation extras propagation graph resolution and platform filtering have one definition and re-express both reconciliation entry points as comparisons against it and ## Scope
-
-- `src/vaultspec_a2a/desktop/lock_reconciliation.py`
-- `src/vaultspec_a2a/desktop/tests/test_lock_reconciliation.py` placeholders below are machine-filled
+     The heading and Scope placeholders below are machine-filled
      by `vaultspec-core vault add exec` from the originating Step row;
      do not fill them by hand. -->
 

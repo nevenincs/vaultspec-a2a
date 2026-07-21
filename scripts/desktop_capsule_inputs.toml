@@ -83,3 +83,215 @@ version = "22"
 license = "MIT"
 url = "https://nodejs.org/dist/v22.17.0/node-v22.17.0-win-x64.zip"
 sha256 = "721ab118a3aac8584348b132767eadf51379e0616f0db802cc1e66d7f0d98f85"
+
+# ---------------------------------------------------------------------------
+# Curated per-package license overrides (feature: desktop-product-profile).
+# Each entry is keyed by canonical package name and exact locked version. An
+# expression override supplies a curated SPDX expression for a wheel whose
+# METADATA lacks License-Expression, with the verbatim declaration it
+# interprets as evidence. An [[...external]] array binds committed license
+# bytes for a package that ships none: a raw upstream URL at a full immutable
+# commit hash, sha256-pinned (the sha256 is the integrity authority).
+# ---------------------------------------------------------------------------
+
+[license_overrides."aiosqlite"]
+version = "0.22.1"
+expression = "MIT"
+evidence = "wheel METADATA classifier 'License :: OSI Approved :: MIT License'"
+
+[license_overrides."annotated-types"]
+version = "0.7.0"
+expression = "MIT"
+evidence = "wheel METADATA classifier 'License :: OSI Approved :: MIT License'"
+
+[license_overrides."asgiref"]
+version = "3.12.1"
+expression = "BSD-3-Clause"
+evidence = "wheel METADATA License field 'BSD-3-Clause'"
+
+[license_overrides."certifi"]
+version = "2026.6.17"
+expression = "MPL-2.0"
+evidence = "wheel METADATA License field 'MPL-2.0'"
+
+[license_overrides."charset-normalizer"]
+version = "3.4.9"
+expression = "MIT"
+evidence = "wheel METADATA License field 'MIT'"
+
+[license_overrides."colorama"]
+version = "0.4.6"
+expression = "BSD-3-Clause"
+evidence = "OSI classifier 'License :: OSI Approved :: BSD License'; wheel LICENSE.txt is the 3-clause BSD text (Jonathan Hartley)"
+
+[license_overrides."distro"]
+version = "1.9.0"
+expression = "Apache-2.0"
+evidence = "wheel METADATA License field 'Apache License, Version 2.0'"
+
+[license_overrides."h11"]
+version = "0.16.0"
+expression = "MIT"
+evidence = "wheel METADATA License field 'MIT'"
+
+[license_overrides."httpx"]
+version = "0.28.1"
+expression = "BSD-3-Clause"
+evidence = "wheel METADATA License field 'BSD-3-Clause'"
+
+[license_overrides."httpx-sse"]
+version = "0.4.3"
+expression = "MIT"
+evidence = "wheel METADATA License field 'MIT'"
+
+[license_overrides."jsonpatch"]
+version = "1.33"
+expression = "BSD-3-Clause"
+evidence = "wheel METADATA License field 'Modified BSD License'"
+
+[license_overrides."jsonpointer"]
+version = "3.1.1"
+expression = "BSD-3-Clause"
+evidence = "wheel METADATA License field 'Modified BSD License'"
+
+[license_overrides."langchain-core"]
+version = "1.4.9"
+expression = "MIT"
+evidence = "wheel METADATA License field 'MIT'"
+
+[[license_overrides."langchain-core".external]]
+member = "LICENSE"
+url = "https://raw.githubusercontent.com/langchain-ai/langchain/1c3a4186cf2ba4f28face59118ac7786de009f91/LICENSE"
+sha256 = "4ec67e4ca6e6721dba849b2ca82261597c86a61ee214bbf21416006b7b2d0478"
+
+[license_overrides."langchain-openai"]
+version = "1.3.5"
+expression = "MIT"
+evidence = "wheel METADATA License field 'MIT'"
+
+[license_overrides."langchain-protocol"]
+version = "0.0.18"
+expression = "MIT"
+evidence = "wheel METADATA License field 'MIT'"
+
+[license_overrides."langsmith"]
+version = "0.10.3"
+expression = "MIT"
+evidence = "wheel METADATA License field 'MIT'"
+
+[[license_overrides."langsmith".external]]
+member = "LICENSE"
+url = "https://raw.githubusercontent.com/langchain-ai/langsmith-sdk/22971e543126c7331abea2ceac2bba714453b122/LICENSE"
+sha256 = "34e0b9842c7a31d34e53bc7eb224e81e07a34996106e029bbc72dea2d449f496"
+
+[license_overrides."mako"]
+version = "1.3.12"
+expression = "MIT"
+evidence = "wheel METADATA License field 'MIT'"
+
+[license_overrides."markdown-it-py"]
+version = "4.2.0"
+expression = "MIT"
+evidence = "wheel METADATA classifier 'License :: OSI Approved :: MIT License'"
+
+[license_overrides."mcp"]
+version = "1.28.1"
+expression = "MIT"
+evidence = "wheel METADATA License field 'MIT'"
+
+[license_overrides."mdurl"]
+version = "0.1.2"
+expression = "MIT"
+evidence = "wheel METADATA classifier 'License :: OSI Approved :: MIT License'"
+
+[license_overrides."openai"]
+version = "2.45.0"
+expression = "Apache-2.0"
+evidence = "wheel METADATA License field 'Apache-2.0'"
+
+[license_overrides."opentelemetry-util-http"]
+version = "0.64b0"
+
+[[license_overrides."opentelemetry-util-http".external]]
+member = "LICENSE"
+url = "https://raw.githubusercontent.com/open-telemetry/opentelemetry-python-contrib/880e756428b6c34c31b9779804de2d24080f5602/LICENSE"
+sha256 = "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4"
+
+[license_overrides."python-dotenv"]
+version = "1.2.2"
+expression = "BSD-3-Clause"
+evidence = "wheel METADATA License field 'BSD-3-Clause'"
+
+[license_overrides."pywin32"]
+version = "312"
+expression = "PSF-2.0"
+evidence = "wheel METADATA License field 'PSF'"
+justification = "Upstream legacy field 'PSF' is the Python Software Foundation License, SPDX PSF-2.0"
+
+[license_overrides."pyyaml"]
+version = "6.0.3"
+expression = "MIT"
+evidence = "wheel METADATA License field 'MIT'"
+
+[license_overrides."requests"]
+version = "2.34.2"
+expression = "Apache-2.0"
+evidence = "wheel METADATA License field 'Apache-2.0'"
+
+[license_overrides."requests-toolbelt"]
+version = "1.0.0"
+expression = "Apache-2.0"
+evidence = "wheel METADATA License field 'Apache 2.0'"
+
+[license_overrides."rich"]
+version = "15.0.0"
+expression = "MIT"
+evidence = "wheel METADATA License field 'MIT'"
+
+[license_overrides."sniffio"]
+version = "1.3.1"
+expression = "MIT OR Apache-2.0"
+evidence = "wheel METADATA License field 'MIT OR Apache-2.0'"
+justification = "Upstream declares MIT OR Apache-2.0; dual license preserved as an SPDX disjunction"
+
+[license_overrides."sqlalchemy"]
+version = "2.0.51"
+expression = "MIT"
+evidence = "wheel METADATA License field 'MIT'"
+
+[license_overrides."sqlite-vec"]
+version = "0.1.9"
+expression = "MIT OR Apache-2.0"
+evidence = "PyPI license field 'MIT License, Apache License, Version 2.0'; upstream asg017/sqlite-vec at the pinned commit ships separate LICENSE-MIT and LICENSE-APACHE"
+justification = "Dual permissive license; the comma-list is the licensee's choice, preserved as an SPDX disjunction (owner-confirmed)"
+
+[[license_overrides."sqlite-vec".external]]
+member = "LICENSE-MIT"
+url = "https://raw.githubusercontent.com/asg017/sqlite-vec/e9f598abfa0c06b328d8fe5da9c3760cce74be10/LICENSE-MIT"
+sha256 = "6ce72bbe12d975bd5286e5ab0a064c069693300c47bccbc57bec18485f1621ea"
+
+[[license_overrides."sqlite-vec".external]]
+member = "LICENSE-APACHE"
+url = "https://raw.githubusercontent.com/asg017/sqlite-vec/e9f598abfa0c06b328d8fe5da9c3760cce74be10/LICENSE-APACHE"
+sha256 = "a38070a94d4afd9cd710e3ce67bd1de78097cfe1784c1f0109ac95d3c196bfdc"
+
+[license_overrides."tenacity"]
+version = "9.1.4"
+expression = "Apache-2.0"
+evidence = "wheel METADATA License field 'Apache 2.0'"
+
+[license_overrides."tiktoken"]
+version = "0.13.0"
+expression = "MIT"
+evidence = "wheel METADATA License field 'MIT License'"
+
+[license_overrides."tqdm"]
+version = "4.68.4"
+expression = "MPL-2.0 AND MIT"
+evidence = "wheel METADATA License field 'MPL-2.0 AND MIT'"
+justification = "Upstream declares MPL-2.0 AND MIT; both apply, preserved as an SPDX conjunction"
+
+[license_overrides."xxhash"]
+version = "3.8.1"
+expression = "BSD-2-Clause"
+evidence = "wheel METADATA License field 'BSD-2-Clause'"

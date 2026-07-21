@@ -59,6 +59,7 @@ __all__ = [
     "derive_python_wheel_artifact",
     "load_acp_license_overrides",
     "load_license_overrides",
+    "validate_license_overrides",
 ]
 
 _MAX_WHEEL_METADATA_BYTES: Final = 1 << 20
@@ -569,3 +570,82 @@ def derive_acp_package_artifact(
             f"derived license identity for {node.name} fails verification: {error}"
         ) from None
     return artifact
+
+
+def _index_uv_lock(lock_bytes: bytes) -> dict[str, set[str]]:
+    """Index every uv-lock package as canonical name to its locked versions."""
+    try:
+        lock = tomllib.loads(lock_bytes.decode("utf-8"))
+    except (UnicodeDecodeError, tomllib.TOMLDecodeError) as error:
+        raise CapsuleInputAuthoringError(
+            f"uv lock is not valid TOML: {error}"
+        ) from None
+    index: dict[str, set[str]] = {}
+    for record in lock.get("package", []):
+        name = record.get("name")
+        version = record.get("version")
+        if isinstance(name, str) and isinstance(version, str):
+            index.setdefault(canonicalize_name(name), set()).add(version)
+    return index
+
+
+def _index_package_lock(lock_bytes: bytes) -> dict[str, set[str]]:
+    """Index every package-lock node as exact npm name to its locked versions."""
+    try:
+        lock = json.loads(lock_bytes.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise CapsuleInputAuthoringError(
+            f"package lock is not valid JSON: {error}"
+        ) from None
+    packages = lock.get("packages", {})
+    if not isinstance(packages, dict):
+        raise CapsuleInputAuthoringError("package lock packages are invalid")
+    index: dict[str, set[str]] = {}
+    for path, record in packages.items():
+        if not path or "node_modules/" not in path or not isinstance(record, dict):
+            continue
+        version = record.get("version")
+        if isinstance(version, str):
+            name = path.rsplit("node_modules/", 1)[-1]
+            index.setdefault(name, set()).add(version)
+    return index
+
+
+def validate_license_overrides(
+    *,
+    wheel_overrides: dict[str, LicenseOverride],
+    acp_overrides: dict[str, AcpLicenseOverride],
+    uv_lock_bytes: bytes,
+    package_lock_bytes: bytes,
+) -> None:
+    """Fail closed unless every override resolves to an in-lock pinned package.
+
+    The check is against the full lock, independent of target selection, so a
+    stale override left behind by a lock change - a package no longer present,
+    or present only at a different version - is a named validation error rather
+    than silently dead data.
+    """
+    python_index = _index_uv_lock(uv_lock_bytes)
+    for name, override in wheel_overrides.items():
+        versions = python_index.get(name)
+        if versions is None:
+            raise CapsuleInputAuthoringError(
+                f"license override for {name} names no package in the uv lock"
+            )
+        if override.version not in versions:
+            raise CapsuleInputAuthoringError(
+                f"license override for {name} pins {override.version}, "
+                "absent from the uv lock"
+            )
+    acp_index = _index_package_lock(package_lock_bytes)
+    for name, override in acp_overrides.items():
+        versions = acp_index.get(name)
+        if versions is None:
+            raise CapsuleInputAuthoringError(
+                f"ACP license override for {name} names no package in the package lock"
+            )
+        if override.version not in versions:
+            raise CapsuleInputAuthoringError(
+                f"ACP license override for {name} pins {override.version}, "
+                "absent from the package lock"
+            )

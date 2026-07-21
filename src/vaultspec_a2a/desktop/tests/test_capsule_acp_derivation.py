@@ -14,19 +14,22 @@ import hashlib
 import io
 import json
 import tarfile
-from typing import TYPE_CHECKING
+from pathlib import Path
 
 import pytest
 
 from vaultspec_a2a.desktop.capsule_license import (
     AcpLicenseOverride,
     CapsuleInputAuthoringError,
+    LicenseOverride,
     derive_acp_package_artifact,
+    load_acp_license_overrides,
+    load_license_overrides,
+    validate_license_overrides,
 )
 from vaultspec_a2a.desktop.lock_reconciliation import AcpNodeSelection
 
-if TYPE_CHECKING:
-    from pathlib import Path
+_REPO_ROOT = Path(__file__).resolve().parents[4]
 
 
 def _member(name: str, payload: bytes) -> tuple[tarfile.TarInfo, bytes]:
@@ -166,4 +169,57 @@ def test_fails_closed_when_a_canonical_package_ships_no_license_bytes(
     with pytest.raises(CapsuleInputAuthoringError, match="no recognizable license"):
         derive_acp_package_artifact(
             node, cache_root=tmp_path, sha256=sha256, size=size, overrides={}
+        )
+
+
+def _committed_overrides() -> tuple[
+    dict[str, LicenseOverride], dict[str, AcpLicenseOverride]
+]:
+    toml = _REPO_ROOT / "scripts" / "desktop_capsule_inputs.toml"
+    return load_license_overrides(toml), load_acp_license_overrides(toml)
+
+
+def test_every_committed_override_resolves_against_the_real_locks() -> None:
+    wheel_overrides, acp_overrides = _committed_overrides()
+
+    validate_license_overrides(
+        wheel_overrides=wheel_overrides,
+        acp_overrides=acp_overrides,
+        uv_lock_bytes=(_REPO_ROOT / "uv.lock").read_bytes(),
+        package_lock_bytes=(_REPO_ROOT / "package-lock.json").read_bytes(),
+    )
+
+
+def test_a_stale_wheel_override_fails_closed() -> None:
+    wheel_overrides, acp_overrides = _committed_overrides()
+    stale = dict(wheel_overrides)
+    stale["a-package-not-in-the-lock"] = LicenseOverride(
+        version="1.0.0", expression="MIT", evidence="fabricated"
+    )
+
+    with pytest.raises(
+        CapsuleInputAuthoringError, match="names no package in the uv lock"
+    ):
+        validate_license_overrides(
+            wheel_overrides=stale,
+            acp_overrides=acp_overrides,
+            uv_lock_bytes=(_REPO_ROOT / "uv.lock").read_bytes(),
+            package_lock_bytes=(_REPO_ROOT / "package-lock.json").read_bytes(),
+        )
+
+
+def test_an_orphaned_wheel_override_version_fails_closed() -> None:
+    wheel_overrides, acp_overrides = _committed_overrides()
+    orphaned = dict(wheel_overrides)
+    existing = next(iter(wheel_overrides))
+    orphaned[existing] = LicenseOverride(
+        version="0.0.0-not-locked", expression="MIT", evidence="stale pin"
+    )
+
+    with pytest.raises(CapsuleInputAuthoringError, match="absent from the uv lock"):
+        validate_license_overrides(
+            wheel_overrides=orphaned,
+            acp_overrides=acp_overrides,
+            uv_lock_bytes=(_REPO_ROOT / "uv.lock").read_bytes(),
+            package_lock_bytes=(_REPO_ROOT / "package-lock.json").read_bytes(),
         )

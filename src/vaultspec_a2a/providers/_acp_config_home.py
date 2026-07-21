@@ -35,16 +35,39 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
+from ..artifacts import ArtifactDeclaration, RetentionDisposition
 from ._acp_project_mcp import enumerate_ancestor_mcp_names
 
 __all__ = [
+    "PRESERVED_SESSION_LIMIT",
+    "SESSION_RECORD_DECLARATION",
     "cleanup_isolated_config_home",
     "create_isolated_config_home",
     "isolation_required_but_absent",
+    "preserve_session_record",
     "should_isolate_config_home",
 ]
 
 logger = logging.getLogger(__name__)
+
+PRESERVED_SESSION_LIMIT = 20
+"""How many preserved session records to keep before evicting the oldest."""
+
+# Preservation only became defensible once it was bounded. The record this keeps
+# is the agent's own account of a run, which is worth outliving the run - but an
+# uncapped archive of transcripts would trade a small leak for a larger one.
+SESSION_RECORD_DECLARATION = ArtifactDeclaration(
+    name="agent-session-record",
+    root="<a2a_home>/runtime/transcripts/<config-home-name>",
+    owner="providers._acp_config_home",
+    disposition=RetentionDisposition.BOUNDED_BY_SIZE,
+    mechanism=(
+        f"oldest-first eviction past {PRESERVED_SESSION_LIMIT} records, applied "
+        "on every successful preservation"
+    ),
+)
+
+ARTIFACT_DECLARATIONS: tuple[ArtifactDeclaration, ...] = (SESSION_RECORD_DECLARATION,)
 
 # Minimal flags that keep the freshly-created config home from stalling the CLI
 # on first-run onboarding / survey prompts in a non-interactive session.
@@ -195,6 +218,76 @@ def _write_settings(
     (home / "settings.json").write_text(
         json.dumps(settings, indent=2), encoding="utf-8"
     )
+
+
+def preserve_session_record(
+    home: Path | None, *, destination_root: Path
+) -> Path | None:
+    """Copy the CLI's own session record out of *home* before it is destroyed.
+
+    The spawned CLI writes its transcript, history, and todo state beneath its
+    config home.  That is the most complete account of what the agent actually
+    did, and destroying the home discards it unread - a run leaves behind the
+    events a viewer happened to be watching for and nothing else.
+
+    Copies rather than moves, so a failure here can never cost the caller its
+    teardown.  Best-effort by design: preservation must not be able to fail a
+    run, and a run that cannot preserve is better than a run that crashes trying.
+
+    Args:
+        home: The config home about to be removed, or ``None``.
+        destination_root: Directory to collect preserved records under.
+
+    Returns:
+        The directory the record was copied into, or ``None`` when there was
+        nothing to preserve or the copy failed.
+    """
+    if home is None or not home.is_dir():
+        return None
+    sources = [
+        candidate
+        for candidate in (home / "projects", home / "history.jsonl", home / "todos")
+        if candidate.exists()
+    ]
+    if not sources:
+        return None
+    destination = destination_root / home.name
+    try:
+        destination.mkdir(parents=True, exist_ok=True)
+        for source in sources:
+            target = destination / source.name
+            if source.is_dir():
+                shutil.copytree(source, target, dirs_exist_ok=True)
+            else:
+                shutil.copy2(source, target)
+    except OSError:
+        logger.warning(
+            "Could not preserve the session record from %s", home, exc_info=True
+        )
+        return None
+    _prune_preserved_records(destination_root)
+    return destination
+
+
+def _prune_preserved_records(destination_root: Path) -> None:
+    """Keep only the most recent :data:`PRESERVED_SESSION_LIMIT` records.
+
+    The cap is what makes preservation safe to enable.  An unbounded transcript
+    archive would trade one leak for a larger one, which is the failure this
+    package's governing decision exists to prevent.
+    """
+    try:
+        # Name breaks ties: several records preserved inside one filesystem
+        # timestamp tick would otherwise evict in an unstable order.
+        records = sorted(
+            (entry for entry in destination_root.iterdir() if entry.is_dir()),
+            key=lambda entry: (entry.stat().st_mtime, entry.name),
+            reverse=True,
+        )
+    except OSError:
+        return
+    for stale in records[PRESERVED_SESSION_LIMIT:]:
+        shutil.rmtree(stale, ignore_errors=True)
 
 
 def cleanup_isolated_config_home(home: Path | None) -> None:

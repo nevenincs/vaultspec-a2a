@@ -20,6 +20,7 @@ related:
   - '[[2026-07-21-ecosystem-artifact-lifecycle-W02-P04-S11]]'
   - '[[2026-07-21-ecosystem-artifact-lifecycle-W02-P04-S12]]'
   - '[[2026-07-21-ecosystem-artifact-lifecycle-W02-P04-S13]]'
+  - '[[2026-07-21-ecosystem-artifact-lifecycle-W03-P05-S14]]'
   - '[[2026-07-21-ecosystem-artifact-lifecycle-adr]]'
   - '[[2026-07-21-ecosystem-artifact-lifecycle-artifact-delete-residual-risk-audit]]'
   - '[[2026-07-21-ecosystem-artifact-lifecycle-plan]]'
@@ -56,6 +57,7 @@ Auto-generated index of all documents tagged with `#ecosystem-artifact-lifecycle
 - `2026-07-21-ecosystem-artifact-lifecycle-W02-P04-S11` - Route the desktop discovery writer through the shared helper
 - `2026-07-21-ecosystem-artifact-lifecycle-W02-P04-S12` - Route the process registry record writer through the shared helper
 - `2026-07-21-ecosystem-artifact-lifecycle-W02-P04-S13` - Add a test that forces a write failure and asserts no temporary file survives
+- `2026-07-21-ecosystem-artifact-lifecycle-W03-P05-S14` - Export the child session record out of the isolated config home before teardown
 
 ### plan
 

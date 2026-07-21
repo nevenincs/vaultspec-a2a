@@ -143,9 +143,21 @@ provenance model, within the capsule boundary governed by
 - The capsule layout roots are fixed by the landed plan: `runtime/python` and
   `runtime/acp` closure roots beside the verbatim `runtime/cpython` and
   `runtime/node` interpreter subtrees.
-- Unsupported wheel features fail closed: `.data/headers` and `.data/data`
-  members, shebang-rewriting scripts, and any unplaceable member raise a named
-  build error; nothing is skipped or best-effort placed.
+- The capsule is a library runtime whose only executable surface is its two
+  product launchers; third-party console scripts and build-time headers are not
+  part of that surface. A real closure audit of every selected wheel across the
+  four targets (`2026-07-21-capsule-install-layout-reference`) found `.data/`
+  members in exactly three required packages - `greenlet` (`.data/headers`),
+  and `jsonpatch`, `jsonpointer`, `pywin32` (`.data/scripts`) - and no
+  `.data/data` or `.data/platinclude` anywhere. Given that finding, `.data/headers`
+  and `.data/scripts` members are DROPPED (deterministically omitted, not placed
+  and not failed): a frozen offline runtime never compiles against a bundled
+  header, and the dropped scripts are third-party CLIs and install helpers
+  outside the product surface, while the packages' importable `purelib`/`platlib`
+  code still installs in full. `.data/data`, `.data/platinclude`, and any
+  unrecognized `.data` key still fail closed with a named build error; nothing is
+  best-effort placed. The drop is recorded per member in the build evidence so an
+  omission is auditable rather than silent.
 - Determinism: identical verified inputs must yield byte-identical inventories
   and capsule trees (canonical JSON, sorted members, normalized modes, epoch
   timestamps).
@@ -153,10 +165,11 @@ provenance model, within the capsule boundary governed by
   leased-descriptor authorities; the generic projector's wheel refusal remains
   in force verbatim — this record adds the non-generic path beside it rather
   than overriding it.
-- Two sub-decisions remain consciously open and must be grounded before the
-  dependent step relies on them: the `.data` closure audit and the entrypoints
-  0755 derivation (`2026-07-21-capsule-install-layout-reference`). The Windows
-  `Scripts/{name}.exe` launcher source is resolved by this revision: a
+- One sub-decision remains consciously open and must be grounded before the
+  dependent step relies on it: the entrypoints 0755 derivation
+  (`2026-07-21-capsule-install-layout-reference`). The `.data` closure audit is
+  resolved by this revision (drop headers and scripts, fail closed on the rest).
+  The Windows `Scripts/{name}.exe` launcher source is resolved by this revision: a
   content-addressed stub input, not a contract change.
 - Only the input preparation authority performs network access; the build,
   verify, and publish stages consume the content-addressed cache and the pinned
@@ -195,8 +208,10 @@ definition. **Wheel layout:** every archive-root member of a verified wheel
 maps under one library root, honoring the spread rule for a scheme where
 purelib and platlib coincide (true for the bundled per-target CPython, so
 `Root-Is-Purelib` true and false wheels land identically); `.data/purelib` and
-`.data/platlib` also map there, and all other `.data` keys are rejected fail-
-closed until a closure audit proves them needed; per-file size and sha256 come
+`.data/platlib` also map there; `.data/headers` and `.data/scripts` members are
+deterministically dropped as outside the library-runtime surface (recorded per
+member in the build evidence), and `.data/data`, `.data/platinclude`, and any
+unrecognized `.data` key are rejected fail-closed; per-file size and sha256 come
 from `RECORD`-verified member evidence, not from re-hashing. **npm layout:**
 each verified tarball projects verbatim to its declared nested-`node_modules`
 destination, with no `.bin` links. **Entrypoints:** the layout derives each
@@ -304,7 +319,15 @@ while supplying the spec-conformant path the refusal always implied
 - The fixture-authored v1 inventories and every test fixture must migrate to v2
   with real provenance; the version-literal change is intentionally breaking so
   no unprovenanced inventory can pass reconciliation.
-- Fail-closed `.data` handling may reject a future locked dependency; relaxing
+- The `.data` audit is live, not hypothetical: the current lock's real selected
+  set trips the guard on three required packages (`greenlet` headers on all four
+  targets; `jsonpatch`/`jsonpointer` `#!python` scripts on all four; `pywin32`
+  scripts on Windows). The materializing layout must therefore implement the
+  drop rule before `S13` can materialize this closure; a follow-up step changes
+  `install_layout.py` from reject-scripts/headers to drop-scripts/headers with
+  per-member evidence, and re-audit is required whenever the lock changes since
+  a future wheel could introduce a still-fail-closed `.data/data` key.
+- Remaining fail-closed `.data` handling may reject a future locked dependency; relaxing
   requires a closure audit and an amendment here, not an ad-hoc bypass.
 - The Windows launcher is unblocked as a stub-plus-generated-payload
   concatenation; the launcher contract, manifest schema, and golden vectors are

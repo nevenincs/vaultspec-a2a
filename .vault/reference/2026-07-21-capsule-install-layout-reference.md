@@ -89,10 +89,27 @@ by explicit path under the bundled Node runtime.
 
 ### Three open sub-decisions (must be resolved before the dependent step relies on them)
 
-1. **`.data` closure audit.** No sweep exists of whether any locked desktop
-   wheel ships `.data/` members or a non-trivial `Root-Is-Purelib: false`
-   spread. The decision fails closed on unsupported `.data` keys, so
-   correctness is safe today; relaxing that requires this audit first.
+1. **`.data` closure audit — DONE (2026-07-21), resolved by the ADR revision.**
+   All 144 unique wheels across the four shipped targets (closure 82/82/82/84,
+   resolved from the committed `uv.lock` via the landed selection code, each
+   fetched and sha256-verified against its lock pin) were opened and scanned for
+   `.data/` members. Findings: exactly three required packages ship `.data/`
+   content, and no wheel ships `.data/data` or `.data/platinclude`. `greenlet`
+   3.5.3 ships `greenlet-3.5.3.data/headers/greenlet.h` on all four targets (a
+   compile-time C header). `jsonpatch` 1.33 (`jsondiff`, `jsonpatch`) and
+   `jsonpointer` 3.1.1 (`jsonpointer`) ship `.data/scripts` console scripts with
+   literal `#!python` shebangs on all four targets (transitive langchain-core
+   dependencies). `pywin32` 312 ships `.data/scripts/pywin32_postinstall.py` and
+   `pywin32_testall.py` (plain, no shebang) on Windows. The guard is thus live -
+   this exact closure would fail closed at materialization today. Ruling: the
+   capsule is a library runtime whose only executable surface is its two product
+   launchers, so `.data/headers` (build-time only) and `.data/scripts`
+   (third-party CLIs and install helpers) are dropped, and the packages'
+   importable `purelib`/`platlib` code still installs in full; `.data/data`,
+   `.data/platinclude`, and unknown keys stay fail-closed. Re-audit on every lock
+   change. Raw per-wheel evidence was captured during the audit in
+   `scratchpad/unique_wheels.json` and `scratchpad/data_findings.json` (scratch,
+   not vault artifacts).
 2. **Windows launcher source — RESOLVED (2026-07-21) by the ADR revision.**
    The contract pins `Scripts/{name}.exe` (`manifest.py:524-527`) and stays
    unchanged; the launcher is composed from a content-addressed stub input.

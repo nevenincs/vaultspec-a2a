@@ -17,11 +17,22 @@ computation.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Final
+import base64
+import binascii
+import hashlib
+import os
+import urllib.error
+from contextlib import contextmanager
+from dataclasses import dataclass
+from itertools import count
+from pathlib import Path
+from typing import TYPE_CHECKING, BinaryIO, Final, Protocol
+from urllib.request import Request, urlopen
 
 from packaging.tags import Tag, compatible_tags, cpython_tags, mac_platforms
 from packaging.utils import InvalidWheelFilename, parse_wheel_filename
 
+from .closure_inventory import _validate_https_url
 from .contract import TargetTriple
 from .wheel_compatibility import (
     _MAX_GLIBC_BASELINE,
@@ -29,11 +40,25 @@ from .wheel_compatibility import (
     wheel_filename_supports_target,
 )
 
+
+class ByteReader(Protocol):
+    """The single capability acquisition needs from a byte source: chunked read."""
+
+    def read(self, size: int = ..., /) -> bytes: ...
+
+
 if TYPE_CHECKING:
+    from collections.abc import Callable, Iterator
+    from contextlib import AbstractContextManager
+
     from .lock_reconciliation import LockedWheel, PythonPackageSelection
 
+    ArtifactStreamOpener = Callable[[str], AbstractContextManager[ByteReader]]
+
 __all__ = [
+    "AcquiredArtifact",
     "CapsuleInputAuthoringError",
+    "acquire_artifact",
     "select_target_wheel",
     "target_platform_tags",
     "target_supported_tags",
@@ -42,6 +67,11 @@ __all__ = [
 _PYTHON_VERSION: Final = (3, 13)
 _INTERPRETER: Final = "cp313"
 _ABIS: Final = ("cp313",)
+_SHA256_LENGTH: Final = 64
+_DOWNLOAD_CHUNK: Final = 1 << 20
+_MAX_ACQUIRED_BYTES: Final = 4 << 30
+_DOWNLOAD_TIMEOUT: Final = 300.0
+_temp_counter = count()
 # Mirrors the legacy aliases packaging emits immediately after the ``_x_y``
 # form they alias; the interleave position is part of the ordering.
 _LEGACY_MANYLINUX: Final = {
@@ -162,3 +192,201 @@ def select_target_wheel(
             wheel.filename,
         ),
     )
+
+
+@dataclass(frozen=True, slots=True)
+class AcquiredArtifact:
+    """One pinned byte source acquired into the content-addressed cache."""
+
+    sha256: str
+    size: int
+    path: Path
+
+
+def _sha512_sri_digest(value: str) -> bytes:
+    """Return the raw digest of a canonical ``sha512-<base64>`` SRI string."""
+    if not value.startswith("sha512-"):
+        raise CapsuleInputAuthoringError("integrity pin must be a sha512 SRI")
+    try:
+        digest = base64.b64decode(value.removeprefix("sha512-"), validate=True)
+    except (binascii.Error, ValueError):
+        raise CapsuleInputAuthoringError(
+            "integrity pin is not canonical base64"
+        ) from None
+    if len(digest) != hashlib.sha512().digest_size:
+        raise CapsuleInputAuthoringError("integrity pin is not one SHA-512 digest")
+    return digest
+
+
+def _resolved_cache_root(cache_root: Path) -> Path:
+    """Create and resolve the content-addressed cache directory."""
+    if not isinstance(cache_root, Path):
+        raise CapsuleInputAuthoringError("cache root path is invalid")
+    try:
+        if cache_root.exists() and (
+            cache_root.is_symlink() or cache_root.is_junction()
+        ):
+            raise CapsuleInputAuthoringError("cache root must not be a link-like path")
+        cache_root.mkdir(parents=True, exist_ok=True)
+        return cache_root.resolve(strict=True)
+    except CapsuleInputAuthoringError:
+        raise
+    except (OSError, RuntimeError):
+        raise CapsuleInputAuthoringError(
+            "cache root is not a usable directory"
+        ) from None
+
+
+@contextmanager
+def _open_https_stream(url: str) -> Iterator[ByteReader]:
+    """Open one credential-free HTTPS byte stream; the sole network boundary."""
+    try:
+        with urlopen(Request(url, method="GET"), timeout=_DOWNLOAD_TIMEOUT) as response:
+            yield response
+    except (urllib.error.URLError, OSError) as error:
+        raise CapsuleInputAuthoringError(f"cannot acquire {url}: {error}") from None
+
+
+def _stream_to_temp(
+    source: ByteReader, temp: BinaryIO, *, expected_size: int | None
+) -> tuple[int, str, bytes]:
+    """Stream one bounded response into a temp file, returning its identities."""
+    sha256 = hashlib.sha256()
+    sha512 = hashlib.sha512()
+    total = 0
+    for chunk in iter(lambda: source.read(_DOWNLOAD_CHUNK), b""):
+        total += len(chunk)
+        if total > _MAX_ACQUIRED_BYTES or (
+            expected_size is not None and total > expected_size
+        ):
+            raise CapsuleInputAuthoringError("acquired artifact exceeds its size bound")
+        sha256.update(chunk)
+        sha512.update(chunk)
+        temp.write(chunk)
+    return total, sha256.hexdigest(), sha512.digest()
+
+
+def _verify_identities(
+    *,
+    size: int,
+    sha256: str,
+    sha512: bytes,
+    expected_size: int | None,
+    expected_sha256: str | None,
+    expected_sha512_sri: str | None,
+) -> None:
+    """Fail closed unless every supplied pin matches the acquired bytes."""
+    if expected_size is not None and size != expected_size:
+        raise CapsuleInputAuthoringError(
+            "acquired artifact size does not match its pin"
+        )
+    if expected_sha256 is not None and sha256 != expected_sha256:
+        raise CapsuleInputAuthoringError(
+            "acquired artifact sha256 does not match its pin"
+        )
+    if expected_sha512_sri is not None and sha512 != _sha512_sri_digest(
+        expected_sha512_sri
+    ):
+        raise CapsuleInputAuthoringError(
+            "acquired artifact sha512 does not match its integrity pin"
+        )
+
+
+def acquire_artifact(
+    url: str,
+    *,
+    cache_root: Path,
+    expected_sha256: str | None = None,
+    expected_sha512_sri: str | None = None,
+    expected_size: int | None = None,
+    open_stream: ArtifactStreamOpener | None = None,
+) -> AcquiredArtifact:
+    """Acquire one pinned byte source into the sha256-keyed content cache.
+
+    Every acquired byte is verified against every supplied pin before it is
+    admitted, and the cache key is the verified sha256, so a later consumer
+    resolving ``cache_root / sha256`` receives exactly these bytes.  A byte that
+    fails any pin is never written under its content address.
+    """
+    try:
+        _validate_https_url(url)
+    except ValueError:
+        raise CapsuleInputAuthoringError(
+            "acquisition URL is not credential-free HTTPS"
+        ) from None
+    if expected_sha256 is None and expected_sha512_sri is None:
+        raise CapsuleInputAuthoringError(
+            "acquisition requires at least one integrity pin"
+        )
+    if expected_sha256 is not None and (
+        len(expected_sha256) != _SHA256_LENGTH
+        or any(character not in "0123456789abcdef" for character in expected_sha256)
+    ):
+        raise CapsuleInputAuthoringError("acquisition sha256 pin is malformed")
+    root = _resolved_cache_root(cache_root)
+    opener = _open_https_stream if open_stream is None else open_stream
+
+    if expected_sha256 is not None:
+        cached = root / expected_sha256
+        if cached.is_file():
+            reused = _reuse_cached_artifact(
+                cached,
+                expected_size=expected_size,
+                expected_sha256=expected_sha256,
+                expected_sha512_sri=expected_sha512_sri,
+            )
+            if reused is not None:
+                return reused
+
+    temp = root / f".acquire-{os.getpid()}-{next(_temp_counter)}"
+    try:
+        with temp.open("wb") as sink, opener(url) as source:
+            size, sha256, sha512 = _stream_to_temp(
+                source, sink, expected_size=expected_size
+            )
+        _verify_identities(
+            size=size,
+            sha256=sha256,
+            sha512=sha512,
+            expected_size=expected_size,
+            expected_sha256=expected_sha256,
+            expected_sha512_sri=expected_sha512_sri,
+        )
+        final = root / sha256
+        os.replace(temp, final)
+    except BaseException:
+        temp.unlink(missing_ok=True)
+        raise
+    return AcquiredArtifact(sha256=sha256, size=size, path=final)
+
+
+def _reuse_cached_artifact(
+    cached: Path,
+    *,
+    expected_size: int | None,
+    expected_sha256: str,
+    expected_sha512_sri: str | None,
+) -> AcquiredArtifact | None:
+    """Return a cached artifact only if its bytes still satisfy every pin."""
+    sha256 = hashlib.sha256()
+    sha512 = hashlib.sha512()
+    total = 0
+    try:
+        with cached.open("rb") as handle:
+            for chunk in iter(lambda: handle.read(_DOWNLOAD_CHUNK), b""):
+                total += len(chunk)
+                if total > _MAX_ACQUIRED_BYTES:
+                    return None
+                sha256.update(chunk)
+                sha512.update(chunk)
+    except OSError:
+        return None
+    if sha256.hexdigest() != expected_sha256:
+        return None
+    if expected_size is not None and total != expected_size:
+        return None
+    if expected_sha512_sri is not None and sha512.digest() != _sha512_sri_digest(
+        expected_sha512_sri
+    ):
+        return None
+    return AcquiredArtifact(sha256=expected_sha256, size=total, path=cached)

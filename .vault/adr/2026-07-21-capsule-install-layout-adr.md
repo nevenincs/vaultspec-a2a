@@ -110,6 +110,22 @@ provenance model, within the capsule boundary governed by
   stated contract that the workflow supplies a pinned descriptor, and re-grows
   acquisition and derivation logic inside the build script - the
   parallel-implementation defect this record exists to forbid.
+- **Bespoke wheel-selection ordering** (compiled over pure-Python,
+  architecture-specific over `universal2`, highest satisfied ABI and glibc
+  floors). Rejected: the hand rule coincides with the standard tag-priority
+  model on the measured lock, but it is a parallel implementation of an
+  ordering the pinned `packaging` dependency already defines; every future tag
+  family would need a fresh hand decision, and divergence from what the
+  ecosystem installer ships on the same baseline would be invisible until
+  runtime. The compatibility-tags specification explicitly delegates ranking to
+  installers, so adopting the reference installer's model is the strongest
+  available grounding.
+- **Two separate curated inputs - an expression table and an external-artifact
+  table.** Rejected: both entry kinds state facts about one package's license
+  identity; splitting them across two documents reintroduces the keyed-sidecar
+  join drift this record already rejected for provenance, and prevents the
+  validator from cross-checking expression, bytes, and declared member
+  atomically per package.
 - **Repo-committed per-target descriptors verified by CI.** Rejected: the
   descriptor pins the project wheel built from source head, so its digest (and
   the installed inventories embedding it) changes with every commit; keeping
@@ -156,6 +172,21 @@ provenance model, within the capsule boundary governed by
   a package lacking both a metadata license expression and a curated override,
   fail preparation closed; curated overrides are committed, reviewed inputs,
   never runtime inference.
+- Wheel selection is deterministic and reviewable: the per-target supported-tag
+  list is a pure function of the target triple and the fixed compatibility
+  baselines (CPython 3.13, glibc 2.28, macOS 13.0); the selection authority
+  chooses only among wheels the compatibility predicate admits, and a package
+  whose admitted set is empty still fails preparation closed. The closure
+  inventory names the selected wheel per package, so a selection change is a
+  reviewable inventory diff, never a silent re-pick; the tag-list derivation is
+  covered by a fixed vector so a `packaging` upgrade that reorders tags
+  surfaces as a visible failure, not a silent content change.
+- A curated override is pinned to the exact locked package version: a lock
+  upgrade orphans the override and fails preparation closed until a human
+  re-reviews and re-pins it, and an override naming a version absent from the
+  lock is a validation error, not dead data. Every override carries reviewable
+  evidence - the verbatim declaration or pinned locator it interprets - so the
+  curation is auditable per entry.
 
 ## Implementation
 
@@ -200,9 +231,40 @@ primitive and the ACP closure from the committed `package-lock.json`, acquires
 every wheel, tarball, external-license blob, and pinned source into the
 sha256-keyed content-addressed input cache (verifying each byte against its
 committed pin), derives per-package license identity - expression, license
-members, redistribution evidence - from wheel metadata and tarball contents
-with a committed curated-overrides input for packages lacking a metadata
-license expression, and emits the canonical closure inventories. Pass two opens
+members, redistribution evidence - from wheel metadata and tarball contents,
+and emits the canonical closure inventories. **Wheel selection:** beside the
+compatibility predicate, a pure selection function is the single authority
+answering which admitted wheel ships. It adopts the standard installer
+tag-priority model rather than a bespoke ordering: for each target it derives a
+deterministic ordered supported-tag list from the pinned `packaging` dependency
+- `cpython_tags` then `compatible_tags`, called with an explicit `(3, 13)`
+interpreter version and an explicit per-target platform sequence derived from
+the same fixed baselines the compatibility authority encodes - and ranks every
+lock wheel by the best index any of its tags reaches, shipping the lowest. Ties
+break by build tag descending, then filename ascending, so selection is a total
+order over the lock. This reproduces host-independently the choice a baseline
+target machine's installer would make: version-specific compiled wheels over
+stable-ABI wheels, higher satisfied stable-ABI floors over lower,
+architecture-specific over `universal2`, higher satisfied glibc floors
+(`manylinux_2_28`) over lower (`manylinux2014`), pure-Python `py3-none-any`
+last. **Curated license overrides:** one committed overrides input, every entry
+keyed by package name and exact locked version, with two entry kinds. An
+*expression override* supplies the curated SPDX expression for a package whose
+wheel metadata lacks `License-Expression`, and carries its evidence: the
+verbatim legacy declaration it interprets (legacy license field, OSI
+classifier, or an upstream locator at an immutable ref) plus a one-line
+justification for any judgement call. An *external license artifact*
+additionally binds license bytes for a package shipping none, committing URL,
+sha256, and the declared member name the bytes install as. Curated expressions
+record upstream's grant faithfully as a valid SPDX expression: a disjunction is
+preserved, never collapsed to an elected branch - branch election is
+redistribution policy, not package identity - and the capsule carries the text
+of every license an expression references. External artifacts are sourced, in
+preference order, from a hosted file of the exact locked release on the package
+index, an upstream repository URL at a full immutable commit hash, or, only
+when no stable upstream URL exists, a copy vendored beside the overrides input;
+in every case the committed sha256 is the integrity authority, verified before
+caching, so acquisition can never introduce unreviewed content. Pass two opens
 verified archive sessions, invokes the production installed-inventory builder
 against the layout authority, authors the digest-pinned capsule input
 descriptor naming every artifact including the installed inventories, and hands
@@ -272,6 +334,18 @@ while supplying the spec-conformant path the refusal always implied
   without a metadata license expression; each needs a curated override with
   recorded evidence before its target capsule can build. This is deliberate
   fail-closed cost, not a defect.
+- The measured sweep bounds the initial curation cost: 34 of 84 distinct
+  packages need an expression override, four of which also need an external
+  license artifact because their wheels ship no license bytes at all; three
+  further packages carry a legacy-recognizable member the verifier's existing
+  path accepts without curation. Each entry is a one-time reviewed fact that
+  recurs only when its package's locked version changes.
+- On the measured lock the previously untied packages resolve to their compiled
+  variants - `sqlalchemy` to its cp313 platform wheels over `py3-none-any`,
+  `cryptography` to cp311-abi3 on `manylinux_2_28`, and `charset-normalizer`,
+  `websockets`, `wrapt`, and `regex` to architecture-specific wheels - removing
+  both the pure-Python performance regression and the `universal2` size
+  doubling.
 - The installed-inventory builder's invocation moves from the build script to
   the preparation authority; the build script's role narrows to consumption,
   which supersedes the earlier phrasing that the build script invokes the

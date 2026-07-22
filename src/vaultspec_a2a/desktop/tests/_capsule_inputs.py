@@ -277,7 +277,7 @@ def _source_descriptors(
                     archive_kind=ArchiveKind.TAR_GZIP,
                     archive_root="python",
                     license_expression="PSF-2.0",
-                    license_members=("python/LICENSE",),
+                    license_members=("python/lib/python3.13/LICENSE.txt",),
                     redistribution_evidence=("python-license",),
                 ),
                 SourceArtifactDescriptor(

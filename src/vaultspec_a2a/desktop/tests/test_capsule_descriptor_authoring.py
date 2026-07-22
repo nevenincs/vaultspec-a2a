@@ -97,7 +97,7 @@ def _valid_descriptor() -> CapsuleInputDescriptor:
                 archive_kind=ArchiveKind.TAR_GZIP,
                 archive_root="python",
                 license_expression="PSF-2.0",
-                license_members=("python/LICENSE",),
+                license_members=("python/lib/python3.13/LICENSE.txt",),
                 redistribution_evidence=("python-license",),
             ),
             SourceArtifactDescriptor(
@@ -239,7 +239,7 @@ def test_source_and_descriptor_authoring_round_trip_through_the_loader(
             archive_kind=ArchiveKind.TAR_GZIP,
             archive_root="python",
             license_expression="PSF-2.0",
-            license_members=("python/LICENSE",),
+            license_members=("python/lib/python3.13/LICENSE.txt",),
             redistribution_evidence=("python-license",),
         ),
         node=RuntimeSourceInput(

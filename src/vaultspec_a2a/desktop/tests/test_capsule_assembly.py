@@ -195,13 +195,13 @@ def test_source_license_bound_rejects_an_asset_without_license_bytes() -> None:
     ):
         capsule_assembly._assert_declared_source_licenses(
             (
-                ("python-runtime", ("python/LICENSE",)),
+                ("python-runtime", ("python/lib/python3.13/LICENSE.txt",)),
                 ("node-runtime", ()),  # a source that declares no license member
             )
         )
     capsule_assembly._assert_declared_source_licenses(
         (
-            ("python-runtime", ("python/LICENSE",)),
+            ("python-runtime", ("python/lib/python3.13/LICENSE.txt",)),
             ("node-runtime", ("node/LICENSE",)),
         )
     )

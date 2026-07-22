@@ -670,6 +670,23 @@ translators), `emit_interrupt_events` (13, an untouched neighbour), and
 and no `C901` suppression was added - the project configures no mccabe gate, so
 these are recorded as low-severity readability follow-ons rather than defects.
 
+### deletion-saga-schema-blocked-by-capsule-head-coupling | medium | The deletion-saga schema (S08) cannot land while the desktop capsule session is active
+
+Type: sequencing. Status: open (external dependency). The cross-store deletion
+saga (`W01.P03` S08-S14) needs a new Alembic migration to add its saga-header and
+cleanup-manifest tables. Any new migration bumps the packaged Alembic head, and
+`desktop/contract.py` computes `PRIMARY_SCHEMA_VERSION` dynamically from that head
+and *enforces* that a capsule manifest's `compatibility.migration_range.head`
+equals it. So a deletion-saga migration changes the desktop capsule's declared
+schema compatibility, its manifest content, and the golden manifest/tree digests
+(`desktop/tests/test_manifest.py`, `test_capsule_archives.py`), and would break
+the concurrent desktop capsule session's work in flight. S08's schema (two tables,
+migration `0010`, models, and the `test_migrations.py` head/`_APP_TABLES` bumps)
+was drafted and reverted rather than landed. Sequencing decision required: land the
+deletion-saga migration in coordination with (or after) the desktop capsule
+session so both agree on head `0010` and the capsule is rebuilt against it. This is
+a real ordering constraint, not a code defect.
+
 ## Recommendations
 
 1. Draft and approve a hardening ADR before implementation. The ADR must decide:

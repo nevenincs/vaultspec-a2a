@@ -16,6 +16,7 @@ archive bytes, and every assertion reads real materialized files.
 
 from __future__ import annotations
 
+import base64
 import gzip
 import hashlib
 import importlib.util
@@ -38,11 +39,7 @@ from vaultspec_a2a.desktop.capsule_assembly import (
 )
 from vaultspec_a2a.desktop.capsule_preparation import prepare_capsule_inputs
 from vaultspec_a2a.desktop.contract import TargetTriple
-from vaultspec_a2a.desktop.tests._capsule_inputs import (
-    _python_wheel,
-    _sha256,
-    _sha512_sri,
-)
+from vaultspec_a2a.desktop.tests._capsule_inputs import _sha256, _sha512_sri
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -55,6 +52,9 @@ _SDK: Final = "@anthropic-ai/claude-agent-sdk-linux-x64"
 _TARGET: Final = TargetTriple.LINUX_X86_64
 _NODE_STEM: Final = "node-v22.17.0-linux-x64"
 _EPOCH: Final = 1_700_000_000
+# One real wheel member the library-runtime layout deterministically drops, so
+# the build's drop-audit-trail has a real non-empty record to surface.
+_DROPPED_SCRIPT: Final = "click-8.3.1.data/scripts/click-tool"
 
 
 def _load_build_module() -> ModuleType:
@@ -205,10 +205,54 @@ def _npm_tarball(
     return gzip.compress(raw.getvalue(), mtime=0)
 
 
+def _click_wheel_with_dropped_script() -> tuple[str, str, str, int, bytes]:
+    """Build a real click wheel carrying one ``.data/scripts`` member.
+
+    The library-runtime install layout deterministically drops ``.data/scripts``
+    members (they are outside the capsule's executable surface), so the built
+    closure's installed inventory carries one real ``InstalledDroppedRecord`` the
+    build's drop-audit-trail must surface. Returns (url, version, sha256, size,
+    bytes).
+    """
+    dist_info = "click-8.3.1.dist-info"
+    license_member = f"{dist_info}/licenses/LICENSE.txt"
+    members = {
+        f"{dist_info}/METADATA": (
+            b"Metadata-Version: 2.4\nName: click\nVersion: 8.3.1\n"
+            b"License-Expression: BSD-3-Clause\nLicense-File: LICENSE.txt\n"
+        ),
+        f"{dist_info}/WHEEL": (
+            b"Wheel-Version: 1.0\nRoot-Is-Purelib: true\nTag: py3-none-any\n"
+        ),
+        license_member: b"BSD-3-Clause license text\n",
+        _DROPPED_SCRIPT: b"#!/bin/sh\necho click-tool\n",
+    }
+    record_rows = []
+    for name, payload in members.items():
+        encoded = (
+            base64.urlsafe_b64encode(hashlib.sha256(payload).digest())
+            .decode("ascii")
+            .rstrip("=")
+        )
+        record_rows.append(f"{name},sha256={encoded},{len(payload)}\n")
+    record_name = f"{dist_info}/RECORD"
+    record_rows.append(f"{record_name},,\n")
+    members[record_name] = "".join(record_rows).encode()
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w") as archive:
+        for name, payload in members.items():
+            archive.writestr(name, payload)
+    payload = buffer.getvalue()
+    url = "https://files.pythonhosted.org/click-8.3.1-py3-none-any.whl"
+    return url, "8.3.1", _sha256(payload), len(payload), payload
+
+
 @contextmanager
 def _prepared_inputs(tmp_path: Path) -> Iterator[tuple[Path, str, Path, Path, Path]]:
     """Mint a real pinned descriptor offline; yield the build's read-only inputs."""
-    click, click_bytes = _python_wheel()
+    click_url, click_version, click_sha, click_size, click_bytes = (
+        _click_wheel_with_dropped_script()
+    )
     python_blob = _runtime_tar_gz(
         "python",
         {
@@ -256,10 +300,10 @@ dependencies = [{{ name = "click" }}]
 
 [[package]]
 name = "click"
-version = "{click.version}"
+version = "{click_version}"
 source = {{ registry = "https://pypi.org/simple" }}
 wheels = [
-  {{ url = "{click.url}", hash = "sha256:{click.sha256}", size = {click.size} }},
+  {{ url = "{click_url}", hash = "sha256:{click_sha}", size = {click_size} }},
 ]
 """.encode()
     package_lock = json.dumps(
@@ -309,7 +353,7 @@ sha256 = "{_sha256(node_blob)}"
 """
 
     streams = {
-        click.url: click_bytes,
+        click_url: click_bytes,
         acp_root_url: acp_root,
         sdk_url: sdk,
         py_url: python_blob,
@@ -425,14 +469,25 @@ def test_build_assembles_a_complete_deterministic_generation(tmp_path: Path) -> 
         )
         assert manifest_document["target"] == _TARGET.value
 
-        # Complete installed-tree evidence covers the materialized tree; the
-        # empty drop-audit-trail is a no-op stub until the descriptor carries it.
+        # Complete installed-tree evidence covers the materialized tree and
+        # surfaces the per-member drop-audit-trail: the click wheel's
+        # ``.data/scripts`` member is dropped (outside the library-runtime
+        # surface) and recorded auditably, tagged with its closure.
         evidence = json.loads(
             (capsule / "installed-tree.cdx.json").read_text(encoding="utf-8")
         )
         assert evidence["inventory_version"] == "vaultspec-installed-tree-v1"
         assert evidence["components"]
-        assert _BUILD._DROPPED_EVIDENCE_KEY not in evidence
+        dropped = evidence[_BUILD._DROPPED_EVIDENCE_KEY]
+        assert {
+            "closure": "python",
+            "source_member": _DROPPED_SCRIPT,
+            "reason": "data-scripts",
+        }.items() <= next(
+            record for record in dropped if record["source_member"] == _DROPPED_SCRIPT
+        ).items()
+        # ACP tarballs have no ``.data`` members, so nothing ACP is dropped.
+        assert all(record["closure"] == "python" for record in dropped)
 
         # The recorded launcher mode is cross-platform evidence (Windows cannot
         # carry a POSIX exec bit on disk): both product launchers are 0755.

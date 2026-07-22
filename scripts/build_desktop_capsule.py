@@ -227,20 +227,41 @@ def _materialize_lock(
 
 
 def _drop_audit_trail(
-    session: VerifiedCapsuleInputSession,  # noqa: ARG001
+    session: VerifiedCapsuleInputSession,
 ) -> list[dict[str, object]]:
-    """Return the per-member drop-audit-trail carried by the prepared descriptor.
+    """Return the per-member drop-audit-trail carried by the installed inventories.
 
     The preparation stage records every verified closure member deliberately
     omitted from the installed tree - the library-runtime ``.data/headers`` and
-    ``.data/scripts`` omissions - so the omission is auditable rather than
-    silent.  The build surfaces that record verbatim into the installed-tree
-    evidence and derives nothing here.  Until the prepared descriptor exposes
-    the record, this yields an empty trail.
+    ``.data/scripts`` omissions - onto each closure's installed inventory, bound
+    whole by the inventory digest.  The build reads that record off both
+    retained inventories and surfaces it verbatim into the installed-tree
+    evidence, tagging each record with the closure it came from; it derives
+    nothing here.  ACP closures carry no ``.data`` members, so their trail is
+    typically empty.
     """
-    # Wired to the input authority's carried drop-audit-trail once it exposes
-    # it; empty until then. Records are surfaced under ``_DROPPED_EVIDENCE_KEY``.
-    return []
+    tagged = [
+        (closure, record)
+        for closure, inventory in (
+            ("python", session.python_installed),
+            ("acp", session.acp_installed),
+        )
+        for record in inventory.dropped
+    ]
+    tagged.sort(
+        key=lambda item: (item[0], item[1].source_sha256, item[1].source_member)
+    )
+    return [
+        {
+            "closure": closure,
+            "source_member": record.source_member,
+            "source_sha256": record.source_sha256,
+            "size": record.size,
+            "sha256": record.sha256,
+            "reason": record.reason,
+        }
+        for closure, record in tagged
+    ]
 
 
 # ---------------------------------------------------------------------------

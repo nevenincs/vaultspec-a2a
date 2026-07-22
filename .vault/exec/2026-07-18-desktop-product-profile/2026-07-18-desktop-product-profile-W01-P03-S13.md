@@ -53,19 +53,22 @@ The output contract flips from `assets/*` inside one ZIP to an installed tree in
 unpublished generation with `capsule.zip` + manifest + evidence beside it. The
 component-manifest emission contract (canonical bytes + digest) is preserved verbatim.
 
-### Drop-audit-trail (stubbed, pending the input authority)
+### Drop-audit-trail
 
 The ADR's `.data` amendment requires the per-member drop-audit-trail
 (`.data/headers` + `.data/scripts` omissions) be surfaced into the published build
-evidence. Grounding proved this has no read-only seam: the layout's dropped-member
-evidence is computed and discarded in the preparation chain, and neither the installed
-inventory, the installed-closure descriptor, nor the capsule input descriptor carries
-it. Surfacing it by re-deriving the layout in the build would violate the derives-nothing
-contract. Per the agreed sequencing, the input authority is extending the prepared
-descriptor to carry the trail; the build consumes it read-only. `_drop_audit_trail`
-is a thin stub returning an empty trail today and folds the carried records into the
-evidence under `vaultspec:dropped-members` once the descriptor exposes them — a
-one-function swap with no other build change.
+evidence. Grounding proved this had no read-only seam originally: the layout's
+dropped-member evidence was computed and discarded in the preparation chain, and
+nothing the build consumes carried it. Surfacing it by re-deriving the layout in the
+build would violate the derives-nothing contract, so the input authority extended the
+installed inventory to carry the trail (`InstalledClosureInventory.dropped:
+tuple[InstalledDroppedRecord, ...]`, bound whole by the inventory digest, inventory
+schema bumped to v3). `_drop_audit_trail` reads `session.python_installed.dropped` and
+`session.acp_installed.dropped` off the retained inventories (an existing session
+accessor, one attribute deeper — no re-derivation, no descriptor/golden-vector churn),
+tags each record with its closure, sorts deterministically, and folds the flat list into
+the installed-tree evidence under `vaultspec:dropped-members`. The build derives nothing;
+ACP tarballs have no `.data`, so their trail is empty.
 
 ### Tests
 
@@ -78,18 +81,22 @@ Added `src/vaultspec_a2a/desktop/tests/test_build_desktop_capsule.py`:
   asserting the whole generation: both closures reconciled byte-for-byte, both
   interpreter subtrees projected, launchers materialized (0755 recorded mode surfaced
   through the cross-platform evidence, since Windows carries no on-disk exec bit), locks
-  byte-exact, manifest contract intact, evidence covering the tree, one shared-lease
-  generation, a single deterministic `capsule.zip` reproduced across two generations,
-  and the overwrite-refusal guard.
+  byte-exact, manifest contract intact, evidence covering the tree, the drop-audit-trail
+  surfaced (a real `.data/scripts` member the closure wheel ships is dropped and recorded
+  under `vaultspec:dropped-members`, tagged `closure: python`, `reason: data-scripts`),
+  one shared-lease generation, a single deterministic `capsule.zip` reproduced across two
+  generations, and the overwrite-refusal guard.
 
 ## Outcome
 
 - Real end-to-end proof (LINUX_X86_64 target, real descriptor): 299 installed files
-  materialized, deterministic `capsule.zip` byte-identical across two generations.
+  materialized, drop-audit-trail surfaced from a real dropped `.data/scripts` member,
+  deterministic `capsule.zip` byte-identical across two generations.
 - `ruff format` + `ruff check` clean on both files; `ty check` clean on default and
   `--python-platform linux`.
-- `pytest src/vaultspec_a2a/desktop -m "not service"`: **578 passed, 11 deselected**.
-  New file: 6 offline + 2 service tests, all green.
+- Full desktop offline suite (`pytest src/vaultspec_a2a/desktop -m "not service"`) green
+  after the S120 inventory-v3 change landed; the new build test file is 6 offline + 2
+  service tests, all green.
 - Boundary self-grep clean (no step-ids, plan/ADR/campaign stems in shipped
   source/test).
 

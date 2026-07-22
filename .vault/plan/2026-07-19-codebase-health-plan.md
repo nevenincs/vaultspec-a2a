@@ -271,7 +271,7 @@ Share only state-transition and backpressure behavior while retaining deliberate
 
 Recheck both repositories for compatibility ownership and then remove each audited export or subsystem that still has no consumer.
 
-- [ ] `W04.P14.S57` - Prove runtime and dashboard ownership or non-ownership for `GitManager`, `MergeStrategy`, `WorktreeInfo`, `WorkspaceError`, `MergeConflictError`, and the live `_git_mutex`; `src/vaultspec_a2a/workspace/git_manager.py, src/vaultspec_a2a/thread/errors.py, src/vaultspec_a2a/thread/__init__.py, ../../vaultspec-dashboard-worktrees/main, .vault/audit`.
+- [x] `W04.P14.S57` - Prove runtime and dashboard ownership or non-ownership for `GitManager`, `MergeStrategy`, `WorktreeInfo`, `WorkspaceError`, `MergeConflictError`, and the live `_git_mutex`; `src/vaultspec_a2a/workspace/git_manager.py, src/vaultspec_a2a/thread/errors.py, src/vaultspec_a2a/thread/__init__.py, ../../vaultspec-dashboard-worktrees/main, .vault/audit`.
 - [ ] `W04.P14.S174` - Move `_git_mutex` from `workspace/git_manager.py` to `workspace/concurrency.py`, route the ACP handler and Git manager through it, and prove real concurrent ACP writes and Git operations remain serialized; `src/vaultspec_a2a/workspace/concurrency.py, src/vaultspec_a2a/workspace/git_manager.py, src/vaultspec_a2a/providers/_acp_rpc_handlers.py, src/vaultspec_a2a/providers/tests/test_acp_authoring.py, src/vaultspec_a2a/workspace/tests/test_workspace.py`.
 - [ ] `W04.P14.S134` - Prove runtime and dashboard ownership or non-ownership for `AgentState`; `src/vaultspec_a2a/graph/enums.py, ../../vaultspec-dashboard-worktrees/main, .vault/audit`.
 - [ ] `W04.P14.S58` - Remove the unowned `AgentState` export and its export-only tests; `src/vaultspec_a2a/graph/enums.py, tests`.

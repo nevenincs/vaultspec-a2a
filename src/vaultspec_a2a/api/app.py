@@ -26,6 +26,8 @@ import uvicorn
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from opentelemetry import metrics, trace
+from opentelemetry.sdk.metrics import MeterProvider as SdkMeterProvider
+from opentelemetry.sdk.trace import TracerProvider as SdkTracerProvider
 from starlette.websockets import WebSocket
 
 from ..authoring import resolve_engine
@@ -561,11 +563,11 @@ async def _lifespan(app: FastAPI) -> AsyncGenerator[None]:
         await close_db()
 
         provider = trace.get_tracer_provider()
-        if hasattr(provider, "shutdown"):
-            await asyncio.to_thread(provider.shutdown)  # ty: ignore[invalid-argument-type]
+        if isinstance(provider, SdkTracerProvider):
+            await asyncio.to_thread(provider.shutdown)
         meter_provider = metrics.get_meter_provider()
-        if hasattr(meter_provider, "shutdown"):
-            await asyncio.to_thread(meter_provider.shutdown)  # ty: ignore[invalid-argument-type]
+        if isinstance(meter_provider, SdkMeterProvider):
+            await asyncio.to_thread(meter_provider.shutdown)
 
         logger.info("Gateway shutdown complete")
 

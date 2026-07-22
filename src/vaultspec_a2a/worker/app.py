@@ -30,8 +30,11 @@ import anyio  # anyio: structured task groups for heartbeat + dispatch.
 import anyio.abc
 import httpx
 import uvicorn
+from anyio.to_thread import run_sync
 from fastapi import Depends, FastAPI, Header, HTTPException
 from opentelemetry import metrics, trace
+from opentelemetry.sdk.metrics import MeterProvider as SdkMeterProvider
+from opentelemetry.sdk.trace import TracerProvider as SdkTracerProvider
 
 from ..control.config import settings
 from ..control.worker_management import (
@@ -183,11 +186,11 @@ async def _lifespan(app: FastAPI) -> AsyncGenerator[None]:
         await bridge.close()
 
         provider = trace.get_tracer_provider()
-        if hasattr(provider, "shutdown"):
-            await anyio.to_thread.run_sync(provider.shutdown)  # ty: ignore[unresolved-attribute]
+        if isinstance(provider, SdkTracerProvider):
+            await run_sync(provider.shutdown)
         meter_provider = metrics.get_meter_provider()
-        if hasattr(meter_provider, "shutdown"):
-            await anyio.to_thread.run_sync(meter_provider.shutdown)  # ty: ignore[unresolved-attribute]
+        if isinstance(meter_provider, SdkMeterProvider):
+            await run_sync(meter_provider.shutdown)
 
 
 def create_worker_app(lifespan: Any | None = None) -> FastAPI:
@@ -280,9 +283,7 @@ def create_worker_app(lifespan: Any | None = None) -> FastAPI:
             # and which spawn attempt it was. Empty when the worker was started
             # by something other than a gateway spawn - Compose, an operator, or
             # a test - which is itself the honest answer rather than a default.
-            "paired_gateway_lifetime": os.environ.get(
-                GATEWAY_LIFETIME_ENV, ""
-            ),
+            "paired_gateway_lifetime": os.environ.get(GATEWAY_LIFETIME_ENV, ""),
             "worker_generation": os.environ.get(WORKER_GENERATION_ENV, ""),
         }
 

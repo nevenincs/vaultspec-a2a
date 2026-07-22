@@ -38,7 +38,7 @@ from ..database import (
 )
 from ..domain_config import domain_config
 from ..graph.compiler import build_initial_vault_index
-from ..ipc.schemas import DispatchRequest
+from ..ipc.schemas import DispatchRequest, to_dispatch_action
 from ..team.team_config import load_team_config
 from ..thread.creation import requires_dispatch, resolve_autonomous
 from ..thread.dispatch_policy import FailureType, classify_dispatch_failure
@@ -517,7 +517,7 @@ async def create_and_dispatch_thread(
 
     # -- Construct dispatch request --------------------------------------------
     dispatch = DispatchRequest(
-        action=ControlActionType.INGEST,  # ty: ignore[invalid-argument-type]
+        action=to_dispatch_action(ControlActionType.INGEST),
         thread_id=thread.id,
         team_preset=req.team_preset,
         workspace_root=str(req.workspace_root) if req.workspace_root else None,

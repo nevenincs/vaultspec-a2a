@@ -21,7 +21,7 @@ import httpx
 from ..database import list_threads
 from ..database.session import get_session_factory
 from ..domain_config import domain_config
-from ..ipc.schemas import DispatchRequest, DispatchResponse
+from ..ipc.schemas import DispatchRequest, DispatchResponse, to_dispatch_action
 from ..thread.enums import ControlActionType, ThreadStatus
 
 if TYPE_CHECKING:
@@ -303,7 +303,7 @@ async def redispatch_reconciling_threads(
                                     "fallback": role.get("fallback", []),
                                 }
                 dispatch = DispatchRequest(
-                    action=ControlActionType.INGEST,  # ty: ignore[invalid-argument-type]
+                    action=to_dispatch_action(ControlActionType.INGEST),
                     thread_id=thread.id,
                     team_preset=thread.team_preset,
                     workspace_root=meta.get("workspace_root"),

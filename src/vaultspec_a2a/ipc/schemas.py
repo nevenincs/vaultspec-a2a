@@ -13,13 +13,40 @@ from pydantic import BaseModel, Field
 
 from ..thread.actor_tokens import ActorTokenBundle
 from ..thread.constants import DEFAULT_SUPERVISOR_ID
+from ..thread.enums import ControlActionType
 
 __all__ = [
     "DispatchRequest",
     "DispatchResponse",
     "ExecutionStateProjectionPayload",
     "ExecutionTaskProjectionPayload",
+    "to_dispatch_action",
 ]
+
+# The three domain control actions that cross the gateway->worker wire, each
+# mapped to the wire's literal action value.
+_DISPATCH_ACTIONS: dict[ControlActionType, Literal["ingest", "resume", "cancel"]] = {
+    ControlActionType.INGEST: "ingest",
+    ControlActionType.RESUME: "resume",
+    ControlActionType.CANCEL: "cancel",
+}
+
+
+def to_dispatch_action(
+    action: ControlActionType,
+) -> Literal["ingest", "resume", "cancel"]:
+    """Narrow a domain control action to the dispatch wire literal.
+
+    ``ControlActionType`` is a ``StrEnum`` whose members carry the same string
+    values as the wire literals, but the type checker cannot narrow an enum
+    member to a ``Literal`` on its own. This bridge makes the domain-to-wire
+    narrowing explicit and type-safe, and fails loud for any control action that
+    is not one of the three dispatchable ones.
+    """
+    try:
+        return _DISPATCH_ACTIONS[action]
+    except KeyError:
+        raise ValueError(f"{action!r} is not a dispatch action") from None
 
 
 class DispatchRequest(BaseModel):

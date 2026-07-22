@@ -52,7 +52,7 @@ from ..database import (
     update_thread_metadata,
     update_thread_status,
 )
-from ..ipc.schemas import DispatchRequest
+from ..ipc.schemas import DispatchRequest, to_dispatch_action
 from ..thread.enums import ControlActionType
 from .dispatch import safe_dispatch
 
@@ -672,7 +672,7 @@ class VerdictSubscriber:
 
         resume_value: dict[str, str | None] = {"verdict": verdict, "notes": notes}
         dispatch = DispatchRequest(
-            action=ControlActionType.RESUME,  # ty: ignore[invalid-argument-type]
+            action=to_dispatch_action(ControlActionType.RESUME),
             thread_id=thread_id,
             option_id=resume_value,
             team_preset=team_preset,

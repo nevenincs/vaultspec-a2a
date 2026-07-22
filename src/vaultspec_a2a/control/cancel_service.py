@@ -19,7 +19,7 @@ from ..database import (
     get_thread,
     update_thread_status,
 )
-from ..ipc.schemas import DispatchRequest
+from ..ipc.schemas import DispatchRequest, to_dispatch_action
 from ..thread.cancel_policy import can_cancel
 from ..thread.dispatch_policy import FailureType, classify_dispatch_failure
 from ..thread.enums import (
@@ -166,7 +166,7 @@ async def cancel_thread(
     await mark_cancel_requested(db, thread_id)
 
     dispatch = DispatchRequest(
-        action=ControlActionType.CANCEL,  # ty: ignore[invalid-argument-type]
+        action=to_dispatch_action(ControlActionType.CANCEL),
         thread_id=thread_id,
         recursion_limit=recursion_limit,
     )

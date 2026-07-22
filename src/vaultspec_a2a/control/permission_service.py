@@ -25,7 +25,7 @@ from ..database import (
     update_thread_status,
 )
 from ..graph.enums import REJECT_OPTION_IDS
-from ..ipc.schemas import DispatchRequest
+from ..ipc.schemas import DispatchRequest, to_dispatch_action
 from ..thread.dispatch_policy import FailureType, classify_dispatch_failure
 from ..thread.enums import (
     TERMINAL_STATUSES,
@@ -663,7 +663,7 @@ async def _dispatch_permission_resume(
     action = transition.action
 
     dispatch = DispatchRequest(
-        action=ControlActionType.RESUME,  # ty: ignore[invalid-argument-type]
+        action=to_dispatch_action(ControlActionType.RESUME),
         thread_id=thread_id,
         option_id=transition.resume_value,
         team_preset=transition.team_preset,

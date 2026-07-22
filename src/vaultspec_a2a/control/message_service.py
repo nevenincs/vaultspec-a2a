@@ -26,7 +26,7 @@ from ..database import (
     get_thread,
     update_thread_status,
 )
-from ..ipc.schemas import DispatchRequest
+from ..ipc.schemas import DispatchRequest, to_dispatch_action
 from ..thread.dispatch_policy import FailureType, classify_dispatch_failure
 from ..thread.enums import ControlActionType, ThreadStatus
 from ..thread.idempotency import default_message_key
@@ -150,7 +150,7 @@ async def send_followup_message(
 
     # -- Dispatch construction & send ------------------------------------
     dispatch = DispatchRequest(
-        action=ControlActionType.INGEST,  # ty: ignore[invalid-argument-type]
+        action=to_dispatch_action(ControlActionType.INGEST),
         thread_id=thread_id,
         agent_id=agent_id,
         content=content,

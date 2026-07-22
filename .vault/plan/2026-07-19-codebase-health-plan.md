@@ -215,8 +215,8 @@ Ensure provider output cannot deadlock, background failures cannot hang a turn, 
 - [x] `W03.P10.S117` - Attempt Codex background-task cleanup independently while aggregating failures; `src/vaultspec_a2a/providers/codex_chat_model.py`.
 - [x] `W03.P10.S118` - Attempt Codex process cleanup independently while aggregating failures; `src/vaultspec_a2a/providers/codex_chat_model.py`.
 - [x] `W03.P10.S119` - Attempt ACP temporary-configuration cleanup independently while aggregating failures; `src/vaultspec_a2a/providers/acp_chat_model.py, src/vaultspec_a2a/providers/_acp_auth.py`.
-- [ ] `W03.P10.S120` - Attempt ACP background-task cleanup independently while aggregating failures; `src/vaultspec_a2a/providers/acp_chat_model.py`.
-- [ ] `W03.P10.S121` - Attempt ACP process cleanup independently while aggregating failures; `src/vaultspec_a2a/providers/acp_chat_model.py`.
+- [x] `W03.P10.S120` - Attempt ACP background-task cleanup independently while aggregating failures; `src/vaultspec_a2a/providers/acp_chat_model.py`.
+- [x] `W03.P10.S121` - Attempt ACP process cleanup independently while aggregating failures; `src/vaultspec_a2a/providers/acp_chat_model.py`.
 - [ ] `W03.P10.S122` - Prove RPC handler failure terminates a real provider session; `tests/providers, src/vaultspec_a2a/desktop_tests`.
 - [ ] `W03.P10.S123` - Prove provider deadline expiry terminates a real provider session; `tests/providers, src/vaultspec_a2a/desktop_tests`.
 - [ ] `W03.P10.S124` - Prove cleanup continuation after one cleanup failure with a real provider subprocess; `tests/providers, src/vaultspec_a2a/desktop_tests`.

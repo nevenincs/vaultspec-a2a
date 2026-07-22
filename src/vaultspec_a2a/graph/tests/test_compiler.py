@@ -30,6 +30,7 @@ from ..compiler import (
     _loop_route,
     _make_research_producer,
     _resolve_worker_model_preferences,
+    _route_from_supervisor,
     _worker_retry_on,
     compile_team_graph,
 )
@@ -353,11 +354,16 @@ def test_loop_route_signals_finish_only_on_the_literal_and_the_guard() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_star_missing_next_field() -> None:
-    """Star topology conditional edge must not raise KeyError."""
-    edge_fn = lambda state: state.get("next", "")  # noqa: E731
+def test_route_from_supervisor_honors_approval_then_the_next_decision() -> None:
+    """The real star supervisor router, exercised directly (not a shadow lambda).
 
-    state_without_next: dict = {
+    This replaced a test that reimplemented the edge as ``state.get("next", "")``
+    - a shadow that matched neither the production router (which reads
+    ``state["next"]`` directly) nor its flow. Import the real router and assert
+    both arms: a pending approval short-circuits to ``plan_approval`` ahead of any
+    ``next`` decision, and otherwise the supervisor's ``next`` is the route key.
+    """
+    base: dict = {
         "messages": [],
         "active_agent": "",
         "artifacts": [],
@@ -366,14 +372,13 @@ def test_star_missing_next_field() -> None:
         "token_usage": {},
     }
 
-    result = edge_fn(state_without_next)
-    assert result == ""
+    # A pending plan approval short-circuits before next is even consulted.
+    pending = {**base, "approval_status": "pending", "next": "planner"}
+    assert _route_from_supervisor(pending) == "plan_approval"
 
-    state_with_next = {**state_without_next, "next": "planner"}
-    assert edge_fn(state_with_next) == "planner"
-
-    state_finish = {**state_without_next, "next": "FINISH"}
-    assert edge_fn(state_finish) == "FINISH"
+    # With no pending approval, the supervisor's own next decision routes.
+    assert _route_from_supervisor({**base, "next": "planner"}) == "planner"
+    assert _route_from_supervisor({**base, "next": "FINISH"}) == "FINISH"
 
 
 # ---------------------------------------------------------------------------

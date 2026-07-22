@@ -630,11 +630,6 @@ def _compile_star(
     route_map: dict[str, str] = {wid: f"mount_{wid}" for wid in compiled_worker_ids}
     route_map["FINISH"] = END
 
-    def _route_from_supervisor(state: TeamState) -> str:
-        if state.get("approval_status") == "pending":
-            return "plan_approval"
-        return state["next"]
-
     supervisor_route_map = {**route_map, "plan_approval": "plan_approval"}
     builder.add_conditional_edges(
         "supervisor",
@@ -804,6 +799,21 @@ def _validate_pipeline_loop_config(
         )
 
     return loop_node_id, pre_loop
+
+
+def _route_from_supervisor(state: TeamState) -> str:
+    """Route a star-topology supervisor output to its next hop.
+
+    A pending plan approval short-circuits to the ``plan_approval`` node before
+    any worker routing. Otherwise the supervisor's own ``next`` decision is the
+    route key. ``next`` is read directly (not defaulted): by the time this edge
+    runs the supervisor has always set it, so a missing key is a real invariant
+    break that should fail loud rather than silently route nowhere. Lifted to
+    module scope so its contract is testable without compiling a graph.
+    """
+    if state.get("approval_status") == "pending":
+        return "plan_approval"
+    return state["next"]
 
 
 def _loop_route(*, next_value: object, loop_count: int, max_loops: int) -> str:

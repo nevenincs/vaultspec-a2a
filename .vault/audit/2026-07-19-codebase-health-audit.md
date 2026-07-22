@@ -508,6 +508,27 @@ registry, limit repository tooling to the delegating `just` surface, and retain
 service-lifecycle authority for Compose and product topology. Status: resolved.
 The second independent review passed with no findings.
 
+### per-principal-quotas-have-no-principal-to-key-on | medium | the edge authenticates one shared bearer, so a per-principal quota equals the global one
+
+Plan Step `W02.P06.S25` asks for per-principal stream and subscription quotas after
+authentication. The step cannot be implemented as written, and implementing something that
+resembled it would be worse than leaving it open.
+
+The engine-facing authentication validates a single per-process service token and returns
+nothing. There is no principal: every authenticated caller presents the same bearer, so a
+quota keyed on principal identity would admit exactly the same traffic as the global
+connection limit added under `W02.P06.S24`. Shipping it would create a second bound that
+looks like defence in depth and is a duplicate of the first.
+
+The prerequisite is an identity on this edge - a per-consumer credential, or a claim the
+gateway can attribute a connection to. That is an architectural decision about the
+a2a/dashboard boundary rather than a quota implementation, and it belongs in a decision
+record before any quota work.
+
+Left open deliberately. Closing it against the global limit would record a per-principal
+bound this service does not have, and a later reader would reasonably assume one exists.
+
+
 ## User-documentation health review
 
 The repository README, contributor and security policies, issue and pull-request

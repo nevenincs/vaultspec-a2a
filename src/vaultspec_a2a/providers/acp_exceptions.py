@@ -65,7 +65,6 @@ class AcpError(Exception):
             msg += f" | Data: {self.data}"
         return msg
 
-
     __slots__ = ()
 
 

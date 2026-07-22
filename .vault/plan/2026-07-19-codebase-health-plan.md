@@ -205,7 +205,7 @@ Use one canonical server model and reject duplicate identities before generating
 
 Ensure provider output cannot deadlock, background failures cannot hang a turn, and cleanup attempts every sensitive resource independently.
 
-- [ ] `W03.P10.S38` - Continuously drain Codex standard error into a bounded redacted diagnostic buffer; `src/vaultspec_a2a/providers/codex_chat_model.py, src/vaultspec_a2a/providers/_subprocess.py`.
+- [x] `W03.P10.S38` - Continuously drain Codex standard error into a bounded redacted diagnostic buffer; `src/vaultspec_a2a/providers/codex_chat_model.py, src/vaultspec_a2a/providers/_subprocess.py`.
 - [ ] `W03.P10.S39` - Propagate ACP background RPC handler failures as protocol errors or terminal session failures; `src/vaultspec_a2a/providers/_acp_protocol.py, src/vaultspec_a2a/providers/acp_chat_model.py`.
 - [ ] `W03.P10.S40` - Apply bounded deadlines to provider turns requests and cleanup operations; `src/vaultspec_a2a/providers/acp_chat_model.py, src/vaultspec_a2a/providers/codex_chat_model.py`.
 - [ ] `W03.P10.S41` - Attempt Codex credential cleanup independently while aggregating failures; `src/vaultspec_a2a/providers/codex_chat_model.py`.

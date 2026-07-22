@@ -18,6 +18,8 @@ the ChatGPT-session auth mode.
 import asyncio
 import json
 import logging
+import re
+from collections import deque
 from collections.abc import AsyncIterator, Mapping, Sequence
 from contextlib import suppress
 from pathlib import Path
@@ -48,6 +50,54 @@ from ._codex_config_home import build_codex_config_home, cleanup_codex_config_ho
 from ._subprocess import kill_process_tree, spawn_acp_process
 
 logger = logging.getLogger(__name__)
+
+_SECRET_PATTERN = re.compile(
+    r"(?i)((?:[A-Z0-9_]*(?:TOKEN|SECRET|KEY|PASSWORD|CREDENTIAL)[A-Z0-9_]*)\s*[=:]\s*"
+    r"|bearer\s+)(\S+)"
+)
+
+
+def _redact(line: str) -> str:
+    """Mask credential-shaped values in a diagnostic line.
+
+    Provider subprocesses report their configuration when they fail, and
+    configuration is where credentials live, so a retained diagnostic tail is a
+    plausible place for a token to surface. Matches on the NAME rather than the
+    value shape: a token has no reliable shape, but the thing introducing it -
+    an assignment to something called a token, secret, key, password or
+    credential, or a bearer prefix - does.
+    """
+    return _SECRET_PATTERN.sub(lambda m: f"{m.group(1)}<redacted>", line)
+
+
+async def drain_stderr_into(
+    stream: asyncio.StreamReader | None, tail: deque[str]
+) -> None:
+    """Read *stream* to end, appending each redacted non-empty line to *tail*.
+
+    Module-level rather than a method so the behaviour can be driven directly
+    against a real stream, without reaching into a half-built client.
+
+    Never raises: a diagnostic channel must not be able to fail a turn. Each line
+    is redacted before retention because provider subprocesses report their
+    configuration when they fail, and configuration is where credentials live.
+    """
+    if stream is None:
+        return
+    try:
+        while True:
+            line = await stream.readline()
+            if not line:
+                break
+            text = line.decode("utf-8", errors="replace").rstrip()
+            if text:
+                tail.append(_redact(text))
+    except (OSError, ValueError, asyncio.CancelledError):
+        return
+
+
+STDERR_TAIL_LINES = 200
+"""How many redacted stderr lines to retain for crash diagnosis."""
 
 __all__ = ["CodexChatModel"]
 
@@ -126,7 +176,26 @@ class _CodexAppServerClient:
         self._pending: dict[int, asyncio.Future[dict[str, Any]]] = {}
         self.notifications: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
         self._closed = False
+        # An undrained pipe is a hang, not just lost diagnostics: the operating
+        # system buffer fills and the child BLOCKS on its next stderr write. The
+        # subprocess helper opens stderr as a pipe, so something must read it for
+        # the whole session, and the tail is retained bounded so a crash can be
+        # explained without letting a chatty process grow memory without limit.
+        self._stderr_tail: deque[str] = deque(maxlen=STDERR_TAIL_LINES)
         self._reader_task = asyncio.create_task(self._read_loop())
+        self._stderr_task: asyncio.Task[None] | None = (
+            asyncio.create_task(self._drain_stderr())
+            if process.stderr is not None
+            else None
+        )
+
+    async def _drain_stderr(self) -> None:
+        """Read this session's standard error for the process lifetime."""
+        await drain_stderr_into(self._process.stderr, self._stderr_tail)
+
+    def stderr_tail(self) -> str:
+        """Return the retained, redacted tail of the child's standard error."""
+        return chr(10).join(self._stderr_tail)
 
     async def _read_loop(self) -> None:
         """Parse newline-delimited JSON frames, routing responses vs. notifications."""
@@ -218,6 +287,8 @@ class _CodexAppServerClient:
             logger.debug("codex app-server: stdin close failed", exc_info=True)
         await kill_process_tree(self._process, self._metadata)
         self._reader_task.cancel()
+        if self._stderr_task is not None:
+            self._stderr_task.cancel()
         with suppress(asyncio.CancelledError, Exception):
             await self._reader_task
 

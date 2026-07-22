@@ -19,7 +19,11 @@ from the committed pinned-inputs document to the descriptor's source facts.
 
 from __future__ import annotations
 
+import hashlib
+import json
 import re
+import shutil
+import tarfile
 import tomllib
 import zipfile
 from dataclasses import dataclass
@@ -30,12 +34,36 @@ from typing import TYPE_CHECKING, Final
 from packaging.utils import InvalidWheelFilename, parse_wheel_filename
 from pydantic import ValidationError
 
-from .artifacts import ArchiveKind
-from .capsule_descriptor import RuntimeSourceInput
+from .artifacts import (
+    _TARGET_SDK_PACKAGES,
+    ArchiveKind,
+    LockInputDescriptor,
+    open_verified_capsule_inputs,
+)
+from .capsule_descriptor import (
+    RuntimeSourceInput,
+    author_capsule_descriptor,
+    author_capsule_input_descriptor,
+    author_source_descriptors,
+    build_acp_installed_inventory,
+    build_python_installed_inventory,
+)
 from .capsule_input_authoring import (
     BuiltDistribution,
     CapsuleInputAuthoringError,
     PinnedSource,
+    acquire_acp_closure,
+    acquire_pinned_sources,
+    acquire_python_closure,
+    build_a2a_distribution_wheel,
+    emit_acp_closure_inventory,
+    emit_python_closure_inventory,
+)
+from .capsule_license import (
+    derive_acp_package_artifact,
+    derive_python_wheel_artifact,
+    load_acp_license_overrides,
+    load_license_overrides,
 )
 from .closure_inventory import PythonWheelArtifact
 from .contract import (
@@ -43,6 +71,11 @@ from .contract import (
     CPYTHON_VERSION_PIN,
     NODEJS_VERSION_PIN,
     TargetTriple,
+)
+from .lock_reconciliation import (
+    _ACP_ROOT_PACKAGE,
+    resolve_acp_closure_selection,
+    resolve_python_closure_selection,
 )
 from .package_archives import (
     PackageArchiveError,
@@ -52,14 +85,21 @@ from .package_archives import (
 if TYPE_CHECKING:
     from pathlib import Path
 
+    from .capsule_input_authoring import ArtifactStreamOpener
+    from .lock_reconciliation import AcpClosureSelection
+
 __all__ = [
     "RuntimeSourceFacts",
     "SourceInputs",
     "derive_project_wheel_artifact",
     "load_source_inputs",
+    "prepare_capsule_inputs",
 ]
 
 _MAX_WHEEL_METADATA_BYTES: Final = 1 << 20
+_PROJECT_ROOT_PACKAGE: Final = "vaultspec-a2a"
+_ACP_ROOT_INSTALL_PATH: Final = f"node_modules/{_ACP_ROOT_PACKAGE}"
+_MAX_PACKAGE_JSON_BYTES: Final = 1 << 20
 
 # The committed pinned-inputs document declares version + license + url + sha256
 # per source; the remaining descriptor facts (release, build, archive_root,
@@ -333,3 +373,217 @@ def derive_project_wheel_artifact(
             f"derived project wheel identity fails verification: {error}"
         ) from None
     return artifact
+
+
+def _read_acp_bin_entrypoints(cache_root: Path, sha256: str) -> tuple[str, ...]:
+    """Read the ACP root package.json ``bin`` as placed installed-tree paths."""
+    try:
+        with tarfile.open(cache_root / sha256, mode="r:gz") as archive:
+            member = archive.extractfile("package/package.json")
+            if member is None:
+                raise CapsuleInputAuthoringError("ACP root tarball lacks package.json")
+            payload = member.read(_MAX_PACKAGE_JSON_BYTES + 1)
+    except (OSError, tarfile.TarError) as error:
+        raise CapsuleInputAuthoringError(
+            f"cannot read ACP root package.json: {error}"
+        ) from None
+    if len(payload) > _MAX_PACKAGE_JSON_BYTES:
+        raise CapsuleInputAuthoringError("ACP root package.json exceeds its size bound")
+    try:
+        document = json.loads(payload.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise CapsuleInputAuthoringError(
+            f"ACP root package.json is invalid: {error}"
+        ) from None
+    bin_field = document.get("bin")
+    if isinstance(bin_field, str):
+        paths: tuple[str, ...] = (bin_field,)
+    elif (
+        isinstance(bin_field, dict)
+        and bin_field
+        and all(isinstance(value, str) for value in bin_field.values())
+    ):
+        paths = tuple(bin_field.values())
+    else:
+        raise CapsuleInputAuthoringError(
+            "ACP root package.json bin is missing or invalid"
+        )
+    return tuple(
+        f"{_ACP_ROOT_INSTALL_PATH}/{path.removeprefix('./')}" for path in paths
+    )
+
+
+def _node_integrity(selection: AcpClosureSelection, install_path: str) -> str:
+    for node in selection.packages:
+        if node.install_path == install_path:
+            return node.integrity
+    raise CapsuleInputAuthoringError(f"ACP closure is missing {install_path}")
+
+
+def prepare_capsule_inputs(
+    target: TargetTriple,
+    *,
+    inputs_toml: Path,
+    uv_lock: Path,
+    package_lock: Path,
+    repo_root: Path,
+    cache_root: Path,
+    output_dir: Path,
+    source_date_epoch: int,
+    open_stream: ArtifactStreamOpener | None = None,
+) -> tuple[Path, str]:
+    """Run the full per-target preparation flow, emitting the pinned descriptor.
+
+    Resolves the target's Python and ACP closures, acquires every pinned byte
+    into the content-addressed cache (the first-party wheel built from source
+    HEAD among them), derives per-package license identity, emits the canonical
+    closure inventories, builds the installed inventories, authors and digests
+    the capsule input descriptor, and proves the whole set by opening it through
+    the production verified-input session.  Returns the written descriptor path
+    and its digest.  ``open_stream`` overrides network acquisition with an
+    injected byte-stream seam for offline proofs; production omits it.
+    """
+    sources = load_source_inputs(inputs_toml, target)
+    uv_bytes = uv_lock.read_bytes()
+    package_bytes = package_lock.read_bytes()
+
+    python_selection = resolve_python_closure_selection(
+        lock_bytes=uv_bytes,
+        target=target,
+        root_package=_PROJECT_ROOT_PACKAGE,
+        python_full_version=sources.python.release,
+    )
+    acp_selection = resolve_acp_closure_selection(
+        lock_bytes=package_bytes,
+        target=target,
+        root_package=_ACP_ROOT_PACKAGE,
+        node_full_version=sources.node.release,
+    )
+
+    acquired_wheels = acquire_python_closure(
+        python_selection, cache_root=cache_root, open_stream=open_stream
+    )
+    acquired_tarballs = acquire_acp_closure(
+        acp_selection, cache_root=cache_root, open_stream=open_stream
+    )
+    python_pin, node_pin, acp_pin = acquire_pinned_sources(
+        (sources.python.pinned, sources.node.pinned, sources.acp.pinned),
+        cache_root=cache_root,
+        open_stream=open_stream,
+    )
+    built = build_a2a_distribution_wheel(
+        repo_root=repo_root,
+        sandbox=cache_root / ".a2a-build",
+        source_date_epoch=source_date_epoch,
+    )
+    shutil.copyfile(built.path, cache_root / built.sha256)
+
+    overrides = load_license_overrides(inputs_toml)
+    acp_overrides = load_acp_license_overrides(inputs_toml)
+    python_artifacts = tuple(
+        derive_python_wheel_artifact(
+            package,
+            acquired_wheels[package.name].wheel,
+            target=target,
+            cache_root=cache_root,
+            overrides=overrides,
+        )
+        for package in python_selection.packages
+    )
+    acp_artifacts = tuple(
+        derive_acp_package_artifact(
+            node,
+            cache_root=cache_root,
+            sha256=acquired_tarballs[node.install_path].sha256,
+            size=acquired_tarballs[node.install_path].size,
+            overrides=acp_overrides,
+        )
+        for node in acp_selection.packages
+    )
+    project_wheel = derive_project_wheel_artifact(
+        built, cache_root=cache_root, target=target
+    )
+
+    python_inventory, python_emitted = emit_python_closure_inventory(
+        python_selection,
+        python_artifacts,
+        lock_bytes=uv_bytes,
+        root_package=_PROJECT_ROOT_PACKAGE,
+        python_full_version=sources.python.release,
+        cache_root=cache_root,
+    )
+    acp_inventory, acp_emitted = emit_acp_closure_inventory(
+        acp_artifacts,
+        target=target,
+        lock_bytes=package_bytes,
+        root_package=_ACP_ROOT_PACKAGE,
+        node_full_version=sources.node.release,
+        cache_root=cache_root,
+    )
+
+    uv_lock_sha256 = hashlib.sha256(uv_bytes).hexdigest()
+    package_lock_sha256 = hashlib.sha256(package_bytes).hexdigest()
+    root_integrity = _node_integrity(acp_selection, _ACP_ROOT_INSTALL_PATH)
+    sdk_install_path = f"node_modules/{_TARGET_SDK_PACKAGES[target]}"
+    sdk_integrity = _node_integrity(acp_selection, sdk_install_path)
+    acp_root_sha256 = acquired_tarballs[_ACP_ROOT_INSTALL_PATH].sha256
+
+    python_installed, _ = build_python_installed_inventory(
+        (*python_artifacts, project_wheel),
+        target=target,
+        source_inventory_sha256=python_emitted.sha256,
+        lock_sha256=uv_lock_sha256,
+        cache_root=cache_root,
+    )
+    acp_installed, _ = build_acp_installed_inventory(
+        acp_artifacts,
+        target=target,
+        source_inventory_sha256=acp_emitted.sha256,
+        lock_sha256=package_lock_sha256,
+        bin_entrypoints=_read_acp_bin_entrypoints(cache_root, acp_root_sha256),
+        cache_root=cache_root,
+    )
+
+    descriptor = author_capsule_descriptor(
+        target=target,
+        source_date_epoch=source_date_epoch,
+        sources=author_source_descriptors(
+            target=target,
+            python=sources.python.runtime_source_input(size=python_pin.size),
+            node=sources.node.runtime_source_input(size=node_pin.size),
+            acp=sources.acp.runtime_source_input(size=acp_pin.size),
+            acp_root_integrity=root_integrity,
+            a2a=built,
+            a2a_version=project_wheel.version,
+            a2a_license_expression=project_wheel.license_expression,
+            a2a_license_members=project_wheel.license_members,
+            a2a_redistribution_evidence=project_wheel.redistribution_evidence,
+        ),
+        uv_lock=LockInputDescriptor(sha256=uv_lock_sha256, size=len(uv_bytes)),
+        package_lock=LockInputDescriptor(
+            sha256=package_lock_sha256, size=len(package_bytes)
+        ),
+        python_installed=python_installed,
+        python_inventory_sha256=python_emitted.sha256,
+        python_inventory_size=python_emitted.size,
+        python_package_count=len(python_inventory.packages),
+        acp_installed=acp_installed,
+        acp_inventory_sha256=acp_emitted.sha256,
+        acp_inventory_size=acp_emitted.size,
+        acp_package_count=len(acp_inventory.packages),
+        acp_root_integrity=root_integrity,
+        target_sdk_integrity=sdk_integrity,
+    )
+    authored = author_capsule_input_descriptor(descriptor, output_dir=output_dir)
+
+    # The proof: the production consumer opens exactly the descriptor just
+    # written against the same cache and locks. A failure raises loud here.
+    with open_verified_capsule_inputs(
+        authored.path,
+        expected_descriptor_sha256=authored.sha256,
+        input_dir=cache_root,
+        uv_lock_path=uv_lock,
+        package_lock_path=package_lock,
+    ):
+        pass
+    return authored.path, authored.sha256

@@ -26,6 +26,7 @@ related:
   - '[[2026-07-19-codebase-health-W04-P12-S48]]'
   - '[[2026-07-19-codebase-health-W04-P12-S49]]'
   - '[[2026-07-19-codebase-health-W04-P12-S50]]'
+  - '[[2026-07-19-codebase-health-W04-P12-S51]]'
   - '[[2026-07-19-codebase-health-W04-P13-S127]]'
   - '[[2026-07-19-codebase-health-W04-P13-S128]]'
   - '[[2026-07-19-codebase-health-W04-P13-S129]]'
@@ -99,6 +100,7 @@ Auto-generated index of all documents tagged with `#codebase-health`.
 - `2026-07-19-codebase-health-W04-P12-S48` - Bind MCP-unavailable error-path tests to an owned closed loopback socket without production-state mutation
 - `2026-07-19-codebase-health-W04-P12-S49` - Make one repair-policy module authoritative for runtime transitions and direct production-import tests
 - `2026-07-19-codebase-health-W04-P12-S50` - Replace sequential per-thread checkpoint reads with bounded bulk reads limited concurrency and one request deadline
+- `2026-07-19-codebase-health-W04-P12-S51` - Prove thread-list ordering partial-state policy concurrency bounds and request deadline against real stores
 - `2026-07-19-codebase-health-W04-P13-S127` - Route message dispatch failure through the shared typed transition function
 - `2026-07-19-codebase-health-W04-P13-S128` - Route thread dispatch failure through the shared typed transition function
 - `2026-07-19-codebase-health-W04-P13-S129` - Route permission dispatch failure through the shared typed transition function

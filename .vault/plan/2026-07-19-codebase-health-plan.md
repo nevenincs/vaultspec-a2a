@@ -241,7 +241,7 @@ Consume the tooling debt work, repair the concrete stale and non-hermetic cases,
 - [x] `W04.P12.S48` - Bind MCP-unavailable error-path tests to an owned closed loopback socket without production-state mutation; `tests/mcp, tests/api`.
 - [x] `W04.P12.S49` - Make one repair-policy module authoritative for runtime transitions and direct production-import tests; `src/vaultspec_a2a/thread/repair_policy.py, src/vaultspec_a2a/control/repair_transitions.py, tests`.
 - [x] `W04.P12.S50` - Replace sequential per-thread checkpoint reads with bounded bulk reads limited concurrency and one request deadline; `src/vaultspec_a2a/control/thread_service.py, src/vaultspec_a2a/control/repositories`.
-- [ ] `W04.P12.S51` - Prove thread-list ordering partial-state policy concurrency bounds and request deadline against real stores; `tests/control, tests/api`.
+- [x] `W04.P12.S51` - Prove thread-list ordering partial-state policy concurrency bounds and request deadline against real stores; `tests/control, tests/api`.
 - [ ] `W04.P12.S101` - Replace prohibited fake mock and stub based tests with direct production imports and real behavior; `tests, src/vaultspec_a2a`.
 - [ ] `W04.P12.S102` - Replace prohibited skip and expected-failure shortcuts with executable environment gates or real fixtures; `tests, src/vaultspec_a2a`.
 - [ ] `W04.P12.S103` - Remove prohibited monkeypatch and runtime code-mutation tests in favor of owned configuration and process boundaries; `tests, src/vaultspec_a2a`.

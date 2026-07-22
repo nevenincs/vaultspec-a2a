@@ -30,7 +30,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ...control.admission import AdmissionBroker, AdmissionReadiness
-from ...control.cancel_service import cancel_thread
+from ...control.cancel_service import cancel_thread, raise_for_cancel_failure
 from ...control.config import settings
 from ...control.drain import DrainGate
 from ...control.health import (
@@ -1240,12 +1240,7 @@ async def run_cancel_endpoint(
         trace_headers=trace_headers(),
     )
 
-    if result.failure_type == FailureType.NOT_FOUND:
-        raise HTTPException(status_code=404, detail="Run not found")
-    if result.failure_type is not None:
-        raise HTTPException(
-            status_code=502, detail=result.error_detail or "Cancel dispatch failed"
-        )
+    raise_for_cancel_failure(result, resource_noun="Run")
 
     if result.cancelled:
         mark_worker_connected(request)

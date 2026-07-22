@@ -57,6 +57,35 @@ class CancelResult:
     failure_type: FailureType | None = None
 
 
+def raise_for_cancel_failure(result: CancelResult, *, resource_noun: str) -> None:
+    """Translate a cancel outcome's failure into the HTTP error the route returns.
+
+    Both the internal thread-cancel route and the versioned run-cancel verb
+    performed this mapping inline and identically - a not-found becomes 404, any
+    other dispatch failure becomes 502 - differing only in the resource noun.
+    Sharing it keeps the two edges from drifting to different status codes for
+    the same underlying outcome, which is the failure a duplicated mapping
+    invites.
+
+    Args:
+        result: The cancel-service outcome to inspect.
+        resource_noun: What the 404 names - ``"Thread"`` or ``"Run"`` - so each
+            edge speaks its own vocabulary without owning the status logic.
+
+    Raises:
+        HTTPException: 404 when the target is absent, 502 on any other dispatch
+            failure. Returns without raising when the cancel succeeded.
+    """
+    from fastapi import HTTPException
+
+    if result.failure_type == FailureType.NOT_FOUND:
+        raise HTTPException(status_code=404, detail=f"{resource_noun} not found")
+    if result.failure_type is not None:
+        raise HTTPException(
+            status_code=502, detail=result.error_detail or "Cancel dispatch failed"
+        )
+
+
 @dataclass(frozen=True, slots=True)
 class _PriorRepairState:
     repair_status: str

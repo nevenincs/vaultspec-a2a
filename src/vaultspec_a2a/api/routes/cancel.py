@@ -4,13 +4,12 @@ import logging
 from typing import Any
 
 import httpx
-from fastapi import APIRouter, Depends, Header, HTTPException, Request
+from fastapi import APIRouter, Depends, Header, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ...control.cancel_service import cancel_thread
+from ...control.cancel_service import cancel_thread, raise_for_cancel_failure
 from ...database.session import get_db
 from ...domain_config import domain_config
-from ...thread.dispatch_policy import FailureType
 from .._utils import mark_worker_connected, trace_headers
 from ..dependencies import get_circuit_breaker, get_worker_client, get_worker_spawner
 from ..schemas.rest import CancelThreadResponse
@@ -44,13 +43,7 @@ async def cancel_thread_endpoint(
         trace_headers=trace_headers(),
     )
 
-    if result.failure_type == FailureType.NOT_FOUND:
-        raise HTTPException(status_code=404, detail="Thread not found")
-    if result.failure_type is not None:
-        raise HTTPException(
-            status_code=502,
-            detail=result.error_detail or "Cancel dispatch failed",
-        )
+    raise_for_cancel_failure(result, resource_noun="Thread")
 
     if result.cancelled:
         mark_worker_connected(request)

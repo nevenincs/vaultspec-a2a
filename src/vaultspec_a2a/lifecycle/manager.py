@@ -454,7 +454,11 @@ def rebuild(
 
 
 def resume(
-    name: str, *, home: Path | None = None, config: ProcsConfig | None = None
+    name: str,
+    *,
+    home: Path | None = None,
+    config: ProcsConfig | None = None,
+    ready_timeout: float = 20.0,
 ) -> ProcRecord:
     """Restart a died record's process on its original port and workspace.
 
@@ -478,11 +482,17 @@ def resume(
             f"{record.pid} terminated; refusing to spawn an overlapping "
             "replacement (record left unchanged)"
         )
-    return _start_from_record(record, home=home, config=config)
+    return _start_from_record(
+        record, home=home, config=config, ready_timeout=ready_timeout
+    )
 
 
 def rerun(
-    name: str, *, home: Path | None = None, config: ProcsConfig | None = None
+    name: str,
+    *,
+    home: Path | None = None,
+    config: ProcsConfig | None = None,
+    ready_timeout: float = 20.0,
 ) -> ProcRecord:
     """Kill, rebuild (when the role declares a build), and restart on the same port.
 
@@ -514,7 +524,9 @@ def rerun(
                 f"rebuild for {record.role}-{record.name} failed "
                 f"(exit {result.returncode})"
             )
-    return _start_from_record(record, home=home, config=resolved_config)
+    return _start_from_record(
+        record, home=home, config=resolved_config, ready_timeout=ready_timeout
+    )
 
 
 def reap(

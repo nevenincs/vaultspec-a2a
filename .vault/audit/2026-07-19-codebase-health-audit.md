@@ -817,13 +817,15 @@ a record could be published pointing at a crashed pid. The common case - an orph
 child of the felled old generation still holding the port - is now mitigated by the
 S96/S151 confirm-terminated reap-before-spawn (the orphan is felled with the old
 tree, freeing the port before the respawn), so only a genuinely foreign racer on a
-fixed resume/rerun port remains. A tighter fix would confirm the listening pid is
-the spawned pid (or a descendant). This also blocks a clean proof of S97/S152 (the
-kill-failure atomicity proofs): driving resume/rerun through the confirm-terminated
-FAILURE path needs a process that survives ``tree_kill``, and there is no portable,
-safe way to make an owned test process unkillable; a port-contention stand-in is
-defeated by this same port-vs-process ambiguity. S97/S152 remain open on that
-injection gap; the confirm-terminated gate's detection is proven directly.
+fixed resume/rerun port remains. The tighter fix landed (2026-07-22): the listening
+pid is now confirmed to be the spawned pid or a descendant. This also UNBLOCKED the
+clean proof of S97/S152 (the kill-failure atomicity proofs): with the port-vs-process
+ambiguity closed, a port-contention stand-in is a valid injection - a real foreign
+process holds the record's port (a surviving old-tree member / failed kill), the
+respawn stays alive but never OWNS the listener, so the ownership-aware readiness gate
+fails and resume/rerun refuse atomically (prior generation unchanged, respawn felled,
+no overlapping child). S97 and S152 are proven and closed on that injection with real
+multi-process tests; no unkillable process is needed.
 
 ## Recommendations
 

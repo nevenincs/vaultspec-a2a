@@ -343,6 +343,78 @@ def test_rerun_that_never_becomes_ready_is_atomic(tmp_path) -> None:
         tree_kill(old.pid)
 
 
+def _hold_loopback_port() -> tuple[socket.socket, int]:
+    """A real, listening loopback socket in THIS process, and the port it holds.
+
+    Stands in for a surviving old-tree member / foreign racer that still holds a
+    fixed resume/rerun port after a kill did not fully take: the listener pid (this
+    test process) is outside any tree a respawn will root, so it is positively
+    foreign to the replacement.
+    """
+    holder = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    holder.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    holder.bind(("127.0.0.1", 0))
+    holder.listen(1)
+    return holder, holder.getsockname()[1]
+
+
+def test_resume_kill_failure_leaves_the_generation_unchanged(tmp_path) -> None:
+    """S97: a foreign holder on the record's port makes resume atomic.
+
+    Models a resume kill failure - the old generation (or an un-reaped orphan)
+    still holds the port. The respawn stays alive but never OWNS that listener, so
+    the pid-ownership readiness gate never passes: resume fails loud, the prior
+    (dead) generation stays the last committed record, and the felled respawn
+    leaves no overlapping child. Before the gate the foreign listener false-passed
+    readiness and resume published a record pointing at a process that never bound
+    the port. No mock: a real socket holds the port, a real child is the respawn.
+    """
+    holder, port = _hold_loopback_port()
+    record = _record(
+        name="revive-foreign", pid=_dead_pid(), port=port, workspace="ws-f"
+    )
+    write_record(record, home=tmp_path)
+    # A respawn that stays alive but never binds the port (the foreigner holds it):
+    # the case only the owner-check catches - a bare bound-port probe reads ready.
+    config = _scratch_config(
+        serve=[sys.executable, "-c", "import time; time.sleep(60)"]
+    )
+    try:
+        with pytest.raises(LifecycleError, match="never became ready"):
+            resume("revive-foreign", home=tmp_path, config=config, ready_timeout=3.0)
+        persisted = read_record(record_path("scratch", "revive-foreign", home=tmp_path))
+        assert persisted is not None
+        assert persisted.pid == record.pid  # prior generation unchanged
+    finally:
+        holder.close()
+
+
+def test_rerun_kill_failure_leaves_the_generation_unchanged(tmp_path) -> None:
+    """S152: the rerun analogue of the foreign-holder atomicity proof.
+
+    rerun fells the running tree, then a foreign holder on the record's port keeps
+    the respawn from ever owning the listener, so the pid-ownership readiness gate
+    fails: rerun raises without publishing a new generation and the record still
+    names the pre-rerun pid. No overlapping child survives (the respawn is felled).
+    """
+    holder, port = _hold_loopback_port()
+    old = _sleeper()
+    record = _record(name="cycle-foreign", pid=old.pid, port=port, workspace="ws-g")
+    write_record(record, home=tmp_path)
+    config = _scratch_config(
+        serve=[sys.executable, "-c", "import time; time.sleep(60)"]
+    )
+    try:
+        with pytest.raises(LifecycleError, match="never became ready"):
+            rerun("cycle-foreign", home=tmp_path, config=config, ready_timeout=3.0)
+        persisted = read_record(record_path("scratch", "cycle-foreign", home=tmp_path))
+        assert persisted is not None
+        assert persisted.pid == old.pid  # no not-ready new generation published
+    finally:
+        holder.close()
+        tree_kill(old.pid)
+
+
 def test_reap_clears_dead_and_stale_but_keeps_live(tmp_path) -> None:
     write_record(_record(name="corpse", pid=_dead_pid(), port=18906), home=tmp_path)
     child = _sleeper()

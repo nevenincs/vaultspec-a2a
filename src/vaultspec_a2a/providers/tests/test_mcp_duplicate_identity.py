@@ -19,7 +19,11 @@ import pytest
 
 from ...thread.errors import ConfigError
 from .._acp_config_home import create_isolated_config_home
-from .._acp_mcp import config_home_mcp_servers, reject_duplicate_identities
+from .._acp_mcp import (
+    codex_mcp_server_specs,
+    config_home_mcp_servers,
+    reject_duplicate_identities,
+)
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -99,3 +103,29 @@ def test_a_duplicate_never_reaches_the_config_home_writer(tmp_path: Path) -> Non
         )
 
     assert sorted(tmp_path.iterdir()) == before
+
+
+def test_the_codex_transport_also_refuses_a_repeated_name() -> None:
+    """Both emitters share one registry, so both must share the refusal.
+
+    Guarding only the ACP path left the second transport emitting two blocks
+    under one configuration key - either a parse failure or a last-wins
+    overwrite, which is the shadowing the specs path already refused.
+    """
+    with pytest.raises(ConfigError, match="duplicate MCP server names"):
+        codex_mcp_server_specs([_KNOWN, _KNOWN])
+
+
+def test_the_codex_transport_still_resolves_a_single_name() -> None:
+    """The guard must not disturb the ordinary path."""
+    specs = codex_mcp_server_specs([_KNOWN])
+
+    assert [spec["name"] for spec in specs] == [_KNOWN]
+
+
+def test_both_transports_refuse_the_same_condition() -> None:
+    """One registry, one trust root, one answer to a repeated identity."""
+    with pytest.raises(ConfigError):
+        config_home_mcp_servers([_spec("a"), _spec("b")])
+    with pytest.raises(ConfigError):
+        codex_mcp_server_specs([_KNOWN, _KNOWN])

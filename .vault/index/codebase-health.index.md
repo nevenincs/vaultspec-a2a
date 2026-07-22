@@ -15,6 +15,7 @@ related:
   - '[[2026-07-19-codebase-health-W02-P05-S19]]'
   - '[[2026-07-19-codebase-health-W02-P05-S20]]'
   - '[[2026-07-19-codebase-health-W02-P06-S26]]'
+  - '[[2026-07-19-codebase-health-W03-P09-S35]]'
   - '[[2026-07-19-codebase-health-W03-P09-S36]]'
   - '[[2026-07-19-codebase-health-W03-P09-S37]]'
   - '[[2026-07-19-codebase-health-W03-P10-S38]]'
@@ -80,6 +81,7 @@ Auto-generated index of all documents tagged with `#codebase-health`.
 - `2026-07-19-codebase-health-W02-P05-S19` - Unify launch discovery and acceptance on one profile eligibility decision
 - `2026-07-19-codebase-health-W02-P05-S20` - Read one project checkpoint tuple and derive all run-status fields from that immutable snapshot
 - `2026-07-19-codebase-health-W02-P06-S26` - Parse numeric and ISO heartbeat values strictly and reject stale malformed non-finite and implausibly future values
+- `2026-07-19-codebase-health-W03-P09-S35` - Consolidate harness MCP server normalization on one canonical schema and resolver
 - `2026-07-19-codebase-health-W03-P09-S36` - Reject duplicate MCP server identities before emitting Codex or ACP configuration
 - `2026-07-19-codebase-health-W03-P09-S37` - Prove duplicate MCP identity rejection through the real configuration parser
 - `2026-07-19-codebase-health-W03-P10-S38` - Continuously drain Codex standard error into a bounded redacted diagnostic buffer

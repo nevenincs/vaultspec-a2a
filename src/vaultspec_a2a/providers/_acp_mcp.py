@@ -38,6 +38,7 @@ __all__ = [
     "config_home_mcp_servers",
     "harness_allowed_tool_names",
     "reject_duplicate_identities",
+    "reject_duplicate_names",
     "resolve_harness_mcp_capabilities",
     "resolve_harness_mcp_servers",
 ]
@@ -272,6 +273,31 @@ def config_home_mcp_servers(
     return home
 
 
+def reject_duplicate_names(names: Sequence[str]) -> None:
+    """Fail loud when a declared server name is repeated.
+
+    The name-list counterpart of :func:`reject_duplicate_identities`, for the
+    transport that resolves names rather than specs. Emitting a repeated name
+    produces two blocks with one key in the Codex configuration, which is either
+    a parse failure or a last-wins overwrite - the same shadowing the specs path
+    refuses, on a transport where it can also break the file outright.
+
+    Raises:
+        ConfigError: If any name appears more than once.
+    """
+    seen: dict[str, int] = {}
+    for name in names:
+        if name:
+            seen[name] = seen.get(name, 0) + 1
+    duplicates = sorted(name for name, count in seen.items() if count > 1)
+    if duplicates:
+        raise ConfigError(
+            "refusing to emit a Codex configuration with duplicate MCP server "
+            f"names: {', '.join(duplicates)}. Each name is a configuration key, "
+            "so a repeat overwrites rather than conflicting"
+        )
+
+
 def reject_duplicate_identities(mcp_servers: Sequence[dict[str, Any]]) -> None:
     """Fail loud when two advertised servers claim the same identity.
 
@@ -332,6 +358,7 @@ def codex_mcp_server_specs(
     entry both raise :class:`ConfigError`, so one registry stays the single trust
     root across both transports.
     """
+    reject_duplicate_names(names)
     resolution = resolve_harness_mcp_capabilities(names, profile=profile)
     specs: list[dict[str, Any]] = []
     for name in resolution.available_servers:

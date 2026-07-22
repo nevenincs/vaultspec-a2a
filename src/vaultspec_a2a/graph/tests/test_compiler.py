@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 import pytest
 import pytest_asyncio
@@ -13,6 +13,7 @@ from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator
 
+    from ...thread.state import TeamState
     from ..protocols import ProviderFactoryProtocol
 
 from vaultspec_a2a.team.team_config import (
@@ -363,22 +364,28 @@ def test_route_from_supervisor_honors_approval_then_the_next_decision() -> None:
     both arms: a pending approval short-circuits to ``plan_approval`` ahead of any
     ``next`` decision, and otherwise the supervisor's ``next`` is the route key.
     """
-    base: dict = {
-        "messages": [],
-        "active_agent": "",
-        "artifacts": [],
-        "current_plan": [],
-        "thread_id": "test-thread",
-        "token_usage": {},
-    }
+
+    def _state(**overrides: object) -> TeamState:
+        base: dict[str, object] = {
+            "messages": [],
+            "active_agent": "",
+            "artifacts": [],
+            "current_plan": [],
+            "thread_id": "test-thread",
+            "token_usage": {},
+        }
+        base.update(overrides)
+        return cast("TeamState", base)
 
     # A pending plan approval short-circuits before next is even consulted.
-    pending = {**base, "approval_status": "pending", "next": "planner"}
-    assert _route_from_supervisor(pending) == "plan_approval"
+    assert (
+        _route_from_supervisor(_state(approval_status="pending", next="planner"))
+        == "plan_approval"
+    )
 
     # With no pending approval, the supervisor's own next decision routes.
-    assert _route_from_supervisor({**base, "next": "planner"}) == "planner"
-    assert _route_from_supervisor({**base, "next": "FINISH"}) == "FINISH"
+    assert _route_from_supervisor(_state(next="planner")) == "planner"
+    assert _route_from_supervisor(_state(next="FINISH")) == "FINISH"
 
 
 # ---------------------------------------------------------------------------

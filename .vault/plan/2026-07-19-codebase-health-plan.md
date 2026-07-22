@@ -297,7 +297,7 @@ Decompose every remaining audited function above complexity score twenty at stab
 - [x] `W04.P15.S67` - Split `compose_harness_mcp_servers` into normalization, validation, and projection stages; `src/vaultspec_a2a/providers/_acp_mcp.py, tests/providers`.
 - [x] `W04.P15.S68` - Split `respond_to_permission` into authorization, transition, and dispatch stages; `src/vaultspec_a2a/control/permission_service.py, tests/control`.
 - [x] `W04.P15.S69` - Split `normalize_tool_input_schema` into explicit schema-shape translators; `src/vaultspec_a2a/streaming/transformer.py, tests/streaming`.
-- [ ] `W04.P15.S70` - Split `sync_worker_event` into event validation, persistence, and projection stages; `src/vaultspec_a2a/control/event_handlers.py, tests/control`.
+- [x] `W04.P15.S70` - Split `sync_worker_event` into event validation, persistence, and projection stages; `src/vaultspec_a2a/control/event_handlers.py, tests/control`.
 - [x] `W04.P15.S71` - Split `project_checkpoint_tuple` into immutable checkpoint extraction and response projection stages; `src/vaultspec_a2a/control/thread_state_service.py, tests/control`.
 - [ ] `W04.P15.S72` - Recalculate complexity and prove every decomposed path preserves real behavior without suppressive thresholds; `src/vaultspec_a2a, tests, .vault/audit`.
 

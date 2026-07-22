@@ -156,7 +156,7 @@ Replace payload-shaped relaying with one versioned DTO and enforce resource limi
 - [ ] `W02.P06.S99` - Prove forbidden fields cannot cross the encoded A2A SSE boundary; `tests/streaming, tests/api`.
 - [ ] `W02.P06.S159` - Prove bounded token deltas with a real authenticated stream client; `tests/streaming, tests/api`.
 - [ ] `W02.P06.S160` - Prove global and per-principal quotas with real authenticated stream clients; `tests/streaming, tests/api`.
-- [ ] `W02.P06.S161` - Prove malformed and stale heartbeat rejection against real discovery records; `tests/authoring`.
+- [x] `W02.P06.S161` - Prove malformed and stale heartbeat rejection against real discovery records; `tests/authoring`.
 
 ### Phase `W02.P07` - retire legacy dependencies from the dashboard path
 

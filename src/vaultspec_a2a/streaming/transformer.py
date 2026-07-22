@@ -58,6 +58,295 @@ def _artifact_label_from_tool_input(file_path: str) -> str:
     return PurePath(normalized).name or "artifact"
 
 
+async def _translate_chat_model_stream(
+    event_data: dict[str, Any],
+    thread_id: str,
+    effective_agent_id: str,
+    run_id: str,
+    emitters: EventEmitters,
+    buffering: BufferingManager,
+) -> None:
+    chunk = event_data.get("data", {}).get("chunk")
+    if chunk is not None:
+        content = getattr(chunk, "content", "")
+        if isinstance(content, list):
+            for block in content:
+                if isinstance(block, dict):
+                    if block.get("type") == "reasoning":
+                        reasoning_text = block.get("content", "") or block.get(
+                            "text", ""
+                        )
+                        if reasoning_text:
+                            await emitters.emit_thought_chunk(
+                                thread_id=thread_id,
+                                agent_id=effective_agent_id,
+                                content=reasoning_text,
+                                message_id=run_id,
+                            )
+                    elif block.get("type") in ("text", "text_delta"):
+                        text = block.get("text", "") or block.get("content", "")
+                        if text:
+                            await buffering.buffer_message_chunk(
+                                thread_id=thread_id,
+                                agent_id=effective_agent_id,
+                                content=text,
+                                message_id=run_id,
+                            )
+        elif isinstance(content, str) and content:
+            await buffering.buffer_message_chunk(
+                thread_id=thread_id,
+                agent_id=effective_agent_id,
+                content=content,
+                message_id=run_id,
+            )
+        if not isinstance(content, list):
+            additional_kwargs = getattr(chunk, "additional_kwargs", {}) or {}
+            reasoning = (
+                additional_kwargs.get("reasoning")
+                or additional_kwargs.get("reasoning_content")
+                or ""
+            )
+            if reasoning:
+                await emitters.emit_thought_chunk(
+                    thread_id=thread_id,
+                    agent_id=effective_agent_id,
+                    content=reasoning,
+                    message_id=run_id,
+                )
+
+
+async def _translate_chat_model_end(
+    event_data: dict[str, Any],
+    thread_id: str,
+    effective_agent_id: str,
+    run_id: str,
+    emitters: EventEmitters,
+    buffering: BufferingManager,
+) -> None:
+    await buffering.flush_chunk_buffer(thread_id)
+    output = event_data.get("data", {}).get("output")
+    finish_reason: str | None = None
+    if output is not None:
+        resp_meta = getattr(output, "response_metadata", None) or {}
+        finish_reason = resp_meta.get("finish_reason") or resp_meta.get("stop_reason")
+    if finish_reason:
+        await emitters.emit_message_chunk(
+            thread_id=thread_id,
+            agent_id=effective_agent_id,
+            content="",
+            message_id=run_id,
+            finish_reason=finish_reason,
+        )
+
+
+async def _translate_tool_start(
+    event_data: dict[str, Any],
+    thread_id: str,
+    effective_agent_id: str,
+    run_id: str,
+    node: str | None,
+    emitters: EventEmitters,
+) -> None:
+    if node:
+        tool_name = event_data.get("name", "unknown_tool")
+        tool_input = event_data.get("data", {}).get("input")
+        input_args = tool_input if isinstance(tool_input, dict) else None
+        await emitters.emit_tool_call_start(
+            thread_id=thread_id,
+            agent_id=effective_agent_id,
+            tool_call_id=run_id,
+            title=tool_name,
+            kind=classify_tool_kind(tool_name),
+            input_args=input_args,
+        )
+
+
+async def _translate_tool_end(
+    event_data: dict[str, Any],
+    thread_id: str,
+    effective_agent_id: str,
+    run_id: str,
+    node: str | None,
+    emitters: EventEmitters,
+) -> None:
+    if node:
+        tool_name = event_data.get("name", "")
+        output = event_data.get("data", {}).get("output")
+        output_content: list[dict[str, str | None]] | None = None
+        if output is not None:
+            output_str = ""
+            if hasattr(output, "content"):
+                output_str = str(output.content)
+            elif isinstance(output, str):
+                output_str = output
+            else:
+                output_str = str(output)
+            if output_str:
+                max_len = domain_config.tool_arg_truncate_len
+                if len(output_str) > max_len:
+                    output_str = output_str[:max_len] + "..."
+                output_content = [{"content_type": "text", "text": output_str}]
+        await emitters.emit_tool_call_update(
+            thread_id=thread_id,
+            agent_id=effective_agent_id,
+            tool_call_id=run_id,
+            status=ToolCallStatus.COMPLETED,
+            content=output_content,
+        )
+        _file_tool_keywords = {
+            "write",
+            "edit",
+            "create",
+            "save",
+            "move",
+            "rename",
+            "delete",
+        }
+        if any(kw in tool_name.lower() for kw in _file_tool_keywords):
+            output_str = ""
+            file_path = ""
+            if hasattr(output, "content"):
+                output_str = str(output.content)
+            elif isinstance(output, str):
+                output_str = output
+            tool_input = event_data.get("data", {}).get("input", {})
+            if isinstance(tool_input, dict):
+                file_path = (
+                    tool_input.get("file_path", "")
+                    or tool_input.get("path", "")
+                    or tool_input.get("filename", "")
+                )
+            if file_path:
+                filename = _artifact_label_from_tool_input(file_path)
+                await emitters.emit_artifact_update(
+                    thread_id=thread_id,
+                    artifact_id=f"{run_id}:{filename}",
+                    filename=filename,
+                    content=output_str[:500]
+                    if output_str
+                    else f"[{tool_name}] {filename}",
+                )
+
+
+async def _translate_tool_error(
+    event_data: dict[str, Any],
+    thread_id: str,
+    effective_agent_id: str,
+    run_id: str,
+    node: str | None,
+    emitters: EventEmitters,
+) -> None:
+    if node:
+        error_data = event_data.get("data", {})
+        error_msg = str(error_data.get("error", "Tool call failed"))
+        logger.warning(
+            "Tool error in thread %s node %s: %s",
+            thread_id,
+            node,
+            error_msg,
+        )
+        error_content: list[dict[str, str | None]] | None = (
+            [{"content_type": "text", "text": error_msg}] if error_msg else None
+        )
+        await emitters.emit_tool_call_update(
+            thread_id=thread_id,
+            agent_id=effective_agent_id,
+            tool_call_id=run_id,
+            status=ToolCallStatus.FAILED,
+            content=error_content,
+        )
+
+
+async def _translate_custom_event(
+    event_data: dict[str, Any],
+    thread_id: str,
+    effective_agent_id: str,
+    run_id: str,
+    emitters: EventEmitters,
+) -> None:
+    data = event_data.get("data", {})
+    content = data if isinstance(data, str) else str(data.get("content", ""))
+    if content:
+        max_len = domain_config.tool_arg_truncate_len
+        if len(content) > max_len:
+            content = content[:max_len] + "..."
+        await emitters.emit_thought_chunk(
+            thread_id=thread_id,
+            agent_id=effective_agent_id,
+            content=content,
+            message_id=run_id,
+        )
+
+
+async def _translate_node_boundary(
+    event_data: dict[str, Any],
+    event_kind: str,
+    thread_id: str,
+    effective_agent_id: str,
+    node: str,
+    emitters: EventEmitters,
+) -> None:
+    # The dispatcher only calls this under ``and node``, so node is never None
+    # here - typed accordingly so the agent-status calls type-check.
+    if event_kind == "on_chain_start":
+        await emitters.emit_agent_status(
+            thread_id=thread_id,
+            agent_id=effective_agent_id,
+            node_name=node,
+            state=AgentLifecycleState.WORKING,
+        )
+    elif event_kind == "on_chain_end":
+        await emitters.emit_agent_status(
+            thread_id=thread_id,
+            agent_id=effective_agent_id,
+            node_name=node,
+            state=AgentLifecycleState.IDLE,
+        )
+        output = event_data.get("data", {}).get("output")
+        if isinstance(output, dict):
+            raw_plan = output.get("current_plan")
+            if raw_plan and isinstance(raw_plan, list):
+                entries = [
+                    {
+                        "content": str(entry.get("content", "")),
+                        "status": entry.get("status", "pending"),
+                        "priority": entry.get("priority", "medium"),
+                    }
+                    for entry in raw_plan
+                    if isinstance(entry, dict) and entry.get("content")
+                ]
+                if entries:
+                    await emitters.emit_plan_update(thread_id, entries)
+            raw_artifacts = output.get("artifacts")
+            if raw_artifacts and isinstance(raw_artifacts, list):
+                for artifact in raw_artifacts:
+                    if isinstance(artifact, dict) and artifact.get("id"):
+                        await emitters.emit_artifact_update(
+                            thread_id=thread_id,
+                            artifact_id=str(artifact["id"]),
+                            filename=str(
+                                artifact.get("filename", artifact.get("path", ""))
+                            ),
+                            content=str(artifact.get("content", "")),
+                        )
+    elif event_kind == "on_chain_error":
+        error_data = event_data.get("data", {})
+        error_msg = str(error_data.get("error", "Node execution failed"))
+        logger.warning(
+            "Chain error in thread %s node %s: %s",
+            thread_id,
+            node,
+            error_msg,
+        )
+        await emitters.emit_agent_status(
+            thread_id=thread_id,
+            agent_id=effective_agent_id,
+            node_name=node,
+            state=AgentLifecycleState.FAILED,
+            detail=error_msg[:200],
+        )
+
+
 async def process_langgraph_event(
     event_data: dict[str, Any],
     thread_id: str,
@@ -78,247 +367,40 @@ async def process_langgraph_event(
 
     effective_agent_id = node or agent_id
 
-    # --- Passthrough events (no node filter needed for LLM/tool) ---
     if event_kind == "on_chat_model_stream":
-        chunk = event_data.get("data", {}).get("chunk")
-        if chunk is not None:
-            content = getattr(chunk, "content", "")
-            if isinstance(content, list):
-                for block in content:
-                    if isinstance(block, dict):
-                        if block.get("type") == "reasoning":
-                            reasoning_text = block.get("content", "") or block.get(
-                                "text", ""
-                            )
-                            if reasoning_text:
-                                await emitters.emit_thought_chunk(
-                                    thread_id=thread_id,
-                                    agent_id=effective_agent_id,
-                                    content=reasoning_text,
-                                    message_id=run_id,
-                                )
-                        elif block.get("type") in ("text", "text_delta"):
-                            text = block.get("text", "") or block.get("content", "")
-                            if text:
-                                await buffering.buffer_message_chunk(
-                                    thread_id=thread_id,
-                                    agent_id=effective_agent_id,
-                                    content=text,
-                                    message_id=run_id,
-                                )
-            elif isinstance(content, str) and content:
-                await buffering.buffer_message_chunk(
-                    thread_id=thread_id,
-                    agent_id=effective_agent_id,
-                    content=content,
-                    message_id=run_id,
-                )
-            if not isinstance(content, list):
-                additional_kwargs = getattr(chunk, "additional_kwargs", {}) or {}
-                reasoning = (
-                    additional_kwargs.get("reasoning")
-                    or additional_kwargs.get("reasoning_content")
-                    or ""
-                )
-                if reasoning:
-                    await emitters.emit_thought_chunk(
-                        thread_id=thread_id,
-                        agent_id=effective_agent_id,
-                        content=reasoning,
-                        message_id=run_id,
-                    )
+        await _translate_chat_model_stream(
+            event_data, thread_id, effective_agent_id, run_id, emitters, buffering
+        )
         return
-
     if event_kind == "on_chat_model_end":
-        await buffering.flush_chunk_buffer(thread_id)
-        output = event_data.get("data", {}).get("output")
-        finish_reason: str | None = None
-        if output is not None:
-            resp_meta = getattr(output, "response_metadata", None) or {}
-            finish_reason = resp_meta.get("finish_reason") or resp_meta.get(
-                "stop_reason"
-            )
-        if finish_reason:
-            await emitters.emit_message_chunk(
-                thread_id=thread_id,
-                agent_id=effective_agent_id,
-                content="",
-                message_id=run_id,
-                finish_reason=finish_reason,
-            )
+        await _translate_chat_model_end(
+            event_data, thread_id, effective_agent_id, run_id, emitters, buffering
+        )
         return
-
     if event_kind == "on_tool_start":
-        if node:
-            tool_name = event_data.get("name", "unknown_tool")
-            tool_input = event_data.get("data", {}).get("input")
-            input_args = tool_input if isinstance(tool_input, dict) else None
-            await emitters.emit_tool_call_start(
-                thread_id=thread_id,
-                agent_id=effective_agent_id,
-                tool_call_id=run_id,
-                title=tool_name,
-                kind=classify_tool_kind(tool_name),
-                input_args=input_args,
-            )
+        await _translate_tool_start(
+            event_data, thread_id, effective_agent_id, run_id, node, emitters
+        )
         return
-
     if event_kind == "on_tool_end":
-        if node:
-            tool_name = event_data.get("name", "")
-            output = event_data.get("data", {}).get("output")
-            output_content: list[dict[str, str | None]] | None = None
-            if output is not None:
-                output_str = ""
-                if hasattr(output, "content"):
-                    output_str = str(output.content)
-                elif isinstance(output, str):
-                    output_str = output
-                else:
-                    output_str = str(output)
-                if output_str:
-                    max_len = domain_config.tool_arg_truncate_len
-                    if len(output_str) > max_len:
-                        output_str = output_str[:max_len] + "..."
-                    output_content = [{"content_type": "text", "text": output_str}]
-            await emitters.emit_tool_call_update(
-                thread_id=thread_id,
-                agent_id=effective_agent_id,
-                tool_call_id=run_id,
-                status=ToolCallStatus.COMPLETED,
-                content=output_content,
-            )
-            _file_tool_keywords = {
-                "write",
-                "edit",
-                "create",
-                "save",
-                "move",
-                "rename",
-                "delete",
-            }
-            if any(kw in tool_name.lower() for kw in _file_tool_keywords):
-                output_str = ""
-                file_path = ""
-                if hasattr(output, "content"):
-                    output_str = str(output.content)
-                elif isinstance(output, str):
-                    output_str = output
-                tool_input = event_data.get("data", {}).get("input", {})
-                if isinstance(tool_input, dict):
-                    file_path = (
-                        tool_input.get("file_path", "")
-                        or tool_input.get("path", "")
-                        or tool_input.get("filename", "")
-                    )
-                if file_path:
-                    filename = _artifact_label_from_tool_input(file_path)
-                    await emitters.emit_artifact_update(
-                        thread_id=thread_id,
-                        artifact_id=f"{run_id}:{filename}",
-                        filename=filename,
-                        content=output_str[:500]
-                        if output_str
-                        else f"[{tool_name}] {filename}",
-                    )
+        await _translate_tool_end(
+            event_data, thread_id, effective_agent_id, run_id, node, emitters
+        )
         return
-
     if event_kind == "on_tool_error":
-        if node:
-            error_data = event_data.get("data", {})
-            error_msg = str(error_data.get("error", "Tool call failed"))
-            logger.warning(
-                "Tool error in thread %s node %s: %s",
-                thread_id,
-                node,
-                error_msg,
-            )
-            error_content: list[dict[str, str | None]] | None = (
-                [{"content_type": "text", "text": error_msg}] if error_msg else None
-            )
-            await emitters.emit_tool_call_update(
-                thread_id=thread_id,
-                agent_id=effective_agent_id,
-                tool_call_id=run_id,
-                status=ToolCallStatus.FAILED,
-                content=error_content,
-            )
+        await _translate_tool_error(
+            event_data, thread_id, effective_agent_id, run_id, node, emitters
+        )
         return
-
     if event_kind == "on_custom_event":
-        data = event_data.get("data", {})
-        content = data if isinstance(data, str) else str(data.get("content", ""))
-        if content:
-            max_len = domain_config.tool_arg_truncate_len
-            if len(content) > max_len:
-                content = content[:max_len] + "..."
-            await emitters.emit_thought_chunk(
-                thread_id=thread_id,
-                agent_id=effective_agent_id,
-                content=content,
-                message_id=run_id,
-            )
+        await _translate_custom_event(
+            event_data, thread_id, effective_agent_id, run_id, emitters
+        )
         return
-
-    # --- Node boundary events (require langgraph_node metadata) ---
     if event_kind in NODE_BOUNDARY_EVENTS and node:
-        if event_kind == "on_chain_start":
-            await emitters.emit_agent_status(
-                thread_id=thread_id,
-                agent_id=effective_agent_id,
-                node_name=node,
-                state=AgentLifecycleState.WORKING,
-            )
-        elif event_kind == "on_chain_end":
-            await emitters.emit_agent_status(
-                thread_id=thread_id,
-                agent_id=effective_agent_id,
-                node_name=node,
-                state=AgentLifecycleState.IDLE,
-            )
-            output = event_data.get("data", {}).get("output")
-            if isinstance(output, dict):
-                raw_plan = output.get("current_plan")
-                if raw_plan and isinstance(raw_plan, list):
-                    entries = [
-                        {
-                            "content": str(entry.get("content", "")),
-                            "status": entry.get("status", "pending"),
-                            "priority": entry.get("priority", "medium"),
-                        }
-                        for entry in raw_plan
-                        if isinstance(entry, dict) and entry.get("content")
-                    ]
-                    if entries:
-                        await emitters.emit_plan_update(thread_id, entries)
-                raw_artifacts = output.get("artifacts")
-                if raw_artifacts and isinstance(raw_artifacts, list):
-                    for artifact in raw_artifacts:
-                        if isinstance(artifact, dict) and artifact.get("id"):
-                            await emitters.emit_artifact_update(
-                                thread_id=thread_id,
-                                artifact_id=str(artifact["id"]),
-                                filename=str(
-                                    artifact.get("filename", artifact.get("path", ""))
-                                ),
-                                content=str(artifact.get("content", "")),
-                            )
-        elif event_kind == "on_chain_error":
-            error_data = event_data.get("data", {})
-            error_msg = str(error_data.get("error", "Node execution failed"))
-            logger.warning(
-                "Chain error in thread %s node %s: %s",
-                thread_id,
-                node,
-                error_msg,
-            )
-            await emitters.emit_agent_status(
-                thread_id=thread_id,
-                agent_id=effective_agent_id,
-                node_name=node,
-                state=AgentLifecycleState.FAILED,
-                detail=error_msg[:200],
-            )
+        await _translate_node_boundary(
+            event_data, event_kind, thread_id, effective_agent_id, node, emitters
+        )
         return
 
     # --- Everything else is filtered out (research §1.2) ---

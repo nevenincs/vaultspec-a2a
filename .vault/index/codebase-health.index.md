@@ -48,6 +48,7 @@ related:
   - '[[2026-07-19-codebase-health-W04-P14-S61]]'
   - '[[2026-07-19-codebase-health-W04-P14-S62]]'
   - '[[2026-07-19-codebase-health-W04-P14-S64]]'
+  - '[[2026-07-19-codebase-health-W04-P15-S65]]'
   - '[[2026-07-19-codebase-health-W04-P16-S73]]'
   - '[[2026-07-19-codebase-health-adr]]'
   - '[[2026-07-19-codebase-health-audit]]'
@@ -119,6 +120,7 @@ Auto-generated index of all documents tagged with `#codebase-health`.
 - `2026-07-19-codebase-health-W04-P14-S61` - Remove the unowned acceptance_gate_reason export and its export-only tests
 - `2026-07-19-codebase-health-W04-P14-S62` - Remove the unowned projected_declared_names export and its export-only tests
 - `2026-07-19-codebase-health-W04-P14-S64` - Remove the unused print_trace_summary helper and its latent integration surface
+- `2026-07-19-codebase-health-W04-P15-S65` - Split process_langgraph_event into bounded event-family translators
 - `2026-07-19-codebase-health-W04-P16-S73` - Rewrite service deployment documentation and environment examples to describe the headless runtime
 
 ### plan

@@ -292,7 +292,7 @@ Recheck both repositories for compatibility ownership and then remove each audit
 
 Decompose every remaining audited function above complexity score twenty at stable policy or translation seams while retaining real-behavior coverage.
 
-- [ ] `W04.P15.S65` - Split `process_langgraph_event` into bounded event-family translators; `src/vaultspec_a2a/streaming/aggregator.py, tests/streaming`.
+- [x] `W04.P15.S65` - Split `process_langgraph_event` into bounded event-family translators; `src/vaultspec_a2a/streaming/aggregator.py, tests/streaming`.
 - [ ] `W04.P15.S66` - Split `ProviderFactory.create` into explicit provider admission and construction paths; `src/vaultspec_a2a/providers/factory.py, tests/providers`.
 - [ ] `W04.P15.S67` - Split `compose_harness_mcp_servers` into normalization, validation, and projection stages; `src/vaultspec_a2a/providers/_acp_mcp.py, tests/providers`.
 - [ ] `W04.P15.S68` - Split `respond_to_permission` into authorization, transition, and dispatch stages; `src/vaultspec_a2a/control/permission_service.py, tests/control`.

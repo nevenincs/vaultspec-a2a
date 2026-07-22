@@ -209,12 +209,12 @@ Ensure provider output cannot deadlock, background failures cannot hang a turn, 
 - [x] `W03.P10.S39` - Propagate ACP background RPC handler failures as protocol errors or terminal session failures; `src/vaultspec_a2a/providers/_acp_protocol.py, src/vaultspec_a2a/providers/acp_chat_model.py`.
 - [x] `W03.P10.S40` - Apply bounded deadlines to provider turns requests and cleanup operations; `src/vaultspec_a2a/providers/acp_chat_model.py, src/vaultspec_a2a/providers/codex_chat_model.py`.
 - [x] `W03.P10.S41` - Attempt Codex credential cleanup independently while aggregating failures; `src/vaultspec_a2a/providers/codex_chat_model.py`.
-- [ ] `W03.P10.S42` - Attempt ACP credential cleanup independently while aggregating failures; `src/vaultspec_a2a/providers/acp_chat_model.py, src/vaultspec_a2a/providers/_acp_auth.py`.
+- [x] `W03.P10.S42` - Attempt ACP credential cleanup independently while aggregating failures; `src/vaultspec_a2a/providers/acp_chat_model.py, src/vaultspec_a2a/providers/_acp_auth.py`.
 - [ ] `W03.P10.S43` - Prove standard-error backpressure handling with a real provider subprocess; `tests/providers, src/vaultspec_a2a/desktop_tests`.
 - [x] `W03.P10.S116` - Attempt Codex temporary-configuration cleanup independently while aggregating failures; `src/vaultspec_a2a/providers/codex_chat_model.py`.
 - [x] `W03.P10.S117` - Attempt Codex background-task cleanup independently while aggregating failures; `src/vaultspec_a2a/providers/codex_chat_model.py`.
 - [x] `W03.P10.S118` - Attempt Codex process cleanup independently while aggregating failures; `src/vaultspec_a2a/providers/codex_chat_model.py`.
-- [ ] `W03.P10.S119` - Attempt ACP temporary-configuration cleanup independently while aggregating failures; `src/vaultspec_a2a/providers/acp_chat_model.py, src/vaultspec_a2a/providers/_acp_auth.py`.
+- [x] `W03.P10.S119` - Attempt ACP temporary-configuration cleanup independently while aggregating failures; `src/vaultspec_a2a/providers/acp_chat_model.py, src/vaultspec_a2a/providers/_acp_auth.py`.
 - [ ] `W03.P10.S120` - Attempt ACP background-task cleanup independently while aggregating failures; `src/vaultspec_a2a/providers/acp_chat_model.py`.
 - [ ] `W03.P10.S121` - Attempt ACP process cleanup independently while aggregating failures; `src/vaultspec_a2a/providers/acp_chat_model.py`.
 - [ ] `W03.P10.S122` - Prove RPC handler failure terminates a real provider session; `tests/providers, src/vaultspec_a2a/desktop_tests`.

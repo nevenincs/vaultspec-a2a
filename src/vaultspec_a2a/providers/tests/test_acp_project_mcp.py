@@ -25,10 +25,10 @@ from .._acp_authoring import (
 from .._acp_project_mcp import (
     PROJECTION_MARKER_KEY,
     ProjectionRefusedError,
+    _declared_home_entries,
     cleanup_projected_mcp,
     enumerate_ancestor_mcp_names,
     project_declared_mcp,
-    projected_declared_names,
 )
 
 if TYPE_CHECKING:
@@ -97,7 +97,7 @@ def test_only_run_owned_specs_enter_the_projected_provider_tree(
     _write_mcp(tmp_path, ["foreign-ancestor-srv"])
 
     declared = [_rag_spec(), *_bridge_specs()]
-    run_owned = set(projected_declared_names(declared))
+    run_owned = set(_declared_home_entries(declared))
     # Exactly the run-owned declared servers (harness + the run's authoring bridge).
     assert run_owned == {"vaultspec-rag", AUTHORING_MCP_SERVER_NAME}
     # The foreign ancestor server is enumerated for the caller's deny set, but is
@@ -146,7 +146,7 @@ def test_deny_set_is_ancestor_enumeration_minus_declared(tmp_path: Path) -> None
     _write_mcp(tmp_path, ["foreign-srv", "vaultspec-rag"])
     run_ws = tmp_path / "run"
     run_ws.mkdir()
-    declared = set(projected_declared_names([_rag_spec()]))
+    declared = set(_declared_home_entries([_rag_spec()]))
     enumerated = set(enumerate_ancestor_mcp_names(run_ws))
     deny = enumerated - declared
     assert "foreign-srv" in deny

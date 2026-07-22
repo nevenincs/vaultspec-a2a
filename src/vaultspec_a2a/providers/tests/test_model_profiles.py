@@ -24,11 +24,11 @@ from vaultspec_a2a.team.team_config import (
 from vaultspec_a2a.thread.errors import ConfigError
 
 from ..model_profiles import (
+    _ACCEPTANCE_GATE_REASON,
     AssignmentSource,
     ProfileAssignment,
     ProviderReadiness,
     RoleAssignment,
-    acceptance_gate_reason,
     evaluate_profile_eligibility,
     freeze_assignment,
     frozen_from_record,
@@ -288,7 +288,7 @@ class TestEligibility:
             acceptance_gate_passed=False,
         )
         assert elig.eligible is False
-        assert acceptance_gate_reason() in elig.reasons
+        assert _ACCEPTANCE_GATE_REASON in elig.reasons
 
     def test_eligible_fallback_keeps_role_eligible(self) -> None:
         """A not-ready primary with a ready declared fallback stays eligible."""

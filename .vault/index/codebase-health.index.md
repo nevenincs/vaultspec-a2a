@@ -12,10 +12,16 @@ related:
   - '[[2026-07-19-codebase-health-W04-P14-S135]]'
   - '[[2026-07-19-codebase-health-W04-P14-S136]]'
   - '[[2026-07-19-codebase-health-W04-P14-S137]]'
+  - '[[2026-07-19-codebase-health-W04-P14-S138]]'
+  - '[[2026-07-19-codebase-health-W04-P14-S175]]'
+  - '[[2026-07-19-codebase-health-W04-P14-S176]]'
   - '[[2026-07-19-codebase-health-W04-P14-S57]]'
   - '[[2026-07-19-codebase-health-W04-P14-S58]]'
   - '[[2026-07-19-codebase-health-W04-P14-S59]]'
   - '[[2026-07-19-codebase-health-W04-P14-S60]]'
+  - '[[2026-07-19-codebase-health-W04-P14-S61]]'
+  - '[[2026-07-19-codebase-health-W04-P14-S62]]'
+  - '[[2026-07-19-codebase-health-W04-P14-S64]]'
   - '[[2026-07-19-codebase-health-W04-P16-S73]]'
   - '[[2026-07-19-codebase-health-adr]]'
   - '[[2026-07-19-codebase-health-audit]]'
@@ -49,10 +55,16 @@ Auto-generated index of all documents tagged with `#codebase-health`.
 - `2026-07-19-codebase-health-W04-P14-S135` - Prove runtime and dashboard ownership or non-ownership for AcpProtocolError
 - `2026-07-19-codebase-health-W04-P14-S136` - Prove runtime and dashboard ownership or non-ownership for discover_agent_preset_ids
 - `2026-07-19-codebase-health-W04-P14-S137` - Prove runtime and dashboard ownership or non-ownership for acceptance_gate_reason
+- `2026-07-19-codebase-health-W04-P14-S138` - Prove runtime and dashboard ownership or non-ownership for projected_declared_names
+- `2026-07-19-codebase-health-W04-P14-S175` - Remove utils/timestamp.py, its facade exports, and its export-only tests
+- `2026-07-19-codebase-health-W04-P14-S176` - Prove runtime and dashboard ownership or non-ownership for now_utc, parse_iso, and human_delta
 - `2026-07-19-codebase-health-W04-P14-S57` - Prove runtime and dashboard ownership or non-ownership for the workspace exports
 - `2026-07-19-codebase-health-W04-P14-S58` - Remove the unowned AgentState export and its export-only tests
 - `2026-07-19-codebase-health-W04-P14-S59` - Remove the unowned AcpProtocolError export and its export-only tests
 - `2026-07-19-codebase-health-W04-P14-S60` - Remove the unowned discover_agent_preset_ids export and its export-only tests
+- `2026-07-19-codebase-health-W04-P14-S61` - Remove the unowned acceptance_gate_reason export and its export-only tests
+- `2026-07-19-codebase-health-W04-P14-S62` - Remove the unowned projected_declared_names export and its export-only tests
+- `2026-07-19-codebase-health-W04-P14-S64` - Remove the unused print_trace_summary helper and its latent integration surface
 - `2026-07-19-codebase-health-W04-P16-S73` - Rewrite service deployment documentation and environment examples to describe the headless runtime
 
 ### plan

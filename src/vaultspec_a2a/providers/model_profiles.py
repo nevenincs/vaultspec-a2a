@@ -60,7 +60,6 @@ __all__ = [
     "ProviderReadiness",
     "RoleAssignment",
     "RoleEligibility",
-    "acceptance_gate_reason",
     "evaluate_profile_eligibility",
     "freeze_assignment",
     "frozen_from_record",
@@ -82,11 +81,6 @@ _DEFAULT_PROVIDER = Provider.CLAUDE
 _ACCEPTANCE_GATE_REASON = (
     "production acceptance gate for the research-to-ADR capability has not passed"
 )
-
-
-def acceptance_gate_reason() -> str:
-    """Return the honest ineligibility reason while the acceptance gate is open."""
-    return _ACCEPTANCE_GATE_REASON
 
 
 class AssignmentSource(StrEnum):

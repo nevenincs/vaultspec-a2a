@@ -65,7 +65,6 @@ __all__ = [
     "cleanup_projected_mcp",
     "enumerate_ancestor_mcp_names",
     "project_declared_mcp",
-    "projected_declared_names",
 ]
 
 logger = logging.getLogger(__name__)
@@ -115,15 +114,6 @@ def enumerate_ancestor_mcp_names(start_dir: Path | str | None) -> list[str]:
     for directory in (start, *start.parents):
         names |= _mcp_names(directory / ".mcp.json")
     return sorted(names)
-
-
-def projected_declared_names(mcp_servers: Sequence[dict[str, Any]]) -> list[str]:
-    """Return the server names this run would PROJECT (declared harness + bridge).
-
-    These are the names the caller must keep OUT of the deny set (they are what
-    the projection deliberately surfaces) and pass to ``enabledMcpjsonServers``.
-    """
-    return sorted(_declared_home_entries(mcp_servers))
 
 
 def _declared_home_entries(

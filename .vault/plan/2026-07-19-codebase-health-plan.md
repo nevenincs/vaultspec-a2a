@@ -280,13 +280,13 @@ Recheck both repositories for compatibility ownership and then remove each audit
 - [x] `W04.P14.S136` - Prove runtime and dashboard ownership or non-ownership for `discover_agent_preset_ids`; `src/vaultspec_a2a/team/team_config.py, ../../vaultspec-dashboard-worktrees/main, .vault/audit`.
 - [x] `W04.P14.S60` - Remove the unowned `discover_agent_preset_ids` export and its export-only tests; `src/vaultspec_a2a/team/team_config.py, tests`.
 - [x] `W04.P14.S137` - Prove runtime and dashboard ownership or non-ownership for `acceptance_gate_reason`; `src/vaultspec_a2a/providers/model_profiles.py, ../../vaultspec-dashboard-worktrees/main, .vault/audit`.
-- [ ] `W04.P14.S61` - Remove the unowned `acceptance_gate_reason` export and its export-only tests; `src/vaultspec_a2a/providers/model_profiles.py, tests`.
-- [ ] `W04.P14.S138` - Prove runtime and dashboard ownership or non-ownership for `projected_declared_names`; `src/vaultspec_a2a/providers/_acp_project_mcp.py, ../../vaultspec-dashboard-worktrees/main, .vault/audit`.
-- [ ] `W04.P14.S62` - Remove the unowned `projected_declared_names` export and its export-only tests; `src/vaultspec_a2a/providers/_acp_project_mcp.py, tests`.
+- [x] `W04.P14.S61` - Remove the unowned `acceptance_gate_reason` export and its export-only tests; `src/vaultspec_a2a/providers/model_profiles.py, tests`.
+- [x] `W04.P14.S138` - Prove runtime and dashboard ownership or non-ownership for `projected_declared_names`; `src/vaultspec_a2a/providers/_acp_project_mcp.py, ../../vaultspec-dashboard-worktrees/main, .vault/audit`.
+- [x] `W04.P14.S62` - Remove the unowned `projected_declared_names` export and its export-only tests; `src/vaultspec_a2a/providers/_acp_project_mcp.py, tests`.
 - [ ] `W04.P14.S63` - After `S57` proves dashboard non-ownership and `S174` relocates `_git_mutex`, remove `GitManager`, `MergeStrategy`, `WorktreeInfo`, `WorkspaceError`, and `MergeConflictError`, their facade exports, and their export-only or worktree-only tests; `src/vaultspec_a2a/workspace/git_manager.py, src/vaultspec_a2a/workspace/__init__.py, src/vaultspec_a2a/workspace/tests, src/vaultspec_a2a/thread/errors.py, src/vaultspec_a2a/thread/__init__.py, src/vaultspec_a2a/thread/tests/test_errors.py`.
-- [ ] `W04.P14.S64` - Remove the unused `print_trace_summary` helper and its latent integration surface; `src/vaultspec_a2a/utils/trace.py, tests`.
-- [ ] `W04.P14.S176` - Prove runtime and dashboard ownership or non-ownership for `now_utc`, `parse_iso`, and `human_delta`; `src/vaultspec_a2a/utils/timestamp.py, src/vaultspec_a2a/utils/__init__.py, ../../vaultspec-dashboard-worktrees/main, .vault/audit`.
-- [ ] `W04.P14.S175` - After `S176` proves A2A and dashboard non-ownership, remove `utils/timestamp.py`, its facade exports, and its export-only tests; `src/vaultspec_a2a/utils/timestamp.py, src/vaultspec_a2a/utils/__init__.py, src/vaultspec_a2a/utils/tests/test_timestamp.py`.
+- [x] `W04.P14.S64` - Remove the unused `print_trace_summary` helper and its latent integration surface; `src/vaultspec_a2a/utils/trace.py, tests`.
+- [x] `W04.P14.S176` - Prove runtime and dashboard ownership or non-ownership for `now_utc`, `parse_iso`, and `human_delta`; `src/vaultspec_a2a/utils/timestamp.py, src/vaultspec_a2a/utils/__init__.py, ../../vaultspec-dashboard-worktrees/main, .vault/audit`.
+- [x] `W04.P14.S175` - After `S176` proves A2A and dashboard non-ownership, remove `utils/timestamp.py`, its facade exports, and its export-only tests; `src/vaultspec_a2a/utils/timestamp.py, src/vaultspec_a2a/utils/__init__.py, src/vaultspec_a2a/utils/tests/test_timestamp.py`.
 
 ### Phase `W04.P15` - split each complexity hotspot
 

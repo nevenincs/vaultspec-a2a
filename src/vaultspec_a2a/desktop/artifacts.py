@@ -1559,7 +1559,7 @@ def build_python_closure_installed_inventory(
     (``open_verified_python_wheel_archive``), applies the pure install-layout
     authority to derive every content file's
     destination and provenance, joins caller-supplied license placements, and
-    persists canonical v2 inventory bytes into the content-addressed input cache.
+    persists canonical v3 inventory bytes into the content-addressed input cache.
     License placement is a separate, not-yet-authoritative concern the caller owns;
     a caller-placed external license still proves membership legitimately, since
     the evidence this build enforces covers both real archive members and each
@@ -1605,7 +1605,7 @@ def build_acp_closure_installed_inventory(
     Consumes still-open verified npm sessions (``open_verified_acp_package_archive``),
     applies the pure install-layout authority to derive every content file's
     destination and provenance, joins caller-supplied license placements, and
-    persists canonical v2 inventory bytes into the content-addressed input cache.
+    persists canonical v3 inventory bytes into the content-addressed input cache.
     License placement is a separate, not-yet-authoritative concern the caller owns;
     a caller-placed external license still proves membership legitimately, since
     the evidence this build enforces covers both real archive members and each

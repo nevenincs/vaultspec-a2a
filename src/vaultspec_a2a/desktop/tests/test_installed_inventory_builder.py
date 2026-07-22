@@ -760,7 +760,7 @@ def test_build_python_closure_inventory_excludes_dropped_data_members(
     assert "jsonpointer" not in placed
     assert not any(path.endswith("/jsonpointer") for path in placed)
 
-    # S120: the drop audit trail the layout produced is now carried onto the
+    # The drop audit trail the layout produced is now carried onto the
     # inventory (non-empty, both reasons), survives the build->load round-trip
     # through the real consumer, and never enters the placed-tree digest.
     assert {(record.source_member, record.reason) for record in inventory.dropped} == {

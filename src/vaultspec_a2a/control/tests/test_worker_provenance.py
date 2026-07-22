@@ -21,9 +21,11 @@ import pytest
 
 from vaultspec_a2a.control.config import settings
 from vaultspec_a2a.control.worker_management import (
+    LazyWorkerSpawner,
     _evict_stale_worker,
     _fetch_worker_health,
     _same_gateway,
+    _worker_ready_and_ours,
 )
 
 if TYPE_CHECKING:
@@ -178,3 +180,80 @@ async def test_tokenless_shutdown_is_rejected_by_authenticated_worker() -> None:
     ):
         await _evict_stale_worker(url, port, timeout=1.0)
         assert flag["called"] is False
+
+
+@pytest.mark.asyncio
+async def test_worker_ready_and_ours_accepts_a_same_gateway_worker() -> None:
+    """A healthy worker declaring THIS gateway is ready and ours."""
+    body: dict[str, object] = {
+        "status": "ok",
+        "service": "worker",
+        "gateway_url": settings.gateway_url,
+    }
+    with _worker_like(body) as (url, _port, _flag):
+        assert await _worker_ready_and_ours(url) is True
+
+
+@pytest.mark.asyncio
+async def test_worker_ready_and_ours_rejects_a_foreign_gateway_worker() -> None:
+    """The adoption guard: a healthy worker heartbeating a DIFFERENT gateway is not
+    ours, even though it answers /health on the port. This is the readiness signal
+    every adoption path now routes through, so a foreign orphan cannot be adopted.
+    """
+    foreign = "http://127.0.0.1:59999"
+    assert foreign.rstrip("/") != settings.gateway_url.rstrip("/")
+    body: dict[str, object] = {
+        "status": "ok",
+        "service": "worker",
+        "gateway_url": foreign,
+    }
+    with _worker_like(body) as (url, _port, _flag):
+        assert await _worker_ready_and_ours(url) is False
+
+
+@pytest.mark.asyncio
+async def test_worker_ready_and_ours_accepts_a_legacy_worker_without_a_target() -> None:
+    """A worker whose /health predates the gateway_url field is treated as ours, so
+    the provenance gate never disowns a correctly-wired legacy worker."""
+    body: dict[str, object] = {"status": "ok", "service": "worker"}
+    with _worker_like(body) as (url, _port, _flag):
+        assert await _worker_ready_and_ours(url) is True
+
+
+@pytest.mark.asyncio
+async def test_worker_ready_and_ours_false_when_no_worker_answers() -> None:
+    assert await _worker_ready_and_ours("http://127.0.0.1:9") is False
+
+
+@pytest.mark.asyncio
+async def test_ensure_worker_does_not_adopt_a_foreign_worker() -> None:
+    """A non-auto-spawn gateway must not mark itself paired to a foreign worker.
+
+    Before the fix ensure_worker's fallback was a bare /health check, so a healthy
+    orphan targeting another gateway squatting the port was adopted and this gateway
+    dispatched to a worker emitting events elsewhere. The provenance-aware fallback
+    leaves the gateway unpaired instead.
+    """
+    body: dict[str, object] = {
+        "status": "ok",
+        "service": "worker",
+        "gateway_url": "http://127.0.0.1:59999",
+    }
+    with _worker_like(body) as (url, port, _flag):
+        spawner = LazyWorkerSpawner(worker_url=url, worker_port=port, auto_spawn=False)
+        await spawner.ensure_worker()
+        assert spawner.spawned is False
+
+
+@pytest.mark.asyncio
+async def test_ensure_worker_attaches_to_a_same_gateway_worker() -> None:
+    """The positive: a non-auto-spawn gateway attaches to a worker that targets it."""
+    body: dict[str, object] = {
+        "status": "ok",
+        "service": "worker",
+        "gateway_url": settings.gateway_url,
+    }
+    with _worker_like(body) as (url, port, _flag):
+        spawner = LazyWorkerSpawner(worker_url=url, worker_port=port, auto_spawn=False)
+        await spawner.ensure_worker()
+        assert spawner.spawned is True

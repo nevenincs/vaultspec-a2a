@@ -294,6 +294,24 @@ def _same_gateway(worker_target: object, our_gateway: str) -> bool:
     return worker_target.rstrip("/") == our_gateway.rstrip("/")
 
 
+async def _worker_ready_and_ours(worker_url: str) -> bool:
+    """Whether a healthy worker at *worker_url* heartbeats *this* gateway.
+
+    The provenance-aware readiness signal for every adoption decision: a bare
+    ``/health`` 200 only proves *some* worker holds the port, which a foreign
+    orphan squatting a shared band port satisfies just as well as our own. Adopting
+    on that alone lets this gateway dispatch to a worker that emits its events to a
+    different gateway. This pairs the health check with the worker's declared
+    ``gateway_url`` and accepts only when it is ours (a legacy worker whose
+    ``/health`` predates the field is treated as ours by :func:`_same_gateway`, so a
+    correctly-wired old worker is not spuriously disowned).
+    """
+    body = await _fetch_worker_health(worker_url)
+    if body is None:
+        return False
+    return _same_gateway(body.get("gateway_url"), settings.gateway_url)
+
+
 async def _evict_stale_worker(
     worker_url: str,
     worker_port: int,
@@ -388,12 +406,20 @@ async def _spawn_worker(
                 settings.gateway_url,
             )
             if not await _evict_stale_worker(worker_url, worker_port):
+                # The foreign orphan would not release the port. Spawning anyway is
+                # the adoption hazard this guard exists to close: our new worker
+                # cannot bind the held port, and the readiness probe would find the
+                # SURVIVING foreign worker healthy and hand it back as ours. Fail
+                # loud instead of spawning a competitor onto a port a foreign
+                # gateway's worker still serves.
                 logger.error(
-                    "Stale worker at %s did not release port %d — new spawn will"
-                    " likely fail to bind; manual reap may be required",
+                    "Stale worker at %s did not release port %d after eviction —"
+                    " refusing to spawn onto a foreign-held port (manual reap"
+                    " required)",
                     worker_url,
                     worker_port,
                 )
+                return None
 
     logger.info(
         "Auto-spawning worker on port %d",
@@ -477,24 +503,10 @@ async def _spawn_worker(
     last_log = 0.0  # elapsed seconds at last progress log
 
     while asyncio.get_event_loop().time() < deadline:
-        # Fast-path: skip full HTTP check if port isn't even open yet.
-        if await _tcp_port_ready(
-            "127.0.0.1", worker_port
-        ) and await _check_worker_health(worker_url):
-            elapsed = 30.0 - (deadline - asyncio.get_event_loop().time())
-            logger.info(
-                "Worker ready at %s (PID %d) in %.1fs",
-                worker_url,
-                process.pid,
-                elapsed,
-            )
-            return process
-
-        elapsed = 30.0 - (deadline - asyncio.get_event_loop().time())
-        if elapsed - last_log >= settings.worker_poll_log_interval_seconds:
-            logger.info("Waiting for worker... (%.0fs elapsed)", elapsed)
-            last_log = elapsed
-
+        # Detect OUR spawn dying before probing health. A spawn that crashed on its
+        # bind (the port was held by a surviving foreign worker) must be reported as
+        # a failed spawn, never as ready off the foreign worker still answering on
+        # the port - so the liveness check leads the readiness check.
         if process.poll() is not None:
             detail = _build_worker_restart_detail(
                 returncode=process.returncode,
@@ -509,6 +521,26 @@ async def _spawn_worker(
                 # (Windows KILL_ON_JOB_CLOSE reaps any straggler it left behind).
                 containment.close()
             return None
+
+        # Ready only when OUR worker answers: the port being open and healthy is not
+        # enough when a foreign orphan can squat a shared band port, so readiness
+        # requires the responding worker to declare THIS gateway as its target.
+        if await _tcp_port_ready(
+            "127.0.0.1", worker_port
+        ) and await _worker_ready_and_ours(worker_url):
+            elapsed = 30.0 - (deadline - asyncio.get_event_loop().time())
+            logger.info(
+                "Worker ready at %s (PID %d) in %.1fs",
+                worker_url,
+                process.pid,
+                elapsed,
+            )
+            return process
+
+        elapsed = 30.0 - (deadline - asyncio.get_event_loop().time())
+        if elapsed - last_log >= settings.worker_poll_log_interval_seconds:
+            logger.info("Waiting for worker... (%.0fs elapsed)", elapsed)
+            last_log = elapsed
 
         await asyncio.sleep(interval)
         interval = min(
@@ -643,11 +675,14 @@ class LazyWorkerSpawner:
             if self._spawned:
                 return
             if not self._auto_spawn:
-                # Not configured to auto-spawn; just check if it's running.
-                self._spawned = await _check_worker_health(self._worker_url)
+                # Not configured to auto-spawn; attach only to a worker that
+                # declares THIS gateway as its target, never a foreign orphan that
+                # merely answers /health on the port.
+                self._spawned = await _worker_ready_and_ours(self._worker_url)
                 if not self._spawned:
                     logger.warning(
-                        "Worker not running at %s and auto_spawn_worker=False",
+                        "No worker targeting this gateway at %s and"
+                        " auto_spawn_worker=False",
                         self._worker_url,
                     )
                 return
@@ -673,9 +708,12 @@ class LazyWorkerSpawner:
                 # stale reference so shutdown does not double-reap.
                 self._containment = None
             # Mark as spawned even if _spawn_worker found it already running
-            # (returns None when worker was already healthy).
+            # (returns None when a same-gateway worker was already healthy). The
+            # fallback probe must confirm the running worker is OURS: a bare health
+            # check here would let a refused-eviction foreign orphan (spawn returned
+            # None) be adopted as this gateway's worker.
             self._spawned = self._process is not None or (
-                await _check_worker_health(self._worker_url)
+                await _worker_ready_and_ours(self._worker_url)
             )
             if self._spawned:
                 logger.info("Worker available — processing dispatch")

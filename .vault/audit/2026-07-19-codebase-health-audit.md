@@ -56,6 +56,22 @@ research, proposed ADR, and index pass their document checks.
 
 ### foreign-worker-adoption-after-failed-eviction | critical | A gateway can adopt a worker still paired to another gateway
 
+Status: RESOLVED (2026-07-22) on the dev/compose adoption path. A single
+provenance-aware readiness signal, `_worker_ready_and_ours`, now gates every
+adoption decision (it pairs the `/health` 200 with the worker's declared
+`gateway_url` and accepts only a same-gateway target; a legacy worker with no
+declared target is still treated as ours, so no correctly-wired worker regresses).
+Applied at: `_spawn_worker` now fails loud instead of spawning after an
+unsuccessful eviction (refuses to spawn onto a foreign-held port); its readiness
+loop checks OUR spawn's liveness before the health probe and requires same-gateway
+provenance, so a surviving foreign worker on the port can no longer be handed back
+as ready; and both `ensure_worker` fallbacks (auto-spawn and externally-managed)
+require same-gateway provenance rather than a bare health check. Proven with real
+loopback HTTP workers (a foreign-gateway worker is refused at every path). The
+desktop armed profile's strict authenticated pairing is separately covered by
+S93/S94; the plan's real-two-gateway-process proofs (S95/S153-157) remain open as
+a higher-fidelity integration bar. Original finding retained below.
+
 Module-level `_spawn_worker` in `control/worker_management.py:334-346` can see
 the still-running foreign worker during its readiness probe. It can return the
 new child handle before observing that child's bind failure.

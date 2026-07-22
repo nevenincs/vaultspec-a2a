@@ -21,6 +21,7 @@ from ..factory import (
     _classify_gemini_command,
     classify_provider_command,
 )
+from ..model_profiles import PROVIDER_DEFAULT_MODELS
 
 
 def get_model_attr(model_obj: BaseChatModel) -> str | None:
@@ -370,3 +371,46 @@ def test_provider_factory_unsupported_provider() -> None:
     """Verify that nonsense providers raise ValueError with useful message."""
     with pytest.raises(ValueError, match="Unsupported provider: unknown"):
         ProviderFactory().create(cast("Provider", "unknown"))
+
+
+class TestProviderAdmission:
+    """The admission path, exercised apart from construction after the split.
+
+    ``create`` folded the supported-provider guard and the model-name resolution
+    into one method with construction. Separated, admission is a pure decision -
+    is this provider allowed, and what model does it resolve to - assertable
+    without building a model.
+    """
+
+    def test_a_default_resolves_to_the_mapped_model(self) -> None:
+        from ..factory import _admit_and_resolve_model_name
+
+        resolved = _admit_and_resolve_model_name(Provider.CLAUDE, None)
+
+        assert resolved == MODEL_MAP[Provider.CLAUDE][
+            PROVIDER_DEFAULT_MODELS[Provider.CLAUDE]
+        ]
+
+    def test_a_model_enum_resolves_through_the_map(self) -> None:
+        from ..factory import _admit_and_resolve_model_name
+
+        level = PROVIDER_DEFAULT_MODELS[Provider.CLAUDE]
+        resolved = _admit_and_resolve_model_name(Provider.CLAUDE, level)
+
+        assert resolved == MODEL_MAP[Provider.CLAUDE][level]
+
+    def test_a_raw_string_passes_through_unvalidated(self) -> None:
+        from ..factory import _admit_and_resolve_model_name
+
+        resolved = _admit_and_resolve_model_name(Provider.CLAUDE, "some-custom-name")
+
+        assert resolved == "some-custom-name"
+
+    def test_an_unsupported_provider_is_refused(self) -> None:
+        from ..factory import _admit_and_resolve_model_name
+
+        class _Bogus:
+            value = "bogus"
+
+        with pytest.raises(ValueError, match="Unsupported provider"):
+            _admit_and_resolve_model_name(cast("Provider", _Bogus()), None)

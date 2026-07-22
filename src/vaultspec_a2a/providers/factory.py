@@ -570,6 +570,67 @@ def classify_provider_command(
     raise ValueError(f"provider {provider.value} has no subprocess command to classify")
 
 
+_SUPPORTED_PROVIDERS: frozenset[Provider] = frozenset(
+    {
+        Provider.CLAUDE,
+        Provider.CODEX,
+        Provider.DETERMINISTIC,
+        Provider.GEMINI,
+        Provider.KIMI,
+        Provider.MOCK,
+        Provider.ZAI,
+        Provider.ZHIPU,
+        Provider.OPENAI,
+    }
+)
+
+
+def _admit_and_resolve_model_name(
+    provider: Provider, model: "Model | str | None"
+) -> str:
+    """Admit the provider and resolve its model name, or raise.
+
+    The admission path, separated from construction: it refuses an unsupported
+    provider and turns the optional model selector into a concrete model name.
+    A default or a ``Model`` enum is validated against the model map; a raw
+    string is passed through with a warning, because it bypasses that
+    validation and an operator should see when a non-canonical name is in use.
+
+    Raises:
+        ValueError: If the provider is unsupported or the model level is not
+            mapped for it.
+    """
+    if provider not in _SUPPORTED_PROVIDERS:
+        logger.error("Failed to instantiate: Unsupported provider %s", provider)
+        raise ValueError(f"Unsupported provider: {provider}")
+
+    if model is None:
+        model_level = PROVIDER_DEFAULT_MODELS[provider]
+        try:
+            return MODEL_MAP[provider][model_level]
+        except KeyError:
+            raise ValueError(
+                f"Unsupported model level {model_level!r} for provider {provider!r}"
+            ) from None
+    if isinstance(model, Model):
+        try:
+            return MODEL_MAP[provider][model]
+        except KeyError:
+            raise ValueError(
+                f"Unsupported model level {model!r} for provider {provider!r}"
+            ) from None
+    # M21: raw string model_name bypasses the MODEL_MAP validation that would
+    # catch typos or unsupported models. Log a warning so operators can see
+    # when a non-canonical model string is in use.
+    logger.warning(
+        "ProviderFactory received a raw model string %r for provider=%s. "
+        "Prefer passing a Model enum value to ensure the name is valid.",
+        model,
+        provider,
+    )
+    return model
+
+
 class ProviderFactory:
     """Factory for instantiating LangChain chat models for different providers."""
 
@@ -601,50 +662,10 @@ class ProviderFactory:
         """
         timeout = kwargs.pop("timeout", settings.provider_timeout_seconds)
 
-        # Guard unsupported providers before model resolution to produce a clear error
-        # (PROVIDER_DEFAULT_MODELS lookup raises KeyError for unknown providers).
-        supported = {
-            Provider.CLAUDE,
-            Provider.CODEX,
-            Provider.DETERMINISTIC,
-            Provider.GEMINI,
-            Provider.KIMI,
-            Provider.MOCK,
-            Provider.ZAI,
-            Provider.ZHIPU,
-            Provider.OPENAI,
-        }
-        if provider not in supported:
-            logger.error("Failed to instantiate: Unsupported provider %s", provider)
-            raise ValueError(f"Unsupported provider: {provider}")
-
-        # Resolve model name
-        if model is None:
-            model_level = PROVIDER_DEFAULT_MODELS[provider]
-            try:
-                model_name = MODEL_MAP[provider][model_level]
-            except KeyError:
-                raise ValueError(
-                    f"Unsupported model level {model_level!r} for provider {provider!r}"
-                ) from None
-        elif isinstance(model, Model):
-            try:
-                model_name = MODEL_MAP[provider][model]
-            except KeyError:
-                raise ValueError(
-                    f"Unsupported model level {model!r} for provider {provider!r}"
-                ) from None
-        else:
-            # M21: raw string model_name bypasses the MODEL_MAP validation that would
-            # catch typos or unsupported models.  Log a warning so operators can see
-            # when a non-canonical model string is in use.
-            model_name = model
-            logger.warning(
-                "ProviderFactory received a raw model string %r for provider=%s. "
-                "Prefer passing a Model enum value to ensure the name is valid.",
-                model_name,
-                provider,
-            )
+        # Admission: refuse an unsupported provider and resolve its model name
+        # before any construction begins, so a bad request fails clearly rather
+        # than partway through building a model.
+        model_name = _admit_and_resolve_model_name(provider, model)
 
         logger.info(
             "Instantiating ProviderFactory for provider=%s, resolved_model=%s",

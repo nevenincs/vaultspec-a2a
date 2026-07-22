@@ -51,6 +51,7 @@ related:
   - '[[2026-07-19-codebase-health-W04-P14-S62]]'
   - '[[2026-07-19-codebase-health-W04-P14-S64]]'
   - '[[2026-07-19-codebase-health-W04-P15-S65]]'
+  - '[[2026-07-19-codebase-health-W04-P15-S66]]'
   - '[[2026-07-19-codebase-health-W04-P15-S69]]'
   - '[[2026-07-19-codebase-health-W04-P15-S71]]'
   - '[[2026-07-19-codebase-health-W04-P16-S73]]'
@@ -127,6 +128,7 @@ Auto-generated index of all documents tagged with `#codebase-health`.
 - `2026-07-19-codebase-health-W04-P14-S62` - Remove the unowned projected_declared_names export and its export-only tests
 - `2026-07-19-codebase-health-W04-P14-S64` - Remove the unused print_trace_summary helper and its latent integration surface
 - `2026-07-19-codebase-health-W04-P15-S65` - Split process_langgraph_event into bounded event-family translators
+- `2026-07-19-codebase-health-W04-P15-S66` - Split ProviderFactory.create into explicit provider admission and construction paths
 - `2026-07-19-codebase-health-W04-P15-S69` - Split normalize_tool_input_schema into explicit schema-shape translators
 - `2026-07-19-codebase-health-W04-P15-S71` - Split project_checkpoint_tuple into immutable checkpoint extraction and response projection stages
 - `2026-07-19-codebase-health-W04-P16-S73` - Rewrite service deployment documentation and environment examples to describe the headless runtime

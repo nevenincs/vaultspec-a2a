@@ -61,9 +61,6 @@ from .errors import (
     EventAggregatorError as EventAggregatorError,
 )
 from .errors import (
-    MergeConflictError as MergeConflictError,
-)
-from .errors import (
     NicknameConflictError as NicknameConflictError,
 )
 from .errors import (
@@ -89,9 +86,6 @@ from .errors import (
 )
 from .errors import (
     WorkerExecutionError as WorkerExecutionError,
-)
-from .errors import (
-    WorkspaceError as WorkspaceError,
 )
 from .models import (
     ArtifactRef as ArtifactRef,
@@ -158,7 +152,6 @@ __all__ = [
     "EventAggregatorError",
     "ExecutionStateProjection",
     "InvalidTransitionError",
-    "MergeConflictError",
     "NicknameConflictError",
     "PermissionDeniedError",
     "PermissionRequestStatus",
@@ -176,7 +169,6 @@ __all__ = [
     "TokenUsageEntry",
     "VaultspecError",
     "WorkerExecutionError",
-    "WorkspaceError",
     "classify_message_role",
     "derive_message_id",
     "extract_message_timestamp",

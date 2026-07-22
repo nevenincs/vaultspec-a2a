@@ -348,28 +348,14 @@ class TestAuthoringVisibleButVaultWriteDenied:
 
 
 class TestAcpWriteGitSerialization:
-    """ACP writes and Git operations serialize through the shared workspace mutex.
+    """ACP writes serialize through the shared workspace mutex.
 
-    After ``_git_mutex`` moved to ``workspace/concurrency.py`` as
-    ``git_workspace_mutex``, both the ACP fs-write handler and the Git manager
-    acquire that one lock, so neither can touch the working tree while the other
-    holds it. This proves the contention through the production handler and the
-    production lock, not a stand-in.
+    The workspace-global ``git_workspace_mutex`` (in ``workspace/concurrency.py``)
+    serializes every subsystem that writes the working tree; the ACP fs-write
+    handler acquires it, so a write cannot proceed while a repository-wide holder
+    of that lock is in its critical section. This proves the contention through
+    the production handler and the production lock, not a stand-in.
     """
-
-    def test_the_git_manager_and_acp_write_share_one_workspace_mutex(self) -> None:
-        """GitManager and the ACP write path route through the one shared lock.
-
-        The relocation's point: both writers depend on the single
-        ``concurrency.git_workspace_mutex``. GitManager binds it at import; the
-        ACP handler re-imports it from the same module on every call. Asserting
-        the GitManager binding is the concurrency module's object pins the shared
-        routing (the behaviour test then proves that shared lock serializes).
-        """
-        import vaultspec_a2a.workspace.concurrency as concurrency
-        import vaultspec_a2a.workspace.git_manager as git_manager
-
-        assert git_manager.git_workspace_mutex is concurrency.git_workspace_mutex
 
     @pytest.fixture
     def loop_bound_mutex(self) -> Iterator[asyncio.Lock]:

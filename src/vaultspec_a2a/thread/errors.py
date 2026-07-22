@@ -86,15 +86,6 @@ class ConfigError(VaultspecError):
     recovery_action = RecoveryAction.ABORT
 
 
-class WorkspaceError(VaultspecError):
-    """Raised when workspace operations fail."""
-
-    __slots__ = ()
-
-    severity = ErrorSeverity.PERMANENT
-    recovery_action = RecoveryAction.ESCALATE_TO_USER
-
-
 class ProjectionRefusedError(ConfigError):
     """Raised when the run workspace cannot host a projected ``.mcp.json``.
 
@@ -257,20 +248,6 @@ class ContextOverflowError(VaultspecError):
 
 
 # ---------------------------------------------------------------------------
-# Merge / workspace conflicts
-# ---------------------------------------------------------------------------
-
-
-class MergeConflictError(WorkspaceError):
-    """Raised when a git merge produces conflicts that need resolution."""
-
-    __slots__ = ()
-
-    severity = ErrorSeverity.PERMANENT
-    recovery_action = RecoveryAction.ESCALATE_TO_USER
-
-
-# ---------------------------------------------------------------------------
 # Agent / team config discovery
 # ---------------------------------------------------------------------------
 
@@ -340,7 +317,6 @@ __all__ = [
     "EventAggregatorError",
     "GitWorkspaceError",
     "IsolationRequiredError",
-    "MergeConflictError",
     "NicknameConflictError",
     "PermissionDeniedError",
     "ProjectionRefusedError",
@@ -351,5 +327,4 @@ __all__ = [
     "TokenBudgetExceededError",
     "VaultspecError",
     "WorkerExecutionError",
-    "WorkspaceError",
 ]

@@ -10,7 +10,6 @@ from .. import (
     DatabaseError,
     ErrorSeverity,
     EventAggregatorError,
-    MergeConflictError,
     NicknameConflictError,
     PermissionDeniedError,
     ProtocolError,
@@ -19,7 +18,6 @@ from .. import (
     TeamConfigNotFoundError,
     TokenBudgetExceededError,
     VaultspecError,
-    WorkspaceError,
 )
 
 # Module object used for __all__ introspection
@@ -99,7 +97,6 @@ class TestInheritanceHierarchy:
         "exc_cls",
         [
             ConfigError,
-            WorkspaceError,
             AgentProcessError,
             ProtocolError,
             EventAggregatorError,
@@ -116,14 +113,6 @@ class TestInheritanceHierarchy:
         """Each listed exception class is a direct subclass of VaultspecError."""
         assert issubclass(exc_cls, VaultspecError)
 
-    def test_merge_conflict_is_workspace_error(self) -> None:
-        """MergeConflictError is a subclass of WorkspaceError."""
-        assert issubclass(MergeConflictError, WorkspaceError)
-
-    def test_merge_conflict_is_also_vaultspec_error(self) -> None:
-        """MergeConflictError is also a subclass of VaultspecError."""
-        assert issubclass(MergeConflictError, VaultspecError)
-
 
 # ---------------------------------------------------------------------------
 # Default severity and recovery classifications
@@ -133,7 +122,6 @@ class TestInheritanceHierarchy:
 _EXPECTED_DEFAULTS: list[tuple[type[VaultspecError], ErrorSeverity, RecoveryAction]] = [
     (VaultspecError, ErrorSeverity.UNKNOWN, RecoveryAction.ESCALATE_TO_USER),
     (ConfigError, ErrorSeverity.PERMANENT, RecoveryAction.ABORT),
-    (WorkspaceError, ErrorSeverity.PERMANENT, RecoveryAction.ESCALATE_TO_USER),
     (
         AgentProcessError,
         ErrorSeverity.TRANSIENT,
@@ -158,11 +146,6 @@ _EXPECTED_DEFAULTS: list[tuple[type[VaultspecError], ErrorSeverity, RecoveryActi
     ),
     (TokenBudgetExceededError, ErrorSeverity.PERMANENT, RecoveryAction.REASSIGN),
     (ContextOverflowError, ErrorSeverity.PERMANENT, RecoveryAction.REASSIGN),
-    (
-        MergeConflictError,
-        ErrorSeverity.PERMANENT,
-        RecoveryAction.ESCALATE_TO_USER,
-    ),
 ]
 
 
@@ -264,11 +247,6 @@ class TestCatchability:
         with pytest.raises(VaultspecError):
             raise ConfigError("bad config")
 
-    def test_catch_workspace_error_catches_merge_conflict(self) -> None:
-        """WorkspaceError catches MergeConflictError."""
-        with pytest.raises(WorkspaceError):
-            raise MergeConflictError("conflict in file.py")
-
     def test_catch_exception_catches_vaultspec_error(self) -> None:
         """TokenBudgetExceededError is catchable as its own type (and as Exception)."""
         with pytest.raises(TokenBudgetExceededError):
@@ -348,7 +326,6 @@ class TestAllExports:
             "EventAggregatorError",
             "GitWorkspaceError",
             "IsolationRequiredError",
-            "MergeConflictError",
             "NicknameConflictError",
             "PermissionDeniedError",
             "ProtocolError",
@@ -359,7 +336,6 @@ class TestAllExports:
             "TokenBudgetExceededError",
             "VaultspecError",
             "WorkerExecutionError",
-            "WorkspaceError",
         }
         assert set(_errors_module.__all__) == expected
 
@@ -374,7 +350,6 @@ class TestAllExports:
         assert DatabaseError is _errors_module.DatabaseError
         assert ErrorSeverity is _errors_module.ErrorSeverity
         assert EventAggregatorError is _errors_module.EventAggregatorError
-        assert MergeConflictError is _errors_module.MergeConflictError
         assert PermissionDeniedError is _errors_module.PermissionDeniedError
         assert RecoveryAction is _errors_module.RecoveryAction
         assert TokenBudgetExceededError is _errors_module.TokenBudgetExceededError

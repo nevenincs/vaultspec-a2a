@@ -376,6 +376,58 @@ def codex_mcp_server_specs(
     return specs
 
 
+def _resolve_harness_composition(
+    model: BaseChatModel,
+    names: Sequence[str],
+    *,
+    profile: HarnessMcpRuntimeProfile,
+) -> tuple[HarnessMcpResolution, set[str], list[dict[str, Any]]]:
+    """Resolve and validate the declared names into specs and an unavailable set.
+
+    The normalisation-and-validation stage, separated from projection. It
+    validates the declared names first - so an unknown name is refused loudly
+    regardless of the model type, rather than being swallowed when composition is
+    inapplicable - resolves them to launch specs, and computes the set of
+    capability names the profile marks unavailable. Under the desktop profile it
+    additionally folds in any already-attached server the profile now prohibits,
+    so a capability that survived an earlier non-desktop composition is stripped.
+
+    Returns the resolution, the unavailable-name set, and the resolved launch
+    specs, which the projection stage delivers onto the model.
+
+    Raises:
+        ConfigError: On an unknown declared name.
+    """
+    resolution = resolve_harness_mcp_capabilities(names, profile=profile)
+    unavailable_names = {
+        unavailable.capability for unavailable in resolution.unavailable
+    }
+    if profile is HarnessMcpRuntimeProfile.DESKTOP:
+        attached_names = {
+            str(spec.get("name"))
+            for spec in (getattr(model, "mcp_servers", []) or [])
+            if spec.get("name") in _KNOWN_MCP_SERVERS
+        }
+        attached_names.update(
+            name
+            for name in (getattr(model, "harness_mcp_servers", []) or [])
+            if name in _KNOWN_MCP_SERVERS
+        )
+        if attached_names:
+            attached_resolution = resolve_harness_mcp_capabilities(
+                sorted(attached_names),
+                profile=profile,
+            )
+            unavailable_names.update(
+                unavailable.capability
+                for unavailable in attached_resolution.unavailable
+            )
+    resolved = [
+        _launch_spec(_KNOWN_MCP_SERVERS[name]) for name in resolution.available_servers
+    ]
+    return resolution, unavailable_names, resolved
+
+
 def compose_harness_mcp_servers(
     model: BaseChatModel,
     names: Sequence[str],
@@ -416,39 +468,39 @@ def compose_harness_mcp_servers(
     """
     if not names and profile is HarnessMcpRuntimeProfile.NON_DESKTOP:
         return model
-    # Validate the declared names FIRST, so an unknown name is refused loudly
-    # regardless of model type - a configuration error is an error even when
-    # composition is inapplicable (a non-ACP model) and would otherwise swallow
-    # it silently.
-    resolution = resolve_harness_mcp_capabilities(names, profile=profile)
-    unavailable_names = {
-        unavailable.capability for unavailable in resolution.unavailable
-    }
-    if profile is HarnessMcpRuntimeProfile.DESKTOP:
-        attached_names = {
-            str(spec.get("name"))
-            for spec in (getattr(model, "mcp_servers", []) or [])
-            if spec.get("name") in _KNOWN_MCP_SERVERS
-        }
-        attached_names.update(
-            name
-            for name in (getattr(model, "harness_mcp_servers", []) or [])
-            if name in _KNOWN_MCP_SERVERS
-        )
-        if attached_names:
-            attached_resolution = resolve_harness_mcp_capabilities(
-                sorted(attached_names),
-                profile=profile,
-            )
-            unavailable_names.update(
-                unavailable.capability
-                for unavailable in attached_resolution.unavailable
-            )
-    resolved = [
-        _launch_spec(_KNOWN_MCP_SERVERS[name]) for name in resolution.available_servers
-    ]
+    resolution, unavailable_names, resolved = _resolve_harness_composition(
+        model, names, profile=profile
+    )
     if not resolved and not unavailable_names:
         return model
+    return _project_composition_onto_model(
+        model,
+        resolution,
+        unavailable_names,
+        resolved,
+        allowed_tools=allowed_tools,
+        profile=profile,
+    )
+
+
+def _project_composition_onto_model(
+    model: BaseChatModel,
+    resolution: HarnessMcpResolution,
+    unavailable_names: set[str],
+    resolved: list[dict[str, Any]],
+    *,
+    allowed_tools: Sequence[str] | None,
+    profile: HarnessMcpRuntimeProfile,
+) -> BaseChatModel:
+    """Deliver the resolved composition onto the model via its own mechanism.
+
+    The projection stage, separated from resolution. It dispatches on the model's
+    delivery surface - an ACP model's session-inject ``with_mcp_servers``, a Codex
+    model's ``config.toml`` ``with_harness_mcp_servers``, or neither - and in each
+    case unions the resolved specs and allowlist with what the model already
+    carries while dropping anything the profile marks unavailable. A model with no
+    delivery mechanism is returned unchanged.
+    """
     attach = getattr(model, "with_mcp_servers", None)
     if attach is None:
         # Codex lane: no ACP session surface, but its own config.toml delivery.

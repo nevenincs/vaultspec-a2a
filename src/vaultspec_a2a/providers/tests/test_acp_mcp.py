@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import subprocess
 
+import typing
+
 import pytest
 from langchain_openai import ChatOpenAI
 
@@ -351,3 +353,40 @@ def test_compose_unknown_name_raises_even_on_non_acp_model() -> None:
     model = ChatOpenAI(model="gpt-4o-mini", api_key="unused-test-key")
     with pytest.raises(ConfigError):
         compose_harness_mcp_servers(model, ["totally-unknown"])
+
+
+class TestHarnessCompositionStages:
+    """The resolve stage, exercised apart from projection after the split.
+
+    Composition was one function doing resolution-and-validation then projection.
+    The resolve stage is separable now, so the validate-first guarantee - an
+    unknown name is refused before any delivery is attempted - can be asserted
+    directly rather than only through a composed model.
+    """
+
+    def test_resolve_refuses_an_unknown_name_before_projection(self) -> None:
+        from .._acp_mcp import HarnessMcpRuntimeProfile, _resolve_harness_composition
+
+        class _Bare:
+            """A model with no delivery mechanism at all."""
+
+        with pytest.raises(ConfigError):
+            _resolve_harness_composition(
+                _Bare(),
+                ["not-a-real-server"],
+                profile=HarnessMcpRuntimeProfile.NON_DESKTOP,
+            )
+
+    def test_resolve_returns_specs_for_a_known_name(self) -> None:
+        from .._acp_mcp import HarnessMcpRuntimeProfile, _resolve_harness_composition
+
+        class _Bare:
+            mcp_servers: typing.ClassVar[list] = []
+
+        resolution, unavailable, resolved = _resolve_harness_composition(
+            _Bare(), ["vaultspec-rag"], profile=HarnessMcpRuntimeProfile.NON_DESKTOP
+        )
+
+        assert "vaultspec-rag" in resolution.available_servers
+        assert unavailable == set()
+        assert [s["name"] for s in resolved] == ["vaultspec-rag"]

@@ -206,3 +206,30 @@ async def test_document_approval_request_is_persisted_as_durable_pending_permiss
         assert thread.status == "input_required"
         assert thread.approval_status == "pending"
         assert thread.approval_request_id == request_id
+
+
+@pytest.mark.asyncio
+async def test_permission_resolution_for_unknown_request_is_a_clean_noop(
+    session_factory,
+) -> None:
+    """The resolution stage no-ops when no matching request row exists.
+
+    After the split into a validation-then-dispatch handler, the resolution
+    stage's missing-permission guard is exercised directly through the handler:
+    a permission_resolved event for a request that was never recorded must
+    settle nothing and append no control action.
+    """
+    async with session_factory() as session:
+        thread = await create_thread(session, title="Unknown Resolution")
+        await session.commit()
+        thread_id = thread.id
+
+    await _handle_permission_event(
+        thread_id,
+        {"type": "permission_resolved", "request_id": f"{thread_id}:never-recorded"},
+        session_factory=session_factory,
+    )
+
+    async with session_factory() as session:
+        actions = (await session.execute(select(ControlActionModel))).scalars().all()
+        assert actions == []

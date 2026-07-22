@@ -273,21 +273,27 @@ async def _handle_terminal_event(
             )
 
 
-async def _handle_permission_event(
+_PERMISSION_REQUEST_EVENT_TYPES = frozenset(
+    {"permission_request", "plan_approval_request", "document_approval_request"}
+)
+
+
+async def _persist_permission_request(
+    db: Any,
     thread_id: str,
     payload: dict[str, Any],
     *,
-    session_factory: Any | None = None,
+    event_type: str,
 ) -> None:
-    """Persist worker permission events into the durable journal."""
-    if not is_permission_event(payload):
-        return
-    event_type = payload.get("type", "")
+    """Persist a fresh permission/approval request into the durable journal.
 
+    Supersedes any competing pending requests, records the request row and its
+    creation control action, and projects the resulting pause onto thread status,
+    repair state, and - for a plan approval - approval state. A payload with no
+    request id is ignored, matching the prior inline guard.
+    """
     from ..database import (
         create_control_action,
-        get_permission_request,
-        mark_permission_request_applied,
         record_permission_request,
         set_thread_approval_state,
         set_thread_repair_state,
@@ -300,6 +306,135 @@ async def _handle_permission_event(
         ControlActionType,
     )
 
+    request_id = str(payload.get("request_id", ""))
+    if not request_id:
+        return
+    tool_call = payload.get("tool_call")
+    pause_reason_type = (
+        event_type
+        if event_type in {"plan_approval_request", "document_approval_request"}
+        else classify_permission_pause_reason(tool_call)
+    )
+    fx = compute_permission_request_effects(pause_reason_type)
+    await supersede_permission_requests(
+        db,
+        thread_id=thread_id,
+        except_request_id=request_id,
+    )
+    description = str(payload.get("description", ""))[:4096]
+    allowed_options = list(payload.get("options", []))[:50]
+    await record_permission_request(
+        db,
+        request_id=request_id,
+        thread_id=thread_id,
+        pause_reason_type=pause_reason_type,
+        description=description,
+        allowed_options=allowed_options,
+        tool_call=tool_call,
+    )
+    await create_control_action(
+        db,
+        thread_id=thread_id,
+        action_type=ControlActionType.PERMISSION_REQUEST_CREATED,
+        request_id=request_id,
+        idempotency_key=f"permission-request:{request_id}",
+        payload={"description": description},
+        result_status=ControlActionResultStatus.APPLIED,
+    )
+    await update_thread_status(db, thread_id, fx.thread_status)
+    await set_thread_repair_state(
+        db,
+        thread_id,
+        repair_status=fx.repair_status,
+        repair_reason=fx.repair_reason,
+        execution_readiness=fx.repair_status.value,
+        last_applied_action=fx.last_applied_action,
+    )
+    if fx.is_plan_approval:
+        await set_thread_approval_state(
+            db,
+            thread_id,
+            approval_status=ApprovalStatus.PENDING,
+            approval_request_id=request_id,
+            approval_reason=str(payload.get("description", "")),
+            approval_response_action_id=None,
+        )
+
+
+async def _apply_permission_resolution(
+    db: Any,
+    thread_id: str,
+    payload: dict[str, Any],
+) -> None:
+    """Finalize a worker-applied permission resolution into the journal.
+
+    Only a request still in ``answered_pending_apply`` is settled: its row is
+    marked applied and the resolution is projected onto the applied control
+    action, repair state, and - for a plan approval - approval state. Any other
+    state is a no-op, matching the prior inline guard.
+    """
+    from ..database import (
+        create_control_action,
+        get_permission_request,
+        mark_permission_request_applied,
+        set_thread_approval_state,
+        set_thread_repair_state,
+    )
+    from ..thread.enums import ControlActionResultStatus
+
+    request_id = str(payload.get("request_id", ""))
+    permission = await get_permission_request(db, request_id)
+    if permission is None or permission.request_status != "answered_pending_apply":
+        return
+    fx_res = compute_permission_resolution_effects(
+        permission.response_option_id,
+        permission.pause_reason_type,
+    )
+    await mark_permission_request_applied(
+        db, request_id=request_id, status=fx_res.target_status
+    )
+    await create_control_action(
+        db,
+        thread_id=thread_id,
+        action_type=fx_res.last_applied_action,
+        request_id=request_id,
+        idempotency_key=f"permission-response-applied:{request_id}",
+        payload={"request_id": request_id},
+        result_status=ControlActionResultStatus.APPLIED,
+    )
+    await set_thread_repair_state(
+        db,
+        thread_id,
+        repair_status=fx_res.repair_status,
+        repair_reason=fx_res.repair_reason,
+        execution_readiness=fx_res.repair_status.value,
+        last_applied_action=fx_res.last_applied_action,
+    )
+    if fx_res.is_plan_approval:
+        await set_thread_approval_state(
+            db,
+            thread_id,
+            approval_status=fx_res.approval_status,
+            approval_request_id=request_id,
+            approval_reason=permission.description,
+        )
+
+
+async def _handle_permission_event(
+    thread_id: str,
+    payload: dict[str, Any],
+    *,
+    session_factory: Any | None = None,
+) -> None:
+    """Persist worker permission events into the durable journal.
+
+    Validates the payload as a permission event, then dispatches to the request
+    persistence stage or the resolution stage under one committed transaction.
+    """
+    if not is_permission_event(payload):
+        return
+    event_type = payload.get("type", "")
+
     if session_factory is None:
         from ..database.session import get_session_factory
 
@@ -307,103 +442,12 @@ async def _handle_permission_event(
     else:
         factory = session_factory
     async with factory() as db:
-        if event_type in {
-            "permission_request",
-            "plan_approval_request",
-            "document_approval_request",
-        }:
-            request_id = str(payload.get("request_id", ""))
-            if not request_id:
-                return
-            tool_call = payload.get("tool_call")
-            pause_reason_type = (
-                event_type
-                if event_type in {"plan_approval_request", "document_approval_request"}
-                else classify_permission_pause_reason(tool_call)
+        if event_type in _PERMISSION_REQUEST_EVENT_TYPES:
+            await _persist_permission_request(
+                db, thread_id, payload, event_type=event_type
             )
-            fx = compute_permission_request_effects(pause_reason_type)
-            await supersede_permission_requests(
-                db,
-                thread_id=thread_id,
-                except_request_id=request_id,
-            )
-            description = str(payload.get("description", ""))[:4096]
-            allowed_options = list(payload.get("options", []))[:50]
-            await record_permission_request(
-                db,
-                request_id=request_id,
-                thread_id=thread_id,
-                pause_reason_type=pause_reason_type,
-                description=description,
-                allowed_options=allowed_options,
-                tool_call=tool_call,
-            )
-            await create_control_action(
-                db,
-                thread_id=thread_id,
-                action_type=ControlActionType.PERMISSION_REQUEST_CREATED,
-                request_id=request_id,
-                idempotency_key=f"permission-request:{request_id}",
-                payload={"description": description},
-                result_status=ControlActionResultStatus.APPLIED,
-            )
-            await update_thread_status(db, thread_id, fx.thread_status)
-            await set_thread_repair_state(
-                db,
-                thread_id,
-                repair_status=fx.repair_status,
-                repair_reason=fx.repair_reason,
-                execution_readiness=fx.repair_status.value,
-                last_applied_action=fx.last_applied_action,
-            )
-            if fx.is_plan_approval:
-                await set_thread_approval_state(
-                    db,
-                    thread_id,
-                    approval_status=ApprovalStatus.PENDING,
-                    approval_request_id=request_id,
-                    approval_reason=str(payload.get("description", "")),
-                    approval_response_action_id=None,
-                )
         else:
-            request_id = str(payload.get("request_id", ""))
-            permission = await get_permission_request(db, request_id)
-            if (
-                permission is not None
-                and permission.request_status == "answered_pending_apply"
-            ):
-                fx_res = compute_permission_resolution_effects(
-                    permission.response_option_id,
-                    permission.pause_reason_type,
-                )
-                await mark_permission_request_applied(
-                    db, request_id=request_id, status=fx_res.target_status
-                )
-                await create_control_action(
-                    db,
-                    thread_id=thread_id,
-                    action_type=fx_res.last_applied_action,
-                    request_id=request_id,
-                    idempotency_key=f"permission-response-applied:{request_id}",
-                    payload={"request_id": request_id},
-                    result_status=ControlActionResultStatus.APPLIED,
-                )
-                await set_thread_repair_state(
-                    db,
-                    thread_id,
-                    repair_status=fx_res.repair_status,
-                    repair_reason=fx_res.repair_reason,
-                    execution_readiness=fx_res.repair_status.value,
-                    last_applied_action=fx_res.last_applied_action,
-                )
-                if fx_res.is_plan_approval:
-                    await set_thread_approval_state(
-                        db,
-                        thread_id,
-                        approval_status=fx_res.approval_status,
-                        approval_request_id=request_id,
-                        approval_reason=permission.description,
-                    )
+            await _apply_permission_resolution(db, thread_id, payload)
         await db.commit()
 
 

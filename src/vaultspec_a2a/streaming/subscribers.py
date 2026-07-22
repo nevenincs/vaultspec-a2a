@@ -86,7 +86,11 @@ class SubscriberManager:
         self._broadcast_hooks.append(hook)
 
     def subscriber_count(self) -> int:
-        """Return the number of currently registered subscribers."""
+        """Return the number of currently registered subscribers.
+
+        Each subscriber owns a bounded queue and a delivery path, so this count
+        is the resource the gateway's global stream-connection limit bounds.
+        """
         return len(self._subscribers)
 
     def subscription_count(self) -> int:

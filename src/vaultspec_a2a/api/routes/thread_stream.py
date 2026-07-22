@@ -121,6 +121,21 @@ async def build_thread_stream_response(
     implementation. Callers pass ``not_found_detail`` to speak their own resource
     vocabulary in the 404.
     """
+    # Refused before the thread lookup, deliberately. The limit exists to stop a
+    # caller exhausting queues and delivery tasks, so it must be decided from
+    # process-local state rather than after a database round trip that the same
+    # flood would also multiply. It says nothing about the request's identity or
+    # its target - only that this process is already at capacity.
+    limit = settings.max_stream_connections
+    if limit > 0 and aggregator.subscriber_count() >= limit:
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "Gateway is at its progress-stream connection limit; retry later"
+            ),
+            headers={"Retry-After": "5"},
+        )
+
     thread = await get_thread(db, thread_id)
     if thread is None:
         raise HTTPException(status_code=404, detail=not_found_detail)

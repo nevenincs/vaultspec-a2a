@@ -743,6 +743,18 @@ class Settings(DomainSettingsConfig, InfraConfig):
         state = derive_state_paths(self.desktop_app_home)
         return credential_paths(state.credentials_dir)
 
+    max_stream_connections: int = Field(
+        default=256,
+        alias="VAULTSPEC_MAX_STREAM_CONNECTIONS",
+        description=(
+            "Maximum concurrent progress-stream subscribers this gateway admits. "
+            "Each holds a bounded queue and a delivery path, so an unbounded "
+            "count is a resource-exhaustion surface even for an authenticated "
+            "caller. Zero disables the limit, which is a deliberate operator "
+            "choice rather than the default."
+        ),
+    )
+
     @property
     def desktop_temp_homes_dir(self) -> Path | None:
         """Return the armed desktop profile's root for per-run temporary homes.

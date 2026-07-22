@@ -148,7 +148,7 @@ Replace payload-shaped relaying with one versioned DTO and enforce resource limi
 
 - [ ] `W02.P06.S22` - Define the versioned positive progress DTO with identifiers lifecycle state bounded counters approved summaries and one bounded token-delta field; `src/vaultspec_a2a/api/schemas/gateway.py, src/vaultspec_a2a/streaming`.
 - [ ] `W02.P06.S23` - Transform gateway events through the positive DTO while excluding prompts documents artifacts edit diffs and raw provider payloads; `src/vaultspec_a2a/streaming/aggregator.py, src/vaultspec_a2a/streaming/transformer.py`.
-- [ ] `W02.P06.S24` - Authenticate the progress stream and enforce global connection limits before principal lookup; `src/vaultspec_a2a/api/routes/gateway.py, src/vaultspec_a2a/api/dependencies.py`.
+- [x] `W02.P06.S24` - Authenticate the progress stream and enforce global connection limits before principal lookup; `src/vaultspec_a2a/api/routes/gateway.py, src/vaultspec_a2a/api/dependencies.py`.
 - [ ] `W02.P06.S25` - Enforce per-principal stream and subscription quotas after authentication; `src/vaultspec_a2a/streaming/subscribers.py, src/vaultspec_a2a/api/routes/thread_stream.py`.
 - [x] `W02.P06.S26` - Parse numeric and ISO heartbeat values strictly and reject stale malformed non-finite and implausibly future values; `src/vaultspec_a2a/authoring/discovery.py`.
 - [ ] `W02.P06.S27` - Prove progress allowlisting with a real authenticated stream client; `tests/streaming, tests/api`.

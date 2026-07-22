@@ -558,53 +558,74 @@ class AcpChatModel(BaseChatModel):
         stdout_task: asyncio.Task,
         stderr_task: asyncio.Task,
     ) -> None:
-        """Terminate subprocess and clean up tasks."""
-        # Kill all spawned terminals before cancelling the session
-        for _tid, proc in list(ctx.terminals.items()):
-            with suppress(Exception):
-                await _kill_process_tree(proc)
-        ctx.terminals.clear()
+        """Terminate the subprocess and its tasks independently, aggregating errors.
 
-        if self._active_session_id and not ctx.prompt_done.is_set():
-            with suppress(Exception):
-                # session/cancel must be a proper JSON-RPC
-                # (with id) and awaited with a 3-second timeout so the subprocess
-                # has a chance to flush its state before we kill it.
-                rpc_id = AcpRequestId.SESSION_CANCEL
-                loop = asyncio.get_running_loop()
-                ctx.response_futures[rpc_id] = loop.create_future()
-                req = {
-                    "jsonrpc": "2.0",
-                    "id": rpc_id,
-                    "method": "session/cancel",
-                    "params": {"sessionId": self._active_session_id},
-                }
-                async with ctx.stdin_lock:
-                    ctx.stdin.write(json.dumps(req).encode("utf-8") + b"\n")
-                    await ctx.stdin.drain()
-                await asyncio.wait_for(ctx.response_futures[rpc_id], timeout=3.0)
+        Each teardown step - reaping spawned terminals, cancelling the session,
+        cancelling the in-flight background RPC tasks, cancelling the reader
+        tasks, and killing the process tree - runs regardless of an earlier step's
+        failure, so one error can never skip a later release (which would leak the
+        subprocess or a terminal). Failures are aggregated rather than discarded.
+        Ordering is preserved: session-cancel runs before the kill so the
+        subprocess can flush its state.
+        """
 
-        # Cancel all in-flight background RPC tasks before killing process
-        for task in list(ctx.background_tasks):
-            task.cancel()
-        if ctx.background_tasks:
-            await asyncio.gather(*ctx.background_tasks, return_exceptions=True)
+        async def _reap_terminals() -> None:
+            # Each terminal is independent of the others.
+            for _tid, proc in list(ctx.terminals.items()):
+                with suppress(Exception):
+                    await _kill_process_tree(proc)
+            ctx.terminals.clear()
 
-        # Await task cancellation before killing the process
-        stdout_task.cancel()
-        stderr_task.cancel()
-        await asyncio.gather(stdout_task, stderr_task, return_exceptions=True)
-        await _kill_process_tree(
-            ctx.process,
-            metadata=runtime_log_extra(
-                self._config,
-                process=ctx.process,
-                handshake_step="cleanup",
-                stderr_event_count=ctx.stderr_event_count,
-                kill_strategy="taskkill_tree"
-                if sys.platform == "win32"
-                else "sigterm_then_sigkill",
-            ),
+        async def _cancel_session() -> None:
+            if not (self._active_session_id and not ctx.prompt_done.is_set()):
+                return
+            # session/cancel must be a proper JSON-RPC (with id) and awaited with a
+            # 3-second timeout so the subprocess flushes its state before the kill.
+            rpc_id = AcpRequestId.SESSION_CANCEL
+            loop = asyncio.get_running_loop()
+            ctx.response_futures[rpc_id] = loop.create_future()
+            req = {
+                "jsonrpc": "2.0",
+                "id": rpc_id,
+                "method": "session/cancel",
+                "params": {"sessionId": self._active_session_id},
+            }
+            async with ctx.stdin_lock:
+                ctx.stdin.write(json.dumps(req).encode("utf-8") + b"\n")
+                await ctx.stdin.drain()
+            await asyncio.wait_for(ctx.response_futures[rpc_id], timeout=3.0)
+
+        async def _cancel_background_tasks() -> None:
+            for task in list(ctx.background_tasks):
+                task.cancel()
+            if ctx.background_tasks:
+                await asyncio.gather(*ctx.background_tasks, return_exceptions=True)
+
+        async def _cancel_reader_tasks() -> None:
+            stdout_task.cancel()
+            stderr_task.cancel()
+            await asyncio.gather(stdout_task, stderr_task, return_exceptions=True)
+
+        async def _kill_process() -> None:
+            await _kill_process_tree(
+                ctx.process,
+                metadata=runtime_log_extra(
+                    self._config,
+                    process=ctx.process,
+                    handshake_step="cleanup",
+                    stderr_event_count=ctx.stderr_event_count,
+                    kill_strategy="taskkill_tree"
+                    if sys.platform == "win32"
+                    else "sigterm_then_sigkill",
+                ),
+            )
+
+        await run_independent_cleanups(
+            ("acp-terminals", _reap_terminals),
+            ("acp-session-cancel", _cancel_session),
+            ("acp-background-tasks", _cancel_background_tasks),
+            ("acp-reader-tasks", _cancel_reader_tasks),
+            ("acp-process-tree", _kill_process),
         )
 
         self._process = None

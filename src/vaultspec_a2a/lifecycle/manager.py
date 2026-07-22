@@ -740,8 +740,18 @@ def _start_from_record(
     *,
     home: Path | None,
     config: ProcsConfig | None,
+    ready_timeout: float = 20.0,
 ) -> ProcRecord:
-    """Spawn the role's serve command and re-register *record* with the new pid."""
+    """Spawn the role's serve command and re-register *record* with the new pid.
+
+    Verifies the respawned process reaches readiness (a live listener on its
+    original port) BEFORE the record is published, mirroring ``serve_up``'s
+    spawn -> await-listener -> commit-or-reap discipline. A spawn that dies or
+    never binds within *ready_timeout* is felled and the failure raised, so a
+    failed resume/rerun never publishes a record pointing at a dead pid: the
+    prior generation stays the last committed state and exactly one new
+    generation is committed, only once it is ready.
+    """
     from dataclasses import replace
 
     resolved_config = config if config is not None else load_procs_config()
@@ -765,6 +775,17 @@ def _start_from_record(
     )
     cwd = _serve_cwd_for(record)
     process = spawn(command, cwd=cwd, log_path=record.log_path or None, env=child_env)
+    if not _await_listener(record.port, process, timeout=ready_timeout):
+        # The respawn died or never bound its port: fell the process tree and
+        # refuse to publish. The prior record generation remains the last
+        # committed state - a failed resume/rerun is atomic, not a half-published
+        # dead pid.
+        tree_kill(process.pid)
+        raise LifecycleError(
+            f"resume of {record.role}-{record.name} spawned pid {process.pid} "
+            f"but it never became ready on port {record.port} within "
+            f"{ready_timeout:g}s; process felled and record left unchanged"
+        )
     stamp = now_ms()
     updated = replace(
         record,

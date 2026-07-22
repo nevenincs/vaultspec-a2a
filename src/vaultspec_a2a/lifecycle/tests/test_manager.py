@@ -268,9 +268,9 @@ def test_resume_restarts_a_died_record_on_its_original_port(tmp_path) -> None:
     )
     write_record(record, home=tmp_path)
 
-    config = _scratch_config(
-        serve=[sys.executable, "-c", "import time; time.sleep(60)"]
-    )
+    # A serve that actually binds its port, so the resume's readiness gate is
+    # satisfied and the new generation is published only once it is live.
+    config = _scratch_config(serve=[sys.executable, "-c", _BIND_SERVE, "{port}"])
     updated = resume("revive", home=tmp_path, config=config)
     try:
         # A brand-new live pid, same port and workspace preserved.
@@ -291,6 +291,31 @@ def test_resume_restarts_a_died_record_on_its_original_port(tmp_path) -> None:
             resume("up", home=tmp_path, config=config)
     finally:
         tree_kill(child.pid)
+
+
+def test_resume_that_never_becomes_ready_is_atomic(tmp_path) -> None:
+    """A respawn that never binds is felled and the prior record left unchanged.
+
+    Proves the S04/S07 readiness-gated single-generation commit against a real
+    child: the serve exits immediately without binding, so resume must fail loud
+    and NOT publish a record pointing at the dead pid - exactly one generation is
+    committed, only once ready, and a failed resume is atomic.
+    """
+    original_port = 18908
+    record = _record(
+        name="revive-fail", pid=_dead_pid(), port=original_port, workspace="ws-y"
+    )
+    write_record(record, home=tmp_path)
+
+    # A real serve that exits at once without ever binding its port.
+    config = _scratch_config(serve=[sys.executable, "-c", "import sys; sys.exit(1)"])
+    with pytest.raises(LifecycleError, match="never became ready"):
+        resume("revive-fail", home=tmp_path, config=config)
+
+    # The prior (dead) generation is untouched - no half-published new pid.
+    persisted = read_record(record_path("scratch", "revive-fail", home=tmp_path))
+    assert persisted is not None
+    assert persisted.pid == record.pid
 
 
 def test_reap_clears_dead_and_stale_but_keeps_live(tmp_path) -> None:

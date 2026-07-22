@@ -11,6 +11,7 @@ their configuration when they fail and configuration is where credentials live.
 from __future__ import annotations
 
 import asyncio
+import sys
 from collections import deque
 
 import pytest
@@ -118,3 +119,48 @@ def test_the_cleanup_deadline_is_bounded_and_positive() -> None:
     killed, which is a live-process test rather than a unit one.
     """
     assert 0 < CLEANUP_TIMEOUT_SECONDS <= 30
+
+
+@pytest.mark.asyncio
+async def test_drain_relieves_a_real_subprocess_stderr_backpressure() -> None:
+    """A real child flooding stderr past the OS pipe buffer exits only because the
+    drain consumes it concurrently.
+
+    This is the live-process backpressure property the in-memory drains above
+    cannot exercise: feeding a StreamReader never fills an OS pipe. The child
+    writes far more than any pipe buffer and then exits; without a concurrent
+    reader it would block on the overflowing write and never reach exit, so the
+    gather would blow the deadline. Its clean completion IS the proof the drain
+    relieved the backpressure - not merely that some bytes were read.
+    """
+    line = "d" * 240
+    count = 4000  # ~4000 * 241 bytes ~= 960 KB, far past any OS pipe buffer.
+    code = (
+        "import sys\n"
+        "w = sys.stderr.write\n"
+        f"for _ in range({count}):\n"
+        f"    w({line!r} + chr(10))\n"
+        "sys.stderr.flush()\n"
+    )
+    proc = await asyncio.create_subprocess_exec(
+        sys.executable,
+        "-c",
+        code,
+        stdout=asyncio.subprocess.DEVNULL,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    assert proc.stderr is not None
+    tail: deque[str] = deque(maxlen=STDERR_TAIL_LINES)
+
+    # A generous deadline a deadlocked child would blow through, while a child
+    # whose stderr is being drained finishes in well under it.
+    await asyncio.wait_for(
+        asyncio.gather(drain_stderr_into(proc.stderr, tail), proc.wait()),
+        timeout=30.0,
+    )
+
+    assert proc.returncode == 0
+    # The whole flood was consumed (the child reached exit) and only the bounded
+    # window is retained, redaction leaving the plain lines intact.
+    assert len(tail) == STDERR_TAIL_LINES
+    assert all(retained == line for retained in tail)

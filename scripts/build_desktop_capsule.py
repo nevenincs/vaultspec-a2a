@@ -1,332 +1,492 @@
-"""A2A desktop capsule builder.
+"""A2A desktop capsule builder: the read-only consume stage.
 
-Assembles a target-specific, immutable A2A desktop capsule from pinned
-CPython, Node.js, ACP, and package-owned wheel and pylock inputs.  The
-produced capsule is a transport artifact containing verbatim source archives
-for the four base-closure components.  Unpacking and environment setup are
-the dashboard's responsibility.
+The preparation stage authors one digest-pinned capsule input descriptor and an
+explicit content-addressed input cache (``prepare_desktop_capsule.py``).  This
+builder consumes exactly that descriptor plus that cache and assembles the
+deterministic installed capsule tree inside one caller-owned, final-name
+unpublished generation.  The build acquires nothing, derives nothing, and mints
+nothing: it opens the pinned descriptor and cache read-only through the
+production verified-input session and fails closed on any bound violation.
 
-Capsule layout (single ZIP archive, all targets):
-  component-manifest.json           emitted component manifest
-  component-manifest.canonical.bin  canonical JSON bytes for cross-language hashing
-  component-manifest.digest.sha256  hex SHA-256 of canonical bytes (ASCII, no newline)
-  assets/
-    python-runtime    CPython 3.13 install_only archive (tar.gz, all targets)
-    node-runtime      Node.js 22 archive (tar.gz POSIX; zip Windows)
-    acp-adapter       ACP 0.59.0 npm tarball (tgz, all targets)
-    a2a-distribution  vaultspec-a2a wheel (whl, all targets)
-  a2a/
-    pylock.toml       locked base Python dependency closure
+Generation layout (all targets), rooted at ``<out-dir>/<target>``:
+  capsule/                         the materialized installed tree
+    runtime/python                 Python wheelhouse, replayed byte-for-byte
+    runtime/acp                    ACP node_modules, replayed byte-for-byte
+    runtime/cpython                verbatim CPython interpreter subtree
+    runtime/node                   verbatim Node.js interpreter subtree
+    bin/ or Scripts/               relocatable product launchers
+    locks/uv.lock, locks/package-lock.json
+    component-manifest.json        emitted component manifest
+    component-manifest.canonical.bin
+    component-manifest.digest.sha256
+    installed-tree.cdx.json        complete machine-readable installed-tree evidence
+  capsule.zip                      deterministic archive, published once beside the tree
 
-Archive format: ZIP with DEFLATE compression for all targets.  All entry
-timestamps are set to the minimum ZIP epoch (1980-01-01 00:00:00) for
-determinism.  Entries are written in ascending lexicographic path order.
-
-Digest semantics: the SHA-256 digests in the component manifest are computed
-from the raw source-artifact bytes stored under assets/.  The standalone
-verifier can therefore re-derive every asset digest directly from the
-capsule archive without any external source.
+Every closure byte is verified against its declared installed record during the
+write; the two interpreter subtrees are verbatim projections of the verified
+runtime sources; the launchers, locks, manifest, and evidence are generated or
+streamed directly from the retained session.  One directory authority for the
+capsule root is claimed once inside the generation and shared across every
+writer, so no writer opens a second lease and nothing is published inside the
+generation but the single final ``capsule.zip``.
 
 Usage:
   uv run --no-sync python scripts/build_desktop_capsule.py build \\
       --target x86_64-pc-windows-msvc \\
-      --out-dir dist/capsules
-
-  uv run --no-sync python scripts/build_desktop_capsule.py compute-digests \\
-      --target x86_64-pc-windows-msvc
+      --descriptor dist/capsules/x86_64-pc-windows-msvc/capsule-inputs.toml \\
+      --descriptor-sha256 <hex> \\
+      --input-dir dist/capsules/.cache \\
+      --uv-lock uv.lock \\
+      --package-lock package-lock.json \\
+      --out-dir dist/capsules \\
+      --launcher-stub-donor dist/capsules/.cache/<donor-wheel-sha256>
 """
 
 from __future__ import annotations
 
-import hashlib
+import io
 import json
-import os
-import shutil
-import subprocess
 import sys
-import tarfile
-import tempfile
-import tomllib
-import zipfile
 from pathlib import Path
-from typing import Final
-from urllib.request import urlopen
+from typing import TYPE_CHECKING, Final
 
 import click
 
 from vaultspec_a2a.desktop import (
     ApiVersionRange,
-    AssetSource,
-    ComponentAssetKind,
     GatewayApiVersion,
     TargetTriple,
     component_manifest_canonical_bytes,
     component_manifest_digest,
-    emit_component_manifest,
+)
+from vaultspec_a2a.desktop._filesystem_authority import (
+    claim_new_directory,
+    directory_lease,
+    resolve_directory_authority,
+)
+from vaultspec_a2a.desktop.artifacts import (
+    ArtifactInputError,
+    open_verified_capsule_inputs,
+    verify_cached_artifacts,
+)
+from vaultspec_a2a.desktop.capsule import (
+    CapsuleAssemblyError,
+    materialize_verified_member,
+    project_source_archive_into_unpublished_generation,
+)
+from vaultspec_a2a.desktop.capsule_assembly import (
+    CAPSULE_ARCHIVE_OUTPUT_NAME,
+    CAPSULE_ROOT,
+    CapsuleAssemblyPlanError,
+    PlanReservationRole,
+    derive_capsule_assembly_plan,
+)
+from vaultspec_a2a.desktop.capsule_evidence import (
+    canonical_evidence_bytes,
+    installed_tree_inventory,
+    write_deterministic_capsule_zip_into_unpublished_generation,
+)
+from vaultspec_a2a.desktop.capsule_materializer import (
+    CapsuleMaterializationError,
+    extract_windows_launcher_stub,
+    extract_windows_launcher_stub_license,
+    materialize_capsule_closures,
+)
+from vaultspec_a2a.desktop.contract import ComponentAssetKind
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+    from contextlib import AbstractContextManager
+    from typing import BinaryIO
+
+    from vaultspec_a2a.desktop._filesystem_authority import DirectoryAuthority
+    from vaultspec_a2a.desktop.artifacts import VerifiedCapsuleInputSession
+    from vaultspec_a2a.desktop.capsule_assembly import (
+        CapsuleAssemblyPlan,
+        ReservedTreeFile,
+    )
+    from vaultspec_a2a.desktop.capsule_evidence import ProjectedFile
+
+# The capsule contract fixes the gateway API surface at v1; a wider range is a
+# future contract change, not a build-time choice.
+_API_VERSIONS: Final = ApiVersionRange(
+    minimum=GatewayApiVersion.V1, maximum=GatewayApiVersion.V1
 )
 
-_REPO_ROOT: Final = Path(__file__).resolve().parents[1]
-_INPUTS_FILE: Final = _REPO_ROOT / "scripts" / "desktop_capsule_inputs.toml"
+# The two interpreter archives extract verbatim into these sibling subtrees
+# under the materialized ``runtime`` directory the closures already create.
+_INTERPRETER_SUBTREES: Final = (
+    (ComponentAssetKind.PYTHON_RUNTIME, "cpython"),
+    (ComponentAssetKind.NODE_RUNTIME, "node"),
+)
+_RUNTIME_ROOT: Final = "runtime"
 
-# Fixed archive paths for each base-closure asset kind inside the capsule ZIP.
-_ASSET_PATH: Final[dict[ComponentAssetKind, str]] = {
-    ComponentAssetKind.PYTHON_RUNTIME: "assets/python-runtime",
-    ComponentAssetKind.NODE_RUNTIME: "assets/node-runtime",
-    ComponentAssetKind.ACP_ADAPTER: "assets/acp-adapter",
-    ComponentAssetKind.A2A_DISTRIBUTION: "assets/a2a-distribution",
-}
+# Installed-tree evidence key under which the per-member drop-audit-trail is
+# surfaced so a library-runtime omission is auditable, not silent.
+_DROPPED_EVIDENCE_KEY: Final = "vaultspec:dropped-members"
 
-_MANIFEST_JSON: Final = "component-manifest.json"
-_MANIFEST_CANONICAL: Final = "component-manifest.canonical.bin"
-_MANIFEST_DIGEST: Final = "component-manifest.digest.sha256"
-_PYLOCK_PATH: Final = "a2a/pylock.toml"
-
-# Minimum ZIP timestamp: deterministic epoch for all archive entries.
-_ZIP_EPOCH: Final = (1980, 1, 1, 0, 0, 0)
-_READ_CHUNK: Final = 1 << 20  # 1 MiB
-_DOWNLOAD_TIMEOUT: Final = 300
+_UV_LOCK_BASENAME: Final = "uv.lock"
+_PACKAGE_LOCK_BASENAME: Final = "package-lock.json"
 
 
-class CapsuleError(RuntimeError):
-    """Fatal error during capsule assembly or digest computation."""
+class CapsuleBuildError(RuntimeError):
+    """Fatal error while consuming pinned inputs into a capsule generation."""
 
 
 # ---------------------------------------------------------------------------
-# Pinned-inputs loading
+# Reservation lookup
 # ---------------------------------------------------------------------------
 
 
-def _load_inputs(
-    triple: str,
-) -> tuple[dict[str, str], dict[str, str], dict[str, str]]:
-    """Return (acp_entry, python_entry, node_entry) for *triple*.
+def _single_reservation(
+    plan: CapsuleAssemblyPlan, role: PlanReservationRole
+) -> ReservedTreeFile:
+    """Return the sole plan reservation carrying *role*, failing closed otherwise."""
+    matches = [file for file in plan.files if file.role is role]
+    if len(matches) != 1:
+        raise CapsuleBuildError(
+            f"capsule plan does not reserve exactly one {role.value} destination"
+        )
+    return matches[0]
 
-    Each entry is a mapping with at minimum ``version``, ``license``,
-    ``url``, and ``sha256`` keys as strings.
-    """
-    try:
-        document = tomllib.loads(_INPUTS_FILE.read_text(encoding="utf-8"))
-    except (OSError, tomllib.TOMLDecodeError) as exc:
-        raise CapsuleError(f"cannot read {_INPUTS_FILE.name}: {exc}") from None
 
-    acp: dict[str, str] = document.get("acp", {})
-    targets: dict[str, dict[str, dict[str, str]]] = document.get("targets", {})
-    if triple not in targets:
-        raise CapsuleError(f"target {triple!r} is not declared in {_INPUTS_FILE.name}")
-    target_section = targets[triple]
-    python_entry: dict[str, str] = target_section.get("python", {})
-    node_entry: dict[str, str] = target_section.get("node", {})
-    for label, entry in (("acp", acp), ("python", python_entry), ("node", node_entry)):
-        for key in ("version", "license", "url", "sha256"):
-            if key not in entry:
-                raise CapsuleError(f"inputs file is missing [{triple}.{label}].{key}")
-    return acp, python_entry, node_entry
+def _lock_reservations(
+    plan: CapsuleAssemblyPlan,
+) -> tuple[ReservedTreeFile, ReservedTreeFile]:
+    """Return the (uv, package) dependency-lock reservations by their basenames."""
+    by_name = {
+        file.path.rsplit("/", 1)[-1]: file
+        for file in plan.files
+        if file.role is PlanReservationRole.DEPENDENCY_LOCK
+    }
+    uv = by_name.get(_UV_LOCK_BASENAME)
+    package = by_name.get(_PACKAGE_LOCK_BASENAME)
+    if uv is None or package is None or len(by_name) != 2:
+        raise CapsuleBuildError("capsule plan does not reserve both dependency locks")
+    return uv, package
 
 
 # ---------------------------------------------------------------------------
-# Download and content-addressed cache
+# Generated- and streamed-byte materialization (into the shared capsule lease)
 # ---------------------------------------------------------------------------
 
 
-def _sha256_file(path: Path) -> str:
-    hasher = hashlib.sha256()
-    with path.open("rb") as handle:
-        while block := handle.read(_READ_CHUNK):
-            hasher.update(block)
-    return hasher.hexdigest()
-
-
-def _download_to(url: str, dest: Path) -> None:
-    click.echo(f"    downloading {url}")
-    try:
-        with urlopen(url, timeout=_DOWNLOAD_TIMEOUT) as response:
-            dest.write_bytes(response.read())
-    except Exception as exc:
-        raise CapsuleError(f"download failed for {url}: {exc}") from None
-
-
-def _is_pinned(sha256: str) -> bool:
-    """Return True when *sha256* is a real 64-character hex digest."""
-    return len(sha256) == 64 and all(c in "0123456789abcdef" for c in sha256)
-
-
-def _ensure_cached(
-    url: str,
-    expected_sha256: str,
-    cache_dir: Path,
+def _materialize_bytes(
+    content: bytes,
+    reserved: ReservedTreeFile,
     *,
-    skip_download: bool,
-    verify: bool = True,
-) -> Path:
-    """Return a path to the cached artifact, downloading when absent."""
-    cache_dir.mkdir(parents=True, exist_ok=True)
-    safe_name = url.rsplit("/", 1)[-1].replace("%", "_").replace("+", "_")
-    cached = cache_dir / safe_name
+    capsule: DirectoryAuthority,
+    generation: DirectoryAuthority,
+    parent_identities: dict[tuple[str, ...], tuple[int, int]],
+    source_date_epoch: int,
+) -> ProjectedFile:
+    """Materialize one exact in-memory byte payload into its reserved destination."""
+    with io.BytesIO(content) as stream:
+        return materialize_verified_member(
+            stream,
+            reserved.path,
+            destination_root=capsule.path,
+            generation_authority=generation,
+            destination_authority=capsule,
+            parent_identities=parent_identities,
+            expected_size=len(content),
+            mode=reserved.mode,
+            source_date_epoch=source_date_epoch,
+        )
 
-    if cached.is_file():
-        click.echo(f"  cache hit: {safe_name}")
-        if verify and _is_pinned(expected_sha256):
-            actual = _sha256_file(cached)
-            if actual != expected_sha256:
-                raise CapsuleError(
-                    f"cached {safe_name} digest mismatch:\n"
-                    f"  expected: {expected_sha256}\n"
-                    f"  actual:   {actual}"
+
+def _materialize_lock(
+    open_lock: Callable[[], AbstractContextManager[BinaryIO]],
+    reserved: ReservedTreeFile,
+    *,
+    capsule: DirectoryAuthority,
+    generation: DirectoryAuthority,
+    parent_identities: dict[tuple[str, ...], tuple[int, int]],
+    source_date_epoch: int,
+) -> ProjectedFile:
+    """Stream one retained dependency lock into its reserved destination."""
+    if reserved.size is None:
+        raise CapsuleBuildError("dependency-lock reservation is missing its size")
+    with open_lock() as stream:
+        return materialize_verified_member(
+            stream,
+            reserved.path,
+            destination_root=capsule.path,
+            generation_authority=generation,
+            destination_authority=capsule,
+            parent_identities=parent_identities,
+            expected_size=reserved.size,
+            mode=reserved.mode,
+            source_date_epoch=source_date_epoch,
+        )
+
+
+# ---------------------------------------------------------------------------
+# Drop-audit-trail (consumed from the prepared descriptor)
+# ---------------------------------------------------------------------------
+
+
+def _drop_audit_trail(
+    session: VerifiedCapsuleInputSession,  # noqa: ARG001
+) -> list[dict[str, object]]:
+    """Return the per-member drop-audit-trail carried by the prepared descriptor.
+
+    The preparation stage records every verified closure member deliberately
+    omitted from the installed tree - the library-runtime ``.data/headers`` and
+    ``.data/scripts`` omissions - so the omission is auditable rather than
+    silent.  The build surfaces that record verbatim into the installed-tree
+    evidence and derives nothing here.  Until the prepared descriptor exposes
+    the record, this yields an empty trail.
+    """
+    # Wired to the input authority's carried drop-audit-trail once it exposes
+    # it; empty until then. Records are surfaced under ``_DROPPED_EVIDENCE_KEY``.
+    return []
+
+
+# ---------------------------------------------------------------------------
+# Interpreter subtree verbatim projection
+# ---------------------------------------------------------------------------
+
+
+def _project_interpreter_subtrees(
+    session: VerifiedCapsuleInputSession,
+    *,
+    input_dir: Path,
+    capsule: DirectoryAuthority,
+    source_date_epoch: int,
+) -> list[ProjectedFile]:
+    """Verbatim-project both interpreter subtrees into the materialized runtime dir.
+
+    The closures already created ``runtime`` (their install roots sit beneath
+    it), so the two interpreter archives extract into fresh ``cpython`` and
+    ``node`` children of that existing directory.  The verified runtime source
+    bytes are re-resolved from the same content-addressed cache; nothing is
+    re-derived.
+    """
+    verified = {
+        artifact.descriptor.kind: artifact
+        for artifact in verify_cached_artifacts(session.descriptor, input_dir=input_dir)
+    }
+    runtime_authority = resolve_directory_authority(capsule.path / _RUNTIME_ROOT)
+    projected: list[ProjectedFile] = []
+    with directory_lease(runtime_authority) as runtime:
+        for kind, prefix in _INTERPRETER_SUBTREES:
+            artifact = verified.get(kind)
+            if artifact is None:
+                raise CapsuleBuildError(
+                    f"verified cache is missing the {kind.value} interpreter source"
                 )
-        return cached
-
-    if skip_download:
-        raise CapsuleError(
-            f"{safe_name} is absent from cache; cannot proceed with --skip-download"
-        )
-
-    _download_to(url, cached)
-    actual = _sha256_file(cached)
-    if verify and _is_pinned(expected_sha256) and actual != expected_sha256:
-        cached.unlink(missing_ok=True)
-        raise CapsuleError(
-            f"download digest mismatch for {safe_name}:\n"
-            f"  expected: {expected_sha256}\n"
-            f"  actual:   {actual}\n"
-            f"Update sha256 in {_INPUTS_FILE.name} if the upstream release changed."
-        )
-    return cached
+            projected.extend(
+                project_source_archive_into_unpublished_generation(
+                    artifact,
+                    generation_authority=runtime,
+                    destination_prefix=prefix,
+                    source_date_epoch=source_date_epoch,
+                )
+            )
+    return projected
 
 
 # ---------------------------------------------------------------------------
-# Wheel and pylock construction
+# Whole-generation assembly
 # ---------------------------------------------------------------------------
 
 
-def _build_env() -> dict[str, str]:
-    env = dict(os.environ)
-    env["NO_COLOR"] = "1"
-    env["UV_NO_PROGRESS"] = "1"
-    for name in ("PYTHONHOME", "PYTHONPATH", "UV_PROJECT_ENVIRONMENT", "VIRTUAL_ENV"):
-        env.pop(name, None)
-    return env
-
-
-def _run(
-    command: list[str],
+def _assemble_generation(
+    session: VerifiedCapsuleInputSession,
+    plan: CapsuleAssemblyPlan,
     *,
-    cwd: Path,
-    env: dict[str, str],
-    timeout: int = 600,
-) -> None:
-    result = subprocess.run(
-        command,
-        cwd=cwd,
-        env=env,
-        capture_output=True,
-        text=True,
-        timeout=timeout,
-    )
-    if result.returncode != 0:
-        rendered = subprocess.list2cmdline(command)
-        raise CapsuleError(
-            f"command failed ({result.returncode}): {rendered}\n"
-            f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}"
-        )
+    input_dir: Path,
+    generation: DirectoryAuthority,
+    capsule: DirectoryAuthority,
+    windows_launcher_stub: bytes | None,
+    windows_launcher_stub_license: bytes | None,
+    source_date_epoch: int,
+) -> tuple[str, int]:
+    """Assemble the whole capsule tree and its final archive inside one generation.
 
-
-def _build_wheel_from_head(sandbox: Path) -> Path:
-    """Build the A2A wheel from a clean git archive of HEAD.
-
-    Builds into *sandbox* which is created if absent.  Returns the path to
-    the single wheel file.
+    Returns the deterministic ``capsule.zip`` digest and the count of installed
+    files surfaced into the installed-tree evidence.
     """
-    git = shutil.which("git")
-    uv = shutil.which("uv")
-    if git is None or uv is None:
-        raise CapsuleError("git and uv must be on PATH to build the capsule wheel")
-
-    sandbox.mkdir(parents=True, exist_ok=True)
-    env = _build_env()
-
-    source_archive = sandbox / "source.tar"
-    _run(
-        [git, "archive", "--format=tar", "--output", str(source_archive), "HEAD"],
-        cwd=_REPO_ROOT,
-        env=env,
+    projected: list[ProjectedFile] = list(
+        materialize_capsule_closures(
+            plan,
+            session,
+            api_versions=_API_VERSIONS,
+            destination_root=capsule.path,
+            generation_authority=generation,
+            destination_authority=capsule,
+            source_date_epoch=source_date_epoch,
+            windows_launcher_stub=windows_launcher_stub,
+            windows_launcher_stub_license=windows_launcher_stub_license,
+        )
     )
-    source_root = sandbox / "source"
-    source_root.mkdir()
-    with tarfile.open(source_archive, mode="r:") as archive:
-        archive.extractall(source_root, filter="data")
-
-    dist_dir = sandbox / "dist"
-    dist_dir.mkdir()
-    _run(
-        [uv, "build", "--wheel", "--out-dir", str(dist_dir), "--no-sources"],
-        cwd=source_root,
-        env=env,
+    projected.extend(
+        _project_interpreter_subtrees(
+            session,
+            input_dir=input_dir,
+            capsule=capsule,
+            source_date_epoch=source_date_epoch,
+        )
     )
-    wheels = list(dist_dir.glob("vaultspec_a2a-*.whl"))
-    if len(wheels) != 1:
-        raise CapsuleError(f"expected one wheel from uv build, got: {wheels}")
-    return wheels[0]
 
-
-def _export_pylock(sandbox: Path) -> Path:
-    """Export the locked base Python dependency closure to *sandbox*/pylock.toml."""
-    uv = shutil.which("uv")
-    if uv is None:
-        raise CapsuleError("uv must be on PATH to export the pylock")
-
-    sandbox.mkdir(parents=True, exist_ok=True)
-    pylock = sandbox / "pylock.toml"
-    env = _build_env()
-    _run(
-        [
-            uv,
-            "export",
-            "--format",
-            "pylock.toml",
-            "--locked",
-            "--no-dev",
-            "--no-emit-project",
-            "--output-file",
-            str(pylock),
-        ],
-        cwd=_REPO_ROOT,
-        env=env,
+    parent_identities: dict[tuple[str, ...], tuple[int, int]] = {}
+    uv_reservation, package_reservation = _lock_reservations(plan)
+    projected.append(
+        _materialize_lock(
+            session.open_uv_lock,
+            uv_reservation,
+            capsule=capsule,
+            generation=generation,
+            parent_identities=parent_identities,
+            source_date_epoch=source_date_epoch,
+        )
     )
-    if not pylock.is_file():
-        raise CapsuleError("uv export did not produce pylock.toml")
-    return pylock
+    projected.append(
+        _materialize_lock(
+            session.open_package_lock,
+            package_reservation,
+            capsule=capsule,
+            generation=generation,
+            parent_identities=parent_identities,
+            source_date_epoch=source_date_epoch,
+        )
+    )
+
+    manifest = session.emit_component_manifest(api_versions=_API_VERSIONS)
+    manifest_json = (
+        json.dumps(manifest.model_dump(mode="json"), indent=2, sort_keys=True).encode(
+            "utf-8"
+        )
+        + b"\n"
+    )
+    for content, role in (
+        (manifest_json, PlanReservationRole.COMPONENT_MANIFEST),
+        (
+            component_manifest_canonical_bytes(manifest),
+            PlanReservationRole.CANONICAL_MANIFEST,
+        ),
+        (
+            component_manifest_digest(manifest).encode("ascii"),
+            PlanReservationRole.MANIFEST_DIGEST,
+        ),
+    ):
+        projected.append(
+            _materialize_bytes(
+                content,
+                _single_reservation(plan, role),
+                capsule=capsule,
+                generation=generation,
+                parent_identities=parent_identities,
+                source_date_epoch=source_date_epoch,
+            )
+        )
+
+    # The installed-tree evidence describes every materialized file except
+    # itself (and the sibling archive, which is not inside the tree).
+    evidence_document = installed_tree_inventory(
+        manifest=manifest,
+        files=projected,
+        source_date_epoch=source_date_epoch,
+    )
+    dropped = _drop_audit_trail(session)
+    if dropped:
+        evidence_document[_DROPPED_EVIDENCE_KEY] = dropped
+    _materialize_bytes(
+        canonical_evidence_bytes(evidence_document),
+        _single_reservation(plan, PlanReservationRole.INSTALLED_EVIDENCE),
+        capsule=capsule,
+        generation=generation,
+        parent_identities=parent_identities,
+        source_date_epoch=source_date_epoch,
+    )
+
+    archive_digest, _ = write_deterministic_capsule_zip_into_unpublished_generation(
+        capsule.path,
+        generation_authority=generation,
+        output_name=CAPSULE_ARCHIVE_OUTPUT_NAME,
+        source_date_epoch=source_date_epoch,
+    )
+    return archive_digest, len(projected)
 
 
-# ---------------------------------------------------------------------------
-# Capsule archive assembly
-# ---------------------------------------------------------------------------
+def _acquire_windows_launcher_stub(donor_path: Path | None) -> tuple[bytes, bytes]:
+    """Extract the pinned console stub and its license notice from the donor wheel."""
+    if donor_path is None:
+        raise CapsuleBuildError(
+            "a Windows target requires --launcher-stub-donor pointing at the "
+            "pinned donor wheel"
+        )
+    with donor_path.open("rb") as donor:
+        stub = extract_windows_launcher_stub(donor)
+    with donor_path.open("rb") as donor:
+        stub_license = extract_windows_launcher_stub_license(donor)
+    return stub, stub_license
 
 
-def _assemble_capsule(
-    capsule_zip: Path,
+def _run_build(
     *,
-    asset_files: dict[ComponentAssetKind, Path],
-    pylock: Path,
-    manifest_json: bytes,
-    canonical_bytes: bytes,
-    digest_hex: str,
-) -> None:
-    """Write the deterministic capsule ZIP to *capsule_zip*."""
-    entries: list[tuple[str, bytes]] = [
-        (_MANIFEST_JSON, manifest_json),
-        (_MANIFEST_CANONICAL, canonical_bytes),
-        (_MANIFEST_DIGEST, digest_hex.encode("ascii")),
-        (_PYLOCK_PATH, pylock.read_bytes()),
-    ]
-    for kind, src in asset_files.items():
-        entries.append((_ASSET_PATH[kind], src.read_bytes()))
+    target: TargetTriple,
+    descriptor_path: Path,
+    descriptor_sha256: str,
+    input_dir: Path,
+    uv_lock: Path,
+    package_lock: Path,
+    out_dir: Path,
+    launcher_stub_donor: Path | None,
+) -> tuple[Path, str]:
+    """Open the pinned inputs read-only and assemble one capsule generation."""
+    with open_verified_capsule_inputs(
+        descriptor_path,
+        expected_descriptor_sha256=descriptor_sha256,
+        input_dir=input_dir,
+        uv_lock_path=uv_lock,
+        package_lock_path=package_lock,
+    ) as session:
+        descriptor = session.descriptor
+        if descriptor.target is not target:
+            raise CapsuleBuildError(
+                f"descriptor target {descriptor.target.value} does not match the "
+                f"requested target {target.value}"
+            )
+        source_date_epoch = descriptor.source_date_epoch
+        plan = derive_capsule_assembly_plan(session, api_versions=_API_VERSIONS)
 
-    entries.sort(key=lambda pair: pair[0])
-    with zipfile.ZipFile(capsule_zip, "w", compression=zipfile.ZIP_DEFLATED) as zf:
-        for archive_path, data in entries:
-            info = zipfile.ZipInfo(archive_path, date_time=_ZIP_EPOCH)
-            info.compress_type = zipfile.ZIP_DEFLATED
-            zf.writestr(info, data)
+        stub: bytes | None = None
+        stub_license: bytes | None = None
+        if descriptor.target is TargetTriple.WINDOWS_X86_64:
+            stub, stub_license = _acquire_windows_launcher_stub(launcher_stub_donor)
+
+        out_dir.mkdir(parents=True, exist_ok=True)
+        generation_dir = out_dir / target.value
+        try:
+            generation_dir.mkdir()
+        except FileExistsError:
+            raise CapsuleBuildError(
+                f"generation directory {generation_dir} already exists; the build "
+                "refuses to overwrite a prior generation"
+            ) from None
+
+        generation_root = resolve_directory_authority(generation_dir)
+        with (
+            directory_lease(generation_root) as generation,
+            claim_new_directory(generation, CAPSULE_ROOT) as capsule,
+        ):
+            archive_digest, file_count = _assemble_generation(
+                session,
+                plan,
+                input_dir=input_dir,
+                generation=generation,
+                capsule=capsule,
+                windows_launcher_stub=stub,
+                windows_launcher_stub_license=stub_license,
+                source_date_epoch=source_date_epoch,
+            )
+    click.echo(f"  generation:        {generation_dir}")
+    click.echo(f"  installed files:   {file_count}")
+    click.echo(f"  capsule archive:   {generation_dir / CAPSULE_ARCHIVE_OUTPUT_NAME}")
+    click.echo(f"  archive sha256:    {archive_digest}")
+    return generation_dir, archive_digest
 
 
 # ---------------------------------------------------------------------------
@@ -344,223 +504,81 @@ def cli() -> None:
     "--target",
     required=True,
     type=click.Choice([t.value for t in TargetTriple]),
-    help="Target triple for the assembled capsule.",
+    help="Target triple; must match the pinned descriptor's target.",
+)
+@click.option(
+    "--descriptor",
+    "descriptor",
+    required=True,
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+    help="Pinned capsule input descriptor produced by the preparation stage.",
+)
+@click.option(
+    "--descriptor-sha256",
+    required=True,
+    help="Expected SHA-256 of the pinned descriptor bytes.",
+)
+@click.option(
+    "--input-dir",
+    required=True,
+    type=click.Path(exists=True, file_okay=False, path_type=Path),
+    help="Content-addressed input cache the descriptor was pinned against.",
+)
+@click.option(
+    "--uv-lock",
+    required=True,
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+    help="uv.lock whose digest the descriptor pins.",
+)
+@click.option(
+    "--package-lock",
+    required=True,
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+    help="package-lock.json whose digest the descriptor pins.",
 )
 @click.option(
     "--out-dir",
     required=True,
-    type=click.Path(),
-    help="Directory to write the capsule archive and detached manifest.",
+    type=click.Path(path_type=Path),
+    help="Directory to hold the per-target generation.",
 )
 @click.option(
-    "--cache-dir",
+    "--launcher-stub-donor",
     default=None,
-    type=click.Path(),
-    help="Content-addressed download cache.  Defaults to <out-dir>/.cache.",
-)
-@click.option(
-    "--skip-download",
-    is_flag=True,
-    default=False,
-    help="Use cached inputs only; fail if any input is absent.",
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+    help="Pinned donor wheel supplying the Windows console launcher stub.",
 )
 def build(
     target: str,
-    out_dir: str,
-    cache_dir: str | None,
-    skip_download: bool,
+    descriptor: Path,
+    descriptor_sha256: str,
+    input_dir: Path,
+    uv_lock: Path,
+    package_lock: Path,
+    out_dir: Path,
+    launcher_stub_donor: Path | None,
 ) -> None:
-    """Assemble a deterministic desktop capsule for TARGET.
-
-    Produces <out-dir>/<target>.zip and <out-dir>/<target>.manifest.json.
-    The manifest JSON is also embedded inside the ZIP for self-contained
-    verification.
-    """
-    triple = TargetTriple(target)
-    out = Path(out_dir)
-    out.mkdir(parents=True, exist_ok=True)
-    cache = Path(cache_dir) if cache_dir else out / ".cache"
-
+    """Assemble a deterministic desktop capsule generation from pinned inputs."""
     try:
-        _run_build(triple, out, cache, skip_download=skip_download)
-    except CapsuleError as exc:
+        _run_build(
+            target=TargetTriple(target),
+            descriptor_path=descriptor,
+            descriptor_sha256=descriptor_sha256,
+            input_dir=input_dir,
+            uv_lock=uv_lock,
+            package_lock=package_lock,
+            out_dir=out_dir,
+            launcher_stub_donor=launcher_stub_donor,
+        )
+    except (
+        CapsuleBuildError,
+        ArtifactInputError,
+        CapsuleAssemblyError,
+        CapsuleAssemblyPlanError,
+        CapsuleMaterializationError,
+    ) as exc:
         click.echo(f"ERROR: {exc}", err=True)
         sys.exit(1)
-
-
-def _run_build(
-    triple: TargetTriple,
-    out: Path,
-    cache: Path,
-    *,
-    skip_download: bool,
-) -> None:
-    acp_entry, python_entry, node_entry = _load_inputs(triple.value)
-
-    click.echo(f"[1/5] Acquiring pinned inputs for {triple.value}...")
-    python_archive = _ensure_cached(
-        python_entry["url"],
-        python_entry["sha256"],
-        cache / "python",
-        skip_download=skip_download,
-    )
-    node_archive = _ensure_cached(
-        node_entry["url"],
-        node_entry["sha256"],
-        cache / "node",
-        skip_download=skip_download,
-    )
-    acp_archive = _ensure_cached(
-        acp_entry["url"],
-        acp_entry["sha256"],
-        cache / "acp",
-        skip_download=skip_download,
-    )
-
-    click.echo("[2/5] Building wheel from git HEAD and exporting pylock...")
-    with tempfile.TemporaryDirectory(prefix="vaultspec-capsule-") as tmp_str:
-        tmp = Path(tmp_str)
-        wheel = _build_wheel_from_head(tmp / "wheel")
-        pylock = _export_pylock(tmp / "pylock")
-
-        click.echo("[3/5] Emitting component manifest...")
-        manifest = emit_component_manifest(
-            target=triple,
-            api_versions=ApiVersionRange(
-                minimum=GatewayApiVersion.V1,
-                maximum=GatewayApiVersion.V1,
-            ),
-            assets=[
-                AssetSource(
-                    kind=ComponentAssetKind.PYTHON_RUNTIME,
-                    path=python_archive,
-                    version=python_entry["version"],
-                    license=python_entry["license"],
-                ),
-                AssetSource(
-                    kind=ComponentAssetKind.A2A_DISTRIBUTION,
-                    path=wheel,
-                ),
-                AssetSource(
-                    kind=ComponentAssetKind.NODE_RUNTIME,
-                    path=node_archive,
-                    version=node_entry["version"],
-                    license=node_entry["license"],
-                ),
-                AssetSource(
-                    kind=ComponentAssetKind.ACP_ADAPTER,
-                    path=acp_archive,
-                    version=acp_entry["version"],
-                    license=acp_entry["license"],
-                ),
-            ],
-            uv_lock_path=_REPO_ROOT / "uv.lock",
-            package_lock_path=_REPO_ROOT / "package-lock.json",
-        )
-
-        canonical = component_manifest_canonical_bytes(manifest)
-        digest_hex = component_manifest_digest(manifest)
-        manifest_payload = manifest.model_dump(mode="json")
-        manifest_json = (
-            json.dumps(manifest_payload, indent=2, sort_keys=True).encode("utf-8")
-            + b"\n"
-        )
-
-        click.echo("[4/5] Assembling capsule archive...")
-        capsule_zip = out / f"{triple.value}.zip"
-        _assemble_capsule(
-            capsule_zip,
-            asset_files={
-                ComponentAssetKind.PYTHON_RUNTIME: python_archive,
-                ComponentAssetKind.NODE_RUNTIME: node_archive,
-                ComponentAssetKind.ACP_ADAPTER: acp_archive,
-                ComponentAssetKind.A2A_DISTRIBUTION: wheel,
-            },
-            pylock=pylock,
-            manifest_json=manifest_json,
-            canonical_bytes=canonical,
-            digest_hex=digest_hex,
-        )
-        detached = out / f"{triple.value}.manifest.json"
-        detached.write_bytes(manifest_json)
-
-        click.echo("[5/5] Done.")
-        size_mb = capsule_zip.stat().st_size / (1024 * 1024)
-        click.echo(f"  capsule:           {capsule_zip}")
-        click.echo(f"  capsule size:      {size_mb:.1f} MiB")
-        click.echo(f"  manifest:          {detached}")
-        click.echo(f"  canonical digest:  {digest_hex}")
-
-
-@cli.command("compute-digests")
-@click.option(
-    "--target",
-    required=True,
-    type=click.Choice([t.value for t in TargetTriple]),
-    help="Target triple whose inputs should be downloaded and hashed.",
-)
-@click.option(
-    "--cache-dir",
-    default=None,
-    type=click.Path(),
-    help="Download cache directory.",
-)
-def compute_digests(target: str, cache_dir: str | None) -> None:
-    """Download pinned inputs for TARGET and print their SHA-256 digests.
-
-    Use this command to bootstrap the sha256 values in
-    desktop_capsule_inputs.toml after selecting new upstream release URLs.
-    """
-    try:
-        _run_compute_digests(target, cache_dir)
-    except CapsuleError as exc:
-        click.echo(f"ERROR: {exc}", err=True)
-        sys.exit(1)
-
-
-def _run_compute_digests(target: str, cache_dir: str | None) -> None:
-    acp_entry, python_entry, node_entry = _load_inputs(target)
-    prefix = "vaultspec-digests-"
-    cache = Path(cache_dir) if cache_dir else Path(tempfile.mkdtemp(prefix=prefix))
-    click.echo(f"Computing digests for {target} (cache: {cache})...")
-
-    python_archive = _ensure_cached(
-        python_entry["url"],
-        python_entry["sha256"],
-        cache / "python",
-        skip_download=False,
-        verify=False,
-    )
-    python_sha256 = _sha256_file(python_archive)
-
-    node_archive = _ensure_cached(
-        node_entry["url"],
-        node_entry["sha256"],
-        cache / "node",
-        skip_download=False,
-        verify=False,
-    )
-    node_sha256 = _sha256_file(node_archive)
-
-    acp_archive = _ensure_cached(
-        acp_entry["url"],
-        acp_entry["sha256"],
-        cache / "acp",
-        skip_download=False,
-        verify=False,
-    )
-    acp_sha256 = _sha256_file(acp_archive)
-
-    click.echo("")
-    click.echo("# --- paste into desktop_capsule_inputs.toml ---")
-    click.echo("# [acp]")
-    click.echo(f'sha256 = "{acp_sha256}"')
-    click.echo("")
-    click.echo(f"# [targets.{target}.python]")
-    click.echo(f'sha256 = "{python_sha256}"')
-    click.echo("")
-    click.echo(f"# [targets.{target}.node]")
-    click.echo(f'sha256 = "{node_sha256}"')
 
 
 if __name__ == "__main__":

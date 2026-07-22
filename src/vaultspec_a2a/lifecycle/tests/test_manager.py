@@ -318,6 +318,31 @@ def test_resume_that_never_becomes_ready_is_atomic(tmp_path) -> None:
     assert persisted.pid == record.pid
 
 
+def test_rerun_that_never_becomes_ready_is_atomic(tmp_path) -> None:
+    """A rerun whose respawn never binds raises without publishing a new pid.
+
+    Proves S107/S149 against real children: rerun fells the running tree, then the
+    respawn (a serve that exits without binding) must fail loud and NOT rewrite the
+    record with a not-ready generation. The record is left carrying the pre-rerun
+    pid rather than a half-published dead new one.
+    """
+    old = _sleeper()
+    record = _record(name="cycle-fail", pid=old.pid, port=18910, workspace="ws-z")
+    write_record(record, home=tmp_path)
+
+    config = _scratch_config(serve=[sys.executable, "-c", "import sys; sys.exit(1)"])
+    try:
+        with pytest.raises(LifecycleError, match="never became ready"):
+            rerun("cycle-fail", home=tmp_path, config=config)
+        # No not-ready new generation was published; the record still names the
+        # pre-rerun pid (which rerun felled), not a half-committed new pid.
+        persisted = read_record(record_path("scratch", "cycle-fail", home=tmp_path))
+        assert persisted is not None
+        assert persisted.pid == old.pid
+    finally:
+        tree_kill(old.pid)
+
+
 def test_reap_clears_dead_and_stale_but_keeps_live(tmp_path) -> None:
     write_record(_record(name="corpse", pid=_dead_pid(), port=18906), home=tmp_path)
     child = _sleeper()

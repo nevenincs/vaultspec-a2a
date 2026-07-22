@@ -153,6 +153,91 @@ def _merge_properties(
             target[name] = subschema
 
 
+def _translate_oneof_schema(
+    branches: list[Any], injected: frozenset[str]
+) -> tuple[dict[str, Any], list[str], list[str], bool]:
+    """Translate a ``oneOf`` DSL schema into JSON-Schema fragments.
+
+    Returns the accumulated ``(properties, required, guidance_parts, open_schema)``.
+    A branch carrying an opaque payload or an unenumerated alias leaves the schema
+    open, because the engine flattens those fields the DSL does not name.
+    """
+    properties: dict[str, Any] = {}
+    open_schema = False
+    required_sets: list[set[str]] = []
+    enum_values: dict[str, list[str]] = {}
+    branch_notes: list[str] = []
+    for branch in branches:
+        if not isinstance(branch, dict):
+            continue
+        b_required = _str_list(branch.get("required"), injected)
+        b_optional = _str_list(branch.get("optional"), injected)
+        for field in (*b_required, *b_optional):
+            properties.setdefault(field, _permissive_field())
+        # A branch that inlines its own JSON-Schema properties (engine content
+        # inlining) contributes them verbatim, overriding the permissive
+        # placeholders above with the real nested shape.
+        _merge_properties(properties, branch.get("properties"), injected)
+        required_sets.append(set(b_required))
+        payload = branch.get("payload")
+        alias_of = branch.get("alias_of")
+        note_parts: list[str] = []
+        if b_required:
+            note_parts.append("requires " + ", ".join(b_required))
+        if isinstance(payload, str):
+            open_schema = True
+            note_parts.append(f"sends payload {payload}")
+        if isinstance(alias_of, str) and not (b_required or b_optional):
+            # An alias with no enumerated fields is an opaque input shape.
+            open_schema = True
+            note_parts.append(f"input aliases {alias_of}")
+        discriminator: tuple[str, str] | None = None
+        for key in _DISCRIMINATOR_KEYS:
+            value = branch.get(key)
+            if isinstance(value, str):
+                values = enum_values.setdefault(key, [])
+                if value not in values:
+                    values.append(value)
+                discriminator = (key, value)
+                break
+        if discriminator is not None:
+            key, value = discriminator
+            detail = "; ".join(note_parts) if note_parts else "no fields"
+            branch_notes.append(f"{key}={value!r} {detail}")
+    for disc_key, values in enum_values.items():
+        properties[disc_key] = {"type": "string", "enum": values}
+    # Per-branch required sets differ, so the top-level guarantee is their
+    # intersection (often empty); per-branch requirements ride the guidance.
+    required: list[str] = []
+    if required_sets:
+        required = sorted(set.intersection(*required_sets))
+    guidance_parts: list[str] = []
+    if branch_notes:
+        guidance_parts.append("One of: " + "; ".join(branch_notes) + ".")
+    return properties, required, guidance_parts, open_schema
+
+
+def _translate_flat_schema(
+    raw: dict[Any, Any], injected: frozenset[str]
+) -> tuple[dict[str, Any], list[str], bool]:
+    """Translate a flat (non-``oneOf``) DSL schema into JSON-Schema fragments.
+
+    Returns ``(properties, required, open_schema)``. A top-level opaque payload
+    leaves the schema open, as in the branch case.
+    """
+    properties: dict[str, Any] = {}
+    b_required = _str_list(raw.get("required"), injected)
+    b_optional = _str_list(raw.get("optional"), injected)
+    for field in (*b_required, *b_optional):
+        properties.setdefault(field, _permissive_field())
+    _merge_properties(properties, raw.get("properties"), injected)
+    required = sorted(b_required)
+    # A top-level opaque payload (e.g. request_apply -> ApplyRequest) has no
+    # enumerated fields, so the schema must stay open for the model to send it.
+    open_schema = isinstance(raw.get("payload"), str)
+    return properties, required, open_schema
+
+
 def normalize_tool_input_schema(
     raw: object, injected: frozenset[str] = frozenset()
 ) -> tuple[dict[str, Any], str]:
@@ -179,78 +264,14 @@ def normalize_tool_input_schema(
     if _looks_like_json_schema(raw):
         return _passthrough_valid_schema(raw, injected)
 
-    properties: dict[str, Any] = {}
-    required: list[str] = []
-    guidance_parts: list[str] = []
-    # A tool/branch carrying an opaque ``payload`` type (or aliasing another
-    # tool's input) whose fields the DSL does NOT enumerate cannot be a closed
-    # schema: the engine flattens the payload at the top level
-    # (``#[serde(tag=..., flatten)]``), so the model must be able to send those
-    # fields. Leave such schemas open (no ``additionalProperties: false``); the
-    # engine deserializes and validates the real shape.
-    open_schema = False
-
     branches = raw.get("oneOf")
     if isinstance(branches, list) and branches:
-        required_sets: list[set[str]] = []
-        enum_values: dict[str, list[str]] = {}
-        branch_notes: list[str] = []
-        for branch in branches:
-            if not isinstance(branch, dict):
-                continue
-            b_required = _str_list(branch.get("required"), injected)
-            b_optional = _str_list(branch.get("optional"), injected)
-            for field in (*b_required, *b_optional):
-                properties.setdefault(field, _permissive_field())
-            # A branch that inlines its own JSON-Schema properties (engine content
-            # inlining) contributes them verbatim, overriding the permissive
-            # placeholders above with the real nested shape.
-            _merge_properties(properties, branch.get("properties"), injected)
-            required_sets.append(set(b_required))
-            payload = branch.get("payload")
-            alias_of = branch.get("alias_of")
-            note_parts: list[str] = []
-            if b_required:
-                note_parts.append("requires " + ", ".join(b_required))
-            if isinstance(payload, str):
-                open_schema = True
-                note_parts.append(f"sends payload {payload}")
-            if isinstance(alias_of, str) and not (b_required or b_optional):
-                # An alias with no enumerated fields is an opaque input shape.
-                open_schema = True
-                note_parts.append(f"input aliases {alias_of}")
-            discriminator: tuple[str, str] | None = None
-            for key in _DISCRIMINATOR_KEYS:
-                value = branch.get(key)
-                if isinstance(value, str):
-                    values = enum_values.setdefault(key, [])
-                    if value not in values:
-                        values.append(value)
-                    discriminator = (key, value)
-                    break
-            if discriminator is not None:
-                key, value = discriminator
-                detail = "; ".join(note_parts) if note_parts else "no fields"
-                branch_notes.append(f"{key}={value!r} {detail}")
-        for disc_key, values in enum_values.items():
-            properties[disc_key] = {"type": "string", "enum": values}
-        # Per-branch required sets differ, so the top-level guarantee is their
-        # intersection (often empty); per-branch requirements ride the guidance.
-        if required_sets:
-            required = sorted(set.intersection(*required_sets))
-        if branch_notes:
-            guidance_parts.append("One of: " + "; ".join(branch_notes) + ".")
+        properties, required, guidance_parts, open_schema = _translate_oneof_schema(
+            branches, injected
+        )
     else:
-        b_required = _str_list(raw.get("required"), injected)
-        b_optional = _str_list(raw.get("optional"), injected)
-        for field in (*b_required, *b_optional):
-            properties.setdefault(field, _permissive_field())
-        _merge_properties(properties, raw.get("properties"), injected)
-        required = sorted(b_required)
-        # A top-level opaque payload (e.g. request_apply -> ApplyRequest) has no
-        # enumerated fields, so the schema must stay open for the model to send it.
-        if isinstance(raw.get("payload"), str):
-            open_schema = True
+        properties, required, open_schema = _translate_flat_schema(raw, injected)
+        guidance_parts = []
 
     bounds = raw.get("bounds")
     if isinstance(bounds, dict) and bounds:

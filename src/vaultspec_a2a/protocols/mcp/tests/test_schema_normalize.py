@@ -286,3 +286,76 @@ async def test_served_tools_carry_json_schema_object_over_real_mcp() -> None:
         assert listed.tools, "the bridge advertises tools"
         for tool in listed.tools:
             assert tool.inputSchema.get("type") == "object", tool.name
+
+
+class TestSchemaShapeTranslators:
+    """Each DSL shape translator, exercised on its own after the split.
+
+    The normaliser was one function branching over oneOf, flat, and passthrough
+    shapes. The two DSL translators are separable functions now, so each shape's
+    output can be asserted directly rather than only through the composed result.
+    """
+
+    def test_flat_translator_enumerates_required_and_optional(self) -> None:
+        from ..tools.schema_normalize import _translate_flat_schema
+
+        props, required, open_schema = _translate_flat_schema(
+            {"required": ["a"], "optional": ["b"]}, frozenset()
+        )
+
+        assert set(props) == {"a", "b"}
+        assert required == ["a"]
+        assert open_schema is False
+
+    def test_flat_translator_leaves_a_payload_schema_open(self) -> None:
+        from ..tools.schema_normalize import _translate_flat_schema
+
+        _props, _required, open_schema = _translate_flat_schema(
+            {"payload": "ApplyRequest"}, frozenset()
+        )
+
+        assert open_schema is True
+
+    def test_flat_translator_drops_injected_ids(self) -> None:
+        from ..tools.schema_normalize import _translate_flat_schema
+
+        props, required, _open = _translate_flat_schema(
+            {"required": ["session_id", "a"]}, frozenset({"session_id"})
+        )
+
+        assert "session_id" not in props
+        assert required == ["a"]
+
+    def test_oneof_translator_intersects_per_branch_required(self) -> None:
+        from ..tools.schema_normalize import _translate_oneof_schema
+
+        props, required, guidance, _open = _translate_oneof_schema(
+            [
+                {"operation": "start", "required": ["shared", "only_a"]},
+                {"operation": "stop", "required": ["shared", "only_b"]},
+            ],
+            frozenset(),
+        )
+
+        # The top-level guarantee is the intersection; per-branch reqs ride guidance.
+        assert required == ["shared"]
+        assert "only_a" in props and "only_b" in props
+        assert "One of:" in guidance[0]
+
+    def test_oneof_translator_opens_on_a_payload_branch(self) -> None:
+        from ..tools.schema_normalize import _translate_oneof_schema
+
+        _props, _required, _guidance, open_schema = _translate_oneof_schema(
+            [{"operation": "apply", "payload": "ApplyRequest"}], frozenset()
+        )
+
+        assert open_schema is True
+
+    def test_oneof_translator_builds_the_discriminator_enum(self) -> None:
+        from ..tools.schema_normalize import _translate_oneof_schema
+
+        props, _required, _guidance, _open = _translate_oneof_schema(
+            [{"operation": "start"}, {"operation": "stop"}], frozenset()
+        )
+
+        assert props["operation"] == {"type": "string", "enum": ["start", "stop"]}

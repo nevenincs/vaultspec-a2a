@@ -841,6 +841,32 @@ fails and resume/rerun refuse atomically (prior generation unchanged, respawn fe
 no overlapping child). S97 and S152 are proven and closed on that injection with real
 multi-process tests; no unkillable process is needed.
 
+### authenticated-pairing-verdict-not-enforced | high | The S93/S94 lifetime+generation classifier is dead code
+
+Type: correctness / dead-code (surfaced 2026-07-22 while grounding S153-156).
+Status: OPEN. `lifecycle/pairing.py` implements the fail-closed authenticated
+pairing verdict - `classify_worker_pairing` (blank evidence -> ``UNIDENTIFIED``,
+lifetime mismatch -> ``FOREIGN``, only the current generation -> ``OWNED``) and
+`eviction_is_authorized` (armed + ``PRIOR_GENERATION`` only) - with thorough unit
+coverage in `test_worker_pairing_verdict.py`. But neither function has ANY
+production caller (verified by grep across `src/` excluding tests): the worker
+advertises its `paired_gateway_lifetime` on ``/health`` (`worker/app.py`), yet no
+gateway-side code reads or classifies it. The real adoption path
+(`control/worker_management.py`) instead gates on the weaker `gateway_url` signal
+via `_worker_ready_and_ours` (the 2026-07-22 dev/compose fix above), which by
+design treats BLANK evidence as a same-gateway match for legacy no-regression -
+the exact opposite of the classifier's fail-closed ``UNIDENTIFIED``. Consequence:
+the stricter authenticated pairing S93/S94 built is not the policy actually
+enforced, and a plain-health worker with no pairing evidence would be adopted by
+the gateway_url path where the classifier would refuse it. This is why the plan's
+real-process pairing proofs (S95/S153-156) cannot be honestly closed: the behavior
+they assert is unwired. Fix requires a policy decision - wire
+`classify_worker_pairing` into the readiness/adoption gate (and
+`eviction_is_authorized` into the eviction path), deciding per profile whether the
+armed desktop gate is strict fail-closed while dev/compose stays legacy-lenient,
+or the classifier supersedes the gateway_url check everywhere. A design decision
+owed to the owner, not a mechanical rewrite; recorded here rather than rushed.
+
 ## Recommendations
 
 1. Draft and approve a hardening ADR before implementation. The ADR must decide:

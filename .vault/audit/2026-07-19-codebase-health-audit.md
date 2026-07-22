@@ -453,6 +453,37 @@ Exact AST and Pylint matches include:
 Share only behavior-bearing helpers. Keep deliberate transport and domain model
 separation explicit instead of mechanically merging schemas.
 
+### facades-and-wire-domain-blocks-are-deliberate-non-duplicates | none | AST similarity is not duplication where the two copies answer different questions
+
+Two of the four AST matches this audit reported are deliberate and must not be merged.
+Verified against the code and the governing boundary decision rather than the similarity
+score.
+
+The lazy package facades in `graph/__init__.py` and `providers/__init__.py` are structurally
+alike because a facade has one shape - re-export names, defer the import to break a cycle -
+but they re-export disjoint symbol sets for two independent packages. Their similarity is the
+pattern, not the content; merging them would couple two packages precisely to remove a
+resemblance that carries no shared behaviour. The behaviour-bearing helpers that were
+genuine duplicates - the integer coercion and the response mappings named in the same audit
+list - have since been consolidated under their own Steps, which is the correct disposition
+for those and the wrong one for these.
+
+The parallel wire and domain field blocks - the run-start request against the thread
+metadata, sharing `feature_tag`, `profile_id`, `team_preset` by name - are two models of two
+concerns. The wire model bounds every field for an untrusted transport boundary: length
+caps, a forbidden-extra policy, stage-aware validation. The domain model carries internal
+defaults and no bounds, because by the time state reaches it the values are already trusted.
+Collapsing them onto one schema would either impose transport bounds on internal state or
+relax the boundary that keeps an oversized or malformed field from reaching the domain. The
+core-layer-boundary decision governs this separation, and the field overlap is the seam
+working as designed rather than duplication to remove.
+
+The disposition of the four matches is therefore split: two consolidated as behaviour-bearing
+duplicates under their Steps, two recorded here as deliberate and kept apart. A similarity
+tool cannot make that distinction; it is a per-match judgement, and this records it so a
+later reader does not reopen the two that are correct.
+
+
 ### vault-mechanical-drift | low | Concurrent lifecycle work leaves the vault mechanically unclean
 
 During the architecture follow-up, the concurrent writer resolved the earlier

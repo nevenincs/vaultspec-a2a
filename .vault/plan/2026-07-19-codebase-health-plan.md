@@ -3,7 +3,7 @@ tags:
   - '#plan'
   - '#codebase-health'
 date: '2026-07-19'
-modified: '2026-07-19'
+modified: '2026-07-22'
 tier: L3
 related:
   - '[[2026-07-19-codebase-health-adr]]'
@@ -20,6 +20,16 @@ related:
   - '[[2026-07-19-observability-lanes-plan]]'
   - '[[2026-07-17-tool-cores-adr]]'
 ---
+
+<!-- LINK RULES:
+     - [[wiki-links]] are ONLY for .vault/ documents in the
+       related: field above.
+     - The related: field carries the AUTHORISING documents
+       (ADR, research, reference, prior plan) for every Step in
+       this plan. Steps inherit this chain; per-row reference
+       footers do not exist.
+     - NEVER use [[wiki-links]] or markdown links in the
+       document body. -->
 
 # `codebase-health` plan
 
@@ -295,7 +305,7 @@ Decompose every remaining audited function above complexity score twenty at stab
 
 Use the documentation pipeline for the headless service surface and perform only targeted vault repair after concurrent writers finish.
 
-- [ ] `W04.P16.S73` - Rewrite service deployment documentation and environment examples to describe the headless runtime through the documentation workflow; `service/README.md, service/docker/README.md, service/.env.example`.
+- [x] `W04.P16.S73` - Rewrite service deployment documentation and environment examples to describe the headless runtime through the documentation workflow; `service/README.md, service/docker/README.md, service/.env.example`.
 - [ ] `W04.P16.S74` - Repair remaining feature-index drift after active vault writers finish; `.vault/index`.
 - [ ] `W04.P16.S139` - Repair remaining generated-template annotation drift after active vault writers finish; `.vault/adr, .vault/audit, .vault/plan, .vault/research`.
 - [ ] `W04.P16.S140` - Repair remaining orphan-plan lifecycle drift after active vault writers finish; `.vault/plan, .vault/index`.

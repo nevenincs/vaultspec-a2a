@@ -3,11 +3,12 @@ generated: true
 tags:
   - '#index'
   - '#codebase-health'
-date: '2026-07-19'
-modified: '2026-07-19'
+date: '2026-07-22'
+modified: '2026-07-22'
 related:
   - '[[2026-07-19-codebase-health-W01-P01-S01]]'
   - '[[2026-07-19-codebase-health-W01-P01-S03]]'
+  - '[[2026-07-19-codebase-health-W04-P16-S73]]'
   - '[[2026-07-19-codebase-health-adr]]'
   - '[[2026-07-19-codebase-health-audit]]'
   - '[[2026-07-19-codebase-health-plan]]'
@@ -34,6 +35,7 @@ Auto-generated index of all documents tagged with `#codebase-health`.
 
 - `2026-07-19-codebase-health-W01-P01-S01` - Curate the service-lifecycle supersession chain so the product lifecycle and tooling decisions have non-conflicting authority
 - `2026-07-19-codebase-health-W01-P01-S03` - Certify the process-registry prerequisite represented by repository-tooling plan step S07 before changing lifecycle registry consumers
+- `2026-07-19-codebase-health-W04-P16-S73` - Rewrite service deployment documentation and environment examples to describe the headless runtime
 
 ### plan
 

@@ -67,8 +67,11 @@ jobs:
             --target ${{ matrix.target }} \
             --out-dir dist/inputs \
             --cache-dir .capsule-cache | tee prepare.out
-          descriptor="$(sed -n '1p' prepare.out)"
-          sha256="$(sed -n '2p' prepare.out | cut -d ':' -f 2)"
+          # Strip CR: Python's text-mode stdout emits CRLF on the Windows runner,
+          # and a trailing \r would break both the descriptor-path existence
+          # check and the bare-hex sha256 validation the build enforces.
+          descriptor="$(sed -n '1p' prepare.out | tr -d '\r')"
+          sha256="$(sed -n '2p' prepare.out | tr -d '\r' | cut -d ':' -f 2)"
           echo "descriptor=${descriptor}" >> "$GITHUB_OUTPUT"
           echo "descriptor_sha256=${sha256}" >> "$GITHUB_OUTPUT"
 

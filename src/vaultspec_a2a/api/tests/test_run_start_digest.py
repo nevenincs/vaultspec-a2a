@@ -12,6 +12,7 @@ the field classification is exercised against the schema it describes.
 
 from __future__ import annotations
 
+import json
 from typing import Any
 
 import pytest
@@ -110,3 +111,46 @@ def test_a_prepare_digest_ignores_the_prompt_and_tokens() -> None:
 
     assert prepare == request_digest(_request(message="different"), prepared=True)
     assert prepare != request_digest(_request(), prepared=False)
+
+
+def test_persisted_digest_round_trips_through_metadata() -> None:
+    """What is written must be readable, or the replay check silently disables."""
+    from vaultspec_a2a.api.routes.gateway import (
+        _persist_request_digest,
+        _persisted_request_digest,
+    )
+
+    digest = request_digest(_request(), prepared=False)
+    metadata = _persist_request_digest('{"feature_tag": "x"}', digest)
+
+    assert _persisted_request_digest(metadata) == digest
+    assert json.loads(metadata)["feature_tag"] == "x", "existing metadata was dropped"
+
+
+def test_a_run_predating_digest_persistence_reads_as_unknown() -> None:
+    """Absent must mean unknown, not mismatched.
+
+    Runs created before the digest was persisted carry no digest. Treating that
+    as a mismatch would refuse every legitimate replay of an existing run, so the
+    caller falls back to the narrower comparison instead.
+    """
+    from vaultspec_a2a.api.routes.gateway import _persisted_request_digest
+
+    assert _persisted_request_digest(None) is None
+    assert _persisted_request_digest("{}") is None
+    assert _persisted_request_digest('{"run_lease": {"lease_id": "l"}}') is None
+    assert _persisted_request_digest("not json at all") is None
+
+
+def test_persisting_a_digest_preserves_the_lease_beside_it() -> None:
+    """Two writers share this blob; neither may clobber the other."""
+    from vaultspec_a2a.api.routes.gateway import (
+        _persist_request_digest,
+        _persisted_lease_id,
+    )
+
+    with_lease = '{"run_lease": {"lease_id": "lease-1", "reservation_id": "r"}}'
+
+    merged = _persist_request_digest(with_lease, "deadbeef")
+
+    assert _persisted_lease_id(merged) == "lease-1"

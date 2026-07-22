@@ -276,6 +276,23 @@ async def _create_run_core(
                         f"{body.profile_id!r}"
                     ),
                 )
+            # The profile check above covers one field. Every other
+            # behaviour-affecting field - the prompt, the preset, the feature
+            # tag, the feedback batch - could differ on a replay and the original
+            # run was returned as though the request matched, silently
+            # discarding the second intention. Compare the whole request.
+            persisted_digest = _persisted_request_digest(existing.thread_metadata)
+            if persisted_digest is not None and persisted_digest != request_digest(
+                body, prepared=False
+            ):
+                raise HTTPException(
+                    status_code=409,
+                    detail=(
+                        f"Run {existing.id!r} was already started with a "
+                        "different request body; a replay must carry the same "
+                        "request to return the original run"
+                    ),
+                )
             return _RunDispatchResult(
                 thread_id=existing.id,
                 status=existing.status,
@@ -327,6 +344,12 @@ async def _create_run_core(
         team_config, body.profile_id, ws_root
     )
     metadata_json = _persist_frozen(metadata_json, frozen)
+    # Persist what this run was started with, so a later replay is compared
+    # against the whole request rather than one field of it.
+    if body.run_id is not None:
+        metadata_json = _persist_request_digest(
+            metadata_json, request_digest(body, prepared=False)
+        )
     # Bind the committed reservation's non-secret lease identity to the run,
     # durably, so terminal settlement and post-restart reconciliation recover it.
     if commit_binding is not None:
@@ -739,6 +762,42 @@ def _prepare_workspace_root(body: RunStartRequest) -> Path | None:
 # gateway writes it at commit and the terminal handler reads it back; both restate
 # this key inline, matching the metadata convention used for the frozen profile.
 _RUN_LEASE_METADATA_KEY = "run_lease"
+
+# The canonical digest of the request that created a run. Persisted on every
+# create so a later replay can be compared against what the run was actually
+# started with, rather than against the single field the check previously read.
+_REQUEST_DIGEST_METADATA_KEY = "run_request_digest"
+
+
+def _persist_request_digest(metadata_json: str | None, digest: str) -> str:
+    """Embed the creating request's canonical digest into run metadata."""
+    data: dict[str, Any] = {}
+    if metadata_json:
+        try:
+            loaded = json.loads(metadata_json)
+        except (json.JSONDecodeError, TypeError):
+            loaded = {}
+        if isinstance(loaded, dict):
+            data = loaded
+    data[_REQUEST_DIGEST_METADATA_KEY] = digest
+    return json.dumps(data)
+
+
+def _persisted_request_digest(metadata_json: str | None) -> str | None:
+    """Read the creating request's digest, or ``None`` for a pre-existing run.
+
+    ``None`` means the run predates digest persistence rather than that its
+    request was empty, so the caller must treat it as unknown and fall back to
+    the narrower comparison instead of refusing a legitimate replay.
+    """
+    if not metadata_json:
+        return None
+    try:
+        data = json.loads(metadata_json)
+    except (json.JSONDecodeError, TypeError):
+        return None
+    digest = data.get(_REQUEST_DIGEST_METADATA_KEY) if isinstance(data, dict) else None
+    return digest if isinstance(digest, str) and digest else None
 
 
 def _persist_lease(metadata_json: str | None, binding: _RunLeaseBinding) -> str:

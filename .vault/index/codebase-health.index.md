@@ -11,6 +11,7 @@ related:
   - '[[2026-07-19-codebase-health-W01-P01-S93]]'
   - '[[2026-07-19-codebase-health-W01-P01-S94]]'
   - '[[2026-07-19-codebase-health-W02-P05-S17]]'
+  - '[[2026-07-19-codebase-health-W02-P05-S18]]'
   - '[[2026-07-19-codebase-health-W02-P06-S26]]'
   - '[[2026-07-19-codebase-health-W03-P09-S36]]'
   - '[[2026-07-19-codebase-health-W03-P09-S37]]'
@@ -73,6 +74,7 @@ Auto-generated index of all documents tagged with `#codebase-health`.
 - `2026-07-19-codebase-health-W01-P01-S93` - Implement gateway lifetime identity worker generation identity and explicit paired-gateway identity in authenticated readiness
 - `2026-07-19-codebase-health-W01-P01-S94` - Fail closed on blank stale mismatched or unauthenticated pairing evidence and permit eviction only for the owner-authorized desktop prior generation
 - `2026-07-19-codebase-health-W02-P05-S17` - Define a canonical run-start fingerprint over every behavior-affecting request field
+- `2026-07-19-codebase-health-W02-P05-S18` - Persist the run-start fingerprint and return conflict for mismatched replay on both normal and integrity-error paths
 - `2026-07-19-codebase-health-W02-P06-S26` - Parse numeric and ISO heartbeat values strictly and reject stale malformed non-finite and implausibly future values
 - `2026-07-19-codebase-health-W03-P09-S36` - Reject duplicate MCP server identities before emitting Codex or ACP configuration
 - `2026-07-19-codebase-health-W03-P09-S37` - Prove duplicate MCP identity rejection through the real configuration parser

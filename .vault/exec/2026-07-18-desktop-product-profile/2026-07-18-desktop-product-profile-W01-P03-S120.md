@@ -9,42 +9,6 @@ related:
   - "[[2026-07-18-desktop-product-profile-plan]]"
 ---
 
-<!-- FRONTMATTER RULES:
-     tags: one directory tag (hardcoded #exec) and one feature tag.
-     Replace desktop-product-profile with a kebab-case feature tag, e.g. #foo-bar.
-     Additional tags may be appended below the required pair.
-
-     modified: CLI-maintained last-modified stamp; set at scaffold time,
-     refreshed by mutating CLI verbs and vault check fix; never hand-edit.
-
-     step_id is the originating Step's canonical identifier, e.g. S01.
-     The S120 and 2026-07-18-desktop-product-profile-plan placeholders are machine-filled by
-     `vaultspec-core vault add exec`; do not fill them by hand.
-
-     Related: use wiki-links as '[[yyyy-mm-dd-foo-bar-plan]]' and link the
-     parent plan.
-
-     DO NOT add fields beyond those scaffolded; metadata lives
-     only in the frontmatter. -->
-
-<!-- LINK RULES:
-     - [[wiki-links]] are ONLY for .vault/ documents in the related: field above.
-     - NEVER use [[wiki-links]] or markdown links in the document body.
-     - NEVER reference file paths in the body. If you must name a source file,
-       class, or function, use inline backtick code: `src/module.py`. -->
-
-<!-- STEP RECORD:
-     This file represents one Step from the originating plan. Identified
-     by its canonical leaf identifier (S##) and ancestor display path.
-     The Carry the dropped-member audit trail from the closure layout onto the installed inventory and the pinned descriptor so the build stage surfaces the data-headers and data-scripts omissions into published evidence as a read-only consumer without re-deriving the layout and ## Scope
-
-- `src/vaultspec_a2a/desktop/installed_inventory.py`
-- `src/vaultspec_a2a/desktop/artifacts.py`
-- `src/vaultspec_a2a/desktop/capsule_descriptor.py`
-- `src/vaultspec_a2a/desktop/capsule_preparation.py` placeholders below are machine-filled
-     by `vaultspec-core vault add exec` from the originating Step row;
-     do not fill them by hand. -->
-
 # Carry the dropped-member audit trail from the closure layout onto the installed inventory and the pinned descriptor so the build stage surfaces the data-headers and data-scripts omissions into published evidence as a read-only consumer without re-deriving the layout
 
 ## Scope

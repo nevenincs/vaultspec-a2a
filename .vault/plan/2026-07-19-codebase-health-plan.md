@@ -306,8 +306,8 @@ Decompose every remaining audited function above complexity score twenty at stab
 Use the documentation pipeline for the headless service surface and perform only targeted vault repair after concurrent writers finish.
 
 - [x] `W04.P16.S73` - Rewrite service deployment documentation and environment examples to describe the headless runtime through the documentation workflow; `service/README.md, service/docker/README.md, service/.env.example`.
-- [ ] `W04.P16.S74` - Repair remaining feature-index drift after active vault writers finish; `.vault/index`.
-- [ ] `W04.P16.S139` - Repair remaining generated-template annotation drift after active vault writers finish; `.vault/adr, .vault/audit, .vault/plan, .vault/research`.
+- [x] `W04.P16.S74` - Repair remaining feature-index drift after active vault writers finish; `.vault/index`.
+- [x] `W04.P16.S139` - Repair remaining generated-template annotation drift after active vault writers finish; `.vault/adr, .vault/audit, .vault/plan, .vault/research`.
 - [ ] `W04.P16.S140` - Repair remaining orphan-plan lifecycle drift after active vault writers finish; `.vault/plan, .vault/index`.
 
 ### Phase `W04.P17` - review and queue maintainability findings

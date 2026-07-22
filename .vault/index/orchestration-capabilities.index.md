@@ -3,8 +3,8 @@ generated: true
 tags:
   - '#index'
   - '#orchestration-capabilities'
-date: '2026-07-19'
-modified: '2026-07-19'
+date: '2026-07-22'
+modified: '2026-07-22'
 related:
   - '[[2026-07-14-orchestration-capabilities-audit]]'
   - '[[2026-07-14-orchestration-capabilities-research]]'

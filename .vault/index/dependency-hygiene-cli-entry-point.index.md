@@ -3,8 +3,8 @@ generated: true
 tags:
   - '#index'
   - '#dependency-hygiene-cli-entry-point'
-date: '2026-07-19'
-modified: '2026-07-19'
+date: '2026-07-22'
+modified: '2026-07-22'
 related:
   - '[[2026-02-28-dependency-hygiene-cli-entry-point-adr]]'
 ---

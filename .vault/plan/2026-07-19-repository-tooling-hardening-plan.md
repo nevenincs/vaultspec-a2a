@@ -11,16 +11,6 @@ related:
   - '[[2026-07-19-repository-tooling-hardening-reference]]'
 ---
 
-<!-- LINK RULES:
-     - [[wiki-links]] are ONLY for .vault/ documents in the
-       related: field above.
-     - The related: field carries the AUTHORISING documents
-       (ADR, research, reference, prior plan) for every Step in
-       this plan. Steps inherit this chain; per-row reference
-       footers do not exist.
-     - NEVER use [[wiki-links]] or markdown links in the
-       document body. -->
-
 # `repository-tooling-hardening` plan
 
 Deliver one locked, modular, clone-reproducible development and governance

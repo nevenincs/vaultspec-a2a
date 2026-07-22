@@ -3,8 +3,8 @@ generated: true
 tags:
   - '#index'
   - '#a2a-edge-conformance'
-date: '2026-07-19'
-modified: '2026-07-19'
+date: '2026-07-22'
+modified: '2026-07-22'
 related:
   - '[[2026-07-14-a2a-edge-conformance-W01-P01-S01]]'
   - '[[2026-07-14-a2a-edge-conformance-W01-P01-S02]]'

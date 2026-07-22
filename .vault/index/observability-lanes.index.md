@@ -3,8 +3,8 @@ generated: true
 tags:
   - '#index'
   - '#observability-lanes'
-date: '2026-07-19'
-modified: '2026-07-19'
+date: '2026-07-22'
+modified: '2026-07-22'
 related:
   - '[[2026-07-19-observability-lanes-P01-S01]]'
   - '[[2026-07-19-observability-lanes-P01-S02]]'

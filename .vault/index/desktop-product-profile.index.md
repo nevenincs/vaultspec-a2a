@@ -3,8 +3,8 @@ generated: true
 tags:
   - '#index'
   - '#desktop-product-profile'
-date: '2026-07-20'
-modified: '2026-07-20'
+date: '2026-07-22'
+modified: '2026-07-22'
 related:
   - '[[2026-07-18-desktop-product-profile-W01-P01-S01]]'
   - '[[2026-07-18-desktop-product-profile-W01-P01-S02]]'
@@ -23,6 +23,22 @@ related:
   - '[[2026-07-18-desktop-product-profile-W01-P02-summary]]'
   - '[[2026-07-18-desktop-product-profile-W01-P03-S100]]'
   - '[[2026-07-18-desktop-product-profile-W01-P03-S101]]'
+  - '[[2026-07-18-desktop-product-profile-W01-P03-S102]]'
+  - '[[2026-07-18-desktop-product-profile-W01-P03-S103]]'
+  - '[[2026-07-18-desktop-product-profile-W01-P03-S105]]'
+  - '[[2026-07-18-desktop-product-profile-W01-P03-S106]]'
+  - '[[2026-07-18-desktop-product-profile-W01-P03-S107]]'
+  - '[[2026-07-18-desktop-product-profile-W01-P03-S108]]'
+  - '[[2026-07-18-desktop-product-profile-W01-P03-S109]]'
+  - '[[2026-07-18-desktop-product-profile-W01-P03-S110]]'
+  - '[[2026-07-18-desktop-product-profile-W01-P03-S111]]'
+  - '[[2026-07-18-desktop-product-profile-W01-P03-S112]]'
+  - '[[2026-07-18-desktop-product-profile-W01-P03-S113]]'
+  - '[[2026-07-18-desktop-product-profile-W01-P03-S114]]'
+  - '[[2026-07-18-desktop-product-profile-W01-P03-S115]]'
+  - '[[2026-07-18-desktop-product-profile-W01-P03-S117]]'
+  - '[[2026-07-18-desktop-product-profile-W01-P03-S119]]'
+  - '[[2026-07-18-desktop-product-profile-W01-P03-S120]]'
   - '[[2026-07-18-desktop-product-profile-W01-P03-S13]]'
   - '[[2026-07-18-desktop-product-profile-W01-P03-S14]]'
   - '[[2026-07-18-desktop-product-profile-W01-P03-S15]]'
@@ -66,6 +82,7 @@ related:
   - '[[2026-07-18-desktop-product-profile-W03-P08-S44]]'
   - '[[2026-07-18-desktop-product-profile-W03-P08-S45]]'
   - '[[2026-07-18-desktop-product-profile-W03-P08-S46]]'
+  - '[[2026-07-18-desktop-product-profile-W03-P08-S98]]'
   - '[[2026-07-18-desktop-product-profile-W03-P08-summary]]'
   - '[[2026-07-18-desktop-product-profile-W03-P09-S47]]'
   - '[[2026-07-18-desktop-product-profile-W03-P09-S48]]'
@@ -105,6 +122,11 @@ related:
   - '[[2026-07-18-desktop-product-profile-W05-P13-S73]]'
   - '[[2026-07-18-desktop-product-profile-W05-P13-S74]]'
   - '[[2026-07-18-desktop-product-profile-W05-P13-S75]]'
+  - '[[2026-07-18-desktop-product-profile-W05-P13-S76]]'
+  - '[[2026-07-18-desktop-product-profile-W05-P13-S77]]'
+  - '[[2026-07-18-desktop-product-profile-W05-P13-S78]]'
+  - '[[2026-07-18-desktop-product-profile-W05-P13-S79]]'
+  - '[[2026-07-18-desktop-product-profile-W05-P13-S80]]'
   - '[[2026-07-18-desktop-product-profile-W05-P13-summary]]'
   - '[[2026-07-18-desktop-product-profile-W05-P14-S81]]'
   - '[[2026-07-18-desktop-product-profile-W05-P14-S82]]'
@@ -237,6 +259,8 @@ Auto-generated index of all documents tagged with `#desktop-product-profile`.
 - `2026-07-18-desktop-product-profile-W04-P12-S70` - Prove attach-control-authenticated terminal callback retry rejects worker IPC and unrelated credentials while status reconciliation revokes exactly one run-scoped lease without raw tokens
 - `2026-07-18-desktop-product-profile-W01-P03-S100` - Consolidate bounded archive inspection and retained consume authority
 - `2026-07-18-desktop-product-profile-W01-P03-S101` - Retain one exact capsule descriptor both locks all four sources closure inventories package archives and external licenses through scope-bound input sessions and emit the component manifest from bound evidence without reopening mutable paths
+- `2026-07-18-desktop-product-profile-W01-P03-S102` - Derive one immutable pre-mutation whole-capsule assembly plan that reserves every runtime package launcher lock license manifest evidence and archive path under dashboard ASCII ancestor collision file size and license bounds
+- `2026-07-18-desktop-product-profile-W03-P08-S98` - Replace platform-skipped credential permission and link tests with real host-native assertions that never skip or xfail
 - `2026-07-18-desktop-product-profile-W04-P12-S104` - Make prepared commit and release crash-recoverable under one stable run identity with a pre-minted lease, a recoverable committing transition, durable exact replay, backward-compatible status, and real failure, restart, race, and lost-ack proofs
 - `2026-07-18-desktop-product-profile-W04-P12-S71` - Certify a clean installed capsule starts and stops the standalone vaultspec-mcp adapter under caller ownership
 - `2026-07-18-desktop-product-profile-W04-P12-summary` - `desktop-product-profile` `W04.P12` summary
@@ -244,6 +268,11 @@ Auto-generated index of all documents tagged with `#desktop-product-profile`.
 - `2026-07-18-desktop-product-profile-W05-P13-S73` - Prove clean offline install relocation cold readiness lazy worker and default ACP execution from one real capsule
 - `2026-07-18-desktop-product-profile-W05-P13-S74` - Prove migration rollback consistency restore tamper detection and immutable-file verification from real capsule state
 - `2026-07-18-desktop-product-profile-W05-P13-S75` - Prove authenticated attach owner-only shutdown drain and data-preserving capsule removal boundaries
+- `2026-07-18-desktop-product-profile-W05-P13-S76` - Certify Apple Silicon macOS capsule closure and upload its pinned component contract
+- `2026-07-18-desktop-product-profile-W05-P13-S77` - Certify Intel macOS capsule closure and upload its pinned component contract
+- `2026-07-18-desktop-product-profile-W05-P13-S78` - Certify Arm64 Linux capsule closure and upload its pinned component contract
+- `2026-07-18-desktop-product-profile-W05-P13-S79` - Certify x86-64 Linux capsule closure and upload its pinned component contract
+- `2026-07-18-desktop-product-profile-W05-P13-S80` - Certify x86-64 Windows capsule closure and upload its pinned component contract
 - `2026-07-18-desktop-product-profile-W05-P13-summary` - `desktop-product-profile` `W05.P13` summary
 - `2026-07-18-desktop-product-profile-W05-P14-S81` - Authenticate the Compose worker healthcheck without changing its independently managed worker topology
 - `2026-07-18-desktop-product-profile-W05-P14-S82` - Authenticate the development Compose worker healthcheck without adopting it into desktop lifecycle
@@ -253,6 +282,21 @@ Auto-generated index of all documents tagged with `#desktop-product-profile`.
 - `2026-07-18-desktop-product-profile-W05-P14-S86` - Perform the mandatory architecture security resource-bound and real-behavior code review
 - `2026-07-18-desktop-product-profile-W05-P14-S87` - Report 2026-07-14-adr-authoring-orchestration-plan ownership of vaultspec-adr-research-mock.toml AUTO MIXED HUMAN reruns checkpoint_permission_without_durable_row and execution_state_projection_missing separately from provider gates
 - `2026-07-18-desktop-product-profile-W05-P14-summary` - `desktop-product-profile` `W05.P14` summary
+- `2026-07-18-desktop-product-profile-W01-P03-S103` - Materialize retained Python wheels the root A2A wheel ACP packages external licenses and relocatable target launchers through leased nested-directory authority and reconcile every written byte against installed closure evidence
+- `2026-07-18-desktop-product-profile-W01-P03-S105` - Add the pure wheel and npm install-layout authority mapping RECORD-verified archive members to installed destinations under the fixed closure roots with fail-closed unsupported-feature handling
+- `2026-07-18-desktop-product-profile-W01-P03-S106` - Extend the installed inventory to version two with per-file source_sha256 and source_member provenance proving every pair names a verified closure member and migrate all fixtures to real provenance
+- `2026-07-18-desktop-product-profile-W01-P03-S107` - Add the production installed-inventory builder that consumes verified archive sessions applies the layout authority and emits canonical v2 inventory bytes into the content-addressed input cache invoked by the capsule build script
+- `2026-07-18-desktop-product-profile-W01-P03-S108` - Compose the Windows product launchers from the content-addressed console stub a relocatable launcher-dir shebang pinning the bundled interpreter and a deterministic epoch-stamped zip that pins the library root replacing the fail-loud Windows refusal and proving one composed launcher by live execution
+- `2026-07-18-desktop-product-profile-W01-P03-S109` - Emit external-license provenance evidence through the production inventory builders so standalone license artifacts reconcile end-to-end without hand-extended evidence closing the capsule license compliance gap
+- `2026-07-18-desktop-product-profile-W01-P03-S110` - Add the wheel selection authority deriving a deterministic per-target ordered supported-tag list from the pinned packaging dependency and ranking every admitted lock wheel by best tag index with a fixed vector guarding the derivation
+- `2026-07-18-desktop-product-profile-W01-P03-S112` - Reserve and place the donated launcher stub license notice inside the capsule so the redistribution terms ship with the product launchers
+- `2026-07-18-desktop-product-profile-W01-P03-S113` - Extract the pure closure selection core from the lock reconciliation authority so marker evaluation extras propagation graph resolution and platform filtering have one definition and re-express both reconciliation entry points as comparisons against it
+- `2026-07-18-desktop-product-profile-W01-P03-S114` - Drop the Intel macOS target from the shipped capsule matrix across the contract enum published manifest schema declared inputs and certification workflow and regenerate the schema snapshot and golden vector
+- `2026-07-18-desktop-product-profile-W01-P03-S115` - Acquire every wheel tarball license blob and pinned source into the sha256-keyed content-addressed cache verifying each byte against its committed pin and failing closed on any digest mismatch
+- `2026-07-18-desktop-product-profile-W01-P03-S117` - Change the layout authority to drop wheel data headers and data scripts members deterministically with per-member evidence instead of rejecting them keeping data data platinclude and unknown keys fail-closed so the real closure materializes
+- `2026-07-18-desktop-product-profile-W01-P03-S111` - Open verified archive sessions build the installed inventories through the production builder author and digest the pinned capsule input descriptor naming every artifact and prove the retained input session envelope against a real per-target closure
+- `2026-07-18-desktop-product-profile-W01-P03-S119` - Wire the production preparation orchestration entrypoint running the full per-target flow from acquisition through installed-inventory build to descriptor authoring and digest emitting the real shippable capsule input descriptor and confirming the retained session byte envelope against a real per-target closure
+- `2026-07-18-desktop-product-profile-W01-P03-S120` - Carry the dropped-member audit trail from the closure layout onto the installed inventory and the pinned descriptor so the build stage surfaces the data-headers and data-scripts omissions into published evidence as a read-only consumer without re-deriving the layout
 
 ### plan
 

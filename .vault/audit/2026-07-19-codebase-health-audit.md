@@ -485,7 +485,6 @@ duplicates under their Steps, two recorded here as deliberate and kept apart. A 
 tool cannot make that distinction; it is a per-match judgement, and this records it so a
 later reader does not reopen the two that are correct.
 
-
 ### vault-mechanical-drift | low | Concurrent lifecycle work leaves the vault mechanically unclean
 
 During the architecture follow-up, the concurrent writer resolved the earlier
@@ -560,7 +559,6 @@ record before any quota work.
 
 Left open deliberately. Closing it against the global limit would record a per-principal
 bound this service does not have, and a later reader would reasonably assume one exists.
-
 
 ## User-documentation health review
 

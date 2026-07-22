@@ -3,8 +3,8 @@ generated: true
 tags:
   - '#index'
   - '#pw7-stack-hardening'
-date: '2026-07-19'
-modified: '2026-07-19'
+date: '2026-07-22'
+modified: '2026-07-22'
 related:
   - '[[2026-07-17-pw7-stack-hardening-audit]]'
 ---

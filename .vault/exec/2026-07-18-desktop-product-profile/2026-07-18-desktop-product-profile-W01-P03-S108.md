@@ -9,41 +9,6 @@ related:
   - "[[2026-07-18-desktop-product-profile-plan]]"
 ---
 
-<!-- FRONTMATTER RULES:
-     tags: one directory tag (hardcoded #exec) and one feature tag.
-     Replace desktop-product-profile with a kebab-case feature tag, e.g. #foo-bar.
-     Additional tags may be appended below the required pair.
-
-     modified: CLI-maintained last-modified stamp; set at scaffold time,
-     refreshed by mutating CLI verbs and vault check fix; never hand-edit.
-
-     step_id is the originating Step's canonical identifier, e.g. S01.
-     The S108 and 2026-07-18-desktop-product-profile-plan placeholders are machine-filled by
-     `vaultspec-core vault add exec`; do not fill them by hand.
-
-     Related: use wiki-links as '[[yyyy-mm-dd-foo-bar-plan]]' and link the
-     parent plan.
-
-     DO NOT add fields beyond those scaffolded; metadata lives
-     only in the frontmatter. -->
-
-<!-- LINK RULES:
-     - [[wiki-links]] are ONLY for .vault/ documents in the related: field above.
-     - NEVER use [[wiki-links]] or markdown links in the document body.
-     - NEVER reference file paths in the body. If you must name a source file,
-       class, or function, use inline backtick code: `src/module.py`. -->
-
-<!-- STEP RECORD:
-     This file represents one Step from the originating plan. Identified
-     by its canonical leaf identifier (S##) and ancestor display path.
-     The Compose the Windows product launchers from the content-addressed console stub a relocatable launcher-dir shebang pinning the bundled interpreter and a deterministic epoch-stamped zip that pins the library root replacing the fail-loud Windows refusal and proving one composed launcher by live execution and ## Scope
-
-- `src/vaultspec_a2a/desktop/capsule_materializer.py`
-- `scripts/desktop_capsule_inputs.toml`
-- `src/vaultspec_a2a/desktop/tests/test_capsule_materializer.py` placeholders below are machine-filled
-     by `vaultspec-core vault add exec` from the originating Step row;
-     do not fill them by hand. -->
-
 # Compose the Windows product launchers from the content-addressed console stub a relocatable launcher-dir shebang pinning the bundled interpreter and a deterministic epoch-stamped zip that pins the library root replacing the fail-loud Windows refusal and proving one composed launcher by live execution
 
 ## Scope

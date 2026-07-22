@@ -3,8 +3,8 @@ generated: true
 tags:
   - '#index'
   - '#capsule-install-layout'
-date: '2026-07-21'
-modified: '2026-07-21'
+date: '2026-07-22'
+modified: '2026-07-22'
 related:
   - '[[2026-07-21-capsule-install-layout-adr]]'
   - '[[2026-07-21-capsule-install-layout-reference]]'

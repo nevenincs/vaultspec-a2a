@@ -3,8 +3,8 @@ generated: true
 tags:
   - '#index'
   - '#ui-integration-wire-regen'
-date: '2026-07-19'
-modified: '2026-07-19'
+date: '2026-07-22'
+modified: '2026-07-22'
 related:
   - '[[2026-04-04-ci-contract-gates-research]]'
   - '[[2026-04-04-ui-integration-wire-regen-phase1-step-exec]]'

@@ -123,6 +123,23 @@ class DomainConfig(BaseModel):
         default=5,
         description="Max concurrent graph executions per worker.",
     )
+    thread_list_checkpoint_concurrency: int = Field(
+        default=8,
+        description=(
+            "Maximum checkpoint reads issued concurrently when assembling a "
+            "thread list. Bounds the load one list request places on the "
+            "checkpoint store, so a large page cannot open one connection per "
+            "thread at once."
+        ),
+    )
+    thread_list_checkpoint_deadline_seconds: float = Field(
+        default=5.0,
+        description=(
+            "Total wall-clock budget for reading every thread's checkpoint in one "
+            "list request. A per-read timeout alone let a page of N slow threads "
+            "cost N times that timeout; this bounds the whole batch instead."
+        ),
+    )
     admission_reservation_ttl_seconds: float = Field(
         default=120.0,
         description=(

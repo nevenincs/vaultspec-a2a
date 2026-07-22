@@ -36,6 +36,7 @@ from ..database import (
     list_threads,
     update_thread_status,
 )
+from ..domain_config import domain_config
 from ..graph.compiler import build_initial_vault_index
 from ..ipc.schemas import DispatchRequest
 from ..team.team_config import load_team_config
@@ -158,6 +159,75 @@ class ListThreadsResult:
     total: int
 
 
+@dataclass(frozen=True, slots=True)
+class _CheckpointProbe:
+    """One thread's checkpoint read result, decoupled from when it was read.
+
+    ``unverified`` is the honest third state between present and absent: the read
+    timed out or errored, so the caller must not report the thread as having no
+    checkpoint - absence and uncertainty are different, and only the certain
+    ones may drive a resumability claim.
+    """
+
+    tuple: Any | None = None
+    unverified: bool = False
+
+
+async def _bulk_read_checkpoints(
+    checkpointer: Any,
+    thread_ids: list[str],
+    *,
+    concurrency: int,
+    deadline: float,
+) -> dict[str, _CheckpointProbe]:
+    """Read every thread's checkpoint concurrently under one shared deadline.
+
+    Reading each checkpoint in the assembly loop cost one sequential round trip
+    per thread, each with its own timeout, so a page of N slow threads took N
+    times that timeout and had no overall bound. This issues the reads together,
+    caps how many run at once so a large page cannot open one connection per
+    thread, and bounds the whole batch by a single wall-clock budget.
+
+    Every failure is a probe marked ``unverified`` rather than a raised error: a
+    thread whose checkpoint could not be read within the budget is reported as
+    uncertain, exactly as the sequential path reported a per-thread timeout,
+    never as a thread with no checkpoint.
+    """
+    semaphore = asyncio.Semaphore(max(1, concurrency))
+
+    async def _one(thread_id: str) -> tuple[str, _CheckpointProbe]:
+        async with semaphore:
+            try:
+                checkpoint_tuple = await checkpointer.aget_tuple(
+                    {"configurable": {"thread_id": thread_id}}
+                )
+            except Exception:
+                logger.warning(
+                    "Checkpoint probe failed for thread %s", thread_id, exc_info=True
+                )
+                return thread_id, _CheckpointProbe(unverified=True)
+            return thread_id, _CheckpointProbe(tuple=checkpoint_tuple)
+
+    tasks = [asyncio.create_task(_one(tid)) for tid in thread_ids]
+    try:
+        pairs = await asyncio.wait_for(
+            asyncio.gather(*tasks, return_exceptions=False), timeout=deadline
+        )
+    except TimeoutError:
+        # The batch budget was exhausted. Every thread that had not resolved is
+        # uncertain, not absent; a resolved task keeps its real result.
+        results: dict[str, _CheckpointProbe] = {}
+        for task, tid in zip(tasks, thread_ids, strict=True):
+            if task.done() and not task.cancelled() and task.exception() is None:
+                _, probe = task.result()
+                results[tid] = probe
+            else:
+                task.cancel()
+                results[tid] = _CheckpointProbe(unverified=True)
+        return results
+    return dict(pairs)
+
+
 async def list_threads_service(
     db: AsyncSession,
     *,
@@ -170,6 +240,14 @@ async def list_threads_service(
     threads, total = await list_threads(
         db, offset=offset, limit=limit, status=status_filter
     )
+    checkpoint_probes: dict[str, _CheckpointProbe] = {}
+    if checkpointer is not None and threads:
+        checkpoint_probes = await _bulk_read_checkpoints(
+            checkpointer,
+            [t.id for t in threads],
+            concurrency=domain_config.thread_list_checkpoint_concurrency,
+            deadline=domain_config.thread_list_checkpoint_deadline_seconds,
+        )
     summaries: list[ThreadSummaryData] = []
     for t in threads:
         feature_tag, source_branch, callee = _parse_thread_summary_metadata(
@@ -185,26 +263,14 @@ async def list_threads_service(
         checkpoint_present = False
         checkpoint_unverified = False
         if checkpointer is not None:
-            try:
-                checkpoint_tuple = await asyncio.wait_for(
-                    checkpointer.aget_tuple({"configurable": {"thread_id": t.id}}),
-                    timeout=2.0,
-                )
-                if checkpoint_tuple is not None:
-                    checkpoint_present = True
-                    checkpoint_id = project_checkpoint_tuple(
-                        checkpoint_tuple,
-                        thread_id=t.id,
-                    ).checkpoint_id
-            except TimeoutError:
-                checkpoint_unverified = True
-            except Exception:
-                logger.warning(
-                    "Checkpoint probe failed for thread %s",
-                    t.id,
-                    exc_info=True,
-                )
-                checkpoint_unverified = True
+            probe = checkpoint_probes.get(t.id, _CheckpointProbe(unverified=True))
+            checkpoint_unverified = probe.unverified
+            if probe.tuple is not None:
+                checkpoint_present = True
+                checkpoint_id = project_checkpoint_tuple(
+                    probe.tuple,
+                    thread_id=t.id,
+                ).checkpoint_id
         if checkpoint_unverified:
             repair_status = RepairStatus.CHECKPOINT_UNAVAILABLE.value
             execution_readiness = RepairStatus.CHECKPOINT_UNAVAILABLE.value

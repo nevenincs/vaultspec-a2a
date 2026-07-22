@@ -23,7 +23,7 @@ from __future__ import annotations
 
 import re
 from enum import StrEnum
-from typing import Annotated, Literal
+from typing import Annotated, Final, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -40,9 +40,11 @@ __all__ = [
     "LivenessResponse",
     "LivenessState",
     "PathSafeRunId",
+    "PositiveProgressEvent",
     "PresetSummary",
     "PresetsListResponse",
     "ProfileSummary",
+    "ProgressCounters",
     "ProviderEligibility",
     "ReservationId",
     "RoleAssignmentSummary",
@@ -422,6 +424,79 @@ class RunCancelResponse(BaseModel):
     applied: bool = False
     action_status: str = "rejected_invalid_state"
     idempotency_key: str | None = None
+
+
+# Bounds for the positive progress frame. The channel is a deliberate allowlist:
+# every field is bounded so a buggy or hostile producer cannot overflow a consumer
+# or smuggle unbounded content through the progress stream.
+_MAX_PROGRESS_COUNTER: Final = 10**9
+_MAX_TOKEN_DELTA: Final = 10**7
+_MAX_APPROVED_SUMMARIES: Final = 32
+_MAX_SUMMARY_CHARS: Final = 512
+
+
+class ProgressCounters(BaseModel):
+    """Bounded monotonic activity counters carried by a progress frame.
+
+    Each counter is a non-negative integer with an upper bound, so the frame can
+    report how much a run has done without ever carrying the underlying content.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    tool_calls: int = Field(default=0, ge=0, le=_MAX_PROGRESS_COUNTER)
+    artifacts: int = Field(default=0, ge=0, le=_MAX_PROGRESS_COUNTER)
+    messages: int = Field(default=0, ge=0, le=_MAX_PROGRESS_COUNTER)
+
+
+class PositiveProgressEvent(BaseModel):
+    """The versioned positive progress frame for the ``run-stream`` channel.
+
+    A deliberate allowlist projection of a run's progress: it carries identifiers,
+    lifecycle state in product-safe role/phase vocabulary, bounded activity
+    counters, a bounded list of explicitly approved short summaries, and one
+    dedicated bounded token-delta field - and nothing else. It never carries
+    prompts, document bodies, raw provider payloads, artifact bodies, or edit
+    diffs: those are excluded by construction (no such field exists) and cannot be
+    added by a producer because ``extra`` is forbidden, so an attempt to smuggle
+    a forbidden field fails validation rather than crossing the boundary. The
+    frame is non-authoritative - it may be dropped freely - while ``run-status``
+    remains the durable source of truth.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    api_version: Literal["v1"] = _API_VERSION
+    # Identifiers.
+    run_id: str
+    sequence: int = Field(ge=0)
+    active_agent: str | None = None
+    # Lifecycle state (product-safe role/phase vocabulary only).
+    status: ThreadStatus
+    semantic_phase: str = ""
+    pause_cause: str | None = None
+    # Bounded activity counters.
+    counters: ProgressCounters = Field(default_factory=ProgressCounters)
+    # Explicitly approved short summaries (bounded count and per-item length).
+    approved_summaries: list[str] = Field(default_factory=list)
+    # The single dedicated bounded token-delta field.
+    token_delta: int = Field(default=0, ge=0, le=_MAX_TOKEN_DELTA)
+
+    @field_validator("approved_summaries")
+    @classmethod
+    def _bound_approved_summaries(cls, value: list[str]) -> list[str]:
+        """Reject an over-long summary list or an over-long summary item."""
+        if len(value) > _MAX_APPROVED_SUMMARIES:
+            raise ValueError(
+                f"approved_summaries exceeds the {_MAX_APPROVED_SUMMARIES}-item cap"
+            )
+        for item in value:
+            if len(item) > _MAX_SUMMARY_CHARS:
+                raise ValueError(
+                    "an approved summary exceeds the "
+                    f"{_MAX_SUMMARY_CHARS}-character cap"
+                )
+        return value
 
 
 class RoleAssignmentSummary(BaseModel):

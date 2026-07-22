@@ -46,6 +46,7 @@ from ..team.team_config import AgentConfig
 from ..utils import package_version
 from ..workspace.environment import resolve_env_vars
 from ._acp_mcp import codex_mcp_server_specs
+from ._cleanup import CleanupStep, run_independent_cleanups
 from ._codex_config_home import build_codex_config_home, cleanup_codex_config_home
 from ._subprocess import kill_process_tree, spawn_acp_process
 
@@ -288,18 +289,29 @@ class _CodexAppServerClient:
             self._stdin.close()
         except Exception:
             logger.debug("codex app-server: stdin close failed", exc_info=True)
-        await kill_process_tree(self._process, self._metadata)
+
+        # Reap the process tree and cancel the reader tasks INDEPENDENTLY: a
+        # failure freeing the process tree must not skip cancelling the tasks
+        # (which would leave the session's readers alive), and vice versa.
         # Cancelling requests cooperation; it does not compel it. A task blocked
-        # in a call that does not observe cancellation would hang close, and
-        # close runs on the path that frees the process tree - so both awaits
-        # carry a deadline, and a task that misses it is abandoned rather than
-        # allowed to hold the session open.
-        for task in (self._reader_task, self._stderr_task):
-            if task is None:
-                continue
-            task.cancel()
-            with suppress(asyncio.CancelledError, TimeoutError, Exception):
-                await asyncio.wait_for(task, timeout=CLEANUP_TIMEOUT_SECONDS)
+        # in a call that does not observe cancellation would hang close, so each
+        # await carries a deadline and a task that misses it is abandoned rather
+        # than allowed to hold the session open.
+        async def _cancel_reader_tasks() -> None:
+            for task in (self._reader_task, self._stderr_task):
+                if task is None:
+                    continue
+                task.cancel()
+                with suppress(asyncio.CancelledError, TimeoutError, Exception):
+                    await asyncio.wait_for(task, timeout=CLEANUP_TIMEOUT_SECONDS)
+
+        await run_independent_cleanups(
+            (
+                "codex-process-tree",
+                lambda: kill_process_tree(self._process, self._metadata),
+            ),
+            ("codex-reader-tasks", _cancel_reader_tasks),
+        )
 
 
 class CodexChatModel(BaseChatModel):
@@ -505,9 +517,19 @@ class CodexChatModel(BaseChatModel):
             async for chunk in self._consume_turn(client, thread_id):
                 yield chunk
         finally:
+            # Independent cleanup: a failure reaping the app-server session must
+            # not skip removing the per-run CODEX_HOME (it holds a copied
+            # credential), and vice versa. Each runs regardless of the other.
+            cleanup_steps: list[CleanupStep] = []
             if client is not None:
-                await client.aclose()
-            cleanup_codex_config_home(codex_config_home)
+                cleanup_steps.append(("codex-app-server-session", client.aclose))
+            cleanup_steps.append(
+                (
+                    "codex-config-home",
+                    lambda: cleanup_codex_config_home(codex_config_home),
+                )
+            )
+            await run_independent_cleanups(*cleanup_steps)
 
     async def _consume_turn(
         self, client: _CodexAppServerClient, thread_id: str

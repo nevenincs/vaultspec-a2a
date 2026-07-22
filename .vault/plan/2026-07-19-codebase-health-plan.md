@@ -237,7 +237,7 @@ Backed by the codebase-health audit and repository-tooling decision and plan, th
 Consume the tooling debt work, repair the concrete stale and non-hermetic cases, and bound dashboard-facing state reads.
 
 - [x] `W04.P12.S46` - Certify repository-tooling step S09 removed the audited prohibited doubles skips mutations suppressions and dependency-gate drift; `.vault/exec, .vault/audit, tests, pyproject.toml`.
-- [ ] `W04.P12.S47` - Update the Kimi profile expectation from the governing production contract; `src/vaultspec_a2a/api/tests/test_gateway_live.py`.
+- [x] `W04.P12.S47` - Update the Kimi profile expectation from the governing production contract; `src/vaultspec_a2a/api/tests/test_gateway_live.py`.
 - [x] `W04.P12.S48` - Bind MCP-unavailable error-path tests to an owned closed loopback socket without production-state mutation; `tests/mcp, tests/api`.
 - [x] `W04.P12.S49` - Make one repair-policy module authoritative for runtime transitions and direct production-import tests; `src/vaultspec_a2a/thread/repair_policy.py, src/vaultspec_a2a/control/repair_transitions.py, tests`.
 - [x] `W04.P12.S50` - Replace sequential per-thread checkpoint reads with bounded bulk reads limited concurrency and one request deadline; `src/vaultspec_a2a/control/thread_service.py, src/vaultspec_a2a/control/repositories`.
@@ -247,8 +247,8 @@ Consume the tooling debt work, repair the concrete stale and non-hermetic cases,
 - [ ] `W04.P12.S103` - Remove prohibited monkeypatch and runtime code-mutation tests in favor of owned configuration and process boundaries; `tests, src/vaultspec_a2a`.
 - [ ] `W04.P12.S104` - Replace tautological and shadow-logic tests with assertions against imported production behavior; `tests, src/vaultspec_a2a`.
 - [x] `W04.P12.S105` - Remove audited type suppressions by correcting production and test contracts; `src/vaultspec_a2a, tests`.
-- [ ] `W04.P12.S125` - Update the thread-error expectation from the governing production contract; `src/vaultspec_a2a/thread/tests/test_errors.py`.
-- [ ] `W04.P12.S126` - Update the feedback-batch expectation from the governing production contract; `src/vaultspec_a2a/thread/tests/test_state.py`.
+- [x] `W04.P12.S125` - Update the thread-error expectation from the governing production contract; `src/vaultspec_a2a/thread/tests/test_errors.py`.
+- [x] `W04.P12.S126` - Update the feedback-batch expectation from the governing production contract; `src/vaultspec_a2a/thread/tests/test_state.py`.
 
 ### Phase `W04.P13` - centralize duplicated behavior
 

@@ -338,11 +338,13 @@ and expose operational counters.
 
 ### stale-contract-assertions | medium | Three deterministic tests lag shipped public state
 
-`api/tests/test_gateway_live.py:281` omits the now-served Kimi profile,
-`thread/tests/test_errors.py:362` omits two exported errors, and
-`thread/tests/test_state.py:281` omits `feedback_batch_id`. All three fail in
-isolation. Update expectations from the governing contracts and keep them
-explicit rather than copying failure output.
+Status: resolved (W04.P12 S47/S125/S126). `api/tests/test_gateway_live.py` now
+asserts the profile set `{team-defaults, fast, codex, zai, kimi}`,
+`thread/tests/test_errors.py` asserts the exact 21-member `errors.__all__`, and
+`thread/tests/test_state.py` includes `feedback_batch_id`. Each expectation is an
+explicit literal matching the governing contract (verified equal to the live
+`__all__`/profile/state contract, not copied failure output) and passes in
+isolation.
 
 ### mcp-unavailable-tests-nonhermetic | medium | Seven error-path tests depend on no gateway listening on port 8000
 

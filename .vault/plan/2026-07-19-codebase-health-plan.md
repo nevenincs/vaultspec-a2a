@@ -94,16 +94,16 @@ Establish one usable decision chain and prove that prerequisite ownership work h
 
 Publish only readiness-proven generations and reap every owned descendant when a post-spawn operation fails.
 
-- [ ] `W01.P02.S04` - Make resume reserve spawn verify readiness and commit one process generation before publication; `src/vaultspec_a2a/lifecycle/manager.py, src/vaultspec_a2a/lifecycle/registry.py`.
-- [ ] `W01.P02.S05` - Reap the complete owned process tree when serve-up fails after readiness but before ownership commit; `src/vaultspec_a2a/lifecycle/manager.py, src/vaultspec_a2a/utils/process.py`.
+- [x] `W01.P02.S04` - Make resume reserve spawn verify readiness and commit one process generation before publication; `src/vaultspec_a2a/lifecycle/manager.py, src/vaultspec_a2a/lifecycle/registry.py`.
+- [x] `W01.P02.S05` - Reap the complete owned process tree when serve-up fails after readiness but before ownership commit; `src/vaultspec_a2a/lifecycle/manager.py, src/vaultspec_a2a/utils/process.py`.
 - [ ] `W01.P02.S06` - Verify the landed desktop owned-tree implementation reaps the complete worker tree on startup readiness timeout; `.vault/exec, .vault/audit, src/vaultspec_a2a/desktop_tests/test_owned_process_tree.py`.
-- [ ] `W01.P02.S07` - Prove resume failure atomicity with a real child process; `tests/lifecycle, src/vaultspec_a2a/desktop_tests`.
-- [ ] `W01.P02.S96` - Require confirmed old-tree termination before spawning or publishing a resume replacement generation; `src/vaultspec_a2a/lifecycle/manager.py, src/vaultspec_a2a/lifecycle/registry.py, src/vaultspec_a2a/utils/process.py`.
+- [x] `W01.P02.S07` - Prove resume failure atomicity with a real child process; `tests/lifecycle, src/vaultspec_a2a/desktop_tests`.
+- [x] `W01.P02.S96` - Require confirmed old-tree termination before spawning or publishing a resume replacement generation; `src/vaultspec_a2a/lifecycle/manager.py, src/vaultspec_a2a/lifecycle/registry.py, src/vaultspec_a2a/utils/process.py`.
 - [ ] `W01.P02.S97` - Prove resume kill failure leaves the prior registry generation unchanged and creates no overlapping child; `tests/lifecycle/test_manager_processes.py, src/vaultspec_a2a/desktop_tests`.
-- [ ] `W01.P02.S107` - Make rerun reserve spawn verify readiness and commit one process generation before publication; `src/vaultspec_a2a/lifecycle/manager.py, src/vaultspec_a2a/lifecycle/registry.py`.
-- [ ] `W01.P02.S149` - Prove rerun failure atomicity with a real child process; `tests/lifecycle, src/vaultspec_a2a/desktop_tests`.
-- [ ] `W01.P02.S150` - Prove serve-up failure atomicity with a real child process; `tests/lifecycle, src/vaultspec_a2a/desktop_tests`.
-- [ ] `W01.P02.S151` - Require confirmed old-tree termination before spawning or publishing a rerun replacement generation; `src/vaultspec_a2a/lifecycle/manager.py, src/vaultspec_a2a/lifecycle/registry.py, src/vaultspec_a2a/utils/process.py`.
+- [x] `W01.P02.S107` - Make rerun reserve spawn verify readiness and commit one process generation before publication; `src/vaultspec_a2a/lifecycle/manager.py, src/vaultspec_a2a/lifecycle/registry.py`.
+- [x] `W01.P02.S149` - Prove rerun failure atomicity with a real child process; `tests/lifecycle, src/vaultspec_a2a/desktop_tests`.
+- [x] `W01.P02.S150` - Prove serve-up failure atomicity with a real child process; `tests/lifecycle, src/vaultspec_a2a/desktop_tests`.
+- [x] `W01.P02.S151` - Require confirmed old-tree termination before spawning or publishing a rerun replacement generation; `src/vaultspec_a2a/lifecycle/manager.py, src/vaultspec_a2a/lifecycle/registry.py, src/vaultspec_a2a/utils/process.py`.
 - [ ] `W01.P02.S152` - Prove rerun kill failure leaves the prior registry generation unchanged and creates no overlapping child; `tests/lifecycle/test_manager_processes.py, src/vaultspec_a2a/desktop_tests`.
 
 ### Phase `W01.P03` - coordinate cross-store thread deletion

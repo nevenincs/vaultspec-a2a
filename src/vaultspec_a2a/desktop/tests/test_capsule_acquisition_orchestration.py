@@ -4,7 +4,7 @@ The orchestrators loop the proven ``acquire_artifact`` over a resolved
 selection.  Wiring is proven offline by injecting real in-memory byte streams
 through the official ``open_stream`` seam - each artifact is served the exact
 bytes matching its pin - so the cache is populated without network.  A real
-full-closure acquisition run is service-marked in the S111 preparation path.
+full-closure acquisition run is service-marked in the preparation path.
 """
 
 from __future__ import annotations

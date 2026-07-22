@@ -356,9 +356,9 @@ def _build_real_a2a_wheel(destination: Path) -> bytes:
 def _write_project_wheel(cache: Path) -> tuple[PythonWheelArtifact, bytes]:
     """Build a synthetic first-party A2A wheel carrying the console modules.
 
-    Used by the B-minimal oracle: the wheel is a full installed member of the
-    Python closure (its modules back the two console scripts) but gets no
-    reserved attribution record; its own license ships as its dist-info member.
+    The wheel is a full installed member of the Python closure (its modules
+    back the two console scripts) but gets no reserved attribution record; its
+    own license ships as its dist-info member.
     """
     dist = "vaultspec_a2a-0.1.0"
     tag = "py3-none-any"
@@ -417,9 +417,9 @@ def open_real_capsule_session(
     When ``project_wheel_in_python_installed`` is set, the Python installed
     inventory is built through the production authority
     (:func:`build_python_installed_inventory`) with the first-party A2A wheel
-    included as an installed member and no reserved attribution record - the
-    B-minimal shape - and that same wheel's bytes back the A2A distribution
-    source.  The default keeps the A2A wheel a source-only artifact.
+    included as an installed member and no reserved attribution record, and
+    that same wheel's bytes back the A2A distribution source.  The default
+    keeps the A2A wheel a source-only artifact.
     """
     wheel, wheel_bytes = _python_wheel()
     packages, package_bytes = _acp_packages()

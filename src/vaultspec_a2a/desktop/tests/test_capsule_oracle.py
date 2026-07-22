@@ -5,9 +5,9 @@ full capsule input set - both closures, both locks, every archive, and the
 retained-session envelope.  These tests drive it against a real on-disk input
 cache whose Python installed inventory is built through the production
 authority (``build_python_installed_inventory``) with the first-party A2A wheel
-as an installed member and no reserved attribution record (the B-minimal
-shape).  A session that opens without raising is the proof the consumer accepts
-that shape; the assertions then pin the shape itself.
+as an installed member and no reserved attribution record.  A session that
+opens without raising is the proof the consumer accepts that shape; the
+assertions then pin the shape itself.
 """
 
 from __future__ import annotations
@@ -29,7 +29,7 @@ def test_consumer_accepts_the_first_party_wheel_in_python_installed(
         installed = session.python_installed
 
         # Deps-only license coverage: the dependency carries an attribution
-        # record; the first-party wheel does not (B-minimal).
+        # record; the first-party wheel does not.
         licensed = {record.package for record in installed.licenses}
         assert licensed == {"click"}
         assert "vaultspec-a2a" not in licensed

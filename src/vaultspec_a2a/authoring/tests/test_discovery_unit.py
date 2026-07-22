@@ -12,6 +12,7 @@ from __future__ import annotations
 import json
 import os
 import time
+from contextlib import contextmanager
 from typing import TYPE_CHECKING
 
 import pytest
@@ -155,3 +156,115 @@ def test_retry_returns_none_when_the_engine_stays_unreachable(
     assert result is None
     # Bounded: three fast attempts with two short sleeps, not an unbounded hang.
     assert time.monotonic() - started < 5.0
+
+
+@contextmanager
+def _live_health_listener() -> Iterator[int]:
+    """Run a real HTTP listener that answers ``/health`` 200, yield its port.
+
+    Used to PROVE heartbeat rejection: a candidate pointed at this live listener
+    would resolve if its heartbeat were accepted, so a resolution that never
+    returns this listener's token proves the heartbeat gate rejected the record
+    before the (successful) liveness probe - not that the port was merely dead.
+    """
+    import threading
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+    class _Health(BaseHTTPRequestHandler):
+        def do_GET(self) -> None:
+            self.send_response(200)
+            self.end_headers()
+
+        def log_message(self, format: str, *args: object) -> None:
+            pass
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), _Health)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        yield server.server_address[1]
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5.0)
+
+
+_REJECT_MARKER_TOKEN = "reject-me-heartbeat-token"
+
+
+@pytest.mark.parametrize(
+    ("last_heartbeat", "why"),
+    [
+        (int(time.time() * 1000) - 10_000_000, "far-past stale"),
+        ("2099-01-15T07:50:00Z", "implausibly future ISO"),
+        ("not-a-timestamp", "non-numeric garbage"),
+        (int(time.time() * 1000) + 10**12, "far-future numeric"),
+    ],
+    ids=["stale", "future-iso", "garbage", "future-numeric"],
+)
+def test_a_bad_heartbeat_is_rejected_even_against_a_live_engine(
+    tmp_path: Path,
+    set_service_json: Callable[[Path], None],
+    last_heartbeat: object,
+    why: str,
+) -> None:
+    """A record with a stale or malformed heartbeat is rejected pre-liveness.
+
+    This proves rejection rather than mere non-liveness: the record points at a
+    real listener that answers ``/health`` 200, so if the heartbeat were wrongly
+    accepted the resolver would return this record's marker token. Asserting the
+    marker token never resolves proves the heartbeat gate dropped the record
+    before the successful probe. Restricting the search to the pinned override
+    (never a machine-global fallback that happened to be live) makes the
+    assertion exact.
+    """
+    with _live_health_listener() as port:
+        record = tmp_path / "service.json"
+        record.write_text(
+            json.dumps(
+                {
+                    "port": port,
+                    "service_token": _REJECT_MARKER_TOKEN,
+                    "last_heartbeat": last_heartbeat,
+                }
+            ),
+            encoding="utf-8",
+        )
+        set_service_json(record)
+
+        result = resolve_engine(liveness_timeout=1.0)
+
+        # If the bad heartbeat were accepted, the live listener would resolve
+        # THIS record's marker token. It must not - the record is rejected.
+        assert result is None or result.bearer_token != _REJECT_MARKER_TOKEN, why
+
+
+def test_a_fresh_heartbeat_against_the_same_live_engine_does_resolve(
+    tmp_path: Path, set_service_json: Callable[[Path], None]
+) -> None:
+    """Contrast control: the identical record with a fresh heartbeat resolves.
+
+    Without this the rejection test could pass for the wrong reason (e.g. the
+    listener never answered). A fresh heartbeat against the same live listener
+    must resolve the marker token, proving the only difference that blocks the
+    stale/malformed cases above is the heartbeat gate itself.
+    """
+    with _live_health_listener() as port:
+        record = tmp_path / "service.json"
+        record.write_text(
+            json.dumps(
+                {
+                    "port": port,
+                    "service_token": _REJECT_MARKER_TOKEN,
+                    "last_heartbeat": int(time.time() * 1000),
+                }
+            ),
+            encoding="utf-8",
+        )
+        set_service_json(record)
+
+        result = resolve_engine(liveness_timeout=1.0)
+
+        assert result is not None
+        assert result.bearer_token == _REJECT_MARKER_TOKEN
+        assert result.base_url == f"http://127.0.0.1:{port}"

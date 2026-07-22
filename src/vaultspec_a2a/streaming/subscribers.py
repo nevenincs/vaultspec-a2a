@@ -9,12 +9,12 @@ import asyncio
 import logging
 from collections import defaultdict
 from collections.abc import Awaitable, Callable
-from typing import cast
 
 from vaultspec_a2a.thread.errors import EventAggregatorError
 
 from ..domain_config import domain_config
 from ..graph.protocols import NullTelemetryHook, TelemetryHook
+from .fanout import deliver_bounded
 from .types import SequencedEvent, StreamableGraph
 
 logger = logging.getLogger(__name__)
@@ -114,24 +114,7 @@ class SubscriberManager:
             client_subs = self._subscriptions.get(client_id, set())
             if thread_id not in client_subs:
                 continue
-            if queue.full():
-                try:
-                    queue.get_nowait()
-                    logger.warning(
-                        "Dropped oldest event for slow client %s "
-                        "(relay backpressure, maxsize=%d)",
-                        client_id,
-                        queue.maxsize,
-                    )
-                except asyncio.QueueEmpty:
-                    pass
-            try:
-                queue.put_nowait(cast("SequencedEvent", payload))
-            except asyncio.QueueFull:
-                logger.warning(
-                    "Relay event dropped for client %s — queue still full",
-                    client_id,
-                )
+            deliver_bounded(queue, payload, client_id=client_id)
 
     # ------------------------------------------------------------------
     # Graph registration
@@ -189,27 +172,10 @@ class SubscriberManager:
             delivered = 0
             for client_id, queue in list(self._subscribers.items()):
                 client_subs = self._subscriptions.get(client_id, set())
-                if thread_id is None or thread_id in client_subs:
-                    if queue.full():
-                        try:
-                            queue.get_nowait()
-                            logger.warning(
-                                "Dropped oldest event for slow client %s "
-                                "(queue full, maxsize=%d)",
-                                client_id,
-                                queue.maxsize,
-                            )
-                        except asyncio.QueueEmpty:
-                            pass
-                    try:
-                        queue.put_nowait(sequenced)
-                    except asyncio.QueueFull:
-                        logger.warning(
-                            "Event dropped for client %s — queue still full after "
-                            "drop-oldest (concurrent producer race)",
-                            client_id,
-                        )
-                        continue
+                subscribed = thread_id is None or thread_id in client_subs
+                if subscribed and deliver_bounded(
+                    queue, sequenced, client_id=client_id
+                ):
                     delivered += 1
             self._telemetry.increment_counter(
                 "aggregator.events_emitted", 1, **{"event.type": str(event_type)}

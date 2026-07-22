@@ -259,11 +259,11 @@ Share only state-transition and backpressure behavior while retaining deliberate
 - [ ] `W04.P13.S54` - Introduce one strict integer-coercion helper for discovery metadata; `src/vaultspec_a2a/lifecycle/discovery.py`.
 - [ ] `W04.P13.S55` - Centralize behavior-bearing cancellation message and gateway response mapping without merging wire and domain schemas; `src/vaultspec_a2a/api/routes`.
 - [ ] `W04.P13.S56` - Record package facades and parallel wire-domain field blocks as deliberate non-duplicates after ownership review; `.vault/audit/2026-07-19-codebase-health-audit.md, src/vaultspec_a2a/graph, src/vaultspec_a2a/providers`.
-- [ ] `W04.P13.S127` - Route message dispatch failure through the shared typed transition function; `src/vaultspec_a2a/control/message_service.py`.
-- [ ] `W04.P13.S128` - Route thread dispatch failure through the shared typed transition function; `src/vaultspec_a2a/control/thread_service.py`.
-- [ ] `W04.P13.S129` - Route permission dispatch failure through the shared typed transition function; `src/vaultspec_a2a/control/permission_service.py`.
-- [ ] `W04.P13.S130` - Route subscriber delivery through the shared bounded fanout implementation; `src/vaultspec_a2a/streaming/subscribers.py`.
-- [ ] `W04.P13.S131` - Route WebSocket delivery through the shared bounded fanout implementation; `src/vaultspec_a2a/api/websocket.py`.
+- [x] `W04.P13.S127` - Route message dispatch failure through the shared typed transition function; `src/vaultspec_a2a/control/message_service.py`.
+- [x] `W04.P13.S128` - Route thread dispatch failure through the shared typed transition function; `src/vaultspec_a2a/control/thread_service.py`.
+- [x] `W04.P13.S129` - Route permission dispatch failure through the shared typed transition function; `src/vaultspec_a2a/control/permission_service.py`.
+- [x] `W04.P13.S130` - Route subscriber delivery through the shared bounded fanout implementation; `src/vaultspec_a2a/streaming/subscribers.py`.
+- [x] `W04.P13.S131` - Route WebSocket delivery through the shared bounded fanout implementation; `src/vaultspec_a2a/api/websocket.py`.
 - [x] `W04.P13.S132` - Route authoring lifecycle integer coercion through the shared strict helper; `src/vaultspec_a2a/authoring/lifecycle.py`.
 - [x] `W04.P13.S133` - Route lifecycle discovery integer coercion through the shared strict helper; `src/vaultspec_a2a/lifecycle/discovery.py`.
 

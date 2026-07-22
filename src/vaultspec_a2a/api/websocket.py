@@ -15,7 +15,7 @@ import logging
 import time
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
-from typing import Any, cast
+from typing import Any
 from uuid import uuid4
 
 from pydantic import TypeAdapter, ValidationError
@@ -23,6 +23,7 @@ from starlette.websockets import WebSocket, WebSocketDisconnect, WebSocketState
 
 from ..control.config import settings
 from ..streaming.aggregator import EventAggregator, SequencedEvent
+from ..streaming.fanout import deliver_bounded
 from ..telemetry.instrumentation import get_meter, get_tracer
 from ..telemetry.middleware import inject_trace_context, ws_span
 from ..thread.constants import DEFAULT_SUPERVISOR_ID
@@ -745,36 +746,16 @@ class ConnectionManager:
             queue = self._aggregator.get_subscriber_queue(client_id)
             if queue is None:
                 continue
-            if queue.full():
-                try:
-                    queue.get_nowait()
-                    logger.warning(
-                        "Dropped oldest event for slow client %s "
-                        "(relay backpressure, maxsize=%d)",
-                        client_id,
-                        queue.maxsize,
-                        extra={
-                            "client_id": client_id,
-                            "thread_id": thread_id,
-                            "action": "relay_drop_oldest",
-                            "queue_maxsize": queue.maxsize,
-                        },
-                    )
-                except asyncio.QueueEmpty:
-                    pass
-            try:
-                queue.put_nowait(cast("SequencedEvent", payload))
-            except asyncio.QueueFull:
-                logger.warning(
-                    "Relay event dropped for client %s — queue still full",
-                    client_id,
-                    extra={
-                        "client_id": client_id,
-                        "thread_id": thread_id,
-                        "action": "relay_drop_event",
-                        "queue_maxsize": queue.maxsize,
-                    },
-                )
+            deliver_bounded(
+                queue,
+                payload,
+                client_id=client_id,
+                log_extra={
+                    "client_id": client_id,
+                    "thread_id": thread_id,
+                    "queue_maxsize": queue.maxsize,
+                },
+            )
 
     # ------------------------------------------------------------------
     # Cleanup

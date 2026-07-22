@@ -254,9 +254,9 @@ Consume the tooling debt work, repair the concrete stale and non-hermetic cases,
 
 Share only state-transition and backpressure behavior while retaining deliberate transport and domain separation.
 
-- [ ] `W04.P13.S52` - Introduce one typed dispatch-failure classification and state-transition function; `src/vaultspec_a2a/control/dispatch.py`.
-- [ ] `W04.P13.S53` - Introduce one bounded drop-oldest fanout implementation; `src/vaultspec_a2a/streaming/subscribers.py`.
-- [ ] `W04.P13.S54` - Introduce one strict integer-coercion helper for discovery metadata; `src/vaultspec_a2a/lifecycle/discovery.py`.
+- [x] `W04.P13.S52` - Introduce one typed dispatch-failure classification and state-transition function; `src/vaultspec_a2a/control/dispatch.py`.
+- [x] `W04.P13.S53` - Introduce one bounded drop-oldest fanout implementation; `src/vaultspec_a2a/streaming/subscribers.py`.
+- [x] `W04.P13.S54` - Introduce one strict integer-coercion helper for discovery metadata; `src/vaultspec_a2a/lifecycle/discovery.py`.
 - [x] `W04.P13.S55` - Centralize behavior-bearing cancellation message and gateway response mapping without merging wire and domain schemas; `src/vaultspec_a2a/api/routes`.
 - [x] `W04.P13.S56` - Record package facades and parallel wire-domain field blocks as deliberate non-duplicates after ownership review; `.vault/audit/2026-07-19-codebase-health-audit.md, src/vaultspec_a2a/graph, src/vaultspec_a2a/providers`.
 - [x] `W04.P13.S127` - Route message dispatch failure through the shared typed transition function; `src/vaultspec_a2a/control/message_service.py`.

@@ -82,6 +82,14 @@ _CONSOLE_SCRIPT_MODULES: Final = (
     "vaultspec_a2a/protocols/mcp/__main__.py",
 )
 _LICENSE_SUBTREE: Final = ".capsule-licenses"
+# The first-party project wheel. It is a full installed member of the Python
+# closure (its modules back the two console scripts), but it gets no reserved
+# .capsule-licenses attribution record: that subtree indexes third-party
+# dependency licenses, and a product does not attribute its own license there.
+# The product's own license still ships physically as the wheel's archive-root
+# dist-info/licenses/LICENSE member, placed and provenance-verified like every
+# other module file.
+_PROJECT_WHEEL_PACKAGE: Final = "vaultspec-a2a"
 
 
 def _license_placement(
@@ -185,9 +193,11 @@ def build_python_installed_inventory(
     """Build the Python closure's installed inventory from verified sessions.
 
     Every wheel - including the A2A distribution wheel, whose modules back the
-    two contract console scripts - is opened and verified in full, its members
-    laid out by the production authority with provable provenance, and its
-    licenses placed into the reserved subtree.  A closure missing either
+    two contract console scripts - is opened and verified in full and its
+    members laid out by the production authority with provable provenance.  A
+    reserved ``.capsule-licenses`` attribution record is placed for each
+    third-party dependency; the first-party A2A wheel gets none (its own
+    license ships as its placed dist-info member).  A closure missing either
     console-script module fails closed.
     """
     if not artifacts:
@@ -212,6 +222,10 @@ def build_python_installed_inventory(
         license_files: list[InstalledFileRecord] = []
         licenses: list[InstalledLicenseRecord] = []
         for session, artifact in zip(sessions, artifacts, strict=True):
+            if artifact.name == _PROJECT_WHEEL_PACKAGE:
+                # First-party wheel: no third-party attribution record. Its own
+                # license ships as its placed dist-info/licenses member.
+                continue
             files, records = _license_placements_for_package(
                 closure_kind="python",
                 package=artifact.name,

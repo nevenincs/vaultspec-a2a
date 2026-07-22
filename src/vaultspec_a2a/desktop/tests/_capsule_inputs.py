@@ -38,6 +38,7 @@ from vaultspec_a2a.desktop.artifacts import (
     canonical_closure_inventory_bytes,
     open_verified_capsule_inputs,
 )
+from vaultspec_a2a.desktop.capsule_descriptor import build_python_installed_inventory
 from vaultspec_a2a.desktop.contract import ComponentAssetKind, TargetTriple
 from vaultspec_a2a.desktop.installed_inventory import (
     InstalledClosureDescriptor,
@@ -352,9 +353,74 @@ def _build_real_a2a_wheel(destination: Path) -> bytes:
     return wheels[0].read_bytes()
 
 
+def _write_project_wheel(cache: Path) -> tuple[PythonWheelArtifact, bytes]:
+    """Build a synthetic first-party A2A wheel carrying the console modules.
+
+    Used by the B-minimal oracle: the wheel is a full installed member of the
+    Python closure (its modules back the two console scripts) but gets no
+    reserved attribution record; its own license ships as its dist-info member.
+    """
+    dist = "vaultspec_a2a-0.1.0"
+    tag = "py3-none-any"
+    license_member = f"{dist}.dist-info/licenses/LICENSE"
+    members: dict[str, bytes] = {
+        "vaultspec_a2a/cli/main.py": b"def main() -> None: ...\n",
+        "vaultspec_a2a/protocols/mcp/__main__.py": b"def main() -> None: ...\n",
+        license_member: b"vaultspec-a2a license\n",
+        f"{dist}.dist-info/METADATA": (
+            b"Metadata-Version: 2.4\nName: vaultspec-a2a\nVersion: 0.1.0\n"
+            b"License-Expression: MIT\nLicense-File: LICENSE\n\n"
+        ),
+        f"{dist}.dist-info/WHEEL": (
+            f"Wheel-Version: 1.0\nRoot-Is-Purelib: true\nTag: {tag}\n".encode()
+        ),
+    }
+    rows = []
+    for name, payload in members.items():
+        encoded = (
+            base64.urlsafe_b64encode(hashlib.sha256(payload).digest())
+            .decode("ascii")
+            .rstrip("=")
+        )
+        rows.append(f"{name},sha256={encoded},{len(payload)}\n")
+    rows.append(f"{dist}.dist-info/RECORD,,\n")
+    members[f"{dist}.dist-info/RECORD"] = "".join(rows).encode()
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w") as archive:
+        for name, payload in members.items():
+            archive.writestr(name, payload)
+    payload = buffer.getvalue()
+    sha256 = _sha256(payload)
+    (cache / sha256).write_bytes(payload)
+    return (
+        PythonWheelArtifact(
+            name="vaultspec-a2a",
+            version="0.1.0",
+            filename=f"{dist}-{tag}.whl",
+            url="https://files.example.test/vaultspec_a2a-0.1.0-py3-none-any.whl",
+            sha256=sha256,
+            size=len(payload),
+            license_expression="MIT",
+            license_members=(license_member,),
+            redistribution_evidence=("wheel-license:LICENSE",),
+        ),
+        payload,
+    )
+
+
 @contextmanager
-def open_real_capsule_session(tmp_path: Path) -> Iterator[VerifiedCapsuleInputSession]:
-    """Open a real verified capsule input session backed by on-disk fixtures."""
+def open_real_capsule_session(
+    tmp_path: Path, *, project_wheel_in_python_installed: bool = False
+) -> Iterator[VerifiedCapsuleInputSession]:
+    """Open a real verified capsule input session backed by on-disk fixtures.
+
+    When ``project_wheel_in_python_installed`` is set, the Python installed
+    inventory is built through the production authority
+    (:func:`build_python_installed_inventory`) with the first-party A2A wheel
+    included as an installed member and no reserved attribution record - the
+    B-minimal shape - and that same wheel's bytes back the A2A distribution
+    source.  The default keeps the A2A wheel a source-only artifact.
+    """
     wheel, wheel_bytes = _python_wheel()
     packages, package_bytes = _acp_packages()
     uv_bytes = f"""version = 1
@@ -431,19 +497,31 @@ wheels = [
     for digest, payload in package_bytes.items():
         (cache / digest).write_bytes(payload)
 
+    if project_wheel_in_python_installed:
+        project_wheel, distribution_bytes = _write_project_wheel(cache)
+        python_installed = build_python_installed_inventory(
+            (wheel, project_wheel),
+            target=_TARGET,
+            source_inventory_sha256=python_digest,
+            lock_sha256=_sha256(uv_bytes),
+            cache_root=cache,
+        )[0]
+    else:
+        distribution_bytes = _build_real_a2a_wheel(tmp_path / "distribution")
+        python_installed = _cache_installed_descriptor(
+            cache,
+            kind="python",
+            source_digest=python_digest,
+            lock_digest=_sha256(uv_bytes),
+            packages=(wheel,),
+        )
     python_closure = PythonClosureDescriptor(
         target=_TARGET,
         lock_sha256=_sha256(uv_bytes),
         package_count=1,
         wheel_inventory_sha256=python_digest,
         wheel_inventory_size=len(python_payload),
-        installed=_cache_installed_descriptor(
-            cache,
-            kind="python",
-            source_digest=python_digest,
-            lock_digest=_sha256(uv_bytes),
-            packages=(wheel,),
-        ),
+        installed=python_installed,
     )
     acp_closure = AcpClosureDescriptor(
         target=_TARGET,
@@ -463,7 +541,6 @@ wheels = [
         target_sdk_integrity=packages[1].integrity,
     )
 
-    distribution_bytes = _build_real_a2a_wheel(tmp_path / "distribution")
     source_payloads = {
         ComponentAssetKind.A2A_DISTRIBUTION: distribution_bytes,
         ComponentAssetKind.PYTHON_RUNTIME: b"retained:python-runtime\n",

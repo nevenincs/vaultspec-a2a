@@ -949,6 +949,55 @@ def test_wheelhouse_rejects_installed_license_source_drift(
         verify_python_wheelhouse(loaded, input_dir=cache)
 
 
+def test_python_closure_rejects_installed_licenses_missing_a_dependency(
+    tmp_path: Path,
+) -> None:
+    # The closure requires click, but the installed inventory licenses a
+    # different package. The coverage gate must fail closed rather than admit a
+    # dependency that ships with no license.
+    click, _ = _python_wheel()
+    other = PythonWheelArtifact(
+        name="notclick",
+        version="1.0.0",
+        filename="notclick-1.0.0-py3-none-any.whl",
+        url="https://files.example.test/notclick-1.0.0-py3-none-any.whl",
+        sha256=_sha256(b"notclick"),
+        size=1,
+        license_expression="MIT",
+        license_members=("notclick-1.0.0.dist-info/licenses/LICENSE",),
+        redistribution_evidence=("wheel-license:LICENSE",),
+    )
+    inventory = PythonClosureInventory(
+        inventory_version="vaultspec-python-wheelhouse-v1",
+        target=TargetTriple.WINDOWS_X86_64,
+        lock_sha256="9" * 64,
+        roots=(click.name,),
+        packages=(click,),
+    )
+    payload = canonical_closure_inventory_bytes(inventory)
+    digest = _sha256(payload)
+    cache = tmp_path / "cache"
+    cache.mkdir()
+    (cache / digest).write_bytes(payload)
+    descriptor = PythonClosureDescriptor(
+        target=TargetTriple.WINDOWS_X86_64,
+        lock_sha256="9" * 64,
+        package_count=1,
+        wheel_inventory_sha256=digest,
+        wheel_inventory_size=len(payload),
+        installed=_cache_installed_descriptor(
+            cache,
+            kind="python",
+            source_digest=digest,
+            lock_digest="9" * 64,
+            packages=(other,),
+        ),
+    )
+
+    with pytest.raises(ArtifactInputError, match="do not cover the package closure"):
+        load_python_closure_inventory(descriptor, input_dir=cache)
+
+
 def test_python_inventory_rejects_noncanonical_bytes_before_use(tmp_path: Path) -> None:
     wheel, _ = _python_wheel()
     inventory = PythonClosureInventory(

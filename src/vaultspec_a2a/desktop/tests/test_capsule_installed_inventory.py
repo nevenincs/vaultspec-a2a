@@ -39,6 +39,7 @@ if TYPE_CHECKING:
 _TARGET = TargetTriple.LINUX_X86_64
 _TAG = "py3-none-any"
 _DIST = "vaultspec_a2a-1.0.0"
+_DEP_DIST = "deppkg-2.0.0"
 _SOURCE_DIGEST = "a" * 64
 _LOCK_DIGEST = "b" * 64
 _CONSOLE_MODULES = (
@@ -112,13 +113,60 @@ def _write_a2a_wheel(
     )
 
 
+def _write_dependency_wheel(cache_root: Path) -> PythonWheelArtifact:
+    license_member = f"{_DEP_DIST}.dist-info/licenses/LICENSE"
+    members = [
+        _zip_member("deppkg/__init__.py", b"value = 1\n"),
+        _zip_member(license_member, b"dep license text\n"),
+        _zip_member(
+            f"{_DEP_DIST}.dist-info/METADATA",
+            b"Metadata-Version: 2.4\nName: deppkg\nVersion: 2.0.0\n"
+            b"License-Expression: MIT\nLicense-File: LICENSE\n\n",
+        ),
+        _zip_member(
+            f"{_DEP_DIST}.dist-info/WHEEL",
+            f"Wheel-Version: 1.0\nRoot-Is-Purelib: true\nTag: {_TAG}\n".encode(),
+        ),
+    ]
+    rows = []
+    for info, payload in members:
+        digest = (
+            base64.urlsafe_b64encode(hashlib.sha256(payload).digest())
+            .decode("ascii")
+            .rstrip("=")
+        )
+        rows.append(f"{info.filename},sha256={digest},{len(payload)}\n")
+    rows.append(f"{_DEP_DIST}.dist-info/RECORD,,\n")
+    members.append(_zip_member(f"{_DEP_DIST}.dist-info/RECORD", "".join(rows).encode()))
+
+    scratch = cache_root / "dependency.whl"
+    with zipfile.ZipFile(scratch, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+        for info, payload in members:
+            archive.writestr(info, payload)
+    payload = scratch.read_bytes()
+    sha256 = hashlib.sha256(payload).hexdigest()
+    scratch.rename(cache_root / sha256)
+    return PythonWheelArtifact(
+        name="deppkg",
+        version="2.0.0",
+        filename=f"{_DEP_DIST}-{_TAG}.whl",
+        url="https://files.example.test/deppkg-2.0.0-py3-none-any.whl",
+        sha256=sha256,
+        size=len(payload),
+        license_expression="MIT",
+        license_members=(license_member,),
+        redistribution_evidence=("wheel-license:LICENSE",),
+    )
+
+
 def test_python_installed_inventory_round_trips_through_the_consumer(
     tmp_path: Path,
 ) -> None:
-    artifact = _write_a2a_wheel(tmp_path)
+    dependency = _write_dependency_wheel(tmp_path)
+    project = _write_a2a_wheel(tmp_path)
 
     descriptor, inventory = build_python_installed_inventory(
-        (artifact,),
+        (dependency, project),
         target=_TARGET,
         source_inventory_sha256=_SOURCE_DIGEST,
         lock_sha256=_LOCK_DIGEST,
@@ -130,14 +178,31 @@ def test_python_installed_inventory_round_trips_through_the_consumer(
         file.relative_path for file in inventory.files if file.mode == "0755"
     }
     assert set(_CONSOLE_MODULES) <= entrypoints
-    # The license is placed into the reserved subtree with provenance.
-    placed = next(
+
+    # The third-party dependency carries a reserved-subtree attribution record.
+    assert {record.package for record in inventory.licenses} == {"deppkg"}
+    dep_license = next(
         file
         for file in inventory.files
-        if file.relative_path == ".capsule-licenses/vaultspec-a2a/LICENSE"
+        if file.relative_path == ".capsule-licenses/deppkg/LICENSE"
     )
-    assert placed.source_sha256 == artifact.sha256
-    assert placed.sha256 == hashlib.sha256(b"MIT license text\n").hexdigest()
+    assert dep_license.source_sha256 == dependency.sha256
+
+    # The first-party A2A wheel gets NO reserved attribution record ...
+    assert not any(
+        file.relative_path.startswith(".capsule-licenses/vaultspec-a2a/")
+        for file in inventory.files
+    )
+    # ... yet its own license still ships as a placed dist-info member.
+    product_license = next(
+        file
+        for file in inventory.files
+        if file.relative_path == f"{_DIST}.dist-info/licenses/LICENSE"
+    )
+    assert product_license.mode == "0644"
+    assert product_license.source_sha256 == project.sha256
+    assert product_license.sha256 == hashlib.sha256(b"MIT license text\n").hexdigest()
+
     # Round-trip: the consumer loads it and the tree digest matches.
     loaded = load_installed_closure_inventory(descriptor, input_dir=tmp_path)
     assert loaded.value.tree_digest == inventory.tree_digest

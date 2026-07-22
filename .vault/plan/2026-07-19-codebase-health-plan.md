@@ -140,7 +140,7 @@ Make idempotency behavior-complete and derive each run-status response from one 
 - [x] `W02.P05.S18` - Persist the run-start fingerprint and return conflict for mismatched replay on both normal and integrity-error paths; `src/vaultspec_a2a/api/routes/gateway.py, src/vaultspec_a2a/control/repositories`.
 - [x] `W02.P05.S19` - Unify launch discovery and acceptance on one profile eligibility decision; `src/vaultspec_a2a/providers/model_profiles.py, src/vaultspec_a2a/api/routes/gateway.py, src/vaultspec_a2a/authoring/discovery.py`.
 - [x] `W02.P05.S20` - Read one project checkpoint tuple and derive all run-status fields from that immutable snapshot; `src/vaultspec_a2a/control/thread_state_service.py`.
-- [ ] `W02.P05.S21` - Prove request-fingerprint conflicts profile parity and single-snapshot run status against real persistence; `tests/api, tests/control`.
+- [x] `W02.P05.S21` - Prove request-fingerprint conflicts profile parity and single-snapshot run status against real persistence; `tests/api, tests/control`.
 
 ### Phase `W02.P06` - allowlist progress and bound stream resources
 

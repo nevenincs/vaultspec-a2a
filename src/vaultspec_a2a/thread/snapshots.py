@@ -322,13 +322,18 @@ def _load_json_list(raw: str | None, *, field_name: str) -> list[Any]:
     return decoded
 
 
-def project_checkpoint_tuple(
+def _extract_checkpoint_fields(
     checkpoint_tuple: Any,
     *,
     thread_id: str,
-    history_depth: int | None = None,
+    history_depth: int | None,
 ) -> CheckpointProjection:
-    """Project repair-relevant checkpoint data beyond raw channel values."""
+    """Extract the immutable per-checkpoint fields into a base projection.
+
+    Reads only the checkpoint, its metadata, and its parent config - the values
+    that describe the checkpoint itself, not the pending work layered on it. The
+    pending-write fold is a separate stage so the two concerns read apart.
+    """
     checkpoint = checkpoint_tuple.checkpoint
     metadata = (
         checkpoint_tuple.metadata if isinstance(checkpoint_tuple.metadata, dict) else {}
@@ -367,7 +372,23 @@ def project_checkpoint_tuple(
     )
     if projection.checkpoint_id is not None:
         projection.config["configurable"]["checkpoint_id"] = projection.checkpoint_id
+    return projection
 
+
+def _fold_pending_writes(
+    projection: CheckpointProjection,
+    checkpoint_tuple: Any,
+    *,
+    thread_id: str,
+) -> None:
+    """Fold the checkpoint's pending writes onto a base projection in place.
+
+    This is the response-shaping stage: it counts pending writes, records their
+    channels, decodes interrupt payloads into projected interrupts, and marks the
+    degraded reasons a malformed interrupt surfaces. It mutates *projection*
+    rather than returning a new one, because the base fields it builds on are
+    already correct and only the pending-work view is being added.
+    """
     for index, pending_write in enumerate(checkpoint_tuple.pending_writes or []):
         _task_id, channel, value = pending_write
         projection.pending_write_count += 1
@@ -409,6 +430,24 @@ def project_checkpoint_tuple(
     if projection.history_depth is None:
         projection.degraded_reasons.append("checkpoint_history_unknown")
 
+
+def project_checkpoint_tuple(
+    checkpoint_tuple: Any,
+    *,
+    thread_id: str,
+    history_depth: int | None = None,
+) -> CheckpointProjection:
+    """Project repair-relevant checkpoint data beyond raw channel values.
+
+    Two stages: extract the immutable per-checkpoint fields, then fold the
+    pending-write and interrupt view onto them. The split keeps the checkpoint's
+    own description separate from the pending work layered on it, so each reads
+    and tests apart.
+    """
+    projection = _extract_checkpoint_fields(
+        checkpoint_tuple, thread_id=thread_id, history_depth=history_depth
+    )
+    _fold_pending_writes(projection, checkpoint_tuple, thread_id=thread_id)
     return projection
 
 

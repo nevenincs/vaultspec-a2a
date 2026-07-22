@@ -59,11 +59,38 @@ def commit_singleflight(app: FastAPI) -> _CommitSingleFlight:
     return singleflight
 
 
+# Fields excluded from every request digest, with the reason each is excluded.
+# Named rather than derived: a field added later must be classified by a person.
+# Deriving the set would silently fold a new field in - making previously valid
+# replays conflict - and defaulting new fields out would let a behaviour change
+# replay as identical. Both failures are quiet.
+#
+# ``stage`` and ``reservation_id`` identify the request rather than describe the
+# work: a prepare and its own commit differ on both while driving one run, so
+# including them would make the staged path conflict with itself.
+_ALWAYS_EXCLUDED: frozenset[str] = frozenset({"stage", "reservation_id"})
+
+# Additionally excluded when digesting a PREPARE, which carries no opening
+# prompt and no tokens yet. Comparing them would make every commit differ from
+# the prepare it binds to.
+_PREPARE_EXCLUDED: frozenset[str] = frozenset({"message", "actor_tokens"})
+
+
 def request_digest(body: RunStartRequest, *, prepared: bool) -> str:
-    """Hash one canonical request shape without persisting any raw token."""
-    excluded = {"stage", "reservation_id"}
+    """Hash one canonical request shape without persisting any raw token.
+
+    Two requests that would produce the same run share a digest; any difference
+    in what the run would do produces a different one. That is what lets a
+    replayed run id be answered with the original outcome when the body matches,
+    and refused when it does not - a replay carrying a different prompt or preset
+    is a new intention wearing an old id.
+
+    Serialisation is canonical - keys sorted, separators fixed - so the digest
+    depends on the values rather than on dictionary ordering or formatting.
+    """
+    excluded = set(_ALWAYS_EXCLUDED)
     if prepared:
-        excluded.update({"message", "actor_tokens"})
+        excluded.update(_PREPARE_EXCLUDED)
     payload = body.model_dump(mode="json", exclude=excluded)
     canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()

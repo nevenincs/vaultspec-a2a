@@ -1,4 +1,4 @@
-"""A replay must be recognised by what the run would do, not by its identifiers.
+"""A replay must be recognised by what the run would do.
 
 A run id is how a caller retries after a lost acknowledgement, so the same id
 arriving twice is ordinary. What is not ordinary is the same id arriving with a
@@ -16,11 +16,12 @@ from typing import Any
 
 import pytest
 
-from vaultspec_a2a.api.schemas.gateway import RunStartRequest
-from vaultspec_a2a.control.run_start_policy import (
-    RUN_START_FINGERPRINT_FIELDS,
-    run_start_fingerprint,
+from vaultspec_a2a.api.run_admission import (
+    _ALWAYS_EXCLUDED,
+    _PREPARE_EXCLUDED,
+    request_digest,
 )
+from vaultspec_a2a.api.schemas.gateway import RunStartRequest
 
 
 def _request(**overrides: Any) -> RunStartRequest:
@@ -39,7 +40,9 @@ def _request(**overrides: Any) -> RunStartRequest:
 
 def test_identical_bodies_share_a_fingerprint() -> None:
     """An honest retry of the same work must be recognised as the same work."""
-    assert run_start_fingerprint(_request()) == run_start_fingerprint(_request())
+    assert request_digest(_request(), prepared=False) == request_digest(
+        _request(), prepared=False
+    )
 
 
 @pytest.mark.parametrize(
@@ -58,16 +61,23 @@ def test_a_behaviour_affecting_change_produces_a_different_fingerprint(
     field: str, value: object
 ) -> None:
     """Anything that changes what the run does must break the match."""
-    assert run_start_fingerprint(_request()) != run_start_fingerprint(
-        _request(**{field: value})
+    assert request_digest(_request(), prepared=False) != request_digest(
+        _request(**{field: value}), prepared=False
     )
 
 
 @pytest.mark.parametrize("run_id", ["r-2", "r-3"])
-def test_the_run_id_does_not_affect_the_fingerprint(run_id: str) -> None:
-    """The id names the request; it does not describe the work."""
-    assert run_start_fingerprint(_request()) == run_start_fingerprint(
-        _request(run_id=run_id)
+def test_the_run_id_is_part_of_the_digest(run_id: str) -> None:
+    """The id is included, and that is harmless for the two uses it serves.
+
+    A replay is looked up BY run id before its digest is compared, so including
+    it adds nothing there; a prepare and its commit carry the same id, so it
+    cannot make them differ. Asserted rather than assumed, because a future
+    reader weighing whether to exclude it should see the current behaviour
+    stated.
+    """
+    assert request_digest(_request(), prepared=False) != request_digest(
+        _request(run_id=run_id), prepared=False
     )
 
 
@@ -78,20 +88,25 @@ def test_the_fingerprint_is_stable_across_processes() -> None:
     digest over canonical text, and this asserts the value rather than trusting
     that distinction.
     """
-    assert run_start_fingerprint(_request()) == (run_start_fingerprint(_request()))
-    assert len(run_start_fingerprint(_request())) == 64
+    assert request_digest(_request(), prepared=False) == (
+        request_digest(_request(), prepared=False)
+    )
+    assert len(request_digest(_request(), prepared=False)) == 64
 
 
-def test_every_named_field_exists_on_the_request_schema() -> None:
-    """A renamed field would silently drop out of the fingerprint."""
+def test_every_excluded_field_exists_on_the_request_schema() -> None:
+    """A renamed field would silently stop being excluded."""
     schema_fields = set(RunStartRequest.model_fields)
+    named = _ALWAYS_EXCLUDED | _PREPARE_EXCLUDED
 
-    missing = [f for f in RUN_START_FINGERPRINT_FIELDS if f not in schema_fields]
+    missing = sorted(f for f in named if f not in schema_fields)
 
-    assert not missing, f"fingerprint names fields the schema lacks: {missing}"
+    assert not missing, f"exclusions name fields the schema lacks: {missing}"
 
 
-def test_the_identifier_fields_are_deliberately_excluded() -> None:
-    """Including them would make a prepare and its own commit conflict."""
-    for identifier in ("stage", "reservation_id", "run_id", "actor_tokens"):
-        assert identifier not in RUN_START_FINGERPRINT_FIELDS
+def test_a_prepare_digest_ignores_the_prompt_and_tokens() -> None:
+    """A prepare carries neither, so a commit must still bind to its prepare."""
+    prepare = request_digest(_request(), prepared=True)
+
+    assert prepare == request_digest(_request(message="different"), prepared=True)
+    assert prepare != request_digest(_request(), prepared=False)

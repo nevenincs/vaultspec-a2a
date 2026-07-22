@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 import pytest
 from pydantic import ValidationError
@@ -12,6 +12,7 @@ from vaultspec_a2a.desktop.installed_inventory import (
     INSTALLED_PROVENANCE_EVIDENCE_KEY,
     InstalledClosureDescriptor,
     InstalledClosureInventory,
+    InstalledDroppedRecord,
     InstalledFileRecord,
     InstalledInventoryError,
     InstalledLicenseRecord,
@@ -86,7 +87,7 @@ def _files() -> tuple[InstalledFileRecord, ...]:
 def _inventory(**changes: object) -> InstalledClosureInventory:
     context = changes.pop("context", None)
     fields: dict[str, object] = {
-        "inventory_version": "vaultspec-installed-closure-v2",
+        "inventory_version": "vaultspec-installed-closure-v3",
         "closure_kind": "python",
         "target": TargetTriple.WINDOWS_X86_64,
         "install_root": "runtime/python",
@@ -130,8 +131,9 @@ def test_inventory_is_immutable_canonical_and_dashboard_digest_compatible() -> N
 
     assert installed_tree_digest(inventory) == _TREE_DIGEST
     assert canonical_installed_inventory_bytes(inventory).endswith(b"\n")
+    frozen: Any = inventory
     with pytest.raises(ValidationError, match="frozen"):
-        inventory.file_count = 4  # ty: ignore[invalid-assignment]
+        frozen.file_count = 4
 
 
 def test_acp_inventory_binds_its_own_target_install_root_and_tree() -> None:
@@ -146,6 +148,56 @@ def test_acp_inventory_binds_its_own_target_install_root_and_tree() -> None:
     assert inventory.closure_kind == "acp"
     assert inventory.target is TargetTriple.LINUX_X86_64
     assert installed_tree_digest(inventory) == _ACP_TREE_DIGEST
+
+
+def test_dropped_records_bind_the_inventory_but_not_the_tree_digest() -> None:
+    dropped = (
+        InstalledDroppedRecord(
+            source_member="example-1.0.data/scripts/tool",
+            source_sha256=_PACKAGE_DIGEST,
+            size=5,
+            sha256="9" * 64,
+            reason="data-scripts",
+        ),
+    )
+    without = _inventory()
+    with_dropped = _inventory(dropped=dropped)
+
+    # A dropped record changes the inventory's canonical bytes (hence the
+    # content digest the descriptor pins) ...
+    assert canonical_installed_inventory_bytes(
+        with_dropped
+    ) != canonical_installed_inventory_bytes(without)
+    # ... but never the placed-tree digest: the same tree with or without it.
+    assert with_dropped.tree_digest == without.tree_digest == _TREE_DIGEST
+    assert installed_tree_digest(with_dropped) == _TREE_DIGEST
+    assert with_dropped.dropped == dropped
+
+
+def test_inventory_rejects_the_superseded_v2_version() -> None:
+    with pytest.raises(ValidationError):
+        _inventory(inventory_version="vaultspec-installed-closure-v2")
+
+
+def test_dropped_records_must_be_distinct_and_sorted() -> None:
+    unsorted = (
+        InstalledDroppedRecord(
+            source_member="pkg.data/scripts/b",
+            source_sha256=_PACKAGE_DIGEST,
+            size=1,
+            sha256="9" * 64,
+            reason="data-scripts",
+        ),
+        InstalledDroppedRecord(
+            source_member="pkg.data/scripts/a",
+            source_sha256=_PACKAGE_DIGEST,
+            size=1,
+            sha256="9" * 64,
+            reason="data-scripts",
+        ),
+    )
+    with pytest.raises(ValidationError, match="dropped records must be distinct"):
+        _inventory(dropped=unsorted)
 
 
 @pytest.mark.parametrize(
@@ -340,7 +392,7 @@ def test_loader_requires_an_ordinary_inventory_file(tmp_path: Path) -> None:
 def test_provenance_membership_join_proves_verified_closure_members() -> None:
     context = {INSTALLED_PROVENANCE_EVIDENCE_KEY: _VERIFIED_MEMBERS}
     proven = _inventory(context=context)
-    assert proven.inventory_version == "vaultspec-installed-closure-v2"
+    assert proven.inventory_version == "vaultspec-installed-closure-v3"
     assert proven.files[0].source_sha256 == _PACKAGE_DIGEST
     assert proven.files[0].source_member == _GATEWAY_MEMBER
 

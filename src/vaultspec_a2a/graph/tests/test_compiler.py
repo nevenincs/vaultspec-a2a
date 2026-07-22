@@ -669,9 +669,7 @@ async def test_research_producer_injects_scoped_conventions(tmp_path) -> None:
     captured: dict[str, list] = {}
 
     class _RecordingModel(FakeChatModel):
-        async def _agenerate(  # type: ignore[no-untyped-def]
-            self, messages, stop=None, run_manager=None, **kwargs
-        ):
+        async def _agenerate(self, messages, stop=None, run_manager=None, **kwargs):
             captured["messages"] = list(messages)
             return ChatResult(
                 generations=[ChatGeneration(message=AIMessage(content="finding"))]

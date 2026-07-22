@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -148,8 +149,9 @@ def test_supported_tags_never_admit_a_foreign_platform(
 
 
 def test_platform_tags_reject_a_non_target() -> None:
+    non_target: Any = object()
     with pytest.raises(CapsuleInputAuthoringError, match="target is invalid"):
-        target_platform_tags(object())  # ty: ignore[invalid-argument-type]
+        target_platform_tags(non_target)
 
 
 @pytest.mark.parametrize("target", tuple(TargetTriple))

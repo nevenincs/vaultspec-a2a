@@ -204,7 +204,7 @@ async def test_synthesist_node_grounds_on_a_real_feedback_batch(
         feedback_reader=reader,
     )
 
-    state: dict[str, Any] = {
+    state: Any = {
         "messages": [HumanMessage(content="Revise the research document.")],
         "active_agent": _SYNTHESIST,
         "artifacts": [],
@@ -215,7 +215,7 @@ async def test_synthesist_node_grounds_on_a_real_feedback_batch(
         "active_feature": "edge-feature",
         "feedback_batch_id": batch_id,
     }
-    await node(state)  # ty: ignore[invalid-argument-type]
+    await node(state)
 
     # The writer's model received the reviewer feedback, retrieved live by id.
     assert recording.calls, "the node never invoked the model"
@@ -245,7 +245,7 @@ async def test_synthesist_node_ungrounded_without_a_batch(
         role="synthesist",
         feedback_reader=reader,
     )
-    state: dict[str, Any] = {
+    state: Any = {
         "messages": [HumanMessage(content="Draft the research document.")],
         "active_agent": _SYNTHESIST,
         "artifacts": [],
@@ -255,7 +255,7 @@ async def test_synthesist_node_ungrounded_without_a_batch(
         "next": "",
         "active_feature": "edge-feature",
     }
-    await node(state)  # ty: ignore[invalid-argument-type]
+    await node(state)
     assert recording.calls
     system_text = "\n".join(
         str(m.content) for m in recording.calls[0] if m.type == "system"

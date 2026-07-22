@@ -10,7 +10,7 @@ import stat
 import struct
 import tarfile
 import zipfile
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import pytest
 
@@ -734,8 +734,9 @@ def test_verified_archive_member_evidence_requires_an_open_session(
 
 
 def test_verified_archive_member_evidence_rejects_a_non_session_input() -> None:
+    non_session: Any = object()
     with pytest.raises(PackageArchiveError, match="session is invalid"):
-        verified_archive_member_evidence(object())  # ty: ignore[invalid-argument-type]
+        verified_archive_member_evidence(non_session)
 
 
 def test_wheel_preflight_reconciles_real_central_directory_count(

@@ -69,7 +69,7 @@ def _inject_graph(executor: Executor, thread_id: str, *, cache_key=_TEST_CACHE_K
     """Insert a sentinel graph into the executor's LRU cache for *thread_id*."""
     sentinel = object()
     if cache_key not in executor._graph_cache:
-        executor._graph_cache[cache_key] = sentinel  # type: ignore[assignment]
+        executor._graph_cache[cache_key] = sentinel
     executor._thread_to_cache_key[thread_id] = cache_key
 
 
@@ -600,7 +600,7 @@ class TestLazyRecompilation:
             try:
                 executor = Executor(checkpointer=cp, bridge=bridge)
                 cache_key = ("vaultspec-solo-coder", None, False)
-                executor._graph_cache[cache_key] = object()  # type: ignore[assignment]
+                executor._graph_cache[cache_key] = object()
                 executor._thread_to_cache_key["t-cache"] = cache_key
                 assert executor._thread_to_cache_key["t-cache"] == cache_key
             finally:
@@ -650,7 +650,7 @@ class TestLazyRecompilation:
             try:
                 executor = Executor(checkpointer=cp, bridge=bridge)
                 cache_key = ("vaultspec-solo-coder", "/some/path", False)
-                executor._graph_cache[cache_key] = object()  # type: ignore[assignment]
+                executor._graph_cache[cache_key] = object()
                 executor._thread_to_cache_key["t-preset"] = cache_key
 
                 # Verify the mapping is correctly stored (tests _thread_to_cache_key

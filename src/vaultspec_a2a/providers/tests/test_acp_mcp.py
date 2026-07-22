@@ -7,7 +7,6 @@ Real objects only, no mocks: composition runs against production
 from __future__ import annotations
 
 import subprocess
-
 import typing
 
 import pytest
@@ -370,9 +369,10 @@ class TestHarnessCompositionStages:
         class _Bare:
             """A model with no delivery mechanism at all."""
 
+        bare: typing.Any = _Bare()
         with pytest.raises(ConfigError):
             _resolve_harness_composition(
-                _Bare(),
+                bare,
                 ["not-a-real-server"],
                 profile=HarnessMcpRuntimeProfile.NON_DESKTOP,
             )
@@ -383,8 +383,9 @@ class TestHarnessCompositionStages:
         class _Bare:
             mcp_servers: typing.ClassVar[list] = []
 
+        bare: typing.Any = _Bare()
         resolution, unavailable, resolved = _resolve_harness_composition(
-            _Bare(), ["vaultspec-rag"], profile=HarnessMcpRuntimeProfile.NON_DESKTOP
+            bare, ["vaultspec-rag"], profile=HarnessMcpRuntimeProfile.NON_DESKTOP
         )
 
         assert "vaultspec-rag" in resolution.available_servers

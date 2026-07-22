@@ -4,6 +4,8 @@ Exercises to_dict/from_dict round-trips, frozen immutability, and edge-case
 handling (missing keys, extra keys, default values).
 """
 
+from typing import Any
+
 import pytest
 
 from ..models import ArtifactRef, PlanStep, TokenUsageEntry
@@ -43,8 +45,9 @@ class TestTokenUsageEntry:
     def test_frozen_immutability(self) -> None:
         """Frozen dataclass rejects attribute assignment."""
         entry = TokenUsageEntry(agent_id="a", input_tokens=1, output_tokens=2, total=3)
+        frozen: Any = entry
         with pytest.raises(AttributeError):
-            entry.agent_id = "b"  # ty: ignore[invalid-assignment]
+            frozen.agent_id = "b"
 
     def test_default_field_values(self) -> None:
         """Only agent_id is required; counters default to 0."""
@@ -91,8 +94,9 @@ class TestPlanStep:
     def test_frozen_immutability(self) -> None:
         """Frozen dataclass rejects attribute assignment."""
         ps = PlanStep(step="x")
+        frozen: Any = ps
         with pytest.raises(AttributeError):
-            ps.step = "y"  # ty: ignore[invalid-assignment]
+            frozen.step = "y"
 
 
 # ---------------------------------------------------------------------------
@@ -144,8 +148,9 @@ class TestArtifactRef:
     def test_frozen_immutability(self) -> None:
         """Frozen dataclass rejects attribute assignment."""
         ar = ArtifactRef(id="x", path="/y")
+        frozen: Any = ar
         with pytest.raises(AttributeError):
-            ar.id = "z"  # ty: ignore[invalid-assignment]
+            frozen.id = "z"
 
     def test_different_type_values(self) -> None:
         """ArtifactRef supports arbitrary type strings (file, diff, doc, etc.)."""

@@ -891,7 +891,7 @@ class TestAdrResearchTeamPreset:
                 f"or the TOML schema is broken: {exc}"
             )
         assert cfg.id == "vaultspec-adr-research"
-        assert cfg.topology.type == TopologyType.RESEARCH_ADR  # type: ignore[attr-defined]
+        assert cfg.topology.type == TopologyType.RESEARCH_ADR
         assert len(cfg.workers) == 4
 
     def test_adr_research_harness_opts_into_vaultspec_rag(self) -> None:

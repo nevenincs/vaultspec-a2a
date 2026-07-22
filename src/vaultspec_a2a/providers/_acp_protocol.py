@@ -186,7 +186,32 @@ async def handle_server_rpc(
 
     handler = rpc_handler_map.get(method)
     if handler is not None:
-        resp = await handler(rpc_id, params, ctx, config)
+        try:
+            resp = await handler(rpc_id, params, ctx, config)
+        except asyncio.CancelledError:
+            # Session teardown, not a handler fault: the agent is going away and
+            # owes no reply. Re-raised so cancellation keeps propagating.
+            raise
+        except Exception as exc:
+            # A handler raising is a request the agent is still waiting on. With
+            # no reply it blocks until its own timeout, or worse proceeds as
+            # though the operation succeeded - a failed file write read as
+            # written. Report the failure as a protocol error so the agent learns
+            # the outcome, and keep the exception in the log for the operator.
+            logger.error(
+                "ACP handler for %s failed; replying with a protocol error",
+                method,
+                exc_info=exc,
+                extra=runtime_log_extra(config),
+            )
+            resp = {
+                "jsonrpc": "2.0",
+                "id": rpc_id,
+                "error": {
+                    "code": -32603,
+                    "message": f"Internal error handling {method}",
+                },
+            }
     else:
         resp = {
             "jsonrpc": "2.0",

@@ -20,8 +20,10 @@ resident gateway on its real port can never accidentally satisfy them.
 """
 
 import asyncio
+import socket
 from contextlib import asynccontextmanager
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import httpx
 import pytest
@@ -55,6 +57,10 @@ from ....database.models import (
 from ....streaming.aggregator import EventAggregator
 from .. import _http as mcp_http
 from .._http import _reset_client, _reset_known_presets
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
+
 from ..tools.discovery import (
     get_pending_permissions,
     get_team_status,
@@ -474,8 +480,44 @@ class TestCreateThreadViaApp:
 # ---------------------------------------------------------------------------
 
 
+@pytest.fixture
+def unreachable_gateway() -> "Iterator[None]":
+    """Point the gateway URL at an OWNED, closed loopback port for a test.
+
+    These error-path tests assert that a tool raises when the gateway is
+    unavailable. Left to ambient settings the URL defaults to the real gateway
+    port, so on a machine already running one the tests would reach a live
+    service and assert nothing about the unavailable path. The fixture takes a
+    port, closes it, and confirms by a connect-probe that the port refuses -
+    binding alone is an unreliable "is it free" signal on Windows - so
+    unavailability is guaranteed rather than assumed. Settings are restored on
+    exit, and the shared client is reset so no test leaks a connection to the
+    dead port into the next.
+    """
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+        probe.bind(("127.0.0.1", 0))
+        port = probe.getsockname()[1]
+    # The socket is now closed; confirm the port actually refuses before relying
+    # on it, so a racing bind cannot turn "unavailable" into a silent success.
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as check:
+        check.settimeout(0.5)
+        if check.connect_ex(("127.0.0.1", port)) == 0:
+            pytest.skip(f"port {port} was reclaimed before the test could use it")
+
+    original_url = settings.gateway_url
+    _reset_client()
+    settings.gateway_url = f"http://127.0.0.1:{port}"
+    try:
+        yield
+    finally:
+        settings.gateway_url = original_url
+        _reset_client()
+
+
 @pytest.mark.asyncio
-async def test_start_thread_raises_when_server_unavailable() -> None:
+async def test_start_thread_raises_when_server_unavailable(
+    unreachable_gateway: None,
+) -> None:
     """start_thread with a valid preset raises when the server is not running.
 
     Verifies the tool raises an exception (FastMCP signals
@@ -499,7 +541,9 @@ async def test_start_thread_raises_when_server_unavailable() -> None:
 
 
 @pytest.mark.asyncio
-async def test_get_thread_status_raises_when_server_unavailable() -> None:
+async def test_get_thread_status_raises_when_server_unavailable(
+    unreachable_gateway: None,
+) -> None:
     """get_thread_status raises when the server is not running.
 
     Verifies exception-based error signaling.
@@ -558,7 +602,9 @@ async def test_get_thread_status_reports_repair_and_readiness(
 
 
 @pytest.mark.asyncio
-async def test_send_message_raises_when_server_unavailable() -> None:
+async def test_send_message_raises_when_server_unavailable(
+    unreachable_gateway: None,
+) -> None:
     """send_message raises when the server is not running.
 
     Verifies exception-based error signaling.
@@ -666,7 +712,9 @@ def test_ws_url_no_port_omits_colon() -> None:
 
 
 @pytest.mark.asyncio
-async def test_list_threads_raises_when_server_unavailable() -> None:
+async def test_list_threads_raises_when_server_unavailable(
+    unreachable_gateway: None,
+) -> None:
     """list_threads raises when the server is unreachable."""
     with pytest.raises(ToolError) as exc_info:
         await list_threads()
@@ -1158,7 +1206,9 @@ class TestListThreadsViaApp:
 
 
 @pytest.mark.asyncio
-async def test_respond_to_permission_raises_when_server_unavailable() -> None:
+async def test_respond_to_permission_raises_when_server_unavailable(
+    unreachable_gateway: None,
+) -> None:
     """respond_to_permission raises when the server is unreachable."""
     with pytest.raises(ToolError) as exc_info:
         await respond_to_permission(
@@ -1304,7 +1354,9 @@ class TestRespondToPermissionViaApp:
 
 
 @pytest.mark.asyncio
-async def test_get_team_status_raises_when_server_unavailable() -> None:
+async def test_get_team_status_raises_when_server_unavailable(
+    unreachable_gateway: None,
+) -> None:
     """get_team_status raises when the server is unreachable."""
     with pytest.raises(ToolError) as exc_info:
         await get_team_status()
@@ -1333,7 +1385,9 @@ class TestGetTeamStatusViaApp:
 
 
 @pytest.mark.asyncio
-async def test_get_pending_permissions_raises_when_server_unavailable() -> None:
+async def test_get_pending_permissions_raises_when_server_unavailable(
+    unreachable_gateway: None,
+) -> None:
     """get_pending_permissions raises when server is unreachable."""
     with pytest.raises(ToolError) as exc_info:
         await get_pending_permissions()
@@ -1579,7 +1633,9 @@ class TestGetPendingPermissionsViaApp:
 
 
 @pytest.mark.asyncio
-async def test_list_team_presets_raises_when_server_unavailable() -> None:
+async def test_list_team_presets_raises_when_server_unavailable(
+    unreachable_gateway: None,
+) -> None:
     """list_team_presets raises when the server is unreachable."""
     with pytest.raises(ToolError) as exc_info:
         await list_team_presets()
@@ -1621,7 +1677,9 @@ class TestListTeamPresetsViaApp:
 
 
 @pytest.mark.asyncio
-async def test_cancel_thread_raises_when_server_unavailable() -> None:
+async def test_cancel_thread_raises_when_server_unavailable(
+    unreachable_gateway: None,
+) -> None:
     """cancel_thread raises when the server is unreachable."""
     with pytest.raises(ToolError) as exc_info:
         await cancel_thread(thread_id="some-thread-id")

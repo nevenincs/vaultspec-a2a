@@ -739,6 +739,25 @@ interpreter mutation. `S101` (prohibited fakes/stubs) is NOT covered by this swe
 `FakeChatModel` remain and need an owner ruling on recording-double-at-a-real-seam
 vs. prohibited fake before that step closes.
 
+### tautological-shadow-test-sweep | info | The two named tautological/shadow tests are replaced; a sweep finds no others
+
+Type: verification (S104). Status: resolved. The two offenders were replaced with
+assertions against imported production behavior: the compile-only ``FINISH`` test
+(which asserted only that a graph compiled) now exercises the real ``_loop_route``
+across all arms, and ``test_star_missing_next_field`` (which reimplemented the edge
+as a ``state.get("next", "")`` lambda) now imports and drives the real
+``_route_from_supervisor``. A whole-tree sweep for the remaining prohibited shapes
+found none: zero trivially-true assertions (``assert True`` / ``assert x == x``);
+the eleven ``= lambda`` assignments are all legitimate dependency injection,
+stream stop-conditions, or sort keys (e.g. ``make_researcher`` invokes the real
+``create_researcher_node``, ``endpoint_provider`` injects a real ``EngineEndpoint``),
+not reimplementations of production logic. An AST scan flagged 77 tests whose only
+assertions are ``is None`` / ``is not None`` / bare-name, but the sampled ones
+assert the real outcome of a production call (``_decision("FINISH").routing_error
+is None``, ``compute_reconciliation_actions(...).new_thread_status is None``,
+``resolve_venv(...) is None``), where ``None`` is the behaviour under test - not a
+compile-only proxy. No further tautological or shadow-logic test was identified.
+
 ## Recommendations
 
 1. Draft and approve a hardening ADR before implementation. The ADR must decide:

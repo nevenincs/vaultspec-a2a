@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING
 
 from ..database import set_thread_repair_state
 from ..thread.enums import ControlActionType, RepairStatus
+from ..thread.repair_policy import repair_state_for_action
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
@@ -14,21 +15,23 @@ if TYPE_CHECKING:
 
 
 async def mark_ingest_requested(db: AsyncSession, thread_id: str) -> ThreadModel | None:
+    transition = repair_state_for_action(ControlActionType.INGEST, "requested")
     return await set_thread_repair_state(
         db,
         thread_id,
-        repair_status=RepairStatus.HEALTHY,
-        execution_readiness=RepairStatus.HEALTHY.value,
+        repair_status=transition.repair_status,
+        execution_readiness=transition.execution_readiness,
         last_requested_action=ControlActionType.INGEST,
     )
 
 
 async def mark_ingest_applied(db: AsyncSession, thread_id: str) -> ThreadModel | None:
+    transition = repair_state_for_action(ControlActionType.INGEST, "applied")
     return await set_thread_repair_state(
         db,
         thread_id,
-        repair_status=RepairStatus.HEALTHY,
-        execution_readiness=RepairStatus.HEALTHY.value,
+        repair_status=transition.repair_status,
+        execution_readiness=transition.execution_readiness,
         last_applied_action=ControlActionType.INGEST,
     )
 
@@ -36,11 +39,14 @@ async def mark_ingest_applied(db: AsyncSession, thread_id: str) -> ThreadModel |
 async def mark_permission_response_requested(
     db: AsyncSession, thread_id: str
 ) -> ThreadModel | None:
+    transition = repair_state_for_action(
+        ControlActionType.PERMISSION_RESPONSE_SUBMITTED, "requested"
+    )
     return await set_thread_repair_state(
         db,
         thread_id,
-        repair_status=RepairStatus.PAUSED_RESUMABLE,
-        execution_readiness=RepairStatus.PAUSED_RESUMABLE.value,
+        repair_status=transition.repair_status,
+        execution_readiness=transition.execution_readiness,
         last_requested_action=ControlActionType.PERMISSION_RESPONSE_SUBMITTED,
     )
 
@@ -48,11 +54,14 @@ async def mark_permission_response_requested(
 async def mark_permission_response_applied(
     db: AsyncSession, thread_id: str
 ) -> ThreadModel | None:
+    transition = repair_state_for_action(
+        ControlActionType.PERMISSION_RESPONSE_SUBMITTED, "applied"
+    )
     return await set_thread_repair_state(
         db,
         thread_id,
-        repair_status=RepairStatus.HEALTHY,
-        execution_readiness=RepairStatus.HEALTHY.value,
+        repair_status=transition.repair_status,
+        execution_readiness=transition.execution_readiness,
         last_applied_action=ControlActionType.PERMISSION_RESPONSE_SUBMITTED,
     )
 
@@ -60,11 +69,14 @@ async def mark_permission_response_applied(
 async def mark_message_followup_requested(
     db: AsyncSession, thread_id: str
 ) -> ThreadModel | None:
+    transition = repair_state_for_action(
+        ControlActionType.MESSAGE_FOLLOWUP_REQUESTED, "requested"
+    )
     return await set_thread_repair_state(
         db,
         thread_id,
-        repair_status=RepairStatus.HEALTHY,
-        execution_readiness=RepairStatus.HEALTHY.value,
+        repair_status=transition.repair_status,
+        execution_readiness=transition.execution_readiness,
         last_requested_action=ControlActionType.MESSAGE_FOLLOWUP_REQUESTED,
     )
 
@@ -72,21 +84,25 @@ async def mark_message_followup_requested(
 async def mark_message_followup_applied(
     db: AsyncSession, thread_id: str
 ) -> ThreadModel | None:
+    transition = repair_state_for_action(
+        ControlActionType.MESSAGE_FOLLOWUP_APPLIED, "applied"
+    )
     return await set_thread_repair_state(
         db,
         thread_id,
-        repair_status=RepairStatus.HEALTHY,
-        execution_readiness=RepairStatus.HEALTHY.value,
+        repair_status=transition.repair_status,
+        execution_readiness=transition.execution_readiness,
         last_applied_action=ControlActionType.MESSAGE_FOLLOWUP_APPLIED,
     )
 
 
 async def mark_cancel_requested(db: AsyncSession, thread_id: str) -> ThreadModel | None:
+    transition = repair_state_for_action(ControlActionType.CANCEL, "requested")
     return await set_thread_repair_state(
         db,
         thread_id,
-        repair_status=RepairStatus.CANCEL_PENDING,
-        execution_readiness=RepairStatus.CANCEL_PENDING.value,
+        repair_status=transition.repair_status,
+        execution_readiness=transition.execution_readiness,
         last_requested_action=ControlActionType.CANCEL,
     )
 

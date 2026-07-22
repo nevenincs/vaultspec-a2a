@@ -18,9 +18,15 @@ from vaultspec_a2a.desktop.capsule_descriptor import author_source_descriptors
 from vaultspec_a2a.desktop.capsule_input_authoring import (
     BuiltDistribution,
     CapsuleInputAuthoringError,
+    build_a2a_distribution_wheel,
 )
-from vaultspec_a2a.desktop.capsule_preparation import load_source_inputs
+from vaultspec_a2a.desktop.capsule_preparation import (
+    derive_project_wheel_artifact,
+    load_source_inputs,
+)
 from vaultspec_a2a.desktop.contract import TargetTriple
+
+_REPO_ROOT = Path(__file__).resolve().parents[4]
 
 _INPUTS_TOML = (
     Path(__file__).resolve().parents[4] / "scripts" / "desktop_capsule_inputs.toml"
@@ -94,6 +100,31 @@ def test_derived_facts_author_valid_source_descriptors(target: TargetTriple) -> 
     assert by_kind[ComponentAssetKind.PYTHON_RUNTIME].target is target
     # The A2A distribution is target-neutral.
     assert by_kind[ComponentAssetKind.A2A_DISTRIBUTION].target is None
+
+
+@pytest.mark.service
+def test_project_wheel_artifact_derives_and_verifies(tmp_path: Path) -> None:
+    import shutil
+
+    cache = tmp_path / "cache"
+    cache.mkdir()
+    built = build_a2a_distribution_wheel(
+        repo_root=_REPO_ROOT,
+        sandbox=tmp_path / "build",
+        source_date_epoch=1_700_000_000,
+    )
+    shutil.copyfile(built.path, cache / built.sha256)
+
+    artifact = derive_project_wheel_artifact(
+        built, cache_root=cache, target=TargetTriple.LINUX_X86_64
+    )
+
+    assert artifact.name == "vaultspec-a2a"
+    assert artifact.license_expression == "MIT"
+    assert artifact.license_members == (
+        f"vaultspec_a2a-{artifact.version}.dist-info/licenses/LICENSE",
+    )
+    assert artifact.sha256 == built.sha256
 
 
 def test_missing_target_fails_closed(tmp_path: Path) -> None:

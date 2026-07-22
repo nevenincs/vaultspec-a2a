@@ -21,17 +21,32 @@ from __future__ import annotations
 
 import re
 import tomllib
+import zipfile
 from dataclasses import dataclass
+from email import policy
+from email.parser import BytesParser
 from typing import TYPE_CHECKING, Final
+
+from packaging.utils import InvalidWheelFilename, parse_wheel_filename
+from pydantic import ValidationError
 
 from .artifacts import ArchiveKind
 from .capsule_descriptor import RuntimeSourceInput
-from .capsule_input_authoring import CapsuleInputAuthoringError, PinnedSource
+from .capsule_input_authoring import (
+    BuiltDistribution,
+    CapsuleInputAuthoringError,
+    PinnedSource,
+)
+from .closure_inventory import PythonWheelArtifact
 from .contract import (
     ACP_VERSION_PIN,
     CPYTHON_VERSION_PIN,
     NODEJS_VERSION_PIN,
     TargetTriple,
+)
+from .package_archives import (
+    PackageArchiveError,
+    open_verified_python_wheel_archive,
 )
 
 if TYPE_CHECKING:
@@ -40,8 +55,11 @@ if TYPE_CHECKING:
 __all__ = [
     "RuntimeSourceFacts",
     "SourceInputs",
+    "derive_project_wheel_artifact",
     "load_source_inputs",
 ]
+
+_MAX_WHEEL_METADATA_BYTES: Final = 1 << 20
 
 # The committed pinned-inputs document declares version + license + url + sha256
 # per source; the remaining descriptor facts (release, build, archive_root,
@@ -227,3 +245,91 @@ def load_source_inputs(inputs_toml: Path, target: TargetTriple) -> SourceInputs:
         node=_node_facts(node_section),
         acp=_acp_facts(acp_section),
     )
+
+
+def _read_project_wheel_license(
+    wheel_path: Path, filename: str
+) -> tuple[str, tuple[str, ...]]:
+    parts = filename.removesuffix(".whl").split("-")
+    if len(parts) < 5:
+        raise CapsuleInputAuthoringError(
+            f"wheel filename identity is invalid: {filename}"
+        )
+    dist_info_root = f"{parts[0]}-{parts[1]}.dist-info"
+    metadata_name = f"{dist_info_root}/METADATA"
+    try:
+        with zipfile.ZipFile(wheel_path, mode="r") as archive:
+            names = frozenset(archive.namelist())
+            if metadata_name not in names:
+                raise CapsuleInputAuthoringError(f"wheel lacks {metadata_name}")
+            with archive.open(metadata_name) as handle:
+                payload = handle.read(_MAX_WHEEL_METADATA_BYTES + 1)
+    except (OSError, zipfile.BadZipFile) as error:
+        raise CapsuleInputAuthoringError(
+            f"cannot read wheel archive: {error}"
+        ) from None
+    if len(payload) > _MAX_WHEEL_METADATA_BYTES:
+        raise CapsuleInputAuthoringError("wheel METADATA exceeds its size bound")
+    message = BytesParser(policy=policy.compat32).parsebytes(payload)
+    expressions = message.get_all("License-Expression", [])
+    license_files = message.get_all("License-File", [])
+    if len(expressions) != 1 or not license_files:
+        raise CapsuleInputAuthoringError(
+            "project wheel METADATA must declare one SPDX license and its files"
+        )
+    members = tuple(f"{dist_info_root}/licenses/{name}" for name in license_files)
+    if any(member not in names for member in members):
+        raise CapsuleInputAuthoringError("project wheel license file is not placed")
+    return expressions[0], members
+
+
+def derive_project_wheel_artifact(
+    built: BuiltDistribution, *, cache_root: Path, target: TargetTriple
+) -> PythonWheelArtifact:
+    """Derive the first-party wheel's license identity, proven through the verifier.
+
+    The distribution is the locally built project wheel, not a lock selection, so
+    its identity comes from its own dist-info: name and version from the wheel
+    filename, the single SPDX ``License-Expression`` and its placed dist-info
+    license members from ``METADATA``.  The wheel bytes must already sit at
+    ``cache_root / built.sha256``; the derived artifact is round-tripped through
+    the production wheel verifier rather than asserted against this output.
+    """
+    filename = built.path.name
+    try:
+        name, version, _, _ = parse_wheel_filename(filename)
+    except InvalidWheelFilename as error:
+        raise CapsuleInputAuthoringError(
+            f"built distribution filename is not a valid wheel: {error}"
+        ) from None
+    expression, license_members = _read_project_wheel_license(
+        cache_root / built.sha256, filename
+    )
+    try:
+        artifact = PythonWheelArtifact(
+            name=str(name),
+            version=str(version),
+            filename=filename,
+            url=f"https://example.invalid/{filename}",
+            sha256=built.sha256,
+            size=built.size,
+            license_expression=expression,
+            license_members=license_members,
+            redistribution_evidence=tuple(
+                f"wheel-license:{member}" for member in license_members
+            ),
+        )
+    except ValidationError as error:
+        raise CapsuleInputAuthoringError(
+            f"derived project wheel artifact is invalid: {error}"
+        ) from None
+    try:
+        with open_verified_python_wheel_archive(
+            cache_root / built.sha256, artifact, target=target
+        ):
+            pass
+    except PackageArchiveError as error:
+        raise CapsuleInputAuthoringError(
+            f"derived project wheel identity fails verification: {error}"
+        ) from None
+    return artifact

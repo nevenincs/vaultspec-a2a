@@ -9,6 +9,7 @@ related:
   - '[[2026-07-19-codebase-health-W01-P01-S01]]'
   - '[[2026-07-19-codebase-health-W01-P01-S03]]'
   - '[[2026-07-19-codebase-health-W02-P06-S26]]'
+  - '[[2026-07-19-codebase-health-W04-P12-S46]]'
   - '[[2026-07-19-codebase-health-W04-P13-S127]]'
   - '[[2026-07-19-codebase-health-W04-P13-S128]]'
   - '[[2026-07-19-codebase-health-W04-P13-S129]]'
@@ -37,6 +38,7 @@ related:
   - '[[2026-07-19-codebase-health-research]]'
   - '[[2026-07-19-codebase-health-w01-p01-s03-review-audit]]'
   - '[[2026-07-22-codebase-health-orphan-surface-ownership-audit]]'
+  - '[[2026-07-22-codebase-health-tooling-prohibition-certification-audit]]'
 ---
 
 # `codebase-health` feature index
@@ -54,12 +56,14 @@ Auto-generated index of all documents tagged with `#codebase-health`.
 - `2026-07-19-codebase-health-audit` - `codebase-health` audit: `repository-wide health and dashboard contract`
 - `2026-07-19-codebase-health-w01-p01-s03-review-audit` - `codebase-health` audit: `W01.P01.S03 process-registry prerequisite certification review`
 - `2026-07-22-codebase-health-orphan-surface-ownership-audit` - `codebase-health` audit: `cross-repository ownership of the workspace exports`
+- `2026-07-22-codebase-health-tooling-prohibition-certification-audit` - `codebase-health` audit: `certification of the prohibited-pattern removal`
 
 ### exec
 
 - `2026-07-19-codebase-health-W01-P01-S01` - Curate the service-lifecycle supersession chain so the product lifecycle and tooling decisions have non-conflicting authority
 - `2026-07-19-codebase-health-W01-P01-S03` - Certify the process-registry prerequisite represented by repository-tooling plan step S07 before changing lifecycle registry consumers
 - `2026-07-19-codebase-health-W02-P06-S26` - Parse numeric and ISO heartbeat values strictly and reject stale malformed non-finite and implausibly future values
+- `2026-07-19-codebase-health-W04-P12-S46` - Certify repository-tooling step S09 removed the audited prohibited doubles skips mutations suppressions and dependency-gate drift
 - `2026-07-19-codebase-health-W04-P13-S127` - Route message dispatch failure through the shared typed transition function
 - `2026-07-19-codebase-health-W04-P13-S128` - Route thread dispatch failure through the shared typed transition function
 - `2026-07-19-codebase-health-W04-P13-S129` - Route permission dispatch failure through the shared typed transition function

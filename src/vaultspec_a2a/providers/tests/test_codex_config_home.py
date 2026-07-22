@@ -8,7 +8,9 @@ step; these pin the config.toml content, the auth copy, and the home lifecycle.
 from __future__ import annotations
 
 import os
+import shutil
 import stat
+import subprocess
 import sys
 import tomllib
 from typing import TYPE_CHECKING
@@ -250,3 +252,42 @@ async def test_turn_failure_after_build_cleans_credential_home(
         async for _ in model.astream([HumanMessage(content="hi")]):
             pass
     assert set(glob.glob(pattern)) <= before  # credential home cleaned
+
+
+class TestCodexEntrypointAcceptsEmittedMcpConfig:
+    """The emitted CODEX_HOME config is valid to the real Codex entrypoint (S114).
+
+    The unit tests above pin the config.toml content; this drives the REAL
+    ``codex mcp list`` entrypoint against a per-run CODEX_HOME built by
+    production ``build_codex_config_home`` and confirms Codex parses the config
+    and surfaces our declared MCP server. Skips only when the ``codex`` binary is
+    genuinely absent - an honest environment prerequisite, not a green shortcut.
+    """
+
+    @pytest.mark.skipif(
+        shutil.which("codex") is None, reason="codex CLI is not installed"
+    )
+    def test_codex_mcp_list_accepts_the_built_config_home(self, tmp_path: Path) -> None:
+        codex = shutil.which("codex")
+        assert codex is not None
+        specs = codex_mcp_server_specs(["vaultspec-rag"])
+        home = build_codex_config_home(specs, tmp_path / "base")
+        try:
+            proc = subprocess.run(
+                [codex, "mcp", "list"],
+                env={**os.environ, "CODEX_HOME": str(home)},
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=120,
+            )
+            # Exit 0 proves Codex parsed the config without rejecting it.
+            assert proc.returncode == 0, proc.stderr
+            # The declared server surfaces with its production launch command,
+            # so the emitted mcp_servers block is not merely parseable but the
+            # server Codex would actually launch.
+            assert "vaultspec-rag" in proc.stdout
+            assert "uvx" in proc.stdout
+            assert "vaultspec-search-mcp" in proc.stdout
+        finally:
+            cleanup_codex_config_home(home)

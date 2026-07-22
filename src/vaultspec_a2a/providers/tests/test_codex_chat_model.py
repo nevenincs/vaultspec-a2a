@@ -265,3 +265,35 @@ async def test_codex_live_turn_returns_output() -> None:
     result = await model.ainvoke(messages)
     assert isinstance(result, AIMessage)
     assert str(result.content).strip()
+
+
+@pytest.mark.asyncio
+async def test_cleanup_continues_and_reaps_the_process_after_a_prior_failure() -> None:
+    """A cleanup failure must not skip reaping the real provider subprocess (S124).
+
+    Spawn the real echo subprocess and wrap it in the real client, then run an
+    independent cleanup where a prior step raises before the client's own
+    teardown. The client's aclose must still reap the real process tree: the
+    failure is aggregated, not fatal to the remaining releases.
+    """
+    import asyncio
+
+    from .._cleanup import run_independent_cleanups
+
+    client = await _echo_client()
+    process = client._process  # the real spawned subprocess this client owns
+
+    def _failing_step() -> None:
+        raise OSError("a prior cleanup step failed")
+
+    failures = await run_independent_cleanups(
+        ("failing-first", _failing_step),
+        ("codex-session", client.aclose),
+    )
+
+    # The prior failure is aggregated (recorded), not swallowed nor fatal.
+    assert [name for name, _ in failures] == ["failing-first"]
+    assert isinstance(failures[0][1], OSError)
+    # ...and the real process was reaped despite that earlier failure.
+    await asyncio.wait_for(process.wait(), timeout=10.0)
+    assert process.returncode is not None

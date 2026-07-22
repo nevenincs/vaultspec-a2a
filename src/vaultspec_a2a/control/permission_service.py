@@ -48,6 +48,11 @@ if TYPE_CHECKING:
     import httpx
     from sqlalchemy.ext.asyncio import AsyncSession
 
+    from ..database.models import (
+        ControlActionModel,
+        PermissionRequestModel,
+        ThreadModel,
+    )
     from ..streaming.aggregator import EventAggregator
     from .circuit_breaker import WorkerCircuitBreaker
     from .worker_management import LazyWorkerSpawner
@@ -137,6 +142,36 @@ class PermissionResult:
     failure_type: FailureType | None = None
 
 
+@dataclass(frozen=True, slots=True)
+class _AuthorizedPermission:
+    """A permission response that cleared every authorization guard.
+
+    Carries the resolved durable state the transition and dispatch stages need,
+    so those stages never re-read or re-validate. Produced by
+    :func:`_authorize_permission_response` only when the response is admitted;
+    any rejection or dedup outcome is a :class:`PermissionResult` instead.
+    """
+
+    permission: PermissionRequestModel
+    thread_record: ThreadModel
+    thread_id: str
+    resolved_idempotency_key: str
+
+
+@dataclass(frozen=True, slots=True)
+class _PermissionTransition:
+    """The durable state written before dispatch, threaded into dispatch.
+
+    Records the control action and the resume value computed from the option,
+    plus the routing fields the resume dispatch carries to the worker.
+    """
+
+    action: ControlActionModel
+    resume_value: str | dict[str, bool]
+    team_preset: str | None
+    workspace_root: str | None
+
+
 async def respond_to_permission(
     db: AsyncSession,
     *,
@@ -168,6 +203,56 @@ async def respond_to_permission(
         },
     )
 
+    authorization = await _authorize_permission_response(
+        db,
+        request_id=request_id,
+        option_id=option_id,
+        idempotency_key=idempotency_key,
+    )
+    if isinstance(authorization, PermissionResult):
+        return authorization
+
+    # ------------------------------------------------------------------
+    # 5. Record the transition, then 6-7 dispatch the resume
+    # ------------------------------------------------------------------
+    transition = await _record_permission_transition(
+        db,
+        authorized=authorization,
+        request_id=request_id,
+        option_id=option_id,
+    )
+    return await _dispatch_permission_resume(
+        db,
+        authorized=authorization,
+        transition=transition,
+        request_id=request_id,
+        option_id=option_id,
+        aggregator=aggregator,
+        circuit_breaker=circuit_breaker,
+        worker_spawner=worker_spawner,
+        worker_client=worker_client,
+        recursion_limit=recursion_limit,
+        trace_headers=trace_headers,
+    )
+
+
+async def _authorize_permission_response(
+    db: AsyncSession,
+    *,
+    request_id: str,
+    option_id: str,
+    idempotency_key: str | None,
+) -> PermissionResult | _AuthorizedPermission:
+    """Resolve and authorize a permission response before any state change.
+
+    Runs every read-side guard the state machine imposes - request/thread
+    resolution, idempotency dedup, permission-status and terminal checks, the
+    active-interrupt guard, and option validation. Returns a
+    :class:`PermissionResult` for any rejection, duplicate, or already-applied
+    outcome (committing the rejection journal action where the machine records
+    one), or an :class:`_AuthorizedPermission` when the response is admitted and
+    the transition may proceed.
+    """
     # ------------------------------------------------------------------
     # 1. Resolve permission request and thread
     # ------------------------------------------------------------------
@@ -475,9 +560,34 @@ async def respond_to_permission(
             error_status_code=error_status_code,
         )
 
-    # ------------------------------------------------------------------
-    # 5. Build resume value and create control action
-    # ------------------------------------------------------------------
+    return _AuthorizedPermission(
+        permission=permission,
+        thread_record=thread_record,
+        thread_id=thread_id,
+        resolved_idempotency_key=resolved_idempotency_key,
+    )
+
+
+async def _record_permission_transition(
+    db: AsyncSession,
+    *,
+    authorized: _AuthorizedPermission,
+    request_id: str,
+    option_id: str,
+) -> _PermissionTransition:
+    """Write the durable pre-dispatch transition for an authorized response.
+
+    Creates the submitted control action, records the response submission, and -
+    for a plan-approval pause - stamps the thread's approval state. Returns the
+    action plus the resume value and routing fields the dispatch stage carries to
+    the worker. The session is not committed here; the dispatch stage owns the
+    commit so a dispatch failure can roll the whole transition back atomically.
+    """
+    permission = authorized.permission
+    thread_record = authorized.thread_record
+    thread_id = authorized.thread_id
+    resolved_idempotency_key = authorized.resolved_idempotency_key
+
     team_preset: str | None = thread_record.team_preset
     workspace_root: str | None = None
     if thread_record.thread_metadata:
@@ -517,15 +627,47 @@ async def respond_to_permission(
         )
     await mark_permission_response_requested(db, thread_id)
 
-    # ------------------------------------------------------------------
-    # 6. Dispatch resume to worker
-    # ------------------------------------------------------------------
+    return _PermissionTransition(
+        action=action,
+        resume_value=resume_value,
+        team_preset=team_preset,
+        workspace_root=workspace_root,
+    )
+
+
+async def _dispatch_permission_resume(
+    db: AsyncSession,
+    *,
+    authorized: _AuthorizedPermission,
+    transition: _PermissionTransition,
+    request_id: str,
+    option_id: str,
+    aggregator: EventAggregator,
+    circuit_breaker: WorkerCircuitBreaker,
+    worker_spawner: LazyWorkerSpawner,
+    worker_client: httpx.AsyncClient,
+    recursion_limit: int,
+    trace_headers: dict[str, str] | None,
+) -> PermissionResult:
+    """Dispatch the resume to the worker and settle the response.
+
+    On dispatch failure the recorded transition is reset and the failure is
+    classified into the protocol-facing error and thread state; on success the
+    aggregator is resolved and the thread returns to running. Owns the commit for
+    both outcomes.
+    """
+    permission = authorized.permission
+    thread_record = authorized.thread_record
+    thread_id = authorized.thread_id
+    resolved_idempotency_key = authorized.resolved_idempotency_key
+    action = transition.action
+
     dispatch = DispatchRequest(
         action=ControlActionType.RESUME,  # ty: ignore[invalid-argument-type]
         thread_id=thread_id,
-        option_id=resume_value,
-        team_preset=team_preset,
-        workspace_root=workspace_root,
+        option_id=transition.resume_value,
+        team_preset=transition.team_preset,
+        workspace_root=transition.workspace_root,
         recursion_limit=recursion_limit,
     )
 
@@ -596,9 +738,6 @@ async def respond_to_permission(
             failure_type=typed_failure,
         )
 
-    # ------------------------------------------------------------------
-    # 7. Success path
-    # ------------------------------------------------------------------
     aggregator.resolve_permission(request_id)
     await update_thread_status(db, thread_id, ThreadStatus.RUNNING)
     await mark_permission_response_applied(db, thread_id)

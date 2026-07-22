@@ -225,8 +225,8 @@ Ensure provider output cannot deadlock, background failures cannot hang a turn, 
 
 Review the provider containment implementation and carry all remaining reliability or secret-lifecycle risks into the audit queue.
 
-- [ ] `W03.P11.S44` - Run the formal safety security resource-bound and quality review for Wave W03 against real subprocess evidence; `.vault/audit, .vault/exec`.
-- [ ] `W03.P11.S45` - Classify every Wave W03 review finding and append unresolved work to the codebase-health audit queue; `.vault/audit/2026-07-19-codebase-health-audit.md, .vault/exec`.
+- [x] `W03.P11.S44` - Run the formal safety security resource-bound and quality review for Wave W03 against real subprocess evidence; `.vault/audit, .vault/exec`.
+- [x] `W03.P11.S45` - Classify every Wave W03 review finding and append unresolved work to the codebase-health audit queue; `.vault/audit/2026-07-19-codebase-health-audit.md, .vault/exec`.
 
 ## Wave `W04` - retire duplication dead surfaces and structural debt
 

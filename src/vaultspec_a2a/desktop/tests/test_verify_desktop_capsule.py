@@ -178,6 +178,46 @@ def test_verify_fails_closed_on_a_doctored_drop_audit_trail(
 
 
 @pytest.mark.service
+def test_verify_fails_closed_on_an_extra_dropped_record(
+    verifiable_generation: dict[str, object], tmp_path: Path
+) -> None:
+    clone = _clone_generation(verifiable_generation, tmp_path / "gen")
+    evidence_path = clone / CAPSULE_ROOT / "installed-tree.cdx.json"
+    document = json.loads(evidence_path.read_text(encoding="utf-8"))
+    # A dropped record the inventories never declared must fail closed: the
+    # evidence may not claim an omission that did not happen.
+    document["vaultspec:dropped-members"] = [
+        *document["vaultspec:dropped-members"],
+        {
+            "closure": "acp",
+            "source_member": "package/.data/scripts/fabricated",
+            "source_sha256": "0" * 64,
+            "size": 1,
+            "sha256": "1" * 64,
+            "reason": "data-scripts",
+        },
+    ]
+    evidence_path.write_text(json.dumps(document), encoding="utf-8")
+    with pytest.raises(_VERIFY.VerificationError, match="drop-audit-trail"):
+        _verify(verifiable_generation, generation=clone)
+
+
+@pytest.mark.service
+def test_verify_fails_closed_on_a_missing_installed_file(
+    verifiable_generation: dict[str, object], tmp_path: Path
+) -> None:
+    clone = _clone_generation(verifiable_generation, tmp_path / "gen")
+    target_file = next(
+        path
+        for path in (clone / CAPSULE_ROOT / "runtime" / "python").rglob("*")
+        if path.is_file()
+    )
+    target_file.unlink()
+    with pytest.raises(_VERIFY.VerificationError, match="absent from the capsule tree"):
+        _verify(verifiable_generation, generation=clone)
+
+
+@pytest.mark.service
 def test_verify_fails_closed_on_a_corrupt_archive(
     verifiable_generation: dict[str, object], tmp_path: Path
 ) -> None:

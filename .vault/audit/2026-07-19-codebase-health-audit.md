@@ -796,6 +796,25 @@ alternative - replacing them with live LLM / engine calls - would require
 credentials and turn deterministic unit tests into flaky live tests, contradicting
 the unit-test intent. This audit records the analysis; it does not make the ruling.
 
+### await-listener-confirms-port-not-process | low | Readiness checks the port is bound, not that OUR spawn bound it
+
+Type: correctness (surfaced during W01.P02). Status: open (partially mitigated).
+``_await_listener`` returns ready as soon as ``_port_is_bound(port)`` is true,
+without confirming the process WE spawned is the one holding the port. If a foreign
+process holds the record's port when resume/rerun respawns, the respawn crashes on
+its own bind while the listener check sees the foreign holder and reports ready, so
+a record could be published pointing at a crashed pid. The common case - an orphan
+child of the felled old generation still holding the port - is now mitigated by the
+S96/S151 confirm-terminated reap-before-spawn (the orphan is felled with the old
+tree, freeing the port before the respawn), so only a genuinely foreign racer on a
+fixed resume/rerun port remains. A tighter fix would confirm the listening pid is
+the spawned pid (or a descendant). This also blocks a clean proof of S97/S152 (the
+kill-failure atomicity proofs): driving resume/rerun through the confirm-terminated
+FAILURE path needs a process that survives ``tree_kill``, and there is no portable,
+safe way to make an owned test process unkillable; a port-contention stand-in is
+defeated by this same port-vs-process ambiguity. S97/S152 remain open on that
+injection gap; the confirm-terminated gate's detection is proven directly.
+
 ## Recommendations
 
 1. Draft and approve a hardening ADR before implementation. The ADR must decide:

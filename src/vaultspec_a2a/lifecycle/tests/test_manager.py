@@ -896,3 +896,58 @@ def test_serve_up_captures_build_repo_into_the_record(tmp_path) -> None:
         assert persisted.build_repo == engine_repo
     finally:
         tree_kill(record.pid)
+
+
+# A real serve that records its own pid, binds its port, then sleeps - so a test
+# can prove the exact spawned process was reaped after a post-readiness failure.
+_BIND_AND_RECORD_PID = (
+    "import socket,sys,os,time;"
+    "open(sys.argv[2],'w').write(str(os.getpid()));"
+    "s=socket.socket(socket.AF_INET,socket.SOCK_STREAM);"
+    "s.bind(('127.0.0.1',int(sys.argv[1])));"
+    "s.listen();"
+    "time.sleep(60)"
+)
+
+
+def test_serve_up_reaps_the_owned_tree_when_commit_fails_after_readiness(
+    tmp_path,
+) -> None:
+    """A commit failure after readiness reaps the ready owned process (S05).
+
+    Inject a REAL commit failure - no mock - by pre-occupying the record path with
+    a directory so write_record raises. The serve binds its port (readiness
+    passes) and records its pid; the commit then fails, and the ready OWNED process
+    must be felled rather than leaked. Proven by the recorded pid being dead.
+    """
+    # Pre-occupy the exact record path with a directory so write_record fails.
+    doomed = record_path("scratch", "commit-fail", home=tmp_path)
+    doomed.parent.mkdir(parents=True, exist_ok=True)
+    doomed.mkdir()
+
+    pid_file = tmp_path / "served.pid"
+    port = 18996
+    config = _serve_config(
+        [sys.executable, "-c", _BIND_AND_RECORD_PID, "{port}", str(pid_file)],
+        band=(port, port),
+    )
+
+    spawned_pid: int | None = None
+    try:
+        with pytest.raises(OSError):
+            serve_up(
+                "scratch",
+                "commit-fail",
+                home=tmp_path,
+                config=config,
+                ready_timeout=10.0,
+            )
+        # The serve reached readiness, so it recorded its pid before the commit.
+        spawned_pid = int(pid_file.read_text(encoding="utf-8").strip())
+        # The ready owned process was reaped, not leaked.
+        assert wait_pid_dead(spawned_pid)
+        # No half-committed record survived beside the injected directory.
+        assert list_records(tmp_path) == []
+    finally:
+        if spawned_pid is not None and is_pid_alive(spawned_pid):
+            tree_kill(spawned_pid)

@@ -658,7 +658,15 @@ def serve_up(
                     gateway_url=gateway_url,
                     worker_url=worker_url,
                 )
-                commit_reservation(reservation, record, home=home)
+                try:
+                    commit_reservation(reservation, record, home=home)
+                except BaseException:
+                    # The process is up and ready and OWNED by us, but committing
+                    # its claiming record failed - reap the complete owned tree
+                    # before propagating so a commit failure after readiness never
+                    # leaks a ready-but-unowned process.
+                    tree_kill(process.pid)
+                    raise
                 held.remove(reservation)
                 return record
             # The child never bound (a racer took the port, or it crashed): fell it

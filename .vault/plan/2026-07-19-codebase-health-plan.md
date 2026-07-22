@@ -196,8 +196,8 @@ Backed by the codebase-health desktop and tool-core decisions, this Wave consume
 Use one canonical server model and reject duplicate identities before generating provider-specific configuration.
 
 - [ ] `W03.P09.S35` - Consolidate harness MCP server normalization on one canonical schema and resolver; `src/vaultspec_a2a/providers/_acp_mcp.py, src/vaultspec_a2a/mcp`.
-- [ ] `W03.P09.S36` - Reject duplicate MCP server identities before emitting Codex or ACP configuration; `src/vaultspec_a2a/providers/_acp_mcp.py, src/vaultspec_a2a/providers/_acp_project_mcp.py`.
-- [ ] `W03.P09.S37` - Prove duplicate MCP identity rejection through the real configuration parser; `tests/providers, tests/mcp`.
+- [x] `W03.P09.S36` - Reject duplicate MCP server identities before emitting Codex or ACP configuration; `src/vaultspec_a2a/providers/_acp_mcp.py, src/vaultspec_a2a/providers/_acp_project_mcp.py`.
+- [x] `W03.P09.S37` - Prove duplicate MCP identity rejection through the real configuration parser; `tests/providers, tests/mcp`.
 - [ ] `W03.P09.S114` - Prove valid Codex MCP configuration through the real Codex entrypoint; `tests/providers, tests/mcp`.
 - [ ] `W03.P09.S115` - Prove valid ACP MCP configuration through the real ACP entrypoint; `tests/providers, tests/mcp`.
 

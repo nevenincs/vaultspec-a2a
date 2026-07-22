@@ -52,7 +52,7 @@ import logging
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from ..thread.errors import ProjectionRefusedError
+from ..thread.errors import ConfigError, ProjectionRefusedError
 from ._acp_authoring import config_home_authoring_entry
 from ._acp_mcp import config_home_mcp_servers
 
@@ -126,6 +126,17 @@ def _declared_home_entries(
     """
     surfacing = config_home_mcp_servers(mcp_servers)
     bridge_entry, _spawn_env = config_home_authoring_entry(mcp_servers)
+    # The bridge is composed from its own guarded channel rather than from the
+    # advertised specs, so the duplicate check on those cannot see a collision
+    # between it and a harness server. A plain update would let the bridge
+    # silently replace a reviewed read-only server with a write-capable one.
+    collisions = sorted(set(bridge_entry) & set(surfacing))
+    if collisions:
+        raise ConfigError(
+            "refusing to compose a surfacing config where the authoring bridge "
+            f"collides with a declared harness server: {', '.join(collisions)}. "
+            "The bridge would silently replace the reviewed entry"
+        )
     surfacing.update(bridge_entry)
     return surfacing
 

@@ -11,6 +11,8 @@ related:
   - '[[2026-07-19-codebase-health-W01-P01-S93]]'
   - '[[2026-07-19-codebase-health-W01-P01-S94]]'
   - '[[2026-07-19-codebase-health-W02-P06-S26]]'
+  - '[[2026-07-19-codebase-health-W03-P09-S36]]'
+  - '[[2026-07-19-codebase-health-W03-P09-S37]]'
   - '[[2026-07-19-codebase-health-W04-P12-S46]]'
   - '[[2026-07-19-codebase-health-W04-P13-S127]]'
   - '[[2026-07-19-codebase-health-W04-P13-S128]]'
@@ -67,6 +69,8 @@ Auto-generated index of all documents tagged with `#codebase-health`.
 - `2026-07-19-codebase-health-W01-P01-S93` - Implement gateway lifetime identity worker generation identity and explicit paired-gateway identity in authenticated readiness
 - `2026-07-19-codebase-health-W01-P01-S94` - Fail closed on blank stale mismatched or unauthenticated pairing evidence and permit eviction only for the owner-authorized desktop prior generation
 - `2026-07-19-codebase-health-W02-P06-S26` - Parse numeric and ISO heartbeat values strictly and reject stale malformed non-finite and implausibly future values
+- `2026-07-19-codebase-health-W03-P09-S36` - Reject duplicate MCP server identities before emitting Codex or ACP configuration
+- `2026-07-19-codebase-health-W03-P09-S37` - Prove duplicate MCP identity rejection through the real configuration parser
 - `2026-07-19-codebase-health-W04-P12-S46` - Certify repository-tooling step S09 removed the audited prohibited doubles skips mutations suppressions and dependency-gate drift
 - `2026-07-19-codebase-health-W04-P13-S127` - Route message dispatch failure through the shared typed transition function
 - `2026-07-19-codebase-health-W04-P13-S128` - Route thread dispatch failure through the shared typed transition function

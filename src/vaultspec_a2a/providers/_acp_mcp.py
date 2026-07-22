@@ -37,6 +37,7 @@ __all__ = [
     "compose_harness_mcp_servers",
     "config_home_mcp_servers",
     "harness_allowed_tool_names",
+    "reject_duplicate_identities",
     "resolve_harness_mcp_capabilities",
     "resolve_harness_mcp_servers",
 ]
@@ -248,6 +249,7 @@ def config_home_mcp_servers(
     surfaces exactly the declared read-only harness servers PLUS at most the run's
     own authoring bridge. Returns an empty mapping when none match.
     """
+    reject_duplicate_identities(mcp_servers)
     known_names = [
         str(spec.get("name"))
         for spec in mcp_servers
@@ -268,6 +270,37 @@ def config_home_mcp_servers(
             entry["env"] = dict(spec["env"])
         home[name] = entry
     return home
+
+
+def reject_duplicate_identities(mcp_servers: Sequence[dict[str, Any]]) -> None:
+    """Fail loud when two advertised servers claim the same identity.
+
+    Composition is keyed by name, so a duplicate does not conflict - it
+    overwrites, and the last spec silently wins. The harness invariant is that
+    the spawned agent's MCP surface is exactly the declared set, and a name that
+    can be redeclared with a different command breaks that: the surviving entry
+    is no longer the one that was reviewed.
+
+    Checked before composition rather than during it, so the refusal names every
+    duplicated identity rather than whichever one the loop reached first.
+
+    Raises:
+        ConfigError: If any name appears more than once.
+    """
+    seen: dict[str, int] = {}
+    for spec in mcp_servers:
+        name = spec.get("name")
+        if not isinstance(name, str) or not name:
+            continue
+        seen[name] = seen.get(name, 0) + 1
+    duplicates = sorted(name for name, count in seen.items() if count > 1)
+    if duplicates:
+        raise ConfigError(
+            "refusing to compose a surfacing config with duplicate MCP server "
+            f"identities: {', '.join(duplicates)}. Composition is keyed by name, "
+            "so a repeated identity silently overwrites rather than conflicting, "
+            "and the agent would surface a server other than the declared one"
+        )
 
 
 def _require_read_only(name: str) -> None:

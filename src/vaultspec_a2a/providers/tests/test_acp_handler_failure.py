@@ -17,6 +17,8 @@ from __future__ import annotations
 
 import asyncio
 import json
+import sys
+from contextlib import suppress
 from typing import Any, cast
 
 import pytest
@@ -206,3 +208,77 @@ def test_an_unknown_method_still_reports_method_not_found() -> None:
     asyncio.run(_dispatch("no/such/method", 11, {}, stdin))
 
     assert _sent(stdin)["error"]["code"] == -32601
+
+
+# A real subprocess acting as the agent: it sends one server-initiated RPC the
+# client must dispatch to a handler, reads the client's reply off its own stdin,
+# and exits 42 IFF that reply is the -32603 protocol error. Any other outcome
+# (silence read as EOF, a non-error reply) exits non-42.
+_AGENT_SENDS_SERVER_RPC = r"""
+import sys, json
+sys.stdout.write(json.dumps(
+    {"jsonrpc": "2.0", "id": 100, "method": "session/request_permission", "params": {}}
+) + "\n")
+sys.stdout.flush()
+line = sys.stdin.readline()
+try:
+    reply = json.loads(line)
+except Exception:
+    sys.exit(7)
+sys.exit(42 if reply.get("error", {}).get("code") == -32603 else 8)
+"""
+
+
+@pytest.mark.asyncio
+async def test_a_failing_handler_answers_the_agent_over_a_real_session_pipe() -> None:
+    """A failing handler answers -32603 over a REAL session's pipe, not just in a
+    unit dispatch.
+
+    A real subprocess sends a server-initiated request_permission; the real
+    process_stdout_loop reads it off the real stdout pipe, dispatches it to a
+    handler that raises, and the guard must write the -32603 protocol error back
+    over the real stdin pipe. The agent confirms receipt by exiting 42 - it would
+    exit non-42 on silence (EOF) or a non-error reply, so the exit code is the
+    end-to-end proof the failing handler did not go silent on a live session.
+    """
+    from .._acp_protocol import process_stdout_loop
+    from .._subprocess import spawn_acp_process
+
+    process = await spawn_acp_process(
+        [sys.executable, "-c", _AGENT_SENDS_SERVER_RPC],
+        env={},
+        cwd=".",
+        use_exec=True,
+    )
+
+    async def _boom(
+        rpc_id: int | str,
+        params: dict[str, Any],
+        ctx_: object,
+        config: _AcpModelConfig,
+    ) -> dict[str, Any]:
+        raise RuntimeError("handler exploded on a live session")
+
+    ctx = _AcpSessionContext(
+        process=process,
+        stdin=cast("asyncio.StreamWriter", process.stdin),
+        stdout=cast("asyncio.StreamReader", process.stdout),
+        response_futures={},
+        chunk_queue=asyncio.Queue(),
+        prompt_done=asyncio.Event(),
+        prompt_id_ref=[0],
+        interrupt_exc=[],
+    )
+    handlers = {"session/request_permission": _boom}
+
+    loop_task = asyncio.create_task(process_stdout_loop(ctx, _config(), handlers))
+    try:
+        returncode = await asyncio.wait_for(process.wait(), timeout=15.0)
+    finally:
+        # The loop ends on the subprocess's EOF; cancel only if it is still
+        # running, and tolerate either outcome.
+        loop_task.cancel()
+        with suppress(asyncio.CancelledError):
+            await loop_task
+
+    assert returncode == 42, "the agent did not receive the -32603 protocol error reply"

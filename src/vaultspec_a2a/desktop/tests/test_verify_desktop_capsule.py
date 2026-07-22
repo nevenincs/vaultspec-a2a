@@ -226,7 +226,13 @@ def test_verify_fails_closed_on_a_corrupt_archive(
     data = bytearray(archive.read_bytes())
     data[len(data) // 2] ^= 0xFF
     archive.write_bytes(bytes(data))
-    with pytest.raises(_VERIFY.VerificationError):
+    # A mid-archive flip lands on one of the archive-integrity branches (a
+    # corrupt member, an entry that no longer matches its materialized file, or
+    # an unreadable archive) — assert it is one of those, not an unrelated raise.
+    with pytest.raises(
+        _VERIFY.VerificationError,
+        match=r"corrupt entry|does not match|cannot open",
+    ):
         _verify(verifiable_generation, generation=clone)
 
 

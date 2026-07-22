@@ -806,6 +806,21 @@ def _validate_pipeline_loop_config(
     return loop_node_id, pre_loop
 
 
+def _loop_route(*, next_value: object, loop_count: int, max_loops: int) -> str:
+    """Decide a pipeline-loop node's next hop: ``"revise"`` or ``"FINISH"``.
+
+    The pure routing decision behind the ``_loop_router`` closure, lifted to
+    module scope so it is testable without compiling a graph. The ``max_loops``
+    guard forces ``"FINISH"`` once the counter reaches the ceiling; before that,
+    only the literal ``"FINISH"`` in ``next_value`` ends the loop early. Any other
+    residue (stale star-route values, empty strings from graph input defaults)
+    routes back to ``"revise"`` so it never escapes the ``{revise, FINISH}`` map.
+    """
+    if loop_count >= max_loops:
+        return "FINISH"
+    return "FINISH" if next_value == "FINISH" else "revise"
+
+
 def _wrap_loop_node(worker_node: WorkerNode) -> WorkerNode:
     """Wrap a worker node to increment ``loop_count`` on every pass.
 
@@ -919,16 +934,11 @@ def _compile_pipeline_loop(
     max_loops = team_config.topology.max_loops
 
     def _loop_router(state: TeamState) -> str:
-        """Route loop_node output: enforce max_loops guard.
-
-        Only the literal "FINISH" ends the loop early; any other residue in
-        ``state["next"]`` (stale star-route values, empty strings from graph
-        input defaults) must not escape the {revise, FINISH} route map.
-        """
-        loop_count = state.get("loop_count", 0)
-        if loop_count >= max_loops:
-            return "FINISH"
-        return "FINISH" if state.get("next") == "FINISH" else "revise"
+        return _loop_route(
+            next_value=state.get("next"),
+            loop_count=state.get("loop_count", 0),
+            max_loops=max_loops,
+        )
 
     builder.add_conditional_edges(
         loop_node_id,

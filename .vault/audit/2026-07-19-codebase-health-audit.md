@@ -682,10 +682,19 @@ schema compatibility, its manifest content, and the golden manifest/tree digests
 (`desktop/tests/test_manifest.py`, `test_capsule_archives.py`), and would break
 the concurrent desktop capsule session's work in flight. S08's schema (two tables,
 migration `0010`, models, and the `test_migrations.py` head/`_APP_TABLES` bumps)
-was drafted and reverted rather than landed. Sequencing decision required: land the
-deletion-saga migration in coordination with (or after) the desktop capsule
-session so both agree on head `0010` and the capsule is rebuilt against it. This is
-a real ordering constraint, not a code defect.
+was drafted and reverted TWICE rather than landed. The blocker is now pinned
+precisely and is CROSS-REPO, not merely the concurrent desktop session: bumping
+the packaged Alembic head to `0010` bumps `desktop/contract.py`'s dynamically
+computed `PRIMARY_SCHEMA_VERSION`, and `ComponentManifest` validation enforces
+`migration_range.head == packaged head`. The second attempt (with the tree clean)
+passed the migration/compatibility suites (29) and the `test_manifest.py` head
+assertions, but failed `test_canonical_json_v1_matches_cross_language_golden_vector`:
+the manifest golden is a **cross-language canonical vector**
+(`component-manifest-canonical-v1.b64` / `.sha256`) that pins `head "0009"` and is
+the shared reference the DASHBOARD/Rust side also validates against. Landing `0010`
+requires regenerating that cross-language vector in lockstep in BOTH repos, so the
+deletion-saga migration is blocked on dashboard-repo access, not just desktop
+coordination. This is a real cross-repo ordering constraint, not a code defect.
 
 ### wave-w03-review | info | Formal safety/security/resource-bound/quality review of Wave W03
 

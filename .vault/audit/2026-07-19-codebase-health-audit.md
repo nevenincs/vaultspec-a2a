@@ -769,8 +769,10 @@ compile-only proxy. No further tautological or shadow-logic test was identified.
 
 ### s101-fake-doubles-adjudication-input | medium | The four named doubles are recording-doubles-at-real-seams; ruling needed
 
-Type: adjudication input (S101 owner decision). Status: OPEN - requires an owner
-ruling, prepared here so the decision is a yes/no rather than an investigation.
+Type: adjudication input (S101 owner decision). Status: RESOLVED (2026-07-22) -
+owner affirmed the four doubles as sanctioned recording-doubles-at-real-seams;
+S101 has no prohibited fake to replace and is closed on that ruling. Original
+analysis retained below for the record.
 The four flagged doubles all inject a deterministic or recording collaborator at a
 REAL dependency-injection seam while the unit under test runs for real:
 

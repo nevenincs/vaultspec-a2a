@@ -641,6 +641,33 @@ through the real endpoint seam, so this is readability debt rather than a defect
 a follow-on could lift each guard into a named predicate returning an optional
 rejection. No behaviour change is implied.
 
+### complexity-recalculation-w04-p15 | info | Post-decomposition cyclomatic recalculation for the hotspot split wave
+
+Type: verification. Status: resolved. Step `S72` recalculated cyclomatic
+complexity (ruff C901, mccabe, threshold 10) across every function the `W04.P15`
+wave decomposed, and proved behaviour preservation by running the full
+touched-area suites green: streaming, providers, control, and thread
+(797 passed), plus the api permission characterization suite (103 passed) and the
+streaming suite after the final split (73 passed).
+
+Every former hotspot orchestrator now measures at or below the threshold:
+`respond_to_permission`, `process_langgraph_event`, `compose_harness_mcp_servers`,
+`normalize_tool_input_schema`, `project_checkpoint_tuple`, and - after the recalc
+surfaced it - `sync_worker_event` (cyclomatic 23 -> 3). The recalculation also
+corrected a plan-scope error: step `S70` named `sync_worker_event` but scoped it
+to `control/event_handlers.py`, whereas the function lives in
+`streaming/emitters.py`; both the event-handler permission stage and the emitter
+dispatch were decomposed.
+
+Residual functions still above 10 are flat branch fans, not nested monoliths, and
+each is independently tested: `_authorize_permission_response` (15, the guard
+chain queued above), `create` (14, provider-family admission in `factory.py`),
+`_translate_chat_model_stream` and `_translate_tool_end` (12 each, per-field event
+translators), `emit_interrupt_events` (13, an untouched neighbour), and
+`_fold_pending_writes` (11, the pending-writes fold). No threshold was loosened
+and no `C901` suppression was added - the project configures no mccabe gate, so
+these are recorded as low-severity readability follow-ons rather than defects.
+
 ## Recommendations
 
 1. Draft and approve a hardening ADR before implementation. The ADR must decide:

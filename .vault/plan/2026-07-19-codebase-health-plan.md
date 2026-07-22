@@ -299,7 +299,7 @@ Decompose every remaining audited function above complexity score twenty at stab
 - [x] `W04.P15.S69` - Split `normalize_tool_input_schema` into explicit schema-shape translators; `src/vaultspec_a2a/streaming/transformer.py, tests/streaming`.
 - [x] `W04.P15.S70` - Split `sync_worker_event` into event validation, persistence, and projection stages; `src/vaultspec_a2a/control/event_handlers.py, tests/control`.
 - [x] `W04.P15.S71` - Split `project_checkpoint_tuple` into immutable checkpoint extraction and response projection stages; `src/vaultspec_a2a/control/thread_state_service.py, tests/control`.
-- [ ] `W04.P15.S72` - Recalculate complexity and prove every decomposed path preserves real behavior without suppressive thresholds; `src/vaultspec_a2a, tests, .vault/audit`.
+- [x] `W04.P15.S72` - Recalculate complexity and prove every decomposed path preserves real behavior without suppressive thresholds; `src/vaultspec_a2a, tests, .vault/audit`.
 
 ### Phase `W04.P16` - repair documentation and mechanical drift
 

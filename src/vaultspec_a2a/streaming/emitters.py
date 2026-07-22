@@ -10,7 +10,7 @@ import logging
 import time
 from collections import defaultdict
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, ClassVar
 from uuid import uuid4
 
 from ..domain_config import domain_config
@@ -542,130 +542,154 @@ class EventEmitters:
         thread_id: str,
         payload: dict[str, Any],
     ) -> None:
-        """Sync a relayed worker event into aggregator state."""
+        """Sync a relayed worker event into aggregator state.
+
+        Validates the event type and dispatches to the per-type sync handler;
+        each handler owns its own state mutation and sequence projection. An
+        unrecognized but non-empty event still advances the sequence, matching
+        the prior trailing catch-all.
+        """
         event_type = payload.get("type", "")
-
-        if event_type == "agent_status":
-            agent_id = payload.get("agent_id", "")
-            raw_state = payload.get("state", "")
-            if agent_id and raw_state:
-                try:
-                    lifecycle = AgentLifecycleState(raw_state)
-                except ValueError:
-                    logger.warning(
-                        "Unknown agent state %r in relayed event",
-                        raw_state,
-                    )
-                    return
-                self._agent_states[agent_id] = lifecycle
-            self.next_sequence(thread_id)
-
-        elif event_type == "permission_request":
-            request_id = payload.get("request_id", "")
-            if request_id:
-                description = payload.get("description", "")
-                options = payload.get("options", [])
-                tool_call = payload.get("tool_call")
-                perm_options: list[dict[str, str]] = []
-                for opt in options:
-                    perm_options.append(
-                        {
-                            "option_id": opt.get("option_id", ""),
-                            "name": opt.get("name", ""),
-                            "kind": str(map_acp_option_kind(opt.get("option_id", ""))),
-                        }
-                    )
-                event = PermissionRequest(
-                    thread_id=thread_id,
-                    agent_id=payload.get("agent_id", ""),
-                    timestamp=datetime.now(UTC).timestamp(),
-                    request_id=request_id,
-                    description=description,
-                    options=perm_options,
-                    tool_call=str(tool_call) if tool_call is not None else None,
-                )
-                self._replace_thread_pending_permission(
-                    thread_id=thread_id,
-                    request_id=request_id,
-                    event=event,
-                )
-                self.next_sequence(thread_id)
-
-        elif event_type == "permission_resolved":
-            request_id = payload.get("request_id", "")
-            if request_id:
-                self._pending_permissions.pop(request_id, None)
-            self.next_sequence(thread_id)
-
-        elif event_type == "graph_registered":
-            nodes = payload.get("nodes", {})
-            if isinstance(nodes, dict):
-                self._subscribers.set_node_metadata(
-                    {
-                        name: {
-                            "role": str(meta.get("role", "")),
-                            "display_name": str(meta.get("display_name", "")),
-                            "description": str(meta.get("description", "")),
-                        }
-                        for name, meta in nodes.items()
-                        if isinstance(meta, dict)
-                    }
-                )
-                logger.debug(
-                    "sync_worker_event: cached metadata for %d nodes",
-                    len(nodes),
-                )
-
-        elif event_type == "plan_update":
-            self.next_sequence(thread_id)
-
-        elif event_type == "artifact_update":
-            artifact_id = payload.get("artifact_id", "")
-            filename = payload.get("filename", "")
-            if artifact_id and filename:
-                self.next_sequence(thread_id)
-
-        elif event_type == "tool_call_start":
-            tc_id = payload.get("tool_call_id", "")
-            tc_title = payload.get("title", "unknown_tool")
-            tc_kind = payload.get("kind", ToolKind.OTHER.value)
-            agent_id = payload.get("agent_id", "")
-            if tc_id:
-                self._tool_call_states[(thread_id, tc_id)] = {
-                    "title": tc_title,
-                    "kind": tc_kind,
-                    "status": ToolCallStatus.PENDING.value,
-                    "agent_id": agent_id,
-                }
-            self.next_sequence(thread_id)
-
-        elif event_type == "tool_call_update":
-            tc_id = payload.get("tool_call_id", "")
-            if tc_id:
-                key = (thread_id, tc_id)
-                existing = self._tool_call_states.get(key)
-                if existing is not None:
-                    if payload.get("status"):
-                        existing["status"] = payload["status"]
-                    if payload.get("title"):
-                        existing["title"] = payload["title"]
-                else:
-                    self._tool_call_states[key] = {
-                        "title": payload.get("title", "unknown_tool"),
-                        "kind": payload.get("kind", ToolKind.OTHER.value),
-                        "status": payload.get("status", ToolCallStatus.PENDING.value),
-                        "agent_id": payload.get("agent_id", ""),
-                    }
-                updated_status = payload.get("status", "")
-                if updated_status in (
-                    ToolCallStatus.COMPLETED.value,
-                    ToolCallStatus.FAILED.value,
-                ):
-                    self._prune_completed_tool_calls(thread_id)
-            self.next_sequence(thread_id)
-
+        handler_name = self._SYNC_EVENT_HANDLERS.get(event_type)
+        if handler_name is not None:
+            getattr(self, handler_name)(thread_id, payload)
         elif thread_id and event_type:
             self.next_sequence(thread_id)
+
+    def _sync_agent_status(self, thread_id: str, payload: dict[str, Any]) -> None:
+        agent_id = payload.get("agent_id", "")
+        raw_state = payload.get("state", "")
+        if agent_id and raw_state:
+            try:
+                lifecycle = AgentLifecycleState(raw_state)
+            except ValueError:
+                logger.warning(
+                    "Unknown agent state %r in relayed event",
+                    raw_state,
+                )
+                return
+            self._agent_states[agent_id] = lifecycle
+        self.next_sequence(thread_id)
+
+    def _sync_permission_request(self, thread_id: str, payload: dict[str, Any]) -> None:
+        request_id = payload.get("request_id", "")
+        if not request_id:
+            return
+        description = payload.get("description", "")
+        options = payload.get("options", [])
+        tool_call = payload.get("tool_call")
+        perm_options: list[dict[str, str]] = []
+        for opt in options:
+            perm_options.append(
+                {
+                    "option_id": opt.get("option_id", ""),
+                    "name": opt.get("name", ""),
+                    "kind": str(map_acp_option_kind(opt.get("option_id", ""))),
+                }
+            )
+        event = PermissionRequest(
+            thread_id=thread_id,
+            agent_id=payload.get("agent_id", ""),
+            timestamp=datetime.now(UTC).timestamp(),
+            request_id=request_id,
+            description=description,
+            options=perm_options,
+            tool_call=str(tool_call) if tool_call is not None else None,
+        )
+        self._replace_thread_pending_permission(
+            thread_id=thread_id,
+            request_id=request_id,
+            event=event,
+        )
+        self.next_sequence(thread_id)
+
+    def _sync_permission_resolved(
+        self, thread_id: str, payload: dict[str, Any]
+    ) -> None:
+        request_id = payload.get("request_id", "")
+        if request_id:
+            self._pending_permissions.pop(request_id, None)
+        self.next_sequence(thread_id)
+
+    def _sync_graph_registered(self, _thread_id: str, payload: dict[str, Any]) -> None:
+        nodes = payload.get("nodes", {})
+        if isinstance(nodes, dict):
+            self._subscribers.set_node_metadata(
+                {
+                    name: {
+                        "role": str(meta.get("role", "")),
+                        "display_name": str(meta.get("display_name", "")),
+                        "description": str(meta.get("description", "")),
+                    }
+                    for name, meta in nodes.items()
+                    if isinstance(meta, dict)
+                }
+            )
+            logger.debug(
+                "sync_worker_event: cached metadata for %d nodes",
+                len(nodes),
+            )
+
+    def _sync_plan_update(self, thread_id: str, _payload: dict[str, Any]) -> None:
+        self.next_sequence(thread_id)
+
+    def _sync_artifact_update(self, thread_id: str, payload: dict[str, Any]) -> None:
+        artifact_id = payload.get("artifact_id", "")
+        filename = payload.get("filename", "")
+        if artifact_id and filename:
+            self.next_sequence(thread_id)
+
+    def _sync_tool_call_start(self, thread_id: str, payload: dict[str, Any]) -> None:
+        tc_id = payload.get("tool_call_id", "")
+        tc_title = payload.get("title", "unknown_tool")
+        tc_kind = payload.get("kind", ToolKind.OTHER.value)
+        agent_id = payload.get("agent_id", "")
+        if tc_id:
+            self._tool_call_states[(thread_id, tc_id)] = {
+                "title": tc_title,
+                "kind": tc_kind,
+                "status": ToolCallStatus.PENDING.value,
+                "agent_id": agent_id,
+            }
+        self.next_sequence(thread_id)
+
+    def _sync_tool_call_update(self, thread_id: str, payload: dict[str, Any]) -> None:
+        tc_id = payload.get("tool_call_id", "")
+        if tc_id:
+            key = (thread_id, tc_id)
+            existing = self._tool_call_states.get(key)
+            if existing is not None:
+                if payload.get("status"):
+                    existing["status"] = payload["status"]
+                if payload.get("title"):
+                    existing["title"] = payload["title"]
+            else:
+                self._tool_call_states[key] = {
+                    "title": payload.get("title", "unknown_tool"),
+                    "kind": payload.get("kind", ToolKind.OTHER.value),
+                    "status": payload.get("status", ToolCallStatus.PENDING.value),
+                    "agent_id": payload.get("agent_id", ""),
+                }
+            updated_status = payload.get("status", "")
+            if updated_status in (
+                ToolCallStatus.COMPLETED.value,
+                ToolCallStatus.FAILED.value,
+            ):
+                self._prune_completed_tool_calls(thread_id)
+        self.next_sequence(thread_id)
+
+    # Event type -> bound sync-handler method name. A type absent here falls to
+    # the trailing catch-all in sync_worker_event.
+    _SYNC_EVENT_HANDLERS: ClassVar[dict[str, str]] = {
+        "agent_status": "_sync_agent_status",
+        "permission_request": "_sync_permission_request",
+        "permission_resolved": "_sync_permission_resolved",
+        "graph_registered": "_sync_graph_registered",
+        "plan_update": "_sync_plan_update",
+        "artifact_update": "_sync_artifact_update",
+        "tool_call_start": "_sync_tool_call_start",
+        "tool_call_update": "_sync_tool_call_update",
+    }
 
     # ------------------------------------------------------------------
     # Shutdown

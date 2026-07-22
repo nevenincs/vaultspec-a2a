@@ -519,8 +519,19 @@ class ServiceStateResponse(BaseModel):
     ready: bool
     can_accept_run: bool
     gateway_pid: int
+    # Identity of THIS gateway process, distinct from its pid and its port. A
+    # gateway that restarts on the same port is a different incarnation, and a
+    # consumer comparing only host and port cannot tell the two apart - which is
+    # how dispatch reached a worker still paired to a gateway that had exited.
+    gateway_lifetime_id: str | None = None
     worker_status: str | None = None
     worker_connected: bool | None = None
+    # What the worker reports about the pairing, echoed rather than asserted:
+    # which gateway incarnation spawned it, and which spawn attempt it was.
+    # A mismatch against gateway_lifetime_id means the worker belongs to another
+    # gateway; both absent means the worker was not gateway-spawned at all.
+    worker_paired_gateway_lifetime: str | None = None
+    worker_generation: str | None = None
     circuit_breaker: str | None = None
     database_backend: str | None = None
     checkpoint_backend: str | None = None

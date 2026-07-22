@@ -14,7 +14,9 @@ import os
 import re
 import subprocess
 import sys
+import threading
 import time
+import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
@@ -88,6 +90,20 @@ def _runtime_dir() -> Path:
 def _worker_stderr_log_path(worker_port: int) -> Path:
     """Return the deterministic stderr log path for the auto-spawned worker."""
     return _runtime_dir() / f"worker-autospawn-{worker_port}.stderr.log"
+
+
+GATEWAY_LIFETIME_ENV = "VAULTSPEC_GATEWAY_LIFETIME_ID"
+"""Env name carrying the spawning gateway's lifetime identity to its worker."""
+
+WORKER_GENERATION_ENV = "VAULTSPEC_WORKER_GENERATION"
+"""Env name carrying the spawn generation this worker belongs to."""
+
+# One value per gateway PROCESS, not per port or per host. A gateway that
+# restarts on the same port is a different incarnation, and a worker still
+# holding the previous value is paired to a gateway that no longer exists -
+# the condition a URL comparison cannot see, and the one that let dispatch
+# reach a foreign worker.
+GATEWAY_LIFETIME_ID = uuid.uuid4().hex
 
 
 _WORKER_LOG_NAME_RE = re.compile(r"^worker-autospawn-(\d+)\.stderr\.log$")
@@ -330,6 +346,7 @@ async def _spawn_worker(
     worker_port: int,
     *,
     containment: ProcessContainment | None = None,
+    generation: int = 0,
 ) -> subprocess.Popen[bytes] | None:
     """Spawn the worker as a child process if not already running.
 
@@ -405,6 +422,8 @@ async def _spawn_worker(
     spawn_env["VAULTSPEC_WORKER_HOST"] = settings.worker_host
     if settings.internal_token is not None:
         spawn_env[INTERNAL_TOKEN_ENV] = settings.internal_token
+    spawn_env[GATEWAY_LIFETIME_ENV] = GATEWAY_LIFETIME_ID
+    spawn_env[WORKER_GENERATION_ENV] = str(generation)
 
     stderr_log_path = _worker_stderr_log_path(worker_port)
     stderr_log_path.parent.mkdir(parents=True, exist_ok=True)
@@ -576,6 +595,15 @@ class LazyWorkerSpawner:
             _worker_stderr_log_path(worker_port) if auto_spawn else None
         )
         self._spawned = False
+        # Incremented before each spawn, so the value a worker carries names the
+        # attempt that produced it. A restart yields a distinct generation even
+        # when the port, the host and the gateway are unchanged.
+        self._generation = 0
+        # A plain increment is not atomic - it loads, adds and stores - so two
+        # callers can read the same value and issue one generation twice. The
+        # asyncio lock below does not help: the watchdog reaches this from a
+        # worker thread, not the event loop.
+        self._generation_lock = threading.Lock()
         self._lock = asyncio.Lock()
         # Optional demand-readiness signal wired by the armed desktop gateway. It
         # is fired once, on the authenticated demand path, after the single-flight
@@ -633,10 +661,12 @@ class LazyWorkerSpawner:
             self._containment = (
                 ProcessContainment.create() if settings.desktop_profile_armed else None
             )
+            generation = self.next_generation()
             self._process = await _spawn_worker(
                 self._worker_url,
                 self._worker_port,
                 containment=self._containment,
+                generation=generation,
             )
             if self._process is None:
                 # The spawn failed and already released its containment; drop the
@@ -674,6 +704,23 @@ class LazyWorkerSpawner:
     def worker_port(self) -> int:
         """The worker's port number."""
         return self._worker_port
+
+    def next_generation(self) -> int:
+        """Advance and return the spawn generation for a replacement worker.
+
+        The watchdog restarts the worker without going through the lazy spawn
+        path, so it takes its generation from here rather than minting one; two
+        counters would let a restarted worker claim a generation the gateway
+        never issued.
+        """
+        with self._generation_lock:
+            self._generation += 1
+            return self._generation
+
+    @property
+    def generation(self) -> int:
+        """Return the spawn generation of the worker this spawner last started."""
+        return self._generation
 
     def replace_process(
         self,
@@ -950,6 +997,7 @@ class WorkerWatchdog:
                 self._spawner.worker_url,
                 self._spawner.worker_port,
                 containment=new_containment,
+                generation=self._spawner.next_generation(),
             )
             if new_proc is not None:
                 self._spawner.replace_process(new_proc, new_containment)

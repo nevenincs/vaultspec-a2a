@@ -34,6 +34,10 @@ from fastapi import Depends, FastAPI, Header, HTTPException
 from opentelemetry import metrics, trace
 
 from ..control.config import settings
+from ..control.worker_management import (
+    GATEWAY_LIFETIME_ENV,
+    WORKER_GENERATION_ENV,
+)
 from ..database.checkpoints import open_checkpointer
 from ..ipc.schemas import DispatchRequest, DispatchResponse
 from ..lifecycle.registration import deregister_serve, register_serve
@@ -269,6 +273,17 @@ def create_worker_app(lifespan: Any | None = None) -> FastAPI:
             "database_backend": settings.resolved_database_backend,
             "checkpoint_backend": settings.resolved_checkpoint_backend,
             "postgres_required": settings.postgres_required,
+            # Pairing identity, reported not asserted. A URL cannot distinguish a
+            # gateway from its own restart on the same port, so a worker naming
+            # only its target looks correctly paired to a gateway that no longer
+            # exists. These two say WHICH gateway incarnation started this worker
+            # and which spawn attempt it was. Empty when the worker was started
+            # by something other than a gateway spawn - Compose, an operator, or
+            # a test - which is itself the honest answer rather than a default.
+            "paired_gateway_lifetime": os.environ.get(
+                GATEWAY_LIFETIME_ENV, ""
+            ),
+            "worker_generation": os.environ.get(WORKER_GENERATION_ENV, ""),
         }
 
     @app.post(

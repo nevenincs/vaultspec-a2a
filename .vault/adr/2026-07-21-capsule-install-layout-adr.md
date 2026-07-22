@@ -385,6 +385,20 @@ while supplying the spec-conformant path the refusal always implied
   further packages carry a legacy-recognizable member the verifier's existing
   path accepts without curation. Each entry is a one-time reviewed fact that
   recurs only when its package's locked version changes.
+- The first-party project wheel installs into the Python closure but is not a
+  third-party license concern. The vaultspec-a2a distribution wheel is a full
+  installed member of the Python closure inventory - its modules back the two
+  contract console-scripts, so it is materialized and provenance-bearing like
+  every other wheel - yet it is not a member of the uv.lock dependency closure
+  and carries no third-party attribution entry in the `.capsule-licenses`
+  bundle. Its own license ships as the ordinary archive-root
+  `dist-info/licenses/` member the layout places verbatim; the third-party
+  compliance index is for redistributed dependencies only. The
+  dependency-license-coverage gate therefore stays strict - every dependency
+  must present a source-verified license - while treating the first-party
+  project wheel as the one legitimate installed package outside the dependency
+  closure. This keeps the coverage guarantee intact without a decorative,
+  unverified license record for the product's own wheel.
 - The ACP closure carries a proprietary dependency: the required Anthropic SDK
   packages ship an "all rights reserved" `LICENSE.md`, so the capsule bundles a
   non-open-source component recorded as `LicenseRef-Anthropic-Commercial`, with

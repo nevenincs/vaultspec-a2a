@@ -11,13 +11,17 @@ caller to surface.
 
 import inspect
 import logging
-from collections.abc import Awaitable, Callable
+from collections.abc import Callable
 
 logger = logging.getLogger(__name__)
 
 __all__ = ["run_independent_cleanups"]
 
-CleanupStep = tuple[str, Callable[[], Awaitable[None] | None]]
+# A named cleanup step. The callable may be sync or async and may return any
+# value; an awaitable result is awaited and any other return is ignored, so a
+# release that happens to return a handle (e.g. a preserved-record path) fits
+# without an adapter.
+CleanupStep = tuple[str, Callable[[], object]]
 
 
 async def run_independent_cleanups(*steps: CleanupStep) -> list[tuple[str, Exception]]:

@@ -73,6 +73,7 @@ from ._acp_rpc_handlers import (
 )
 from ._acp_session import initialize_session, setup_prompt, setup_session
 from ._acp_types import PermissionCallback, _AcpModelConfig, _AcpSessionContext
+from ._cleanup import CleanupStep, run_independent_cleanups
 from ._subprocess import kill_process_tree as _kill_process_tree
 from ._subprocess import spawn_acp_process as _spawn_acp_process
 from .acp_exceptions import (
@@ -456,15 +457,35 @@ class AcpChatModel(BaseChatModel):
             async for chunk in self._yield_chunks(ctx, prompt_future, run_manager):
                 yield chunk
         finally:
+            # Independent cleanup: a failure in any one release must not skip the
+            # rest. In particular, reaping the session must not skip destroying the
+            # isolated config home (which holds the copied credential), and the
+            # transcript is carried out BEFORE that home is destroyed. Each step
+            # runs regardless of earlier failures, which are aggregated.
+            cleanup_steps: list[CleanupStep] = []
             if ctx is not None and stdout_task is not None and stderr_task is not None:
-                await self._cleanup_session(ctx, stdout_task, stderr_task)
-            # Carry the CLI's own transcript out before the home holding it is
-            # destroyed; without this the richest record of the run dies unread.
-            preserve_session_record(
-                config_home, destination_root=preserved_session_root()
+                session_ctx, out_task, err_task = ctx, stdout_task, stderr_task
+                cleanup_steps.append(
+                    (
+                        "acp-session",
+                        lambda: self._cleanup_session(session_ctx, out_task, err_task),
+                    )
+                )
+            cleanup_steps.append(
+                (
+                    "acp-preserve-session-record",
+                    lambda: preserve_session_record(
+                        config_home, destination_root=preserved_session_root()
+                    ),
+                )
             )
-            cleanup_isolated_config_home(config_home)
-            cleanup_projected_mcp(projected_mcp)
+            cleanup_steps.append(
+                ("acp-config-home", lambda: cleanup_isolated_config_home(config_home))
+            )
+            cleanup_steps.append(
+                ("acp-projected-mcp", lambda: cleanup_projected_mcp(projected_mcp))
+            )
+            await run_independent_cleanups(*cleanup_steps)
 
     async def _yield_chunks(
         self,

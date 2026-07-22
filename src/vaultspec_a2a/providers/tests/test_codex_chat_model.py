@@ -297,3 +297,42 @@ async def test_cleanup_continues_and_reaps_the_process_after_a_prior_failure() -
     # ...and the real process was reaped despite that earlier failure.
     await asyncio.wait_for(process.wait(), timeout=10.0)
     assert process.returncode is not None
+
+
+# A real subprocess that consumes stdin but never answers, so a request's
+# future never resolves - the deadline must fire rather than hang forever.
+_HANG_SERVER = r"""
+import sys
+for _line in sys.stdin:
+    pass
+"""
+
+
+@pytest.mark.asyncio
+async def test_deadline_expiry_terminates_a_real_session() -> None:
+    """A bounded request deadline expires against a non-answering real subprocess.
+
+    Spawn a real process that reads the request but never sends a response frame,
+    so the request future would wait forever. The bounded deadline (the same
+    asyncio.wait_for the turn driver wraps each request in) must raise rather than
+    hang, and the session is then reaped - proving deadline expiry terminates the
+    session, against a real subprocess.
+    """
+    import asyncio
+
+    process = await spawn_acp_process(
+        [sys.executable, "-c", _HANG_SERVER],
+        env={},
+        cwd=".",
+        use_exec=True,
+    )
+    client = _CodexAppServerClient(process)
+    try:
+        with pytest.raises((TimeoutError, asyncio.TimeoutError)):
+            await asyncio.wait_for(client.request("never-answered", {}), timeout=0.5)
+    finally:
+        await client.aclose()
+
+    # The session's real process is reaped after the deadline fires.
+    await asyncio.wait_for(process.wait(), timeout=10.0)
+    assert process.returncode is not None

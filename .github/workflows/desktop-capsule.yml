@@ -12,7 +12,7 @@ concurrency:
 
 jobs:
   capsule:
-    name: Build and verify capsule (${{ matrix.target }})
+    name: Prepare, build, and verify capsule (${{ matrix.target }})
     strategy:
       fail-fast: false
       matrix:
@@ -47,51 +47,137 @@ jobs:
       - name: Install locked build environment
         run: uv sync --locked --no-default-groups --group tooling
 
-      - name: Restore download cache
+      - name: Restore acquisition cache
         uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
         with:
           path: .capsule-cache
-          key: capsule-inputs-${{ matrix.target }}-${{ hashFiles('scripts/desktop_capsule_inputs.toml') }}
+          key: capsule-inputs-${{ matrix.target }}-${{ hashFiles('scripts/desktop_capsule_inputs.toml', 'uv.lock', 'package-lock.json') }}
           restore-keys: |
             capsule-inputs-${{ matrix.target }}-
 
-      - name: Build capsule
+      # Preparation is the only network-bound stage: it acquires every pinned
+      # byte into the content-addressed cache and mints the digest-pinned
+      # descriptor the build stage opens read-only. It prints the descriptor
+      # path (line 1) and its sha256 (line 2, prefixed "sha256:").
+      - name: Prepare pinned capsule inputs
+        id: prepare
         shell: bash
         run: |
+          uv run --no-sync --frozen python scripts/prepare_desktop_capsule.py \
+            --target ${{ matrix.target }} \
+            --out-dir dist/inputs \
+            --cache-dir .capsule-cache | tee prepare.out
+          descriptor="$(sed -n '1p' prepare.out)"
+          sha256="$(sed -n '2p' prepare.out | cut -d ':' -f 2)"
+          echo "descriptor=${descriptor}" >> "$GITHUB_OUTPUT"
+          echo "descriptor_sha256=${sha256}" >> "$GITHUB_OUTPUT"
+
+      # The Windows product launchers are composed from a pinned console-stub
+      # donor wheel. Only preparation-class network access acquires it; the
+      # build stays a pure consumer and only reads the passed path. The download
+      # is verified against the pinned digest and fails closed on mismatch.
+      - name: Acquire and verify the Windows launcher-stub donor
+        id: donor
+        if: matrix.target == 'x86_64-pc-windows-msvc'
+        shell: bash
+        run: |
+          uv run --no-sync --frozen python - <<'PY'
+          import hashlib
+          import os
+          import pathlib
+          import sys
+          import tomllib
+          import urllib.request
+
+          document = tomllib.loads(
+              pathlib.Path("scripts/desktop_capsule_inputs.toml").read_text("utf-8")
+          )
+          stub = document["launcher_stub"]
+          url, expected = stub["url"], stub["sha256"]
+          destination = pathlib.Path("dist/donor/launcher-stub-donor.whl")
+          destination.parent.mkdir(parents=True, exist_ok=True)
+          with urllib.request.urlopen(url, timeout=300) as response:
+              payload = response.read()
+          actual = hashlib.sha256(payload).hexdigest()
+          if actual != expected:
+              sys.exit(f"donor digest mismatch: expected {expected}, got {actual}")
+          destination.write_bytes(payload)
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as handle:
+              handle.write(f"path={destination.as_posix()}\n")
+          print(f"launcher-stub donor verified: {destination}")
+          PY
+
+      # The build consumes the pinned descriptor and cache read-only and
+      # assembles the deterministic installed tree inside one caller-owned
+      # generation (dist/capsules/<target>/: the capsule tree plus capsule.zip).
+      - name: Build capsule generation
+        shell: bash
+        run: |
+          donor_arg=""
+          if [ "${{ matrix.target }}" = "x86_64-pc-windows-msvc" ]; then
+            donor_arg="--launcher-stub-donor ${{ steps.donor.outputs.path }}"
+          fi
           uv run --no-sync --frozen python scripts/build_desktop_capsule.py build \
             --target ${{ matrix.target }} \
+            --descriptor "${{ steps.prepare.outputs.descriptor }}" \
+            --descriptor-sha256 "${{ steps.prepare.outputs.descriptor_sha256 }}" \
+            --input-dir .capsule-cache \
+            --uv-lock uv.lock \
+            --package-lock package-lock.json \
             --out-dir dist/capsules \
-            --cache-dir .capsule-cache
+            $donor_arg
 
-      - name: Verify capsule
+      # Producer-side verification: a non-zero exit here fails the job before
+      # any publish step runs, so only a verified generation is ever published.
+      - name: Verify capsule generation
         shell: bash
         run: |
           uv run --no-sync --frozen python scripts/verify_desktop_capsule.py verify \
-            dist/capsules/${{ matrix.target }}.zip
+            --target ${{ matrix.target }} \
+            --generation dist/capsules/${{ matrix.target }} \
+            --descriptor "${{ steps.prepare.outputs.descriptor }}" \
+            --descriptor-sha256 "${{ steps.prepare.outputs.descriptor_sha256 }}" \
+            --input-dir .capsule-cache \
+            --uv-lock uv.lock \
+            --package-lock package-lock.json
 
+      # The SBOM is written beside the generation (not inside it, so the
+      # generation stays exactly the capsule tree plus its archive). The sbom
+      # subcommand re-verifies the generation before emitting.
       - name: Emit SBOM
         shell: bash
         run: |
           uv run --no-sync --frozen python scripts/verify_desktop_capsule.py sbom \
-            dist/capsules/${{ matrix.target }}.zip \
+            --target ${{ matrix.target }} \
+            --generation dist/capsules/${{ matrix.target }} \
+            --descriptor "${{ steps.prepare.outputs.descriptor }}" \
+            --descriptor-sha256 "${{ steps.prepare.outputs.descriptor_sha256 }}" \
+            --input-dir .capsule-cache \
+            --uv-lock uv.lock \
+            --package-lock package-lock.json \
             --output dist/capsules/${{ matrix.target }}.sbom.json
 
       - name: Bind capsule archive digest
         id: capsule-digest
         shell: bash
         env:
-          CAPSULE_PATH: dist/capsules/${{ matrix.target }}.zip
+          CAPSULE_PATH: dist/capsules/${{ matrix.target }}/capsule.zip
+          SHA_PATH: dist/capsules/${{ matrix.target }}.capsule.zip.sha256
         run: |
-          uv run --no-sync --frozen python -c "import hashlib, os; from pathlib import Path; p = Path(os.environ['CAPSULE_PATH']); digest = hashlib.sha256(p.read_bytes()).hexdigest(); p.with_suffix(p.suffix + '.sha256').write_text(f'{digest}  {p.name}\n', encoding='ascii'); Path(os.environ['GITHUB_OUTPUT']).open('a', encoding='utf-8').write(f'sha256={digest}\n')"
+          uv run --no-sync --frozen python -c "import hashlib, os; from pathlib import Path; p = Path(os.environ['CAPSULE_PATH']); digest = hashlib.sha256(p.read_bytes()).hexdigest(); Path(os.environ['SHA_PATH']).write_text(f'{digest}  {p.name}\n', encoding='ascii'); Path(os.environ['GITHUB_OUTPUT']).open('a', encoding='utf-8').write(f'sha256={digest}\n')"
 
-      - name: Upload capsule artifact
+      # Publish only the verified generation: the deterministic archive, its
+      # detached digest, the SBOM, and the installed-tree evidence + component
+      # manifest the dashboard consumes.
+      - name: Publish verified capsule generation
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: desktop-capsule-${{ matrix.target }}-${{ steps.capsule-digest.outputs.sha256 }}
           path: |
-            dist/capsules/${{ matrix.target }}.zip
-            dist/capsules/${{ matrix.target }}.zip.sha256
-            dist/capsules/${{ matrix.target }}.manifest.json
+            dist/capsules/${{ matrix.target }}/capsule.zip
+            dist/capsules/${{ matrix.target }}.capsule.zip.sha256
             dist/capsules/${{ matrix.target }}.sbom.json
+            dist/capsules/${{ matrix.target }}/capsule/installed-tree.cdx.json
+            dist/capsules/${{ matrix.target }}/capsule/component-manifest.json
           if-no-files-found: error
           retention-days: 30

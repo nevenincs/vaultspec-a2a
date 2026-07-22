@@ -82,6 +82,7 @@ from vaultspec_a2a.desktop.capsule_assembly import (
     derive_capsule_assembly_plan,
 )
 from vaultspec_a2a.desktop.capsule_evidence import (
+    ProjectedFile,
     canonical_evidence_bytes,
     installed_tree_inventory,
     write_deterministic_capsule_zip_into_unpublished_generation,
@@ -105,7 +106,6 @@ if TYPE_CHECKING:
         CapsuleAssemblyPlan,
         ReservedTreeFile,
     )
-    from vaultspec_a2a.desktop.capsule_evidence import ProjectedFile
 
 # The capsule contract fixes the gateway API surface at v1; a wider range is a
 # future contract change, not a build-time choice.
@@ -283,6 +283,11 @@ def _project_interpreter_subtrees(
     ``node`` children of that existing directory.  The verified runtime source
     bytes are re-resolved from the same content-addressed cache; nothing is
     re-derived.
+
+    The projector roots its evidence at the leased ``runtime`` directory it
+    claims into, so the returned paths are ``cpython/...``/``node/...``; they are
+    re-rooted under ``runtime/`` here so every returned :class:`ProjectedFile`
+    is capsule-relative, matching the closures, launchers, and locks.
     """
     verified = {
         artifact.descriptor.kind: artifact
@@ -298,7 +303,13 @@ def _project_interpreter_subtrees(
                     f"verified cache is missing the {kind.value} interpreter source"
                 )
             projected.extend(
-                project_source_archive_into_unpublished_generation(
+                ProjectedFile(
+                    relative_path=f"{_RUNTIME_ROOT}/{emitted.relative_path}",
+                    size=emitted.size,
+                    sha256=emitted.sha256,
+                    mode=emitted.mode,
+                )
+                for emitted in project_source_archive_into_unpublished_generation(
                     artifact,
                     generation_authority=runtime,
                     destination_prefix=prefix,

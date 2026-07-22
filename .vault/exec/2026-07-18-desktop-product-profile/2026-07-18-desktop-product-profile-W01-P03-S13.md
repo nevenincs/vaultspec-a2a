@@ -112,3 +112,10 @@ Added `src/vaultspec_a2a/desktop/tests/test_build_desktop_capsule.py`:
 - The Windows launcher stub donor is supplied to the build as an explicit path
   (`--launcher-stub-donor`); whether the preparation stage pins the donor in the
   content-addressed cache is a coordination point for the verifier/workflow steps.
+- Follow-up correction (surfaced by the verifier step): the two verbatim interpreter
+  subtrees were recorded in the installed-tree evidence at `cpython/...`/`node/...`
+  instead of `runtime/cpython/...`/`runtime/node/...`, because the source-archive
+  projector roots its evidence at the leased `runtime` directory it claims into. The
+  files always landed correctly on disk (the deterministic archive was unaffected); only
+  the evidence paths were wrong. Fixed by re-rooting each interpreter-subtree
+  `ProjectedFile` under `runtime/` so every emitted evidence path is capsule-relative.

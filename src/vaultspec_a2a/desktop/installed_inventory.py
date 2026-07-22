@@ -46,6 +46,7 @@ __all__ = [
     "INSTALLED_PROVENANCE_EVIDENCE_KEY",
     "InstalledClosureDescriptor",
     "InstalledClosureInventory",
+    "InstalledDroppedRecord",
     "InstalledFileRecord",
     "InstalledInventoryError",
     "InstalledLicenseRecord",
@@ -73,6 +74,7 @@ _DASHBOARD_PATH: Final = re.compile(r"^(?:[A-Za-z0-9@_+.-]+/)*[A-Za-z0-9@_+.-]+$
 HexDigest = Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")]
 ClosureKind = Literal["python", "acp"]
 FileMode = Literal["0644", "0755"]
+DropReason = Literal["data-headers", "data-scripts"]
 
 
 class InstalledInventoryError(RuntimeError):
@@ -234,6 +236,31 @@ class InstalledLicenseRecord(BaseModel):
         return _portable_nfc_path(value)
 
 
+class InstalledDroppedRecord(BaseModel):
+    """One verified archive member deliberately omitted from the installed tree.
+
+    The layout drops ``.data/headers`` and ``.data/scripts`` members (a frozen
+    library runtime compiles nothing and ships no third-party CLIs), and the
+    omission is recorded here so it is auditable rather than silent.  The record
+    is bound into the inventory (hence its content digest) but never into the
+    placed-tree digest: a closure that drops a member yields the same tree
+    digest as one that never carried it.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    source_member: str = Field(min_length=1, max_length=4096)
+    source_sha256: HexDigest
+    size: int = Field(ge=0, le=_MAX_MEMBER_BYTES)
+    sha256: HexDigest
+    reason: DropReason
+
+    @field_validator("source_member")
+    @classmethod
+    def _source_member_is_portable_nfc(cls, value: str) -> str:
+        return _portable_source_member(value)
+
+
 def _tree_digest(install_root: str, files: Sequence[InstalledFileRecord]) -> str:
     records = [
         {
@@ -265,7 +292,7 @@ class InstalledClosureInventory(BaseModel):
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
-    inventory_version: Literal["vaultspec-installed-closure-v2"]
+    inventory_version: Literal["vaultspec-installed-closure-v3"]
     closure_kind: ClosureKind
     target: TargetTriple
     install_root: str = Field(min_length=1, max_length=4096)
@@ -279,6 +306,9 @@ class InstalledClosureInventory(BaseModel):
         min_length=1, max_length=_MAX_LICENSES
     )
     files: tuple[InstalledFileRecord, ...] = Field(min_length=1, max_length=_MAX_FILES)
+    dropped: tuple[InstalledDroppedRecord, ...] = Field(
+        default=(), max_length=_MAX_FILES
+    )
 
     @field_validator("install_root")
     @classmethod
@@ -335,6 +365,14 @@ class InstalledClosureInventory(BaseModel):
             installed = by_path.get(license.relative_path)
             if installed is None or installed.sha256 != license.sha256:
                 raise ValueError("installed license does not match a file digest")
+
+        dropped_keys = tuple(
+            (record.source_sha256, record.source_member) for record in self.dropped
+        )
+        if dropped_keys != tuple(sorted(dropped_keys)) or len(set(dropped_keys)) != len(
+            dropped_keys
+        ):
+            raise ValueError("installed dropped records must be distinct and sorted")
 
         evidence = _verified_member_evidence(info.context)
         if evidence is not None:
@@ -420,10 +458,11 @@ def build_installed_closure_inventory(
     entrypoints: tuple[str, ...],
     licenses: tuple[InstalledLicenseRecord, ...],
     files: tuple[InstalledFileRecord, ...],
+    dropped: tuple[InstalledDroppedRecord, ...] = (),
 ) -> InstalledClosureInventory:
     """Build validated installed authority while deriving every aggregate fact."""
     return InstalledClosureInventory(
-        inventory_version="vaultspec-installed-closure-v2",
+        inventory_version="vaultspec-installed-closure-v3",
         closure_kind=closure_kind,
         target=target,
         install_root=install_root,
@@ -435,6 +474,7 @@ def build_installed_closure_inventory(
         entrypoints=entrypoints,
         licenses=licenses,
         files=files,
+        dropped=dropped,
     )
 
 
@@ -467,6 +507,7 @@ def build_verified_installed_closure_inventory(
     licenses: tuple[InstalledLicenseRecord, ...],
     files: tuple[InstalledFileRecord, ...],
     verified_closure_members: Mapping[str, Iterable[str]],
+    dropped: tuple[InstalledDroppedRecord, ...] = (),
 ) -> InstalledClosureInventory:
     """Build the production installed inventory with its membership proof enforced.
 
@@ -480,7 +521,7 @@ def build_verified_installed_closure_inventory(
     """
     evidence = _validated_verified_closure_members(verified_closure_members)
     payload = {
-        "inventory_version": "vaultspec-installed-closure-v2",
+        "inventory_version": "vaultspec-installed-closure-v3",
         "closure_kind": closure_kind,
         "target": target,
         "install_root": install_root,
@@ -492,6 +533,7 @@ def build_verified_installed_closure_inventory(
         "entrypoints": entrypoints,
         "licenses": licenses,
         "files": files,
+        "dropped": dropped,
     }
     try:
         return InstalledClosureInventory.model_validate(
@@ -539,12 +581,15 @@ def cache_verified_installed_closure_inventory(
     files: tuple[InstalledFileRecord, ...],
     verified_closure_members: Mapping[str, Iterable[str]],
     input_dir: Path,
+    dropped: tuple[InstalledDroppedRecord, ...] = (),
 ) -> tuple[InstalledClosureDescriptor, InstalledClosureInventory]:
     """Build one production installed inventory and persist it into the input cache.
 
-    Emits canonical v2 inventory bytes keyed by their own digest, the shape every
+    Emits canonical v3 inventory bytes keyed by their own digest, the shape every
     ``load_installed_closure_inventory`` caller later reconciles against, and returns
-    the descriptor a capsule build script binds into its closure descriptor.
+    the descriptor a capsule build script binds into its closure descriptor.  The
+    ``dropped`` audit trail rides inside the inventory bytes (hence the descriptor's
+    ``inventory_sha256``) but not the placed-tree digest.
     """
     inventory = build_verified_installed_closure_inventory(
         closure_kind=closure_kind,
@@ -556,6 +601,7 @@ def cache_verified_installed_closure_inventory(
         licenses=licenses,
         files=files,
         verified_closure_members=verified_closure_members,
+        dropped=dropped,
     )
     payload = canonical_installed_inventory_bytes(inventory)
     digest = hashlib.sha256(payload).hexdigest()

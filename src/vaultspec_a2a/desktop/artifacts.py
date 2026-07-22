@@ -81,6 +81,7 @@ from .install_layout import (
 from .installed_inventory import (
     InstalledClosureDescriptor,
     InstalledClosureInventory,
+    InstalledDroppedRecord,
     InstalledFileRecord,
     InstalledLicenseRecord,
     LoadedInstalledClosureInventory,
@@ -1430,6 +1431,23 @@ def _installed_file_records_from_layout(
     )
 
 
+def _dropped_records_from_layout(
+    layout: ClosureLayout,
+) -> tuple[InstalledDroppedRecord, ...]:
+    return tuple(
+        InstalledDroppedRecord.model_validate(
+            {
+                "source_member": member.source_member,
+                "source_sha256": member.source_sha256,
+                "size": member.size,
+                "sha256": member.sha256,
+                "reason": member.reason,
+            }
+        )
+        for member in layout.dropped
+    )
+
+
 def _verified_closure_member_evidence(
     sessions: tuple[VerifiedPackageArchiveSession, ...],
     *,
@@ -1567,6 +1585,7 @@ def build_python_closure_installed_inventory(
             wheel_sessions, input_dir=input_dir
         ),
         input_dir=input_dir,
+        dropped=_dropped_records_from_layout(layout),
     )
 
 
@@ -1612,6 +1631,7 @@ def build_acp_closure_installed_inventory(
             tarball_sessions, input_dir=input_dir
         ),
         input_dir=input_dir,
+        dropped=_dropped_records_from_layout(layout),
     )
 
 

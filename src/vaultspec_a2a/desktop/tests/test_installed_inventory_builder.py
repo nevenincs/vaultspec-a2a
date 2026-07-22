@@ -264,7 +264,7 @@ def test_build_verified_installed_closure_inventory_carries_real_provenance(
         verified_closure_members=verified_closure_members,
     )
 
-    assert inventory.inventory_version == "vaultspec-installed-closure-v2"
+    assert inventory.inventory_version == "vaultspec-installed-closure-v3"
     for file in inventory.files:
         if file.relative_path == license_file.relative_path:
             continue
@@ -406,7 +406,7 @@ def test_build_python_closure_installed_inventory_is_deterministic_and_caches(
     assert first_descriptor.inventory_sha256 == hashlib.sha256(first_bytes).hexdigest()
 
     loaded = load_installed_closure_inventory(first_descriptor, input_dir=cache)
-    assert loaded.value.inventory_version == "vaultspec-installed-closure-v2"
+    assert loaded.value.inventory_version == "vaultspec-installed-closure-v3"
     module_files = {
         file.relative_path: file
         for file in loaded.value.files
@@ -481,7 +481,7 @@ def test_build_acp_closure_installed_inventory_carries_real_npm_provenance(
             input_dir=cache,
         )
 
-    assert inventory.inventory_version == "vaultspec-installed-closure-v2"
+    assert inventory.inventory_version == "vaultspec-installed-closure-v3"
     index_js = next(
         file
         for file in inventory.files
@@ -738,7 +738,7 @@ def test_build_python_closure_inventory_excludes_dropped_data_members(
             _DROPPED_SCRIPT: "data-scripts",
         }
 
-        _resolved_descriptor, inventory = build_python_closure_installed_inventory(
+        resolved_descriptor, inventory = build_python_closure_installed_inventory(
             target=_TARGET,
             source_inventory_sha256=_SOURCE_DIGEST,
             lock_sha256=_LOCK_DIGEST,
@@ -759,6 +759,17 @@ def test_build_python_closure_inventory_excludes_dropped_data_members(
     assert not any("greenlet.h" in path for path in placed)
     assert "jsonpointer" not in placed
     assert not any(path.endswith("/jsonpointer") for path in placed)
+
+    # S120: the drop audit trail the layout produced is now carried onto the
+    # inventory (non-empty, both reasons), survives the build->load round-trip
+    # through the real consumer, and never enters the placed-tree digest.
+    assert {(record.source_member, record.reason) for record in inventory.dropped} == {
+        (_DROPPED_HEADER, "data-headers"),
+        (_DROPPED_SCRIPT, "data-scripts"),
+    }
+    loaded = load_installed_closure_inventory(resolved_descriptor, input_dir=cache)
+    assert loaded.value.dropped == inventory.dropped
+    assert loaded.value.tree_digest == inventory.tree_digest
 
 
 def test_build_acp_closure_installed_inventory_admits_two_licenses_sharing_a_digest(

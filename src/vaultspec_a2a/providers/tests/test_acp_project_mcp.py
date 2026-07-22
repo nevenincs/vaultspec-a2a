@@ -12,6 +12,9 @@ from __future__ import annotations
 
 import json
 import logging
+import os
+import shutil
+import subprocess
 from typing import TYPE_CHECKING
 
 import pytest
@@ -22,6 +25,7 @@ from .._acp_authoring import (
     AuthoringToolBinding,
     build_authoring_stdio_mcp_servers,
 )
+from .._acp_mcp import resolve_harness_mcp_servers
 from .._acp_project_mcp import (
     PROJECTION_MARKER_KEY,
     ProjectionRefusedError,
@@ -415,3 +419,54 @@ def test_reprojection_over_desynced_crash_residue_refuses_via_full_collision_che
     after = _read(path)
     assert "user-srv-renamed" in after["mcpServers"]
     assert "vaultspec-rag" in after["mcpServers"]
+
+
+class TestAcpEntrypointAcceptsProjectedMcpConfig:
+    """The projected .mcp.json is valid to the real ACP (claude) entrypoint (S115).
+
+    The unit tests above pin the projected file's content and merge model; this
+    drives the REAL ``claude mcp list`` entrypoint from a workspace carrying a
+    production projection and confirms the ACP CLI parses the .mcp.json and
+    surfaces our declared MCP server with its production launch command. Skips
+    only when the ``claude`` binary is genuinely absent - an honest environment
+    prerequisite, not a green shortcut.
+    """
+
+    @pytest.mark.skipif(
+        shutil.which("claude") is None, reason="claude ACP CLI is not installed"
+    )
+    def test_claude_mcp_list_accepts_the_projected_config(self, tmp_path: Path) -> None:
+        claude = shutil.which("claude")
+        assert claude is not None
+        specs = resolve_harness_mcp_servers(["vaultspec-rag"])
+        workspace = tmp_path / "run-ws"
+        workspace.mkdir()
+        projected = project_declared_mcp(workspace, specs)
+        assert projected is not None
+        # An isolated CLAUDE_CONFIG_DIR so the probe reads only the projected
+        # project-scope .mcp.json, never the operator's ambient servers.
+        config_home = tmp_path / "config-home"
+        config_home.mkdir()
+        try:
+            proc = subprocess.run(
+                [claude, "mcp", "list"],
+                cwd=str(workspace),
+                env={**os.environ, "CLAUDE_CONFIG_DIR": str(config_home)},
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                check=False,
+                timeout=120,
+            )
+            out = proc.stdout or ""
+            # Exit 0 proves the ACP CLI parsed the .mcp.json without rejecting it.
+            assert proc.returncode == 0, proc.stderr
+            # The declared server surfaces with its production launch command, so
+            # the projection is not merely well-formed but the server the CLI
+            # would actually launch from project scope.
+            assert "vaultspec-rag" in out
+            assert "uvx" in out
+            assert "vaultspec-search-mcp" in out
+        finally:
+            cleanup_projected_mcp(projected)

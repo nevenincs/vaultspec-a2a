@@ -16,6 +16,7 @@ from collections import deque
 import pytest
 
 from ..codex_chat_model import (
+    CLEANUP_TIMEOUT_SECONDS,
     STDERR_TAIL_LINES,
     _redact,
     drain_stderr_into,
@@ -104,3 +105,16 @@ def test_the_retained_tail_is_bounded() -> None:
 
     assert len(kept) == STDERR_TAIL_LINES
     assert kept[-1] == f"line-{STDERR_TAIL_LINES + 49}"
+
+
+def test_the_cleanup_deadline_is_bounded_and_positive() -> None:
+    """A zero or absent deadline would reintroduce the unbounded wait.
+
+    The stronger property - that close abandons a task which ignores
+    cancellation - is deliberately not asserted here. Constructing a genuinely
+    uncancellable task to prove it leaves that task alive, and the loop shutdown
+    at the end of the test then blocks on it: the test hangs the suite while
+    proving the code does not hang. Verifying it needs a subprocess that can be
+    killed, which is a live-process test rather than a unit one.
+    """
+    assert 0 < CLEANUP_TIMEOUT_SECONDS <= 30

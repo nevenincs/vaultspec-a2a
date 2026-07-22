@@ -96,6 +96,9 @@ async def drain_stderr_into(
         return
 
 
+CLEANUP_TIMEOUT_SECONDS = 5.0
+"""How long close waits for a cancelled background task before abandoning it."""
+
 STDERR_TAIL_LINES = 200
 """How many redacted stderr lines to retain for crash diagnosis."""
 
@@ -286,11 +289,17 @@ class _CodexAppServerClient:
         except Exception:
             logger.debug("codex app-server: stdin close failed", exc_info=True)
         await kill_process_tree(self._process, self._metadata)
-        self._reader_task.cancel()
-        if self._stderr_task is not None:
-            self._stderr_task.cancel()
-        with suppress(asyncio.CancelledError, Exception):
-            await self._reader_task
+        # Cancelling requests cooperation; it does not compel it. A task blocked
+        # in a call that does not observe cancellation would hang close, and
+        # close runs on the path that frees the process tree - so both awaits
+        # carry a deadline, and a task that misses it is abandoned rather than
+        # allowed to hold the session open.
+        for task in (self._reader_task, self._stderr_task):
+            if task is None:
+                continue
+            task.cancel()
+            with suppress(asyncio.CancelledError, TimeoutError, Exception):
+                await asyncio.wait_for(task, timeout=CLEANUP_TIMEOUT_SECONDS)
 
 
 class CodexChatModel(BaseChatModel):

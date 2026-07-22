@@ -146,17 +146,23 @@ unbounded accumulation in the operator's machine-global home.
 """
 
 
-def sweep_stale_runtime_dirs(*, keep: Path | None = None) -> list[Path]:
+def sweep_stale_runtime_dirs(
+    *, keep: Path | None = None, root: Path | None = None
+) -> list[Path]:
     """Evict all but the most recent service-test runtime directories.
 
     Args:
         keep: A directory to retain regardless of age - the caller's own run.
+        root: Directory to sweep; defaults to the machine-global runtime root.
+            Taking it as a parameter keeps the sweep testable against a real
+            temporary tree without reassigning module state.
 
     Returns:
         The directories removed.
     """
+    search_root = root if root is not None else RUNTIME_ROOT
     try:
-        candidates = [entry for entry in RUNTIME_ROOT.iterdir() if entry.is_dir()]
+        candidates = [entry for entry in search_root.iterdir() if entry.is_dir()]
     except OSError:
         return []
     # Name breaks ties so several directories sharing one filesystem timestamp

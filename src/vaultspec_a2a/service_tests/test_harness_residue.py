@@ -54,21 +54,18 @@ def _aged_dir(root: Path, name: str, *, age_seconds: float) -> Path:
 
 
 def test_runtime_directories_are_bounded_and_evict_oldest_first(
-    tmp_path: Path, monkeypatch: object
+    tmp_path: Path,
 ) -> None:
     """Recent post-mortems survive; older runs are reclaimed."""
-    import vaultspec_a2a.service_tests.harness as harness_module
-
     fake_root = tmp_path / "service-tests"
     fake_root.mkdir()
-    monkeypatch.setattr(harness_module, "RUNTIME_ROOT", fake_root)  # type: ignore[attr-defined]
 
     created = [
         _aged_dir(fake_root, f"run-{index:03d}", age_seconds=1000 - index)
         for index in range(RETAINED_RUNTIME_DIRS + 3)
     ]
 
-    removed = sweep_stale_runtime_dirs()
+    removed = sweep_stale_runtime_dirs(root=fake_root)
 
     surviving = sorted(entry.name for entry in fake_root.iterdir())
     assert len(surviving) == RETAINED_RUNTIME_DIRS

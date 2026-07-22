@@ -14,8 +14,61 @@ eligibility that depends on the loaded preset.
 
 from __future__ import annotations
 
+import hashlib
+import json
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
+
+RUN_START_FINGERPRINT_FIELDS: tuple[str, ...] = (
+    "team_preset",
+    "message",
+    "metadata",
+    "autonomous",
+    "title",
+    "feature_tag",
+    "profile_id",
+    "feedback_batch_id",
+)
+"""Request fields whose value changes what a run DOES.
+
+Deliberately enumerated rather than derived from the model. A field added later
+must be classified by a person: silently folding every new field in would make
+previously-valid replays conflict, and silently excluding them would let a
+behaviour change replay as identical. Both failures are quiet, so the list is
+explicit and its omissions are reasoned.
+
+Excluded, and why. ``stage``, ``reservation_id`` and ``run_id`` identify the
+request rather than describe the work: a prepare and its commit legitimately
+differ on all three while driving one run. ``actor_tokens`` are minted per
+attempt by the engine, so comparing them would make every honest retry conflict.
+"""
+
+
+def run_start_fingerprint(request: object) -> str:
+    """Return a stable digest of the behaviour-affecting fields of *request*.
+
+    Two requests that would produce the same run share a fingerprint; any
+    difference in what the run would do produces a different one. That is what
+    lets a replayed run id be answered with the original outcome when the body
+    matches, and refused when it does not - a replay carrying a different prompt
+    or a different preset is a new intention wearing an old id, and returning the
+    first run's result would silently discard the second.
+
+    Serialisation is canonical: keys sorted, separators fixed, non-ASCII
+    preserved, so a digest depends on the values rather than on dictionary
+    ordering or formatting.
+    """
+    payload: dict[str, object] = {}
+    for field in RUN_START_FINGERPRINT_FIELDS:
+        value = getattr(request, field, None)
+        if hasattr(value, "model_dump"):
+            value = value.model_dump(mode="json")
+        payload[field] = value
+    canonical = json.dumps(
+        payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False
+    )
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
 
 if TYPE_CHECKING:
     from ..api.schemas.gateway import ProviderEligibility

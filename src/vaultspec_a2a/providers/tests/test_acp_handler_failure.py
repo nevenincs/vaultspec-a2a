@@ -253,10 +253,10 @@ async def test_a_failing_handler_answers_the_agent_over_a_real_session_pipe() ->
 
     async def _boom(
         rpc_id: int | str,
-        params: dict[str, Any],
-        ctx_: object,
+        params: dict[Any, Any],
+        ctx_: _AcpSessionContext,
         config: _AcpModelConfig,
-    ) -> dict[str, Any]:
+    ) -> dict[str, object]:
         raise RuntimeError("handler exploded on a live session")
 
     ctx = _AcpSessionContext(
@@ -269,7 +269,7 @@ async def test_a_failing_handler_answers_the_agent_over_a_real_session_pipe() ->
         prompt_id_ref=[0],
         interrupt_exc=[],
     )
-    handlers = {"session/request_permission": _boom}
+    handlers: dict[str, Any] = {"session/request_permission": _boom}
 
     loop_task = asyncio.create_task(process_stdout_loop(ctx, _config(), handlers))
     try:

@@ -27,7 +27,24 @@ _SERVICE_TOKEN = "active-discovery-service-token"
 _WORKER_TOKEN = "active-discovery-worker-token"
 
 
+# A full ``serve`` boot imports the application, runs migrations, and completes a
+# lifespan before it answers. Ten seconds is comfortable on an idle machine and
+# marginal inside a loaded whole-repository run, where this test was the one that
+# failed under ordering pressure while passing in isolation. The budget is
+# generous rather than tuned: a slow boot should cost wall-clock, not a red suite.
+_READY_ATTEMPTS = 3000
+_READY_INTERVAL_SECONDS = 0.02
+
+
 def _unused_loopback_port() -> int:
+    """Return a loopback port that was free a moment ago.
+
+    Binding to port zero and closing hands back a number rather than a
+    reservation, so the port can be taken between this call and the child
+    binding it. The window is small but real, and it widens under a loaded
+    suite - callers that fail to become ready should treat a bind conflict as a
+    plausible cause rather than assuming the service is broken.
+    """
     with socket.socket() as listener:
         listener.bind(("127.0.0.1", 0))
         return int(listener.getsockname()[1])
@@ -79,7 +96,7 @@ async def _production_gateway(
             timeout=2.0,
             headers={"Authorization": f"Bearer {_SERVICE_TOKEN}"},
         ) as client:
-            for _ in range(500):
+            for _ in range(_READY_ATTEMPTS):
                 if process.returncode is not None:
                     output = await process.stdout.read() if process.stdout else b""
                     pytest.fail(
@@ -92,9 +109,14 @@ async def _production_gateway(
                         break
                 except httpx.TransportError:
                     pass
-                await asyncio.sleep(0.02)
+                await asyncio.sleep(_READY_INTERVAL_SECONDS)
             else:
-                pytest.fail("production gateway did not become ready")
+                budget = _READY_ATTEMPTS * _READY_INTERVAL_SECONDS
+                pytest.fail(
+                    f"production gateway did not become ready within {budget:.0f}s "
+                    f"on port {port}; a bind conflict on that port is a plausible "
+                    "cause alongside a genuinely slow or failed boot"
+                )
         fixture_engine = create_async_engine(database_url)
         try:
             session_factory = async_sessionmaker(

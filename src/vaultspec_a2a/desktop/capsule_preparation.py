@@ -1,6 +1,6 @@
 """Production preparation orchestration for the capsule input authority.
 
-This is the thin top-level flow the ADR's preparation phase calls for.  It
+This is the thin top-level flow of the capsule's preparation phase.  It
 wires the proven component authorities in one sequence - resolve the
 target-selective closures, acquire every pinned byte, derive per-package
 license identity, emit the canonical closure inventories, build the installed

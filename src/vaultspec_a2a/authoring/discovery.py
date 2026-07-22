@@ -14,9 +14,11 @@ The bearer is read out of the file and never logged.
 from __future__ import annotations
 
 import json
+import math
 import os
 import time
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 
 import httpx
@@ -65,16 +67,54 @@ def read_service_json(path: Path) -> dict | None:
     return info if isinstance(info, dict) else None
 
 
-def heartbeat_is_fresh(info: dict, now_ms: int) -> bool:
-    """Return ``False`` only when a present heartbeat is older than the window.
+def _parse_heartbeat_ms(value: object) -> int | None:
+    """Return *value* as a millisecond epoch, or ``None`` when it is unusable.
 
-    A record with no ``last_heartbeat`` is treated as fresh (the field is
-    optional per the contract); a present ms-epoch heartbeat older than
-    :data:`HEARTBEAT_STALE_MS` reads as a crash.
+    Accepts a finite number and an ISO-8601 timestamp, because a peer may publish
+    either. Rejects booleans, non-finite floats, unparseable strings, and every
+    other type.
     """
-    heartbeat = info.get("last_heartbeat")
-    if isinstance(heartbeat, bool) or not isinstance(heartbeat, (int, float)):
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        if not math.isfinite(value):
+            return None
+        return int(value)
+    if isinstance(value, str) and value.strip():
+        try:
+            parsed = datetime.fromisoformat(value.strip().replace("Z", "+00:00"))
+        except ValueError:
+            return None
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=UTC)
+        return int(parsed.timestamp() * 1000)
+    return None
+
+
+def heartbeat_is_fresh(info: dict, now_ms: int) -> bool:
+    """Return whether the record's heartbeat licenses treating the peer as live.
+
+    A record carrying no ``last_heartbeat`` is fresh: the field is optional per
+    the contract, and its absence says nothing about liveness.
+
+    A heartbeat that is PRESENT but unusable is stale, not fresh. That direction
+    matters: this guard decides whether a peer is treated as running, so an
+    unparseable, non-finite, or implausibly future value must not license
+    liveness. A record claiming an infinite or far-future heartbeat would
+    otherwise read as permanently fresh, which is exactly the shape a stale or
+    forged record takes.
+
+    A future heartbeat is tolerated only within one staleness window, which
+    absorbs ordinary clock skew between peers without accepting a timestamp that
+    could pin freshness indefinitely.
+    """
+    if "last_heartbeat" not in info or info.get("last_heartbeat") is None:
         return True
+    heartbeat = _parse_heartbeat_ms(info.get("last_heartbeat"))
+    if heartbeat is None:
+        return False
+    if heartbeat - now_ms > HEARTBEAT_STALE_MS:
+        return False
     return now_ms - heartbeat <= HEARTBEAT_STALE_MS
 
 

@@ -150,7 +150,7 @@ Replace payload-shaped relaying with one versioned DTO and enforce resource limi
 - [ ] `W02.P06.S23` - Transform gateway events through the positive DTO while excluding prompts documents artifacts edit diffs and raw provider payloads; `src/vaultspec_a2a/streaming/aggregator.py, src/vaultspec_a2a/streaming/transformer.py`.
 - [ ] `W02.P06.S24` - Authenticate the progress stream and enforce global connection limits before principal lookup; `src/vaultspec_a2a/api/routes/gateway.py, src/vaultspec_a2a/api/dependencies.py`.
 - [ ] `W02.P06.S25` - Enforce per-principal stream and subscription quotas after authentication; `src/vaultspec_a2a/streaming/subscribers.py, src/vaultspec_a2a/api/routes/thread_stream.py`.
-- [ ] `W02.P06.S26` - Parse numeric and ISO heartbeat values strictly and reject stale malformed non-finite and implausibly future values; `src/vaultspec_a2a/authoring/discovery.py`.
+- [x] `W02.P06.S26` - Parse numeric and ISO heartbeat values strictly and reject stale malformed non-finite and implausibly future values; `src/vaultspec_a2a/authoring/discovery.py`.
 - [ ] `W02.P06.S27` - Prove progress allowlisting with a real authenticated stream client; `tests/streaming, tests/api`.
 - [ ] `W02.P06.S98` - Enforce the positive progress allowlist again at the SSE frame and API event-adapter output boundary; `src/vaultspec_a2a/streaming/sse_frames.py, src/vaultspec_a2a/api/event_adapter.py`.
 - [ ] `W02.P06.S99` - Prove forbidden fields cannot cross the encoded A2A SSE boundary; `tests/streaming, tests/api`.

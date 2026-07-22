@@ -58,6 +58,7 @@ from ..desktop._platform_acl import (
 from ..desktop._platform_acl import (
     windows_file_is_restricted as _windows_file_is_restricted,
 )
+from ..utils.coercion import coerce_int
 from .atomic_write import atomic_write_text
 
 __all__ = [
@@ -159,16 +160,6 @@ class ServiceInfo:
 def service_json_path(a2a_home: Path) -> Path:
     """Return the machine-global discovery file path under the A2A home."""
     return a2a_home / _SERVICE_JSON_NAME
-
-
-def _coerce_int(value: object) -> int | None:
-    if isinstance(value, bool):
-        return None
-    if isinstance(value, int):
-        return value
-    if isinstance(value, float) and value.is_integer():
-        return int(value)
-    return None
 
 
 def _read_handoff_credential(discovery_path: Path, reference: object) -> str | None:
@@ -310,15 +301,15 @@ def _replace_private_credential(path: Path, payload: bytes) -> Path:
 
 def _service_info(info: dict, discovery_path: Path) -> ServiceInfo | None:
     """Build a :class:`ServiceInfo` from a parsed record, or ``None`` if invalid."""
-    port = _coerce_int(info.get("port"))
+    port = coerce_int(info.get("port"))
     if port is None:
         return None
     reference = info.get("handoff_reference")
     token = _read_handoff_credential(discovery_path, reference)
     return ServiceInfo(
         port=port,
-        pid=_coerce_int(info.get("pid")),
-        last_heartbeat=_coerce_int(info.get("last_heartbeat")),
+        pid=coerce_int(info.get("pid")),
+        last_heartbeat=coerce_int(info.get("last_heartbeat")),
         service_token=token,
         handoff_reference=reference if isinstance(reference, str) else None,
     )
@@ -608,11 +599,11 @@ def _parse_desktop_record(info: dict) -> DesktopDiscoveryRecord | None:
         return None
     if not isinstance(endpoint, dict):
         return None
-    protocol_min = _coerce_int(protocol.get("min"))
-    protocol_max = _coerce_int(protocol.get("max"))
-    pid = _coerce_int(process.get("pid"))
-    port = _coerce_int(endpoint.get("port"))
-    last_heartbeat = _coerce_int(info.get("last_heartbeat"))
+    protocol_min = coerce_int(protocol.get("min"))
+    protocol_max = coerce_int(protocol.get("max"))
+    pid = coerce_int(process.get("pid"))
+    port = coerce_int(endpoint.get("port"))
+    last_heartbeat = coerce_int(info.get("last_heartbeat"))
     if (
         protocol_min is None
         or protocol_max is None

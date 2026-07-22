@@ -26,6 +26,8 @@ import json
 from dataclasses import dataclass
 from typing import Any
 
+from ..utils.coercion import coerce_int
+
 __all__ = [
     "VERDICT_APPROVED",
     "VERDICT_REJECTED",
@@ -123,17 +125,6 @@ class StreamError:
 SseFrame = LifecycleEvent | GapSignal | StreamError
 
 
-def _as_int(value: Any) -> int | None:
-    """Coerce a JSON number to int, rejecting bools and non-numerics."""
-    if isinstance(value, bool):
-        return None
-    if isinstance(value, int):
-        return value
-    if isinstance(value, float) and value.is_integer():
-        return int(value)
-    return None
-
-
 def parse_sse_frame(event_type: str, data: str) -> SseFrame | None:
     """Decode one SSE frame into a typed :data:`SseFrame`, or ``None`` if unusable.
 
@@ -154,10 +145,10 @@ def parse_sse_frame(event_type: str, data: str) -> SseFrame | None:
     if event_type == "gap":
         return GapSignal(
             reason=str(payload.get("reason", "unknown")),
-            latest_outbox_seq=_as_int(payload.get("latest_outbox_seq")),
+            latest_outbox_seq=coerce_int(payload.get("latest_outbox_seq")),
             next_recovery_seq=(
-                _as_int(payload.get("next_recovery_seq"))
-                or _as_int(payload.get("next_seq"))
+                coerce_int(payload.get("next_recovery_seq"))
+                or coerce_int(payload.get("next_seq"))
             ),
             raw=payload,
         )
@@ -171,7 +162,7 @@ def parse_sse_frame(event_type: str, data: str) -> SseFrame | None:
 
 def _lifecycle_from_record(record: dict[str, Any]) -> LifecycleEvent | None:
     """Build a :class:`LifecycleEvent` from a lifecycle feed record dict."""
-    seq = _as_int(record.get("seq"))
+    seq = coerce_int(record.get("seq"))
     if seq is None:
         return None
     inner: dict[str, Any] = {}

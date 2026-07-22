@@ -264,8 +264,8 @@ Share only state-transition and backpressure behavior while retaining deliberate
 - [ ] `W04.P13.S129` - Route permission dispatch failure through the shared typed transition function; `src/vaultspec_a2a/control/permission_service.py`.
 - [ ] `W04.P13.S130` - Route subscriber delivery through the shared bounded fanout implementation; `src/vaultspec_a2a/streaming/subscribers.py`.
 - [ ] `W04.P13.S131` - Route WebSocket delivery through the shared bounded fanout implementation; `src/vaultspec_a2a/api/websocket.py`.
-- [ ] `W04.P13.S132` - Route authoring lifecycle integer coercion through the shared strict helper; `src/vaultspec_a2a/authoring/lifecycle.py`.
-- [ ] `W04.P13.S133` - Route lifecycle discovery integer coercion through the shared strict helper; `src/vaultspec_a2a/lifecycle/discovery.py`.
+- [x] `W04.P13.S132` - Route authoring lifecycle integer coercion through the shared strict helper; `src/vaultspec_a2a/authoring/lifecycle.py`.
+- [x] `W04.P13.S133` - Route lifecycle discovery integer coercion through the shared strict helper; `src/vaultspec_a2a/lifecycle/discovery.py`.
 
 ### Phase `W04.P14` - remove proven orphan surfaces
 

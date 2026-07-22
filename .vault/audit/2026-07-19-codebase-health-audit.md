@@ -628,6 +628,19 @@ Type: documentation terminology. Status: resolved by defining Vaultspec sync as
 an explicit Core mutation and reconciliation as the underlying state comparison
 that may be diagnostic or mutating.
 
+### authorization-guard-chain-still-long | low | Permission authorization stage remains a 330-line flat guard chain
+
+Type: maintainability. Status: deferred. Splitting the permission-response state
+machine into authorization, transition, and dispatch stages
+(`_authorize_permission_response`, `_record_permission_transition`,
+`_dispatch_permission_resume`) reduced the orchestrator to 62 lines, but the
+authorization stage is still a 330-line sequence of independent early-return
+guards (resolution, idempotency dedup, permission-status, terminal, active
+interrupt, option validation). Each guard is flat and independently testable
+through the real endpoint seam, so this is readability debt rather than a defect;
+a follow-on could lift each guard into a named predicate returning an optional
+rejection. No behaviour change is implied.
+
 ## Recommendations
 
 1. Draft and approve a hardening ADR before implementation. The ADR must decide:

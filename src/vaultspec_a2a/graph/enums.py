@@ -15,7 +15,6 @@ __all__ = [
     "REJECT_OPTION_IDS",
     "RESEARCH_ADR_NODE_PHASE",
     "AgentLifecycleState",
-    "AgentState",
     "Model",
     "PermissionOptionKind",
     "PermissionType",
@@ -37,20 +36,10 @@ class PipelinePhase(StrEnum):
     AUDIT = "audit"
 
 
-class AgentState(StrEnum):
-    """Lifecycle states for LangGraph agents/nodes."""
-
-    INIT = "init"
-    READY = "ready"
-    RUNNING = "running"
-    ERROR = "error"
-    DONE = "done"
-
-
 class AgentLifecycleState(StrEnum):
     """Observable agent states exposed to the frontend.
 
-    Maps to the MCP states. Distinct from ``AgentState`` which tracks
+    Maps to the MCP states. Tracks
     internal process lifecycle (init/ready/running/error/done).
     """
 

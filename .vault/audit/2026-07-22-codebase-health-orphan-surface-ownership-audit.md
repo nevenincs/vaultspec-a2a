@@ -59,7 +59,35 @@ fixtures encode the wrong expectation, the dashboard's own contract test passes 
 fabricated contract and is structurally unable to detect the mismatch. The console script
 name in those same fixtures is correct, which is why the discrepancy has stayed invisible.
 
+### agent-state-enum-is-unowned-and-never-reaches-the-wire | medium | the dashboard's agent state comes from a different enum entirely
+
+`AgentState` is declared in the graph enums module and named in that module's exports, but
+it is absent from the graph package facade, has no production consumer, and is referenced
+only by an export-only test. It never reaches the wire: the streaming transformer emits
+agent status using `AgentLifecycleState`, not this enum.
+
+The dashboard appears to match, and does not. Its `relayAgentState` is a function it
+declares itself for extracting a state string from a relay frame, and the values that
+function receives are the lifecycle-state values the transformer actually emits. Treating
+the name match as ownership would have preserved an enum that nothing on either side of the
+edge produces or consumes.
+
+### three-provider-and-team-exports-are-unowned | low | no consumer in either repository
+
+`AcpProtocolError` is declared, re-exported through the providers facade, and exercised only
+by its own test. `acceptance_gate_reason` is declared and exercised only by its own test.
+`discover_agent_preset_ids` is referenced by nothing at all beyond its declaration - not
+even a test. None appears anywhere in the dashboard repository.
+
+Severity is low rather than medium because each is a single leaf symbol whose removal
+touches one module and its export-only test, unlike the workspace surface where a live
+mutex is entangled with dead code around it.
+
 ## Recommendations
+
+Remove the unowned agent-state enum, protocol error, gate-reason helper, and preset-id
+discovery function together with their export-only tests; each is licensed by the evidence
+above and none has a consumer to break.
 
 Remove the unowned workspace surface in the Step that follows, keeping the Git mutex. The
 evidence supports removal in both repositories, and the mutex should move to a module whose

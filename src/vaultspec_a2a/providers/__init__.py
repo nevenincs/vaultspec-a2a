@@ -19,7 +19,6 @@ from .acp_exceptions import AcpAuthError as AcpAuthError
 from .acp_exceptions import AcpError as AcpError
 from .acp_exceptions import AcpErrorCode as AcpErrorCode
 from .acp_exceptions import AcpPromptError as AcpPromptError
-from .acp_exceptions import AcpProtocolError as AcpProtocolError
 from .acp_exceptions import AcpSessionError as AcpSessionError
 
 # Lazy imports to break circular dependency:
@@ -48,7 +47,6 @@ __all__ = [
     "AcpError",
     "AcpErrorCode",
     "AcpPromptError",
-    "AcpProtocolError",
     "AcpSessionError",
     "MockChatModel",
     "ProviderFactory",

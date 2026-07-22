@@ -67,7 +67,6 @@ __all__ = [
     "WorkerOverrideConfig",
     "WorkerRef",
     "authoring_capability",
-    "discover_agent_preset_ids",
     "discover_team_preset_ids",
     "is_mock_preset",
     "load_agent_config",
@@ -118,18 +117,6 @@ class TopologyType(StrEnum):
 _PRESET_ROOT = Path(str(resources.files("vaultspec_a2a.team"))) / "presets"
 _PRESET_AGENTS_DIR = _PRESET_ROOT / "agents"
 _PRESET_TEAMS_DIR = _PRESET_ROOT / "teams"
-
-
-def discover_agent_preset_ids() -> frozenset[str]:
-    """Discover available agent preset IDs by globbing the bundled TOML directory.
-
-    Returns a frozenset of TOML file stems from the installed
-    ``vaultspec_a2a.team/presets/agents`` package resource.
-    If the directory does not exist or is empty, returns an empty frozenset.
-    """
-    if _PRESET_AGENTS_DIR.is_dir():
-        return frozenset(p.stem for p in _PRESET_AGENTS_DIR.glob("*.toml"))
-    return frozenset()
 
 
 def discover_team_preset_ids(workspace_root: Path | None = None) -> frozenset[str]:

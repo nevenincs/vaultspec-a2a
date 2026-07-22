@@ -7,7 +7,6 @@ PROVIDER_DEFAULT_MODELS consistency.
 from ...graph.enums import (
     MODEL_MAP,
     PROVIDER_DEFAULT_MODELS,
-    AgentState,
     Model,
     Provider,
 )
@@ -20,25 +19,6 @@ from ..enums import (
 # ---------------------------------------------------------------------------
 # StrEnum checks
 # ---------------------------------------------------------------------------
-
-
-class TestAgentState:
-    """Tests for the AgentState lifecycle enum."""
-
-    def test_members(self) -> None:
-        """All five lifecycle states are present."""
-        assert set(AgentState) == {
-            AgentState.INIT,
-            AgentState.READY,
-            AgentState.RUNNING,
-            AgentState.ERROR,
-            AgentState.DONE,
-        }
-
-    def test_values_match_lowercase_names(self) -> None:
-        """Each member value is its lowercased name."""
-        for member in AgentState:
-            assert member.value == member.name.lower()
 
 
 class TestLogLevel:

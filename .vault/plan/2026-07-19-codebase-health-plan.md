@@ -273,13 +273,13 @@ Recheck both repositories for compatibility ownership and then remove each audit
 
 - [x] `W04.P14.S57` - Prove runtime and dashboard ownership or non-ownership for `GitManager`, `MergeStrategy`, `WorktreeInfo`, `WorkspaceError`, `MergeConflictError`, and the live `_git_mutex`; `src/vaultspec_a2a/workspace/git_manager.py, src/vaultspec_a2a/thread/errors.py, src/vaultspec_a2a/thread/__init__.py, ../../vaultspec-dashboard-worktrees/main, .vault/audit`.
 - [ ] `W04.P14.S174` - Move `_git_mutex` from `workspace/git_manager.py` to `workspace/concurrency.py`, route the ACP handler and Git manager through it, and prove real concurrent ACP writes and Git operations remain serialized; `src/vaultspec_a2a/workspace/concurrency.py, src/vaultspec_a2a/workspace/git_manager.py, src/vaultspec_a2a/providers/_acp_rpc_handlers.py, src/vaultspec_a2a/providers/tests/test_acp_authoring.py, src/vaultspec_a2a/workspace/tests/test_workspace.py`.
-- [ ] `W04.P14.S134` - Prove runtime and dashboard ownership or non-ownership for `AgentState`; `src/vaultspec_a2a/graph/enums.py, ../../vaultspec-dashboard-worktrees/main, .vault/audit`.
-- [ ] `W04.P14.S58` - Remove the unowned `AgentState` export and its export-only tests; `src/vaultspec_a2a/graph/enums.py, tests`.
-- [ ] `W04.P14.S135` - Prove runtime and dashboard ownership or non-ownership for `AcpProtocolError`; `src/vaultspec_a2a/providers/acp_exceptions.py, ../../vaultspec-dashboard-worktrees/main, .vault/audit`.
-- [ ] `W04.P14.S59` - Remove the unowned `AcpProtocolError` export and its export-only tests; `src/vaultspec_a2a/providers/acp_exceptions.py, tests`.
-- [ ] `W04.P14.S136` - Prove runtime and dashboard ownership or non-ownership for `discover_agent_preset_ids`; `src/vaultspec_a2a/team/team_config.py, ../../vaultspec-dashboard-worktrees/main, .vault/audit`.
-- [ ] `W04.P14.S60` - Remove the unowned `discover_agent_preset_ids` export and its export-only tests; `src/vaultspec_a2a/team/team_config.py, tests`.
-- [ ] `W04.P14.S137` - Prove runtime and dashboard ownership or non-ownership for `acceptance_gate_reason`; `src/vaultspec_a2a/providers/model_profiles.py, ../../vaultspec-dashboard-worktrees/main, .vault/audit`.
+- [x] `W04.P14.S134` - Prove runtime and dashboard ownership or non-ownership for `AgentState`; `src/vaultspec_a2a/graph/enums.py, ../../vaultspec-dashboard-worktrees/main, .vault/audit`.
+- [x] `W04.P14.S58` - Remove the unowned `AgentState` export and its export-only tests; `src/vaultspec_a2a/graph/enums.py, tests`.
+- [x] `W04.P14.S135` - Prove runtime and dashboard ownership or non-ownership for `AcpProtocolError`; `src/vaultspec_a2a/providers/acp_exceptions.py, ../../vaultspec-dashboard-worktrees/main, .vault/audit`.
+- [x] `W04.P14.S59` - Remove the unowned `AcpProtocolError` export and its export-only tests; `src/vaultspec_a2a/providers/acp_exceptions.py, tests`.
+- [x] `W04.P14.S136` - Prove runtime and dashboard ownership or non-ownership for `discover_agent_preset_ids`; `src/vaultspec_a2a/team/team_config.py, ../../vaultspec-dashboard-worktrees/main, .vault/audit`.
+- [x] `W04.P14.S60` - Remove the unowned `discover_agent_preset_ids` export and its export-only tests; `src/vaultspec_a2a/team/team_config.py, tests`.
+- [x] `W04.P14.S137` - Prove runtime and dashboard ownership or non-ownership for `acceptance_gate_reason`; `src/vaultspec_a2a/providers/model_profiles.py, ../../vaultspec-dashboard-worktrees/main, .vault/audit`.
 - [ ] `W04.P14.S61` - Remove the unowned `acceptance_gate_reason` export and its export-only tests; `src/vaultspec_a2a/providers/model_profiles.py, tests`.
 - [ ] `W04.P14.S138` - Prove runtime and dashboard ownership or non-ownership for `projected_declared_names`; `src/vaultspec_a2a/providers/_acp_project_mcp.py, ../../vaultspec-dashboard-worktrees/main, .vault/audit`.
 - [ ] `W04.P14.S62` - Remove the unowned `projected_declared_names` export and its export-only tests; `src/vaultspec_a2a/providers/_acp_project_mcp.py, tests`.

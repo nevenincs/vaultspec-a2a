@@ -10,7 +10,6 @@ __all__ = [
     "AcpError",
     "AcpErrorCode",
     "AcpPromptError",
-    "AcpProtocolError",
     "AcpSessionError",
 ]
 
@@ -66,9 +65,6 @@ class AcpError(Exception):
             msg += f" | Data: {self.data}"
         return msg
 
-
-class AcpProtocolError(AcpError):
-    """Raised when the agent sends malformed protocol data."""
 
     __slots__ = ()
 

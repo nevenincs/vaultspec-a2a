@@ -8,7 +8,14 @@ modified: '2026-07-22'
 related:
   - '[[2026-07-19-codebase-health-W01-P01-S01]]'
   - '[[2026-07-19-codebase-health-W01-P01-S03]]'
+  - '[[2026-07-19-codebase-health-W04-P14-S134]]'
+  - '[[2026-07-19-codebase-health-W04-P14-S135]]'
+  - '[[2026-07-19-codebase-health-W04-P14-S136]]'
+  - '[[2026-07-19-codebase-health-W04-P14-S137]]'
   - '[[2026-07-19-codebase-health-W04-P14-S57]]'
+  - '[[2026-07-19-codebase-health-W04-P14-S58]]'
+  - '[[2026-07-19-codebase-health-W04-P14-S59]]'
+  - '[[2026-07-19-codebase-health-W04-P14-S60]]'
   - '[[2026-07-19-codebase-health-W04-P16-S73]]'
   - '[[2026-07-19-codebase-health-adr]]'
   - '[[2026-07-19-codebase-health-audit]]'
@@ -38,7 +45,14 @@ Auto-generated index of all documents tagged with `#codebase-health`.
 
 - `2026-07-19-codebase-health-W01-P01-S01` - Curate the service-lifecycle supersession chain so the product lifecycle and tooling decisions have non-conflicting authority
 - `2026-07-19-codebase-health-W01-P01-S03` - Certify the process-registry prerequisite represented by repository-tooling plan step S07 before changing lifecycle registry consumers
+- `2026-07-19-codebase-health-W04-P14-S134` - Prove runtime and dashboard ownership or non-ownership for AgentState
+- `2026-07-19-codebase-health-W04-P14-S135` - Prove runtime and dashboard ownership or non-ownership for AcpProtocolError
+- `2026-07-19-codebase-health-W04-P14-S136` - Prove runtime and dashboard ownership or non-ownership for discover_agent_preset_ids
+- `2026-07-19-codebase-health-W04-P14-S137` - Prove runtime and dashboard ownership or non-ownership for acceptance_gate_reason
 - `2026-07-19-codebase-health-W04-P14-S57` - Prove runtime and dashboard ownership or non-ownership for the workspace exports
+- `2026-07-19-codebase-health-W04-P14-S58` - Remove the unowned AgentState export and its export-only tests
+- `2026-07-19-codebase-health-W04-P14-S59` - Remove the unowned AcpProtocolError export and its export-only tests
+- `2026-07-19-codebase-health-W04-P14-S60` - Remove the unowned discover_agent_preset_ids export and its export-only tests
 - `2026-07-19-codebase-health-W04-P16-S73` - Rewrite service deployment documentation and environment examples to describe the headless runtime
 
 ### plan

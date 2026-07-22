@@ -11,7 +11,6 @@ from ..acp_exceptions import (
     AcpError,
     AcpErrorCode,
     AcpPromptError,
-    AcpProtocolError,
     AcpSessionError,
 )
 
@@ -126,8 +125,8 @@ class TestAcpSubclasses:
 
     @pytest.mark.parametrize(
         "exc_cls",
-        [AcpProtocolError, AcpSessionError, AcpPromptError, AcpAuthError],
-        ids=["Protocol", "Session", "Prompt", "Auth"],
+        [AcpSessionError, AcpPromptError, AcpAuthError],
+        ids=["Session", "Prompt", "Auth"],
     )
     def test_is_subclass_of_acp_error(self, exc_cls: type[AcpError]) -> None:
         """Each subclass is an AcpError."""
@@ -135,8 +134,8 @@ class TestAcpSubclasses:
 
     @pytest.mark.parametrize(
         "exc_cls",
-        [AcpProtocolError, AcpSessionError, AcpPromptError, AcpAuthError],
-        ids=["Protocol", "Session", "Prompt", "Auth"],
+        [AcpSessionError, AcpPromptError, AcpAuthError],
+        ids=["Session", "Prompt", "Auth"],
     )
     def test_subclass_caught_as_acp_error(self, exc_cls: type[AcpError]) -> None:
         """Subclass instances are catchable as AcpError."""
@@ -145,8 +144,8 @@ class TestAcpSubclasses:
 
     @pytest.mark.parametrize(
         "exc_cls",
-        [AcpProtocolError, AcpSessionError, AcpPromptError, AcpAuthError],
-        ids=["Protocol", "Session", "Prompt", "Auth"],
+        [AcpSessionError, AcpPromptError, AcpAuthError],
+        ids=["Session", "Prompt", "Auth"],
     )
     def test_subclass_inherits_formatting(self, exc_cls: type[AcpError]) -> None:
         """Subclasses inherit _format_message from AcpError."""
@@ -157,12 +156,12 @@ class TestAcpSubclasses:
         assert "(r1)" in text
 
     def test_siblings_not_cross_catchable(self) -> None:
-        """AcpProtocolError is not caught by AcpSessionError."""
-        with pytest.raises(AcpProtocolError):
+        """AcpPromptError is not caught by AcpSessionError."""
+        with pytest.raises(AcpPromptError):
             try:
-                raise AcpProtocolError("proto fail")
+                raise AcpPromptError("prompt fail")
             except AcpSessionError:
-                pytest.fail("AcpSessionError should not catch AcpProtocolError")
+                pytest.fail("AcpSessionError should not catch AcpPromptError")
 
     def test_subclass_attributes_preserved(self) -> None:
         """Subclass instances preserve all AcpError attributes."""

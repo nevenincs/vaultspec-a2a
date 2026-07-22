@@ -951,3 +951,17 @@ def test_serve_up_reaps_the_owned_tree_when_commit_fails_after_readiness(
     finally:
         if spawned_pid is not None and is_pid_alive(spawned_pid):
             tree_kill(spawned_pid)
+
+
+def test_confirm_terminated_detects_a_live_and_a_dead_pid() -> None:
+    """The termination gate returns True only once the pid is actually gone."""
+    from ..manager import _confirm_terminated
+
+    child = _sleeper()
+    try:
+        # A live pid is not confirmed terminated within a short window.
+        assert _confirm_terminated(child.pid, timeout=0.3) is False
+    finally:
+        tree_kill(child.pid)
+    # Once felled, it confirms terminated.
+    assert _confirm_terminated(child.pid, timeout=10.0) is True

@@ -118,6 +118,22 @@ def _is_pid_alive(pid: int) -> bool:
     return is_pid_alive(pid)
 
 
+def _confirm_terminated(pid: int, *, timeout: float = 10.0) -> bool:
+    """Poll until *pid* is no longer a live process; ``False`` if it survives.
+
+    A bounded confirmation that a felled generation actually terminated, so a
+    replacement is never spawned while the old process is still alive on the same
+    port. Returns ``False`` when the pid is still alive at the deadline (a kill
+    that did not take), so the caller can refuse rather than overlap generations.
+    """
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if not _is_pid_alive(pid):
+            return True
+        time.sleep(0.05)
+    return not _is_pid_alive(pid)
+
+
 def tree_kill(pid: int, *, timeout: float = 10.0) -> bool:
     """Kill *pid* and its whole process tree, returning ``True`` once it is dead.
 
@@ -452,6 +468,16 @@ def resume(
             f"{record.role}-{record.name} pid {record.pid} is still alive; "
             "nothing to resume (use rerun to cycle it)"
         )
+    # The main is confirmed dead above; fell any orphan tree it left and confirm
+    # termination before spawning, so the replacement generation cannot overlap a
+    # surviving old-tree member on the same port.
+    tree_kill(record.pid)
+    if not _confirm_terminated(record.pid):
+        raise LifecycleError(
+            f"resume could not confirm {record.role}-{record.name} pid "
+            f"{record.pid} terminated; refusing to spawn an overlapping "
+            "replacement (record left unchanged)"
+        )
     return _start_from_record(record, home=home, config=config)
 
 
@@ -471,6 +497,15 @@ def rerun(
     # and resume both guard before acting, and rerun must match that ordering.
     _ensure_explicit_repo(role, record.repo, f"{record.role}-{record.name}")
     tree_kill(record.pid)
+    if not _confirm_terminated(record.pid):
+        # The old tree did not confirm dead: refuse to spawn a replacement that
+        # could overlap the surviving old generation on the same port. The record
+        # is left unchanged - no new generation is published.
+        raise LifecycleError(
+            f"rerun could not confirm {record.role}-{record.name} pid "
+            f"{record.pid} terminated; refusing to spawn an overlapping "
+            "replacement (record left unchanged)"
+        )
     if role.build:
         cwd = _build_cwd_for(record)
         result = subprocess.run(role.build, cwd=str(cwd), check=False)

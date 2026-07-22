@@ -23,7 +23,13 @@ if TYPE_CHECKING:
 
     from .procs_config import ProcsConfig
 
-__all__ = ["DispatchPairingStatus", "verify_dispatch_pairing"]
+__all__ = [
+    "DispatchPairingStatus",
+    "WorkerPairingVerdict",
+    "classify_worker_pairing",
+    "eviction_is_authorized",
+    "verify_dispatch_pairing",
+]
 
 _GATEWAY_ROLE = "gateway-dev"
 _WORKER_ROLE = "worker-dev"
@@ -107,3 +113,82 @@ def verify_dispatch_pairing(
         "dispatching to a non-band worker; ensure this is intentional."
     )
     return DispatchPairingStatus.UNPAIRED, message
+
+
+class WorkerPairingVerdict(StrEnum):
+    """What a worker's reported identity licenses this gateway to do."""
+
+    OWNED = "owned"
+    """This gateway's current generation: adopt and dispatch."""
+
+    PRIOR_GENERATION = "prior_generation"
+    """This gateway spawned it, but an earlier attempt did: evictable by the owner."""
+
+    FOREIGN = "foreign"
+    """Another gateway incarnation spawned it: never adopt, never evict."""
+
+    UNIDENTIFIED = "unidentified"
+    """No usable pairing evidence: never adopt, never evict."""
+
+
+def classify_worker_pairing(
+    *,
+    reported_lifetime: str | None,
+    reported_generation: str | None,
+    gateway_lifetime: str,
+    current_generation: int,
+) -> WorkerPairingVerdict:
+    """Classify a worker's claimed pairing against this gateway's identity.
+
+    Fails closed on every ambiguity. Blank evidence is ``UNIDENTIFIED`` rather
+    than assumed-ours, because a worker that reports nothing is exactly what a
+    process this gateway never started looks like - Compose, an operator, a test,
+    or another gateway's orphan. Treating silence as ownership is how dispatch
+    reached a foreign worker.
+
+    A generation that does not parse, or that claims to be newer than any this
+    gateway has issued, is also ``UNIDENTIFIED``: a worker cannot legitimately
+    hold a generation its gateway never minted, so the claim is evidence the
+    record is wrong rather than evidence of a newer worker.
+
+    Args:
+        reported_lifetime: The gateway lifetime the worker says spawned it.
+        reported_generation: The spawn generation the worker says it belongs to.
+        gateway_lifetime: This gateway process's own lifetime identity.
+        current_generation: The highest generation this gateway has issued.
+
+    Returns:
+        The verdict governing adoption and eviction.
+    """
+    if not reported_lifetime or not reported_lifetime.strip():
+        return WorkerPairingVerdict.UNIDENTIFIED
+    if reported_lifetime.strip() != gateway_lifetime:
+        return WorkerPairingVerdict.FOREIGN
+    if reported_generation is None or not reported_generation.strip():
+        return WorkerPairingVerdict.UNIDENTIFIED
+    try:
+        generation = int(reported_generation.strip())
+    except ValueError:
+        return WorkerPairingVerdict.UNIDENTIFIED
+    if generation <= 0 or generation > current_generation:
+        return WorkerPairingVerdict.UNIDENTIFIED
+    if generation < current_generation:
+        return WorkerPairingVerdict.PRIOR_GENERATION
+    return WorkerPairingVerdict.OWNED
+
+
+def eviction_is_authorized(
+    verdict: WorkerPairingVerdict, *, desktop_profile_armed: bool
+) -> bool:
+    """Return whether this gateway may terminate the worker it just classified.
+
+    Eviction is a hard kill of another process, so it is permitted in exactly one
+    case: an armed desktop gateway reclaiming a worker it demonstrably spawned
+    under an earlier generation. Every other verdict refuses.
+
+    A foreign worker is never evicted even though it is in the way, because the
+    gateway that owns it may be serving live runs. An unidentified worker is
+    never evicted because absence of evidence is not evidence of ownership. An
+    owned current-generation worker is not evicted because it is the one in use.
+    """
+    return desktop_profile_armed and verdict is WorkerPairingVerdict.PRIOR_GENERATION

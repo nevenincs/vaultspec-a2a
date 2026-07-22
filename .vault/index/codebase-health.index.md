@@ -9,6 +9,7 @@ related:
   - '[[2026-07-19-codebase-health-W01-P01-S01]]'
   - '[[2026-07-19-codebase-health-W01-P01-S03]]'
   - '[[2026-07-19-codebase-health-W01-P01-S93]]'
+  - '[[2026-07-19-codebase-health-W01-P01-S94]]'
   - '[[2026-07-19-codebase-health-W02-P06-S26]]'
   - '[[2026-07-19-codebase-health-W04-P12-S46]]'
   - '[[2026-07-19-codebase-health-W04-P13-S127]]'
@@ -64,6 +65,7 @@ Auto-generated index of all documents tagged with `#codebase-health`.
 - `2026-07-19-codebase-health-W01-P01-S01` - Curate the service-lifecycle supersession chain so the product lifecycle and tooling decisions have non-conflicting authority
 - `2026-07-19-codebase-health-W01-P01-S03` - Certify the process-registry prerequisite represented by repository-tooling plan step S07 before changing lifecycle registry consumers
 - `2026-07-19-codebase-health-W01-P01-S93` - Implement gateway lifetime identity worker generation identity and explicit paired-gateway identity in authenticated readiness
+- `2026-07-19-codebase-health-W01-P01-S94` - Fail closed on blank stale mismatched or unauthenticated pairing evidence and permit eviction only for the owner-authorized desktop prior generation
 - `2026-07-19-codebase-health-W02-P06-S26` - Parse numeric and ISO heartbeat values strictly and reject stale malformed non-finite and implausibly future values
 - `2026-07-19-codebase-health-W04-P12-S46` - Certify repository-tooling step S09 removed the audited prohibited doubles skips mutations suppressions and dependency-gate drift
 - `2026-07-19-codebase-health-W04-P13-S127` - Route message dispatch failure through the shared typed transition function

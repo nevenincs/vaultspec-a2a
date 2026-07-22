@@ -687,6 +687,41 @@ deletion-saga migration in coordination with (or after) the desktop capsule
 session so both agree on head `0010` and the capsule is rebuilt against it. This is
 a real ordering constraint, not a code defect.
 
+### wave-w03-review | info | Formal safety/security/resource-bound/quality review of Wave W03
+
+Type: verification (S44). Status: resolved. Wave `W03` (provider MCP-config
+validation `P09` and provider resource-failure containment `P10`) was reviewed
+against its real-subprocess evidence. The teardown work is sound: a single shared
+`run_independent_cleanups` runs each named release regardless of an earlier
+failure, aggregates failures, and never swallows `BaseException`/cancellation, so
+a killed-process failure can no longer strand a credential home; both the Codex
+(`aclose` + `_astream` finally) and ACP (`_astream` finally + `_cleanup_session`)
+paths route through it, preserving prior ordering (session-cancel before kill).
+The four containment proofs are genuine and non-tautological, exercised against
+real subprocesses rather than a full LLM session: stderr backpressure relief
+(`S43`, ~960 KB flood), cleanup continuation after a failure (`S124`), request
+deadline expiry (`S123`), and a failing handler answering `-32603` over a real
+session pipe (`S122`, agent exits 42 to confirm). The MCP-config proofs drive the
+real `codex mcp list` (`S114`) and `claude mcp list` (`S115`) entrypoints.
+
+Findings appended to the queue by `S45`:
+
+- `cleanup-runner-imposes-no-per-step-deadline` | low. `run_independent_cleanups`
+  awaits each step with no per-step timeout, so teardown boundedness relies on
+  each wired step being self-bounded. Every current step is (process-tree kill via
+  taskkill/sigterm-sigkill, session-cancel's own 3 s `wait_for`, task-cancel's
+  `CLEANUP_TIMEOUT_SECONDS`, local `rmtree`), but a future unbounded step would
+  hang teardown silently. Consider an optional per-step deadline in the runner.
+- `mcp-config-live-proofs-are-environment-gated` | low. `S114`/`S115` skip when the
+  `codex`/`claude` binaries are absent (an honest prerequisite gate, not a green
+  shortcut), so the live config validation does not run in an environment without
+  them; the certification job must guarantee both binaries are present, or that
+  coverage is environment-dependent.
+- `cleanup-step-failures-are-logged-unredacted` | info. Cleanup-step exceptions are
+  logged with `exc_info` without the stderr path's credential redaction. Low risk
+  (cleanup errors carry filesystem paths, not secrets), recorded for symmetry with
+  the redacted diagnostic tail.
+
 ## Recommendations
 
 1. Draft and approve a hardening ADR before implementation. The ADR must decide:

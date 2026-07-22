@@ -10,11 +10,10 @@ expected failure is used.
 Install strategy
 ----------------
 Same wheel-install approach as ``test_artifact_install.py`` (see that module's
-docstring for rationale).  The transport capsule's ``verify_desktop_capsule.py``
-asset-digest checks apply to the full CPython+Node ZIP format produced by S13;
-those checks are proved in ``test_capsule_verify.py``.  For the installed-wheel
-layout used here, the analogous integrity authority is the wheel RECORD file,
-and that is what tamper-detection proves.
+docstring for rationale).  The capsule generation's ``verify_desktop_capsule.py``
+integrity checks are proved in ``test_verify_desktop_capsule.py``.  For the
+installed-wheel layout used here, the analogous integrity authority is the wheel
+RECORD file, and that is what tamper-detection proves.
 
 All tests are marked ``service`` because they run ``uv build`` and provision a
 clean environment.

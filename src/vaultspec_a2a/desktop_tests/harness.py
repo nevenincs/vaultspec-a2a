@@ -8,9 +8,9 @@ and Node.js (~20 MB) archives and is the province of the CI target-build legs
 wheel and its locked base Python closure — the same package inputs the dashboard
 activates after unpacking a transport capsule — which is the correct installed-
 capsule boundary for the S73-S75 lifecycle gates.  Every consuming test file
-documents this choice explicitly; the transport-capsule format and
-``verify_desktop_capsule.py`` asset-digest checks remain the province of
-``test_capsule_build.py`` and ``test_capsule_verify.py``.
+documents this choice explicitly; the transport-capsule generation format and
+its source-free verification remain the province of
+``test_build_desktop_capsule.py`` and ``test_verify_desktop_capsule.py``.
 
 Relocation model
 ----------------

@@ -767,6 +767,35 @@ is None``, ``compute_reconciliation_actions(...).new_thread_status is None``,
 ``resolve_venv(...) is None``), where ``None`` is the behaviour under test - not a
 compile-only proxy. No further tautological or shadow-logic test was identified.
 
+### s101-fake-doubles-adjudication-input | medium | The four named doubles are recording-doubles-at-real-seams; ruling needed
+
+Type: adjudication input (S101 owner decision). Status: OPEN - requires an owner
+ruling, prepared here so the decision is a yes/no rather than an investigation.
+The four flagged doubles all inject a deterministic or recording collaborator at a
+REAL dependency-injection seam while the unit under test runs for real:
+
+- ``_StubProviderFactory`` (``graph/tests/conftest.py``) implements the real
+  ``ProviderFactoryProtocol.create`` seam and returns LangChain's own
+  ``FakeChatModel`` (a real deterministic model with preset responses). The graph
+  compilation and execution paths are exercised for real; only the leaf LLM -
+  which needs a live provider and credentials - is deterministic.
+- ``FakeChatModel`` is LangChain's shipped deterministic chat model, not a
+  hand-rolled shadow of business logic.
+- ``_FakeSubmitter`` (``graph/tests/test_research_adr.py``) and
+  ``_StubProposalSubmitter`` (``service_tests/test_receipt_role_rules.py``) record
+  the phases / proposals the real node hands the submit seam, so the graph's
+  routing and the receipt rules are asserted against real behaviour; the real
+  submitter target is a live engine, out of scope and credential-gated for a unit.
+
+Per this project's own ``reference_graph_boundary_test_pattern`` (recording model
+via the provider_factory seam is the sanctioned pattern), none of these shadow or
+reimplement business logic; they are injected collaborators at a real seam.
+Recommendation: affirm them as sanctioned recording-doubles-at-real-seams, in which
+case ``S101`` has no prohibited fake to replace and closes on that ruling. The
+alternative - replacing them with live LLM / engine calls - would require
+credentials and turn deterministic unit tests into flaky live tests, contradicting
+the unit-test intent. This audit records the analysis; it does not make the ruling.
+
 ## Recommendations
 
 1. Draft and approve a hardening ADR before implementation. The ADR must decide:

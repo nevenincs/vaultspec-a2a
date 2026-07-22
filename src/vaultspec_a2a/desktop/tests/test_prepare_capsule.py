@@ -43,9 +43,12 @@ def test_source_inputs_derive_the_pinned_release_facts(target: TargetTriple) -> 
     assert inputs.python.build == "20250702"
     assert inputs.python.archive_kind is ArchiveKind.TAR_GZIP
     assert inputs.python.archive_root == "python"
+    # CPython ships its license under lib/python3.13, not at python/LICENSE.
+    assert inputs.python.license_members == ("python/lib/python3.13/LICENSE.txt",)
 
     assert inputs.node.release == "22.17.0"
     assert inputs.node.archive_root == _NODE_STEM[target]
+    assert inputs.node.license_members == (f"{_NODE_STEM[target]}/LICENSE",)
     expected_kind = (
         ArchiveKind.ZIP
         if target is TargetTriple.WINDOWS_X86_64

@@ -57,6 +57,9 @@ _NODE_URL_RE: Final = re.compile(
 )
 _ACP_ARCHIVE_ROOT: Final = "package"
 _PYTHON_ARCHIVE_ROOT: Final = "python"
+# python-build-standalone install_only archives ship CPython's own license at
+# lib/python<minor>/LICENSE.txt under the python root, not at python/LICENSE.
+_PYTHON_LICENSE_MEMBER: Final = f"python/lib/python{CPYTHON_VERSION_PIN}/LICENSE.txt"
 
 
 @dataclass(frozen=True, slots=True)
@@ -133,8 +136,8 @@ def _python_facts(section: dict[str, object]) -> RuntimeSourceFacts:
         archive_kind=ArchiveKind.TAR_GZIP,
         archive_root=_PYTHON_ARCHIVE_ROOT,
         license_expression=license_expression,
-        license_members=(f"{_PYTHON_ARCHIVE_ROOT}/LICENSE",),
-        redistribution_evidence=(f"archive-license:{_PYTHON_ARCHIVE_ROOT}/LICENSE",),
+        license_members=(_PYTHON_LICENSE_MEMBER,),
+        redistribution_evidence=(f"archive-license:{_PYTHON_LICENSE_MEMBER}",),
     )
 
 

@@ -965,6 +965,52 @@ async def test_run_start_conflicts_on_profile_change_retry(
 
 
 @pytest.mark.asyncio(loop_scope="function")
+async def test_run_start_conflicts_on_changed_request_body_retry(
+    session_factory, checkpointer
+) -> None:
+    """A retry with the same run id but a different prompt is a 409, not a replay.
+
+    Profile parity covers one field; this proves the whole-request fingerprint
+    check (the digest branch) catches a changed behaviour-affecting field on an
+    otherwise-matching retry, so a second intention is never silently discarded
+    as an idempotent replay of the first. The profile is held equal to the frozen
+    default so the digest branch - not the profile branch - is the one exercised.
+    """
+    app, _agg, worker, _cp = make_app(session_factory, checkpointer)
+    async with (
+        _live_server(app) as base,
+        httpx.AsyncClient(base_url=base, timeout=10.0) as client,
+    ):
+        payload = {
+            "team_preset": _PRESET,
+            "message": "go",
+            "run_id": "rid-body-conflict",
+            "profile_id": "team-defaults",
+        }
+        first = await client.post("/v1/runs", json=payload)
+        assert first.status_code == 201, first.text
+
+        # Same run id, same profile, DIFFERENT prompt -> fingerprint conflict.
+        conflict = await client.post(
+            "/v1/runs", json={**payload, "message": "a different intention"}
+        )
+        assert conflict.status_code == 409, conflict.text
+        assert "different request body" in conflict.json()["detail"]
+
+        # The conflicting retry never produced a second dispatch.
+        rid_dispatches = [
+            d for d in worker.dispatches if d.get("thread_id") == "rid-body-conflict"
+        ]
+        assert len(rid_dispatches) == 1
+
+        # An identical replay (the original body) still returns the original run,
+        # proving the 409 was the changed body - not a blanket rejection.
+        replay = await client.post("/v1/runs", json=payload)
+        assert replay.status_code == 201, replay.text
+        assert replay.json()["run_id"] == "rid-body-conflict"
+
+
+@pytest.mark.asyncio(loop_scope="function")
 async def test_run_start_idempotency_is_race_safe(
     session_factory, checkpointer
 ) -> None:

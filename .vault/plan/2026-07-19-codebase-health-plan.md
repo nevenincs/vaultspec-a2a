@@ -243,8 +243,8 @@ Consume the tooling debt work, repair the concrete stale and non-hermetic cases,
 - [x] `W04.P12.S50` - Replace sequential per-thread checkpoint reads with bounded bulk reads limited concurrency and one request deadline; `src/vaultspec_a2a/control/thread_service.py, src/vaultspec_a2a/control/repositories`.
 - [x] `W04.P12.S51` - Prove thread-list ordering partial-state policy concurrency bounds and request deadline against real stores; `tests/control, tests/api`.
 - [ ] `W04.P12.S101` - Replace prohibited fake mock and stub based tests with direct production imports and real behavior; `tests, src/vaultspec_a2a`.
-- [ ] `W04.P12.S102` - Replace prohibited skip and expected-failure shortcuts with executable environment gates or real fixtures; `tests, src/vaultspec_a2a`.
-- [ ] `W04.P12.S103` - Remove prohibited monkeypatch and runtime code-mutation tests in favor of owned configuration and process boundaries; `tests, src/vaultspec_a2a`.
+- [x] `W04.P12.S102` - Replace prohibited skip and expected-failure shortcuts with executable environment gates or real fixtures; `tests, src/vaultspec_a2a`.
+- [x] `W04.P12.S103` - Remove prohibited monkeypatch and runtime code-mutation tests in favor of owned configuration and process boundaries; `tests, src/vaultspec_a2a`.
 - [ ] `W04.P12.S104` - Replace tautological and shadow-logic tests with assertions against imported production behavior; `tests, src/vaultspec_a2a`.
 - [x] `W04.P12.S105` - Remove audited type suppressions by correcting production and test contracts; `src/vaultspec_a2a, tests`.
 - [x] `W04.P12.S125` - Update the thread-error expectation from the governing production contract; `src/vaultspec_a2a/thread/tests/test_errors.py`.

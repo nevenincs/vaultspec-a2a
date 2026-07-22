@@ -722,6 +722,23 @@ Findings appended to the queue by `S45`:
   (cleanup errors carry filesystem paths, not secrets), recorded for symmetry with
   the redacted diagnostic tail.
 
+### skip-monkeypatch-xfail-sweep | info | Codebase-wide sweep confirms no prohibited skip/xfail/monkeypatch shortcuts
+
+Type: verification (S102/S103). Status: resolved. A whole-tree sweep of every
+`test_*.py` and `conftest.py` under `src/vaultspec_a2a` found: zero
+`@pytest.mark.skip` (unconditional) markers, zero `@pytest.mark.xfail` /
+`pytest.xfail(`, and zero real `monkeypatch` usage (the only textual hits are
+docstrings declaring "no monkeypatch"). The 20 runtime `pytest.skip(...)` calls are
+all conditional environment gates - `if shutil.which("claude") is None`, `if
+resolve_engine() is None`, `except (OSError, NotImplementedError)` on symlink
+creation, a reclaimed-port guard - which is the executable-environment-gate pattern
+`S102` endorses, not a green shortcut. Test environment access uses owned APIs
+(e.g. the discovery override reads the official `SERVICE_JSON_ENV` directly), not
+interpreter mutation. `S101` (prohibited fakes/stubs) is NOT covered by this sweep:
+`_StubProviderFactory`, `_FakeSubmitter`, `_StubProposalSubmitter`, and
+`FakeChatModel` remain and need an owner ruling on recording-double-at-a-real-seam
+vs. prohibited fake before that step closes.
+
 ## Recommendations
 
 1. Draft and approve a hardening ADR before implementation. The ADR must decide:

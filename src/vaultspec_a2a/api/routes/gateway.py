@@ -52,9 +52,10 @@ from ...control.thread_service import (
 )
 from ...control.thread_state_service import (
     build_thread_state,
+    derive_run_authoring_ids,
+    derive_run_semantic_context,
     project_semantic_phase,
-    read_run_authoring_ids,
-    read_run_semantic_context,
+    read_run_snapshot,
 )
 from ...database import get_thread
 from ...database.checkpoints import Checkpointer
@@ -1118,8 +1119,13 @@ async def run_status_endpoint(
 
     thread = await get_thread(db, run_id)
     team_preset = thread.team_preset if thread is not None else None
-    proposal_ids, changeset_ids = await read_run_authoring_ids(checkpointer, run_id)
-    semantic = await read_run_semantic_context(checkpointer, run_id)
+    # One checkpoint read for the whole response. Reading per field let the run
+    # advance between reads, so a single run-status could carry a status from one
+    # moment and a position from another - internally inconsistent, and worse
+    # than a stale but coherent answer.
+    checkpoint_snapshot = await read_run_snapshot(checkpointer, run_id)
+    proposal_ids, changeset_ids = derive_run_authoring_ids(checkpoint_snapshot)
+    semantic = derive_run_semantic_context(checkpoint_snapshot)
     semantic_phase = project_semantic_phase(
         status=snapshot.status,
         next_nodes=snapshot.next_nodes,

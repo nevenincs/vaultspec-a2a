@@ -122,6 +122,56 @@ def _string_list(value: object) -> list[str]:
     return [item for item in value if isinstance(item, str) and item]
 
 
+def _channel_values(checkpoint_tuple: object) -> dict[str, object]:
+    """Return the channel values of a checkpoint tuple, or an empty mapping."""
+    checkpoint = getattr(checkpoint_tuple, "checkpoint", None)
+    values = (
+        checkpoint.get("channel_values", {}) if isinstance(checkpoint, dict) else {}
+    )
+    return values if isinstance(values, dict) else {}
+
+
+async def read_run_snapshot(
+    checkpointer: Checkpointer,
+    thread_id: str,
+    *,
+    timeout: float = 2.0,
+) -> object | None:
+    """Read a run's checkpoint tuple once, or ``None`` when it is unreadable.
+
+    Every run-status field derives from one snapshot. Reading the checkpoint
+    per field let a run advance between reads, so a single response could carry
+    a status from one moment and a position from another - internally
+    inconsistent, and worse than a stale but coherent answer.
+
+    Non-raising, matching the derivations it feeds: a missing, timed-out, or
+    unreadable checkpoint yields ``None`` and each field degrades to its own
+    empty value.
+    """
+    config: RunnableConfig = {"configurable": {"thread_id": thread_id}}
+    try:
+        return await asyncio.wait_for(checkpointer.aget_tuple(config), timeout=timeout)
+    except TimeoutError:
+        logger.warning("Checkpoint read timed out: %s", thread_id)
+        return None
+    except Exception:
+        logger.warning("Checkpoint read failed: %s", thread_id, exc_info=True)
+        return None
+
+
+def derive_run_authoring_ids(
+    checkpoint_tuple: object | None,
+) -> tuple[list[str], list[str]]:
+    """Derive ``(proposal_ids, changeset_ids)`` from an already-read snapshot."""
+    if checkpoint_tuple is None:
+        return [], []
+    values = _channel_values(checkpoint_tuple)
+    return (
+        _string_list(values.get(_PROPOSAL_ID_FIELD)),
+        _string_list(values.get(_CHANGESET_ID_FIELD)),
+    )
+
+
 async def read_run_authoring_ids(
     checkpointer: Checkpointer,
     thread_id: str,
@@ -147,16 +197,7 @@ async def read_run_authoring_ids(
             "Checkpoint read for authoring ids failed: %s", thread_id, exc_info=True
         )
         return [], []
-    if checkpoint_tuple is None:
-        return [], []
-    checkpoint = getattr(checkpoint_tuple, "checkpoint", None)
-    values = (
-        checkpoint.get("channel_values", {}) if isinstance(checkpoint, dict) else {}
-    )
-    return (
-        _string_list(values.get(_PROPOSAL_ID_FIELD)),
-        _string_list(values.get(_CHANGESET_ID_FIELD)),
-    )
+    return derive_run_authoring_ids(checkpoint_tuple)
 
 
 @dataclass(frozen=True, slots=True)
@@ -170,6 +211,17 @@ class SemanticContext:
 def _optional_str(value: object) -> str | None:
     """Return *value* when it is a non-empty string, else None."""
     return value if isinstance(value, str) and value else None
+
+
+def derive_run_semantic_context(checkpoint_tuple: object | None) -> SemanticContext:
+    """Derive the target feature and authoring session from a read snapshot."""
+    if checkpoint_tuple is None:
+        return SemanticContext(feature_tag=None, authoring_session_id=None)
+    values = _channel_values(checkpoint_tuple)
+    return SemanticContext(
+        feature_tag=_optional_str(values.get(_ACTIVE_FEATURE_FIELD)),
+        authoring_session_id=_optional_str(values.get(_AUTHORING_SESSION_FIELD)),
+    )
 
 
 async def read_run_semantic_context(
@@ -199,16 +251,7 @@ async def read_run_semantic_context(
             exc_info=True,
         )
         return SemanticContext(feature_tag=None, authoring_session_id=None)
-    if checkpoint_tuple is None:
-        return SemanticContext(feature_tag=None, authoring_session_id=None)
-    checkpoint = getattr(checkpoint_tuple, "checkpoint", None)
-    values = (
-        checkpoint.get("channel_values", {}) if isinstance(checkpoint, dict) else {}
-    )
-    return SemanticContext(
-        feature_tag=_optional_str(values.get(_ACTIVE_FEATURE_FIELD)),
-        authoring_session_id=_optional_str(values.get(_AUTHORING_SESSION_FIELD)),
-    )
+    return derive_run_semantic_context(checkpoint_tuple)
 
 
 async def build_thread_state(

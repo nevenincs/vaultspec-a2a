@@ -346,7 +346,7 @@ async def on_fs_write_text_file(
     concurrent git operations. Uses asyncio.to_thread so
     blocking I/O does not stall the event loop.
     """
-    from ..workspace.git_manager import _git_mutex
+    from ..workspace.concurrency import git_workspace_mutex
 
     try:
         file_path = sandbox_path(params["path"], config)
@@ -367,7 +367,7 @@ async def on_fs_write_text_file(
             file_path.parent.mkdir(parents=True, exist_ok=True)
             file_path.write_text(content, encoding="utf-8")
 
-        async with _git_mutex:
+        async with git_workspace_mutex:
             await asyncio.to_thread(_write)
         return {"jsonrpc": "2.0", "id": rpc_id, "result": {}}
     except Exception as exc:

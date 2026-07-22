@@ -15,6 +15,7 @@ from enum import StrEnum
 from pathlib import Path
 
 from ..thread.errors import MergeConflictError, WorkspaceError
+from .concurrency import git_workspace_mutex
 
 # Validates agent_id: must start with alphanumeric, contain only [a-zA-Z0-9_-].
 # Prevents path traversal (../) and git flag injection (--flag).
@@ -37,12 +38,6 @@ __all__ = [
 ]
 
 log = logging.getLogger(__name__)
-
-# Global mutex serializing destructive repo-wide git operations.
-# asyncio.Lock() at module level is safe in Python 3.10+ (PEP 641);
-# the deprecation warning was removed before Python 3.13.  No cross-loop risk
-# since the orchestrator runs a single-process uvicorn event loop.
-_git_mutex = asyncio.Lock()
 
 
 class MergeStrategy(StrEnum):
@@ -175,7 +170,7 @@ class GitManager:
         branch_name = f"agent/{agent_id}"
         worktree_path = self._root / "agent" / agent_id
 
-        async with _git_mutex:
+        async with git_workspace_mutex:
             # shield() prevents task cancellation from corrupting .git
             # state mid-operation (research finding: cancellation safety).
             await asyncio.shield(self._run_git("rev-parse", "--verify", base_branch))
@@ -213,7 +208,7 @@ class GitManager:
             raise ValueError(
                 f"Worktree path {worktree_path} is not under repo root {self._root}"
             )
-        async with _git_mutex:
+        async with git_workspace_mutex:
             await asyncio.shield(
                 self._run_git("worktree", "remove", str(resolved), "--force")
             )
@@ -333,7 +328,7 @@ class GitManager:
         Uses ``git merge-tree`` (available since Git 2.38) for a
         zero-side-effect simulation of merging into *target_branch*.
 
-        Callers must hold ``_git_mutex`` to prevent TOCTOU races
+        Callers must hold ``git_workspace_mutex`` to prevent TOCTOU races
         between the three ``rev-parse`` calls and any concurrent repo
         mutations.  ``merge_worktree`` acquires the mutex before calling
         this method.
@@ -409,7 +404,7 @@ class GitManager:
                 "Cannot merge a detached HEAD; checkout a named branch first."
             )
 
-        async with _git_mutex:
+        async with git_workspace_mutex:
             # move the pre-flight conflict check inside the mutex to prevent
             # a TOCTOU race where another task modifies the repo between the
             # has_conflicts() check and the actual merge operation.
@@ -459,7 +454,7 @@ class GitManager:
                 )
 
             result_sha = await asyncio.shield(self._run_git("rev-parse", "HEAD"))
-        # End of _git_mutex block
+        # End of git_workspace_mutex block
 
         log.info(
             "Merged %s into %s (strategy=%s) -> %s",

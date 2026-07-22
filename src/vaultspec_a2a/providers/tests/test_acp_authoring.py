@@ -7,6 +7,7 @@ and the exact ``mcpServers`` entry shape the claude-agent-acp CLI consumes.
 
 from __future__ import annotations
 
+import asyncio
 import json
 from typing import TYPE_CHECKING, cast
 
@@ -36,6 +37,7 @@ from .._acp_rpc_handlers import on_fs_write_text_file
 from .._acp_types import _AcpModelConfig, _AcpSessionContext
 
 if TYPE_CHECKING:
+    from collections.abc import Iterator
     from pathlib import Path
 
 _LOOPBACK_URL = "http://127.0.0.1:8200/mcp"
@@ -343,3 +345,94 @@ class TestAuthoringVisibleButVaultWriteDenied:
         assert payload["denial_kind"] == "forbidden_actor"
         assert "error" not in result
         assert not (tmp_path / ".vault" / "plan" / "x.md").exists()
+
+
+class TestAcpWriteGitSerialization:
+    """ACP writes and Git operations serialize through the shared workspace mutex.
+
+    After ``_git_mutex`` moved to ``workspace/concurrency.py`` as
+    ``git_workspace_mutex``, both the ACP fs-write handler and the Git manager
+    acquire that one lock, so neither can touch the working tree while the other
+    holds it. This proves the contention through the production handler and the
+    production lock, not a stand-in.
+    """
+
+    def test_the_git_manager_and_acp_write_share_one_workspace_mutex(self) -> None:
+        """GitManager and the ACP write path route through the one shared lock.
+
+        The relocation's point: both writers depend on the single
+        ``concurrency.git_workspace_mutex``. GitManager binds it at import; the
+        ACP handler re-imports it from the same module on every call. Asserting
+        the GitManager binding is the concurrency module's object pins the shared
+        routing (the behaviour test then proves that shared lock serializes).
+        """
+        import vaultspec_a2a.workspace.concurrency as concurrency
+        import vaultspec_a2a.workspace.git_manager as git_manager
+
+        assert git_manager.git_workspace_mutex is concurrency.git_workspace_mutex
+
+    @pytest.fixture
+    def loop_bound_mutex(self) -> Iterator[asyncio.Lock]:
+        """A fresh workspace mutex bound to the running test loop.
+
+        ``git_workspace_mutex`` is a process-global ``asyncio.Lock`` - correct
+        for the single production uvicorn loop, but pytest gives each test its
+        own loop, and a lock binds to the first loop that uses it. Reset it to a
+        fresh instance so this test's hold and the handler's acquisition (which
+        re-imports the module attribute on every call) contend on the same loop,
+        then restore the original so the global is never left mutated.
+        """
+        import vaultspec_a2a.workspace.concurrency as concurrency
+
+        original = concurrency.git_workspace_mutex
+        fresh = asyncio.Lock()
+        concurrency.git_workspace_mutex = fresh
+        try:
+            yield fresh
+        finally:
+            concurrency.git_workspace_mutex = original
+
+    @pytest.mark.asyncio
+    async def test_acp_write_is_serialized_behind_a_held_git_mutex(
+        self, tmp_path: Path, loop_bound_mutex: asyncio.Lock
+    ) -> None:
+        """A concurrent ACP write cannot proceed while the shared mutex is held.
+
+        Hold the shared workspace mutex, launch a real write through the
+        production handler, and prove it is serialized behind the lock: it stays
+        pending while the lock is held and completes only once it is released. A
+        handler acquiring a different lock would finish during the hold and fail
+        the not-done assertion, so this pins the shared-lock routing, not just
+        that some lock exists.
+        """
+        config = _config_with_authoring(str(tmp_path))
+        order: list[str] = []
+
+        async with loop_bound_mutex:
+            order.append("holder-acquired")
+            write = asyncio.create_task(
+                on_fs_write_text_file(
+                    1,
+                    {
+                        "path": "serialized.txt",
+                        "content": "written after the lock frees",
+                    },
+                    cast("_AcpSessionContext", None),
+                    config,
+                )
+            )
+            # Ample opportunity to run if the write were NOT serialized.
+            await asyncio.sleep(0.1)
+            # If the handler used a different lock it would finish during the
+            # hold; serialization on the shared mutex keeps it pending.
+            assert not write.done(), "ACP write ran while the shared git lock was held"
+            order.append("holder-still-holding")
+
+        result = await write
+        order.append("write-completed")
+
+        assert order == ["holder-acquired", "holder-still-holding", "write-completed"]
+        assert cast("dict", result["result"]) == {}
+        assert (tmp_path / "serialized.txt").read_text(encoding="utf-8") == (
+            "written after the lock frees"
+        )

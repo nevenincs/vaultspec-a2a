@@ -47,7 +47,7 @@ from .registry import (
 
 if TYPE_CHECKING:
     from pathlib import Path
-    from typing import IO
+    from typing import IO, Any
 
     from .procs_config import RoleConfig
 
@@ -717,14 +717,26 @@ def serve_up(
 
 
 def _await_listener(
-    port: int, process: subprocess.Popen[bytes], *, timeout: float
+    port: int, process: subprocess.Popen[Any], *, timeout: float
 ) -> bool:
-    """Wait for a live listener on *port*; return ``False`` if the child dies first."""
+    """Wait for a live listener on *port* that OUR child owns.
+
+    Returns ``False`` if the spawned child dies first, and does not accept a bound
+    port until the listening pid is confirmed to be the child or a descendant of
+    it (:func:`~vaultspec_a2a.utils.process.listener_belongs_to`). A foreign holder
+    of the port - an un-reaped orphan of a felled generation, or a racer on a
+    fixed resume/rerun port - therefore never reads as our process being ready, so
+    a record is not published pointing at a listener we do not own. The owner check
+    fails safe: when the listening pid cannot be resolved it degrades to the bare
+    bound-port signal rather than stalling a legitimate boot.
+    """
+    from ..utils.process import listener_belongs_to
+
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         if process.poll() is not None:
             return False
-        if _port_is_bound(port):
+        if _port_is_bound(port) and listener_belongs_to(port, process.pid):
             return True
         time.sleep(0.1)
     return False

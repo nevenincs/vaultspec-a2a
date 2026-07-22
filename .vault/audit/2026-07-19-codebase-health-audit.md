@@ -800,7 +800,15 @@ the unit-test intent. This audit records the analysis; it does not make the ruli
 
 ### await-listener-confirms-port-not-process | low | Readiness checks the port is bound, not that OUR spawn bound it
 
-Type: correctness (surfaced during W01.P02). Status: open (partially mitigated).
+Type: correctness (surfaced during W01.P02). Status: RESOLVED (2026-07-22) - the
+tighter fix landed: `_await_listener` now confirms the listening pid is the
+spawned process or a descendant via the dependency-free `listener_belongs_to`
+(netstat on Windows, `/proc` then `lsof` on POSIX, with a cross-platform parent-map
+ancestry walk), so a foreign holder of the port no longer reads as our child being
+ready. It fails safe - an unresolved owner degrades to the bare bound-port signal,
+never falsely failing a legitimate boot - and is proven by real multi-process
+tests (a foreign listener is positively rejected; the owning tree is accepted;
+150 lifecycle tests still green). Original analysis retained below.
 ``_await_listener`` returns ready as soon as ``_port_is_bound(port)`` is true,
 without confirming the process WE spawned is the one holding the port. If a foreign
 process holds the record's port when resume/rerun respawns, the respawn crashes on

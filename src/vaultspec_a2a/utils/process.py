@@ -35,7 +35,9 @@ __all__ = [
     "ProcessContainment",
     "ProcessContainmentError",
     "kill_pid_tree_async",
+    "listener_belongs_to",
     "pid_is_live",
+    "port_listener_pid",
     "posix_descendant_pids",
     "posix_parent_map",
 ]
@@ -233,6 +235,218 @@ def posix_descendant_pids(pid: int) -> list[int]:
         descendants.append(current)
         frontier.extend(children.get(current, ()))
     return descendants
+
+
+def listener_belongs_to(port: int, root_pid: int) -> bool:
+    """``False`` only when *port*'s LISTENER is positively outside *root_pid*'s tree.
+
+    A readiness probe that a port is bound cannot tell our freshly spawned server
+    apart from a stranger that happens to hold the same port - an un-reaped orphan
+    of a felled generation, or a foreign racer on a fixed resume/rerun port. This
+    confirms the pid listening on the loopback port is *root_pid* itself or a
+    descendant of it, so readiness passes on OUR process and not a stranger's.
+
+    It fails safe: when the listener pid or the ancestry cannot be resolved (no
+    ``netstat``/``/proc``/``lsof``, or an unreadable parent map) it returns
+    ``True`` and degrades to the bare bound-port signal, so a normal boot is never
+    falsely failed. It returns ``False`` only when a listener pid is resolved AND
+    positively shown to descend from a different root.
+    """
+    listener_pid = port_listener_pid(port)
+    if listener_pid is None:
+        return True
+    return _pid_in_tree(root_pid, listener_pid)
+
+
+def port_listener_pid(port: int) -> int | None:
+    """Best-effort pid LISTENING on loopback *port*; ``None`` when unresolved.
+
+    Platform-aware and dependency-free: ``netstat`` on Windows, ``/proc/net`` then
+    ``lsof`` on POSIX. Returns ``None`` (never a guess) when no owner can be read,
+    so callers degrade rather than misattribute a port to the wrong process.
+    """
+    if sys.platform == "win32":
+        return _netstat_listener_pid(port)
+    proc_pid = _proc_listener_pid(port)
+    if proc_pid is not None:
+        return proc_pid
+    return _lsof_listener_pid(port)
+
+
+def _pid_in_tree(root_pid: int, candidate_pid: int) -> bool:
+    """``True`` when *candidate_pid* is *root_pid* or descends from it.
+
+    Degrades to ``True`` on an unresolved parent map (candidate is not the root
+    but ancestry cannot be walked), so a legitimate descendant listener is never
+    falsely rejected; returns ``False`` only on a resolved map that positively
+    fails to reach the root.
+    """
+    if candidate_pid == root_pid:
+        return True
+    parents = _parent_map()
+    if not parents:
+        return True
+    seen: set[int] = set()
+    current = candidate_pid
+    while current > 1 and current not in seen:
+        seen.add(current)
+        parent = parents.get(current)
+        if parent is None:
+            return False
+        if parent == root_pid:
+            return True
+        current = parent
+    return False
+
+
+def _parent_map() -> dict[int, int]:
+    """A ``{pid: parent pid}`` map for this host, cross-platform; empty on failure."""
+    if sys.platform == "win32":
+        return _win_parent_map()
+    return posix_parent_map()
+
+
+def _win_parent_map() -> dict[int, int]:
+    """Windows ``{pid: parent pid}`` via a single CIM query; empty on any failure.
+
+    Windows fells trees with ``taskkill /T`` and keeps no parent map for
+    termination, but the readiness owner-check needs one to confirm a listener pid
+    descends from the process we spawned.
+    """
+    try:
+        completed = subprocess.run(
+            [
+                "powershell",
+                "-NoProfile",
+                "-NonInteractive",
+                "-Command",
+                "Get-CimInstance Win32_Process | ForEach-Object "
+                '{ "$($_.ProcessId) $($_.ParentProcessId)" }',
+            ],
+            capture_output=True,
+            text=True,
+            timeout=_PS_TIMEOUT,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return {}
+    mapping: dict[int, int] = {}
+    for line in completed.stdout.splitlines():
+        parts = line.split()
+        if len(parts) == 2 and parts[0].isdigit() and parts[1].isdigit():
+            mapping[int(parts[0])] = int(parts[1])
+    return mapping
+
+
+def _netstat_listener_pid(port: int) -> int | None:
+    try:
+        completed = subprocess.run(
+            ["netstat", "-ano", "-p", "tcp"],
+            capture_output=True,
+            text=True,
+            timeout=_PS_TIMEOUT,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    for line in completed.stdout.splitlines():
+        parts = line.split()
+        # Columns: Proto  Local Address  Foreign Address  State  PID
+        if len(parts) < 5 or parts[0].upper() != "TCP":
+            continue
+        if parts[3].upper() != "LISTENING":
+            continue
+        if _addr_port(parts[1]) != port:
+            continue
+        if parts[4].isdigit():
+            return int(parts[4])
+    return None
+
+
+_TCP_LISTEN_STATE = "0A"
+
+
+def _proc_listener_pid(port: int) -> int | None:
+    inode = _proc_listen_inode(port)
+    if inode is None:
+        return None
+    return _proc_pid_for_socket_inode(inode)
+
+
+def _proc_listen_inode(port: int) -> str | None:
+    for path in ("/proc/net/tcp", "/proc/net/tcp6"):
+        try:
+            with open(path, encoding="ascii", errors="replace") as handle:
+                next(handle, None)  # header row
+                for line in handle:
+                    fields = line.split()
+                    if len(fields) < 10 or fields[3] != _TCP_LISTEN_STATE:
+                        continue
+                    _, sep, hexport = fields[1].partition(":")
+                    if not sep:
+                        continue
+                    try:
+                        if int(hexport, 16) != port:
+                            continue
+                    except ValueError:
+                        continue
+                    return fields[9]
+        except OSError:
+            continue
+    return None
+
+
+def _proc_pid_for_socket_inode(inode: str) -> int | None:
+    target = f"socket:[{inode}]"
+    try:
+        entries = os.listdir("/proc")
+    except OSError:
+        return None
+    for entry in entries:
+        if not entry.isdigit():
+            continue
+        fd_dir = f"/proc/{entry}/fd"
+        try:
+            fds = os.listdir(fd_dir)
+        except OSError:
+            continue
+        for fd in fds:
+            try:
+                if os.readlink(f"{fd_dir}/{fd}") == target:
+                    return int(entry)
+            except OSError:
+                continue
+    return None
+
+
+def _lsof_listener_pid(port: int) -> int | None:
+    try:
+        completed = subprocess.run(
+            ["lsof", "-nP", f"-iTCP:{port}", "-sTCP:LISTEN", "-t"],
+            capture_output=True,
+            text=True,
+            timeout=_PS_TIMEOUT,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    for token in completed.stdout.split():
+        if token.isdigit():
+            return int(token)
+    return None
+
+
+def _addr_port(addr: str) -> int | None:
+    """The port of a ``host:port`` local-address column, or ``None``.
+
+    Accepts IPv4 (``127.0.0.1:8123``) and IPv6 (``[::]:8123``) forms by reading
+    only the final ``:``-delimited field, so any bound host with the right port
+    matches - a wildcard ``0.0.0.0``/``[::]`` listener serves loopback too.
+    """
+    _, sep, port_s = addr.rpartition(":")
+    if not sep or not port_s.isdigit():
+        return None
+    return int(port_s)
 
 
 def _posix_signal_all(pids: list[int], signal_number: int) -> None:

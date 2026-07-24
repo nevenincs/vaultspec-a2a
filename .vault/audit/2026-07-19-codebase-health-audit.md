@@ -1086,3 +1086,57 @@ New debt raised by this pass, carried forward rather than silently absorbed:
   and unverified.
 - `deletion-saga-and-workspace-delete-safety` remain owner-scoped as recorded
   above; nothing in this pass changed their status.
+
+### `W01.P02.S06` scoping analysis (2026-07-24) - not closed
+
+S06 asks to "verify the landed desktop owned-tree implementation reaps the
+complete worker tree on startup readiness timeout". Investigated but
+deliberately NOT closed, because the Step as worded cannot be honestly proven
+and the reason is worth the owner's attention rather than a contrived test.
+
+What the implementation does: the readiness loop in
+`control/worker_management.py` distinguishes two failure exits. A worker that
+dies on its own is detected by `process.poll()` and releases the containment
+handle; a worker that stays alive but never verifies runs to the deadline and is
+reaped with `await containment.terminate(term_timeout=5.0, kill_timeout=5.0)` -
+the whole-tree primitive - rather than `process.terminate()`. That branch
+selection is the actual safety property.
+
+Why the Step's premise is partly vacuous: at the startup-readiness-timeout
+instant the worker has no descendants to reap. The worker package spawns no
+subprocesses at all (no `Popen`, `spawn_acp_process`, or `create_subprocess`
+anywhere under `src/vaultspec_a2a/worker/`); provider trees are spawned from
+`providers/` while executing a run, which by definition has not happened yet
+because the worker never became ready. So "the complete worker tree" at that
+boundary is the worker process alone.
+
+Why this was not tested anyway: a test that reached the branch with a real
+worker (held un-ready via a deliberate generation mismatch, so it stays alive
+and healthy but never classifies as ours) would assert only that the worker pid
+dies - which `process.terminate()` would also achieve. The assertion cannot
+discriminate the containment path from the per-pid path without a descendant
+existing, and no supported seam produces one: `module_command` is a closed
+allowlist with no override by design, so substituting a descendant-spawning
+stand-in worker would mean adding test-only production surface to a deliberately
+sealed execution allowlist.
+
+Recommended re-scope for the owner, rather than a silent close:
+
+- Narrow S06 to the invariant that is real at this boundary - the timeout exit
+  reaps through the containment primitive and the premature-exit exit releases
+  the handle - and prove it where descendants genuinely exist.
+- The descendant-bearing reap is already covered at the boundaries where a tree
+  actually exists: `desktop_tests/test_owned_process_tree.py` proves
+  contained-before-work and reaped-whole on graceful termination and on forced
+  orphaned termination, and the gateway-owned worker leg proves the graceful
+  shutdown reap.
+
+Adjacent finding raised while reading this path:
+
+- `worker-readiness-deadline-is-an-unnamed-literal` (low, open) - the 30-second
+  readiness deadline is a bare literal at the `deadline` assignment, and the
+  same `30.0` is repeated as the base of the `elapsed` progress math in three
+  places. Changing the deadline silently falsifies every elapsed figure logged
+  during startup. Unlike its neighbours (`worker_poll_initial_interval_seconds`,
+  `worker_poll_backoff_factor`, `worker_poll_max_interval_seconds`) it is not a
+  setting.

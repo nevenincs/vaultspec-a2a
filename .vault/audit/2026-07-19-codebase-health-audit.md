@@ -3,7 +3,7 @@ tags:
   - '#audit'
   - '#codebase-health'
 date: '2026-07-19'
-modified: '2026-07-19'
+modified: '2026-07-24'
 related:
   - "[[2026-07-14-a2a-edge-conformance-adr]]"
   - "[[2026-07-18-desktop-product-profile-plan]]"
@@ -1033,3 +1033,56 @@ reality.
   (high), `per-principal-quotas-have-no-principal-to-key-on` (medium),
   `dashboard-up-path-has-no-joint-certification` (medium) — versioned wire
   contracts owned by the dashboard project, not this repository.
+
+### Closed after reconciliation (2026-07-24, same day)
+
+Three of the four `Open - a2a-local` items above were driven to closure
+immediately after the reconciliation pass. Each landed with a real-behaviour
+test carrying a negative control, so a passing run cannot be satisfied by the
+pre-fix code.
+
+- `default-otel-import` (high) - RESOLVED `4202a68b`. Root cause was narrower
+  and more dangerous than "unhandled missing parent": `importlib.util.find_spec`
+  returns `None` only for a missing leaf under an importable parent, and
+  *raises* when a parent cannot be imported. The ordered `_OTLP_EXPORTER_MODULES`
+  walk already covered the fully-absent exporter, so the surviving hazard was a
+  partial install - exporter package present, its `grpc` distribution absent -
+  where walking into `opentelemetry.exporter.otlp.proto.grpc` aborts gateway and
+  worker startup. Both probes now route through `_spec_exists`, which treats any
+  import-time failure as unavailable and degrades to the no-op tracer. Note the
+  pre-existing `probe_clean_base.py` can never reach this path: it rejects any
+  environment containing `opentelemetry.exporter`.
+- `acp-background-rpc-errors-only-log-and-hang` (high) - RESOLVED `222731d5`.
+  The finding's first clause was already closed before this pass:
+  `handle_server_rpc` converts a raising handler into a `-32603` reply, proven
+  over a real session pipe in `test_acp_handler_failure.py`. The outstanding
+  clause was bounded turn lifetimes. `_yield_chunks` left its poll only on a
+  queue sentinel or `prompt_done`, both of which require the subprocess to
+  speak, so an agent that stayed alive while going silent parked the caller
+  indefinitely. Bounded by silence rather than total turn length
+  (`VAULTSPEC_ACP_TURN_IDLE_TIMEOUT_SECONDS`, default 600s, 0 disables) so a
+  legitimately long run is never truncated.
+- `unbounded-stream-subscriber-cardinality` (medium) - RESOLVED `ceb37221`.
+  Completes the half `fffd645e` left open. `subscribe()` did an unbounded
+  `set.update`, so one authenticated caller could demand arbitrary per-event
+  fan-out from a single connection. Capped at the domain seam rather than one
+  route, refused all-or-nothing, and idempotent for a reconnecting client
+  replaying the set it already holds.
+
+Still open and unchanged: `authorization-guard-chain-still-long` (low, deferred
+by the original finding), `torch-source-portability` (medium) and
+`probe-gate-durability` (medium) - both still needing separate triage.
+
+New debt raised by this pass, carried forward rather than silently absorbed:
+
+- `acp-turn-deadline-default-unproven` (low, open) - the 600s default idle
+  deadline is a reasoned choice, not a measured one. No evidence yet on the
+  longest legitimate silent gap a production ACP agent produces, so the default
+  could in principle cut a real turn. The disable switch and the per-deployment
+  override bound the blast radius; a measured default is owed.
+- `subscription-refusal-counter-unasserted` (low, open) - the refusal path
+  increments `aggregator.subscriptions_refused`, but no test asserts the counter
+  is emitted; the finding's "expose operational counters" clause is implemented
+  and unverified.
+- `deletion-saga-and-workspace-delete-safety` remain owner-scoped as recorded
+  above; nothing in this pass changed their status.

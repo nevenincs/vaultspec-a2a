@@ -44,8 +44,6 @@ __all__ = [
     "SemanticContext",
     "build_thread_state",
     "project_semantic_phase",
-    "read_run_authoring_ids",
-    "read_run_semantic_context",
 ]
 
 logger = logging.getLogger(__name__)
@@ -172,34 +170,6 @@ def derive_run_authoring_ids(
     )
 
 
-async def read_run_authoring_ids(
-    checkpointer: Checkpointer,
-    thread_id: str,
-    *,
-    timeout: float = 2.0,
-) -> tuple[list[str], list[str]]:
-    """Read a run's produced ``(proposal_ids, changeset_ids)`` from its checkpoint.
-
-    Non-raising: a missing, timed-out, or unreadable checkpoint yields empty
-    lists so the recovery snapshot degrades to "no proposals recorded" rather
-    than failing the whole run-status read.
-    """
-    config: RunnableConfig = {"configurable": {"thread_id": thread_id}}
-    try:
-        checkpoint_tuple = await asyncio.wait_for(
-            checkpointer.aget_tuple(config), timeout=timeout
-        )
-    except TimeoutError:
-        logger.warning("Checkpoint read for authoring ids timed out: %s", thread_id)
-        return [], []
-    except Exception:
-        logger.warning(
-            "Checkpoint read for authoring ids failed: %s", thread_id, exc_info=True
-        )
-        return [], []
-    return derive_run_authoring_ids(checkpoint_tuple)
-
-
 @dataclass(frozen=True, slots=True)
 class SemanticContext:
     """A run's target feature and produced authoring session id (run-status)."""
@@ -222,36 +192,6 @@ def derive_run_semantic_context(checkpoint_tuple: object | None) -> SemanticCont
         feature_tag=_optional_str(values.get(_ACTIVE_FEATURE_FIELD)),
         authoring_session_id=_optional_str(values.get(_AUTHORING_SESSION_FIELD)),
     )
-
-
-async def read_run_semantic_context(
-    checkpointer: Checkpointer,
-    thread_id: str,
-    *,
-    timeout: float = 2.0,
-) -> SemanticContext:
-    """Read a run's target feature and authoring session id from its checkpoint.
-
-    Non-raising, mirroring :func:`read_run_authoring_ids`: a missing, timed-out,
-    or unreadable checkpoint yields a context of ``None`` fields so run-status
-    degrades gracefully rather than failing.
-    """
-    config: RunnableConfig = {"configurable": {"thread_id": thread_id}}
-    try:
-        checkpoint_tuple = await asyncio.wait_for(
-            checkpointer.aget_tuple(config), timeout=timeout
-        )
-    except TimeoutError:
-        logger.warning("Checkpoint read for semantic context timed out: %s", thread_id)
-        return SemanticContext(feature_tag=None, authoring_session_id=None)
-    except Exception:
-        logger.warning(
-            "Checkpoint read for semantic context failed: %s",
-            thread_id,
-            exc_info=True,
-        )
-        return SemanticContext(feature_tag=None, authoring_session_id=None)
-    return derive_run_semantic_context(checkpoint_tuple)
 
 
 async def build_thread_state(

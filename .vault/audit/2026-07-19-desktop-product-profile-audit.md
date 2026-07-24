@@ -412,6 +412,17 @@ tests import production component identity, target, digest, and schema
 authorities and use no fake, mock, stub, patch, monkeypatch, skip, expected
 failure, or mirrored dashboard consumer logic.
 
+> **Superseded (2026-07-24) by the dashboard-bundled-runtime pivot.** Every
+> finding in the `W01 P03` S13 (builder), S14 (verifier), and S15 (release)
+> reviews below targets the desktop capsule build/verify/SBOM/multi-target
+> surface, which has been REMOVED from the tree per the accepted
+> `2026-07-24-dashboard-bundled-runtime-adr` (a2a now ships as a
+> dashboard-bundled binary, not an installable capsule). These findings are
+> retained as historical record and must not be re-driven. This supersession is
+> scoped to the S13/S14/S15 capsule reviews only: the earlier non-capsule
+> findings in this audit — `default-otel-import`, `torch-source-portability`,
+> and `probe-gate-durability` — survive the strip and remain live.
+
 ## `W01 P03 S13` deterministic capsule-builder review
 
 Status: REVISION REQUIRED

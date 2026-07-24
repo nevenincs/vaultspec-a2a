@@ -11,6 +11,15 @@ related:
 
 # `desktop-product-profile` audit: `w01 p03 capsule review`
 
+> **Superseded (2026-07-24) by the dashboard-bundled-runtime pivot.** Every file
+> this audit reviews — `scripts/build_desktop_capsule.py`,
+> `scripts/verify_desktop_capsule.py`, `scripts/desktop_capsule_inputs.toml`,
+> the capsule build/verify service tests, and `.github/workflows/desktop-capsule.yml`
+> — has been REMOVED from the tree per the accepted
+> `2026-07-24-dashboard-bundled-runtime-adr`. All S13/S14/S15 findings below are
+> retained as historical record and must not be re-driven; a2a now ships as a
+> dashboard-bundled binary, not an installable capsule.
+
 ## Scope
 
 Code review for W01.P03 S13-S15 (commits 7df84b1d, 5323b167, 2c525cca on

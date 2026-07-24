@@ -947,3 +947,89 @@ owed to the owner, not a mechanical rewrite; recorded here rather than rushed.
 8. Run a fresh formal code-review audit after every implementation wave.
    Classify every new finding. Append each one to this queue before closing the
    wave.
+
+## Reconciliation (2026-07-24)
+
+Verify-and-classify pass against `main` after the dashboard-bundled-runtime
+pivot landed. Each finding is dispositioned with evidence so the plan reflects
+reality.
+
+### Resolved — closed this campaign (evidence commit)
+
+- `repair-policy-shadow-map` — `dcd67ea8` (dispatch-failed repair state sourced
+  from the pure policy; parity test added).
+- `dispatch-failure-policy-duplication` — `b69acbc2` (centralized
+  `evaluate_dispatch_failure` + `apply_dispatch_failure`).
+- `dead-public-api-cluster-after-dead-code-sweep` — the five named symbols were
+  already removed; the residual per-field checkpoint readers removed in
+  `fbf10b7a`.
+
+### Resolved — verified fixed by prior/concurrent work (evidence)
+
+- `foreign-worker-adoption-after-failed-eviction` — `658615ab` (same-gateway
+  provenance on every adoption path).
+- `authenticated-pairing-verdict-not-enforced` — `122b1e06` (the
+  lifetime+generation classifier is now enforced at worker adoption).
+- `heartbeat-parser-accepts-malformed-as-fresh` — `678934f8` (strict i64/ISO
+  parse; `test_heartbeat_freshness`).
+- `run-status-triple-checkpoint-read` — single `read_run_snapshot` + pure
+  `derive_*` in `api/routes/gateway.py`.
+- `run-id-replay-does-not-bind-request` — `gateway.py` compares the full
+  `request_digest`, 409 on mismatch.
+- `git-manager-orphaned-subsystem` — `_git_mutex` relocated to
+  `workspace/concurrency.py`.
+- `resident-discovery-is-not-a-singleton` — OS runtime singleton acquired before
+  bind/publish (`lifecycle/singleton.py`).
+- `restart-registers-before-readiness` and `serve-up-commit-failure-leaks-child`
+  — `lifecycle/manager.py` routes restart through reserve → readiness → commit
+  with commit-failure-after-readiness handling.
+- `worker-startup-timeout-orphans-process-tree` — containment whole-tree reap in
+  `worker_management.py` (implementation; the `W01.P02.S06` verify Step remains
+  open).
+- `duplicate-harness-server-invalid-codex-toml` — `_acp_mcp.py` reject-duplicate
+  + order-preserving dedup.
+- `codex-stderr-backpressure-deadlock` — continuous `_drain_stderr` task.
+- `stale-acceptance-gate-disables-dashboard-profiles` — both summary and launch
+  drive off the shared `evaluate_profile_eligibility`; gate reported honestly.
+- `cleanup-failure-cascades-artifact-leaks` — aggregated `finally` cleanup in the
+  codex/acp models.
+- `thread-list-sequential-checkpoint-n-plus-one` — `_bulk_read_checkpoints` with
+  bounded concurrency + request-wide deadline.
+- `unused-trace-helper`, `timestamp-utility-module-is-export-only` — modules
+  already deleted.
+- `canonical-ci-unit-gate-red` — does not reproduce; the canonical unit gate is
+  green on `main`.
+- The self-declared `Status: resolved` findings above (`stale-contract-assertions`,
+  the `docs-*` set, `ty-suppression-retained-in-test-remediation`,
+  `stdio-entrypoint-test-can-pass-before-entrypoint-success`,
+  `lifecycle-authority-curation-review`, `dead-code-refresh-*-review`,
+  `a2a-adr-grounding-drift-resolved`, `duplicate-backpressure-fanout`,
+  `s101-fake-doubles-adjudication-input`, `await-listener-confirms-port-not-process`,
+  and the `info` verification sweeps) stand.
+
+### Open — a2a-local
+
+- `acp-background-rpc-errors-only-log-and-hang` (high) — `_acp_auth` still
+  log-only; the ACP prompt loop has no turn deadline.
+- `unbounded-stream-subscriber-cardinality` (medium) — connections bounded
+  (`fffd645e`); the subscription-count cap is still owed.
+- `authorization-guard-chain-still-long` (low) — deferred by the original
+  finding.
+- `default-otel-import` (high), `torch-source-portability` (medium),
+  `probe-gate-durability` (medium) — from the desktop-product-profile audit;
+  survive the strip, need separate triage.
+
+### Owner decision (tracked as tasks)
+
+- `authenticated-pairing` design authority and the deletion-saga /
+  `hard-delete-cross-store-nonatomic` + workspace-delete-safety findings
+  (`containment-is-positional-not-provenance-based`, `silent-partial-deletion`,
+  `deletion-scope-derives-from-a-duplicated-source-of-truth`) are owner-scoped
+  feature/architecture decisions, not solo-drivable here.
+
+### Cross-repo — dashboard lane
+
+- `sse-content-exclusion-regression` (high), `unauthenticated-public-control-plane`
+  (high), `per-principal-quotas-have-no-principal-to-key-on` (medium),
+  `dashboard-up-path-has-no-joint-certification` (medium) — versioned wire
+  contracts owned by the dashboard project, not this repository.

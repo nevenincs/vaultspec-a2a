@@ -7,6 +7,7 @@ date: '2026-07-24'
 modified: '2026-07-24'
 related:
   - '[[2026-07-24-dashboard-bundled-runtime-adr]]'
+  - '[[2026-07-24-dashboard-bundled-runtime-audit]]'
   - '[[2026-07-24-dashboard-bundled-runtime-reference]]'
 ---
 
@@ -19,6 +20,10 @@ Auto-generated index of all documents tagged with `#dashboard-bundled-runtime`.
 ### adr
 
 - `2026-07-24-dashboard-bundled-runtime-adr` - `dashboard-bundled-runtime` adr: `a2a is a dashboard-bundled runtime, not an installable product` | (**status:** `accepted`)
+
+### audit
+
+- `2026-07-24-dashboard-bundled-runtime-audit` - `dashboard-bundled-runtime` audit: `pivot execution review and deferred-findings queue`
 
 ### reference
 

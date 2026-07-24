@@ -3,8 +3,8 @@ generated: true
 tags:
   - '#index'
   - '#codebase-health'
-date: '2026-07-22'
-modified: '2026-07-22'
+date: '2026-07-24'
+modified: '2026-07-24'
 related:
   - '[[2026-07-19-codebase-health-W01-P01-S01]]'
   - '[[2026-07-19-codebase-health-W01-P01-S03]]'
@@ -62,6 +62,7 @@ related:
   - '[[2026-07-19-codebase-health-w01-p01-s03-review-audit]]'
   - '[[2026-07-22-codebase-health-orphan-surface-ownership-audit]]'
   - '[[2026-07-22-codebase-health-tooling-prohibition-certification-audit]]'
+  - '[[2026-07-24-codebase-health-adr]]'
 ---
 
 # `codebase-health` feature index
@@ -73,6 +74,7 @@ Auto-generated index of all documents tagged with `#codebase-health`.
 ### adr
 
 - `2026-07-19-codebase-health-adr` - `codebase-health` adr: `failure-atomic hardening across the dashboard-owned runtime` | (**status:** `accepted`)
+- `2026-07-24-codebase-health-adr` - `codebase-health` adr: `the authenticated pairing verdict governs worker adoption under the armed profile` | (**status:** `accepted`)
 
 ### audit
 

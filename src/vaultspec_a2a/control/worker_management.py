@@ -26,6 +26,11 @@ if TYPE_CHECKING:
     import httpx
 
 from ..artifacts import ArtifactDeclaration, RetentionDisposition
+from ..lifecycle.pairing import (
+    WorkerPairingVerdict,
+    classify_worker_pairing,
+    eviction_is_authorized,
+)
 from ..utils import kill_pid_tree_async
 from ..utils.process import ProcessContainment, ProcessContainmentError
 from ..utils.runtime_exec import module_command
@@ -294,21 +299,58 @@ def _same_gateway(worker_target: object, our_gateway: str) -> bool:
     return worker_target.rstrip("/") == our_gateway.rstrip("/")
 
 
-async def _worker_ready_and_ours(worker_url: str) -> bool:
-    """Whether a healthy worker at *worker_url* heartbeats *this* gateway.
+def _classify_worker_body(
+    body: dict[str, Any], *, current_generation: int
+) -> WorkerPairingVerdict:
+    """Classify a fetched worker health body against this gateway's identity.
+
+    The single enforcement seam for the authenticated pairing policy: the
+    worker's reported ``paired_gateway_lifetime`` and ``worker_generation`` are
+    judged by :func:`~vaultspec_a2a.lifecycle.pairing.classify_worker_pairing`
+    against THIS process's lifetime identity and the spawner's current
+    generation. Blank or foreign evidence fails closed.
+    """
+    lifetime = body.get("paired_gateway_lifetime")
+    generation = body.get("worker_generation")
+    return classify_worker_pairing(
+        reported_lifetime=lifetime if isinstance(lifetime, str) else None,
+        reported_generation=generation if isinstance(generation, str) else None,
+        gateway_lifetime=GATEWAY_LIFETIME_ID,
+        current_generation=current_generation,
+    )
+
+
+async def _worker_ready_and_ours(
+    worker_url: str, *, current_generation: int = 0
+) -> bool:
+    """Whether a healthy worker at *worker_url* is provably THIS gateway's.
 
     The provenance-aware readiness signal for every adoption decision: a bare
     ``/health`` 200 only proves *some* worker holds the port, which a foreign
-    orphan squatting a shared band port satisfies just as well as our own. Adopting
-    on that alone lets this gateway dispatch to a worker that emits its events to a
-    different gateway. This pairs the health check with the worker's declared
-    ``gateway_url`` and accepts only when it is ours (a legacy worker whose
-    ``/health`` predates the field is treated as ours by :func:`_same_gateway`, so a
-    correctly-wired old worker is not spuriously disowned).
+    orphan squatting a shared band port satisfies just as well as our own.
+
+    Profile-split enforcement (the authenticated-pairing decision): under the
+    ARMED desktop profile the authenticated pairing verdict is the authority -
+    only a worker whose reported gateway lifetime and spawn generation classify
+    as ``OWNED`` is adopted; blank, legacy, or foreign evidence fails closed.
+    Unarmed profiles keep the legacy declared-``gateway_url`` comparison so
+    registry- and Compose-managed workers (which legitimately carry no pairing
+    evidence) are not disowned.
     """
     body = await _fetch_worker_health(worker_url)
     if body is None:
         return False
+    if settings.desktop_profile_armed:
+        verdict = _classify_worker_body(body, current_generation=current_generation)
+        if verdict is not WorkerPairingVerdict.OWNED:
+            logger.warning(
+                "Worker at %s is not adoptable under the armed profile "
+                "(pairing verdict: %s)",
+                worker_url,
+                verdict.value,
+            )
+            return False
+        return True
     return _same_gateway(body.get("gateway_url"), settings.gateway_url)
 
 
@@ -377,12 +419,57 @@ async def _spawn_worker(
     whole worker tree is reaped as one on shutdown. A Windows assignment failure
     is logged and downgraded to the per-pid fallback rather than failing the spawn.
     """
-    # The armed desktop gateway owns its worker exclusively. Its runtime directory
-    # and worker port are private to this application home, so there is never a
-    # foreign or shared worker to discover, adopt, or evict: it spawns and owns
-    # unconditionally. Only the Compose and development band profiles probe the
-    # port for an already-running same-gateway worker (adopt) or a stale foreign
-    # orphan (evict) before spawning.
+    # The armed desktop gateway owns its worker exclusively, but its private
+    # worker port can still be occupied - a surviving prior generation after a
+    # containment downgrade, or a stranger process. The authenticated pairing
+    # verdict rules on ONE health read (adoption and eviction must share one
+    # classification): an OWNED current-generation worker is adopted, a
+    # PRIOR_GENERATION worker this gateway demonstrably spawned is evicted
+    # under the classifier's authorization (a failed eviction is a conflict,
+    # never an adoption), and a FOREIGN or UNIDENTIFIED occupant refuses the
+    # spawn loudly with no eviction - it may be serving someone else's runs,
+    # and silence is not evidence of ownership.
+    if settings.desktop_profile_armed:
+        occupant = await _fetch_worker_health(worker_url)
+        if occupant is not None:
+            verdict = _classify_worker_body(occupant, current_generation=generation)
+            if verdict is WorkerPairingVerdict.OWNED:
+                logger.info(
+                    "Worker already running at %s with an owned pairing "
+                    "verdict — adopting instead of spawning",
+                    worker_url,
+                )
+                return None
+            if eviction_is_authorized(
+                verdict, desktop_profile_armed=settings.desktop_profile_armed
+            ):
+                logger.warning(
+                    "Worker at %s is this gateway's prior generation "
+                    "(verdict: %s) — evicting before spawning the replacement",
+                    worker_url,
+                    verdict.value,
+                )
+                if not await _evict_stale_worker(worker_url, worker_port):
+                    logger.error(
+                        "Prior-generation worker at %s did not release port %d "
+                        "after an authorized eviction — refusing to spawn onto "
+                        "a held port (conflict, no adoption)",
+                        worker_url,
+                        worker_port,
+                    )
+                    return None
+            else:
+                logger.error(
+                    "Worker port %d is held by a process this gateway cannot "
+                    "adopt or evict (pairing verdict: %s) — refusing to spawn "
+                    "(conflict, no adoption, no eviction)",
+                    worker_port,
+                    verdict.value,
+                )
+                return None
+    # Only the Compose and development band profiles probe the port for an
+    # already-running same-gateway worker (adopt) or a stale foreign orphan
+    # (evict) before spawning, using the legacy declared-gateway_url signal.
     if not settings.desktop_profile_armed:
         existing = await _fetch_worker_health(worker_url)
         if existing is not None:
@@ -525,7 +612,7 @@ async def _spawn_worker(
         # requires the responding worker to declare THIS gateway as its target.
         if await _tcp_port_ready(
             "127.0.0.1", worker_port
-        ) and await _worker_ready_and_ours(worker_url):
+        ) and await _worker_ready_and_ours(worker_url, current_generation=generation):
             elapsed = 30.0 - (deadline - asyncio.get_event_loop().time())
             logger.info(
                 "Worker ready at %s (PID %d) in %.1fs",
@@ -675,8 +762,13 @@ class LazyWorkerSpawner:
             if not self._auto_spawn:
                 # Not configured to auto-spawn; attach only to a worker that
                 # declares THIS gateway as its target, never a foreign orphan that
-                # merely answers /health on the port.
-                self._spawned = await _worker_ready_and_ours(self._worker_url)
+                # merely answers /health on the port. Under the armed profile
+                # this attach requires the OWNED pairing verdict, which an
+                # externally-managed worker can never present - armed without
+                # auto-spawn is a misconfiguration and fails closed.
+                self._spawned = await _worker_ready_and_ours(
+                    self._worker_url, current_generation=self._generation
+                )
                 if not self._spawned:
                     logger.warning(
                         "No worker targeting this gateway at %s and"
@@ -711,7 +803,9 @@ class LazyWorkerSpawner:
             # check here would let a refused-eviction foreign orphan (spawn returned
             # None) be adopted as this gateway's worker.
             self._spawned = self._process is not None or (
-                await _worker_ready_and_ours(self._worker_url)
+                await _worker_ready_and_ours(
+                    self._worker_url, current_generation=self._generation
+                )
             )
             if self._spawned:
                 logger.info("Worker available — processing dispatch")
@@ -1039,8 +1133,15 @@ class WorkerWatchdog:
                 self._spawner.replace_process(new_proc, new_containment)
                 return True, attempt + 1
 
-            # Check if an external worker came up.
-            if await _check_worker_health(self._spawner.worker_url):
+            # Check if an external worker came up. Adoption still requires
+            # provenance: under the armed profile the authenticated pairing
+            # verdict, elsewhere the declared-gateway_url signal - a bare
+            # health 200 from a stranger on the port is not an adoptable
+            # worker.
+            if await _worker_ready_and_ours(
+                self._spawner.worker_url,
+                current_generation=self._spawner.generation,
+            ):
                 self._spawner.replace_process(None)
                 return True, attempt + 1
 

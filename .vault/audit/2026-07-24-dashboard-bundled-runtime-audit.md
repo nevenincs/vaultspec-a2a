@@ -99,14 +99,23 @@ base/head assertions; the decision record and grounding reference amended in
 place. The lesson recorded for future passes: a keep verdict must cite a live
 caller, not plausibility.
 
-### admission-flake-baseline | low | Three run-admission gates flake under full-suite parallel load
+### admission-flake-baseline | resolved | The flake was the Windows freed-port bind race; boot is now death-aware and retrying
 
 `test_pre_durability_commit_failure_restores_reservation_for_release`,
 `test_gateway_restart_recovers_durable_lease_and_exact_commit_replay`, and
-`test_v1_write_body_is_rejected_before_unbounded_json_parsing` failed in the
-full unit gate and pass individually; the same three-failure signature
-predates the pivot on main. Not caused by this change; belongs to the
-codebase-health flake queue.
+`test_v1_write_body_is_rejected_before_unbounded_json_parsing` failed in full
+runs and passed individually; the signature predates the pivot. Root cause:
+every desktop gate allocated ports bind-then-close and polled the health
+endpoint for forty seconds; a freed port is not reserved on Windows, so late
+in a long suite another process could bind it first, the gateway child died
+on its bind, and the poll burned the whole window before an opaque
+"never came up". Resolution: one shared boot authority
+(`desktop_tests/_boot.py`) replaces the seven duplicated helpers - readiness
+fails immediately with the child's exit code and log tail when the process
+dies pre-ready, and re-boots on a fresh port pair with bounded attempts,
+dead-child only, so a genuine boot regression still fails loudly. All six
+desktop gates and the live service harness migrated; the whole desktop gate
+suite passes including the three former flakers.
 
 ## Recommendations
 
@@ -116,6 +125,5 @@ codebase-health flake queue.
 - Run a vault-curate pass over the desktop-product-profile plan to annotate
   the void capsule waves against the superseding record
   (plan-capsule-waves-void).
-- Fold the three flaking admission gates into the codebase-health flake
-  workstream with the parallel-load reproduction noted
-  (admission-flake-baseline).
+- None outstanding for admission-flake-baseline: resolved in-tree by the
+  shared death-aware boot authority.

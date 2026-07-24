@@ -23,9 +23,12 @@ import subprocess
 import sys
 import time
 from contextlib import contextmanager
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import httpx
+
+from vaultspec_a2a.lifecycle.discovery import is_pid_alive
 
 from .test_run_admission import (
     _ATTACH,
@@ -36,7 +39,6 @@ from .test_run_admission import (
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
-    from pathlib import Path
 
 import os
 
@@ -329,3 +331,189 @@ def test_two_gateways_one_worker_authenticated_pairing(tmp_path: Path) -> None:
                 or "cannot adopt or evict" in log_text
                 or "not adoptable" in log_text
             ), "expected B's log to carry a provenance-shaped refusal"
+
+
+# A genuinely armed drive of the production ``_spawn_worker`` conflict branch.
+#
+# The PRIOR_GENERATION authorized-eviction path cannot be reached by a black-box
+# gateway subprocess: ``GATEWAY_LIFETIME_ID`` is a per-process ``uuid4`` a
+# squatter cannot forge, and a real spawned worker honours ``/admin/shutdown`` so
+# its eviction never *fails*. So this runs under a real armed desktop profile,
+# reads THIS process's own lifetime - the only value a prior-generation worker of
+# this gateway could legitimately carry - hands it to a stubborn squatter that
+# reports an earlier generation and refuses to die, then drives the production
+# ``_spawn_worker`` at a higher generation. The gateway logic is production code;
+# the squatter is the modeled adversary (a wedged prior worker), never a stand-in
+# for any code under test.
+_PRIOR_GENERATION_CONFLICT_DRIVER = """
+import asyncio
+import contextlib
+import json
+import subprocess
+import sys
+import time
+
+import httpx
+
+from vaultspec_a2a.control.config import settings
+from vaultspec_a2a.control.worker_management import (
+    GATEWAY_LIFETIME_ID,
+    _spawn_worker,
+    _worker_stderr_log_path,
+)
+
+squatter_file, worker_port_s, squatter_log, result_file = sys.argv[1:5]
+worker_port = int(worker_port_s)
+
+if not settings.desktop_profile_armed:
+    raise SystemExit("driver requires the armed desktop profile")
+
+# The squatter claims THIS gateway's lifetime at an earlier generation: exactly
+# what a prior-generation worker this gateway spawned would report.
+body = {
+    "status": "healthy",
+    "paired_gateway_lifetime": GATEWAY_LIFETIME_ID,
+    "worker_generation": "1",
+}
+# Detach the squatter's std streams: it outlives this driver (the parent reaps
+# it), so inheriting the driver's captured pipes would wedge the parent's read on
+# a pipe the squatter never closes.
+squatter = subprocess.Popen(
+    [sys.executable, squatter_file, str(worker_port), json.dumps(body), squatter_log],
+    stdin=subprocess.DEVNULL,
+    stdout=subprocess.DEVNULL,
+    stderr=subprocess.DEVNULL,
+)
+
+deadline = time.monotonic() + 10
+while time.monotonic() < deadline:
+    try:
+        with httpx.Client(timeout=1.0) as client:
+            if client.get(f"http://127.0.0.1:{worker_port}/health").status_code == 200:
+                break
+    except httpx.HTTPError:
+        time.sleep(0.05)
+else:
+    raise SystemExit("squatter never came up")
+
+worker_url = f"http://127.0.0.1:{worker_port}"
+# generation=2 makes the reported generation 1 a PRIOR_GENERATION verdict, which
+# authorizes eviction under the armed profile; the squatter's refusal to release
+# the port makes that eviction fail.
+result = asyncio.run(_spawn_worker(worker_url, worker_port, generation=2))
+autospawn_log = _worker_stderr_log_path(worker_port)
+
+# Were the conflict guard absent, _spawn_worker would spawn a real worker onto the
+# held port; reap any such handle so the driver leaks nothing, while still
+# reporting that a spawn was attempted.
+if result is not None:
+    with contextlib.suppress(Exception):
+        result.kill()
+        result.wait(timeout=10)
+
+with open(result_file, "w", encoding="utf-8") as handle:
+    json.dump(
+        {
+            "armed": settings.desktop_profile_armed,
+            "squatter_pid": squatter.pid,
+            "spawn_result": "process" if result is not None else "none",
+            "autospawn_log": str(autospawn_log),
+            "autospawn_log_exists": autospawn_log.exists(),
+        },
+        handle,
+    )
+"""
+
+
+def test_failed_owner_authorized_eviction_is_conflict_without_adoption(
+    tmp_path: Path,
+) -> None:
+    """A failed owner-authorized eviction is a conflict, never an adoption.
+
+    Under the armed desktop profile a prior-generation worker this gateway
+    spawned is evictable; but when that eviction fails - the worker is wedged and
+    ignores the shutdown - the gateway must refuse to spawn onto the held port
+    (conflict, no adoption), never adopt the survivor and never spawn a competitor
+    onto a port it still holds.
+
+    Discriminating on three independent axes, all against real processes:
+
+    - No adoption: ``_spawn_worker`` returns no worker handle.
+    - No spawn after the failed eviction: the deterministic worker-autospawn
+      stderr log is never created. Remove the conflict guard and the code falls
+      through to spawn a real worker onto the held port, which opens that log
+      before it even fails to bind - so this file's absence fails loudly.
+    - The eviction was really *authorized and attempted*: the squatter received
+      the bearer-authenticated ``POST /admin/shutdown``. That distinguishes the
+      PRIOR_GENERATION authorized-eviction branch from the FOREIGN/UNIDENTIFIED
+      refuse-*without*-eviction branch, which sends no shutdown at all.
+    """
+    worker_port = free_port()
+    app_home = tmp_path / "app-home"
+    app_home.mkdir()
+    squatter_file = tmp_path / "squatter.py"
+    squatter_file.write_text(_SQUATTER, encoding="utf-8")
+    driver_file = tmp_path / "prior_generation_conflict_driver.py"
+    driver_file.write_text(_PRIOR_GENERATION_CONFLICT_DRIVER, encoding="utf-8")
+    squatter_log = tmp_path / "squatter-requests.log"
+    squatter_log.write_text("", encoding="utf-8")
+    result_file = tmp_path / "result.json"
+
+    env = os.environ.copy()
+    env["VAULTSPEC_DESKTOP_APP_HOME"] = str(app_home)
+    env["VAULTSPEC_ENVIRONMENT"] = "production"
+    env["VAULTSPEC_PORT"] = str(free_port())
+    env["VAULTSPEC_WORKER_PORT"] = str(worker_port)
+
+    driver = subprocess.run(
+        [
+            sys.executable,
+            str(driver_file),
+            str(squatter_file),
+            str(worker_port),
+            str(squatter_log),
+            str(result_file),
+        ],
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+    assert driver.returncode == 0, (
+        f"driver failed ({driver.returncode}):\n{driver.stdout}\n{driver.stderr}"
+    )
+    result = json.loads(result_file.read_text(encoding="utf-8"))
+    squatter_pid = int(result["squatter_pid"])
+    try:
+        assert result["armed"] is True, result
+
+        # No adoption: the demand produced no worker handle.
+        assert result["spawn_result"] == "none", result
+
+        # No spawn attempted after the failed eviction (checked independently of
+        # the driver's own report, on the real filesystem).
+        assert result["autospawn_log_exists"] is False, result
+        assert not Path(result["autospawn_log"]).exists(), result
+
+        requests = squatter_log.read_text(encoding="utf-8").splitlines()
+        # The authorized eviction was really attempted against the occupant.
+        assert any(line.startswith("POST /admin/shutdown") for line in requests), (
+            requests
+        )
+        # And it began as a health-provenance read, not a blind kill.
+        assert any(line.startswith("GET /health") for line in requests), requests
+
+        # Eviction failed: the wedged squatter ignored the shutdown and still
+        # holds the port - and was NOT adopted regardless.
+        assert is_pid_alive(squatter_pid), (
+            "the wedged prior-generation worker must survive a failed eviction"
+        )
+    finally:
+        import asyncio
+
+        from vaultspec_a2a.utils import kill_pid_tree_async
+
+        with contextlib.suppress(Exception):
+            asyncio.run(
+                kill_pid_tree_async(squatter_pid, term_timeout=5.0, kill_timeout=5.0)
+            )

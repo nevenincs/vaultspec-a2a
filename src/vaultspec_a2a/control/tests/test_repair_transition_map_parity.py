@@ -16,7 +16,9 @@ import pytest_asyncio
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from vaultspec_a2a.control.repair_transitions import (
+    apply_dispatch_failure,
     mark_cancel_requested,
+    mark_dispatch_failed,
     mark_ingest_applied,
     mark_ingest_requested,
     mark_message_followup_applied,
@@ -26,8 +28,11 @@ from vaultspec_a2a.control.repair_transitions import (
 )
 from vaultspec_a2a.database import create_thread
 from vaultspec_a2a.database.models import Base
-from vaultspec_a2a.thread.enums import ControlActionType
-from vaultspec_a2a.thread.repair_policy import repair_state_for_action
+from vaultspec_a2a.thread.enums import ControlActionType, ThreadStatus
+from vaultspec_a2a.thread.repair_policy import (
+    DISPATCH_FAILED_TRANSITION,
+    repair_state_for_action,
+)
 
 
 @pytest_asyncio.fixture
@@ -88,5 +93,67 @@ async def test_each_transition_persists_what_the_map_declares(
         await session.commit()
 
     assert updated is not None
+    assert updated.repair_status == expected.repair_status.value
+    assert updated.execution_readiness == expected.execution_readiness
+
+
+@pytest.mark.asyncio
+async def test_dispatch_failed_persists_the_pure_policy_transition(
+    session_factory,
+) -> None:
+    """Dispatch failure writes exactly the pure ``DISPATCH_FAILED_TRANSITION``.
+
+    Dispatch failure has no ``(action, phase)`` map key, but its repair state is
+    still owned by the pure policy rather than spelled out inline in the
+    transition function; this proves the function persists that one authority.
+    """
+    expected = DISPATCH_FAILED_TRANSITION
+
+    async with session_factory() as session:
+        thread = await create_thread(
+            session,
+            title="parity",
+            repair_status="healthy",
+            execution_readiness="healthy",
+        )
+        await session.commit()
+
+        updated = await mark_dispatch_failed(session, thread.id, reason="boom")
+        await session.commit()
+
+    assert updated is not None
+    assert updated.repair_status == expected.repair_status.value
+    assert updated.execution_readiness == expected.execution_readiness
+    assert updated.repair_reason == "boom"
+
+
+@pytest.mark.asyncio
+async def test_apply_dispatch_failure_moves_status_and_repair_state_together(
+    session_factory,
+) -> None:
+    """The shared helper pairs the thread-status change with the repair transition.
+
+    The three dispatch callers used to spell both mutations inline; the helper is
+    the single place that performs them, so a caller cannot update one without the
+    other.
+    """
+    expected = DISPATCH_FAILED_TRANSITION
+
+    async with session_factory() as session:
+        thread = await create_thread(
+            session,
+            title="apply",
+            repair_status="healthy",
+            execution_readiness="healthy",
+        )
+        await session.commit()
+
+        updated = await apply_dispatch_failure(
+            session, thread.id, failed_status=ThreadStatus.FAILED
+        )
+        await session.commit()
+
+    assert updated is not None
+    assert updated.status == ThreadStatus.FAILED.value
     assert updated.repair_status == expected.repair_status.value
     assert updated.execution_readiness == expected.execution_readiness

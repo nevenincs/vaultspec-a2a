@@ -9,6 +9,7 @@ these mappings were scattered across 7 functions in
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Final
 
 from .enums import ControlActionType, RepairStatus
 
@@ -55,6 +56,18 @@ _REPAIR_MAP: dict[tuple[ControlActionType, str], RepairTransition] = {
         execution_readiness=RepairStatus.CANCEL_PENDING.value,
     ),
 }
+
+
+# Worker-dispatch failure has no durable journaled ``ControlActionType`` and so
+# is not a ``(action, phase)`` entry in the map above; it is a terminal
+# operator-intervention repair state produced when dispatch fails. Declaring it
+# here keeps the pure policy the single authority for every repair-state value
+# the transition functions persist, rather than repeating the enum values inline
+# in ``control/repair_transitions.py``.
+DISPATCH_FAILED_TRANSITION: Final = RepairTransition(
+    repair_status=RepairStatus.OPERATOR_INTERVENTION_REQUIRED,
+    execution_readiness=RepairStatus.OPERATOR_INTERVENTION_REQUIRED.value,
+)
 
 
 def repair_state_for_action(

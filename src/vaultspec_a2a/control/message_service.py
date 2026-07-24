@@ -16,7 +16,7 @@ from typing import TYPE_CHECKING
 
 from ..control.dispatch import safe_dispatch
 from ..control.repair_transitions import (
-    mark_dispatch_failed,
+    apply_dispatch_failure,
     mark_message_followup_applied,
     mark_message_followup_requested,
 )
@@ -27,7 +27,7 @@ from ..database import (
     update_thread_status,
 )
 from ..ipc.schemas import DispatchRequest, to_dispatch_action
-from ..thread.dispatch_policy import FailureType, classify_dispatch_failure
+from ..thread.dispatch_policy import FailureType, evaluate_dispatch_failure
 from ..thread.enums import ControlActionType, ThreadStatus
 from ..thread.idempotency import default_message_key
 from ..thread.message_policy import can_send_followup
@@ -180,13 +180,11 @@ async def send_followup_message(
     )
 
     if not outcome.success:
-        policy = classify_dispatch_failure(outcome.failure_type)
-        typed_failure = (
-            FailureType(outcome.failure_type) if outcome.failure_type else None
-        )
+        policy, typed_failure = evaluate_dispatch_failure(outcome.failure_type)
         if policy.should_mark_failed:
-            await update_thread_status(db, thread_id, ThreadStatus.FAILED)
-            await mark_dispatch_failed(db, thread_id)
+            await apply_dispatch_failure(
+                db, thread_id, failed_status=ThreadStatus.FAILED
+            )
         await db.commit()
         return MessageResult(
             action_id=action.id,

@@ -71,3 +71,26 @@ def classify_dispatch_failure(failure_type: str | None) -> FailureAction:
     if failure_type is None:
         return FailureAction(should_mark_failed=False, is_circuit_open=False)
     return _POLICY.get(failure_type, _DEFAULT)
+
+
+def evaluate_dispatch_failure(
+    failure_type: str | None,
+) -> tuple[FailureAction, FailureType | None]:
+    """Classify a dispatch failure and resolve its typed form together.
+
+    Every dispatch caller (run creation, message follow-up, permission resume,
+    cancel) pairs the failure-action classification with the same typed-failure
+    resolution. Returning both from one call keeps those callers from deriving
+    the pair differently.
+
+    Args:
+        failure_type: The ``DispatchOutcome.failure_type`` string, or None.
+
+    Returns:
+        The canonical :class:`FailureAction` and the :class:`FailureType` the
+        string maps to (``None`` when there is no failure type).
+    """
+    return (
+        classify_dispatch_failure(failure_type),
+        FailureType(failure_type) if failure_type else None,
+    )

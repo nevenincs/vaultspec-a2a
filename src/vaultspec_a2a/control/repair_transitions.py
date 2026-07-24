@@ -4,14 +4,28 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from ..database import set_thread_repair_state
-from ..thread.enums import ControlActionType, RepairStatus
-from ..thread.repair_policy import repair_state_for_action
+from ..database import set_thread_repair_state, update_thread_status
+from ..thread.enums import ControlActionType, ThreadStatus
+from ..thread.repair_policy import DISPATCH_FAILED_TRANSITION, repair_state_for_action
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
 
     from ..database.models import ThreadModel
+
+
+async def apply_dispatch_failure(
+    db: AsyncSession, thread_id: str, *, failed_status: ThreadStatus
+) -> ThreadModel | None:
+    """Apply the shared dispatch-failure state transition.
+
+    Run creation, message follow-up, and permission resume all react to a
+    should-mark-failed dispatch outcome by pairing a thread-status change with
+    the dispatch-failed repair transition. Centralizing the pair keeps a caller
+    from updating one without the other.
+    """
+    await update_thread_status(db, thread_id, failed_status)
+    return await mark_dispatch_failed(db, thread_id)
 
 
 async def mark_ingest_requested(db: AsyncSession, thread_id: str) -> ThreadModel | None:
@@ -113,10 +127,11 @@ async def mark_dispatch_failed(
     *,
     reason: str = "Worker dispatch failed",
 ) -> ThreadModel | None:
+    transition = DISPATCH_FAILED_TRANSITION
     return await set_thread_repair_state(
         db,
         thread_id,
-        repair_status=RepairStatus.OPERATOR_INTERVENTION_REQUIRED,
+        repair_status=transition.repair_status,
         repair_reason=reason,
-        execution_readiness=RepairStatus.OPERATOR_INTERVENTION_REQUIRED.value,
+        execution_readiness=transition.execution_readiness,
     )

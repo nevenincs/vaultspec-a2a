@@ -20,6 +20,7 @@ from __future__ import annotations
 
 __all__ = [
     "circuit_breaker",
+    "cleanup",
     "config",
     "db",
     "diagnostics",

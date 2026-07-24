@@ -12,7 +12,6 @@ import asyncio
 import contextlib
 import json
 import logging
-import pathlib
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 from uuid import uuid4
@@ -28,7 +27,6 @@ from ..control.repair_transitions import (
 from ..database import (
     create_control_action,
     create_thread,
-    delete_thread,
     get_artifacts_by_thread,
     get_pending_permission_requests,
     get_thread,
@@ -52,7 +50,15 @@ from ..thread.enums import (
 from ..thread.errors import ConfigError, TeamConfigNotFoundError
 from ..thread.lifecycle_guards import can_archive, can_delete
 from ..thread.snapshots import PLAN_APPROVAL_PAUSE_CAUSES, project_checkpoint_tuple
+from .cleanup import build_cleanup_manifest, execute_cleanup_manifest
 from .permission_options import extract_allowed_option_ids
+from .repositories import (
+    CleanupItemResult,
+    advance_deletion_cleanup_item,
+    claim_deletion_saga,
+    create_deletion_saga,
+    finalize_deletion_saga,
+)
 
 if TYPE_CHECKING:
     from datetime import datetime
@@ -599,11 +605,19 @@ async def create_and_dispatch_thread(
 
 @dataclass(frozen=True, slots=True)
 class DeleteResult:
-    """Outcome of :func:`delete_thread_service`."""
+    """Outcome of :func:`delete_thread_service`.
+
+    ``deleted`` is true only when the saga finalized and every control row is
+    gone. ``cleanup_incomplete`` means the deletion started durably but at
+    least one cross-store cleanup item did not finish, so the thread stays
+    hidden and the saga is resumable on retry. ``error_detail`` carries a
+    lifecycle-guard refusal reason when the delete was refused before it began.
+    """
 
     deleted: bool
     not_found: bool = False
     error_detail: str | None = None
+    cleanup_incomplete: bool = False
 
 
 async def delete_thread_service(
@@ -612,68 +626,71 @@ async def delete_thread_service(
     *,
     checkpointer: Any | None = None,
 ) -> DeleteResult:
-    """Hard-delete a thread after lifecycle-guard validation.
+    """Delete a thread through the durable cross-store deletion saga.
 
-    Commits the session before returning — the service owns its
-    transaction boundary.
+    Replaces irreversible hard deletion with a resumable saga. A fresh delete
+    captures the cleanup manifest and marks the thread ``deleting`` in one
+    durable commit before any external effect; a replayed or resumed request on
+    an already-``deleting`` thread rejoins the same saga. Cleanup then removes
+    the checkpoint and artifact files from the durable manifest, and the control
+    rows are removed only once every item is done.
+
+    Commits the session at each durable boundary — the service owns its
+    transaction boundaries. Does **not** raise ``HTTPException``.
     """
     thread = await get_thread(db, thread_id)
     if thread is None:
         return DeleteResult(deleted=False, not_found=True)
 
-    eligibility = can_delete(thread.status)
-    if not eligibility.allowed:
-        return DeleteResult(deleted=False, error_detail=eligibility.reason)
+    if thread.status != ThreadStatus.DELETING.value:
+        eligibility = can_delete(thread.status)
+        if not eligibility.allowed:
+            return DeleteResult(deleted=False, error_detail=eligibility.reason)
+        manifest = build_cleanup_manifest(
+            thread,
+            await get_artifacts_by_thread(db, thread_id),
+            include_checkpoint=checkpointer is not None,
+        )
+        await create_deletion_saga(db, thread_id=thread_id, manifest=manifest)
+        await db.commit()
 
-    # Collect artifact file paths before CASCADE destroys the rows.
-    _cleanup_artifact_files(thread, await get_artifacts_by_thread(db, thread_id))
-
-    deleted = await delete_thread(db, thread_id)
-    if not deleted:
-        return DeleteResult(deleted=False, not_found=True)
-
-    if checkpointer is not None:
-        await checkpointer.adelete_thread(thread_id)
-
-    await db.commit()
-    return DeleteResult(deleted=True)
+    return await _run_deletion_saga(db, thread_id, checkpointer=checkpointer)
 
 
-def _cleanup_artifact_files(
-    thread: Any,
-    artifacts: Any,
-) -> None:
-    """Best-effort removal of workspace artifact files.
+async def _run_deletion_saga(
+    db: AsyncSession,
+    thread_id: str,
+    *,
+    checkpointer: Any | None,
+) -> DeleteResult:
+    """Claim, drive, and finalize the deletion saga for one thread.
 
-    Resolves each artifact path against the thread workspace_root and
-    validates that the resolved path is confined within the workspace
-    before unlinking.  Failures are suppressed — file cleanup is
-    best-effort during hard delete.
+    Idempotent by construction: already-done cleanup items are skipped, and a
+    saga that another pass finalized between reads reports a completed delete.
     """
-    if not artifacts:
-        return
-    metadata_json = getattr(thread, "thread_metadata", None)
-    if not metadata_json:
-        return
-    try:
-        meta = json.loads(metadata_json)
-    except (json.JSONDecodeError, TypeError):
-        return
-    workspace_root_str = meta.get("workspace_root")
-    if not workspace_root_str:
-        return
-    workspace_root = pathlib.Path(workspace_root_str).resolve()
-    if not workspace_root.is_dir():
-        return
-    for artifact in artifacts:
-        try:
-            target = (workspace_root / artifact.path).resolve()
-            if not target.is_relative_to(workspace_root):
-                continue
-            if target.is_file():
-                target.unlink()
-        except (OSError, ValueError):
-            continue
+    saga = await claim_deletion_saga(db, thread_id=thread_id)
+    await db.commit()
+    if saga is None:
+        # The saga was finalized between the status read and the claim; the
+        # thread is already fully deleted.
+        return DeleteResult(deleted=True)
+
+    async def _advance(result: CleanupItemResult) -> None:
+        await advance_deletion_cleanup_item(db, thread_id=thread_id, result=result)
+        await db.commit()
+
+    await execute_cleanup_manifest(
+        saga.manifest,
+        saga.results,
+        checkpointer=checkpointer,
+        advance=_advance,
+    )
+
+    outcome = await finalize_deletion_saga(db, thread_id=thread_id)
+    await db.commit()
+    if outcome.finalized:
+        return DeleteResult(deleted=True)
+    return DeleteResult(deleted=False, cleanup_incomplete=True)
 
 
 # ---------------------------------------------------------------------------

@@ -210,12 +210,25 @@ async def delete_thread_endpoint(
     aggregator: EventAggregator = Depends(get_aggregator),
     checkpointer: Checkpointer = Depends(get_checkpointer),
 ) -> None:
-    """Hard-delete a thread and all cascading artifacts."""
+    """Delete a thread through the durable cross-store deletion saga.
+
+    A replayed request resumes the same saga rather than starting a second
+    teardown, so repeated calls converge on one deletion.
+    """
     result = await delete_thread_service(db, thread_id, checkpointer=checkpointer)
     if result.not_found:
         raise HTTPException(status_code=404, detail="Thread not found")
-    if not result.deleted:
+    if result.error_detail is not None:
         raise HTTPException(status_code=409, detail=result.error_detail)
+    if result.cleanup_incomplete:
+        # The deletion is durable and the thread is hidden, but at least one
+        # cross-store cleanup item did not finish. Signal a retryable state
+        # rather than falsely reporting the thread fully deleted; a retry
+        # resumes the same saga.
+        raise HTTPException(
+            status_code=503,
+            detail="Thread deletion is in progress; retry to complete cleanup.",
+        )
     aggregator.clear_thread_state(thread_id)
 
 

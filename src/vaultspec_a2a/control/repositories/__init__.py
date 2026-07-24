@@ -11,4 +11,38 @@ operations are re-exported here as the package's public surface.
 
 from __future__ import annotations
 
-__all__: list[str] = []
+from .deletion_saga import (
+    CleanupItem,
+    CleanupItemResult,
+    CleanupItemState,
+    CleanupKind,
+    DeletionSaga,
+    FinalizeOutcome,
+    advance_deletion_cleanup_item,
+    claim_deletion_saga,
+    create_deletion_saga,
+    deserialize_manifest,
+    deserialize_results,
+    finalize_deletion_saga,
+    manifest_is_complete,
+    serialize_manifest,
+    serialize_results,
+)
+
+__all__ = [
+    "CleanupItem",
+    "CleanupItemResult",
+    "CleanupItemState",
+    "CleanupKind",
+    "DeletionSaga",
+    "FinalizeOutcome",
+    "advance_deletion_cleanup_item",
+    "claim_deletion_saga",
+    "create_deletion_saga",
+    "deserialize_manifest",
+    "deserialize_results",
+    "finalize_deletion_saga",
+    "manifest_is_complete",
+    "serialize_manifest",
+    "serialize_results",
+]

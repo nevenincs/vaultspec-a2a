@@ -24,6 +24,7 @@ from ..graph.events import (
     ToolCallStart,
     ToolCallUpdate,
 )
+from ..streaming.sse_frames import enforce_progress_allowlist
 
 if TYPE_CHECKING:
     from ..streaming.aggregator import SequencedEvent
@@ -55,7 +56,11 @@ from .schemas.events import (
     ToolCallUpdateEvent,
 )
 
-__all__ = ["domain_to_wire", "sequenced_to_wire"]
+__all__ = [
+    "domain_to_wire",
+    "sequenced_to_positive_payload",
+    "sequenced_to_wire",
+]
 
 
 def _ts(epoch: float) -> datetime:
@@ -260,3 +265,20 @@ def domain_to_wire(event: DomainEvent, sequence: int) -> ServerEvent:
 def sequenced_to_wire(sequenced: SequencedEvent) -> ServerEvent:
     """Convenience wrapper: unpack a ``SequencedEvent`` and convert."""
     return domain_to_wire(sequenced.event, sequenced.sequence)
+
+
+def sequenced_to_positive_payload(sequenced: SequencedEvent) -> dict[str, object]:
+    """Project an in-process ``SequencedEvent`` onto the positive progress edge.
+
+    The wire model carries fields that violate the progress content boundary -
+    ``ArtifactUpdateEvent.content`` (artifact body) and the ``diff`` tool-call
+    content block's ``new_text``/``old_text`` (edit diff). This is the boundary
+    projection for the in-process event path: it converts the event to its wire
+    shape, then applies the positive allowlist so those bodies and any raw
+    provider payload are dropped by omission before encoding. It mirrors
+    :func:`vaultspec_a2a.streaming.transformer.project_run_progress`, which does
+    the same for relayed worker payloads, so both stream sources cross the edge
+    under one allowlist.
+    """
+    payload = sequenced_to_wire(sequenced).model_dump(mode="json")
+    return dict(enforce_progress_allowlist(payload))

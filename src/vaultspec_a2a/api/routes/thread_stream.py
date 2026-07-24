@@ -18,7 +18,7 @@ from ...streaming.aggregator import EventAggregator, SequencedEvent
 from ...streaming.sse_frames import encode_sse_frame
 from ...thread.enums import TERMINAL_STATUSES
 from ..dependencies import get_aggregator
-from ..event_adapter import sequenced_to_wire
+from ..event_adapter import sequenced_to_positive_payload
 from ..schemas.events import HeartbeatEvent
 
 if TYPE_CHECKING:
@@ -89,7 +89,11 @@ async def _stream_thread_events(
                 continue
 
             if isinstance(item, SequencedEvent):
-                payload = sequenced_to_wire(item).model_dump(mode="json")
+                # In-process events are projected onto the positive progress
+                # allowlist here; relayed worker payloads were already projected
+                # at the relay seam. The encode boundary re-applies the allowlist
+                # to both, so a forbidden body cannot cross by either path.
+                payload = sequenced_to_positive_payload(item)
             else:
                 payload = _normalize_payload(item)
 

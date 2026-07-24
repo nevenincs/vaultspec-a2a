@@ -33,7 +33,6 @@ from __future__ import annotations
 
 import json
 import os
-import sys
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 from urllib.parse import urlparse
@@ -62,6 +61,7 @@ from ..protocols.mcp.authoring_stdio import (
     ENV_SERVER_NAME as STDIO_ENV_SERVER_NAME,
 )
 from ..thread.errors import ConfigError
+from ..utils.runtime_exec import is_module_invocation, module_command
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -269,15 +269,21 @@ def build_authoring_stdio_mcp_servers(
     ``${VAULTSPEC_AUTHORING_*}`` placeholders and the real values ride the CLI
     spawn env — so surfacing rides the home channel, not the injected session.
 
-    ``python_executable`` defaults to the current interpreter (``sys.executable``),
-    which in a deployed run is the venv python carrying the installed package.
+    ``python_executable`` defaults to the runtime command authority's own
+    executable, which in a deployed run carries the installed package (the venv
+    interpreter from source, the frozen binary itself when frozen).
     """
     if binding.engine_base_url is None or binding.run_id is None:
         raise ValueError(
             "stdio authoring bridge requires engine_base_url + run_id on the "
             "binding; this binding carries only the HTTP transport"
         )
-    command = python_executable or sys.executable
+    # Freeze-safe bridge argv rendered by the runtime's command authority
+    # (`python -m <module>` from source, the binary's run-module dispatch when
+    # frozen); the explicit python_executable override substitutes only the
+    # launched command, never the args signature the admission key rides on.
+    bridge_argv = module_command(AUTHORING_STDIO_MODULE)
+    command = python_executable or bridge_argv[0]
     env = [
         {"name": STDIO_ENV_BASE_URL, "value": binding.engine_base_url},
         {"name": STDIO_ENV_BEARER, "value": binding.bearer_token},
@@ -303,7 +309,7 @@ def build_authoring_stdio_mcp_servers(
         {
             "name": AUTHORING_MCP_SERVER_NAME,
             "command": command,
-            "args": ["-m", AUTHORING_STDIO_MODULE],
+            "args": bridge_argv[1:],
             "env": env,
         }
     ]
@@ -333,8 +339,9 @@ def config_home_authoring_entry(
     placeholder and its value can never diverge; callers MUST NOT split this.
 
     Admission is guarded by shape: only a spec named
-    :data:`AUTHORING_MCP_SERVER_NAME` whose ``args`` are exactly
-    ``["-m", AUTHORING_STDIO_MODULE]`` is admitted — i.e. provably produced by
+    :data:`AUTHORING_MCP_SERVER_NAME` whose ``args`` are exactly this runtime's
+    own invocation of the bridge module (the command authority's source or
+    frozen shape) is admitted — i.e. provably produced by
     :func:`build_authoring_stdio_mcp_servers` off a validated
     :class:`AuthoringToolBinding`. Anything else under that name (an HTTP entry,
     a foreign module, a missing env) raises :class:`ConfigError` rather than
@@ -346,12 +353,13 @@ def config_home_authoring_entry(
     for spec in mcp_servers:
         if spec.get("name") != AUTHORING_MCP_SERVER_NAME:
             continue
-        if spec.get("args") != ["-m", AUTHORING_STDIO_MODULE]:
+        if not is_module_invocation(spec.get("args"), AUTHORING_STDIO_MODULE):
             raise ConfigError(
                 f"refusing to admit server {AUTHORING_MCP_SERVER_NAME!r} into the "
                 f"isolated config home: its shape is not the per-run stdio "
-                f"authoring bridge (args must be ['-m', {AUTHORING_STDIO_MODULE!r}] "
-                f"as built by build_authoring_stdio_mcp_servers)"
+                f"authoring bridge (args must be this runtime's invocation of "
+                f"{AUTHORING_STDIO_MODULE!r} as built by "
+                f"build_authoring_stdio_mcp_servers)"
             )
         if not spec.get("command"):
             raise ConfigError(
@@ -370,15 +378,17 @@ def config_home_authoring_entry(
             var = item["name"]
             home_env[var] = f"${{{var}}}"
             spawn_env[var] = item["value"]
-        # Pin the emitted command to THIS worker's interpreter rather than
-        # passing the spec's value through: the bridge is `python -m <module>` in
-        # the worker's own venv, and sys.executable is the trusted interpreter that
-        # carries the installed package. The spec's command is validated present
-        # above (shape integrity) but never trusted as the launched binary.
+        # Pin the emitted command to THIS runtime's own invocation rather than
+        # passing the spec's value through: the authority renders the trusted
+        # executable (the worker's venv interpreter from source, the frozen
+        # binary itself when frozen) carrying the installed package. The spec's
+        # command is validated present above (shape integrity) but never
+        # trusted as the launched binary.
+        emitted_argv = module_command(AUTHORING_STDIO_MODULE)
         home[AUTHORING_MCP_SERVER_NAME] = {
             "type": "stdio",
-            "command": sys.executable,
-            "args": ["-m", AUTHORING_STDIO_MODULE],
+            "command": emitted_argv[0],
+            "args": emitted_argv[1:],
             "env": home_env,
         }
     return home, spawn_env

@@ -15,7 +15,7 @@ The gateway runs the *production* lifespan rather than a test substitute: an
 override would leave the application state unseated, and every authenticated verb
 would answer 500 instead of exercising the credential planes under test.
 
-The valid database is seated by the real ``desktop-migrate`` entrypoint in a
+The valid database is seated by the real ``migrate`` entrypoint in a
 separate process; the gateway is a second real process. No mock, monkeypatch,
 stub, skip, or expected failure is used; the child is always torn down in a
 ``finally``.
@@ -29,7 +29,6 @@ import socket
 import subprocess
 import sys
 import time
-from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
 
 import httpx
@@ -40,7 +39,6 @@ from vaultspec_a2a.desktop.credentials import (
     OWNERSHIP_CAPABILITY_NAME,
 )
 from vaultspec_a2a.desktop.profile import derive_state_paths
-from vaultspec_a2a.desktop.transaction import package_migration_range
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -84,39 +82,17 @@ def _free_port() -> int:
         return sock.getsockname()[1]
 
 
-def _write_descriptor(descriptor_path: Path, app_home: Path) -> Path:
-    """Write a one-time migration descriptor for the app home's stores."""
-    state = derive_state_paths(app_home)
-    packaged = package_migration_range()
-    document = {
-        "descriptor_version": "1",
-        "transaction_id": "credential-boundaries-txn-1",
-        "app_home": str(app_home),
-        "database_path": str(state.database_path),
-        "checkpoint_path": str(state.checkpoint_path),
-        "generation": {"manifest_digest": _DIGEST, "component_version": "4.0.0"},
-        "migration_range": {"base": packaged.base, "head": packaged.head},
-        "expires_at": (datetime.now(UTC) + timedelta(hours=1)).isoformat(),
-    }
-    descriptor_path.write_text(json.dumps(document), encoding="utf-8")
-    return descriptor_path
-
-
-def _seat_valid_database(app_home: Path, descriptor: Path) -> None:
-    """Seat a valid desktop database via the real desktop-migrate entrypoint."""
-    result = subprocess.run(
-        [
-            sys.executable,
-            "-m",
-            _MODULE,
-            "desktop-migrate",
-            "--descriptor",
-            str(descriptor),
-        ],
-        capture_output=True,
-        text=True,
-        timeout=180,
-    )
+def _seat_valid_database(app_home: Path) -> None:
+    """Seat a valid desktop database via the real migrate entrypoint."""
+    command = [
+        sys.executable,
+        "-m",
+        _MODULE,
+        "migrate",
+        "--app-home",
+        str(app_home),
+    ]
+    result = subprocess.run(command, capture_output=True, text=True, timeout=180)
     assert result.returncode == 0, f"migrate failed: {result.stdout}\n{result.stderr}"
     payload = json.loads(result.stdout.strip())
     assert payload["status"] == "succeeded", payload
@@ -143,7 +119,7 @@ def test_credential_planes_are_isolated_and_secret_free(tmp_path: Path) -> None:
     app_home = tmp_path / "app-home"
     app_home.mkdir()
     credentials_dir = _seed_credentials(app_home)
-    _seat_valid_database(app_home, _write_descriptor(tmp_path / "txn.json", app_home))
+    _seat_valid_database(app_home)
     port = _free_port()
 
     log_path = tmp_path / "gateway.log"

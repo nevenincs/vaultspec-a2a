@@ -3,10 +3,10 @@
 :mod:`vaultspec_a2a.desktop.contract` defines the versioned component model the
 dashboard verifies before launching the bundled runtime. The runtime seam -
 :mod:`vaultspec_a2a.desktop.profile`, :mod:`vaultspec_a2a.desktop.credentials`,
-:mod:`vaultspec_a2a.desktop.settlement`, and the state-lifecycle trio
-(:mod:`vaultspec_a2a.desktop.snapshot`, :mod:`vaultspec_a2a.desktop.migration`,
-:mod:`vaultspec_a2a.desktop.transaction`) - is imported by its own module path;
-this facade re-exports only the stable component-contract surface.
+:mod:`vaultspec_a2a.desktop.settlement`, and the dashboard-spawnable store
+migration in :mod:`vaultspec_a2a.desktop.migration` - is imported by its own
+module path; this facade re-exports only the stable component-contract
+surface.
 
 Consumers of the stable component-manifest contract import from this package
 root::

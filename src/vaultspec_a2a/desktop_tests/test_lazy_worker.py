@@ -16,7 +16,7 @@ loopback sockets, that:
   and the gateway reaches the worker through its own private worker-IPC
   credential, which only its paired owner can present.
 
-The valid database is seated by the real ``desktop-migrate`` entrypoint in a
+The valid database is seated by the real ``migrate`` entrypoint in a
 separate process; the gateway is a second real process and the worker a third,
 gateway-owned one. No mock, monkeypatch, stub, skip, or expected failure is
 used; every child is reaped in a ``finally`` by killing the gateway process
@@ -34,7 +34,6 @@ import subprocess
 import sys
 import time
 from concurrent.futures import ThreadPoolExecutor
-from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
 
 import httpx
@@ -45,7 +44,6 @@ from vaultspec_a2a.desktop.credentials import (
     OWNERSHIP_CAPABILITY_NAME,
 )
 from vaultspec_a2a.desktop.profile import derive_state_paths
-from vaultspec_a2a.desktop.transaction import package_migration_range
 from vaultspec_a2a.utils import kill_pid_tree_async
 
 if TYPE_CHECKING:
@@ -88,33 +86,15 @@ def _seed_credentials(app_home: Path) -> None:
         harden_credential_file(path)
 
 
-def _write_descriptor(descriptor_path: Path, app_home: Path) -> Path:
-    """Write a one-time migration descriptor for the app home's stores."""
-    state = derive_state_paths(app_home)
-    packaged = package_migration_range()
-    document = {
-        "descriptor_version": "1",
-        "transaction_id": "lazyworker-txn-1",
-        "app_home": str(app_home),
-        "database_path": str(state.database_path),
-        "checkpoint_path": str(state.checkpoint_path),
-        "generation": {"manifest_digest": _DIGEST, "component_version": "4.0.0"},
-        "migration_range": {"base": packaged.base, "head": packaged.head},
-        "expires_at": (datetime.now(UTC) + timedelta(hours=1)).isoformat(),
-    }
-    descriptor_path.write_text(json.dumps(document), encoding="utf-8")
-    return descriptor_path
-
-
-def _seat_valid_database(app_home: Path, descriptor: Path) -> None:
-    """Seat a valid desktop database via the real desktop-migrate entrypoint."""
+def _seat_valid_database(app_home: Path) -> None:
+    """Seat a valid desktop database via the real migrate entrypoint."""
     command = [
         sys.executable,
         "-m",
         _MODULE,
-        "desktop-migrate",
-        "--descriptor",
-        str(descriptor),
+        "migrate",
+        "--app-home",
+        str(app_home),
     ]
     result = subprocess.run(command, capture_output=True, text=True, timeout=180)
     assert result.returncode == 0, f"migrate failed: {result.stdout}\n{result.stderr}"
@@ -190,7 +170,7 @@ def test_idle_boot_starts_no_worker_and_concurrent_demand_starts_exactly_one(
     app_home = tmp_path / "app-home"
     app_home.mkdir()
     _seed_credentials(app_home)
-    _seat_valid_database(app_home, _write_descriptor(tmp_path / "txn.json", app_home))
+    _seat_valid_database(app_home)
 
     gateway_port = _free_port()
     worker_port = _free_port()

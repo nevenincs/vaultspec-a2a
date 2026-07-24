@@ -10,7 +10,7 @@ credential, and that a cold, startable worker reads as gateway-ready yet not
 execution-ready - the cold rung of the cold-to-execution ladder - on both the
 authenticated liveness surface and the service-state verb.
 
-The valid database is seated by the real ``desktop-migrate`` entrypoint in a
+The valid database is seated by the real ``migrate`` entrypoint in a
 separate process; the gateway is a second real process. No mock, monkeypatch,
 stub, skip, or expected failure is used; children are torn down in a ``finally``.
 """
@@ -23,7 +23,6 @@ import socket
 import subprocess
 import sys
 import time
-from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
 
 import httpx
@@ -34,7 +33,6 @@ from vaultspec_a2a.desktop.credentials import (
     OWNERSHIP_CAPABILITY_NAME,
 )
 from vaultspec_a2a.desktop.profile import derive_state_paths
-from vaultspec_a2a.desktop.transaction import package_migration_range
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -72,40 +70,17 @@ def _seed_credentials(app_home: Path) -> Path:
     return state.credentials_dir
 
 
-def _write_descriptor(descriptor_path: Path, app_home: Path) -> Path:
-    """Write a one-time migration descriptor for the app home's stores."""
-    state = derive_state_paths(app_home)
-    packaged = package_migration_range()
-    document = {
-        "descriptor_version": "1",
-        "transaction_id": "readiness-txn-1",
-        "app_home": str(app_home),
-        "database_path": str(state.database_path),
-        "checkpoint_path": str(state.checkpoint_path),
-        "generation": {"manifest_digest": _DIGEST, "component_version": "4.0.0"},
-        "migration_range": {"base": packaged.base, "head": packaged.head},
-        "expires_at": (datetime.now(UTC) + timedelta(hours=1)).isoformat(),
-    }
-    descriptor_path.write_text(json.dumps(document), encoding="utf-8")
-    return descriptor_path
-
-
-def _seat_valid_database(app_home: Path, descriptor: Path) -> None:
-    """Seat a valid desktop database via the real desktop-migrate entrypoint."""
+def _seat_valid_database(app_home: Path) -> None:
+    """Seat a valid desktop database via the real migrate entrypoint."""
     command = [
         sys.executable,
         "-m",
         _MODULE,
-        "desktop-migrate",
-        "--descriptor",
-        str(descriptor),
+        "migrate",
+        "--app-home",
+        str(app_home),
     ]
-    result = subprocess.run(
-        command,
-        capture_output=True,
-        text=True,
-        timeout=180,
-    )
+    result = subprocess.run(command, capture_output=True, text=True, timeout=180)
     assert result.returncode == 0, f"migrate failed: {result.stdout}\n{result.stderr}"
     payload = json.loads(result.stdout.strip())
     assert payload["status"] == "succeeded", payload
@@ -140,7 +115,7 @@ def test_desktop_readiness_liveness_minimal_and_readiness_authenticated(
     app_home = tmp_path / "app-home"
     app_home.mkdir()
     _seed_credentials(app_home)
-    _seat_valid_database(app_home, _write_descriptor(tmp_path / "txn.json", app_home))
+    _seat_valid_database(app_home)
 
     port = _free_port()
     log_path = tmp_path / "gateway.log"

@@ -39,11 +39,9 @@ Persistence and operations
 --------------------------
 
 :mod:`vaultspec_a2a.database` persists runtime state.
-:mod:`vaultspec_a2a.desktop` defines the stable desktop capsule contract and
-manifest emission boundary. Workflow-internal
-:mod:`vaultspec_a2a.desktop.artifacts`, :mod:`vaultspec_a2a.desktop.capsule`,
-and :mod:`vaultspec_a2a.desktop.capsule_evidence` verify exact inputs, project
-bounded archive content, and publish installed-tree evidence.
+:mod:`vaultspec_a2a.desktop` defines the stable desktop component contract
+the dashboard verifies, plus the runtime profile, credential, settlement, and
+cross-release state-lifecycle authorities.
 :mod:`vaultspec_a2a.lifecycle` manages machine-global development processes.
 :mod:`vaultspec_a2a.workspace` manages Git worktrees and environments.
 

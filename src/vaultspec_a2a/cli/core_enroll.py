@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import subprocess
-import sys
 import tempfile
 from pathlib import Path
+
+from ..utils.runtime_exec import module_command
 
 _OWNED_PATHS = (
     ".vaultspec",
@@ -102,7 +103,7 @@ def _seed_runtime_without_overwrite(root: Path, staged: Path) -> None:
 
 
 def _core(root: Path, *args: str) -> None:
-    _run(root, sys.executable, "-m", "vaultspec_core", *args)
+    _run(root, *module_command("vaultspec_core"), *args)
 
 
 def main() -> None:

@@ -53,18 +53,21 @@ below; their only consumers are their own tests and the capsule scripts.
   `desktop/_filesystem_authority.py`, `desktop/settlement.py`,
   `desktop/contract.py`, `lifecycle/discovery.py`, `api/auth.py`,
   `cli/provision.py`, `build-constraints.txt`, `scripts/check_node_version.mjs`.
-- State-lifecycle trio kept: `desktop/snapshot.py` (SQLite consistency-group
-  snapshot/restore via the online-backup API; no capsule imports),
-  `desktop/migration.py` (staged Alembic + checkpoint-schema + SDD backfill;
-  imports `database/` and `desktop/transaction.py` only),
-  `desktop/transaction.py` (one-time descriptor validation; imports
-  `MigrationRange` from kept `desktop/contract.py` plus `desktop/profile.py`).
-  Coupling verdict: schema-generation lifecycle, not packaging - a dashboard
-  swapping binary generations still needs quiesced migration and group
-  rollback. Their CLI verbs (`desktop-migrate`, `desktop-snapshot-create`,
-  `desktop-snapshot-inspect`, `desktop-snapshot-restore`) and tests
-  (`test_migration_entrypoint.py`, `test_snapshot_recovery.py`,
-  `test_snapshot_group.py`) stay.
+- State-lifecycle verdict (REVISED on dashboard-source evidence): only the
+  schema authority survives. `desktop/migration.py` is reshaped into the
+  dashboard-spawnable `migrate` entrypoint (packaged-head upgrade, optional
+  `expect_from`/`expect_head` fail-closed assertions, live/locked-store
+  refusal) plus `initialize_fresh_stores` for the setup verb;
+  `package_migration_range` moves into it. DELETED: `desktop/snapshot.py`,
+  `desktop/transaction.py`, and the `desktop-migrate`/`desktop-snapshot-*`
+  CLI verbs. Grounding: the dashboard's update transaction performs the
+  consistency-group snapshot as byte-level Rust file copies and owns
+  drain-snapshot-migrate-activate ordering and rollback itself, spawning a2a
+  only for the migrate step; an exhaustive caller sweep after the capsule
+  strip found no production consumer of snapshot or the descriptor ceremony
+  outside their own tests. The migration entrypoint gate
+  (`test_migration_entrypoint.py`) is reworked to the descriptor-free verb;
+  the snapshot gates are deleted with their subject.
 - `desktop/__init__.py` facade slims to `.contract` exports only; the
   `.manifest` exports leave with `manifest.py`.
 

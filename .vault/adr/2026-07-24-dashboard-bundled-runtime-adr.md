@@ -45,10 +45,13 @@ product shape that will not ship.
 - The runtime contract the dashboard already codes against - service discovery
   record, owner-ACL bearer handoff, authenticated health, readiness, drain, and
   shutdown - is independent of distribution shape and must survive unchanged.
-- Cross-release state lifecycle (Alembic head, checkpoint schema identity,
-  state-driven-development backfill, consistency-group snapshot and restore) is
-  needed regardless of how bytes arrive on disk: swapping a binary generation
-  still leaves the previous generation's SQLite schema behind.
+- Cross-release schema work (Alembic head, checkpoint schema identity,
+  state-driven-development backfill) is needed regardless of how bytes arrive
+  on disk: swapping a binary generation still leaves the previous generation's
+  SQLite schema behind. The dashboard's own update transaction owns ordering
+  and performs consistency-group snapshot and rollback itself as byte-level
+  file copies in Rust; it spawns a2a only for the migrate step (dashboard
+  source, read-only audit).
 - The gateway, worker, provider subprocesses, and MCP bridges are one dependency
   closure in one interpreter today; the freeze boundary must preserve every
   subprocess seam.
@@ -104,10 +107,15 @@ the component contract surface it still owns.
 
 The runtime seam is kept intact: desktop profile and credentials, platform ACL
 and filesystem authority, settlement, the component contract, lifecycle
-discovery, gateway auth, and workspace provisioning. The state-lifecycle trio -
-staged migration entrypoint, one-time transaction descriptor, and
-consistency-group snapshot and restore - is kept as the cross-release state
-contract; it is coupled to schema generations, not to capsule packaging.
+discovery, gateway auth, and workspace provisioning. Of the former
+state-lifecycle machinery only the schema authority survives, reshaped into a
+lean dashboard-spawnable migrate entrypoint (packaged-head upgrade with
+optional fail-closed base and head assertions, refusing live or locked
+stores) plus fresh-store initialisation for setup. The consistency-group
+snapshot module, the one-time transaction descriptor ceremony, and their CLI
+verbs are deleted: the dashboard performs snapshot, rollback, and transaction
+ordering itself and never invokes them - post-strip they had no caller
+outside their own tests.
 
 The service-management CLI completes over the existing lifecycle primitives with
 no second code path: serve (existing, foreground), setup (application-home
@@ -134,10 +142,12 @@ lifecycle verbs. Every alternative preserves machinery whose purpose was
 multi-channel end-user installation - a requirement that no longer exists. The
 freezer objection recorded on the dashboard side is not an argument against the
 binary; it is the specification of the one real blocker, and the command
-authority plus argv dispatch resolves it at a single seam. Keeping the
-state-lifecycle trio while deleting the packaging tree follows the coupling
-evidence: the trio imports schema and profile authorities only, never capsule
-assembly.
+authority plus argv dispatch resolves it at a single seam. Keeping only the
+migrate authority while deleting snapshot and transaction follows the caller
+evidence on both sides: the dashboard's transaction owns snapshot, rollback,
+and ordering itself and spawns a2a solely for the migrate step, and once the
+capsule flow left the tree, a2a's snapshot and descriptor modules had no
+production caller at all.
 
 ## Consequences
 

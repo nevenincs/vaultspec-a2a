@@ -78,6 +78,21 @@ would be wrong for roles that shell a bare python - acceptable because
 procs.toml roles are a development surface; recorded so the boundary is a
 decision, not an accident.
 
+### snapshot-transaction-verdict-revised | resolved | The initial keep-all-three verdict was corrected on caller evidence
+
+The first pass kept snapshot, migration, and transaction as a "cross-release
+state contract." Dashboard-source evidence then established that the
+dashboard's own update transaction performs the consistency-group snapshot as
+byte-level Rust file copies and owns ordering and rollback, spawning a2a only
+for the migrate step; a post-strip caller sweep confirmed `desktop/snapshot.py`
+and `desktop/transaction.py` had no production consumer beyond their own tests
+and the removed capsule flow. Resolution: both modules and the
+`desktop-migrate`/`desktop-snapshot-*` verbs deleted; `desktop/migration.py`
+reshaped into the descriptor-free `migrate` entrypoint with fail-closed
+base/head assertions; the decision record and grounding reference amended in
+place. The lesson recorded for future passes: a keep verdict must cite a live
+caller, not plausibility.
+
 ### admission-flake-baseline | low | Three run-admission gates flake under full-suite parallel load
 
 `test_pre_durability_commit_failure_restores_reservation_for_release`,

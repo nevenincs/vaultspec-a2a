@@ -8,7 +8,7 @@
     "/api/health": {
       "get": {
         "summary": "Health",
-        "description": "Public health endpoint aggregating gateway, worker, and database status.",
+        "description": "Public health endpoint aggregating gateway, worker, and database status.\n\nUnder the armed desktop profile this ungated surface discloses only the\nminimal liveness signal - no process identity, service identity, or product\nstate crosses the unauthenticated boundary; the aggregate readiness facts move\nbehind attach authentication on the service-state verb and the authenticated\nliveness surface. The Compose and development profiles retain the full\naggregate body their gateway healthchecks already consume.",
         "operationId": "health_api_health_get",
         "responses": {
           "200": {
@@ -31,6 +31,24 @@
         "summary": "Create Thread Endpoint",
         "description": "Create a new orchestration thread and dispatch to the worker.",
         "operationId": "create_thread_endpoint_api_threads_post",
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
         "requestBody": {
           "required": true,
           "content": {
@@ -107,6 +125,22 @@
               ],
               "title": "Status"
             }
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
           }
         ],
         "responses": {
@@ -147,6 +181,22 @@
               "type": "string",
               "title": "Thread Id"
             }
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
           }
         ],
         "responses": {
@@ -176,7 +226,7 @@
     "/api/threads/{thread_id}": {
       "delete": {
         "summary": "Delete Thread Endpoint",
-        "description": "Hard-delete a thread and all cascading artifacts.",
+        "description": "Delete a thread through the durable cross-store deletion saga.\n\nA replayed request resumes the same saga rather than starting a second\nteardown, so repeated calls converge on one deletion.",
         "operationId": "delete_thread_endpoint_api_threads__thread_id__delete",
         "parameters": [
           {
@@ -186,6 +236,22 @@
             "schema": {
               "type": "string",
               "title": "Thread Id"
+            }
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
             }
           }
         ],
@@ -219,6 +285,22 @@
             "schema": {
               "type": "string",
               "title": "Thread Id"
+            }
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
             }
           }
         ],
@@ -260,6 +342,22 @@
               "type": "string",
               "title": "Thread Id"
             }
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
           }
         ],
         "responses": {
@@ -287,7 +385,7 @@
     "/api/threads/{thread_id}/state": {
       "get": {
         "summary": "Get Thread State Endpoint",
-        "description": "Return a complete thread state snapshot for client reconnection.\n\nThe ``last_sequence`` field enables gap detection: the client discards\nany subsequent WebSocket events with ``sequence <= last_sequence``\n(ADR-011 section 2.3).",
+        "description": "Return a complete thread state snapshot for client reconnection.\n\nThe ``last_sequence`` field enables gap detection: the client discards\nany subsequent WebSocket events with ``sequence <= last_sequence``.",
         "operationId": "get_thread_state_endpoint_api_threads__thread_id__state_get",
         "parameters": [
           {
@@ -297,6 +395,22 @@
             "schema": {
               "type": "string",
               "title": "Thread Id"
+            }
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
             }
           }
         ],
@@ -327,7 +441,7 @@
     "/api/threads/{thread_id}/messages": {
       "post": {
         "summary": "Send Message Endpoint",
-        "description": "Send a user message into an existing thread.\n\nReturns 202 Accepted immediately; the message is dispatched to the\nworker process for graph execution (ADR-019).",
+        "description": "Send a user message into an existing thread.\n\nReturns 202 Accepted immediately; the message is dispatched to the\nworker process for graph execution.",
         "operationId": "send_message_endpoint_api_threads__thread_id__messages_post",
         "parameters": [
           {
@@ -353,6 +467,22 @@
                 }
               ],
               "title": "Idempotency-Key"
+            }
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
             }
           }
         ],
@@ -420,6 +550,22 @@
               ],
               "title": "Idempotency-Key"
             }
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
           }
         ],
         "responses": {
@@ -451,6 +597,24 @@
         "summary": "Get Team Status Endpoint",
         "description": "Return current team status: agents, active threads, pending permissions.",
         "operationId": "get_team_status_endpoint_api_team_status_get",
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "description": "Successful Response",
@@ -458,6 +622,16 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/TeamStatusResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
                 }
               }
             }
@@ -470,6 +644,24 @@
         "summary": "List Team Presets Endpoint",
         "description": "Return all available team presets for the team picker UI.",
         "operationId": "list_team_presets_endpoint_api_teams_get",
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "description": "Successful Response",
@@ -477,6 +669,16 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/TeamPresetsResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
                 }
               }
             }
@@ -513,6 +715,22 @@
                 }
               ],
               "title": "Idempotency-Key"
+            }
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
             }
           }
         ],
@@ -553,19 +771,540 @@
     "/api/admin/shutdown": {
       "post": {
         "summary": "Shutdown Endpoint",
-        "description": "Initiate graceful server shutdown.",
+        "description": "Initiate graceful server shutdown.\n\nAdministrative shutdown is a receipt-bound lifecycle operation: it requires\nboth authenticated runtime control (the attach credential) and receipt\nownership (the lifecycle capability that discovery never references), so a\nforeign attachment that can reach the product surface still cannot stop the\ngateway.\n\nRun admission is closed first, so the gateway admits no new run while it\ndrains; the in-process stop is then deferred briefly so this 202 flushes\nbefore the SIGINT-driven graceful shutdown - which drains and reaps the owned\nworker and run descendants in the lifespan - begins.",
         "operationId": "shutdown_endpoint_api_admin_shutdown_post",
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "name": "X-Vaultspec-Lifecycle-Capability",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Vaultspec-Lifecycle-Capability"
+            }
+          }
+        ],
         "responses": {
           "202": {
             "description": "Successful Response",
             "content": {
               "application/json": {
                 "schema": {
+                  "type": "object",
                   "additionalProperties": {
                     "type": "string"
                   },
-                  "type": "object",
                   "title": "Response Shutdown Endpoint Api Admin Shutdown Post"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/runs": {
+      "post": {
+        "summary": "Run Start Endpoint",
+        "description": "Start, prepare, commit, or release through the single run-start verb.\n\nThe ``stage`` selector splits one verb into four shapes without growing the\nverb set: ``prepare`` reserves bounded capacity without tokens or a durable\nrun; ``commit`` binds the exact actor-token role set to that reservation;\n``release`` frees only an uncommitted reservation; and ``start`` (the\ndefault) preserves the one-shot engine/Compose path.",
+        "operationId": "run_start_endpoint_v1_runs_post",
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RunStartRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/RunStartResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/RunPrepareResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/RunCommitResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/RunReleaseResponse"
+                    }
+                  ],
+                  "title": "Response Run Start Endpoint V1 Runs Post"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "summary": "Active Runs Endpoint",
+        "description": "Return a capped identity projection for durable non-terminal runs.",
+        "operationId": "active_runs_endpoint_v1_runs_get",
+        "parameters": [
+          {
+            "name": "state",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "const": "active",
+              "type": "string",
+              "default": "active",
+              "title": "State"
+            }
+          },
+          {
+            "name": "workspace_root",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 4096
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Workspace Root"
+            }
+          },
+          {
+            "name": "feature_tag",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Feature Tag"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "default": 50,
+              "title": "Limit"
+            }
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ActiveRunsResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/runs/{run_id}": {
+      "get": {
+        "summary": "Run Status Endpoint",
+        "description": "Return the authoritative recovery snapshot for a run.",
+        "operationId": "run_status_endpoint_v1_runs__run_id__get",
+        "parameters": [
+          {
+            "name": "run_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^[A-Za-z0-9_][A-Za-z0-9_-]{0,127}$",
+              "title": "Run Id"
+            }
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunStatusResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/runs/{run_id}/stream": {
+      "get": {
+        "summary": "Run Stream Endpoint",
+        "description": "Re-serve the run's bounded, versioned v1 SSE progress frames.\n\nThe public streaming companion to run-status: run-status is the authoritative\nrecovery snapshot, this is the droppable live progress relay. A run id is the\nthread id, so this delegates to the same stream builder the internal\n``/api/threads/{id}/stream`` route uses - one code path, the same versioned\n256 KiB-bounded frames, the same terminal-replay-then-close semantics. Frames\nare non-authoritative by contract: a consumer reconciles run state from\nrun-status, never from a relay frame.",
+        "operationId": "run_stream_endpoint_v1_runs__run_id__stream_get",
+        "parameters": [
+          {
+            "name": "run_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^[A-Za-z0-9_][A-Za-z0-9_-]{0,127}$",
+              "title": "Run Id"
+            }
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/runs/{run_id}/cancel": {
+      "post": {
+        "summary": "Run Cancel Endpoint",
+        "description": "Cancel a run idempotently.",
+        "operationId": "run_cancel_endpoint_v1_runs__run_id__cancel_post",
+        "parameters": [
+          {
+            "name": "run_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^[A-Za-z0-9_][A-Za-z0-9_-]{0,127}$",
+              "title": "Run Id"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
+            }
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunCancelResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/presets": {
+      "get": {
+        "summary": "Presets List Endpoint",
+        "description": "List team presets truthfully, marking each loadable or unloadable.\n\nResolution uses the requested workspace context so workspace-local presets\nare listed alongside the bundled set. A single preset that fails to load or\nvalidate is reported with ``loadable=False`` and a reason rather than\nomitted or allowed to crash the whole listing. Each loadable preset carries\nits model profiles with per-role effective assignments (resolved by the same\nshared resolver launch uses) and backend-computed eligibility. The whole\nbuild - file I/O, provider readiness, and the engine reachability probe -\nruns off the event loop.",
+        "operationId": "presets_list_endpoint_v1_presets_get",
+        "parameters": [
+          {
+            "name": "workspace_root",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 4096
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Workspace Root"
+            }
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PresetsListResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/service": {
+      "get": {
+        "summary": "Service State Endpoint",
+        "description": "Return truthful, probe-backed readiness for the resident gateway.\n\nRuns the real dependency probes (database, checkpoint, worker) rather than\nreporting a hardcoded status, and separates process-alive from\ncan-accept-run. Engine authoring-backend reachability is reported from\nnon-blocking discovery-file freshness.",
+        "operationId": "service_state_endpoint_v1_service_get",
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServiceStateResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
                 }
               }
             }
@@ -687,7 +1426,7 @@
           "internal"
         ],
         "summary": "Receive Worker Event Batch",
-        "description": "Receive a batch of events from the worker (CRIT-02).\n\nThe ``WorkerBridge`` accumulates events for a short interval then\nPOSTs them as a single ``{\"events\": [...]}`` payload.  Each entry\nhas the same shape as a single-event envelope (``thread_id`` +\n``payload``).",
+        "description": "Receive a batch of events from the worker.\n\nThe ``WorkerBridge`` accumulates events for a short interval then\nPOSTs them as a single ``{\"events\": [...]}`` payload.  Each entry\nhas the same shape as a single-event envelope (``thread_id`` +\n``payload``).",
         "operationId": "receive_worker_event_batch_internal_events_batch_post",
         "parameters": [
           {
@@ -792,7 +1531,7 @@
     "/health": {
       "get": {
         "summary": "Health Endpoint",
-        "description": "Top-level liveness check for external probes.\n\n`/health` stays green when the gateway process is alive. Aggregate\ndependency readiness is exposed separately via `/api/health`.",
+        "description": "Top-level liveness check for external probes.\n\nUnder the armed desktop profile the unauthenticated boundary discloses\nonly the minimal liveness fact - no process identity, product identity, or\nproduct state - while an attach-authenticated caller additionally receives\nthe readiness projection from the single readiness authority. The Compose\nand development profiles retain the legacy aggregate liveness body their\nprobes already consume; readiness there stays on `/api/health`.",
         "operationId": "health_endpoint_health_get",
         "responses": {
           "200": {
@@ -813,6 +1552,96 @@
   },
   "components": {
     "schemas": {
+      "ActiveRunRecord": {
+        "properties": {
+          "run_id": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Run Id"
+          },
+          "status": {
+            "$ref": "#/components/schemas/ThreadStatus"
+          },
+          "feature_tag": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 128
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Feature Tag"
+          }
+        },
+        "type": "object",
+        "required": [
+          "run_id",
+          "status"
+        ],
+        "title": "ActiveRunRecord",
+        "description": "Minimal durable run identity used to recover a viewing binding."
+      },
+      "ActiveRunsResponse": {
+        "properties": {
+          "api_version": {
+            "type": "string",
+            "const": "v1",
+            "title": "Api Version",
+            "default": "v1"
+          },
+          "state": {
+            "type": "string",
+            "const": "active",
+            "title": "State",
+            "default": "active"
+          },
+          "runs": {
+            "items": {
+              "$ref": "#/components/schemas/ActiveRunRecord"
+            },
+            "type": "array",
+            "maxItems": 100,
+            "title": "Runs"
+          },
+          "truncated": {
+            "type": "boolean",
+            "title": "Truncated",
+            "default": false
+          }
+        },
+        "type": "object",
+        "title": "ActiveRunsResponse",
+        "description": "Bounded, non-authoritative discovery result for active runs."
+      },
+      "ActorTokenBundle": {
+        "properties": {
+          "tokens": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object",
+            "title": "Tokens"
+          },
+          "engine_bearer": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Engine Bearer"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "ActorTokenBundle",
+        "description": "A run's per-role actor tokens plus the engine machine bearer.\n\nParameters\n----------\ntokens:\n    Mapping of role identifier (the worker ``agent_id`` or the supervisor\n    constant) to that role's engine-minted actor token. A role only ever\n    receives its own token via :meth:`actor_token`.\nengine_bearer:\n    The machine bearer minted at engine boot, forwarded so a worker's\n    authoring bridge can reach the engine. Optional: when absent the worker\n    resolves the bearer from the engine discovery file instead."
+      },
       "AgentLifecycleState": {
         "type": "string",
         "enum": [
@@ -826,7 +1655,7 @@
           "cancelled"
         ],
         "title": "AgentLifecycleState",
-        "description": "Observable agent states exposed to the frontend.\n\nMaps to ADR-003 MCP states. Distinct from ``AgentState`` which tracks\ninternal process lifecycle (init/ready/running/error/done)."
+        "description": "Observable agent states exposed to the frontend.\n\nMaps to the MCP states. Tracks\ninternal process lifecycle (init/ready/running/error/done)."
       },
       "AgentStatusEntry": {
         "properties": {
@@ -1081,6 +1910,16 @@
               }
             ],
             "title": "Autonomous"
+          },
+          "actor_tokens": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ActorTokenBundle"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "type": "object",
@@ -1119,6 +1958,72 @@
         ],
         "title": "CreateThreadResponse",
         "description": "Response after successfully creating a thread."
+      },
+      "DesktopReadiness": {
+        "properties": {
+          "api_version": {
+            "type": "string",
+            "const": "v1",
+            "title": "Api Version",
+            "default": "v1"
+          },
+          "gateway_pid": {
+            "type": "integer",
+            "title": "Gateway Pid"
+          },
+          "generation": {
+            "type": "string",
+            "title": "Generation"
+          },
+          "profile": {
+            "type": "string",
+            "title": "Profile"
+          },
+          "liveness": {
+            "$ref": "#/components/schemas/LivenessState",
+            "default": "alive"
+          },
+          "gateway_readiness": {
+            "$ref": "#/components/schemas/GatewayReadiness"
+          },
+          "worker_state": {
+            "$ref": "#/components/schemas/WorkerLifecycleState"
+          },
+          "provider_eligibility": {
+            "$ref": "#/components/schemas/ProviderEligibility"
+          },
+          "eligible_providers": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "maxItems": 16,
+            "title": "Eligible Providers"
+          },
+          "run_admission": {
+            "$ref": "#/components/schemas/RunAdmission"
+          },
+          "reasons": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "maxItems": 16,
+            "title": "Reasons"
+          }
+        },
+        "type": "object",
+        "required": [
+          "gateway_pid",
+          "generation",
+          "profile",
+          "gateway_readiness",
+          "worker_state",
+          "provider_eligibility",
+          "run_admission"
+        ],
+        "title": "DesktopReadiness",
+        "description": "The authenticated desktop readiness projection.\n\nCarries process and product identity alongside the five separate bounded\nreadiness facts. The facts are never collapsed into a single boolean: a cold,\nstartable worker leaves ``gateway_readiness`` ``ready`` while ``run_admission``\nstays ``deferred``, so gateway-readiness and execution-readiness remain\ndistinct. Served only to an attach-authenticated caller."
       },
       "ExecutionTaskSnapshot": {
         "properties": {
@@ -1186,6 +2091,15 @@
         "title": "ExecutionTaskSnapshot",
         "description": "Normalized execution task used in reconnect snapshots."
       },
+      "GatewayReadiness": {
+        "type": "string",
+        "enum": [
+          "ready",
+          "not_ready"
+        ],
+        "title": "GatewayReadiness",
+        "description": "Whether a live gateway with a valid database is ready to be attached.\n\nIndependent of worker state: a live gateway with a valid database and a cold,\nstartable worker is ``ready``. A gateway-owned dependency failure - an invalid\nor unreachable database - is ``not_ready``."
+      },
       "HTTPValidationError": {
         "properties": {
           "detail": {
@@ -1198,6 +2112,15 @@
         },
         "type": "object",
         "title": "HTTPValidationError"
+      },
+      "LivenessState": {
+        "type": "string",
+        "enum": [
+          "alive",
+          "not_alive"
+        ],
+        "title": "LivenessState",
+        "description": "Minimal process-liveness fact: the gateway answered, or it did not.\n\nThis is the only fact an unauthenticated caller ever observes. It proves\nneither ownership nor readiness and discloses no product state."
       },
       "MessageSnapshot": {
         "properties": {
@@ -1295,6 +2218,7 @@
         "properties": {
           "option_id": {
             "type": "string",
+            "maxLength": 256,
             "title": "Option Id"
           },
           "kind": {
@@ -1403,19 +2327,968 @@
         "required": [
           "content"
         ],
-        "title": "PlanEntry"
+        "title": "PlanEntry",
+        "description": "A single entry in the agent's execution plan.\n\nFields use plain ``str`` so the domain layer stays free of wire-protocol\nenum imports.  Values correspond to ``PlanEntryStatus`` / ``PlanEntryPriority``\nmembers defined in ``api.schemas.enums``."
+      },
+      "PresetSummary": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "loadable": {
+            "type": "boolean",
+            "title": "Loadable"
+          },
+          "unavailable_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unavailable Reason"
+          },
+          "display_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Display Name"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "topology": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Topology"
+          },
+          "worker_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Worker Count"
+          },
+          "required_roles": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Required Roles"
+          },
+          "authoring_capability": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Authoring Capability"
+          },
+          "is_mock": {
+            "type": "boolean",
+            "title": "Is Mock",
+            "default": false
+          },
+          "origin": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Origin"
+          },
+          "supported_capabilities": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Supported Capabilities"
+          },
+          "profiles": {
+            "items": {
+              "$ref": "#/components/schemas/ProfileSummary"
+            },
+            "type": "array",
+            "title": "Profiles"
+          },
+          "default_profile_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Default Profile Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "loadable"
+        ],
+        "title": "PresetSummary",
+        "description": "One discovered team preset and whether it is actually runnable.\n\nA preset whose TOML is missing or invalid is still listed with\n``loadable=False`` and an ``unavailable_reason`` so the Rust backend sees the\ntruthful set rather than a listing that omits or crashes on it. Descriptive\nfields are populated only when the preset loaded."
+      },
+      "PresetsListResponse": {
+        "properties": {
+          "api_version": {
+            "type": "string",
+            "const": "v1",
+            "title": "Api Version",
+            "default": "v1"
+          },
+          "presets": {
+            "items": {
+              "$ref": "#/components/schemas/PresetSummary"
+            },
+            "type": "array",
+            "title": "Presets"
+          }
+        },
+        "type": "object",
+        "title": "PresetsListResponse",
+        "description": "List of available team presets."
+      },
+      "ProfileSummary": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "display_name": {
+            "type": "string",
+            "title": "Display Name",
+            "default": ""
+          },
+          "description": {
+            "type": "string",
+            "title": "Description",
+            "default": ""
+          },
+          "is_default": {
+            "type": "boolean",
+            "title": "Is Default",
+            "default": false
+          },
+          "eligible": {
+            "type": "boolean",
+            "title": "Eligible",
+            "default": false
+          },
+          "unavailable_reasons": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Unavailable Reasons"
+          },
+          "assignments": {
+            "items": {
+              "$ref": "#/components/schemas/RoleAssignmentSummary"
+            },
+            "type": "array",
+            "title": "Assignments"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id"
+        ],
+        "title": "ProfileSummary",
+        "description": "One selectable model profile for a preset.\n\nCarries the profile's identity, whether it is the default, its per-role\neffective assignments (resolved by the same shared resolver launch uses, so\npicker truth cannot drift from execution truth), and backend-computed\neligibility with safe reasons."
       },
       "Provider": {
         "type": "string",
         "enum": [
           "claude",
+          "codex",
+          "deterministic",
           "gemini",
+          "kimi",
           "mock",
           "openai",
+          "zai",
           "zhipu"
         ],
         "title": "Provider",
         "description": "Supported LLM providers."
+      },
+      "ProviderEligibility": {
+        "type": "string",
+        "enum": [
+          "eligible",
+          "ineligible"
+        ],
+        "title": "ProviderEligibility",
+        "description": "Whether at least one subprocess provider command resolves on this host.\n\nComputed through the no-instantiation classify seam: no provider is\nconstructed and no subprocess is spawned to determine it."
+      },
+      "RoleAssignmentSummary": {
+        "properties": {
+          "role_id": {
+            "type": "string",
+            "title": "Role Id"
+          },
+          "agent_id": {
+            "type": "string",
+            "title": "Agent Id"
+          },
+          "provider_id": {
+            "type": "string",
+            "title": "Provider Id"
+          },
+          "capability": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Capability"
+          },
+          "model_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model Name"
+          },
+          "fallback_providers": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Fallback Providers"
+          },
+          "provider_ready": {
+            "type": "boolean",
+            "title": "Provider Ready",
+            "default": false
+          },
+          "source": {
+            "type": "string",
+            "title": "Source",
+            "default": "team_default"
+          },
+          "resolution_error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resolution Error"
+          }
+        },
+        "type": "object",
+        "required": [
+          "role_id",
+          "agent_id",
+          "provider_id"
+        ],
+        "title": "RoleAssignmentSummary",
+        "description": "Effective per-role model assignment under a profile.\n\nOnly safe operational metadata: role id, agent id, provider id, capability,\nthe stable concrete model name, ordered fallbacks, current provider readiness,\nand which precedence layer the assignment came from. Never a credential, env\nvalue, token, or private path."
+      },
+      "RoleState": {
+        "properties": {
+          "agent_id": {
+            "type": "string",
+            "title": "Agent Id"
+          },
+          "role": {
+            "type": "string",
+            "title": "Role",
+            "default": ""
+          },
+          "state": {
+            "type": "string",
+            "title": "State"
+          },
+          "display_name": {
+            "type": "string",
+            "title": "Display Name",
+            "default": ""
+          }
+        },
+        "type": "object",
+        "required": [
+          "agent_id",
+          "state"
+        ],
+        "title": "RoleState",
+        "description": "Per-role lifecycle state within a run (recovery snapshot)."
+      },
+      "RunAdmission": {
+        "type": "string",
+        "enum": [
+          "ready",
+          "deferred",
+          "blocked"
+        ],
+        "title": "RunAdmission",
+        "description": "Whether the gateway would admit a run right now - the execution-ready fact.\n\n``ready`` means execution-ready: a reachable worker and an eligible provider.\n``deferred`` means gateway-ready but not yet execution-ready - the worker is\ncold or starting and will start on demand. It remains informational on the\nreadiness surface, while staged ``prepare`` admission refuses it fail-closed.\n``blocked`` means a hard gateway dependency (the database) is unavailable."
+      },
+      "RunCancelResponse": {
+        "properties": {
+          "api_version": {
+            "type": "string",
+            "const": "v1",
+            "title": "Api Version",
+            "default": "v1"
+          },
+          "run_id": {
+            "type": "string",
+            "title": "Run Id"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "cancelled": {
+            "type": "boolean",
+            "title": "Cancelled"
+          },
+          "accepted": {
+            "type": "boolean",
+            "title": "Accepted",
+            "default": false
+          },
+          "applied": {
+            "type": "boolean",
+            "title": "Applied",
+            "default": false
+          },
+          "action_status": {
+            "type": "string",
+            "title": "Action Status",
+            "default": "rejected_invalid_state"
+          },
+          "idempotency_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Idempotency Key"
+          }
+        },
+        "type": "object",
+        "required": [
+          "run_id",
+          "status",
+          "cancelled"
+        ],
+        "title": "RunCancelResponse",
+        "description": "Acknowledge an (idempotent) run-cancel request."
+      },
+      "RunCommitResponse": {
+        "properties": {
+          "api_version": {
+            "type": "string",
+            "const": "v1",
+            "title": "Api Version",
+            "default": "v1"
+          },
+          "stage": {
+            "type": "string",
+            "const": "committed",
+            "title": "Stage",
+            "default": "committed"
+          },
+          "run_id": {
+            "type": "string",
+            "title": "Run Id"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "lease_id": {
+            "type": "string",
+            "title": "Lease Id"
+          },
+          "semantic_status": {
+            "type": "string",
+            "title": "Semantic Status",
+            "default": "starting"
+          },
+          "nickname": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Nickname"
+          },
+          "profile_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Profile Id"
+          },
+          "assignments": {
+            "items": {
+              "$ref": "#/components/schemas/RoleAssignmentSummary"
+            },
+            "type": "array",
+            "title": "Assignments"
+          }
+        },
+        "type": "object",
+        "required": [
+          "run_id",
+          "status",
+          "lease_id"
+        ],
+        "title": "RunCommitResponse",
+        "description": "Acknowledge a run committed against a prepared reservation.\n\nReturned by the ``commit`` stage. The reservation is consumed and a stable\nrun is created and dispatched with the bound actor tokens. ``lease_id`` is the\nnon-secret, run-scoped lease identity the dashboard revokes at terminal\nsettlement; it is an identifier, never a bearer."
+      },
+      "RunPrepareResponse": {
+        "properties": {
+          "api_version": {
+            "type": "string",
+            "const": "v1",
+            "title": "Api Version",
+            "default": "v1"
+          },
+          "stage": {
+            "type": "string",
+            "const": "prepared",
+            "title": "Stage",
+            "default": "prepared"
+          },
+          "reservation_id": {
+            "type": "string",
+            "title": "Reservation Id"
+          },
+          "lease_id": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9_][A-Za-z0-9_-]{0,127}$",
+            "title": "Lease Id"
+          },
+          "required_roles": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "maxItems": 64,
+            "title": "Required Roles"
+          },
+          "expires_at": {
+            "type": "string",
+            "title": "Expires At"
+          },
+          "worker_state": {
+            "$ref": "#/components/schemas/WorkerLifecycleState"
+          },
+          "provider_eligibility": {
+            "$ref": "#/components/schemas/ProviderEligibility"
+          },
+          "run_admission": {
+            "$ref": "#/components/schemas/RunAdmission"
+          },
+          "reasons": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "maxItems": 16,
+            "title": "Reasons"
+          }
+        },
+        "type": "object",
+        "required": [
+          "reservation_id",
+          "lease_id",
+          "expires_at",
+          "worker_state",
+          "provider_eligibility",
+          "run_admission"
+        ],
+        "title": "RunPrepareResponse",
+        "description": "Acknowledge a prepared admission reservation.\n\nReturned by the ``prepare`` stage of run-start. It carries the server-minted\nreservation identity a later ``commit`` binds to, its non-secret run-scoped\nlease identity, the bounded validated set of roles that commit's actor-token\nbundle must cover, and the reservation's hard expiry. The three readiness\nfacts report why admission is or is not\nexecution-ready right now. No durable run exists yet and no token was\naccepted; a reservation that is never committed simply expires."
+      },
+      "RunReleaseResponse": {
+        "properties": {
+          "api_version": {
+            "type": "string",
+            "const": "v1",
+            "title": "Api Version",
+            "default": "v1"
+          },
+          "stage": {
+            "type": "string",
+            "const": "released",
+            "title": "Stage",
+            "default": "released"
+          },
+          "reservation_id": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9_][A-Za-z0-9_-]{0,127}$",
+            "title": "Reservation Id"
+          },
+          "released": {
+            "type": "boolean",
+            "title": "Released"
+          }
+        },
+        "type": "object",
+        "required": [
+          "reservation_id",
+          "released"
+        ],
+        "title": "RunReleaseResponse",
+        "description": "Acknowledge explicit release of an uncommitted reservation."
+      },
+      "RunStage": {
+        "type": "string",
+        "enum": [
+          "start",
+          "prepare",
+          "commit",
+          "release"
+        ],
+        "title": "RunStage",
+        "description": "Which stage of the run-start verb a request drives.\n\nThe single ``POST /v1/runs`` verb supports ``prepare`` for readiness-gated,\nexpiring capacity; ``commit`` for exact request and actor-role binding;\n``release`` for an uncommitted reservation; and the pre-existing one-shot\n``start`` compatibility path."
+      },
+      "RunStartRequest": {
+        "properties": {
+          "stage": {
+            "$ref": "#/components/schemas/RunStage",
+            "default": "start"
+          },
+          "reservation_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 128,
+                "minLength": 1,
+                "pattern": "^[A-Za-z0-9_][A-Za-z0-9_-]{0,127}$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reservation Id"
+          },
+          "team_preset": {
+            "type": "string",
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Team Preset"
+          },
+          "message": {
+            "type": "string",
+            "maxLength": 65536,
+            "title": "Message",
+            "default": ""
+          },
+          "actor_tokens": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ActorTokenBundle"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "metadata": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ThreadMetadata"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "autonomous": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Autonomous"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 200
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
+          },
+          "feature_tag": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 128
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Feature Tag"
+          },
+          "run_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 128,
+                "minLength": 1,
+                "pattern": "^[A-Za-z0-9_][A-Za-z0-9_-]{0,127}$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Run Id"
+          },
+          "profile_id": {
+            "type": "string",
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Profile Id",
+            "default": "team-defaults"
+          },
+          "feedback_batch_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 256,
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Feedback Batch Id"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "team_preset"
+        ],
+        "title": "RunStartRequest",
+        "description": "Start a run: the engine-facing shape of thread-create + first message.\n\nCarries the engine-provisioned per-role actor token bundle alongside\nthe run's preset and opening message. The gateway threads this onto the same\ndispatch path the internal thread-create flow uses â€” no second code path."
+      },
+      "RunStartResponse": {
+        "properties": {
+          "api_version": {
+            "type": "string",
+            "const": "v1",
+            "title": "Api Version",
+            "default": "v1"
+          },
+          "run_id": {
+            "type": "string",
+            "title": "Run Id"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "nickname": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Nickname"
+          },
+          "semantic_status": {
+            "type": "string",
+            "title": "Semantic Status",
+            "default": "starting"
+          },
+          "eligible": {
+            "type": "boolean",
+            "title": "Eligible",
+            "default": true
+          },
+          "profile_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Profile Id"
+          },
+          "assignments": {
+            "items": {
+              "$ref": "#/components/schemas/RoleAssignmentSummary"
+            },
+            "type": "array",
+            "title": "Assignments"
+          }
+        },
+        "type": "object",
+        "required": [
+          "run_id",
+          "status"
+        ],
+        "title": "RunStartResponse",
+        "description": "Acknowledge a started run, with its initial semantic status."
+      },
+      "RunStatusResponse": {
+        "properties": {
+          "api_version": {
+            "type": "string",
+            "const": "v1",
+            "title": "Api Version",
+            "default": "v1"
+          },
+          "run_id": {
+            "type": "string",
+            "title": "Run Id"
+          },
+          "status": {
+            "$ref": "#/components/schemas/ThreadStatus"
+          },
+          "semantic_phase": {
+            "type": "string",
+            "title": "Semantic Phase"
+          },
+          "feature_tag": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Feature Tag"
+          },
+          "authoring_session_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Authoring Session Id"
+          },
+          "topology": {
+            "$ref": "#/components/schemas/TopologyPosition"
+          },
+          "roles": {
+            "items": {
+              "$ref": "#/components/schemas/RoleState"
+            },
+            "type": "array",
+            "title": "Roles"
+          },
+          "proposal_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Proposal Ids"
+          },
+          "changeset_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Changeset Ids"
+          },
+          "approval_status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Approval Status"
+          },
+          "approval_request_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Approval Request Id"
+          },
+          "checkpoint_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Checkpoint Id"
+          },
+          "last_sequence": {
+            "type": "integer",
+            "title": "Last Sequence",
+            "default": 0
+          },
+          "repair_status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Repair Status"
+          },
+          "execution_readiness": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Execution Readiness"
+          },
+          "degraded_reasons": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Degraded Reasons"
+          },
+          "profile_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Profile Id"
+          },
+          "assignments": {
+            "items": {
+              "$ref": "#/components/schemas/RoleAssignmentSummary"
+            },
+            "type": "array",
+            "title": "Assignments"
+          },
+          "lease_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 128,
+                "minLength": 1,
+                "pattern": "^[A-Za-z0-9_][A-Za-z0-9_-]{0,127}$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lease Id"
+          },
+          "reservation_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 128,
+                "minLength": 1,
+                "pattern": "^[A-Za-z0-9_][A-Za-z0-9_-]{0,127}$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reservation Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "run_id",
+          "status",
+          "semantic_phase",
+          "topology"
+        ],
+        "title": "RunStatusResponse",
+        "description": "The authoritative recovery snapshot for a run.\n\nDesigned as the read a restarted A2A resumes or reports a run from: topology\nposition, per-role state, and the engine proposal/changeset ids the run has\nproduced, plus the checkpoint cursor and repair posture. Non-authoritative\nSSE progress frames may be lost freely; this snapshot is the source of truth."
       },
       "SendMessageRequest": {
         "properties": {
@@ -1500,6 +3373,218 @@
         "title": "SendMessageResponse",
         "description": "Response after accepting a user message (202 Accepted)."
       },
+      "ServiceStateResponse": {
+        "properties": {
+          "api_version": {
+            "type": "string",
+            "const": "v1",
+            "title": "Api Version",
+            "default": "v1"
+          },
+          "service_version": {
+            "type": "string",
+            "title": "Service Version"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "alive": {
+            "type": "boolean",
+            "title": "Alive",
+            "default": true
+          },
+          "ready": {
+            "type": "boolean",
+            "title": "Ready"
+          },
+          "can_accept_run": {
+            "type": "boolean",
+            "title": "Can Accept Run"
+          },
+          "gateway_pid": {
+            "type": "integer",
+            "title": "Gateway Pid"
+          },
+          "gateway_lifetime_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Gateway Lifetime Id"
+          },
+          "worker_status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Worker Status"
+          },
+          "worker_connected": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Worker Connected"
+          },
+          "worker_paired_gateway_lifetime": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Worker Paired Gateway Lifetime"
+          },
+          "worker_generation": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Worker Generation"
+          },
+          "circuit_breaker": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Circuit Breaker"
+          },
+          "database_backend": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Database Backend"
+          },
+          "checkpoint_backend": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Checkpoint Backend"
+          },
+          "database_ready": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Database Ready"
+          },
+          "checkpoint_ready": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Checkpoint Ready"
+          },
+          "worker_ready": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Worker Ready"
+          },
+          "authoring_backend_reachable": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Authoring Backend Reachable"
+          },
+          "active_run_capacity": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Active Run Capacity"
+          },
+          "degraded_reasons": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Degraded Reasons"
+          },
+          "routes": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Routes"
+          },
+          "readiness": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DesktopReadiness"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "service_version",
+          "status",
+          "ready",
+          "can_accept_run",
+          "gateway_pid"
+        ],
+        "title": "ServiceStateResponse",
+        "description": "Backend-served readiness for the A2A service (service-state verb).\n\nDistinguishes three truths the Rust backend must not conflate: the process is\n``alive`` (it answered), the service ``can_accept_run`` (dependencies are\nready), and - separately, via presets-list eligibility - whether a chosen\nauthoring preset is runnable. A live HTTP process is not evidence that a run\ncan start, so ``status`` is derived from real dependency probes rather than\nhardcoded."
+      },
       "TeamPresetSummary": {
         "properties": {
           "id": {
@@ -1532,7 +3617,7 @@
           "worker_count"
         ],
         "title": "TeamPresetSummary",
-        "description": "Lightweight team preset descriptor for the team picker UI (ADR-013 §6)."
+        "description": "Lightweight team preset descriptor for the team picker UI."
       },
       "TeamPresetsResponse": {
         "properties": {
@@ -1549,7 +3634,7 @@
           "presets"
         ],
         "title": "TeamPresetsResponse",
-        "description": "Response for GET /teams: list of available team presets (ADR-013 §6)."
+        "description": "Response for GET /teams: list of available team presets."
       },
       "TeamStatusResponse": {
         "properties": {
@@ -1643,6 +3728,11 @@
             },
             "type": "array",
             "title": "Context Refs"
+          },
+          "feedback_batch_id": {
+            "type": "string",
+            "title": "Feedback Batch Id",
+            "default": ""
           }
         },
         "type": "object",
@@ -1911,7 +4001,8 @@
           "failed",
           "archived",
           "repair_needed",
-          "reconciling"
+          "reconciling",
+          "deleting"
         ],
         "title": "ThreadStatus",
         "description": "Durable lifecycle states for orchestration threads."
@@ -2254,6 +4345,46 @@
         "title": "ToolKind",
         "description": "ACP tool categories (mirrors agentclientprotocol.com schema)."
       },
+      "TopologyPosition": {
+        "properties": {
+          "team_preset": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Team Preset"
+          },
+          "active_agent": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Active Agent"
+          },
+          "pause_cause": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pause Cause"
+          }
+        },
+        "type": "object",
+        "title": "TopologyPosition",
+        "description": "Where a run sits in its team topology (recovery snapshot).\n\nProduct-facing status speaks role vocabulary only: ``active_agent`` is\nthe role currently working, never an internal LangGraph node name. The raw\nnext-node projection lives in the internal recovery snapshot\n(``thread/snapshots.py``), not this contract; ``next_nodes`` was dropped\nfrom the v1 surface."
+      },
       "ValidationError": {
         "properties": {
           "loc": {
@@ -2293,6 +4424,17 @@
           "type"
         ],
         "title": "ValidationError"
+      },
+      "WorkerLifecycleState": {
+        "type": "string",
+        "enum": [
+          "cold",
+          "starting",
+          "ready",
+          "unavailable"
+        ],
+        "title": "WorkerLifecycleState",
+        "description": "The gateway-owned worker's rung on the cold-to-execution ladder.\n\n``cold`` is the pre-demand resting state: no worker exists yet and one is\nstartable on first execution demand. It is informational, never degradation.\n``starting`` is the single-flight startup window, ``ready`` is an up and\nreachable worker, and ``unavailable`` is a worker that started but is down or\nrestarting after demand."
       },
       "_AgentSnapshot": {
         "properties": {

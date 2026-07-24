@@ -410,8 +410,11 @@ async def _spawn_worker(
 ) -> subprocess.Popen[bytes] | None:
     """Spawn the worker as a child process if not already running.
 
-    Returns the ``Process`` handle on success, or ``None`` if the worker
-    was already running or failed to start within 30 seconds.
+    Returns the ``Process`` handle on success, or ``None`` if the worker was
+    already running or failed to become ready within
+    ``settings.worker_ready_timeout_seconds``. A worker that spawned but never
+    became ready is reaped tree-and-all before returning, so a failed spawn
+    never leaves an orphan holding the worker port.
 
     When *containment* is supplied (the armed desktop gateway owning its worker),
     the worker is spawned inside it - a new POSIX session/process group or a
@@ -583,7 +586,9 @@ async def _spawn_worker(
     # Adaptive health polling (PHASE-1e): fast initial probes, exponential
     # backoff to cap.  TCP fast-path skips expensive HTTP checks while the
     # process is still binding its port.
-    deadline = asyncio.get_event_loop().time() + 30.0
+    ready_timeout = settings.worker_ready_timeout_seconds
+    started = asyncio.get_event_loop().time()
+    deadline = started + ready_timeout
     interval = settings.worker_poll_initial_interval_seconds
     last_log = 0.0  # elapsed seconds at last progress log
 
@@ -613,7 +618,7 @@ async def _spawn_worker(
         if await _tcp_port_ready(
             "127.0.0.1", worker_port
         ) and await _worker_ready_and_ours(worker_url, current_generation=generation):
-            elapsed = 30.0 - (deadline - asyncio.get_event_loop().time())
+            elapsed = asyncio.get_event_loop().time() - started
             logger.info(
                 "Worker ready at %s (PID %d) in %.1fs",
                 worker_url,
@@ -622,7 +627,7 @@ async def _spawn_worker(
             )
             return process
 
-        elapsed = 30.0 - (deadline - asyncio.get_event_loop().time())
+        elapsed = asyncio.get_event_loop().time() - started
         if elapsed - last_log >= settings.worker_poll_log_interval_seconds:
             logger.info("Waiting for worker... (%.0fs elapsed)", elapsed)
             last_log = elapsed
@@ -634,16 +639,44 @@ async def _spawn_worker(
         )
 
     logger.error(
-        "Worker failed to become ready within 30 seconds; stderr_log=%s",
+        "Worker failed to become ready within %.0f seconds; stderr_log=%s",
+        ready_timeout,
         stderr_log_path,
     )
+    await _reap_unready_worker(process, containment)
+    return None
+
+
+async def _reap_unready_worker(
+    process: subprocess.Popen[bytes],
+    containment: ProcessContainment | None,
+) -> None:
+    """Reap a worker that spawned but never became ready, tree and all.
+
+    Both bands must escalate and must fell the whole tree, because the caller
+    returns ``None`` afterwards - it reports the spawn as failed, and anything
+    still alive is by definition an orphan holding the worker port. The next
+    spawn then meets its own leftover on that port and refuses it as an
+    unidentified occupant, so an incomplete reap here wedges the band rather
+    than merely leaking a process.
+
+    Armed desktop: the OS containment fells the tree at once (Job Object or
+    process group), and is itself safe when assignment never completed - it
+    downgrades to the same per-pid tree kill used below.
+
+    Compose / development: no containment exists, so the shared per-pid tree
+    kill does the escalation. A bare ``Popen.terminate`` is not enough - it
+    signals only the immediate process, never escalates past a SIGTERM the
+    worker may be ignoring, and leaves any descendant behind.
+
+    Either way the handle is waited afterwards so no zombie is left on POSIX.
+    """
     if containment is not None:
-        # Reap the whole half-started worker tree via its containment, not just
-        # the immediate process.
         await containment.terminate(term_timeout=5.0, kill_timeout=5.0)
     else:
-        process.terminate()
-    return None
+        await kill_pid_tree_async(process.pid, term_timeout=5.0, kill_timeout=5.0)
+    with contextlib.suppress(Exception):
+        await asyncio.to_thread(process.wait, 5.0)
 
 
 async def _shutdown_worker_process(

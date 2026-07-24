@@ -459,6 +459,15 @@ class InfraConfig(BaseSettings):
         alias="VAULTSPEC_WORKER_POLL_LOG_INTERVAL_SECONDS",
         description="Seconds between 'still waiting for worker' log messages.",
     )
+    worker_ready_timeout_seconds: float = Field(
+        default=30.0,
+        alias="VAULTSPEC_WORKER_READY_TIMEOUT_SECONDS",
+        description=(
+            "Seconds a spawned worker may take to become ready before the spawn"
+            " is abandoned and its process tree reaped. Slow cold starts (first"
+            " import on a cold filesystem, a contended host) need headroom here."
+        ),
+    )
 
     # Worker watchdog
     watchdog_poll_interval_seconds: float = Field(

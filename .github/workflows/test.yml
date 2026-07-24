@@ -45,6 +45,13 @@ jobs:
       - name: Run canonical CI
         run: just ci
 
+      # The environment synchronized above carries --extra server, which
+      # installs the OTLP exporter, so no step before this one can observe a
+      # base-only installation. This gate builds its own isolated default-deps
+      # environment for exactly that reason.
+      - name: Prove telemetry starts in a base-only installation
+        run: just dev test clean-base
+
       - name: Build strict documentation
         run: just dev build docs
 

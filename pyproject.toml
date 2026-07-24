@@ -91,6 +91,14 @@ all = [
 default-groups = []
 
 [tool.uv.sources]
+# uv-only project metadata. `tool.uv.sources` is NOT emitted into the wheel's
+# Requires-Dist, and PEP 508 has no way to express an index, so this override
+# reaches uv-managed resolution ONLY. A consumer running `pip install
+# vaultspec-a2a[rag]` against the built wheel resolves torch from the default
+# index and gets whatever CUDA build PyPI serves, not cu130. Anything that needs
+# the pinned CUDA build must therefore resolve through the uv-managed lock
+# rather than wheel metadata; do not restate this override as a property of the
+# published package.
 torch = [
     { index = "pytorch-cu130", extra = "rag", marker = "sys_platform == 'linux' or sys_platform == 'win32'" },
 ]

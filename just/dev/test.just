@@ -17,6 +17,16 @@ service *ARGS:
 all *ARGS:
     uv run --no-sync --frozen --no-default-groups --group tooling pytest --override-ini "addopts=--durations=10 --showlocals -ra --capture=sys" {{ ARGS }}
 
+# Prove gateway and worker telemetry start in a base-only installation.
+#
+# Runs in an isolated environment holding ONLY the default dependencies, so the
+# optional OTLP exporter is genuinely absent rather than merely unimported - the
+# condition that once aborted startup and that the main suite, which has the
+# exporter installed, cannot reproduce. Installed editable on purpose: the wheel
+# excludes `**/tests`, so the probe has no installed-module form to invoke.
+clean-base:
+    uv run --isolated --no-project --with-editable . python -m vaultspec_a2a.telemetry.tests.probe_clean_base
+
 # Run the unit gate with terminal coverage.
 coverage *ARGS:
     uv run --no-sync --frozen --no-default-groups --group tooling pytest -m "not service" --cov=src/vaultspec_a2a --cov-report=term-missing {{ ARGS }}

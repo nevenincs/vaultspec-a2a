@@ -175,10 +175,25 @@ async def list_threads(
     offset: int = 0,
     limit: int = 50,
     status: ThreadStatus | None = None,
+    include_deleting: bool = False,
 ) -> tuple[Sequence[ThreadModel], int]:
-    count_stmt = select(func.count()).select_from(ThreadModel)
+    """List threads with pagination, hiding threads under deletion by default.
+
+    A thread in the ``deleting`` teardown state is a cross-store cleanup subject,
+    not a run: it is excluded from both the page and the total unless a caller
+    opts in with ``include_deleting`` for a cleanup or administrative view. The
+    filter runs in the query so the total and pagination stay consistent with
+    the page.
+    """
+    filters = []
     if status is not None:
-        count_stmt = count_stmt.where(ThreadModel.status == status.value)
+        filters.append(ThreadModel.status == status.value)
+    if not include_deleting:
+        filters.append(ThreadModel.status != ThreadStatus.DELETING.value)
+
+    count_stmt = select(func.count()).select_from(ThreadModel)
+    if filters:
+        count_stmt = count_stmt.where(*filters)
     total = (await session.execute(count_stmt)).scalar_one()
 
     stmt = (
@@ -187,8 +202,8 @@ async def list_threads(
         .offset(offset)
         .limit(limit)
     )
-    if status is not None:
-        stmt = stmt.where(ThreadModel.status == status.value)
+    if filters:
+        stmt = stmt.where(*filters)
     result = await session.execute(stmt)
     return result.scalars().all(), total
 

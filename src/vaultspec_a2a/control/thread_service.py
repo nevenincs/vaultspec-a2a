@@ -242,9 +242,18 @@ async def list_threads_service(
     offset: int = 0,
     checkpointer: Any | None = None,
 ) -> ListThreadsResult:
-    """Query threads and assemble summary data with parsed metadata."""
+    """Query threads and assemble summary data with parsed metadata.
+
+    Threads under deletion are hidden from this product listing; they are a
+    cross-store cleanup subject, not a run, and remain visible only to the
+    cleanup coordinator.
+    """
     threads, total = await list_threads(
-        db, offset=offset, limit=limit, status=status_filter
+        db,
+        offset=offset,
+        limit=limit,
+        status=status_filter,
+        include_deleting=False,
     )
     checkpoint_probes: dict[str, _CheckpointProbe] = {}
     if checkpointer is not None and threads:

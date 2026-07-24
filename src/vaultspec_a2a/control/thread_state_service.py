@@ -208,7 +208,10 @@ async def build_thread_state(
     handler owns HTTP response mapping.
     """
     thread = await get_thread(db, thread_id)
-    if thread is None:
+    if thread is None or thread.status == ThreadStatus.DELETING.value:
+        # A thread under deletion is a cross-store cleanup subject, not a run.
+        # Product run lookups must not surface it; the cleanup coordinator reads
+        # it directly instead. Report it as absent so the route answers 404.
         return None
     last_seq = aggregator.get_sequence(thread_id)
 

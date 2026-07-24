@@ -46,6 +46,8 @@ from vaultspec_a2a.desktop.credentials import (
 from vaultspec_a2a.desktop.profile import derive_state_paths
 from vaultspec_a2a.utils import kill_pid_tree_async
 
+from ._boot import spawn_until_ready
+
 if TYPE_CHECKING:
     from pathlib import Path
 
@@ -103,12 +105,6 @@ def _seat_valid_database(app_home: Path) -> None:
     assert derive_state_paths(app_home).database_path.is_file()
 
 
-def _free_port() -> int:
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-        sock.bind(("127.0.0.1", 0))
-        return sock.getsockname()[1]
-
-
 def _port_listening(port: int, *, timeout: float = 0.5) -> bool:
     """Return whether a real TCP connection to the loopback port succeeds."""
     try:
@@ -116,21 +112,6 @@ def _port_listening(port: int, *, timeout: float = 0.5) -> bool:
             return True
     except OSError:
         return False
-
-
-def _await_health(base: str, *, timeout: float = 40.0) -> None:
-    """Wait until the gateway's liveness endpoint answers 200."""
-    deadline = time.monotonic() + timeout
-    last: str | None = None
-    while time.monotonic() < deadline:
-        try:
-            with httpx.Client(base_url=base, timeout=2.0) as client:
-                if client.get("/health").status_code == 200:
-                    return
-        except httpx.HTTPError as exc:  # not up yet
-            last = repr(exc)
-        time.sleep(0.1)
-    raise AssertionError(f"gateway readiness never came up ({last})")
 
 
 def _worker_state(base: str, headers: dict[str, str]) -> str:
@@ -172,30 +153,29 @@ def test_idle_boot_starts_no_worker_and_concurrent_demand_starts_exactly_one(
     _seed_credentials(app_home)
     _seat_valid_database(app_home)
 
-    gateway_port = _free_port()
-    worker_port = _free_port()
     log_path = tmp_path / "gateway.log"
-    env = os.environ.copy()
-    env["VAULTSPEC_DESKTOP_APP_HOME"] = str(app_home)
-    env["VAULTSPEC_ENVIRONMENT"] = "production"
-    env["VAULTSPEC_PORT"] = str(gateway_port)
-    env["VAULTSPEC_WORKER_PORT"] = str(worker_port)
-    # The gateway owns and spawns its worker; boot must still not start it.
-    env["VAULTSPEC_AUTO_SPAWN_WORKER"] = "true"
-
-    base = f"http://127.0.0.1:{gateway_port}"
+    log_handle = log_path.open("wb")
     auth = {"Authorization": f"Bearer {_ATTACH}"}
 
-    log_handle = log_path.open("wb")
-    proc = subprocess.Popen(
-        [sys.executable, "-c", _GATEWAY, str(gateway_port)],
-        env=env,
-        stdout=log_handle,
-        stderr=subprocess.STDOUT,
+    def _spawn(gateway_port: int, worker_port: int) -> subprocess.Popen[bytes]:
+        env = os.environ.copy()
+        env["VAULTSPEC_DESKTOP_APP_HOME"] = str(app_home)
+        env["VAULTSPEC_ENVIRONMENT"] = "production"
+        env["VAULTSPEC_PORT"] = str(gateway_port)
+        env["VAULTSPEC_WORKER_PORT"] = str(worker_port)
+        # The gateway owns and spawns its worker; boot must still not start it.
+        env["VAULTSPEC_AUTO_SPAWN_WORKER"] = "true"
+        return subprocess.Popen(
+            [sys.executable, "-c", _GATEWAY, str(gateway_port)],
+            env=env,
+            stdout=log_handle,
+            stderr=subprocess.STDOUT,
+        )
+
+    proc, _gateway_port, worker_port, base = spawn_until_ready(
+        _spawn, log_path=log_path
     )
     try:
-        _await_health(base)
-
         # --- Idle armed boot: no worker exists. ---
         # The gateway is up and gateway-ready, yet nothing bound the worker port,
         # readiness reports the cold rung, and no spawn line was logged. Give a

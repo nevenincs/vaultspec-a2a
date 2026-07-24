@@ -31,7 +31,6 @@ import contextlib
 import json
 import os
 import signal
-import socket
 import subprocess
 import sys
 import time
@@ -48,6 +47,8 @@ from vaultspec_a2a.desktop.credentials import (
 )
 from vaultspec_a2a.desktop.profile import derive_state_paths
 from vaultspec_a2a.utils import kill_pid_tree_async
+
+from ._boot import spawn_until_ready
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -104,27 +105,6 @@ def _seat_valid_database(app_home: Path) -> None:
     assert derive_state_paths(app_home).database_path.is_file()
 
 
-def _free_port() -> int:
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-        sock.bind(("127.0.0.1", 0))
-        return sock.getsockname()[1]
-
-
-def _await_health(base: str, *, timeout: float = 40.0) -> None:
-    """Wait until the gateway's liveness endpoint answers 200."""
-    deadline = time.monotonic() + timeout
-    last: str | None = None
-    while time.monotonic() < deadline:
-        try:
-            with httpx.Client(base_url=base, timeout=2.0) as client:
-                if client.get("/health").status_code == 200:
-                    return
-        except httpx.HTTPError as exc:  # not up yet
-            last = repr(exc)
-        time.sleep(0.1)
-    raise AssertionError(f"gateway readiness never came up ({last})")
-
-
 @contextmanager
 def _running_gateway(
     tmp_path: Path,
@@ -134,28 +114,29 @@ def _running_gateway(
     **extra_env: str,
 ) -> Iterator[tuple[str, str]]:
     """Run one gateway process over an already seated application home."""
-    gateway_port = _free_port()
-    worker_port = _free_port()
     log_path = tmp_path / log_name
-    env = os.environ.copy()
-    env["VAULTSPEC_DESKTOP_APP_HOME"] = str(app_home)
-    env["VAULTSPEC_ENVIRONMENT"] = "production"
-    env["VAULTSPEC_PORT"] = str(gateway_port)
-    env["VAULTSPEC_WORKER_PORT"] = str(worker_port)
-    env["VAULTSPEC_AUTO_SPAWN_WORKER"] = "true"
-    env.update(extra_env)
-
-    base = f"http://127.0.0.1:{gateway_port}"
     log_handle = log_path.open("wb")
-    proc = subprocess.Popen(
-        [sys.executable, "-c", _GATEWAY, str(gateway_port)],
-        env=env,
-        stdout=log_handle,
-        stderr=subprocess.STDOUT,
-        start_new_session=os.name != "nt",
+
+    def _spawn(gateway_port: int, worker_port: int) -> subprocess.Popen[bytes]:
+        env = os.environ.copy()
+        env["VAULTSPEC_DESKTOP_APP_HOME"] = str(app_home)
+        env["VAULTSPEC_ENVIRONMENT"] = "production"
+        env["VAULTSPEC_PORT"] = str(gateway_port)
+        env["VAULTSPEC_WORKER_PORT"] = str(worker_port)
+        env["VAULTSPEC_AUTO_SPAWN_WORKER"] = "true"
+        env.update(extra_env)
+        return subprocess.Popen(
+            [sys.executable, "-c", _GATEWAY, str(gateway_port)],
+            env=env,
+            stdout=log_handle,
+            stderr=subprocess.STDOUT,
+            start_new_session=os.name != "nt",
+        )
+
+    proc, _gateway_port, _worker_port, base = spawn_until_ready(
+        _spawn, log_path=log_path
     )
     try:
-        _await_health(base)
         yield base, f"Bearer {_ATTACH}"
     finally:
         with contextlib.suppress(Exception):

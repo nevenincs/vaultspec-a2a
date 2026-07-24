@@ -19,10 +19,8 @@ from __future__ import annotations
 
 import json
 import os
-import socket
 import subprocess
 import sys
-import time
 from typing import TYPE_CHECKING
 
 import httpx
@@ -33,6 +31,8 @@ from vaultspec_a2a.desktop.credentials import (
     OWNERSHIP_CAPABILITY_NAME,
 )
 from vaultspec_a2a.desktop.profile import derive_state_paths
+
+from ._boot import spawn_until_ready
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -87,27 +87,6 @@ def _seat_valid_database(app_home: Path) -> None:
     assert derive_state_paths(app_home).database_path.is_file()
 
 
-def _free_port() -> int:
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-        sock.bind(("127.0.0.1", 0))
-        return sock.getsockname()[1]
-
-
-def _await_health(base: str, *, timeout: float = 40.0) -> None:
-    """Wait until the gateway's liveness endpoint answers 200."""
-    deadline = time.monotonic() + timeout
-    last: str | None = None
-    while time.monotonic() < deadline:
-        try:
-            with httpx.Client(base_url=base, timeout=2.0) as client:
-                if client.get("/health").status_code == 200:
-                    return
-        except httpx.HTTPError as exc:  # not up yet
-            last = repr(exc)
-        time.sleep(0.1)
-    raise AssertionError(f"gateway readiness never came up ({last})")
-
-
 def test_desktop_readiness_liveness_minimal_and_readiness_authenticated(
     tmp_path: Path,
 ) -> None:
@@ -117,28 +96,27 @@ def test_desktop_readiness_liveness_minimal_and_readiness_authenticated(
     _seed_credentials(app_home)
     _seat_valid_database(app_home)
 
-    port = _free_port()
     log_path = tmp_path / "gateway.log"
-    env = os.environ.copy()
-    env["VAULTSPEC_DESKTOP_APP_HOME"] = str(app_home)
-    env["VAULTSPEC_ENVIRONMENT"] = "production"
-    env["VAULTSPEC_PORT"] = str(port)
-    # Keep the worker cold: ordinary boot must not start it, so the gateway-ready
-    # yet not-execution-ready fact is observable.
-    env["VAULTSPEC_AUTO_SPAWN_WORKER"] = "false"
-    env["VAULTSPEC_REPAIR_ON_STARTUP"] = "false"
-
     log_handle = log_path.open("wb")
-    proc = subprocess.Popen(
-        [sys.executable, "-c", _GATEWAY, str(port)],
-        env=env,
-        stdout=log_handle,
-        stderr=subprocess.STDOUT,
-    )
-    base = f"http://127.0.0.1:{port}"
-    try:
-        _await_health(base)
 
+    def _spawn(port: int, _worker_port: int) -> subprocess.Popen[bytes]:
+        env = os.environ.copy()
+        env["VAULTSPEC_DESKTOP_APP_HOME"] = str(app_home)
+        env["VAULTSPEC_ENVIRONMENT"] = "production"
+        env["VAULTSPEC_PORT"] = str(port)
+        # Keep the worker cold: ordinary boot must not start it, so the
+        # gateway-ready yet not-execution-ready fact is observable.
+        env["VAULTSPEC_AUTO_SPAWN_WORKER"] = "false"
+        env["VAULTSPEC_REPAIR_ON_STARTUP"] = "false"
+        return subprocess.Popen(
+            [sys.executable, "-c", _GATEWAY, str(port)],
+            env=env,
+            stdout=log_handle,
+            stderr=subprocess.STDOUT,
+        )
+
+    proc, _port, _worker_port, base = spawn_until_ready(_spawn, log_path=log_path)
+    try:
         with httpx.Client(base_url=base, timeout=5.0) as client:
             # --- Every ungated liveness surface is minimal, byte-for-byte. ---
             # Both the top-level probe and the aggregate probe must disclose only

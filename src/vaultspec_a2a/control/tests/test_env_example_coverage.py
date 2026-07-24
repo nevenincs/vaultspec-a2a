@@ -20,9 +20,7 @@ from vaultspec_a2a.control.config import Settings
 # service example documents their absence rather than the settings.
 _DESKTOP_ONLY = frozenset({"VAULTSPEC_DESKTOP_APP_HOME", "VAULTSPEC_CAPSULE_ASSETS"})
 
-_ENV_EXAMPLE = (
-    pathlib.Path(__file__).resolve().parents[3].parent / ".env.example"
-)
+_ENV_EXAMPLE = pathlib.Path(__file__).resolve().parents[3].parent / ".env.example"
 
 
 def _documented() -> str:

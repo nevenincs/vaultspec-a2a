@@ -3,7 +3,7 @@ tags:
   - '#audit'
   - '#codebase-health'
 date: '2026-07-19'
-modified: '2026-07-24'
+modified: '2026-07-25'
 related:
   - "[[2026-07-14-a2a-edge-conformance-adr]]"
   - "[[2026-07-18-desktop-product-profile-plan]]"
@@ -1227,3 +1227,89 @@ protects is now real and proven.
   when it then fails. The only way to reach the no-pid return is never having
   attempted assignment, where "nothing to reap" is the true answer. Recorded so
   the same theory is not re-derived later.
+
+### Third pass (2026-07-25) - parallel execution findings
+
+Findings raised while driving W01.P03, W02.P06, and W01.P01 in parallel. Code
+evidence only; step outcomes are recorded separately once their gates pass.
+
+#### `per-principal-stream-quotas-have-no-principal` (high, blocks `W02.P06.S25`)
+
+S25 asks for per-principal stream and subscription quotas "after
+ authentication". It cannot be implemented as written, and the reason is
+architectural rather than an execution gap.
+
+Authentication on this surface is a single shared attach credential.
+`api/app.py:193` `_http_attach_authorized` compares the supplied bearer against
+one `app.state.v1_service_token` with `hmac.compare_digest`; the WebSocket check
+mirrors it. There is no subject, no claims, and no per-caller identity anywhere
+in the chain - `api/routes/thread_stream.py` takes only `get_db` and
+`get_aggregator`, with no identity dependency at all. Every authenticated caller
+is therefore indistinguishable from every other, so a per-principal quota has
+nothing to key on and would be indistinguishable from the global limit already
+enforced.
+
+What IS in place and adequate for the global dimension: the connection cap
+(`max_stream_connections`, refused before the thread lookup) and the per-client
+subscription cap (`max_subscriptions_per_client`, all-or-nothing, with a refusal
+counter).
+
+Closing S25 requires first deciding whether callers get distinct identities -
+per-caller tokens or a claims-bearing credential - which is an ADR-level change
+to the authentication model, not a step. Recommend re-scoping S25 behind that
+decision rather than leaving it open as though it were implementable work.
+
+#### `caller-supplied-workspace-root-is-unconstrained` (medium, trust-boundary decision)
+
+`api/routes/gateway.py:746` `_prepare_workspace_root` reads `workspace_root`
+from request-body metadata and accepts it on `candidate.is_absolute()` alone;
+the same value is also accepted as a query parameter. It flows into
+`load_team_config`, which reads `{workspace_root}/.vaultspec/teams/{id}.toml`
+(`team/team_config.py:717`). The team identifier is regex-guarded, so there is
+no traversal through it, but the root itself is unconstrained: an authenticated
+caller directs preset resolution at any absolute path on the gateway host.
+
+Impact bounded honestly: `AgentModelConfig` carries `Provider`/`Model` enums,
+not a command string, so a planted preset cannot name an arbitrary executable
+directly. It can set `AgentCapabilitiesConfig` and `AgentPermissionsConfig`, and
+`terminal` capability does reach command execution - but only for a caller who
+can already write a file on the host, which is the precondition that keeps this
+from being straightforwardly exploitable.
+
+Deliberately NOT clamped. Under the armed desktop profile the user's workspace
+legitimately IS an arbitrary absolute path - their own project directory - and
+the authenticated caller is their own dashboard, so containing the root under
+`settings.workspace_root` would break the product's core use case in one line.
+Routed to the owner with three options; the recommendation is to split by
+profile, unconstrained on armed desktop and allowlisted under Compose, since
+Compose is the deployment where the value crosses a real trust boundary.
+
+#### `published-openapi-artifact-is-stale-and-malformed` (medium)
+
+The committed `openapi.json` is broken three independent ways, and nothing
+validates it - the one test that touches OpenAPI builds the document live from
+`app.openapi()` and never reads the file.
+
+- It documents 18 paths against the live application's 24, missing the entire
+  versioned public surface: `/v1/runs`, `/v1/runs/{run_id}`, its `cancel` and
+  `stream` members, `/v1/presets`, and `/v1/service`. A consumer generating a
+  typed client from it - which is exactly what the open type-safe-client task
+  proposes - would produce a client with no gateway verbs at all.
+- It is cp1252-encoded, carrying `0xa7` at offsets 41842 and 42327, so it is not
+  valid UTF-8 and a strict RFC 8259 parser rejects the file outright.
+- It carries five `ADR-013 §6` vault references in description strings. The live
+  document carries none, and no source file under `src/` mentions an ADR
+  identifier, so the artifact predates the dev-metadata scrub and preserves
+  exactly the coupling that scrub removed.
+
+Fix is to regenerate from the live application as UTF-8 and add a gate asserting
+the committed artifact matches, so it cannot silently drift again.
+
+#### `shared-index-cross-staging` (low, process)
+
+Three executor agents shared one working tree and one git index. One agent's
+formatting commit staged broadly and captured an unrelated file rename staged by
+the orchestrator, recording it under a message that does not describe it. No
+work was lost and the rename is correct; the cost is a misleading history entry,
+recorded rather than rewritten. Parallel agents in a shared tree must stage
+explicit paths and verify the staged set before committing.

@@ -21,7 +21,7 @@ from ..context.metadata import ThreadMetadata, discover_context_refs, generate_n
 from ..context.preamble import build_context_preamble
 from ..control.dispatch import safe_dispatch
 from ..control.repair_transitions import (
-    mark_dispatch_failed,
+    apply_dispatch_failure,
     mark_ingest_applied,
     mark_ingest_requested,
 )
@@ -41,7 +41,7 @@ from ..graph.compiler import build_initial_vault_index
 from ..ipc.schemas import DispatchRequest, to_dispatch_action
 from ..team.team_config import load_team_config
 from ..thread.creation import requires_dispatch, resolve_autonomous
-from ..thread.dispatch_policy import FailureType, classify_dispatch_failure
+from ..thread.dispatch_policy import FailureType, evaluate_dispatch_failure
 from ..thread.enums import (
     TERMINAL_STATUSES,
     ApprovalStatus,
@@ -559,13 +559,11 @@ async def create_and_dispatch_thread(
     )
 
     if not outcome.success:
-        policy = classify_dispatch_failure(outcome.failure_type)
-        typed_failure = (
-            FailureType(outcome.failure_type) if outcome.failure_type else None
-        )
+        policy, typed_failure = evaluate_dispatch_failure(outcome.failure_type)
         if policy.should_mark_failed:
-            await update_thread_status(db, thread.id, ThreadStatus.FAILED)
-            await mark_dispatch_failed(db, thread.id)
+            await apply_dispatch_failure(
+                db, thread.id, failed_status=ThreadStatus.FAILED
+            )
         await db.commit()
         return ThreadCreationResult(
             thread_id=thread.id,

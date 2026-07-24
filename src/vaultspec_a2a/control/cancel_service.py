@@ -21,7 +21,7 @@ from ..database import (
 )
 from ..ipc.schemas import DispatchRequest, to_dispatch_action
 from ..thread.cancel_policy import can_cancel
-from ..thread.dispatch_policy import FailureType, classify_dispatch_failure
+from ..thread.dispatch_policy import FailureType, evaluate_dispatch_failure
 from ..thread.enums import (
     ControlActionResultStatus,
     ControlActionType,
@@ -191,10 +191,7 @@ async def cancel_thread(
     )
 
     if not outcome.success:
-        policy = classify_dispatch_failure(outcome.failure_type)
-        typed_failure = (
-            FailureType(outcome.failure_type) if outcome.failure_type else None
-        )
+        policy, typed_failure = evaluate_dispatch_failure(outcome.failure_type)
         logger.warning(
             "Cancel dispatch failed for thread %s — restoring durable repair state",
             thread_id,

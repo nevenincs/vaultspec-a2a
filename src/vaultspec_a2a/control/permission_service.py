@@ -26,7 +26,7 @@ from ..database import (
 )
 from ..graph.enums import REJECT_OPTION_IDS
 from ..ipc.schemas import DispatchRequest, to_dispatch_action
-from ..thread.dispatch_policy import FailureType, classify_dispatch_failure
+from ..thread.dispatch_policy import FailureType, evaluate_dispatch_failure
 from ..thread.enums import (
     TERMINAL_STATUSES,
     ApprovalStatus,
@@ -39,7 +39,7 @@ from ..thread.snapshots import PLAN_APPROVAL_PAUSE_CAUSES
 from .dispatch import safe_dispatch
 from .permission_options import extract_allowed_option_ids
 from .repair_transitions import (
-    mark_dispatch_failed,
+    apply_dispatch_failure,
     mark_permission_response_applied,
     mark_permission_response_requested,
 )
@@ -698,13 +698,11 @@ async def _dispatch_permission_resume(
         action.idempotency_key = (
             f"{resolved_idempotency_key}:dispatch-failed:{action.id}"
         )
-        policy = classify_dispatch_failure(outcome.failure_type)
-        typed_failure = (
-            FailureType(outcome.failure_type) if outcome.failure_type else None
-        )
+        policy, typed_failure = evaluate_dispatch_failure(outcome.failure_type)
         if policy.should_mark_failed:
-            await update_thread_status(db, thread_id, ThreadStatus.INPUT_REQUIRED)
-            await mark_dispatch_failed(db, thread_id)
+            await apply_dispatch_failure(
+                db, thread_id, failed_status=ThreadStatus.INPUT_REQUIRED
+            )
         else:
             action.result_status = (
                 ControlActionResultStatus.REJECTED_INVALID_STATE.value

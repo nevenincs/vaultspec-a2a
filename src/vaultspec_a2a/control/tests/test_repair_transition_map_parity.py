@@ -16,6 +16,7 @@ import pytest_asyncio
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from vaultspec_a2a.control.repair_transitions import (
+    apply_dispatch_failure,
     mark_cancel_requested,
     mark_dispatch_failed,
     mark_ingest_applied,
@@ -27,7 +28,7 @@ from vaultspec_a2a.control.repair_transitions import (
 )
 from vaultspec_a2a.database import create_thread
 from vaultspec_a2a.database.models import Base
-from vaultspec_a2a.thread.enums import ControlActionType
+from vaultspec_a2a.thread.enums import ControlActionType, ThreadStatus
 from vaultspec_a2a.thread.repair_policy import (
     DISPATCH_FAILED_TRANSITION,
     repair_state_for_action,
@@ -124,3 +125,35 @@ async def test_dispatch_failed_persists_the_pure_policy_transition(
     assert updated.repair_status == expected.repair_status.value
     assert updated.execution_readiness == expected.execution_readiness
     assert updated.repair_reason == "boom"
+
+
+@pytest.mark.asyncio
+async def test_apply_dispatch_failure_moves_status_and_repair_state_together(
+    session_factory,
+) -> None:
+    """The shared helper pairs the thread-status change with the repair transition.
+
+    The three dispatch callers used to spell both mutations inline; the helper is
+    the single place that performs them, so a caller cannot update one without the
+    other.
+    """
+    expected = DISPATCH_FAILED_TRANSITION
+
+    async with session_factory() as session:
+        thread = await create_thread(
+            session,
+            title="apply",
+            repair_status="healthy",
+            execution_readiness="healthy",
+        )
+        await session.commit()
+
+        updated = await apply_dispatch_failure(
+            session, thread.id, failed_status=ThreadStatus.FAILED
+        )
+        await session.commit()
+
+    assert updated is not None
+    assert updated.status == ThreadStatus.FAILED.value
+    assert updated.repair_status == expected.repair_status.value
+    assert updated.execution_readiness == expected.execution_readiness

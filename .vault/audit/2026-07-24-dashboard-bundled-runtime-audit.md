@@ -48,24 +48,29 @@ numpy hook (metadata-only reinstall fixed it). Residual: the other targets
 build in the dashboard's release pipeline; this box proves the recipe and
 the process model.
 
-### dashboard-records-stale | high | Dashboard-side ADRs still describe capsule consumption
+### dashboard-records-stale | resolved | The dashboard-side reversal record is accepted; residual is code reshape
 
-The dashboard repository's provisioning, archive-materialization,
-distribution-trust, and generation-authority records still bind the product
-to the capsule shape this pivot removed. Their consume path was never wired
-(fail-closed placeholder), so nothing breaks live, but the records now
-contradict the accepted a2a-side decision. Cross-repo reversal is proposed to
-the owner rather than executed silently; tracked as the pending cross-repo
-task in the pivot's coordination channel.
+Closed at the record layer the same day: the dashboard repository now carries
+its own accepted 2026-07-24 a2a-product-provisioning record (dashboard-built
+frozen onedir, capsule consume reversed, deliberate amend-not-supersede
+semantics) plus a plan reshape applied through the plan CLI. The workflow leg
+(onedir build proof, pinned-source freeze build, capsule fetch removed, lock
+re-pinned transitionally) is landed on a dashboard branch; the remaining code
+reshape (BuildSources onedir admission, capsule-manifest authority
+retirement, final lock shape) is scoped and owned by the dashboard-side
+workstream, gated fail-closed until it lands.
 
-### plan-capsule-waves-void | medium | The desktop-product-profile plan carries now-void capsule waves
+### plan-capsule-waves-void | resolved | The plan now carries a body-prose supersession annotation
 
-The superseding decision record notes the supersession, but the plan document
-itself still lists unexecuted capsule-wave steps whose subjects no longer
-exist in the tree. A curation pass (vault-curate) should mark or annotate the
-affected waves; plan-structure mutation was deliberately avoided in this pass
-because above-step plan verbs on a shared tree have a known sibling-row
-corruption hazard.
+Closed by a curation pass: the desktop-product-profile plan's Description
+carries a supersession note (checked capsule Steps stay as historical record,
+their subjects are deleted and must not be re-driven; the runtime decisions
+are re-homed under the superseding record; the one open runtime-admission
+Step is unaffected) and the superseding record is linked in its related
+frontmatter via the owning verb. Step rows were deliberately left untouched -
+above-step plan verbs on a shared tree carry a known sibling-row corruption
+hazard, and prose annotation plus linkage delivers the reconciliation without
+identifier mutation.
 
 ### capsule-vocabulary-residue | low | Runtime vocabulary still says capsule for the bundled asset root
 
@@ -99,23 +104,30 @@ base/head assertions; the decision record and grounding reference amended in
 place. The lesson recorded for future passes: a keep verdict must cite a live
 caller, not plausibility.
 
-### admission-flake-baseline | low | Three run-admission gates flake under full-suite parallel load
+### admission-flake-baseline | resolved | The flake was the Windows freed-port bind race; boot is now death-aware and retrying
 
 `test_pre_durability_commit_failure_restores_reservation_for_release`,
 `test_gateway_restart_recovers_durable_lease_and_exact_commit_replay`, and
-`test_v1_write_body_is_rejected_before_unbounded_json_parsing` failed in the
-full unit gate and pass individually; the same three-failure signature
-predates the pivot on main. Not caused by this change; belongs to the
-codebase-health flake queue.
+`test_v1_write_body_is_rejected_before_unbounded_json_parsing` failed in full
+runs and passed individually; the signature predates the pivot. Root cause:
+every desktop gate allocated ports bind-then-close and polled the health
+endpoint for forty seconds; a freed port is not reserved on Windows, so late
+in a long suite another process could bind it first, the gateway child died
+on its bind, and the poll burned the whole window before an opaque
+"never came up". Resolution: one shared boot authority
+(`desktop_tests/_boot.py`) replaces the seven duplicated helpers - readiness
+fails immediately with the child's exit code and log tail when the process
+dies pre-ready, and re-boots on a fresh port pair with bounded attempts,
+dead-child only, so a genuine boot regression still fails loudly. All six
+desktop gates and the live service harness migrated; the whole desktop gate
+suite passes including the three former flakers.
 
 ## Recommendations
 
-- Author the dashboard-side superseding record and rewire its release
-  pipeline to invoke the a2a freeze entry per target
-  (dashboard-records-stale).
-- Run a vault-curate pass over the desktop-product-profile plan to annotate
-  the void capsule waves against the superseding record
-  (plan-capsule-waves-void).
-- Fold the three flaking admission gates into the codebase-health flake
-  workstream with the parallel-load reproduction noted
-  (admission-flake-baseline).
+- Complete the dashboard-side code reshape (BuildSources onedir admission,
+  capsule-manifest authority retirement, final source-pin lock shape) in the
+  dashboard workstream that owns it, and re-point the dashboard's a2a source
+  pin to the merge commit once this branch lands on main
+  (dashboard-records-stale residual).
+- None outstanding for admission-flake-baseline: resolved in-tree by the
+  shared death-aware boot authority.

@@ -3,12 +3,13 @@ tags:
   - '#plan'
   - '#desktop-product-profile'
 date: '2026-07-18'
-modified: '2026-07-22'
+modified: '2026-07-24'
 tier: L3
 related:
   - '[[2026-07-18-desktop-product-profile-adr]]'
   - '[[2026-07-18-desktop-product-profile-research]]'
   - '[[2026-07-18-desktop-product-profile-reference]]'
+  - '[[2026-07-24-dashboard-bundled-runtime-adr]]'
 ---
 
 <!-- RETIRED: P15, S88 -->
@@ -70,6 +71,19 @@ MIXED, and HUMAN reruns, and the intermittent
 `execution_state_projection_missing` defects. Both named defects block release
 until that owning plan resolves them; desktop certification cannot waive,
 re-attribute, or silently absorb that work.
+
+**Supersession note (2026-07-24).** The capsule distribution direction this
+plan's Waves `W01`, `W02`, and `W05` executed is superseded by the accepted
+`2026-07-24-dashboard-bundled-runtime-adr`: the capsule assembly, archive,
+inventory, evidence, manifest-emission, and packaging-script apparatus those
+Steps delivered has been REMOVED from the tree, and a2a now ships as a
+dashboard-built PyInstaller onedir with a service-management CLI. The checked
+capsule Steps remain checked as historical execution record; their subjects no
+longer exist and must not be re-driven. The runtime decisions this plan also
+delivered - profile seating, credentials, singleton, settlement, readiness,
+run admission, staged store migration - remain in force and are re-homed under
+the superseding record. The remaining open Step `W04.P12.S104` is runtime
+admission work and is unaffected by the supersession.
 
 ## Steps
 

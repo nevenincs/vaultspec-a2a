@@ -46,6 +46,8 @@ from vaultspec_a2a.providers._subprocess import kill_process_tree, spawn_acp_pro
 from vaultspec_a2a.utils import kill_pid_tree_async
 from vaultspec_a2a.utils.process import ProcessContainment
 
+from ._boot import spawn_until_ready
+
 if TYPE_CHECKING:
     from pathlib import Path
 
@@ -268,31 +270,12 @@ def _seat_valid_database(app_home: Path) -> None:
     assert json.loads(result.stdout.strip())["status"] == "succeeded"
 
 
-def _free_port() -> int:
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-        sock.bind(("127.0.0.1", 0))
-        return sock.getsockname()[1]
-
-
 def _port_listening(port: int, *, timeout: float = 0.5) -> bool:
     try:
         with socket.create_connection(("127.0.0.1", port), timeout=timeout):
             return True
     except OSError:
         return False
-
-
-def _await_health(base: str, *, timeout: float = 40.0) -> None:
-    deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline:
-        with (
-            contextlib.suppress(httpx.HTTPError),
-            httpx.Client(base_url=base, timeout=2.0) as client,
-        ):
-            if client.get("/health").status_code == 200:
-                return
-        time.sleep(0.1)
-    raise AssertionError("gateway readiness never came up")
 
 
 def test_desktop_worker_tree_contained_and_reaped_on_graceful_shutdown(
@@ -311,26 +294,28 @@ def test_desktop_worker_tree_contained_and_reaped_on_graceful_shutdown(
     _seed_credentials(app_home)
     _seat_valid_database(app_home)
 
-    gateway_port = _free_port()
-    worker_port = _free_port()
-    env = os.environ.copy()
-    env["VAULTSPEC_DESKTOP_APP_HOME"] = str(app_home)
-    env["VAULTSPEC_ENVIRONMENT"] = "production"
-    env["VAULTSPEC_PORT"] = str(gateway_port)
-    env["VAULTSPEC_WORKER_PORT"] = str(worker_port)
-    env["VAULTSPEC_AUTO_SPAWN_WORKER"] = "true"
-
-    base = f"http://127.0.0.1:{gateway_port}"
     auth = {"Authorization": f"Bearer {_ATTACH}"}
+    log_path = tmp_path / "gateway.log"
+    log_handle = log_path.open("wb")
 
-    proc = subprocess.Popen(
-        [sys.executable, "-c", _GATEWAY, str(gateway_port)],
-        env=env,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.STDOUT,
+    def _spawn(gateway_port: int, worker_port: int) -> subprocess.Popen[bytes]:
+        env = os.environ.copy()
+        env["VAULTSPEC_DESKTOP_APP_HOME"] = str(app_home)
+        env["VAULTSPEC_ENVIRONMENT"] = "production"
+        env["VAULTSPEC_PORT"] = str(gateway_port)
+        env["VAULTSPEC_WORKER_PORT"] = str(worker_port)
+        env["VAULTSPEC_AUTO_SPAWN_WORKER"] = "true"
+        return subprocess.Popen(
+            [sys.executable, "-c", _GATEWAY, str(gateway_port)],
+            env=env,
+            stdout=log_handle,
+            stderr=subprocess.STDOUT,
+        )
+
+    proc, _gateway_port, worker_port, base = spawn_until_ready(
+        _spawn, log_path=log_path
     )
     try:
-        _await_health(base)
         # First demand spawns the gateway-owned worker inside its containment.
         with httpx.Client(base_url=base, timeout=60.0) as client:
             start = client.post(

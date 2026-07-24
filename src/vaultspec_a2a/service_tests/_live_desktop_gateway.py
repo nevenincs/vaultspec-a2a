@@ -7,14 +7,10 @@ import contextlib
 import json
 import os
 import signal
-import socket
 import subprocess
 import sys
 import time
-from contextlib import contextmanager
 from typing import TYPE_CHECKING, Final
-
-import httpx
 
 from vaultspec_a2a.desktop._platform_acl import harden_credential_file
 from vaultspec_a2a.desktop.credentials import (
@@ -23,6 +19,8 @@ from vaultspec_a2a.desktop.credentials import (
 )
 from vaultspec_a2a.desktop.profile import derive_state_paths
 from vaultspec_a2a.utils import kill_pid_tree_async
+
+from ..desktop_tests._boot import spawn_until_ready
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -77,27 +75,7 @@ def _seat_valid_database(app_home: Path) -> None:
     assert derive_state_paths(app_home).database_path.is_file()
 
 
-def _free_port() -> int:
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-        sock.bind(("127.0.0.1", 0))
-        return int(sock.getsockname()[1])
-
-
-def _await_health(base: str, *, timeout: float = 40.0) -> None:
-    deadline = time.monotonic() + timeout
-    last = "not started"
-    while time.monotonic() < deadline:
-        try:
-            with httpx.Client(base_url=base, timeout=2.0) as client:
-                if client.get("/health").status_code == 200:
-                    return
-        except httpx.HTTPError as exc:
-            last = repr(exc)
-        time.sleep(0.1)
-    raise AssertionError(f"gateway readiness never came up ({last})")
-
-
-@contextmanager
+@contextlib.contextmanager
 def armed_gateway(tmp_path: Path, **extra_env: str) -> Iterator[tuple[str, str]]:
     """Boot a migrated production desktop gateway and its real lazy worker."""
     app_home = tmp_path / "app-home"
@@ -105,28 +83,31 @@ def armed_gateway(tmp_path: Path, **extra_env: str) -> Iterator[tuple[str, str]]
     _seed_credentials(app_home)
     _seat_valid_database(app_home)
 
-    gateway_port = _free_port()
-    worker_port = _free_port()
-    environment = {
-        **os.environ,
-        "VAULTSPEC_DESKTOP_APP_HOME": str(app_home),
-        "VAULTSPEC_ENVIRONMENT": "production",
-        "VAULTSPEC_PORT": str(gateway_port),
-        "VAULTSPEC_WORKER_PORT": str(worker_port),
-        "VAULTSPEC_AUTO_SPAWN_WORKER": "true",
-        **extra_env,
-    }
-    base = f"http://127.0.0.1:{gateway_port}"
-    log_handle = (tmp_path / "gateway.log").open("wb")
-    process = subprocess.Popen(
-        [sys.executable, "-c", _GATEWAY, str(gateway_port)],
-        env=environment,
-        stdout=log_handle,
-        stderr=subprocess.STDOUT,
-        start_new_session=os.name != "nt",
+    log_path = tmp_path / "gateway.log"
+    log_handle = log_path.open("wb")
+
+    def _spawn(gateway_port: int, worker_port: int) -> subprocess.Popen[bytes]:
+        environment = {
+            **os.environ,
+            "VAULTSPEC_DESKTOP_APP_HOME": str(app_home),
+            "VAULTSPEC_ENVIRONMENT": "production",
+            "VAULTSPEC_PORT": str(gateway_port),
+            "VAULTSPEC_WORKER_PORT": str(worker_port),
+            "VAULTSPEC_AUTO_SPAWN_WORKER": "true",
+            **extra_env,
+        }
+        return subprocess.Popen(
+            [sys.executable, "-c", _GATEWAY, str(gateway_port)],
+            env=environment,
+            stdout=log_handle,
+            stderr=subprocess.STDOUT,
+            start_new_session=os.name != "nt",
+        )
+
+    process, _gateway_port, _worker_port, base = spawn_until_ready(
+        _spawn, log_path=log_path
     )
     try:
-        _await_health(base)
         yield base, f"Bearer {ATTACH_CREDENTIAL}"
     finally:
         if os.name == "nt":

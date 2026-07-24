@@ -30,17 +30,23 @@ gateway on a scratch home.
 
 ## Findings
 
-### frozen-binary-unproven | high | The PyInstaller build has never been executed end to end
+### frozen-binary-unproven | resolved | The frozen onedir binary is built and proven on Windows
 
-The spec, entry script, and build-plus-smoke driver are authored and the
-process model is freeze-safe by construction and test, but no frozen binary
-has been built on any target yet - the ``freeze`` dependency group was added
-without an install run, and the smoke gate (`scripts/build_binary.py`) has
-only been exercised in source form. The first real dashboard-side build will
-surface hidden-import and data-file gaps (langgraph, aiosqlite, alembic
-script location) that only PyInstaller analysis reveals. Owned by the
-dashboard-integration follow-on; the smoke gate is designed to fail loudly on
-each gap.
+Initially recorded high because the spec had never been executed. Resolved
+the same day on the Windows x86-64 target: `scripts/build_binary.py` builds
+the onedir (~260 MB with the runtime closure; the spec explicitly excludes
+the Torch/RAG and PostgreSQL profiles) and its smoke gate passes (version,
+help tree, allowlist refusal frozen). The payoff proof ran against the
+actual frozen executable on a scratch application home: start published a
+healthy resident, status agreed, restart replaced the generation on the same
+port, stop confirmed termination; the run-module dispatch booted the REAL
+worker from the frozen binary (served its health endpoint and heartbeated
+the frozen gateway over the internal channel) and ran the bundled
+`vaultspec_core` (0.1.48). One build-environment defect surfaced and was
+repaired: a gutted numpy dist-info in the shared venv broke PyInstaller's
+numpy hook (metadata-only reinstall fixed it). Residual: the other targets
+build in the dashboard's release pipeline; this box proves the recipe and
+the process model.
 
 ### dashboard-records-stale | high | Dashboard-side ADRs still describe capsule consumption
 
@@ -104,9 +110,6 @@ codebase-health flake queue.
 
 ## Recommendations
 
-- Execute `scripts/build_binary.py` under the ``freeze`` group on one target
-  as the immediate next step of dashboard integration; iterate the spec's
-  collection lists until the smoke gate passes (frozen-binary-unproven).
 - Author the dashboard-side superseding record and rewire its release
   pipeline to invoke the a2a freeze entry per target
   (dashboard-records-stale).

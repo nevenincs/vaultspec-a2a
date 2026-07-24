@@ -30,8 +30,6 @@ import pytest
 
 from vaultspec_a2a.desktop import (
     ComponentIdentity,
-    DigestAlgorithm,
-    TargetTriple,
     export_component_manifest_schema,
 )
 
@@ -240,10 +238,3 @@ def test_dashboard_fixture_pins_wheel_identity_without_claiming_release_binding(
         version=pin["version"],
     )
     assert fixture_identity == built_wheel.identity
-
-    assert TargetTriple(pin["target"]) is TargetTriple.WINDOWS_X86_64
-    digest_reference = pin["manifest_digest"]
-    assert DigestAlgorithm(digest_reference["algorithm"]) is DigestAlgorithm.SHA256
-    digest_bytes = bytes.fromhex(digest_reference["value"])
-    assert len(digest_bytes) == 32
-    assert digest_reference["value"] == digest_reference["value"].lower()

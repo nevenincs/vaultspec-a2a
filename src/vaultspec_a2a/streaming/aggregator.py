@@ -23,6 +23,7 @@ from .buffering import BufferingManager
 from .emitters import EventEmitters
 from .ingest import IngestManager
 from .subscribers import SubscriberManager
+from .transformer import project_run_progress
 from .types import SequencedEvent, StreamableGraph, classify_tool_kind
 
 __all__ = [
@@ -116,8 +117,15 @@ class EventAggregator:
         self._emitters.clear_thread_state(thread_id)
 
     def relay_payload(self, thread_id: str, payload: object) -> None:
-        """Fan out a pre-serialized payload to all subscribers of ``thread_id``."""
-        self._subscribers_mgr.enqueue_payload(thread_id, payload)
+        """Fan out a pre-serialized payload to all subscribers of ``thread_id``.
+
+        Worker run events enter the public progress edge here. Each is projected
+        through the positive progress DTO before it reaches a subscriber queue, so
+        prompts, document and artifact bodies, edit diffs, and raw provider
+        payloads are dropped at the relay seam - a first enforcement the encode
+        boundary independently repeats.
+        """
+        self._subscribers_mgr.enqueue_payload(thread_id, project_run_progress(payload))
 
     def register_graph(self, graph: StreamableGraph) -> None:
         self._subscribers_mgr.register_graph(graph)

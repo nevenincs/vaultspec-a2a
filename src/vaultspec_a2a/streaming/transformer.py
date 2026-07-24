@@ -10,8 +10,9 @@ references to perform side effects but hold no state of their own.
 
 import asyncio
 import logging
+from collections.abc import Mapping
 from pathlib import PurePath
-from typing import Any
+from typing import Any, cast
 from uuid import uuid4
 
 from ..domain_config import domain_config
@@ -24,6 +25,7 @@ from ..graph.enums import (
 from ..graph.protocols import NullTelemetryHook, TelemetryHook
 from .buffering import BufferingManager
 from .emitters import EventEmitters
+from .sse_frames import enforce_progress_allowlist
 from .types import (
     NODE_BOUNDARY_EVENTS,
     PASSTHROUGH_EVENTS,
@@ -48,6 +50,23 @@ except ImportError:
     _GraphRecursionError = None
 
 logger = logging.getLogger(__name__)
+
+
+def project_run_progress(payload: object) -> object:
+    """Transform a relayed gateway run event through the positive progress DTO.
+
+    The gateway relays each worker run event onto the public progress edge; this
+    is the producer-side projection that drops prompts, document and artifact
+    bodies, edit diffs, and raw provider payloads before the event ever reaches a
+    subscriber queue, keeping only the allowlisted identifiers, lifecycle state,
+    tool and artifact identity, and the bounded token-stream field. A non-mapping
+    payload is returned unchanged. The encode boundary re-applies the same
+    allowlist, so the exclusion holds independently even if this projection is
+    bypassed.
+    """
+    if isinstance(payload, Mapping):
+        return enforce_progress_allowlist(cast("Mapping[str, object]", payload))
+    return payload
 
 
 def _artifact_label_from_tool_input(file_path: str) -> str:

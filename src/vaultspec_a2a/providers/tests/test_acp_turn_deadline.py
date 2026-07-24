@@ -29,6 +29,15 @@ if TYPE_CHECKING:
 # window keeps the "still connected, still silent" condition true throughout.
 _SILENT_AGENT = "import time; time.sleep(600)"
 
+# Mute on stdout like the agent above, but writing diagnostics on stderr the
+# whole time - the shape of an agent that is genuinely working and saying so
+# in its log rather than over the protocol.
+_STDERR_CHATTY_AGENT = (
+    "import sys, time\n"
+    "for _ in range(2000):\n"
+    "    sys.stderr.write('working\\n'); sys.stderr.flush(); time.sleep(0.3)\n"
+)
+
 # Drives the real model against that agent and reports how the turn ended.
 # `outcome` is the whole point of the probe: "deadline" only when the production
 # guard raised with its own marker, "still_waiting" when the turn was still
@@ -64,6 +73,7 @@ _TURN_PROBE_SCRIPT = textwrap.dedent(
             interrupt_exc=[],
         )
         loop_task = asyncio.create_task(process_stdout_loop(ctx, model._config, {}))
+        err_task = asyncio.create_task(model._read_stderr_loop(ctx))
         prompt_future = asyncio.get_running_loop().create_future()
 
         async def drain() -> None:
@@ -82,6 +92,7 @@ _TURN_PROBE_SCRIPT = textwrap.dedent(
         finally:
             elapsed = asyncio.get_running_loop().time() - started
             loop_task.cancel()
+            err_task.cancel()
             process.kill()
             await process.wait()
 
@@ -101,14 +112,16 @@ _IDLE_LIMIT_SECONDS = 1.5
 _OBSERVE_SECONDS = 6.0
 
 
-def _run_turn_probe(tmp_path: Path, idle_limit: str) -> dict[str, Any]:
+def _run_turn_probe(
+    tmp_path: Path, idle_limit: str, agent: str = _SILENT_AGENT
+) -> dict[str, Any]:
     """Run one turn against the silent agent with a given configured deadline."""
     script = tmp_path / "acp_turn_probe.py"
     script.write_text(_TURN_PROBE_SCRIPT, encoding="utf-8")
     env = dict(os.environ)
     env["VAULTSPEC_ACP_TURN_IDLE_TIMEOUT_SECONDS"] = idle_limit
     result = subprocess.run(
-        [sys.executable, str(script), _SILENT_AGENT, str(_OBSERVE_SECONDS)],
+        [sys.executable, str(script), agent, str(_OBSERVE_SECONDS)],
         cwd=os.getcwd(),
         env=env,
         capture_output=True,
@@ -143,6 +156,23 @@ def test_the_same_silent_agent_keeps_waiting_when_the_deadline_is_long(
     report = _run_turn_probe(tmp_path, "3600")
 
     assert report["configured_idle_limit"] == 3600.0
+    assert report["outcome"] == "still_waiting"
+
+
+def test_stderr_diagnostics_keep_the_turn_alive(tmp_path: Path) -> None:
+    """Proof of life on stderr resets the deadline.
+
+    Same mute-on-stdout shape as the failing case and the same short deadline;
+    the only difference is that this agent is writing diagnostics. An agent that
+    is plainly working must not be felled just because its progress is going to
+    the log rather than over the protocol - the expensive mistake here is
+    killing real work, not tolerating a noisy hang a few seconds longer.
+    """
+    report = _run_turn_probe(
+        tmp_path, str(_IDLE_LIMIT_SECONDS), agent=_STDERR_CHATTY_AGENT
+    )
+
+    assert report["configured_idle_limit"] == _IDLE_LIMIT_SECONDS
     assert report["outcome"] == "still_waiting"
 
 

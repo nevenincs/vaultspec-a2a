@@ -721,6 +721,13 @@ class AcpChatModel(BaseChatModel):
             if text:
                 self._capture_auth_progress(text, ctx)
                 ctx.stderr_event_count += 1
+                # Diagnostics are proof of life too. The turn deadline exists to
+                # catch a silent hang, and the expensive mistake is felling an
+                # agent that is genuinely working, so any sign of life resets it.
+                # An agent wedged in a chatty retry loop survives longer as a
+                # result - the deliberate trade, since that one is at least
+                # visible in the log while a silent hang is not.
+                ctx.mark_activity()
                 logger.debug(
                     "ACP STDERR: %s",
                     text,

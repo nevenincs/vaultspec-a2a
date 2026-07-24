@@ -17,6 +17,7 @@ import pytest
 from vaultspec_a2a.thread.errors import EventAggregatorError
 
 from ...domain_config import domain_config
+from ...telemetry.aggregator_hook import OTelAggregatorHook
 from ..aggregator import EventAggregator
 
 
@@ -125,6 +126,37 @@ def test_the_cap_is_per_client_not_global(aggregator: EventAggregator) -> None:
     aggregator.subscribe("client-2", _threads(0, limit))
 
     assert len(aggregator.get_subscriptions("client-2")) == limit
+
+
+def test_a_refusal_emits_the_operational_counter() -> None:
+    """The refusal is observable to operators, not just to the caller.
+
+    Uses the real OTel hook against a real meter rather than a stand-in: it
+    registers each counter lazily on first use, so the counter's presence in the
+    hook's registry is proof the production path actually recorded it. The
+    control below shows the same registry is empty without a refusal, so this
+    cannot pass on a counter registered by some other code path.
+    """
+    hook = OTelAggregatorHook()
+    aggregator = EventAggregator(telemetry=hook)
+    limit = domain_config.max_subscriptions_per_client
+    aggregator.add_subscriber("client-1")
+
+    with pytest.raises(EventAggregatorError):
+        aggregator.subscribe("client-1", _threads(0, limit + 1))
+
+    assert "aggregator.subscriptions_refused" in hook._counters
+
+
+def test_an_accepted_subscription_emits_no_refusal_counter() -> None:
+    """Control: the counter tracks refusals, not subscribe calls."""
+    hook = OTelAggregatorHook()
+    aggregator = EventAggregator(telemetry=hook)
+    aggregator.add_subscriber("client-1")
+
+    aggregator.subscribe("client-1", _threads(0, 5))
+
+    assert "aggregator.subscriptions_refused" not in hook._counters
 
 
 def test_unsubscribing_frees_capacity_again(aggregator: EventAggregator) -> None:

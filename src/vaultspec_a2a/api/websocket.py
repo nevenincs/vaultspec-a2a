@@ -27,6 +27,7 @@ from ..streaming.fanout import deliver_bounded
 from ..telemetry.instrumentation import get_meter, get_tracer
 from ..telemetry.middleware import inject_trace_context, ws_span
 from ..thread.constants import DEFAULT_SUPERVISOR_ID
+from ..thread.errors import EventAggregatorError
 from ..utils import package_version
 from .event_adapter import sequenced_to_wire
 from .schemas.commands import (
@@ -322,7 +323,21 @@ class ConnectionManager:
 
     async def _handle_subscribe(self, client_id: str, cmd: SubscribeCommand) -> None:
         """Handle SUBSCRIBE command."""
-        self._aggregator.subscribe(client_id, cmd.thread_ids)
+        try:
+            self._aggregator.subscribe(client_id, cmd.thread_ids)
+        except EventAggregatorError as exc:
+            # The cap is a capacity refusal, not a protocol fault: the client
+            # keeps its existing subscriptions and its connection, and can retry
+            # after unsubscribing. Surfacing it as a structured error matters
+            # because the alternative - a silently truncated subscription - would
+            # leave the client believing it is watching threads it is not.
+            raise WebSocketCommandRejectedError(
+                thread_id=cmd.thread_ids[0] if cmd.thread_ids else "",
+                code="subscription_limit_exceeded",
+                message=str(exc),
+                recoverable=True,
+                metadata={"requested": len(cmd.thread_ids)},
+            ) from exc
         logger.debug(
             "Client %s subscribed to threads: %s",
             client_id,

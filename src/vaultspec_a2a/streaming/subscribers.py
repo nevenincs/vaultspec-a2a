@@ -64,10 +64,46 @@ class SubscriberManager:
         self._subscriptions.pop(client_id, None)
 
     def subscribe(self, client_id: str, thread_ids: list[str]) -> None:
-        """Subscribe a client to one or more thread event streams."""
+        """Subscribe a client to one or more thread event streams.
+
+        Refuses the whole request once it would carry the client past its
+        subscription cap. Every subscription is matched against every broadcast
+        event, so cardinality here is fan-out work an authenticated caller can
+        demand of the gateway - the connection limit bounds how many clients
+        exist, not how much each one costs. Rejecting outright rather than
+        truncating keeps the client's view honest: a partially applied
+        subscription would silently drop threads it believes it is watching.
+        """
         if client_id not in self._subscribers:
             raise EventAggregatorError(f"Client {client_id} is not registered")
-        self._subscriptions[client_id].update(thread_ids)
+        current = self._subscriptions[client_id]
+        limit = domain_config.max_subscriptions_per_client
+        # Union first: re-subscribing to threads already held must stay a no-op
+        # rather than counting twice against the cap.
+        prospective = current | set(thread_ids)
+        if limit > 0 and len(prospective) > limit:
+            self._telemetry.increment_counter(
+                "aggregator.subscriptions_refused", 1, **{"client_id": client_id}
+            )
+            logger.warning(
+                "Refused subscription for %s: %d held + %d requested exceeds cap %d",
+                client_id,
+                len(current),
+                len(thread_ids),
+                limit,
+                extra={
+                    "client_id": client_id,
+                    "action": "subscription_refused",
+                    "held": len(current),
+                    "requested": len(thread_ids),
+                    "limit": limit,
+                },
+            )
+            raise EventAggregatorError(
+                f"Client {client_id} would hold {len(prospective)} subscriptions, "
+                f"exceeding the per-client limit of {limit}"
+            )
+        self._subscriptions[client_id] = prospective
 
     def unsubscribe(self, client_id: str, thread_ids: list[str]) -> None:
         """Unsubscribe a client from one or more thread event streams."""

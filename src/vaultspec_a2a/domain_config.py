@@ -55,6 +55,17 @@ class DomainConfig(BaseModel):
         default=512,
         description="Aggregator: asyncio queue depth for outgoing events.",
     )
+    max_subscriptions_per_client: int = Field(
+        default=512,
+        description=(
+            "Aggregator: maximum thread subscriptions a single client may hold. "
+            "The gateway's connection limit bounds how many clients exist; this "
+            "bounds the fan-out work each one can demand, since every "
+            "subscription is matched against every broadcast event. Zero "
+            "disables the limit, a deliberate operator choice rather than the "
+            "default."
+        ),
+    )
     aget_state_timeout_seconds: float = Field(
         default=10.0,
         description="Aggregator: timeout (seconds) for checkpointer aget_state calls.",

@@ -1,0 +1,331 @@
+"""Real-process proofs that the authenticated pairing verdict governs adoption.
+
+The enforcement decision (2026-07-24 codebase-health record): under the ARMED
+desktop profile a worker is adoptable only when its reported gateway lifetime
+and spawn generation classify as OWNED; blank evidence, the legacy declared
+gateway-URL echo, and a foreign lifetime all fail closed - no adoption, no
+eviction, loud refusal.
+
+Every proof runs real processes end to end: a real armed gateway boots over a
+migrated application home, the port squatter is a genuine separate process
+serving real HTTP on the gateway's private worker port, and the two-gateway
+proof pits two complete armed gateways against one REAL spawned worker. The
+squatter is the modeled adversary (a stranger process answering health on the
+port), not a stand-in for any production code. Assertions observe process
+liveness, request logs, and the gateway's admission surface - never internals.
+"""
+
+from __future__ import annotations
+
+import contextlib
+import json
+import subprocess
+import sys
+import time
+from contextlib import contextmanager
+from typing import TYPE_CHECKING, Any
+
+import httpx
+
+from .test_run_admission import (
+    _ATTACH,
+    _GATEWAY,
+    _seat_valid_database,
+    _seed_credentials,
+)
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
+    from pathlib import Path
+
+import os
+
+from ._boot import await_gateway_ready, free_port, spawn_until_ready
+
+_SQUATTER = """
+import json
+import sys
+from http.server import BaseHTTPRequestHandler, HTTPServer
+
+port = int(sys.argv[1])
+body = json.loads(sys.argv[2])
+log_path = sys.argv[3]
+
+
+class Handler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        with open(log_path, "a", encoding="utf-8") as log:
+            log.write("GET " + self.path + "\\n")
+        payload = json.dumps(body).encode("utf-8")
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(payload)))
+        self.end_headers()
+        self.wfile.write(payload)
+
+    def do_POST(self):
+        with open(log_path, "a", encoding="utf-8") as log:
+            log.write("POST " + self.path + "\\n")
+        self.send_response(503)
+        self.end_headers()
+
+    def log_message(self, *args):
+        pass
+
+
+HTTPServer(("127.0.0.1", port), Handler).serve_forever()
+"""
+
+
+@contextmanager
+def _squatter(
+    tmp_path: Path, port: int, body: dict[str, Any]
+) -> Iterator[tuple[subprocess.Popen[bytes], Path]]:
+    """Run a real stranger process serving *body* on the worker port."""
+    log_path = tmp_path / f"squatter-{port}.log"
+    log_path.write_text("", encoding="utf-8")
+    proc = subprocess.Popen(
+        [sys.executable, "-c", _SQUATTER, str(port), json.dumps(body), str(log_path)],
+    )
+    try:
+        deadline = time.monotonic() + 10
+        while time.monotonic() < deadline:
+            try:
+                with httpx.Client(timeout=1.0) as client:
+                    if client.get(f"http://127.0.0.1:{port}/health").status_code == 200:
+                        break
+            except httpx.HTTPError:
+                time.sleep(0.05)
+        else:
+            raise AssertionError("squatter never came up")
+        yield proc, log_path
+    finally:
+        with contextlib.suppress(Exception):
+            proc.kill()
+            proc.wait(timeout=10)
+
+
+@contextmanager
+def _armed_gateway_on_worker_port(
+    tmp_path: Path, worker_port: int, *, home_name: str = "app-home"
+) -> Iterator[tuple[str, str, Path]]:
+    """Boot a real armed gateway whose private worker port is pinned.
+
+    Unlike the general boot helper this pins ``VAULTSPEC_WORKER_PORT`` so the
+    test controls who holds the worker port; the gateway port itself is still
+    allocated with bind-race retry. Yields ``(base, bearer, gateway_log)``.
+    """
+    app_home = tmp_path / home_name
+    app_home.mkdir()
+    _seed_credentials(app_home)
+    _seat_valid_database(app_home)
+    log_path = tmp_path / f"{home_name}-gateway.log"
+    log_handle = log_path.open("wb")
+
+    def _spawn(gateway_port: int, _ignored: int) -> subprocess.Popen[bytes]:
+        env = os.environ.copy()
+        env["VAULTSPEC_DESKTOP_APP_HOME"] = str(app_home)
+        env["VAULTSPEC_ENVIRONMENT"] = "production"
+        env["VAULTSPEC_PORT"] = str(gateway_port)
+        env["VAULTSPEC_WORKER_PORT"] = str(worker_port)
+        env["VAULTSPEC_AUTO_SPAWN_WORKER"] = "true"
+        return subprocess.Popen(
+            [sys.executable, "-c", _GATEWAY, str(gateway_port)],
+            env=env,
+            stdout=log_handle,
+            stderr=subprocess.STDOUT,
+        )
+
+    proc, _gateway_port, _ignored, base = spawn_until_ready(_spawn, log_path=log_path)
+    try:
+        yield base, f"Bearer {_ATTACH}", log_path
+    finally:
+        import asyncio
+
+        from vaultspec_a2a.utils import kill_pid_tree_async
+
+        with contextlib.suppress(Exception):
+            asyncio.run(
+                kill_pid_tree_async(proc.pid, term_timeout=10.0, kill_timeout=5.0)
+            )
+        with contextlib.suppress(subprocess.TimeoutExpired):
+            proc.wait(timeout=15)
+        log_handle.close()
+
+
+def _prepare(base: str, auth: str, run_id: str) -> tuple[int, dict[str, Any]]:
+    with httpx.Client(base_url=base, timeout=60.0) as client:
+        resp = client.post(
+            "/v1/runs",
+            headers={"Authorization": auth},
+            json={
+                "team_preset": "mock-success-single",
+                "stage": "prepare",
+                "autonomous": True,
+                "run_id": run_id,
+            },
+        )
+    try:
+        body = resp.json()
+    except ValueError:
+        body = {"raw": resp.text}
+    return resp.status_code, body
+
+
+def _assert_refused_without_adoption_or_eviction(
+    tmp_path: Path, body: dict[str, Any], run_id: str
+) -> None:
+    """One squatter scenario: armed demand must refuse, not adopt, not evict."""
+    worker_port = free_port()
+    with (
+        _squatter(tmp_path, worker_port, body) as (squatter, request_log),
+        _armed_gateway_on_worker_port(tmp_path, worker_port) as (base, auth, gw_log),
+    ):
+        status, prepared = _prepare(base, auth, run_id)
+
+        # Refusal on the admission surface: no reservation is minted off a
+        # worker whose provenance the armed profile cannot prove.
+        assert status == 503, prepared
+        assert prepared["detail"] == "run admission is not execution-ready"
+
+        # No eviction: the squatter process survives the refusal untouched.
+        assert squatter.poll() is None, "squatter must not be evicted"
+
+        # No adoption: the squatter saw only health probes, never a dispatch.
+        requests = request_log.read_text(encoding="utf-8").splitlines()
+        assert requests, "gateway never even probed the occupied worker port"
+        assert all(line.startswith("GET /health") for line in requests), requests
+
+        # The refusal is loud in the gateway's own log.
+        log_text = gw_log.read_bytes().decode("utf-8", errors="replace")
+        assert "refusing to spawn" in log_text or "not adoptable" in log_text, (
+            "expected a loud provenance refusal in the gateway log"
+        )
+
+
+def test_plain_worker_health_never_authorizes_adoption(tmp_path: Path) -> None:
+    """S153: a bare healthy stranger on the worker port is never adopted."""
+    _assert_refused_without_adoption_or_eviction(
+        tmp_path, {"status": "healthy"}, "run-provenance-plain-health"
+    )
+
+
+def test_blank_worker_pairing_never_authorizes_adoption(tmp_path: Path) -> None:
+    """S154: explicitly blank pairing evidence classifies UNIDENTIFIED and refuses."""
+    _assert_refused_without_adoption_or_eviction(
+        tmp_path,
+        {
+            "status": "healthy",
+            "paired_gateway_lifetime": "",
+            "worker_generation": "",
+        },
+        "run-provenance-blank-pairing",
+    )
+
+
+def test_legacy_gateway_url_echo_never_authorizes_adoption(tmp_path: Path) -> None:
+    """S155: the retired lenient signal - an echoed gateway_url - no longer adopts.
+
+    The squatter cannot know the gateway's port before boot, so it echoes a
+    wildcard-free loopback URL for every port by reflecting the Host the
+    gateway probes with; instead, the proof pins the gateway first and hands
+    the squatter that URL. Here the simpler equivalent: the squatter reports a
+    syntactically valid loopback gateway_url while carrying no pairing
+    evidence - under the retired policy the blank-target-is-ours rule plus a
+    matching URL adopted it; under the enforced policy it is UNIDENTIFIED.
+    """
+    worker_port = free_port()
+    gateway_port = free_port()
+    body = {
+        "status": "healthy",
+        "gateway_url": f"http://127.0.0.1:{gateway_port}",
+    }
+    app_home = tmp_path / "app-home"
+    app_home.mkdir()
+    _seed_credentials(app_home)
+    _seat_valid_database(app_home)
+    log_path = tmp_path / "gateway.log"
+    log_handle = log_path.open("wb")
+    with _squatter(tmp_path, worker_port, body) as (squatter, request_log):
+        env = os.environ.copy()
+        env["VAULTSPEC_DESKTOP_APP_HOME"] = str(app_home)
+        env["VAULTSPEC_ENVIRONMENT"] = "production"
+        env["VAULTSPEC_PORT"] = str(gateway_port)
+        env["VAULTSPEC_WORKER_PORT"] = str(worker_port)
+        env["VAULTSPEC_AUTO_SPAWN_WORKER"] = "true"
+        proc = subprocess.Popen(
+            [sys.executable, "-c", _GATEWAY, str(gateway_port)],
+            env=env,
+            stdout=log_handle,
+            stderr=subprocess.STDOUT,
+        )
+        try:
+            base = f"http://127.0.0.1:{gateway_port}"
+            await_gateway_ready(base, proc, log_path=log_path)
+            status, prepared = _prepare(
+                base, f"Bearer {_ATTACH}", "run-provenance-url-echo"
+            )
+            assert status == 503, prepared
+            assert prepared["detail"] == "run admission is not execution-ready"
+            assert squatter.poll() is None, "squatter must not be evicted"
+            requests = request_log.read_text(encoding="utf-8").splitlines()
+            assert all(line.startswith("GET /health") for line in requests), requests
+        finally:
+            import asyncio
+
+            from vaultspec_a2a.utils import kill_pid_tree_async
+
+            with contextlib.suppress(Exception):
+                asyncio.run(
+                    kill_pid_tree_async(proc.pid, term_timeout=10.0, kill_timeout=5.0)
+                )
+            with contextlib.suppress(subprocess.TimeoutExpired):
+                proc.wait(timeout=15)
+            log_handle.close()
+
+
+def test_two_gateways_one_worker_authenticated_pairing(tmp_path: Path) -> None:
+    """S95: a second armed gateway never adopts or evicts the first's worker.
+
+    Gateway A spawns and owns its REAL worker on the shared port; gateway B,
+    armed over its own application home but pointed at the same worker port,
+    classifies A's worker FOREIGN (a lifetime B never issued): B's demand is
+    refused, A's worker survives, and A keeps its execution readiness.
+    """
+    worker_port = free_port()
+    with _armed_gateway_on_worker_port(tmp_path, worker_port, home_name="home-a") as (
+        base_a,
+        auth_a,
+        _log_a,
+    ):
+        # First demand on A spawns A's real worker and reaches readiness.
+        status_a, prepared_a = _prepare(base_a, auth_a, "run-provenance-owner")
+        assert status_a == 201, prepared_a
+
+        with _armed_gateway_on_worker_port(
+            tmp_path, worker_port, home_name="home-b"
+        ) as (base_b, auth_b, log_b):
+            status_b, prepared_b = _prepare(base_b, auth_b, "run-provenance-thief")
+            assert status_b == 503, prepared_b
+            assert prepared_b["detail"] == "run admission is not execution-ready"
+
+            # A's worker survived B's attempt: still ANSWERING on the port.
+            # This probe carries no internal bearer, so the real worker
+            # challenges it with 401 - an HTTP answer either way is liveness
+            # (an evicted worker would refuse the connection outright).
+            with httpx.Client(timeout=5.0) as client:
+                health = client.get(f"http://127.0.0.1:{worker_port}/health")
+            assert health.status_code in (200, 401), health.status_code
+
+            # B's refusal is provenance-shaped, through either fail-closed
+            # layer: the worker-IPC credential boundary (A's worker answers
+            # B's probe 401 - B cannot even read the pairing evidence of a
+            # worker from a foreign application home), or, when the evidence
+            # is readable, the classifier's loud refusal. Both leave B
+            # without adoption and A's worker untouched.
+            log_text = log_b.read_bytes().decode("utf-8", errors="replace")
+            assert (
+                "401 Unauthorized" in log_text
+                or "cannot adopt or evict" in log_text
+                or "not adoptable" in log_text
+            ), "expected B's log to carry a provenance-shaped refusal"

@@ -172,36 +172,53 @@ _BROKEN_PARENT_PROBE_SCRIPT = textwrap.dedent(
 
     sys.path.insert(0, sys.argv[1])
 
-    from vaultspec_a2a.telemetry.instrumentation import _spec_exists
+    from vaultspec_a2a.telemetry.instrumentation import _module_importable
 
-    leaf = "brokenexporter.proto.grpc.trace_exporter"
+    # Two shapes of unusable dependency, and the difference between them is the
+    # whole point. `missing_parent` breaks in the parent chain, which a spec
+    # probe raises on. `broken_leaf` has every file present and a leaf whose own
+    # __init__ fails - a spec probe reports that one as perfectly available,
+    # because find_spec imports parents but never executes the leaf.
+    cases = {
+        "missing_parent": "brokenexporter.proto.grpc.trace_exporter",
+        "broken_leaf": "leafexporter.trace_exporter",
+    }
 
-    # Control: the raw stdlib probe must blow up on this shape. Without it a
-    # passing guard would prove nothing, since find_spec returns None (rather
-    # than raising) whenever the parent chain is merely absent.
-    try:
-        importlib.util.find_spec(leaf)
-    except ModuleNotFoundError as exc:
-        raw = {"raised": True, "missing": exc.name}
-    else:
-        raw = {"raised": False, "missing": None}
+    report = {}
+    for label, target in cases.items():
+        # Control: what the discarded find_spec probe would have concluded.
+        try:
+            spec_probe = importlib.util.find_spec(target) is not None
+        except Exception:
+            spec_probe = "raised"
+        report[label] = {
+            "spec_probe": spec_probe,
+            "importable": _module_importable(target),
+        }
 
-    print(json.dumps({"raw": raw, "guarded": _spec_exists(leaf)}, sort_keys=True))
+    print(json.dumps(report, sort_keys=True))
     """
 ).strip()
 
 
-def test_spec_exists_survives_a_partially_installed_exporter(tmp_path: Path) -> None:
-    """A broken optional-dependency parent degrades to False instead of raising.
+def test_an_unusable_optional_dependency_reports_unavailable(tmp_path: Path) -> None:
+    """Present-on-disk is not importable, and the probe must answer the latter.
 
-    Reproduces the partial-install shape that reaches ``_check_otlp``: the
-    exporter package itself is present, so ``find_spec`` walks into it, but the
-    third-party distribution its ``__init__`` imports (``grpc`` in production) is
-    absent. The package tree here is real on-disk code, and the control branch
-    asserts the unguarded stdlib call genuinely raises on the same target — so
-    this cannot pass if the guard is removed.
+    Two real package trees, both unusable, failing at different depths. The
+    first breaks in its parent chain. The second is the one that matters: every
+    file is present and only the leaf's own ``__init__`` fails, which is what a
+    partial or mismatched install of the OTLP exporter looks like in practice -
+    the exporter is installed, and importing it raises because the separate
+    ``grpc`` distribution does not supply the symbols it expects.
+
+    The recorded ``spec_probe`` value is the control. It shows the discarded
+    ``find_spec`` approach calling the broken leaf *available*, which is exactly
+    how a present-but-unusable exporter reached the construction path and
+    aborted startup. This test fails if the probe reverts to a spec lookup.
     """
     pkg_root = tmp_path / "site"
+
+    # Shape 1: the parent chain itself cannot import.
     grpc_pkg = pkg_root / "brokenexporter" / "proto" / "grpc"
     grpc_pkg.mkdir(parents=True)
     for package_dir in (
@@ -209,9 +226,18 @@ def test_spec_exists_survives_a_partially_installed_exporter(tmp_path: Path) -> 
         pkg_root / "brokenexporter" / "proto",
     ):
         (package_dir / "__init__.py").write_text("", encoding="utf-8")
-    # Mirrors opentelemetry.exporter.otlp.proto.grpc importing the grpc dist.
     (grpc_pkg / "__init__.py").write_text(
         "import definitely_absent_third_party_dist\n", encoding="utf-8"
+    )
+
+    # Shape 2: every file present; the leaf raises on the symbol it wants, the
+    # way the real exporter raises pulling names out of `grpc`.
+    leaf_pkg = pkg_root / "leafexporter"
+    leaf_pkg.mkdir(parents=True)
+    (leaf_pkg / "__init__.py").write_text("", encoding="utf-8")
+    (leaf_pkg / "trace_exporter.py").write_text(
+        'raise ImportError("cannot import ChannelCredentials from grpc")\n',
+        encoding="utf-8",
     )
 
     script = tmp_path / "broken_parent_probe.py"
@@ -227,11 +253,17 @@ def test_spec_exists_survives_a_partially_installed_exporter(tmp_path: Path) -> 
     assert result.returncode == 0, result.stderr
 
     report = json.loads(result.stdout.strip().splitlines()[-1])
-    assert report["raw"] == {
-        "raised": True,
-        "missing": "definitely_absent_third_party_dist",
-    }, "unguarded find_spec must raise here, otherwise the guard is untested"
-    assert report["guarded"] is False
+
+    # Both are unusable, so both must report unavailable.
+    assert report["missing_parent"]["importable"] is False
+    assert report["broken_leaf"]["importable"] is False
+
+    # The control: a spec probe called the broken leaf available. That gap is
+    # the defect, so if this ever stops holding the guard has been weakened.
+    assert report["broken_leaf"]["spec_probe"] is True, (
+        "the broken leaf must look available to a spec probe, "
+        "otherwise this test no longer covers the real failure"
+    )
 
 
 def test_configure_telemetry_langsmith_flag() -> None:

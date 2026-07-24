@@ -123,37 +123,48 @@ class TelemetryConfig:
         )
 
 
-def _spec_exists(module_name: str) -> bool:
-    """Return True if ``module_name`` resolves to an importable spec.
+def _module_importable(module_name: str) -> bool:
+    """Return True if ``module_name`` can actually be imported.
 
-    ``importlib.util.find_spec`` only returns ``None`` for a missing leaf under
-    an importable parent; it *raises* when a parent package cannot be imported.
-    A partial install trips exactly that: the OTLP exporter package is present,
-    so the parent chain is walked, but importing
-    ``opentelemetry.exporter.otlp.proto.grpc`` pulls in the third-party ``grpc``
-    distribution, which may be absent. Treat any import-time failure as "not
-    available" so an optional-dependency probe can never abort startup.
+    Deliberately an import rather than a ``find_spec`` probe. A spec probe
+    answers "are these files on disk", which is not the question a caller of an
+    optional-dependency check is asking, and the two answers come apart in
+    exactly the case that matters. ``find_spec`` imports a module's *parents*
+    but never executes the leaf, so a present-but-unusable exporter probes as
+    available and then raises when something later imports it for real - the OTLP
+    exporter's own ``__init__`` pulls symbols from the separate ``grpc``
+    distribution, and a partial or mismatched install fails there, not at the
+    probe. Importing here collapses that gap: available means importable.
+
+    The module is left in ``sys.modules`` on success, so the caller's subsequent
+    import is a cache hit rather than a second execution.
     """
     try:
-        return importlib.util.find_spec(module_name) is not None
-    except (ImportError, ValueError):
-        # ImportError covers a missing/broken parent package (ModuleNotFoundError
-        # is a subclass); ValueError covers a parent whose __spec__ is None.
+        importlib.import_module(module_name)
+    except Exception:
+        # Deliberately broad. This is a availability probe for an OPTIONAL
+        # dependency, and a dependency that cannot be imported for any reason -
+        # a missing parent, a partial install, a symbol mismatch against a
+        # sibling distribution, a failing module-level side effect - is simply
+        # unavailable. Narrowing to ImportError would let an unrelated exception
+        # in a third-party __init__ abort gateway and worker startup, which is
+        # the whole failure class this guard exists to prevent.
         return False
+    return True
 
 
 def _check_sdk() -> bool:
     """Return True if the mandatory opentelemetry-sdk is importable."""
-    return _spec_exists("opentelemetry.sdk.trace")
+    return _module_importable("opentelemetry.sdk.trace")
 
 
 def _check_otlp() -> bool:
     """Return True if the OTLP gRPC exporter is importable.
 
-    The OTLP exporter is optional (operators may not run a collector),
-    so we retain the availability check here only for the exporter package.
+    The OTLP exporter is optional (operators may not run a collector), so an
+    unusable one degrades to no-export rather than failing startup.
     """
-    return all(_spec_exists(module_name) for module_name in _OTLP_EXPORTER_MODULES)
+    return all(_module_importable(name) for name in _OTLP_EXPORTER_MODULES)
 
 
 def _build_sdk_provider(

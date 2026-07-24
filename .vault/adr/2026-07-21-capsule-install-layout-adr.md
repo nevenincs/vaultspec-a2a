@@ -1,16 +1,16 @@
 ---
 tags:
-  - '#adr'
-  - '#capsule-install-layout'
+  - "#adr"
+  - "#capsule-install-layout"
 date: '2026-07-21'
-modified: '2026-07-21'
 related:
-  - '[[2026-07-18-desktop-product-profile-adr]]'
-  - '[[2026-07-18-desktop-product-profile-plan]]'
-  - '[[2026-07-21-capsule-install-layout-reference]]'
+  - "[[2026-07-18-desktop-product-profile-adr]]"
+  - "[[2026-07-18-desktop-product-profile-plan]]"
+  - "[[2026-07-21-capsule-install-layout-reference]]"
+superseded_by: '2026-07-24-dashboard-bundled-runtime-adr'
+modified: '2026-07-24'
 ---
-
-# `capsule-install-layout` adr: `one wheel-aware install-layout authority with a provenance-bearing installed inventory` | (**status:** `accepted`)
+# `capsule-install-layout` adr: `one wheel-aware install-layout authority with a provenance-bearing installed inventory` | (**status:** `superseded`)
 
 ## Problem Statement
 

@@ -5,8 +5,8 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from ..database import set_thread_repair_state
-from ..thread.enums import ControlActionType, RepairStatus
-from ..thread.repair_policy import repair_state_for_action
+from ..thread.enums import ControlActionType
+from ..thread.repair_policy import DISPATCH_FAILED_TRANSITION, repair_state_for_action
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
@@ -113,10 +113,11 @@ async def mark_dispatch_failed(
     *,
     reason: str = "Worker dispatch failed",
 ) -> ThreadModel | None:
+    transition = DISPATCH_FAILED_TRANSITION
     return await set_thread_repair_state(
         db,
         thread_id,
-        repair_status=RepairStatus.OPERATOR_INTERVENTION_REQUIRED,
+        repair_status=transition.repair_status,
         repair_reason=reason,
-        execution_readiness=RepairStatus.OPERATOR_INTERVENTION_REQUIRED.value,
+        execution_readiness=transition.execution_readiness,
     )

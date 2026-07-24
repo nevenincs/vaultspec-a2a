@@ -17,6 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 
 from vaultspec_a2a.control.repair_transitions import (
     mark_cancel_requested,
+    mark_dispatch_failed,
     mark_ingest_applied,
     mark_ingest_requested,
     mark_message_followup_applied,
@@ -27,7 +28,10 @@ from vaultspec_a2a.control.repair_transitions import (
 from vaultspec_a2a.database import create_thread
 from vaultspec_a2a.database.models import Base
 from vaultspec_a2a.thread.enums import ControlActionType
-from vaultspec_a2a.thread.repair_policy import repair_state_for_action
+from vaultspec_a2a.thread.repair_policy import (
+    DISPATCH_FAILED_TRANSITION,
+    repair_state_for_action,
+)
 
 
 @pytest_asyncio.fixture
@@ -90,3 +94,33 @@ async def test_each_transition_persists_what_the_map_declares(
     assert updated is not None
     assert updated.repair_status == expected.repair_status.value
     assert updated.execution_readiness == expected.execution_readiness
+
+
+@pytest.mark.asyncio
+async def test_dispatch_failed_persists_the_pure_policy_transition(
+    session_factory,
+) -> None:
+    """Dispatch failure writes exactly the pure ``DISPATCH_FAILED_TRANSITION``.
+
+    Dispatch failure has no ``(action, phase)`` map key, but its repair state is
+    still owned by the pure policy rather than spelled out inline in the
+    transition function; this proves the function persists that one authority.
+    """
+    expected = DISPATCH_FAILED_TRANSITION
+
+    async with session_factory() as session:
+        thread = await create_thread(
+            session,
+            title="parity",
+            repair_status="healthy",
+            execution_readiness="healthy",
+        )
+        await session.commit()
+
+        updated = await mark_dispatch_failed(session, thread.id, reason="boom")
+        await session.commit()
+
+    assert updated is not None
+    assert updated.repair_status == expected.repair_status.value
+    assert updated.execution_readiness == expected.execution_readiness
+    assert updated.repair_reason == "boom"

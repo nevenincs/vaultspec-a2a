@@ -8,8 +8,13 @@ modified: '2026-07-24'
 related:
   - '[[2026-07-19-codebase-health-W01-P01-S01]]'
   - '[[2026-07-19-codebase-health-W01-P01-S03]]'
+  - '[[2026-07-19-codebase-health-W01-P01-S153]]'
+  - '[[2026-07-19-codebase-health-W01-P01-S154]]'
+  - '[[2026-07-19-codebase-health-W01-P01-S155]]'
   - '[[2026-07-19-codebase-health-W01-P01-S93]]'
   - '[[2026-07-19-codebase-health-W01-P01-S94]]'
+  - '[[2026-07-19-codebase-health-W01-P01-S95]]'
+  - '[[2026-07-19-codebase-health-W01-P02-S06]]'
   - '[[2026-07-19-codebase-health-W02-P05-S17]]'
   - '[[2026-07-19-codebase-health-W02-P05-S18]]'
   - '[[2026-07-19-codebase-health-W02-P05-S19]]'
@@ -134,6 +139,11 @@ Auto-generated index of all documents tagged with `#codebase-health`.
 - `2026-07-19-codebase-health-W04-P15-S69` - Split normalize_tool_input_schema into explicit schema-shape translators
 - `2026-07-19-codebase-health-W04-P15-S71` - Split project_checkpoint_tuple into immutable checkpoint extraction and response projection stages
 - `2026-07-19-codebase-health-W04-P16-S73` - Rewrite service deployment documentation and environment examples to describe the headless runtime
+- `2026-07-19-codebase-health-W01-P01-S153` - Prove plain worker health never authorizes adoption with real processes
+- `2026-07-19-codebase-health-W01-P01-S154` - Prove blank worker pairing never authorizes adoption with real processes
+- `2026-07-19-codebase-health-W01-P01-S155` - Prove unauthenticated legacy readiness never authorizes adoption with real processes
+- `2026-07-19-codebase-health-W01-P01-S95` - Prove authenticated two-gateway one-worker pairing with real processes
+- `2026-07-19-codebase-health-W01-P02-S06` - Verify the landed desktop owned-tree implementation reaps the complete worker tree on startup readiness timeout
 
 ### plan
 

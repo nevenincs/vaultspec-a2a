@@ -1140,3 +1140,90 @@ Adjacent finding raised while reading this path:
   during startup. Unlike its neighbours (`worker_poll_initial_interval_seconds`,
   `worker_poll_backoff_factor`, `worker_poll_max_interval_seconds`) it is not a
   setting.
+
+### Second pass (2026-07-24) - S06 driven to completion, remaining queue cleared
+
+Owner direction: reconcile against what the code actually does, not the plan's
+wording; functionality over bookkeeping. That inverted the S06 conclusion
+recorded in the previous section.
+
+#### `W01.P02.S06` - RESOLVED `140f26a1`, and it was a real defect
+
+The earlier analysis was right that the worker owns no descendants at the
+readiness-timeout instant, and wrong to stop there. Reading the branch for
+functionality rather than for the Step's wording found that
+`worker-startup-timeout-orphans-process-tree` had only ever been half fixed.
+The armed-desktop branch reaps through its OS containment; the other branch -
+the one Compose and every development run take - still called a bare
+`process.terminate()`.
+
+That signals the immediate process only: no descendants, no escalation past a
+SIGTERM the worker may be ignoring, and no wait on the handle. `_spawn_worker`
+then returns `None` and reports the spawn as failed, so anything still alive is
+an orphan holding the worker port - and the next spawn meets its own leftover
+there and refuses it as an unidentified occupant. An incomplete reap wedges the
+band rather than merely leaking a process. The graceful-shutdown path had used
+`kill_pid_tree_async` correctly all along; only the timeout path had not.
+
+Both bands now route through one named seam, `_reap_unready_worker`, with a
+bounded wait on the handle so no zombie is left on POSIX. Tests drive real
+process trees through it on both bands; the stand-in worker ignores SIGTERM so
+the escalation is exercised rather than assumed. Verified discriminating: all
+three fail against the pre-fix implementation.
+
+The Step is therefore closed by fixing what it existed to verify. Its wording
+still deserves the re-scope noted in the previous section, but the invariant it
+protects is now real and proven.
+
+#### Cleared from the open queue
+
+- `worker-readiness-deadline-is-an-unnamed-literal` (low) - RESOLVED
+  `140f26a1`. Now `VAULTSPEC_WORKER_READY_TIMEOUT_SECONDS`. The literal appeared
+  five times, twice as the base of the elapsed-progress math where a changed
+  deadline would have silently falsified every startup timing logged; elapsed is
+  measured from a start stamp, so no base remains to keep in sync.
+- `subscription-refusal-counter-unasserted` (low) - RESOLVED `3fba5f05`.
+  Asserted through the real OTel hook, which registers counters lazily, plus an
+  accepted-subscription control proving the registry is otherwise empty.
+- `acp-turn-deadline-default-unproven` (low) - MITIGATED `3fba5f05`. The default
+  still cannot be measured here - no preserved session transcripts exist - so
+  the signal was widened instead of the number defended: the stderr drain stamps
+  the same liveness clock, and an agent whose progress goes to its log rather
+  than over the protocol no longer trips the deadline. The deliberate trade is
+  that a chatty wedged agent survives longer, which is at least visible. The
+  default remains unmeasured against production traffic and stays queued as
+  such.
+- `probe-gate-durability` (medium) - RESOLVED `8a775ddc`. The finding was exact
+  on both counts: `probe_clean_base.py` appeared in no Justfile, just module, or
+  workflow and had never run, and it has no installed-module form because the
+  wheel excludes `**/tests`. Registered as `just dev test clean-base` and run on
+  every push, in an isolated default-deps environment - the CI environment syncs
+  with `--extra server` and installs the exporter, so no earlier step can
+  observe a base-only install. It is now the standing regression gate for
+  `default-otel-import`.
+- `torch-source-portability` (medium) - RESOLVED `8a775ddc` as documentation,
+  which is the only available remedy. `tool.uv.sources` is not emitted into
+  wheel `Requires-Dist` and PEP 508 has no index selector, so the override
+  cannot be carried in published metadata at all. Stated at the point of
+  definition so it stops reading as a property of the published package.
+
+#### Investigated and dispositioned without a change
+
+- `authorization-guard-chain-still-long` (low) - REMAINS DEFERRED, and the
+  original remedy does not fit. The finding proposes lifting each guard into a
+  named predicate returning an optional rejection, but five of the six guards in
+  `_authorize_permission_response` are transactional, not pure: they call
+  `create_control_action` and `commit` (lines 346/355, 374/383, 458/467,
+  498/507, 540/549). Reshaping them as predicates would either hide commits
+  inside predicates - worse than the flat chain - or move the transaction
+  boundary, which is a design change on a security-adjacent authorization path
+  with no behavioural gain. Recommend re-scoping to a deliberate step that
+  decides the transaction boundary first, rather than a mechanical extraction.
+- `containment-terminate-returns-true-with-no-pid` - WITHDRAWN, not a defect.
+  Raised while reading the reap paths, on the theory that a containment holding
+  no pid silently reports success. It is correct: `assign()` records `self._pid`
+  as its first statement, before the POSIX branch and before the Windows
+  job-object check, so any attempted assignment leaves a reapable handle even
+  when it then fails. The only way to reach the no-pid return is never having
+  attempted assignment, where "nothing to reap" is the true answer. Recorded so
+  the same theory is not re-derived later.

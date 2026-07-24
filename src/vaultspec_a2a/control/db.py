@@ -205,6 +205,7 @@ _CLEAR_ORDER: tuple[str, ...] = (
     "cost_tracking",
     "task_queue_entries",
     "thread_execution_state",
+    "thread_deletion_saga",
     "authoring_event_cursor",
     "threads",
 )

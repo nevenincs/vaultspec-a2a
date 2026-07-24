@@ -33,6 +33,7 @@ __all__ = [
     "PermissionLogModel",
     "PermissionRequestModel",
     "TaskQueueEntryModel",
+    "ThreadDeletionSagaModel",
     "ThreadExecutionStateModel",
     "ThreadModel",
 ]
@@ -317,6 +318,43 @@ class ThreadExecutionStateModel(Base):
     thread: Mapped["ThreadModel"] = relationship(
         back_populates="execution_state", lazy="raise"
     )
+
+
+class ThreadDeletionSagaModel(Base):
+    """Durable cross-store deletion saga for one thread.
+
+    A thread delete is not a single atomic act: it must remove checkpoint
+    state, workspace artifact files, and control rows that live in three
+    different stores. This row is the outbox that makes that removal
+    failure-atomic and resumable. It is written before any irreversible
+    external effect, transitioning the thread to ``deleting`` and capturing the
+    full cleanup manifest so a crash mid-teardown leaves a durable, replayable
+    plan rather than a half-deleted thread.
+
+    ``manifest_json`` is the immutable list of cleanup items captured at
+    saga creation (the checkpoint and each contained artifact file).
+    ``result_json`` is the per-item terminal-state ledger the cleanup pass
+    advances. Control rows are removed only once every manifest item is done,
+    at which point this saga row is removed with them.
+    """
+
+    __tablename__ = "thread_deletion_saga"
+
+    thread_id: Mapped[str] = mapped_column(ForeignKey("threads.id"), primary_key=True)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime(), default=_utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        UTCDateTime(), default=_utcnow, onupdate=_utcnow
+    )
+    claimed_at: Mapped[datetime | None] = mapped_column(UTCDateTime(), default=None)
+    manifest_json: Mapped[str] = mapped_column(Text)
+    result_json: Mapped[str] = mapped_column(Text, default="{}")
+
+    def __repr__(self) -> str:
+        """Return developer-friendly representation."""
+        return (
+            f"ThreadDeletionSagaModel(thread_id={self.thread_id!r}, "
+            f"claimed_at={self.claimed_at!r})"
+        )
 
 
 class AuthoringEventCursorModel(Base):

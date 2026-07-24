@@ -54,6 +54,7 @@ from .models import Base as Base
 from .models import CostTrackingModel as CostTrackingModel
 from .models import PermissionLogModel as PermissionLogModel
 from .models import TaskQueueEntryModel as TaskQueueEntryModel
+from .models import ThreadDeletionSagaModel as ThreadDeletionSagaModel
 from .models import ThreadModel as ThreadModel
 from .permission_repository import create_control_action as create_control_action
 from .permission_repository import (
@@ -117,6 +118,7 @@ from .thread_repository import (
     list_non_terminal_threads as list_non_terminal_threads,
 )
 from .thread_repository import list_threads as list_threads
+from .thread_repository import mark_thread_deleting as mark_thread_deleting
 from .thread_repository import (
     record_thread_execution_state as record_thread_execution_state,
 )
@@ -143,6 +145,7 @@ __all__ = [
     "RepairStatus",
     "SchemaCompatibilityError",
     "TaskQueueEntryModel",
+    "ThreadDeletionSagaModel",
     "ThreadModel",
     "ThreadStatus",
     "append_cost_record",
@@ -180,6 +183,7 @@ __all__ = [
     "mark_control_action_superseded",
     "mark_permission_request_applied",
     "mark_task_complete",
+    "mark_thread_deleting",
     "migration_script_location",
     "record_permission_request",
     "record_permission_response_submission",

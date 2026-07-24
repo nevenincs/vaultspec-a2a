@@ -31,6 +31,7 @@ __all__ = [
     "permission_service",
     "projection",
     "repair_transitions",
+    "repositories",
     "snapshot",
     "team_service",
     "thread_service",

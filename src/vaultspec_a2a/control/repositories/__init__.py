@@ -1,0 +1,14 @@
+"""Control-plane persistence boundaries for durable orchestration sagas.
+
+These repositories own the control-owned durable state that coordinates work
+spanning more than one store. Unlike the row-level repositories in
+:mod:`vaultspec_a2a.database`, they encode control-plane lifecycle rules -
+idempotent creation, claiming, advancement, and finalization - over that state.
+
+The first such boundary is the cross-store thread deletion saga, whose
+operations are re-exported here as the package's public surface.
+"""
+
+from __future__ import annotations
+
+__all__: list[str] = []

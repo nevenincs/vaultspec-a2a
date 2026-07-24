@@ -52,6 +52,7 @@ __all__ = [
     "list_active_thread_page",
     "list_non_terminal_threads",
     "list_threads",
+    "mark_thread_deleting",
     "record_thread_execution_state",
     "set_thread_approval_state",
     "set_thread_repair_state",
@@ -306,6 +307,31 @@ async def delete_thread(session: AsyncSession, thread_id: str) -> bool:
     await session.delete(thread)
     await session.flush()
     return True
+
+
+async def mark_thread_deleting(
+    session: AsyncSession,
+    thread_id: str,
+) -> ThreadModel | None:
+    """Mark a thread as ``deleting`` for cross-store teardown.
+
+    Deletion is not a lifecycle transition: it is an out-of-band teardown that
+    begins from a settled (terminal or archived) thread and ends in row
+    removal. Routing it through :func:`update_thread_status` would require
+    adding ``deleting`` as a target of the terminal states and so break the
+    invariant that a settled thread only ever advances to ``archived``. This
+    setter therefore writes the sink state directly and clears ``is_active`` so
+    discovery and product reads immediately stop surfacing the thread. The
+    deletion saga is the sole caller and only after eligibility is confirmed.
+    """
+    thread = await session.get(ThreadModel, thread_id)
+    if thread is None:
+        return None
+    thread.status = ThreadStatus.DELETING.value
+    thread.is_active = False
+    thread.updated_at = _utcnow()
+    await session.flush()
+    return thread
 
 
 async def update_thread_status(

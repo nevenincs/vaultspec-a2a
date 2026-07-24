@@ -20,6 +20,7 @@ class ThreadStatus(StrEnum):
     ARCHIVED = "archived"
     REPAIR_NEEDED = "repair_needed"
     RECONCILING = "reconciling"
+    DELETING = "deleting"
 
 
 class RepairStatus(StrEnum):
@@ -99,6 +100,13 @@ TERMINAL_STATUSES: frozenset[ThreadStatus] = frozenset(
 NON_ACTIVE_STATUSES: frozenset[ThreadStatus] = TERMINAL_STATUSES | frozenset(
     {
         ThreadStatus.ARCHIVED,
+        # DELETING is a durable teardown marker, not a settled outcome: the run
+        # is being torn down across the checkpoint, artifact, and control stores
+        # and must never be dispatched, cancelled, or messaged again. It is
+        # deliberately excluded from TERMINAL_STATUSES (archive eligibility and
+        # the terminal-transition invariant apply only to settled outcomes) and
+        # from ACTIVE_STATUSES (discovery and product reads hide it).
+        ThreadStatus.DELETING,
     }
 )
 

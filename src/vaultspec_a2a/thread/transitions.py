@@ -75,6 +75,11 @@ _VALID_TRANSITIONS: dict[ThreadStatus, frozenset[ThreadStatus]] = {
     ThreadStatus.FAILED: frozenset({ThreadStatus.ARCHIVED}),
     ThreadStatus.CANCELLED: frozenset({ThreadStatus.ARCHIVED}),
     ThreadStatus.ARCHIVED: frozenset(),
+    # DELETING is a lifecycle sink: the deletion saga sets it out of band once a
+    # thread is eligible for teardown, and the only exit is control-row removal
+    # when cleanup finalizes. No lifecycle transition leads out of it, so the
+    # normal state machine never resurrects a thread that is being deleted.
+    ThreadStatus.DELETING: frozenset(),
 }
 
 

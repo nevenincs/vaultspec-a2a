@@ -33,6 +33,7 @@ _APP_TABLES = {
     "cost_tracking",
     "thread_execution_state",
     "task_queue_entries",
+    "thread_deletion_saga",
 }
 _LANGGRAPH_TABLES = {"checkpoints", "writes"}
 _ALEMBIC_INI = (
@@ -128,7 +129,7 @@ class TestAlembicUpgradeDowngrade:
         row = conn.execute("SELECT version_num FROM alembic_version").fetchone()
         conn.close()
         assert row is not None
-        assert row[0] == "0009"
+        assert row[0] == "0010"
 
     def test_upgrade_head_rewrites_legacy_created_status(
         self, runtime_dir: Path
@@ -217,6 +218,49 @@ class TestAlembicUpgradeDowngrade:
             "tasks_json",
             "degraded_reasons_json",
         } <= columns
+
+    def test_upgrade_head_adds_thread_deletion_saga_table(
+        self,
+        runtime_dir: Path,
+    ) -> None:
+        """Upgrading head should add the cross-store deletion saga table."""
+        db = runtime_dir / "test.db"
+        cfg = _make_config(db)
+        command.upgrade(cfg, "head")
+
+        conn = sqlite3.connect(str(db))
+        columns = {
+            row[1]
+            for row in conn.execute(
+                "PRAGMA table_info(thread_deletion_saga)"
+            ).fetchall()
+        }
+        conn.close()
+
+        assert {
+            "thread_id",
+            "created_at",
+            "updated_at",
+            "claimed_at",
+            "manifest_json",
+            "result_json",
+        } <= columns
+
+    def test_downgrade_from_head_removes_deletion_saga_table(
+        self,
+        runtime_dir: Path,
+    ) -> None:
+        """Downgrading one revision removes only the deletion saga table."""
+        db = runtime_dir / "test.db"
+        cfg = _make_config(db)
+        command.upgrade(cfg, "head")
+        assert "thread_deletion_saga" in _get_tables(db)
+
+        command.downgrade(cfg, "0009")
+
+        tables = _get_tables(db)
+        assert "thread_deletion_saga" not in tables
+        assert "threads" in tables
 
     def test_upgrade_head_backfills_active_run_selectors(
         self, runtime_dir: Path
@@ -365,7 +409,7 @@ class TestRunMigrations:
             conn.close()
 
         assert version is not None
-        assert version[0] == "0009"
+        assert version[0] == "0010"
 
     @pytest.mark.asyncio
     async def test_run_migrations_with_percent_directory_reaches_head(
@@ -385,7 +429,7 @@ class TestRunMigrations:
             conn.close()
 
         assert version is not None
-        assert version[0] == "0009"
+        assert version[0] == "0010"
 
     @pytest.mark.asyncio
     async def test_concurrent_run_migrations_upgrades_both_databases(
@@ -411,5 +455,5 @@ class TestRunMigrations:
                 conn.close()
 
             assert version is not None
-            assert version[0] == "0009"
+            assert version[0] == "0010"
             assert _get_tables(database) >= _APP_TABLES

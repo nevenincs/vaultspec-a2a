@@ -261,5 +261,3 @@ class TestCredentialScrubbing:
         assert "ANTHROPIC_API_KEY" not in resolved_env, (
             "ANTHROPIC_API_KEY should remain scrubbed even alongside the Z.ai vars"
         )
-
-

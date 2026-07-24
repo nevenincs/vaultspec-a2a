@@ -130,9 +130,7 @@ async def build_thread_stream_response(
     if limit > 0 and aggregator.subscriber_count() >= limit:
         raise HTTPException(
             status_code=503,
-            detail=(
-                "Gateway is at its progress-stream connection limit; retry later"
-            ),
+            detail=("Gateway is at its progress-stream connection limit; retry later"),
             headers={"Retry-After": "5"},
         )
 

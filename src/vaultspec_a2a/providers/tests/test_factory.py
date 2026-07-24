@@ -387,9 +387,10 @@ class TestProviderAdmission:
 
         resolved = _admit_and_resolve_model_name(Provider.CLAUDE, None)
 
-        assert resolved == MODEL_MAP[Provider.CLAUDE][
-            PROVIDER_DEFAULT_MODELS[Provider.CLAUDE]
-        ]
+        assert (
+            resolved
+            == MODEL_MAP[Provider.CLAUDE][PROVIDER_DEFAULT_MODELS[Provider.CLAUDE]]
+        )
 
     def test_a_model_enum_resolves_through_the_map(self) -> None:
         from ..factory import _admit_and_resolve_model_name

@@ -239,6 +239,10 @@ DEP002 = [
   # The RAG profile provisions its runtime and MCP service out of process.
   "torch",
   "vaultspec-rag",
+  # langsmith is the LangGraph/LangChain tracing backend, activated at runtime
+  # via LANGCHAIN_TRACING_V2 / LANGSMITH_* env and consumed by the langgraph
+  # runtime — never imported directly.
+  "langsmith",
 ]
 # DEP004: tests and documentation extensions import their owning development groups.
 DEP004 = [

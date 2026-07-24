@@ -17,9 +17,9 @@ path derivation to it rather than duplicating the layout.
 
 The capsule root is validated against the installed-runtime asset layout owned by
 the provider factory (the bundled Node.js executable and the ACP adapter entry).
-That installed layout is the runtime form of the transport capsule assembled by
-``scripts/build_desktop_capsule.py``; the factory constants are its single
-authority, so this module reuses them rather than restating asset paths.
+That installed layout is the runtime-asset directory the dashboard bundles next
+to the frozen gateway binary; the factory constants are its single authority, so
+this module reuses them rather than restating asset paths.
 """
 
 from __future__ import annotations

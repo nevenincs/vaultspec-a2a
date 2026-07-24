@@ -2,15 +2,11 @@
 
 Install strategy
 ----------------
-The full transport capsule build (S13) requires downloading CPython (~25 MB)
-and Node.js (~20 MB) archives and is the province of the CI target-build legs
-(S76-S80).  This harness assembles the installed layout from the real project
-wheel and its locked base Python closure — the same package inputs the dashboard
-activates after unpacking a transport capsule — which is the correct installed-
-capsule boundary for the S73-S75 lifecycle gates.  Every consuming test file
-documents this choice explicitly; the transport-capsule generation format and
-its source-free verification remain the province of
-``test_build_desktop_capsule.py`` and ``test_verify_desktop_capsule.py``.
+This harness assembles the installed layout from the real project wheel and its
+locked base Python closure — the same package inputs the dashboard activates for
+a bundled runtime generation — which is the correct installed-runtime boundary
+for the lifecycle gates.  Every consuming test file documents this choice
+explicitly.
 
 Relocation model
 ----------------

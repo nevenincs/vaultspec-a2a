@@ -844,7 +844,17 @@ multi-process tests; no unkillable process is needed.
 ### authenticated-pairing-verdict-not-enforced | high | The S93/S94 lifetime+generation classifier is dead code
 
 Type: correctness / dead-code (surfaced 2026-07-22 while grounding S153-156).
-Status: OPEN. `lifecycle/pairing.py` implements the fail-closed authenticated
+Status: RESOLVED (2026-07-24). The 2026-07-24 codebase-health decision record
+made the owed policy call - profile-split enforcement: under the armed
+profile the pairing verdict is the adoption authority (adopt only OWNED,
+evict only authorized PRIOR_GENERATION, refuse FOREIGN/UNIDENTIFIED without
+eviction), while unarmed profiles keep the legacy signal. The classifier and
+eviction authorization are wired into every adoption seam (readiness gate,
+armed pre-spawn occupancy gate, non-auto-spawn attach, post-spawn fallback,
+watchdog external-worker fallback) with the spawner generation threaded
+through, and the plan's real-process proofs S95/S153/S154/S155 are closed
+against the enforced behavior. S156 (eviction-failure conflict proof) and
+S157 (Compose regression proof) remain open. Original finding text follows. `lifecycle/pairing.py` implements the fail-closed authenticated
 pairing verdict - `classify_worker_pairing` (blank evidence -> ``UNIDENTIFIED``,
 lifetime mismatch -> ``FOREIGN``, only the current generation -> ``OWNED``) and
 `eviction_is_authorized` (armed + ``PRIOR_GENERATION`` only) - with thorough unit

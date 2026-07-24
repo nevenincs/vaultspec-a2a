@@ -21,12 +21,12 @@ from __future__ import annotations
 
 import re
 import subprocess
-import sys
 from dataclasses import dataclass
 from importlib import metadata
 from typing import TYPE_CHECKING
 
 from ..context.harness import verify_harness
+from ..utils.runtime_exec import module_command
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -115,17 +115,18 @@ def provision_workspace(
 def _core_base_command() -> list[str]:
     """Return the argv prefix for the environment's deliberate Core authority.
 
-    Invoke Core only through the active environment with
-    ``python -m vaultspec_core``. Falling back to ``PATH`` or an unversioned
-    ``uvx`` acquisition would make the provisioning authority unverifiable.
-    Raises :class:`ProvisionError` when Core is not installed.
+    Invoke Core only through this runtime's own closure (the command authority
+    renders ``python -m vaultspec_core`` from source and the binary's dispatch
+    when frozen). Falling back to ``PATH`` or an unversioned ``uvx`` acquisition
+    would make the provisioning authority unverifiable. Raises
+    :class:`ProvisionError` when Core is not installed.
     """
     if _pinned_version() is None:
         raise ProvisionError(
             "vaultspec-core is not installed in the active environment; "
             "install the repository's locked tooling profile before provisioning"
         )
-    return [sys.executable, "-m", "vaultspec_core"]
+    return module_command("vaultspec_core")
 
 
 def _run_install(workspace_root: Path) -> str:

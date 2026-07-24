@@ -26,6 +26,8 @@ import httpx
 from ..control.config import settings
 from ..gateway_auth import gateway_auth_headers
 from ..utils import configure_logging, package_version, reconfigure_console_utf8
+from ..utils.runtime_exec import DISPATCHABLE_MODULES, RUN_MODULE_VERB, self_command
+from .service import register_service_commands
 
 if TYPE_CHECKING:
     from ..lifecycle.singleton import RuntimeSingleton
@@ -152,6 +154,35 @@ def serve() -> None:
             clear_active_singleton()
 
 
+@main.command(
+    RUN_MODULE_VERB,
+    hidden=True,
+    context_settings={"ignore_unknown_options": True},
+)
+@click.argument("module")
+@click.argument("args", nargs=-1, type=click.UNPROCESSED)
+def run_module(module: str, args: tuple[str, ...]) -> None:
+    """Run an allowlisted module as ``__main__`` inside this runtime's closure.
+
+    The frozen binary's replacement for ``python -m <module>``: the runtime's
+    own subprocess spawns (the worker, the authoring stdio bridge, the bundled
+    ``vaultspec_core`` provisioning calls) render their argv through the
+    command authority, which targets this verb when running frozen. Only the
+    authority's allowlisted modules are dispatchable - this is an execution
+    surface on the shipped binary, so anything else fails loud here even if a
+    caller assembles the argv by hand.
+    """
+    import runpy
+
+    if module not in DISPATCHABLE_MODULES:
+        raise click.ClickException(
+            f"module {module!r} is not dispatchable through this binary; "
+            f"allowlisted modules: {sorted(DISPATCHABLE_MODULES)}"
+        )
+    sys.argv = [module, *args]
+    runpy.run_module(module, run_name="__main__", alter_sys=True)
+
+
 @dataclass(frozen=True)
 class _DesktopServePlan:
     """The armed environment and re-exec argv for a desktop gateway launch."""
@@ -193,8 +224,7 @@ def _prepare_desktop_serve(
         env["VAULTSPEC_HOST"] = host
     if port is not None:
         env["VAULTSPEC_PORT"] = str(port)
-    argv = [sys.executable, "-m", "vaultspec_a2a.cli.main", "serve"]
-    return _DesktopServePlan(env=env, argv=argv)
+    return _DesktopServePlan(env=env, argv=self_command("serve"))
 
 
 @main.command("desktop-serve")
@@ -234,167 +264,6 @@ def desktop_serve(
 
     os.environ.update(plan.env)
     os.execv(plan.argv[0], plan.argv)
-
-
-@main.command("desktop-migrate")
-@click.option(
-    "--descriptor",
-    required=True,
-    type=click.Path(path_type=Path),
-    help="Path to the one-time migration transaction descriptor JSON.",
-)
-def desktop_migrate(descriptor: Path) -> None:
-    """Run the staged-generation desktop migration authorised by a descriptor.
-
-    Internal external-updater command: it applies the packaged Alembic upgrade,
-    checkpointer setup, and state-driven-development backfill against the
-    descriptor's own stores, then prints the bounded machine-readable result as
-    JSON to stdout. This lifecycle verb is deliberately CLI-only and is never
-    exposed on the run-control HTTP API; the exit status is zero only when the
-    migration succeeds.
-    """
-    import asyncio
-
-    from ..desktop.migration import run_staged_migration
-
-    result = asyncio.run(run_staged_migration(descriptor))
-    click.echo(json.dumps(result.model_dump(mode="json"), indent=2, sort_keys=True))
-    if result.status != "succeeded":
-        sys.exit(1)
-
-
-def _emit_snapshot_failure(operation: str, exc: Exception) -> None:
-    """Print a bounded machine-readable snapshot failure and exit non-zero.
-
-    The operator-facing detail names the offending store or descriptor so a
-    failed updater transaction is actionable; the exit status carries the failure
-    so automation need not parse the payload.
-    """
-    click.echo(
-        json.dumps(
-            {
-                "status": "failed",
-                "operation": operation,
-                "error_class": type(exc).__name__,
-                "detail": str(exc),
-            },
-            indent=2,
-            sort_keys=True,
-        )
-    )
-    sys.exit(1)
-
-
-@main.command("desktop-snapshot-create")
-@click.option(
-    "--app-home",
-    required=True,
-    type=click.Path(path_type=Path),
-    help="Explicit absolute mutable-state root for the desktop profile.",
-)
-@click.option(
-    "--group-id",
-    required=True,
-    help="Single-component identity for the new snapshot group.",
-)
-def desktop_snapshot_create(app_home: Path, group_id: str) -> None:
-    """Capture the desktop consistency group as one committed snapshot.
-
-    Internal external-updater command: after quiescence it captures the primary
-    and checkpoint stores as one receipt-verifiable group and prints the committed
-    group descriptor as JSON to stdout. It refuses a live or locked store and a
-    group id that is already committed. This lifecycle verb is CLI-only and is
-    never exposed on the run-control HTTP API; the exit status is zero only when
-    the group commits.
-    """
-    from ..desktop.snapshot import SnapshotError, create_snapshot
-
-    try:
-        descriptor = create_snapshot(app_home, group_id)
-    except SnapshotError as exc:
-        _emit_snapshot_failure("create", exc)
-        return
-    click.echo(json.dumps(descriptor.model_dump(mode="json"), indent=2, sort_keys=True))
-
-
-@main.command("desktop-snapshot-inspect")
-@click.option(
-    "--app-home",
-    required=True,
-    type=click.Path(path_type=Path),
-    help="Explicit absolute mutable-state root for the desktop profile.",
-)
-@click.option(
-    "--group-id",
-    required=True,
-    help="Identity of the committed snapshot group to inspect.",
-)
-def desktop_snapshot_inspect(app_home: Path, group_id: str) -> None:
-    """Print a committed snapshot group's descriptor after integrity-checking it.
-
-    Internal external-updater command: it reports a group only when its descriptor
-    is committed and every captured store still matches its recorded digest, and
-    prints the descriptor as JSON to stdout. An uncommitted or corrupt group makes
-    the command fail closed and exit non-zero. CLI-only; never HTTP-exposed.
-    """
-    from ..desktop.snapshot import SnapshotError, inspect_snapshot
-
-    try:
-        descriptor = inspect_snapshot(app_home, group_id)
-    except SnapshotError as exc:
-        _emit_snapshot_failure("inspect", exc)
-        return
-    click.echo(json.dumps(descriptor.model_dump(mode="json"), indent=2, sort_keys=True))
-
-
-@main.command("desktop-snapshot-restore")
-@click.option(
-    "--app-home",
-    required=True,
-    type=click.Path(path_type=Path),
-    help="Explicit absolute mutable-state root for the desktop profile.",
-)
-@click.option(
-    "--group-id",
-    required=True,
-    help="Identity of the committed snapshot group to restore.",
-)
-@click.option(
-    "--resume/--no-resume",
-    "resume",
-    default=False,
-    help="Roll forward an interrupted restore instead of refusing.",
-)
-def desktop_snapshot_restore(app_home: Path, group_id: str, resume: bool) -> None:
-    """Restore the desktop consistency group from a committed snapshot.
-
-    Internal external-updater command: after quiescence it restores every group
-    member from its verified captured copy under a quiesced-restore marker, then
-    prints a bounded JSON result to stdout. It requires the quiesced condition and
-    refuses a live or locked store; an interrupted restore is refused unless
-    ``--resume`` is given, which rolls it forward deterministically. CLI-only;
-    never HTTP-exposed. The exit status is zero only when the group is restored.
-    """
-    from ..desktop.snapshot import SnapshotError, restore_snapshot
-
-    try:
-        outcome = restore_snapshot(app_home, group_id, resume=resume)
-    except SnapshotError as exc:
-        _emit_snapshot_failure("restore", exc)
-        return
-    click.echo(
-        json.dumps(
-            {
-                "status": "succeeded",
-                "operation": "restore",
-                "group_id": outcome.group_id,
-                "restored": [store.value for store in outcome.restored],
-                "resumed": outcome.resumed,
-            },
-            indent=2,
-            sort_keys=True,
-        )
-    )
 
 
 def _expected_route_signature() -> list[str]:
@@ -784,6 +653,11 @@ def procs_allocate(role: str) -> None:
     except Exception as exc:
         raise _lifecycle_error(exc) from exc
     click.echo(str(reservation.port))
+
+
+# Service-management verbs (setup/start/stop/status/restart) are defined in
+# ``cli.service`` and attach here so the binary exposes one root command set.
+register_service_commands(main)
 
 
 if __name__ == "__main__":

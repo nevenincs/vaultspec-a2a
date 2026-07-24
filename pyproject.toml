@@ -74,6 +74,14 @@ tooling = [
 dev = [
   { include-group = "tooling" },
 ]
+# The frozen-binary build closure: PyInstaller itself plus vaultspec-core,
+# which the binary dispatches via its run-module verb (never a static import,
+# so the spec collects it explicitly). Installed by scripts/build_binary.py's
+# caller (the dashboard release pipeline), not by ordinary development.
+freeze = [
+  "pyinstaller>=6.11",
+  "vaultspec-core>=0.1.48,<0.2",
+]
 all = [
   { include-group = "docs" },
   { include-group = "tooling" },

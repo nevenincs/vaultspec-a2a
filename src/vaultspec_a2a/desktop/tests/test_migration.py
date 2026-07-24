@@ -1,17 +1,14 @@
-"""Real-store tests for the staged-generation desktop migration entrypoint.
+"""Real-store tests for the dashboard-spawnable desktop migration authority.
 
-Every test writes a real transaction descriptor and drives the production
-entrypoint against real SQLite stores. No mock, monkeypatch, stub, skip, or
-expected failure is used: success is proved by reading the real migrated schema,
-consumption is proved by the durable marker file, and refusals are proved by
-holding a real SQLite lock and by supplying a genuinely inconsistent descriptor.
+Every test drives the production entrypoints against real SQLite stores. No
+mock, monkeypatch, stub, skip, or expected failure is used: success is proved
+by reading the real migrated schema, and refusals are proved by holding a real
+SQLite lock and by asserting against the real packaged migration graph.
 """
 
 from __future__ import annotations
 
-import json
 import sqlite3
-from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
 
 import pytest
@@ -27,36 +24,16 @@ from ..migration import (
     MigrationStage,
     StoreName,
     StoreStatus,
-    run_staged_migration,
+    initialize_fresh_stores,
+    migrate_stores,
+    package_migration_range,
 )
 from ..profile import derive_state_paths
-from ..transaction import package_migration_range
 
 if TYPE_CHECKING:
     from pathlib import Path
 
     from langchain_core.runnables import RunnableConfig
-
-_DIGEST = "b" * 64
-
-
-def _write_descriptor(descriptor_path: Path, home: Path, **overrides: object) -> Path:
-    """Write a well-formed migration descriptor targeting ``home``."""
-    state = derive_state_paths(home)
-    packaged = package_migration_range()
-    document: dict[str, object] = {
-        "descriptor_version": "1",
-        "transaction_id": "txn-migrate-1",
-        "app_home": str(home),
-        "database_path": str(state.database_path),
-        "checkpoint_path": str(state.checkpoint_path),
-        "generation": {"manifest_digest": _DIGEST, "component_version": "2.0.0"},
-        "migration_range": {"base": packaged.base, "head": packaged.head},
-        "expires_at": (datetime.now(UTC) + timedelta(hours=1)).isoformat(),
-    }
-    document.update(overrides)
-    descriptor_path.write_text(json.dumps(document), encoding="utf-8")
-    return descriptor_path
 
 
 def _table_present(db_path: Path, table: str) -> bool:
@@ -71,16 +48,28 @@ def _table_present(db_path: Path, table: str) -> bool:
     return row is not None
 
 
-class TestFreshStoreMigration:
+def _primary_revision(db_path: Path) -> str | None:
+    conn = sqlite3.connect(str(db_path))
+    try:
+        try:
+            row = conn.execute("SELECT version_num FROM alembic_version").fetchone()
+        except sqlite3.OperationalError as exc:
+            assert "no such table" in str(exc).lower()
+            return None
+    finally:
+        conn.close()
+    return None if row is None else str(row[0])
+
+
+class TestMigrateStores:
     @pytest.mark.asyncio
-    async def test_fresh_store_migrates_all_three(self, tmp_path: Path) -> None:
+    async def test_fresh_home_migrates_all_three_stores(self, tmp_path: Path) -> None:
         """A fresh app home migrates the primary, checkpoint, and SDD state."""
         home = tmp_path / "app"
-        descriptor = _write_descriptor(tmp_path / "txn.json", home)
         state = derive_state_paths(home)
         packaged = package_migration_range()
 
-        result = await run_staged_migration(descriptor)
+        result = await migrate_stores(home)
 
         assert result.status == "succeeded"
         assert result.target_head == packaged.head
@@ -95,14 +84,8 @@ class TestFreshStoreMigration:
         )
         assert outcomes[StoreName.SDD].status is StoreStatus.BACKFILLED
 
-        # Real schema landed and the transaction is durably consumed.
-        version = (
-            sqlite3.connect(str(state.database_path))
-            .execute("SELECT version_num FROM alembic_version")
-            .fetchone()
-        )
-        assert version is not None
-        assert version[0] == packaged.head
+        # Real schema landed.
+        assert _primary_revision(state.database_path) == packaged.head
         assert _table_present(state.checkpoint_path, "checkpoints")
         checkpoint_identity = (
             sqlite3.connect(str(state.checkpoint_path))
@@ -116,9 +99,21 @@ class TestFreshStoreMigration:
             CHECKPOINT_SCHEMA_VERSION,
             CHECKPOINT_SCHEMA_DIGEST,
         )
-        assert (
-            state.receipts_dir / "migration-transaction-txn-migrate-1.consumed"
-        ).is_file()
+
+    @pytest.mark.asyncio
+    async def test_migrate_is_idempotent_at_head(self, tmp_path: Path) -> None:
+        """A second migrate against a head-revision store succeeds as a no-op."""
+        home = tmp_path / "app"
+        packaged = package_migration_range()
+        first = await migrate_stores(home)
+        assert first.status == "succeeded"
+
+        second = await migrate_stores(home, expect_from=packaged.head)
+
+        assert second.status == "succeeded"
+        outcomes = {outcome.store: outcome for outcome in second.stores}
+        assert outcomes[StoreName.PRIMARY].from_revision == packaged.head
+        assert outcomes[StoreName.PRIMARY].to_revision == packaged.head
 
     @pytest.mark.asyncio
     async def test_legacy_serialized_state_is_backfilled_before_identity_stamp(
@@ -126,7 +121,6 @@ class TestFreshStoreMigration:
     ) -> None:
         """The semantic marker is written only after real state migration."""
         home = tmp_path / "app"
-        descriptor = _write_descriptor(tmp_path / "txn.json", home)
         state = derive_state_paths(home)
         state.checkpoint_path.parent.mkdir(parents=True, exist_ok=True)
         legacy = empty_checkpoint()
@@ -139,7 +133,7 @@ class TestFreshStoreMigration:
         ) as checkpointer:
             stored_config = await checkpointer.aput(config, legacy, {}, {})
 
-        result = await run_staged_migration(descriptor)
+        result = await migrate_stores(home)
 
         assert result.status == "succeeded"
         outcomes = {outcome.store: outcome for outcome in result.stores}
@@ -154,36 +148,19 @@ class TestFreshStoreMigration:
         assert stored is not None
         assert stored.checkpoint["channel_values"]["vault_index"] == {}
 
-    @pytest.mark.asyncio
-    async def test_consumed_descriptor_is_refused_on_replay(
-        self, tmp_path: Path
-    ) -> None:
-        """Re-running a consumed descriptor is refused at the descriptor stage."""
-        home = tmp_path / "app"
-        descriptor = _write_descriptor(tmp_path / "txn.json", home)
-
-        first = await run_staged_migration(descriptor)
-        assert first.status == "succeeded"
-
-        second = await run_staged_migration(descriptor)
-        assert second.status == "failed"
-        assert second.failed_stage is MigrationStage.DESCRIPTOR
-        assert second.error_class == "TransactionDescriptorError"
-
 
 class TestRefusals:
     @pytest.mark.asyncio
     async def test_live_store_is_refused(self, tmp_path: Path) -> None:
         """A store held under a real write lock is refused, mutating nothing."""
         home = tmp_path / "app"
-        descriptor = _write_descriptor(tmp_path / "txn.json", home)
         state = derive_state_paths(home)
         state.database_path.parent.mkdir(parents=True, exist_ok=True)
 
         holder = sqlite3.connect(str(state.database_path))
         try:
             holder.execute("BEGIN IMMEDIATE")
-            result = await run_staged_migration(descriptor)
+            result = await migrate_stores(home)
         finally:
             holder.rollback()
             holder.close()
@@ -191,65 +168,51 @@ class TestRefusals:
         assert result.status == "failed"
         assert result.failed_stage is MigrationStage.LOCK
         assert result.error_class == "StoreLockedError"
-        # The refused transaction is not consumed and may be retried.
-        assert not (
-            state.receipts_dir / "migration-transaction-txn-migrate-1.consumed"
-        ).exists()
+        # The refused store was not mutated.
+        assert _primary_revision(state.database_path) is None
 
     @pytest.mark.asyncio
-    async def test_descriptor_mismatch_is_refused(self, tmp_path: Path) -> None:
-        """A descriptor whose migration range is wrong is refused up front."""
+    async def test_expect_from_mismatch_is_refused(self, tmp_path: Path) -> None:
+        """A base assertion that does not match the store refuses up front."""
         home = tmp_path / "app"
-        descriptor = _write_descriptor(
-            tmp_path / "txn.json",
-            home,
-            migration_range={"base": "0001", "head": "9999_future"},
-        )
+        state = derive_state_paths(home)
 
-        result = await run_staged_migration(descriptor)
+        result = await migrate_stores(home, expect_from="0001_not_the_base")
 
         assert result.status == "failed"
-        assert result.failed_stage is MigrationStage.DESCRIPTOR
-        assert result.error_class == "TransactionDescriptorError"
+        assert result.failed_stage is MigrationStage.PRECONDITION
+        assert result.error_class == "BaseMismatchError"
+        assert not state.database_path.exists() or (
+            _primary_revision(state.database_path) is None
+        )
 
     @pytest.mark.asyncio
-    async def test_post_mutation_consume_failure_is_bounded(
+    async def test_expect_head_mismatch_is_refused(self, tmp_path: Path) -> None:
+        """A head assertion that does not match the package refuses up front."""
+        home = tmp_path / "app"
+
+        result = await migrate_stores(home, expect_head="9999_future")
+
+        assert result.status == "failed"
+        assert result.failed_stage is MigrationStage.PRECONDITION
+        assert result.error_class == "HeadMismatchError"
+
+
+class TestInitializeFreshStores:
+    @pytest.mark.asyncio
+    async def test_fresh_init_then_refusal_on_initialised_home(
         self, tmp_path: Path
     ) -> None:
-        """A consume failure after the mutations returns a bounded result.
-
-        The stores are already migrated when the transaction is marked consumed,
-        so a failure there must not escape as a traceback (which would break the
-        CLI's JSON contract) but must surface as a bounded CONSUME-stage result.
-        """
+        """Fresh init reaches head; a second init refuses at the precondition."""
         home = tmp_path / "app"
-        descriptor = _write_descriptor(tmp_path / "txn.json", home)
         state = derive_state_paths(home)
         packaged = package_migration_range()
 
-        # Pre-create the receipts directory as a regular file. Descriptor
-        # validation still passes (the marker itself does not exist) and both
-        # stores migrate, but the post-mutation consume mkdir hits a real
-        # filesystem error, forcing the CONSUME exit path.
-        state.receipts_dir.parent.mkdir(parents=True, exist_ok=True)
-        state.receipts_dir.write_text("not a directory", encoding="utf-8")
+        first = await initialize_fresh_stores(home)
+        assert first.status == "succeeded"
+        assert _primary_revision(state.database_path) == packaged.head
 
-        result = await run_staged_migration(descriptor)
-
-        assert result.status == "failed"
-        assert result.failed_stage is MigrationStage.CONSUME
-        # A real OSError-family class name, proving no traceback escaped.
-        assert result.error_class
-        assert {outcome.store for outcome in result.stores} == {
-            StoreName.PRIMARY,
-            StoreName.CHECKPOINT,
-            StoreName.SDD,
-        }
-        # The failure is genuinely post-mutation: the primary store reached head.
-        version = (
-            sqlite3.connect(str(state.database_path))
-            .execute("SELECT version_num FROM alembic_version")
-            .fetchone()
-        )
-        assert version is not None
-        assert version[0] == packaged.head
+        second = await initialize_fresh_stores(home)
+        assert second.status == "failed"
+        assert second.failed_stage is MigrationStage.PRECONDITION
+        assert second.error_class == "StoreAlreadyInitializedError"

@@ -86,32 +86,20 @@ Authentication is implemented by
 ``allow_unauthenticated_v1_for_testing`` application option is test-only and
 must never be enabled by an operator deployment.
 
-Staged desktop migration
-------------------------
+Desktop store migration
+-----------------------
 
-``vaultspec-a2a desktop-migrate --descriptor PATH`` is an internal updater
-entry point, not an interactive run-control command. After the updater has
-quiesced the old gateway, it supplies a one-time transaction descriptor owned
-by :mod:`vaultspec_a2a.desktop.transaction`. The command invokes
-:func:`vaultspec_a2a.desktop.migration.run_staged_migration`, prints a bounded
-JSON :class:`vaultspec_a2a.desktop.migration.MigrationResult`, and exits nonzero
-when descriptor validation, store locking, schema migration, checkpointer
-setup, or the state backfill fails. Do not hand-edit, reuse, or replay a consumed
-descriptor.
-
-Desktop consistency-group snapshots
------------------------------------
-
-Snapshot operations treat the primary database and checkpointer database as one
-consistency group. Quiesce the gateway before calling
-:func:`vaultspec_a2a.desktop.snapshot.create_snapshot` or
-:func:`vaultspec_a2a.desktop.snapshot.restore_snapshot`; a live or locked store
-is refused. A snapshot becomes visible only after its descriptor is committed.
-Inspection verifies every captured member's digest and size. Restore writes a
-durable marker before replacing either store; while
-:func:`vaultspec_a2a.desktop.snapshot.pending_restore` returns a marker, treat
-the live group as unhealthy and roll the same snapshot forward with
-``resume=True``. Do not mix members from different snapshot groups.
+``vaultspec-a2a migrate`` is the dashboard-spawnable migrate step of the
+dashboard's own update transaction, not an interactive run-control command. The
+dashboard owns ordering (drain, snapshot, migrate, activate) and rollback via
+its own snapshot; after quiescing the old gateway it spawns ``migrate``, which
+executes a2a's schema work through
+:func:`vaultspec_a2a.desktop.migration.migrate_stores`, prints a bounded JSON
+:class:`vaultspec_a2a.desktop.migration.MigrationResult`, and exits nonzero when
+store locking, schema migration, checkpointer setup, or the state backfill
+fails. The ``setup`` verb initialises fresh stores for a new install through the
+same authority via
+:func:`vaultspec_a2a.desktop.migration.initialize_fresh_stores`.
 
 Active-run discovery
 --------------------

@@ -1,94 +1,5 @@
 {
   "$defs": {
-    "ApiVersionRange": {
-      "additionalProperties": false,
-      "description": "The inclusive gateway API version range this generation serves.",
-      "properties": {
-        "minimum": {
-          "$ref": "#/$defs/GatewayApiVersion",
-          "description": "Lowest served gateway API version from the supported enum."
-        },
-        "maximum": {
-          "$ref": "#/$defs/GatewayApiVersion",
-          "description": "Highest served gateway API version from the supported enum."
-        }
-      },
-      "required": [
-        "minimum",
-        "maximum"
-      ],
-      "title": "ApiVersionRange",
-      "type": "object"
-    },
-    "ComponentAsset": {
-      "additionalProperties": false,
-      "description": "One immutable source artifact used to assemble the base closure.",
-      "properties": {
-        "kind": {
-          "$ref": "#/$defs/ComponentAssetKind",
-          "description": "Base-closure asset kind."
-        },
-        "version": {
-          "description": "Pinned asset version.",
-          "maxLength": 128,
-          "minLength": 1,
-          "title": "Version",
-          "type": "string"
-        },
-        "license": {
-          "description": "SPDX-style license identifier for the asset.",
-          "maxLength": 128,
-          "minLength": 1,
-          "title": "License",
-          "type": "string"
-        },
-        "digest": {
-          "description": "Digest of the immutable source artifact bytes used for assembly (runtime archive, A2A wheel, or ACP package); installed-tree integrity is governed by later release/SBOM contracts.",
-          "pattern": "^[0-9a-f]{64}$",
-          "title": "Digest",
-          "type": "string"
-        }
-      },
-      "required": [
-        "kind",
-        "version",
-        "license",
-        "digest"
-      ],
-      "title": "ComponentAsset",
-      "type": "object"
-    },
-    "ComponentAssetKind": {
-      "description": "The base-closure asset kinds a complete capsule declares.\n\nA capsule ships a bundled CPython runtime, the locked A2A distribution, a\nbundled Node.js runtime, and the pinned ACP adapter. The pinned versions are\n:data:`CPYTHON_VERSION_PIN`, :data:`NODEJS_VERSION_PIN`, and\n:data:`ACP_VERSION_PIN`.",
-      "enum": [
-        "python-runtime",
-        "a2a-distribution",
-        "node-runtime",
-        "acp-adapter"
-      ],
-      "title": "ComponentAssetKind",
-      "type": "string"
-    },
-    "ComponentCompatibility": {
-      "additionalProperties": false,
-      "description": "Protocol and schema compatibility facts a consumer must honour.",
-      "properties": {
-        "api_versions": {
-          "$ref": "#/$defs/ApiVersionRange",
-          "description": "Gateway API version range served by this generation."
-        },
-        "migration_range": {
-          "$ref": "#/$defs/MigrationRange",
-          "description": "Alembic base/head revision range packaged in this generation."
-        }
-      },
-      "required": [
-        "api_versions",
-        "migration_range"
-      ],
-      "title": "ComponentCompatibility",
-      "type": "object"
-    },
     "ComponentEntrypoints": {
       "additionalProperties": false,
       "description": "The dashboard-owned gateway launch and the caller-owned MCP launch.",
@@ -135,121 +46,6 @@
       "title": "ComponentIdentity",
       "type": "object"
     },
-    "ConsistencyGroup": {
-      "additionalProperties": false,
-      "description": "The mutable stores the updater snapshots and restores as one group.\n\nThe declaration binds membership, per-store derivability, and each store's\nschema authority into the manifest so a consumer knows exactly which mutable\nstores move together across a generation change, and which (if any) may be\nomitted because they are provably derivable. The current generation declares\nboth stores non-derivable, so both are mandatory members.",
-      "properties": {
-        "stores": {
-          "allOf": [
-            {
-              "contains": {
-                "properties": {
-                  "kind": {
-                    "const": "primary-database"
-                  },
-                  "schema_authority": {
-                    "const": "alembic-migration-range"
-                  },
-                  "derivable": {
-                    "const": false
-                  },
-                  "schema_version": {
-                    "const": "0009"
-                  }
-                },
-                "required": [
-                  "kind",
-                  "schema_authority",
-                  "schema_version",
-                  "derivable"
-                ]
-              },
-              "maxContains": 1,
-              "minContains": 1
-            },
-            {
-              "contains": {
-                "properties": {
-                  "kind": {
-                    "const": "checkpoint-database"
-                  },
-                  "schema_authority": {
-                    "const": "checkpointer-schema"
-                  },
-                  "derivable": {
-                    "const": false
-                  },
-                  "schema_version": {
-                    "const": "1.0.0"
-                  }
-                },
-                "required": [
-                  "kind",
-                  "schema_authority",
-                  "schema_version",
-                  "derivable"
-                ]
-              },
-              "maxContains": 1,
-              "minContains": 1
-            }
-          ],
-          "description": "The declared consistency-group members, one per store kind.",
-          "items": {
-            "$ref": "#/$defs/MutableStore"
-          },
-          "maxItems": 2,
-          "minItems": 2,
-          "title": "Stores",
-          "type": "array"
-        }
-      },
-      "required": [
-        "stores"
-      ],
-      "title": "ConsistencyGroup",
-      "type": "object"
-    },
-    "DependencyLockIdentity": {
-      "additionalProperties": false,
-      "description": "Digests pinning the resolved Python and JavaScript dependency graphs.",
-      "properties": {
-        "uv_lock_digest": {
-          "description": "Digest of the committed uv.lock.",
-          "pattern": "^[0-9a-f]{64}$",
-          "title": "Uv Lock Digest",
-          "type": "string"
-        },
-        "package_lock_digest": {
-          "description": "Digest of the committed package-lock.json.",
-          "pattern": "^[0-9a-f]{64}$",
-          "title": "Package Lock Digest",
-          "type": "string"
-        }
-      },
-      "required": [
-        "uv_lock_digest",
-        "package_lock_digest"
-      ],
-      "title": "DependencyLockIdentity",
-      "type": "object"
-    },
-    "DigestAlgorithm": {
-      "description": "The digest algorithm governing every hash in a manifest.",
-      "enum": [
-        "sha256"
-      ],
-      "title": "DigestAlgorithm",
-      "type": "string"
-    },
-    "GatewayApiVersion": {
-      "description": "Gateway API versions implemented by the production route surface.",
-      "enum": [
-        "v1"
-      ],
-      "title": "GatewayApiVersion",
-      "type": "string"
-    },
     "GatewayEntrypoint": {
       "additionalProperties": false,
       "description": "The dashboard-owned gateway launch surface.",
@@ -275,9 +71,9 @@
           "type": "string"
         },
         "relative_command": {
-          "description": "Bounded argv path segments relative to the capsule root.",
+          "description": "Bounded argv path segments relative to the runtime root.",
           "items": {
-            "description": "One portable, non-rooted capsule path segment; Windows device basenames and platform-invalid characters are forbidden.",
+            "description": "One portable, non-rooted runtime path segment; Windows device basenames and platform-invalid characters are forbidden.",
             "maxLength": 128,
             "minLength": 1,
             "not": {
@@ -311,78 +107,6 @@
       "title": "GatewayEntrypoint",
       "type": "object"
     },
-    "MigrationRange": {
-      "additionalProperties": false,
-      "description": "The Alembic revision range the generation's package migrations cover.",
-      "properties": {
-        "base": {
-          "description": "Alembic base (initial) revision identifier.",
-          "maxLength": 64,
-          "minLength": 1,
-          "title": "Base",
-          "type": "string"
-        },
-        "head": {
-          "const": "0009",
-          "description": "Alembic head (target) revision identifier.",
-          "maxLength": 64,
-          "minLength": 1,
-          "title": "Head",
-          "type": "string"
-        }
-      },
-      "required": [
-        "base",
-        "head"
-      ],
-      "title": "MigrationRange",
-      "type": "object"
-    },
-    "MutableStore": {
-      "additionalProperties": false,
-      "description": "One declared mutable, schema-bearing consistency-group store.",
-      "properties": {
-        "kind": {
-          "$ref": "#/$defs/MutableStoreKind",
-          "description": "Which schema-bearing mutable store this declares."
-        },
-        "derivable": {
-          "const": false,
-          "description": "Current stores are mandatory and cannot be omitted. A future derivable form requires a separate tagged evidence contract.",
-          "title": "Derivable",
-          "type": "boolean"
-        },
-        "schema_authority": {
-          "$ref": "#/$defs/StoreSchemaAuthority",
-          "description": "Authority governing this store's schema revision. The Alembic authority reconciles with compatibility.migration_range rather than duplicating the base and head."
-        },
-        "schema_version": {
-          "description": "Exact schema revision required by this generation: the packaged Alembic head or the project-owned checkpoint semantic version.",
-          "maxLength": 64,
-          "minLength": 1,
-          "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$",
-          "title": "Schema Version",
-          "type": "string"
-        }
-      },
-      "required": [
-        "kind",
-        "derivable",
-        "schema_authority",
-        "schema_version"
-      ],
-      "title": "MutableStore",
-      "type": "object"
-    },
-    "MutableStoreKind": {
-      "description": "The schema-bearing mutable stores forming the desktop consistency group.\n\nThese are the stores the dashboard's external updater snapshots and restores\nas one receipt-verifiable group across a generation change.\n``PRIMARY_DATABASE`` is the Alembic-versioned application database;\n``CHECKPOINT_DATABASE`` is the LangGraph checkpoint database carrying the\nstate-driven-development state.",
-      "enum": [
-        "primary-database",
-        "checkpoint-database"
-      ],
-      "title": "MutableStoreKind",
-      "type": "string"
-    },
     "StandaloneMcpEntrypoint": {
       "additionalProperties": false,
       "description": "The caller-owned standalone MCP launch surface.",
@@ -408,9 +132,9 @@
           "type": "string"
         },
         "relative_command": {
-          "description": "Bounded argv path segments relative to the capsule root.",
+          "description": "Bounded argv path segments relative to the runtime root.",
           "items": {
-            "description": "One portable, non-rooted capsule path segment; Windows device basenames and platform-invalid characters are forbidden.",
+            "description": "One portable, non-rooted runtime path segment; Windows device basenames and platform-invalid characters are forbidden.",
             "maxLength": 128,
             "minLength": 1,
             "not": {
@@ -443,164 +167,25 @@
       ],
       "title": "StandaloneMcpEntrypoint",
       "type": "object"
-    },
-    "StoreSchemaAuthority": {
-      "description": "What governs a mutable store's schema revision.\n\n``ALEMBIC_MIGRATION_RANGE`` reconciles with the manifest's\n:attr:`ComponentCompatibility.migration_range`, which is the single authority\nfor the primary database's schema-revision facts; a store bearing this\nauthority does not restate the base and head. ``CHECKPOINTER_SCHEMA`` denotes\nthe LangGraph checkpointer's own schema, which the migration range does not\ncover.",
-      "enum": [
-        "alembic-migration-range",
-        "checkpointer-schema"
-      ],
-      "title": "StoreSchemaAuthority",
-      "type": "string"
-    },
-    "TargetTriple": {
-      "description": "The four accepted desktop capsule targets, as Rust-style triples.\n\nThe triples match the platform vocabulary already used by the locked\ndependency closure (see ``desktop_tests/test_dependency_closure.py``).\nIntel macOS is not a shipped target: ``cryptography`` publishes no\n``x86_64-apple-darwin`` wheel, and that package enters the closure through\na required ``mcp -> pyjwt[crypto]`` edge that cannot be pruned.",
-      "enum": [
-        "aarch64-apple-darwin",
-        "aarch64-unknown-linux-gnu",
-        "x86_64-unknown-linux-gnu",
-        "x86_64-pc-windows-msvc"
-      ],
-      "title": "TargetTriple",
-      "type": "string"
     }
   },
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
-  "description": "The versioned desktop component manifest consumed by dashboard packaging.\n\nThe manifest is the entire boundary the dashboard reads about an A2A\ngeneration. It is deterministic and self-describing: given the same inputs\nthe emitter produces a byte-identical document, so a release-set receipt can\npin a generation by manifest digest.",
+  "description": "The desktop component manifest consumed by the dashboard.\n\nThe manifest is the entire boundary the dashboard reads about an A2A\ngeneration: the component's identity and its typed launch surfaces. The\ndashboard owns build, versioning, snapshot, and rollback, so the manifest\ncarries no compatibility, bundled-asset, dependency-lock, or\nconsistency-group machinery.",
   "properties": {
-    "contract_version": {
-      "description": "Canonical MAJOR.MINOR grammar version; consumers require the same major and a declared minor no newer than they support.",
-      "maxLength": 13,
-      "minLength": 3,
-      "pattern": "^(?:0|[1-9][0-9]{0,5})\\.(?:0|[1-9][0-9]{0,5})$",
-      "title": "Contract Version",
-      "type": "string"
-    },
     "identity": {
       "$ref": "#/$defs/ComponentIdentity",
       "description": "Component name and version."
     },
-    "target": {
-      "$ref": "#/$defs/TargetTriple",
-      "description": "The capsule's target triple."
-    },
-    "compatibility": {
-      "$ref": "#/$defs/ComponentCompatibility",
-      "description": "Served API range and packaged Alembic migration range."
-    },
-    "consistency_group": {
-      "$ref": "#/$defs/ConsistencyGroup",
-      "description": "The mutable, schema-bearing stores the external updater snapshots and restores as one group; the primary store's schema authority reconciles with compatibility.migration_range."
-    },
     "entrypoints": {
       "$ref": "#/$defs/ComponentEntrypoints",
       "description": "Gateway and standalone MCP launch surfaces."
-    },
-    "digest_algorithm": {
-      "$ref": "#/$defs/DigestAlgorithm",
-      "description": "Algorithm governing every digest in this manifest."
-    },
-    "assets": {
-      "allOf": [
-        {
-          "contains": {
-            "properties": {
-              "kind": {
-                "const": "python-runtime"
-              },
-              "version": {
-                "const": "3.13"
-              }
-            },
-            "required": [
-              "kind",
-              "version"
-            ]
-          },
-          "maxContains": 1,
-          "minContains": 1
-        },
-        {
-          "contains": {
-            "properties": {
-              "kind": {
-                "const": "a2a-distribution"
-              }
-            },
-            "required": [
-              "kind"
-            ]
-          },
-          "maxContains": 1,
-          "minContains": 1
-        },
-        {
-          "contains": {
-            "properties": {
-              "kind": {
-                "const": "node-runtime"
-              },
-              "version": {
-                "const": "22"
-              }
-            },
-            "required": [
-              "kind",
-              "version"
-            ]
-          },
-          "maxContains": 1,
-          "minContains": 1
-        },
-        {
-          "contains": {
-            "properties": {
-              "kind": {
-                "const": "acp-adapter"
-              },
-              "version": {
-                "const": "0.59.0"
-              }
-            },
-            "required": [
-              "kind",
-              "version"
-            ]
-          },
-          "maxContains": 1,
-          "minContains": 1
-        }
-      ],
-      "description": "The exact four-kind base closure with pinned runtime versions, licenses, and digests.",
-      "items": {
-        "$ref": "#/$defs/ComponentAsset"
-      },
-      "maxItems": 4,
-      "minItems": 4,
-      "title": "Assets",
-      "type": "array"
-    },
-    "dependency_lock": {
-      "$ref": "#/$defs/DependencyLockIdentity",
-      "description": "Digests pinning the Python and JavaScript dependency graphs."
     }
   },
   "required": [
-    "contract_version",
     "identity",
-    "target",
-    "compatibility",
-    "consistency_group",
-    "entrypoints",
-    "digest_algorithm",
-    "assets",
-    "dependency_lock"
+    "entrypoints"
   ],
   "title": "ComponentManifest",
-  "type": "object",
-  "x-vaultspec-invariants": [
-    "identity.version must equal the a2a-distribution asset version; enforced by the production model because JSON Schema Draft 2020-12 has no standard cross-field equality keyword",
-    "the primary-database schema_version must equal compatibility.migration_range.head; enforced by the production model because JSON Schema Draft 2020-12 has no standard cross-field equality keyword"
-  ]
+  "type": "object"
 }

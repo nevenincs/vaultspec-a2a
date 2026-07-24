@@ -188,21 +188,6 @@ Desktop capsule contract
 
 .. py:function:: export_component_manifest_schema()
 
-.. py:module:: vaultspec_a2a.desktop.manifest
-   :synopsis: Deterministic desktop component-manifest emission and hashing.
-
-.. py:class:: AssetSource
-
-.. py:class:: BoundAssetSource
-
-.. py:function:: emit_component_manifest(*, target, api_versions, assets, uv_lock_path, package_lock_path, digest_algorithm=DigestAlgorithm.SHA256)
-
-.. py:function:: emit_component_manifest_from_bound_inputs(*, target, api_versions, assets, a2a_wheel, uv_lock_digest, package_lock_digest, digest_algorithm=DigestAlgorithm.SHA256)
-
-.. py:function:: component_manifest_canonical_bytes(manifest)
-
-.. py:function:: component_manifest_digest(manifest)
-
 Desktop product profile
 ~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -215,109 +200,36 @@ Desktop product profile
 
 .. py:function:: derive_state_paths(app_home)
 
-Staged desktop migration
-~~~~~~~~~~~~~~~~~~~~~~~~
+.. py:module:: vaultspec_a2a.desktop.credentials
+   :synopsis: Owner-restricted split-credential files for the desktop planes.
 
-The external updater supplies a one-time descriptor to
-:func:`vaultspec_a2a.desktop.migration.run_staged_migration`. Descriptor
-validation is owned by :mod:`vaultspec_a2a.desktop.transaction`; schema work
-is owned by :mod:`vaultspec_a2a.desktop.migration`.
+.. py:module:: vaultspec_a2a.desktop.settlement
+   :synopsis: Terminal settlement of the desktop runtime's owned processes.
 
-.. py:module:: vaultspec_a2a.desktop.transaction
-   :synopsis: One-time staged-generation transaction descriptors.
+Desktop store migration
+~~~~~~~~~~~~~~~~~~~~~~~
 
-.. py:class:: TransactionDescriptor
-
-.. py:class:: TransactionDescriptorError
-
-.. py:function:: load_transaction_descriptor(path)
-
-.. py:function:: mark_transaction_consumed(transaction)
+The dashboard's update transaction owns ordering (drain, snapshot, migrate,
+activate) and rollback via its own snapshot; after quiescence it spawns the
+``migrate`` command, which executes a2a's schema work through
+:mod:`vaultspec_a2a.desktop.migration`. The ``setup`` verb uses the same
+authority to initialise fresh stores.
 
 .. py:module:: vaultspec_a2a.desktop.migration
-   :synopsis: Quiescent desktop-store migration execution.
+   :synopsis: Quiescent desktop-store migration and fresh-store initialisation.
 
 .. py:class:: MigrationResult
 
 .. py:class:: StoreOutcome
 
-.. py:function:: run_staged_migration(descriptor_path)
+.. py:function:: migrate_stores(app_home, *, expect_from=None, expect_head=None)
 
-Desktop consistency-group snapshots
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+.. py:function:: initialize_fresh_stores(app_home)
 
-Snapshot capture and restore operate on the complete mutable desktop state
-group and require the gateway to be quiescent. See
-:mod:`vaultspec_a2a.desktop.snapshot` for the durable descriptor and interrupted
-restore-marker contracts.
+.. py:function:: package_migration_range()
 
-.. py:module:: vaultspec_a2a.desktop.snapshot
-   :synopsis: Capture, inspect, and restore desktop consistency groups.
-
-.. py:class:: ConsistencyGroupStore
-
-.. py:class:: ConsistencyGroupStoreSpecification
-
-.. py:class:: StoreSnapshot
-
-.. py:class:: GroupDescriptor
-
-.. py:class:: RestoreMarker
-
-.. py:class:: RestoreOutcome
-
-.. py:class:: SnapshotError
-
-.. py:class:: SnapshotIntegrityError
-
-.. py:class:: SnapshotStoreLockedError
-
-.. py:class:: RestorePendingError
-
-.. py:function:: consistency_group_specifications()
-
-.. py:function:: consistency_group_members(state)
-
-.. py:function:: create_snapshot(app_home, group_id, *, now=None)
-
-.. py:function:: inspect_snapshot(app_home, group_id)
-
-.. py:function:: list_snapshots(app_home)
-
-.. py:function:: pending_restore(app_home)
-
-.. py:function:: restore_snapshot(app_home, group_id, *, resume=False, now=None)
-
-Desktop assembly internals
-~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-These workflow-facing modules implement capsule assembly. They aren't part of
-the package-root component-manifest API and may change with the release
-workflow.
-
-.. py:module:: vaultspec_a2a.desktop.artifacts
-   :synopsis: Exact retained local-input authority and byte-identity verification.
-
-.. py:module:: vaultspec_a2a.desktop.package_archives
-   :synopsis: Verified Python and ACP package archive sessions.
-
-.. py:module:: vaultspec_a2a.desktop.closure_inventory
-   :synopsis: Canonical Python and ACP source-closure inventories.
-
-.. py:module:: vaultspec_a2a.desktop.installed_inventory
-   :synopsis: Canonical expected installed-tree inventories.
-
-.. py:module:: vaultspec_a2a.desktop.lock_reconciliation
-   :synopsis: Closure reconciliation against exact dependency-lock bytes.
-
-.. py:module:: vaultspec_a2a.desktop._archive_authority
-   :synopsis: Bounded archive scanning and retained regular-file snapshots.
-
-.. py:module:: vaultspec_a2a.desktop.capsule
-   :synopsis: Bounded archive projection into private staging trees.
-
-.. py:module:: vaultspec_a2a.desktop.capsule_evidence
-   :synopsis: Installed-tree evidence and deterministic archive publication.
+Desktop publication authority
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. py:module:: vaultspec_a2a.desktop._filesystem_authority
    :synopsis: Native descriptor and handle authority for no-replace publication.

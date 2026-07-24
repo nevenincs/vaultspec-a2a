@@ -13,7 +13,6 @@ import logging
 import os
 import re
 import subprocess
-import sys
 import threading
 import time
 import uuid
@@ -29,6 +28,7 @@ if TYPE_CHECKING:
 from ..artifacts import ArtifactDeclaration, RetentionDisposition
 from ..utils import kill_pid_tree_async
 from ..utils.process import ProcessContainment, ProcessContainmentError
+from ..utils.runtime_exec import module_command
 from .config import GATEWAY_URL_ENV, INTERNAL_TOKEN_ENV, settings
 
 __all__ = [
@@ -460,13 +460,13 @@ async def _spawn_worker(
     new_session = containment is not None and bool(
         containment.spawn_kwargs().get("start_new_session")
     )
+    # Freeze-safe worker re-exec: rendered by the runtime's command authority
+    # (``python -m vaultspec_a2a.worker`` from source; the binary's own
+    # ``run-module`` dispatch when frozen), never assembled interpreter flags.
+    worker_command = module_command("vaultspec_a2a.worker")
     with stderr_log_path.open("wb") as stderr_handle:
         process = subprocess.Popen(
-            [
-                sys.executable,
-                "-c",
-                "from vaultspec_a2a.worker.app import main; main()",
-            ],
+            worker_command,
             stdout=subprocess.DEVNULL,
             stdin=subprocess.DEVNULL,
             stderr=stderr_handle,
@@ -487,11 +487,9 @@ async def _spawn_worker(
                 exc_info=True,
             )
     logger.info(
-        "Worker process spawned (PID %d) via"
-        " `%s -c from vaultspec_a2a.worker.app import main; main()`"
-        " with stderr at %s",
+        "Worker process spawned (PID %d) via `%s` with stderr at %s",
         process.pid,
-        sys.executable,
+        " ".join(worker_command),
         stderr_log_path,
     )
 

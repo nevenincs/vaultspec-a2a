@@ -12,7 +12,6 @@ import subprocess
 import sys
 import time
 from contextlib import contextmanager
-from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Final
 
 import httpx
@@ -23,7 +22,6 @@ from vaultspec_a2a.desktop.credentials import (
     OWNERSHIP_CAPABILITY_NAME,
 )
 from vaultspec_a2a.desktop.profile import derive_state_paths
-from vaultspec_a2a.desktop.transaction import package_migration_range
 from vaultspec_a2a.utils import kill_pid_tree_async
 
 if TYPE_CHECKING:
@@ -60,39 +58,15 @@ def _seed_credentials(app_home: Path) -> None:
         harden_credential_file(path)
 
 
-def _write_descriptor(descriptor_path: Path, app_home: Path) -> Path:
-    state = derive_state_paths(app_home)
-    packaged = package_migration_range()
-    descriptor_path.write_text(
-        json.dumps(
-            {
-                "descriptor_version": "1",
-                "transaction_id": "cross-repo-gateway-txn-1",
-                "app_home": str(app_home),
-                "database_path": str(state.database_path),
-                "checkpoint_path": str(state.checkpoint_path),
-                "generation": {
-                    "manifest_digest": _DIGEST,
-                    "component_version": "4.0.0",
-                },
-                "migration_range": {"base": packaged.base, "head": packaged.head},
-                "expires_at": (datetime.now(UTC) + timedelta(hours=1)).isoformat(),
-            }
-        ),
-        encoding="utf-8",
-    )
-    return descriptor_path
-
-
-def _seat_valid_database(app_home: Path, descriptor: Path) -> None:
+def _seat_valid_database(app_home: Path) -> None:
     result = subprocess.run(
         [
             sys.executable,
             "-m",
             _MODULE,
-            "desktop-migrate",
-            "--descriptor",
-            str(descriptor),
+            "migrate",
+            "--app-home",
+            str(app_home),
         ],
         capture_output=True,
         text=True,
@@ -129,7 +103,7 @@ def armed_gateway(tmp_path: Path, **extra_env: str) -> Iterator[tuple[str, str]]
     app_home = tmp_path / "app-home"
     app_home.mkdir()
     _seed_credentials(app_home)
-    _seat_valid_database(app_home, _write_descriptor(tmp_path / "txn.json", app_home))
+    _seat_valid_database(app_home)
 
     gateway_port = _free_port()
     worker_port = _free_port()

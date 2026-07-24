@@ -25,7 +25,6 @@ import socket
 import subprocess
 import sys
 import time
-from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any, cast
 
 import httpx
@@ -37,7 +36,6 @@ from vaultspec_a2a.desktop.credentials import (
     OWNERSHIP_CAPABILITY_NAME,
 )
 from vaultspec_a2a.desktop.profile import derive_state_paths
-from vaultspec_a2a.desktop.transaction import package_migration_range
 from vaultspec_a2a.lifecycle.discovery import is_pid_alive
 from vaultspec_a2a.providers._acp_rpc_handlers import (
     on_terminal_create,
@@ -256,27 +254,14 @@ def _seed_credentials(app_home: Path) -> None:
         harden_credential_file(path)
 
 
-def _seat_valid_database(app_home: Path, descriptor: Path) -> None:
-    state = derive_state_paths(app_home)
-    packaged = package_migration_range()
-    document = {
-        "descriptor_version": "1",
-        "transaction_id": "ownedtree-txn-1",
-        "app_home": str(app_home),
-        "database_path": str(state.database_path),
-        "checkpoint_path": str(state.checkpoint_path),
-        "generation": {"manifest_digest": _DIGEST, "component_version": "4.0.0"},
-        "migration_range": {"base": packaged.base, "head": packaged.head},
-        "expires_at": (datetime.now(UTC) + timedelta(hours=1)).isoformat(),
-    }
-    descriptor.write_text(json.dumps(document), encoding="utf-8")
+def _seat_valid_database(app_home: Path) -> None:
     command = [
         sys.executable,
         "-m",
         _MODULE,
-        "desktop-migrate",
-        "--descriptor",
-        str(descriptor),
+        "migrate",
+        "--app-home",
+        str(app_home),
     ]
     result = subprocess.run(command, capture_output=True, text=True, timeout=180)
     assert result.returncode == 0, f"migrate failed: {result.stdout}\n{result.stderr}"
@@ -324,7 +309,7 @@ def test_desktop_worker_tree_contained_and_reaped_on_graceful_shutdown(
     app_home = tmp_path / "app-home"
     app_home.mkdir()
     _seed_credentials(app_home)
-    _seat_valid_database(app_home, tmp_path / "txn.json")
+    _seat_valid_database(app_home)
 
     gateway_port = _free_port()
     worker_port = _free_port()

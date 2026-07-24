@@ -199,9 +199,7 @@ def _execute_artifact_item(item: CleanupItem) -> CleanupItemResult:
         if target.is_file():
             target.unlink()
     except (OSError, ValueError) as exc:
-        logger.warning(
-            "Artifact cleanup failed for %s", item.target, exc_info=True
-        )
+        logger.warning("Artifact cleanup failed for %s", item.target, exc_info=True)
         return CleanupItemResult(
             item.key, CleanupItemState.FAILED, detail=_short_detail(exc)
         )

@@ -58,9 +58,7 @@ async def _run_cleanup(
     async def _advance(result: CleanupItemResult) -> None:
         recorded.append(result)
 
-    await execute_cleanup_manifest(
-        manifest, {}, checkpointer=None, advance=_advance
-    )
+    await execute_cleanup_manifest(manifest, {}, checkpointer=None, advance=_advance)
     return recorded
 
 

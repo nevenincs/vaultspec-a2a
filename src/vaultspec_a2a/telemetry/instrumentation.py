@@ -123,9 +123,28 @@ class TelemetryConfig:
         )
 
 
+def _spec_exists(module_name: str) -> bool:
+    """Return True if ``module_name`` resolves to an importable spec.
+
+    ``importlib.util.find_spec`` only returns ``None`` for a missing leaf under
+    an importable parent; it *raises* when a parent package cannot be imported.
+    A partial install trips exactly that: the OTLP exporter package is present,
+    so the parent chain is walked, but importing
+    ``opentelemetry.exporter.otlp.proto.grpc`` pulls in the third-party ``grpc``
+    distribution, which may be absent. Treat any import-time failure as "not
+    available" so an optional-dependency probe can never abort startup.
+    """
+    try:
+        return importlib.util.find_spec(module_name) is not None
+    except (ImportError, ValueError):
+        # ImportError covers a missing/broken parent package (ModuleNotFoundError
+        # is a subclass); ValueError covers a parent whose __spec__ is None.
+        return False
+
+
 def _check_sdk() -> bool:
-    """Return True — opentelemetry-sdk is a mandatory dependency."""
-    return importlib.util.find_spec("opentelemetry.sdk.trace") is not None
+    """Return True if the mandatory opentelemetry-sdk is importable."""
+    return _spec_exists("opentelemetry.sdk.trace")
 
 
 def _check_otlp() -> bool:
@@ -134,10 +153,7 @@ def _check_otlp() -> bool:
     The OTLP exporter is optional (operators may not run a collector),
     so we retain the availability check here only for the exporter package.
     """
-    for module_name in _OTLP_EXPORTER_MODULES:
-        if importlib.util.find_spec(module_name) is None:
-            return False
-    return True
+    return all(_spec_exists(module_name) for module_name in _OTLP_EXPORTER_MODULES)
 
 
 def _build_sdk_provider(

@@ -164,6 +164,76 @@ def test_configure_telemetry_sdk_disabled(tmp_path: Path) -> None:
     assert enabled["sdk_enabled"] is True
 
 
+_BROKEN_PARENT_PROBE_SCRIPT = textwrap.dedent(
+    """
+    import importlib.util
+    import json
+    import sys
+
+    sys.path.insert(0, sys.argv[1])
+
+    from vaultspec_a2a.telemetry.instrumentation import _spec_exists
+
+    leaf = "brokenexporter.proto.grpc.trace_exporter"
+
+    # Control: the raw stdlib probe must blow up on this shape. Without it a
+    # passing guard would prove nothing, since find_spec returns None (rather
+    # than raising) whenever the parent chain is merely absent.
+    try:
+        importlib.util.find_spec(leaf)
+    except ModuleNotFoundError as exc:
+        raw = {"raised": True, "missing": exc.name}
+    else:
+        raw = {"raised": False, "missing": None}
+
+    print(json.dumps({"raw": raw, "guarded": _spec_exists(leaf)}, sort_keys=True))
+    """
+).strip()
+
+
+def test_spec_exists_survives_a_partially_installed_exporter(tmp_path: Path) -> None:
+    """A broken optional-dependency parent degrades to False instead of raising.
+
+    Reproduces the partial-install shape that reaches ``_check_otlp``: the
+    exporter package itself is present, so ``find_spec`` walks into it, but the
+    third-party distribution its ``__init__`` imports (``grpc`` in production) is
+    absent. The package tree here is real on-disk code, and the control branch
+    asserts the unguarded stdlib call genuinely raises on the same target — so
+    this cannot pass if the guard is removed.
+    """
+    pkg_root = tmp_path / "site"
+    grpc_pkg = pkg_root / "brokenexporter" / "proto" / "grpc"
+    grpc_pkg.mkdir(parents=True)
+    for package_dir in (
+        pkg_root / "brokenexporter",
+        pkg_root / "brokenexporter" / "proto",
+    ):
+        (package_dir / "__init__.py").write_text("", encoding="utf-8")
+    # Mirrors opentelemetry.exporter.otlp.proto.grpc importing the grpc dist.
+    (grpc_pkg / "__init__.py").write_text(
+        "import definitely_absent_third_party_dist\n", encoding="utf-8"
+    )
+
+    script = tmp_path / "broken_parent_probe.py"
+    script.write_text(_BROKEN_PARENT_PROBE_SCRIPT, encoding="utf-8")
+    result = subprocess.run(
+        [sys.executable, str(script), str(pkg_root)],
+        cwd=str(tmp_path),
+        env=dict(os.environ),
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+    assert result.returncode == 0, result.stderr
+
+    report = json.loads(result.stdout.strip().splitlines()[-1])
+    assert report["raw"] == {
+        "raised": True,
+        "missing": "definitely_absent_third_party_dist",
+    }, "unguarded find_spec must raise here, otherwise the guard is untested"
+    assert report["guarded"] is False
+
+
 def test_configure_telemetry_langsmith_flag() -> None:
     """TelemetryConfig.langsmith_enabled reflects the module-level constant.
 

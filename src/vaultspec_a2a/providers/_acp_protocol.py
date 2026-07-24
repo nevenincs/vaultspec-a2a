@@ -57,6 +57,9 @@ async def process_stdout_loop(
     """Read JSON-RPC messages from stdout and dispatch them."""
     try:
         while line := await ctx.stdout.readline():
+            # Stamp before parsing: a frame arriving at all proves the agent is
+            # alive and working, which is exactly what the turn deadline asks.
+            ctx.mark_activity()
             if not line.strip():
                 continue
             try:

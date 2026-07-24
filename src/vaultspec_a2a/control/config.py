@@ -573,6 +573,16 @@ class InfraConfig(BaseSettings):
             " success path."
         ),
     )
+    acp_turn_idle_timeout_seconds: float = Field(
+        default=600.0,
+        alias="VAULTSPEC_ACP_TURN_IDLE_TIMEOUT_SECONDS",
+        description=(
+            "Backstop (seconds) on a single ACP turn with no protocol activity."
+            " The clock resets on every frame the agent writes, so a working"
+            " agent never trips it; it bounds a turn whose subprocess is alive"
+            " but has gone silent and would otherwise be awaited forever."
+        ),
+    )
     acp_chunk_queue_maxsize: int = Field(
         default=1024,
         alias="VAULTSPEC_ACP_CHUNK_QUEUE_MAXSIZE",

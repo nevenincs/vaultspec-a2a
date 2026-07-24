@@ -5,6 +5,7 @@ from auth logic and session lifecycle RPCs.
 """
 
 import asyncio
+import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import Any
@@ -85,6 +86,19 @@ class _AcpSessionContext:
     tool_calls: dict[str, Any] = field(default_factory=dict)
     agent_modes: dict[str, Any] = field(default_factory=dict)
     last_auth_url: str | None = None
+    # Monotonic stamp of the last frame read from the subprocess. The turn loop
+    # measures silence against this, so any protocol traffic - streamed content,
+    # a session update, a server RPC, even a malformed line - proves liveness
+    # and resets the deadline. Monotonic so a wall-clock jump cannot fake it.
+    last_activity_monotonic: float = field(default_factory=time.monotonic)
+
+    def mark_activity(self) -> None:
+        """Record that the subprocess just produced a protocol frame."""
+        self.last_activity_monotonic = time.monotonic()
+
+    def seconds_since_activity(self) -> float:
+        """Return seconds elapsed since the last observed protocol frame."""
+        return time.monotonic() - self.last_activity_monotonic
 
 
 @dataclass(frozen=True)

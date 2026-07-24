@@ -487,6 +487,39 @@ class AcpChatModel(BaseChatModel):
             )
             await run_independent_cleanups(*cleanup_steps)
 
+    def _enforce_turn_deadline(self, ctx: _AcpSessionContext) -> None:
+        """Fail the turn once the subprocess has gone silent for too long.
+
+        The queue poll below only ends on a sentinel or on ``prompt_done``, both
+        of which require the subprocess to say something. An agent that stays
+        alive but stops emitting frames - a wedged tool call, a lost upstream
+        connection - therefore parks the caller forever. Bound that by silence
+        rather than by total turn length, so a genuinely long run is never cut
+        off: every frame resets the clock.
+        """
+        idle_limit = settings.acp_turn_idle_timeout_seconds
+        if idle_limit <= 0:
+            return
+        idle_seconds = ctx.seconds_since_activity()
+        if idle_seconds < idle_limit:
+            return
+        logger.error(
+            "ACP turn exceeded the idle deadline",
+            extra=runtime_log_extra(
+                self._config,
+                process=ctx.process,
+                handshake_step="session/prompt",
+                timeout_seconds=idle_limit,
+                stderr_event_count=ctx.stderr_event_count,
+            ),
+        )
+        raise AcpPromptError(
+            f"ACP turn produced no protocol activity for {idle_seconds:.0f}s "
+            f"(deadline {idle_limit:.0f}s); treating the session as hung.",
+            code=AcpErrorCode.INTERNAL_ERROR,
+            data={"acp_outcome": "turn_idle_deadline_expired"},
+        )
+
     async def _yield_chunks(
         self,
         ctx: _AcpSessionContext,
@@ -536,6 +569,7 @@ class AcpChatModel(BaseChatModel):
                             code=err.get("code", AcpErrorCode.INTERNAL_ERROR),
                             data=err.get("data"),
                         ) from None
+                self._enforce_turn_deadline(ctx)
                 continue
 
         while not ctx.chunk_queue.empty():

@@ -116,9 +116,9 @@ jobs:
       - name: Build capsule generation
         shell: bash
         run: |
-          donor_arg=""
+          donor_arg=()
           if [ "${{ matrix.target }}" = "x86_64-pc-windows-msvc" ]; then
-            donor_arg="--launcher-stub-donor ${{ steps.donor.outputs.path }}"
+            donor_arg=(--launcher-stub-donor "${{ steps.donor.outputs.path }}")
           fi
           uv run --no-sync --frozen python scripts/build_desktop_capsule.py build \
             --target ${{ matrix.target }} \
@@ -128,7 +128,7 @@ jobs:
             --uv-lock uv.lock \
             --package-lock package-lock.json \
             --out-dir dist/capsules \
-            $donor_arg
+            "${donor_arg[@]}"
 
       # Producer-side verification: a non-zero exit here fails the job before
       # any publish step runs, so only a verified generation is ever published.

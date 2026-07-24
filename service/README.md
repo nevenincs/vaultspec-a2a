@@ -72,5 +72,5 @@ docker compose --project-name vaultspec-a2a-prod-postgres -f service/docker-comp
 docker compose --project-name vaultspec-a2a-prod-postgres -f service/docker-compose.prod.yml -f service/docker-compose.prod.postgres.yml down --remove-orphans
 ```
 
-See [`service/.env.example`](.env.example) for supported settings and the
+See [`.env.example`](../.env.example) for supported settings and the
 [operator reference](../docs/operations.rst) for lifecycle ownership.

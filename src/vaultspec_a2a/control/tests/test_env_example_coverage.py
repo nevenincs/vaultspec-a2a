@@ -21,7 +21,7 @@ from vaultspec_a2a.control.config import Settings
 _DESKTOP_ONLY = frozenset({"VAULTSPEC_DESKTOP_APP_HOME", "VAULTSPEC_CAPSULE_ASSETS"})
 
 _ENV_EXAMPLE = (
-    pathlib.Path(__file__).resolve().parents[3].parent / "service" / ".env.example"
+    pathlib.Path(__file__).resolve().parents[3].parent / ".env.example"
 )
 
 
@@ -44,7 +44,7 @@ def test_every_aliased_setting_is_documented_or_excluded() -> None:
     )
 
     assert not undocumented, (
-        f"undocumented settings in service/.env.example: {undocumented}. "
+        f"undocumented settings in .env.example: {undocumented}. "
         "Document them, or add them to the desktop-only exclusion with a reason."
     )
 

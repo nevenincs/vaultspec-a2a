@@ -13,6 +13,7 @@ from __future__ import annotations
 import json
 import socket
 import subprocess
+import sys
 import time
 from typing import TYPE_CHECKING
 
@@ -60,7 +61,9 @@ def test_status_with_dead_recorded_pid_reports_stopped(tmp_path: Path) -> None:
     """A record whose pid is gone is a stopped service, not a live one."""
     home = tmp_path / "home"
     home.mkdir()
-    dead = subprocess.Popen(["cmd", "/c", "exit 0"])
+    # Mint a genuinely-dead pid portably: the interpreter that runs the suite
+    # exists on every platform, unlike the Windows-only ``cmd`` shell.
+    dead = subprocess.Popen([sys.executable, "-c", ""])
     dead.wait()
     write_service_json(
         service_json_path(home),

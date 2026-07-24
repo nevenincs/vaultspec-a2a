@@ -15,6 +15,7 @@ from starlette.websockets import WebSocket
 
 from ...control.config import settings
 from ...streaming.aggregator import EventAggregator
+from ...utils import package_version
 from .. import websocket as websocket_module
 from ..schemas.enums import AgentControlAction, AgentLifecycleState, ServerEventType
 from ..websocket import ConnectionManager, WebSocketCommandRejectedError
@@ -47,14 +48,25 @@ class TestConnectedEvent:
     """Tests for the initial ConnectedEvent sent on WebSocket open."""
 
     def test_receives_connected_event_on_open(self) -> None:
-        """Client receives a ConnectedEvent immediately after connecting."""
+        """Client receives a ConnectedEvent immediately after connecting.
+
+        ``server_version`` is checked against the installed distribution rather
+        than a literal. The literal it replaces pinned the version of the day,
+        so every release bump broke this test - and broke it only in CI, where
+        the environment is reinstalled, while an editable checkout kept serving
+        the stale metadata and stayed green. What actually matters here is the
+        wire plumbing: that the field survives the schema and the JSON encoding
+        as the running server's real version, rather than arriving absent, null,
+        or frozen at some build-time constant.
+        """
         app, _agg, _mgr = _create_app()
 
         with TestClient(app) as client, client.websocket_connect("/ws") as ws:
             data = ws.receive_json()
             assert data["type"] == ServerEventType.CONNECTED
             assert "client_id" in data
-            assert data["server_version"] == "0.1.0"
+            assert data["server_version"] == package_version()
+            assert data["server_version"], "server_version must not be empty"
             assert isinstance(data["active_threads"], list)
 
 

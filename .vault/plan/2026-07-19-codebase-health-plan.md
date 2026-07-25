@@ -3,7 +3,7 @@ tags:
   - '#plan'
   - '#codebase-health'
 date: '2026-07-19'
-modified: '2026-07-24'
+modified: '2026-07-25'
 tier: L3
 related:
   - '[[2026-07-19-codebase-health-adr]]'
@@ -87,8 +87,8 @@ Establish one usable decision chain and prove that prerequisite ownership work h
 - [x] `W01.P01.S153` - Prove plain worker health never authorizes adoption with real processes; `src/vaultspec_a2a/desktop_tests/test_worker_provenance.py`.
 - [x] `W01.P01.S154` - Prove blank worker pairing never authorizes adoption with real processes; `src/vaultspec_a2a/desktop_tests/test_worker_provenance.py`.
 - [x] `W01.P01.S155` - Prove unauthenticated legacy readiness never authorizes adoption with real processes; `src/vaultspec_a2a/desktop_tests/test_worker_provenance.py`.
-- [ ] `W01.P01.S156` - Prove failed owner-authorized eviction returns conflict without adoption with real processes; `src/vaultspec_a2a/desktop_tests/test_worker_provenance.py`.
-- [ ] `W01.P01.S157` - Prove Compose provenance mismatch fails closed without eviction with real processes; `src/vaultspec_a2a/service_tests/test_compose_profile_regression.py`.
+- [x] `W01.P01.S156` - Prove failed owner-authorized eviction returns conflict without adoption with real processes; `src/vaultspec_a2a/desktop_tests/test_worker_provenance.py`.
+- [x] `W01.P01.S157` - Prove Compose provenance mismatch fails closed without eviction with real processes; `src/vaultspec_a2a/service_tests/test_compose_profile_regression.py`.
 
 ### Phase `W01.P02` - make lifecycle startup transactional
 
@@ -110,16 +110,16 @@ Publish only readiness-proven generations and reap every owned descendant when a
 
 Replace irreversible hard deletion with a durable resumable saga whose control state remains authoritative until cleanup finishes.
 
-- [ ] `W01.P03.S08` - Add deleting state cleanup-manifest and cleanup-result persistence to the control schema; `src/vaultspec_a2a/database, src/vaultspec_a2a/control/repositories`.
-- [ ] `W01.P03.S09` - Implement the idempotent repository operation that creates one deletion saga; `src/vaultspec_a2a/control/repositories`.
-- [ ] `W01.P03.S10` - Coordinate checkpoint artifact and control-row deletion from the durable cleanup manifest; `src/vaultspec_a2a/control/thread_service.py, src/vaultspec_a2a/control/cleanup`.
-- [ ] `W01.P03.S11` - Hide deleting threads from normal run lookup and list operations while retaining cleanup visibility; `src/vaultspec_a2a/control/thread_service.py, src/vaultspec_a2a/control/thread_state_service.py`.
-- [ ] `W01.P03.S12` - Run checkpoint and artifact cleanup independently so one failure cannot skip later cleanup items; `src/vaultspec_a2a/control/cleanup, src/vaultspec_a2a/checkpointer`.
-- [ ] `W01.P03.S13` - Resume the same deletion saga when the delete endpoint receives a replayed request; `src/vaultspec_a2a/api/routes/threads.py, src/vaultspec_a2a/control/thread_service.py`.
-- [ ] `W01.P03.S14` - Prove deletion retries crash recovery hidden-state behavior and finalization against real control and checkpoint stores; `tests/control, tests/api`.
-- [ ] `W01.P03.S108` - Implement the idempotent repository operation that claims one deletion saga; `src/vaultspec_a2a/control/repositories`.
-- [ ] `W01.P03.S109` - Implement the idempotent repository operation that advances one deletion cleanup item; `src/vaultspec_a2a/control/repositories`.
-- [ ] `W01.P03.S110` - Implement the idempotent repository operation that finalizes one completed deletion saga; `src/vaultspec_a2a/control/repositories`.
+- [x] `W01.P03.S08` - Add deleting state cleanup-manifest and cleanup-result persistence to the control schema; `src/vaultspec_a2a/database, src/vaultspec_a2a/control/repositories`.
+- [x] `W01.P03.S09` - Implement the idempotent repository operation that creates one deletion saga; `src/vaultspec_a2a/control/repositories`.
+- [x] `W01.P03.S10` - Coordinate checkpoint artifact and control-row deletion from the durable cleanup manifest; `src/vaultspec_a2a/control/thread_service.py, src/vaultspec_a2a/control/cleanup`.
+- [x] `W01.P03.S11` - Hide deleting threads from normal run lookup and list operations while retaining cleanup visibility; `src/vaultspec_a2a/control/thread_service.py, src/vaultspec_a2a/control/thread_state_service.py`.
+- [x] `W01.P03.S12` - Run checkpoint and artifact cleanup independently so one failure cannot skip later cleanup items; `src/vaultspec_a2a/control/cleanup, src/vaultspec_a2a/checkpointer`.
+- [x] `W01.P03.S13` - Resume the same deletion saga when the delete endpoint receives a replayed request; `src/vaultspec_a2a/api/routes/threads.py, src/vaultspec_a2a/control/thread_service.py`.
+- [x] `W01.P03.S14` - Prove deletion retries crash recovery hidden-state behavior and finalization against real control and checkpoint stores; `tests/control, tests/api`.
+- [x] `W01.P03.S108` - Implement the idempotent repository operation that claims one deletion saga; `src/vaultspec_a2a/control/repositories`.
+- [x] `W01.P03.S109` - Implement the idempotent repository operation that advances one deletion cleanup item; `src/vaultspec_a2a/control/repositories`.
+- [x] `W01.P03.S110` - Implement the idempotent repository operation that finalizes one completed deletion saga; `src/vaultspec_a2a/control/repositories`.
 
 ### Phase `W01.P04` - review and queue control-state findings
 
@@ -147,14 +147,14 @@ Make idempotency behavior-complete and derive each run-status response from one 
 Replace payload-shaped relaying with one versioned DTO and enforce resource limits before and after authentication.
 
 - [x] `W02.P06.S22` - Define the versioned positive progress DTO with identifiers lifecycle state bounded counters approved summaries and one bounded token-delta field; `src/vaultspec_a2a/api/schemas/gateway.py, src/vaultspec_a2a/streaming`.
-- [ ] `W02.P06.S23` - Transform gateway events through the positive DTO while excluding prompts documents artifacts edit diffs and raw provider payloads; `src/vaultspec_a2a/streaming/aggregator.py, src/vaultspec_a2a/streaming/transformer.py`.
+- [x] `W02.P06.S23` - Transform gateway events through the positive DTO while excluding prompts documents artifacts edit diffs and raw provider payloads; `src/vaultspec_a2a/streaming/aggregator.py, src/vaultspec_a2a/streaming/transformer.py`.
 - [x] `W02.P06.S24` - Authenticate the progress stream and enforce global connection limits before principal lookup; `src/vaultspec_a2a/api/routes/gateway.py, src/vaultspec_a2a/api/dependencies.py`.
 - [ ] `W02.P06.S25` - Enforce per-principal stream and subscription quotas after authentication; `src/vaultspec_a2a/streaming/subscribers.py, src/vaultspec_a2a/api/routes/thread_stream.py`.
 - [x] `W02.P06.S26` - Parse numeric and ISO heartbeat values strictly and reject stale malformed non-finite and implausibly future values; `src/vaultspec_a2a/authoring/discovery.py`.
-- [ ] `W02.P06.S27` - Prove progress allowlisting with a real authenticated stream client; `tests/streaming, tests/api`.
-- [ ] `W02.P06.S98` - Enforce the positive progress allowlist again at the SSE frame and API event-adapter output boundary; `src/vaultspec_a2a/streaming/sse_frames.py, src/vaultspec_a2a/api/event_adapter.py`.
-- [ ] `W02.P06.S99` - Prove forbidden fields cannot cross the encoded A2A SSE boundary; `tests/streaming, tests/api`.
-- [ ] `W02.P06.S159` - Prove bounded token deltas with a real authenticated stream client; `tests/streaming, tests/api`.
+- [x] `W02.P06.S27` - Prove progress allowlisting with a real authenticated stream client; `tests/streaming, tests/api`.
+- [x] `W02.P06.S98` - Enforce the positive progress allowlist again at the SSE frame and API event-adapter output boundary; `src/vaultspec_a2a/streaming/sse_frames.py, src/vaultspec_a2a/api/event_adapter.py`.
+- [x] `W02.P06.S99` - Prove forbidden fields cannot cross the encoded A2A SSE boundary; `tests/streaming, tests/api`.
+- [x] `W02.P06.S159` - Prove bounded token deltas with a real authenticated stream client; `tests/streaming, tests/api`.
 - [ ] `W02.P06.S160` - Prove global and per-principal quotas with real authenticated stream clients; `tests/streaming, tests/api`.
 - [x] `W02.P06.S161` - Prove malformed and stale heartbeat rejection against real discovery records; `tests/authoring`.
 

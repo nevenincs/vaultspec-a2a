@@ -1717,3 +1717,31 @@ and nothing in the logs distinguishes that boot from a healthy one.
 The fix is observability, not behaviour: surface the degraded outcome, so a
 deployment that has silently lost the ownership guarantee is discoverable rather
 than indistinguishable from one that still has it.
+
+### `W05.P20.S144` real-process suites (2026-07-25)
+
+PASS - 46 passed, 74 deselected, in 9m22s, across the acceptance, desktop, and
+service suites.
+
+The Step's command names `tests/acceptance`, which does not exist; the suite
+lives at `src/vaultspec_a2a/acceptance` because `pyproject` sets `testpaths` to
+`src/vaultspec_a2a` and a tree outside it would never be collected. Same stale
+scope path as several sibling Steps.
+
+#### A discarded first run, and why it is worth recording
+
+The first attempt reported one failure -
+`test_stale_discovery_quarantined_only_by_owner`. It was not a product defect
+and not a regression from the ownership change committed just before it. The
+cause was self-inflicted: the utils and lifecycle suites, which spawn real
+listeners on real loopback ports, were being run in the foreground while this
+suite ran in the background. The same test took 25.06s under contention and
+1.49s in isolation, and the clean re-run with nothing else active passed.
+
+That is the third time in this campaign that running real-process suites
+concurrently has produced a misleading result - it previously stalled a gate
+long enough to look hung, and produced a unit-gate figure that had to be thrown
+out because a mid-flight edit could reach subprocesses. Real-process suites here
+claim real ports and spawn real gateways; they are not safe to overlap, with
+each other or with an edit to the tree under them. Recorded as a working
+constraint rather than diagnosed a fourth time.

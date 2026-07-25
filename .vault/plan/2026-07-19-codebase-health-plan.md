@@ -358,7 +358,7 @@ Execute both repositories' canonical gates and prove the versioned contract cann
 - [x] `W05.P20.S141` - Run the canonical A2A dependency gate with just dev deps check; `Justfile, just/dev/deps.just, pyproject.toml, uv.lock`.
 - [x] `W05.P20.S142` - Run the canonical A2A unit gate with just dev test unit; `Justfile, just/dev/test.just, src, tests`.
 - [ ] `W05.P20.S143` - Run the canonical A2A service gate with just dev test service; `Justfile, just/dev/test.just, src/vaultspec_a2a/service_tests`.
-- [ ] `W05.P20.S144` - Run the A2A real-process acceptance suites with uv run --no-sync pytest tests/acceptance src/vaultspec_a2a/desktop_tests src/vaultspec_a2a/service_tests -ra; `tests/acceptance, src/vaultspec_a2a/desktop_tests, src/vaultspec_a2a/service_tests`.
+- [x] `W05.P20.S144` - Run the A2A real-process acceptance suites with uv run --no-sync pytest tests/acceptance src/vaultspec_a2a/desktop_tests src/vaultspec_a2a/service_tests -ra; `tests/acceptance, src/vaultspec_a2a/desktop_tests, src/vaultspec_a2a/service_tests`.
 - [ ] `W05.P20.S145` - Run the dashboard frontend gate with just dev test frontend; `../../vaultspec-dashboard-worktrees/main/frontend, ../../vaultspec-dashboard-worktrees/main/just`.
 - [ ] `W05.P20.S146` - Run the dashboard Rust gate with just dev test rust; `../../vaultspec-dashboard-worktrees/main/engine, ../../vaultspec-dashboard-worktrees/main/just`.
 - [ ] `W05.P20.S148` - Rerun the dashboard-owned a2a-composite-certification workflow after legacy-surface removal; `../../vaultspec-dashboard-worktrees/main/.github/workflows/a2a-composite-certification.yml, ../../vaultspec-dashboard-worktrees/main/.vault/plan`.

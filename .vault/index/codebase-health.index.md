@@ -3,24 +3,41 @@ generated: true
 tags:
   - '#index'
   - '#codebase-health'
-date: '2026-07-24'
-modified: '2026-07-24'
+date: '2026-07-25'
+modified: '2026-07-25'
 related:
   - '[[2026-07-19-codebase-health-W01-P01-S01]]'
   - '[[2026-07-19-codebase-health-W01-P01-S03]]'
   - '[[2026-07-19-codebase-health-W01-P01-S153]]'
   - '[[2026-07-19-codebase-health-W01-P01-S154]]'
   - '[[2026-07-19-codebase-health-W01-P01-S155]]'
+  - '[[2026-07-19-codebase-health-W01-P01-S156]]'
+  - '[[2026-07-19-codebase-health-W01-P01-S157]]'
   - '[[2026-07-19-codebase-health-W01-P01-S93]]'
   - '[[2026-07-19-codebase-health-W01-P01-S94]]'
   - '[[2026-07-19-codebase-health-W01-P01-S95]]'
   - '[[2026-07-19-codebase-health-W01-P02-S06]]'
+  - '[[2026-07-19-codebase-health-W01-P03-S08]]'
+  - '[[2026-07-19-codebase-health-W01-P03-S09]]'
+  - '[[2026-07-19-codebase-health-W01-P03-S108]]'
+  - '[[2026-07-19-codebase-health-W01-P03-S109]]'
+  - '[[2026-07-19-codebase-health-W01-P03-S10]]'
+  - '[[2026-07-19-codebase-health-W01-P03-S110]]'
+  - '[[2026-07-19-codebase-health-W01-P03-S11]]'
+  - '[[2026-07-19-codebase-health-W01-P03-S12]]'
+  - '[[2026-07-19-codebase-health-W01-P03-S13]]'
+  - '[[2026-07-19-codebase-health-W01-P03-S14]]'
   - '[[2026-07-19-codebase-health-W02-P05-S17]]'
   - '[[2026-07-19-codebase-health-W02-P05-S18]]'
   - '[[2026-07-19-codebase-health-W02-P05-S19]]'
   - '[[2026-07-19-codebase-health-W02-P05-S20]]'
+  - '[[2026-07-19-codebase-health-W02-P06-S159]]'
+  - '[[2026-07-19-codebase-health-W02-P06-S23]]'
   - '[[2026-07-19-codebase-health-W02-P06-S24]]'
   - '[[2026-07-19-codebase-health-W02-P06-S26]]'
+  - '[[2026-07-19-codebase-health-W02-P06-S27]]'
+  - '[[2026-07-19-codebase-health-W02-P06-S98]]'
+  - '[[2026-07-19-codebase-health-W02-P06-S99]]'
   - '[[2026-07-19-codebase-health-W03-P09-S35]]'
   - '[[2026-07-19-codebase-health-W03-P09-S36]]'
   - '[[2026-07-19-codebase-health-W03-P09-S37]]'
@@ -144,6 +161,23 @@ Auto-generated index of all documents tagged with `#codebase-health`.
 - `2026-07-19-codebase-health-W01-P01-S155` - Prove unauthenticated legacy readiness never authorizes adoption with real processes
 - `2026-07-19-codebase-health-W01-P01-S95` - Prove authenticated two-gateway one-worker pairing with real processes
 - `2026-07-19-codebase-health-W01-P02-S06` - Verify the landed desktop owned-tree implementation reaps the complete worker tree on startup readiness timeout
+- `2026-07-19-codebase-health-W01-P01-S156` - Prove failed owner-authorized eviction returns conflict without adoption with real processes
+- `2026-07-19-codebase-health-W01-P01-S157` - Prove Compose provenance mismatch fails closed without eviction with real processes
+- `2026-07-19-codebase-health-W01-P03-S08` - Add deleting state cleanup-manifest and cleanup-result persistence to the control schema
+- `2026-07-19-codebase-health-W01-P03-S09` - Implement the idempotent repository operation that creates one deletion saga
+- `2026-07-19-codebase-health-W01-P03-S10` - Coordinate checkpoint artifact and control-row deletion from the durable cleanup manifest
+- `2026-07-19-codebase-health-W01-P03-S108` - Implement the idempotent repository operation that claims one deletion saga
+- `2026-07-19-codebase-health-W01-P03-S109` - Implement the idempotent repository operation that advances one deletion cleanup item
+- `2026-07-19-codebase-health-W01-P03-S11` - Hide deleting threads from normal run lookup and list operations while retaining cleanup visibility
+- `2026-07-19-codebase-health-W01-P03-S110` - Implement the idempotent repository operation that finalizes one completed deletion saga
+- `2026-07-19-codebase-health-W01-P03-S12` - Run checkpoint and artifact cleanup independently so one failure cannot skip later cleanup items
+- `2026-07-19-codebase-health-W01-P03-S13` - Resume the same deletion saga when the delete endpoint receives a replayed request
+- `2026-07-19-codebase-health-W01-P03-S14` - Prove deletion retries crash recovery hidden-state behavior and finalization against real control and checkpoint stores
+- `2026-07-19-codebase-health-W02-P06-S159` - Prove bounded token deltas with a real authenticated stream client
+- `2026-07-19-codebase-health-W02-P06-S23` - Transform gateway events through the positive DTO while excluding prompts documents artifacts edit diffs and raw provider payloads
+- `2026-07-19-codebase-health-W02-P06-S27` - Prove progress allowlisting with a real authenticated stream client
+- `2026-07-19-codebase-health-W02-P06-S98` - Enforce the positive progress allowlist again at the SSE frame and API event-adapter output boundary
+- `2026-07-19-codebase-health-W02-P06-S99` - Prove forbidden fields cannot cross the encoded A2A SSE boundary
 
 ### plan
 

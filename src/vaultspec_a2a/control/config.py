@@ -273,7 +273,10 @@ class InfraConfig(BaseSettings):
         description=(
             "Base URL for reaching the gateway HTTP API. Used by the worker "
             "IPC bridge and the MCP tool server. Auto-derived from host+port "
-            "when not set explicitly."
+            "when not set explicitly. VAULTSPEC_MCP_API_BASE_URL is an alternate "
+            "spelling of the same single field rather than an MCP-scoped "
+            "override: it also moves the spawned worker's heartbeat and pairing "
+            "target, so a proxy set through either name redirects both."
         ),
     )
     mcp_host: str = Field(

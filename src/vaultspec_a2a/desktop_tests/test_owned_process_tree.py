@@ -335,7 +335,11 @@ def test_desktop_worker_tree_contained_and_reaped_on_graceful_shutdown(
         deadline = time.monotonic() + 30.0
         while not _port_listening(worker_port) and time.monotonic() < deadline:
             time.sleep(0.25)
-        assert _port_listening(worker_port), "first demand must start the worker"
+        # Port liveness alone: SOMETHING now holds the freshly allocated worker
+        # port that nothing held before the demand. That is all this leg claims -
+        # it is not evidence of WHICH worker answers, which only the reported
+        # pairing evidence establishes. The reap assertion below is the subject.
+        assert _port_listening(worker_port), "first demand must bind the worker port"
 
         # Graceful, receipt-owned administrative shutdown: the handler runs the
         # authenticated ownership-gated stop (an in-process SIGINT), so the
@@ -361,8 +365,12 @@ def test_desktop_worker_tree_contained_and_reaped_on_graceful_shutdown(
         deadline = time.monotonic() + 15.0
         while _port_listening(worker_port) and time.monotonic() < deadline:
             time.sleep(0.25)
+        # The port the gateway pinned for its worker is free again after a
+        # graceful stop, so whatever the gateway spawned onto it is gone. No
+        # squatter could satisfy this: a process the gateway does not own would
+        # still be holding the port here.
         assert not _port_listening(worker_port), (
-            "graceful shutdown must reap the gateway-owned worker tree"
+            "graceful shutdown must free the gateway's pinned worker port"
         )
     finally:
         with contextlib.suppress(Exception):

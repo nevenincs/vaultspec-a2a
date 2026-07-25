@@ -17,18 +17,28 @@ properties close the gap:
   deadline, so a real boot regression cannot hide behind the retry. The
   attempts share one log file, so a retried run's log carries the dead
   attempt's bind error for diagnosis.
+
+A boot that fails is also REAPED here rather than left running. The failure
+mode this closes is cumulative, not local: a gateway that never became ready
+is still a live process holding its port, its database handles, and its share
+of the machine, and nothing downstream owns it - the caller's context manager
+never received a handle to reap because the failure happened before the yield.
+Every such failure therefore used to leak one gateway tree, and a handful of
+them starve the box until later boots time out too, turning one real failure
+into a cascade of unrelated ones.
 """
 
 from __future__ import annotations
 
+import contextlib
 import socket
+import subprocess
 import time
 from typing import TYPE_CHECKING
 
 import httpx
 
 if TYPE_CHECKING:
-    import subprocess
     from collections.abc import Callable
     from pathlib import Path
 
@@ -36,6 +46,7 @@ __all__ = [
     "GatewayBootError",
     "await_gateway_ready",
     "free_port",
+    "reap_gateway",
     "spawn_until_ready",
 ]
 
@@ -104,6 +115,25 @@ def await_gateway_ready(
     )
 
 
+def reap_gateway(proc: subprocess.Popen[bytes]) -> None:
+    """Terminate a spawned gateway TREE, tolerating an already-dead child.
+
+    The tree, not the handle: on Windows the virtual-environment interpreter is
+    a launcher stub, so the real gateway - and any worker it auto-spawned - are
+    descendants that outlive a kill aimed at the handle alone.
+    """
+    if proc.poll() is not None:
+        return
+    import asyncio
+
+    from vaultspec_a2a.utils import kill_pid_tree_async
+
+    with contextlib.suppress(Exception):
+        asyncio.run(kill_pid_tree_async(proc.pid, term_timeout=10.0, kill_timeout=5.0))
+    with contextlib.suppress(subprocess.TimeoutExpired):
+        proc.wait(timeout=15)
+
+
 def spawn_until_ready(
     spawn: Callable[[int, int], subprocess.Popen[bytes]],
     *,
@@ -118,6 +148,11 @@ def spawn_until_ready(
     ports, and returns ``(proc, gateway_port, worker_port, base)`` once the
     gateway answers its health endpoint. A child that dies before readiness
     is retried on new ports; the final attempt's failure propagates.
+
+    Ownership of a FAILED boot ends here. Only a successful boot hands its
+    process to the caller, so a child still running after a failed attempt has
+    no other owner and is reaped before this returns or raises - including on
+    an interrupt, which is when a leaked gateway is least likely to be noticed.
     """
     last_boot_error: GatewayBootError | None = None
     for _ in range(attempts):
@@ -128,8 +163,20 @@ def spawn_until_ready(
         try:
             await_gateway_ready(base, proc, log_path=log_path, timeout=timeout)
         except GatewayBootError as exc:
+            # Called for symmetry and for the narrow window where the child died
+            # between the poll and here; by this error's definition it is already
+            # dead, so this is normally a no-op. It does NOT recover descendants
+            # a dead child had already spawned - once the root pid is gone there
+            # is no tree left to walk - which is why the harness relies on the
+            # gateway's own containment for that case rather than on this call.
+            reap_gateway(proc)
             last_boot_error = exc
             continue
+        except BaseException:
+            # Unready-at-deadline, interrupt, or anything else: this attempt
+            # never becomes the caller's, so it must not outlive the failure.
+            reap_gateway(proc)
+            raise
         return proc, gateway_port, worker_port, base
     raise AssertionError(
         f"gateway did not boot within {attempts} attempts; last: {last_boot_error}"

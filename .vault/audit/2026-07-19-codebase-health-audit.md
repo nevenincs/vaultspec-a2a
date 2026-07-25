@@ -2011,3 +2011,89 @@ out because a mid-flight edit could reach subprocesses. Real-process suites here
 claim real ports and spawn real gateways; they are not safe to overlap, with
 each other or with an edit to the tree under them. Recorded as a working
 constraint rather than diagnosed a fourth time.
+
+### Orchestrated fleet pass (2026-07-25)
+
+Five lanes driven in parallel against one shared worktree. Closed with evidence:
+the worker-health probe split-brain and the pairing-identity disclosure; the
+boot-harness orphan reap; the Codex idle-timeout inversion; both deletion-saga
+liveness defects (`92a2532d`, `71d2c8e4`, `47cab371`); the `aget_state` timeout
+knob (`ab3a943f`); the tool-kind and heartbeat re-export shims (`970db6e2`); the
+domain-enum symbol shim and its five absolute-import violations (`effb2805`);
+the OpenAPI artifact gate (`d07cf251`); the MCP alias scope lie (`812c6b01`);
+the Codex config-home escape (`5e97dafc`); and the prerequisite rule that gives
+an absent external dependency one meaning across the gates (`18bb720a`,
+`556ed933`). The canonical service gate moved from two hard failures to one.
+
+#### `cleanup-abandonment-not-surfaced-to-the-caller` (medium, open)
+
+Found by first-hand reading, not by the lane that wrote the fix. The
+terminal-disposition repair genuinely closes the wedge: `_abandoned_items`
+settles a manifest once every item is `DONE` or `ABANDONED`, and
+`finalize_deletion_saga` proceeds over abandoned items deliberately, so a
+permanently-failing cleanup item no longer hides a thread forever.
+`DeleteResult` carries `cleanup_abandoned` and the abandonment is logged with
+per-item detail.
+
+The route does not read it. `api/routes/threads.py:223` branches on
+`cleanup_incomplete` alone, so a delete that finalized over abandoned items
+returns as an ordinary success. The caller is told the thread is deleted while
+artifacts remain on disk, and the only record is a log line. This is the second
+finding's "recorded somewhere nobody looks" clause resurfacing one layer up: the
+liveness defect is fixed and the observability half is not. Related to the
+owner-scoped `silent-partial-deletion`, and worth deciding together with it.
+
+Also unmeasured rather than wrong: `_MAX_CLEANUP_ATTEMPTS = 3` counts recorded
+failures across passes, and a later success supersedes an abandonment, so a
+transient failure must recur across three separate delete requests to abandon.
+That is a defensible margin but a reasoned rather than measured one, and once a
+saga finalizes there is no later pass to restore the item.
+
+#### `stale-index-lock-silently-blocks-every-writer` (medium, process)
+
+A crashed git call left a zero-byte `.git/index.lock` with no live git process
+behind it. It blocked every writer in the shared tree for at least eleven
+minutes. Two lanes had staged sets ready and simply stalled; neither surfaced
+the failure, and it was found only because the orchestrator tried to commit.
+The multi-writer arrangement has no detection for this, and a blocked lane is
+indistinguishable from a slow one. Pathspec commits (`git commit -- <paths>`)
+were adopted as the safe primitive afterwards, since they commit named paths
+without capturing another lane's staged entries - the direct repair for the
+earlier `shared-index-cross-staging` incident.
+
+#### `dispatched-agents-idle-without-reporting` (medium, methodology)
+
+Now chronic rather than incidental. This audit already records three review
+agents and then four more going idle without delivering findings, forcing two
+review sections to be done first-hand. This pass added three more: two fleet
+members and a lane lead, the last of which went idle holding its entire fleet's
+verified work uncommitted, and one lane that idled instantly on every resume so
+its report had to be reconstructed from the code. The pattern's shape is
+consistent: an agent backgrounds an asynchronous wait, stops, and its findings
+are never recorded. Foreground verification and reading output files directly
+avoid it. The cost is not lost code - it is lost evidence, which is the part
+that cannot be recovered by looking at the tree.
+
+#### `audit-consumer-inventory-under-reports` (medium, methodology)
+
+The `schemas-enums-symbol-shim` entry named two consumers of the shim path.
+There were six, plus the package facade. Acting on the audit's inventory alone
+would have left four files importing a deleted symbol. Generalises the
+granularity lesson already recorded in
+`shim-sweep-analysed-at-the-wrong-granularity`: an audit entry's evidence list
+is a starting point to be re-derived, not a work order to be executed.
+
+#### `orphan-cascade-misattribution` (correction, closed)
+
+A lane reported 198 live Python processes as this repository's boot-harness
+orphan cascade and proposed a start-time-bounded sweep. The attribution was
+wrong and the sweep would have killed two other projects' live runs. Measured
+directly: all 16 processes belonging to this worktree were live-parented, and no
+gateway orphan was observable at all. The real leak was 120 orphaned
+`multiprocessing.spawn` workers holding 2.3GB, in four cohorts, every one with a
+dead parent. Attribution by interpreter path is unsound here - a uv venv's
+`python.exe` is a launcher stub over the managed base interpreter, so children
+spawned from any project venv surface under the same path. Under investigation
+separately as a production defect. Recorded because a confident wrong
+attribution nearly caused a destructive action, and because the correction had
+to be pushed back to the lane before it reached a report.

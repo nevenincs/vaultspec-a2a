@@ -1313,3 +1313,87 @@ the orchestrator, recording it under a message that does not describe it. No
 work was lost and the rename is correct; the cost is a misleading history entry,
 recorded rather than rewritten. Parallel agents in a shared tree must stage
 explicit paths and verify the staged set before committing.
+
+### W01 deletion-saga review (2026-07-25)
+
+Adversarial read of the saga landed today (`fd764ed9`, `37f2b4c0`, `5ad477f5`,
+`d4506894`, `5e90d584`, `f40bf075`). Performed by the orchestrator directly:
+three successive review agents went idle without delivering findings, so this is
+first-hand reading rather than a delegated report.
+
+The phase does close what it set out to close - scope is captured once in a
+durable manifest, cleanup items run independently and never raise, finalize
+refuses until every item is DONE, and artifact paths that escape the recorded
+workspace root are refused including via symlink. Two liveness defects survive,
+both of which end with a thread hidden from product reads forever.
+
+#### `deletion-claim-does-not-exclude-a-second-pass` (high, open)
+
+`claim_deletion_saga` (`control/repositories/deletion_saga.py:254`) stamps
+`claimed_at` on first call but returns the hydrated saga to EVERY caller,
+including one that finds the row already claimed. Its own docstring states this:
+"a repeated claim leaves it unchanged and returns the same saga". So the
+ownership marker is recorded and never enforced - it is a get-or-stamp, not a
+claim, despite `W01.P03.S108` being worded as "claims one deletion saga", and
+`test_claim_stamps_ownership_once` only asserts the timestamp is written once,
+never that a second claimant is refused.
+
+This is reachable, not theoretical. `_run_deletion_saga`
+(`control/thread_service.py:669`) runs on every delete request including a
+replay, which `W01.P03.S13` exists precisely because clients issue. Two
+concurrent DELETEs for one thread therefore both claim, both take a snapshot of
+`saga.results` at claim time, and both execute the manifest.
+
+Failure scenario: request A claims and begins; request B (a client retry after a
+timeout, or a double-click) claims the same saga and receives a results snapshot
+that does not include A's progress. Both execute items. Both call
+`advance_deletion_cleanup_item` (line 276), which is an unlocked
+read-modify-write over the whole `result_json` blob - `session.get`, deserialize,
+mutate, serialize, flush - with no `SELECT ... FOR UPDATE` and no per-item
+write. B's write, built from a read taken before A's commit, drops A's recorded
+item. That item's result is now permanently absent, `manifest_is_complete`
+(line 199) can never return True, `finalize_deletion_saga` refuses forever, and
+the thread stays hidden from product reads with its rows intact. The user sees
+the thread disappear; it is never actually deleted.
+
+SQLite serialises the writes but not the read-modify-write window, and the
+schema explicitly supports a Postgres backend where READ COMMITTED makes the
+lost update straightforward.
+
+The minimum fix is to make the claim exclusive - a conditional update that
+returns `None` when another pass holds it - or to make `advance` a
+per-item-keyed write rather than a whole-blob rewrite. Either removes the lost
+update; the first also stops the redundant double execution.
+
+#### `a-permanently-failing-cleanup-item-wedges-the-thread-hidden` (high, open)
+
+`manifest_is_complete` requires every item to be `DONE`. There is no terminal
+failure state, no attempt ceiling, and no operator escape. An item that can
+never succeed - a Windows file held open by another process, a permissions
+error, an artifact on a detached volume - keeps the saga unfinalizable for the
+lifetime of the deployment.
+
+Failure scenario: a user deletes a thread whose artifact file is locked. The
+thread is immediately hidden from lookup and list by `W01.P03.S11`, every retry
+re-runs the same item and records the same failure, finalize refuses, and the
+rows are never removed. The thread is invisible to the product, undeletable
+through the API, and observable only by reading the control store directly.
+Nothing surfaces it: the delete endpoint returns `cleanup_incomplete`, which a
+client that has already seen the thread vanish has no reason to act on.
+
+This is the direct cost of hiding deleting threads from product reads, which is
+otherwise correct. The pairing needs either a terminal `FAILED` disposition that
+finalizes with the failure recorded, or a surface that lists wedged sagas so an
+operator can see and resolve them.
+
+#### Verified sound in this pass
+
+Manifest-as-single-source-of-scope (captured once at create, first manifest kept
+on a repeated create); cleanup-item independence and never-raising; artifact
+path containment against absolute escape, parent traversal, and symlink escape;
+finalize's refusal-until-complete guard; and the migration's presence under the
+repository's Migration Check job, green on the release commit.
+
+Coverage limit stated honestly: this reviewed `W01.P03`, the new work. `W01.P01`
+and `W01.P02` were reviewed earlier in the campaign and were not re-read here,
+so `W01.P04.S15` is only partly discharged.

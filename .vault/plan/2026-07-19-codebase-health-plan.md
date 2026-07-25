@@ -325,14 +325,14 @@ Backed by the codebase-health A2A-edge integration-testing desktop repository-to
 
 Provide reusable real gateway worker provider and persistence infrastructure plus one scenario for each cross-repository contract boundary.
 
-- [ ] `W05.P18.S77` - Build a deterministic real-process fixture that launches an authenticated gateway worker provider and real persistence stores; `src/vaultspec_a2a/acceptance, tests/acceptance`.
-- [ ] `W05.P18.S78` - Certify authenticated prepare behavior through the supported public surface; `tests/acceptance/test_dashboard_contract.py`.
-- [ ] `W05.P18.S170` - Certify authenticated start behavior through the supported public surface; `tests/acceptance/test_dashboard_contract.py`.
-- [ ] `W05.P18.S171` - Certify authenticated status behavior through the supported public surface; `tests/acceptance/test_dashboard_contract.py`.
-- [ ] `W05.P18.S172` - Certify authenticated cancel behavior through the supported public surface; `tests/acceptance/test_dashboard_contract.py`.
-- [ ] `W05.P18.S173` - Certify authenticated progress behavior through the supported public surface; `tests/acceptance/test_dashboard_contract.py`.
-- [ ] `W05.P18.S79` - Certify progress reconnection ordering bounded token deltas and forbidden-content exclusion; `tests/acceptance/test_dashboard_stream.py`.
-- [ ] `W05.P18.S80` - Certify deletion interruption replay cleanup recovery and final invisibility across real stores; `tests/acceptance/test_dashboard_deletion.py`.
+- [x] `W05.P18.S77` - Build a deterministic real-process fixture that launches an authenticated gateway worker provider and real persistence stores; `src/vaultspec_a2a/acceptance, tests/acceptance`.
+- [x] `W05.P18.S78` - Certify authenticated prepare behavior through the supported public surface; `tests/acceptance/test_dashboard_contract.py`.
+- [x] `W05.P18.S170` - Certify authenticated start behavior through the supported public surface; `tests/acceptance/test_dashboard_contract.py`.
+- [x] `W05.P18.S171` - Certify authenticated status behavior through the supported public surface; `tests/acceptance/test_dashboard_contract.py`.
+- [x] `W05.P18.S172` - Certify authenticated cancel behavior through the supported public surface; `tests/acceptance/test_dashboard_contract.py`.
+- [x] `W05.P18.S173` - Certify authenticated progress behavior through the supported public surface; `tests/acceptance/test_dashboard_contract.py`.
+- [x] `W05.P18.S79` - Certify progress reconnection ordering bounded token deltas and forbidden-content exclusion; `tests/acceptance/test_dashboard_stream.py`.
+- [x] `W05.P18.S80` - Certify deletion interruption replay cleanup recovery and final invisibility across real stores; `tests/acceptance/test_dashboard_deletion.py`.
 - [ ] `W05.P18.S81` - Certify proposal review permission resume and terminal settlement through the public facade; `tests/acceptance/test_dashboard_proposal_review.py`.
 - [ ] `W05.P18.S82` - Certify Compose provenance mismatch fails closed without worker adoption or eviction; `src/vaultspec_a2a/service_tests/test_compose_profile_regression.py`.
 

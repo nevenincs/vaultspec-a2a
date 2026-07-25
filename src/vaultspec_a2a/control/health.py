@@ -123,6 +123,21 @@ def build_sqlite_fallback_diagnostics(
     return diagnostics
 
 
+def _reported_str(body: dict[str, Any] | None, key: str) -> str | None:
+    """Return a string field a worker reported, or ``None`` when it reported none.
+
+    ``None`` means "the worker did not answer, or carried no such field"; an empty
+    string means "the worker answered and reported it blank". The two are kept
+    distinct on purpose: blank pairing evidence is the signature of a worker no
+    gateway spawned, and collapsing it into ``None`` would erase the difference
+    between a silent worker and one that honestly declares it is unpaired.
+    """
+    if body is None:
+        return None
+    value = body.get(key)
+    return value if isinstance(value, str) else None
+
+
 def assemble_health_status(
     *,
     app_state: Any,
@@ -381,12 +396,21 @@ async def build_full_health(
     circuit_breaker: Any,
     worker_spawner: Any,
     app_state: Any,
+    include_pairing: bool = False,
 ) -> dict[str, Any]:
     """Run all health probes and return the complete readiness payload.
 
     This is the service-layer orchestration consumed by ``/api/health``.
     It runs the DB probe, worker HTTP check, checkpoint presence test,
     circuit breaker and spawner inspection, then computes overall readiness.
+
+    *include_pairing* adds what the worker reported about which gateway
+    incarnation spawned it. It is opt-in and defaults off because this payload
+    is served verbatim on the UNAUTHENTICATED health endpoint under the Compose
+    and development profiles, and the gateway's lifetime identity is exactly the
+    value a port squatter must not be able to learn: the armed adoption check
+    trusts it precisely because it is unguessable. Only the attach-authenticated
+    readiness surface asks for it.
     """
     shared = assemble_health_status(app_state=app_state)
 
@@ -446,15 +470,33 @@ async def build_full_health(
     # --- Worker HTTP probe ---
     # The single worker-health primitive, reusing the pooled client; "healthy" is an
     # exact 200 for both this endpoint and the watchdog, so they cannot disagree.
-    from .worker_management import _check_worker_health
+    # The same round trip hands back what the worker REPORTED about its pairing, so
+    # the readiness surface echoes that evidence without a second probe.
+    from .worker_management import _probe_worker_health
 
-    if await _check_worker_health(
+    worker_healthy, worker_body = await _probe_worker_health(
         settings.worker_url, timeout=5.0, client=worker_client
-    ):
+    )
+    if worker_healthy:
         checks["worker"] = {"status": "ok"}
     else:
         logger.warning("Health check: worker probe failed")
         checks["worker"] = {"status": "error", "detail": "worker probe failed"}
+
+    # Echoed, never asserted: which gateway incarnation the worker says spawned it
+    # and which spawn attempt it was. Absent when the worker did not answer or did
+    # not report them - a worker no gateway spawned reports them blank, which is
+    # the honest answer and must not be dressed up as this gateway's own identity.
+    pairing: dict[str, Any] = {}
+    if include_pairing:
+        pairing = {
+            "worker_paired_gateway_lifetime": _reported_str(
+                worker_body, "paired_gateway_lifetime"
+            ),
+            "worker_reported_generation": _reported_str(
+                worker_body, "worker_generation"
+            ),
+        }
 
     # --- Circuit breaker & spawner ---
     checks["circuit_breaker"] = {"status": circuit_breaker.state}
@@ -473,5 +515,6 @@ async def build_full_health(
     return {
         "status": "ok" if ready else "degraded",
         "checks": checks,
+        **pairing,
         **shared,
     }

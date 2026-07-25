@@ -230,6 +230,52 @@ def _internal_auth_headers() -> dict[str, str] | None:
     return {"Authorization": f"Bearer {settings.internal_token}"}
 
 
+async def _probe_worker_health(
+    url: str,
+    timeout: float = 2.0,
+    *,
+    client: httpx.AsyncClient | None = None,
+) -> tuple[bool, dict[str, Any] | None]:
+    """Probe the worker's ``GET /health`` once, returning ``(healthy, body)``.
+
+    The single worker-health primitive for every caller - the boot/spawn paths,
+    the watchdog's authoritative crash check, and ``/api/health``. Request-path
+    callers pass the app-pooled *client* to reuse its connection pool (already
+    carrying the worker IPC bearer); the watchdog and boot paths pass none and get
+    a self-contained one-shot client that presents the same bearer, so a worker
+    that enforces the credential on ``/health`` still answers its owner.
+
+    The health verdict is an exact ``200`` and nothing else, so every caller
+    agrees and ``/api/health`` can never silently diverge from the watchdog's
+    restart decision (a ``204`` fails both, not one). The decoded body is a
+    strictly additive by-product for callers that also want what the worker
+    *reported*: a body that will not decode leaves the verdict untouched and
+    yields ``None``, so reporting can never turn a healthy worker unhealthy.
+    """
+    import httpx
+
+    async def _probe(
+        active: httpx.AsyncClient,
+    ) -> tuple[bool, dict[str, Any] | None]:
+        resp = await active.get(f"{url}/health", timeout=timeout)
+        healthy = resp.status_code == 200
+        if not healthy:
+            return False, None
+        try:
+            body = resp.json()
+        except ValueError:
+            return True, None
+        return True, body if isinstance(body, dict) else None
+
+    try:
+        if client is not None:
+            return await _probe(client)
+        async with httpx.AsyncClient(headers=_internal_auth_headers()) as owned:
+            return await _probe(owned)
+    except Exception:
+        return False, None
+
+
 async def _check_worker_health(
     url: str,
     timeout: float = 2.0,
@@ -238,52 +284,42 @@ async def _check_worker_health(
 ) -> bool:
     """Probe the worker's ``GET /health``; ``True`` only on an exact ``200``.
 
-    The single worker-health primitive for every caller - the boot/spawn paths,
-    the watchdog's authoritative crash check, and ``/api/health``. Request-path
-    callers pass the app-pooled *client* to reuse its connection pool (already
-    carrying the worker IPC bearer); the watchdog and boot paths pass none and get
-    a self-contained one-shot client that presents the same bearer, so a worker
-    that enforces the credential on ``/health`` still answers its owner. "Healthy"
-    is an exact ``200`` for all of them, so ``/api/health`` can never silently
-    disagree with the watchdog's restart decision (a ``204`` fails both, not one).
+    The boolean face of :func:`_probe_worker_health` for the callers that need
+    only the verdict. It delegates rather than restating the rule so the two can
+    never drift apart.
     """
-    import httpx
-
-    async def _probe(active: httpx.AsyncClient) -> bool:
-        resp = await active.get(f"{url}/health", timeout=timeout)
-        return resp.status_code == 200
-
-    try:
-        if client is not None:
-            return await _probe(client)
-        async with httpx.AsyncClient(headers=_internal_auth_headers()) as owned:
-            return await _probe(owned)
-    except Exception:
-        return False
+    healthy, _body = await _probe_worker_health(url, timeout, client=client)
+    return healthy
 
 
 async def _fetch_worker_health(
     url: str,
     timeout: float = 2.0,
 ) -> dict[str, Any] | None:
-    """Return the worker's ``GET /health`` JSON body, or ``None`` if unhealthy.
+    """Return a healthy worker's ``GET /health`` body, or ``None`` if none answered.
 
-    Unlike :func:`_check_worker_health` this hands back the decoded body so the
-    spawn path can read the worker's declared heartbeat target (``gateway_url``)
-    and decide whether the live worker belongs to *this* gateway or is a stale
-    orphan squatting the port.
+    The body-returning face of :func:`_probe_worker_health`, delegating rather
+    than issuing its own request so the health verdict cannot diverge between
+    the two. Unlike :func:`_check_worker_health` this hands back what the worker
+    reported, so the spawn path can rule on whether the live worker belongs to
+    *this* gateway or is an orphan squatting the port.
+
+    ``None`` means ONLY that no healthy worker answered - unreachable, or any
+    status other than ``200``. It deliberately does NOT mean "answered
+    unreadably": a live worker whose body will not decode yields an EMPTY dict,
+    because those two are opposite instructions to every caller. Collapsing them
+    (the earlier behaviour, where ``resp.json()`` sat inside the request's own
+    ``except``) made a live worker with a malformed body indistinguishable from
+    an absent one, so the spawn path would spawn a competitor onto a port that
+    worker still holds - while the watchdog, reading the same worker through the
+    same primitive, saw it up. An empty body instead carries no pairing evidence,
+    which the classifier already fails closed on as ``UNIDENTIFIED``, and which
+    the legacy declared-target rule already treats as an occupant to leave alone.
     """
-    import httpx
-
-    try:
-        async with httpx.AsyncClient(headers=_internal_auth_headers()) as client:
-            resp = await client.get(f"{url}/health", timeout=timeout)
-            if resp.status_code != 200:
-                return None
-            body = resp.json()
-    except Exception:
+    healthy, body = await _probe_worker_health(url, timeout)
+    if not healthy:
         return None
-    return body if isinstance(body, dict) else None
+    return body if body is not None else {}
 
 
 def _same_gateway(worker_target: object, our_gateway: str) -> bool:
@@ -336,9 +372,19 @@ async def _worker_ready_and_ours(
     Unarmed profiles keep the legacy declared-``gateway_url`` comparison so
     registry- and Compose-managed workers (which legitimately carry no pairing
     evidence) are not disowned.
+
+    An occupant that answered but reported nothing readable is not ours under
+    either profile. This is the opposite reading from the spawn path, which
+    treats the same occupant as a reason NOT to spawn - deliberately so: "some
+    process holds this port" and "this process is provably mine" are different
+    questions, and the safe answer to the first is the unsafe answer to the
+    second. Only the legacy comparison could get this wrong, since a missing
+    declared target reads as a match by design; an empty body is the absence of
+    evidence rather than a legacy worker's silence, so it is refused before the
+    lenient rule can adopt it.
     """
     body = await _fetch_worker_health(worker_url)
-    if body is None:
+    if not body:
         return False
     if settings.desktop_profile_armed:
         verdict = _classify_worker_body(body, current_generation=current_generation)

@@ -1486,6 +1486,11 @@ async def service_state_endpoint(
     can-accept-run. Engine authoring-backend reachability is reported from
     non-blocking discovery-file freshness.
     """
+    # Local import matching this module's convention for control-layer symbols.
+    # The constant is minted once per gateway process, so this is the very
+    # identity the spawner stamps into the workers it starts.
+    from ...control.worker_management import GATEWAY_LIFETIME_ID
+
     db, _aggregator, _checkpointer, worker_client = services
     full = await build_full_health(
         db=db,
@@ -1493,6 +1498,10 @@ async def service_state_endpoint(
         circuit_breaker=circuit_breaker,
         worker_spawner=worker_spawner,
         app_state=request.app.state,
+        # This surface is attach-authenticated, which is the only place the
+        # pairing identity may be disclosed; the unauthenticated health endpoint
+        # serves the same payload and must not carry it.
+        include_pairing=True,
     )
     checks: dict[str, Any] = full["checks"]
     database_ready = checks.get("database", {}).get("status") == "ok"
@@ -1533,6 +1542,14 @@ async def service_state_endpoint(
         ready=can_accept_run,
         can_accept_run=can_accept_run,
         gateway_pid=os.getpid(),
+        # Pairing identity, served so a consumer never has to infer it from
+        # addressing facts: this gateway's own incarnation identity, plus what
+        # the worker reported about which incarnation spawned it. A mismatch
+        # means the worker belongs to another gateway; both blank mean it was
+        # not gateway-spawned at all.
+        gateway_lifetime_id=GATEWAY_LIFETIME_ID,
+        worker_paired_gateway_lifetime=full.get("worker_paired_gateway_lifetime"),
+        worker_generation=full.get("worker_reported_generation"),
         worker_status=full.get("worker_status"),
         worker_connected=full.get("worker_connected"),
         circuit_breaker=full.get("circuit_breaker"),

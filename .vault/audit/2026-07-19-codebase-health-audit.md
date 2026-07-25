@@ -1087,6 +1087,59 @@ New debt raised by this pass, carried forward rather than silently absorbed:
 - `deletion-saga-and-workspace-delete-safety` remain owner-scoped as recorded
   above; nothing in this pass changed their status.
 
+### Consolidation sweep (2026-07-25) - divergent-mandate findings, all open
+
+Raised by a duplication and canonical-consolidation sweep over the tree, not by
+a feature Step. Each is a contradiction between two places that encode the same
+rule differently, which is a correctness class rather than a style one. Line
+references are as reported by the sweep and are to be re-verified by whoever
+takes the fix.
+
+- `codex-idle-timeout-inversion` (high, open) - every ACP-family provider
+  (Claude, Z.ai, Gemini, Kimi) bounds a silent turn with
+  `acp_turn_idle_timeout_seconds` (600.0). Codex does not: `factory.py:663`
+  takes `settings.provider_timeout_seconds` (120.0) and `factory.py:706` passes
+  it into `CodexChatModel`, overriding that class's own 300.0 default
+  (`codex_chat_model.py:336`); the one value then serves both the startup and
+  RPC waits and the per-notification idle wait in `_consume_turn`
+  (`codex_chat_model.py:542-545`). The defect is a category mismatch, not a
+  smaller number: `provider_timeout_seconds` is documented as a global timeout
+  for provider API calls and is correctly reused for single-shot HTTP
+  (`factory.py:924`, `factory.py:950`), but a single-shot call budget is the
+  wrong quantity for a streaming idle backstop. A Codex turn that is alive but
+  quiet beyond 120s - a long tool call, a thinking gap - aborts as hung, while
+  the same workload on the other lanes completes. No decision record pins the
+  current wiring, so it reads as unintentional drift. Compounds
+  `acp-turn-deadline-default-unproven`: that finding asks whether 600s is the
+  right silence budget, and this one shows the budget is not even applied
+  uniformly.
+- `mcp-api-base-url-scope-mismatch` (medium, open) - `.env.example:103-105`
+  documents `VAULTSPEC_MCP_API_BASE_URL` as overriding the MCP server's gateway
+  URL alone, but `control/config.py:267-278` wires it as a `validation_alias`
+  on the single global `gateway_url` field. That field also supplies the
+  spawned worker's heartbeat target (`control/worker_management.py:565`,
+  `worker/app.py:115-144`). An operator pointing MCP at a proxy therefore
+  redirects worker-to-gateway pairing without being told, which puts a
+  documentation-level assumption in direct conflict with the pairing-identity
+  work.
+- `aget-state-timeout-hardcoded-in-sibling` (low, open) - `worker/executor.py`
+  honours `domain_config.aget_state_timeout_seconds`
+  (`VAULTSPEC_AGET_STATE_TIMEOUT_SECONDS`); the sibling
+  `worker/state_projection.py:239` hardcodes the same 10.0 and never imports
+  `domain_config`, though its docstring records that it was extracted from
+  `executor.py`. Numerically equal today, so the defect is latent: raising the
+  environment knob fixes one path and silently leaves the other, which is worse
+  than having no knob because the knob appears to work.
+
+Recorded as non-findings by the same sweep, kept so they are not re-litigated:
+compatibility re-export shims are absent (all facade re-exports are the
+mandated pattern); the declared port policy is internally consistent; the two
+product home directories differ deliberately; the `0.0.0.0` default in
+`.env.example` is reconciled by loopback special-casing in
+`_derive_service_urls`; `default_owner` in `lifecycle/manager.py` and
+`lifecycle/singleton.py` are distinct concepts and must not be merged; and the
+MCP tool layer delegates over HTTP rather than duplicating control services.
+
 ### `W01.P02.S06` scoping analysis (2026-07-24) - not closed
 
 S06 asks to "verify the landed desktop owned-tree implementation reaps the

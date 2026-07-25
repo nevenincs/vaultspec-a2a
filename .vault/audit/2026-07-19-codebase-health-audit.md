@@ -1202,6 +1202,30 @@ before being queued.
   after an earlier split. Under the cap and so not a violation, but it has
   consumed half the margin it was given, which is the evidence that size
   discipline erodes silently here rather than loudly.
+- `service-gate-structurally-unpassable` (medium, open) - the canonical service
+  gate cannot pass from this repository alone, and the cause is the gate rather
+  than the code it guards. `test_engine_broker_lost_ack_live` hard-asserts that
+  `VAULTSPEC_ENGINE_SERVE_CMD` names the dashboard serve command, while every
+  sibling in the same suite - `test_pw7_acceptance`,
+  `test_s20_solo_coder_bridge_live`, `test_tool_cores_floor_live` - skips
+  honestly with a runbook message when the cross-repo engine is absent. One test
+  therefore fails hard on any machine without the dashboard repository wired, so
+  the gate reports red for a reason unrelated to this repository's health and a
+  real regression would be indistinguishable from the standing failure. The
+  repair is to make it skip like its siblings. Observed alongside two causes
+  that are NOT repository defects and must not be conflated with it: sixteen
+  fixture errors from a host Docker credential helper that aborts even anonymous
+  public-image pulls, and one third-party provider quota exhaustion.
+- `armed-desktop-may-not-fail-loud-on-unready-provider` (UNCONFIRMED LEAD, not a
+  finding) - a single unreproduced run of the interactive mock preset through the
+  armed-desktop stack reached `completed` with an empty assistant message and no
+  interactive pause, while the start response carried `"provider_ready": false`.
+  If real, the armed-desktop profile silently no-ops an unready provider instead
+  of failing loud, which would be a fail-open on the exact profile this campaign
+  hardened. Recorded as a lead and deliberately not as a finding: the single
+  observation could not be reproduced because host CPU saturation caused
+  subsequent gateway boots to time out. Needs an uncontended machine to confirm
+  or dismiss; it must not be closed by assumption in either direction.
 - `shim-sweep-analysed-at-the-wrong-granularity` (medium, methodology, closed by
   re-run) - the sweep's first pass returned a clean negative on forbidden
   re-export shims after inspecting `__init__.py` files and whole-module

@@ -1202,6 +1202,29 @@ before being queued.
   after an earlier split. Under the cap and so not a violation, but it has
   consumed half the margin it was given, which is the evidence that size
   discipline erodes silently here rather than loudly.
+- `claim-new-directory-orphaned` (low, being actioned) - `claim_new_directory`
+  in `desktop/_filesystem_authority.py` has exactly one reference in the tree:
+  its own definition. Its only consumer was the capsule subsystem removed in
+  `e9ef823a`, and that commit shows no diff against this file because the
+  module's sibling functions are still live, so the leaf was missed. Confirmed
+  not registry-dispatched, not a facade re-export (the module is underscore
+  private and never named by `desktop/__init__.py`), not a fixture, and not an
+  entry point; the sibling importers in `lifecycle/discovery.py` and the module's
+  own tests each import a subset that pointedly excludes it. Being deleted on
+  the consolidation pass.
+- `mock-only-graph-topologies` (medium, OWNER DECISION - do not action) -
+  `_compile_star` and `_compile_pipeline_loop` in `graph/compiler.py` have no
+  non-mock preset consumer; only the two mock preset files select those
+  topologies, while the real presets are single-agent pipeline and `research_adr`.
+  This is re-discovery of a question this project already heard and deliberately
+  set aside: the earlier dead-code campaign audit records removal as a
+  contract-adjacent architecture decision left to the architect successor
+  ledger, and the topologies are preserved under a dashboard contract clause. A
+  new preset file would exercise them with no code change. Recorded here so the
+  re-discovery is not mistaken for new information; it must not be actioned on a
+  consolidation pass. Sequencing note: if the topologies were ever removed,
+  `graph/compiler.py` falls under the module-size cap with no split at all, so
+  this decision precedes the split proposed in `module-size-cap-exceeded`.
 - `legacy-api-deprecation-has-no-expiry` (low, open) - the `/api` surface is in
   a sanctioned bounded deprecation behind an attach credential while `/v1` is
   canonical, and the live gating is correct. Its removal is tracked by plan

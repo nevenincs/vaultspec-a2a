@@ -7,6 +7,8 @@ from __future__ import annotations
 
 from .enums import InvalidTransitionError, ThreadStatus
 
+__all__ = ["validate_transition"]
+
 _VALID_TRANSITIONS: dict[ThreadStatus, frozenset[ThreadStatus]] = {
     ThreadStatus.SUBMITTED: frozenset(
         {

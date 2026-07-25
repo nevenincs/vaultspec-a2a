@@ -8,6 +8,11 @@ from __future__ import annotations
 
 from typing import Any
 
+__all__ = [
+    "requires_dispatch",
+    "resolve_autonomous",
+]
+
 
 def resolve_autonomous(
     explicit: bool | None,

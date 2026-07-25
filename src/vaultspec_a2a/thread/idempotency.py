@@ -9,6 +9,11 @@ from __future__ import annotations
 
 import hashlib
 
+__all__ = [
+    "default_cancel_key",
+    "default_message_key",
+]
+
 
 def default_cancel_key(thread_id: str) -> str:
     """Derive a deterministic idempotency key for a cancel operation."""

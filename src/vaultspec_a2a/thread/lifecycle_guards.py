@@ -10,6 +10,13 @@ from dataclasses import dataclass
 
 from .enums import TERMINAL_STATUSES, ThreadStatus
 
+__all__ = [
+    "ArchiveEligibility",
+    "DeleteEligibility",
+    "can_archive",
+    "can_delete",
+]
+
 
 @dataclass(frozen=True, slots=True)
 class DeleteEligibility:

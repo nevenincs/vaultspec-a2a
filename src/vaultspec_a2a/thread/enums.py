@@ -6,6 +6,20 @@ These are Layer 1 domain types — consumed by infrastructure services
 
 from enum import StrEnum
 
+__all__ = [
+    "ACTIVE_STATUSES",
+    "NON_ACTIVE_STATUSES",
+    "TERMINAL_STATUSES",
+    "ApprovalStatus",
+    "ControlActionResultStatus",
+    "ControlActionType",
+    "InvalidTransitionError",
+    "PermissionRequestStatus",
+    "RepairStatus",
+    "TaskQueueStatus",
+    "ThreadStatus",
+]
+
 
 class ThreadStatus(StrEnum):
     """Durable lifecycle states for orchestration threads."""

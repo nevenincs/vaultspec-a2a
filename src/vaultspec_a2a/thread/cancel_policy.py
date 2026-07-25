@@ -10,6 +10,11 @@ from dataclasses import dataclass
 
 from .enums import NON_ACTIVE_STATUSES, ThreadStatus
 
+__all__ = [
+    "CancelEligibility",
+    "can_cancel",
+]
+
 
 @dataclass(frozen=True, slots=True)
 class CancelEligibility:

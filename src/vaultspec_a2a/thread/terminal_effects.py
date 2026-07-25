@@ -10,6 +10,11 @@ from dataclasses import dataclass
 
 from .enums import ControlActionType, RepairStatus, ThreadStatus
 
+__all__ = [
+    "TerminalEffects",
+    "compute_terminal_effects",
+]
+
 
 @dataclass(frozen=True, slots=True)
 class TerminalEffects:

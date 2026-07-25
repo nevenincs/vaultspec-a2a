@@ -10,6 +10,13 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import StrEnum
 
+__all__ = [
+    "FailureAction",
+    "FailureType",
+    "classify_dispatch_failure",
+    "evaluate_dispatch_failure",
+]
+
 
 class FailureType(StrEnum):
     """Typed dispatch failure categories.

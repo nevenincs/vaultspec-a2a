@@ -18,6 +18,7 @@ removable, so ``kill`` never has to fight another owner's live claim.
 from __future__ import annotations
 
 import contextlib
+import logging
 import os
 import subprocess
 import sys
@@ -44,6 +45,8 @@ from .registry import (
     reserve_port,
     write_record,
 )
+
+logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -742,14 +745,33 @@ def _await_listener(
     fails safe: when the listening pid cannot be resolved it degrades to the bare
     bound-port signal rather than stalling a legitimate boot.
     """
-    from ..utils.process import listener_belongs_to
+    from ..utils.process import ListenerOwnership, classify_listener_ownership
 
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         if process.poll() is not None:
             return False
-        if _port_is_bound(port) and listener_belongs_to(port, process.pid):
-            return True
+        if _port_is_bound(port):
+            ownership = classify_listener_ownership(port, process.pid)
+            if ownership is ListenerOwnership.CONFIRMED:
+                return True
+            if ownership is ListenerOwnership.UNRESOLVED:
+                # Accepted on the bare bound-port signal, which is the right
+                # call - failing a legitimate boot because a pid could not be
+                # read would be worse than the risk. But a host that can never
+                # resolve a listener degrades EVERY probe, permanently, and
+                # without this line that deployment is indistinguishable from
+                # one where the guarantee still holds.
+                logger.warning(
+                    "Readiness accepted port %d on the bound-port signal alone: "
+                    "the listening pid could not be resolved, so it was not "
+                    "confirmed to belong to pid %d. Ownership is unverified for "
+                    "this boot; an orphan or a racer holding the port would read "
+                    "as ready.",
+                    port,
+                    process.pid,
+                )
+                return True
         time.sleep(0.1)
     return False
 

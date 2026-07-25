@@ -20,6 +20,8 @@ import pytest
 from vaultspec_a2a.lifecycle.discovery import is_pid_alive
 from vaultspec_a2a.lifecycle.manager import _await_listener
 from vaultspec_a2a.utils.process import (
+    ListenerOwnership,
+    classify_listener_ownership,
     kill_pid_tree_async,
     listener_belongs_to,
     pid_is_live,
@@ -140,6 +142,13 @@ _BIND_AND_HOLD = (
 _SLEEP = "import time; time.sleep(120)"
 
 
+def _free_port() -> int:
+    """A loopback port with no listener, for the unresolved-owner case."""
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+        probe.bind(("127.0.0.1", 0))
+        return probe.getsockname()[1]
+
+
 def _spawn_listener() -> tuple[subprocess.Popen[str], int]:
     """Spawn a real child that holds a loopback port; return it and the port."""
     proc = subprocess.Popen(
@@ -229,3 +238,57 @@ def test_await_listener_rejects_a_foreign_port_holder() -> None:
         assert _await_listener(port, not_the_binder, timeout=3.0) is False
     finally:
         _reap(holder, not_the_binder)
+
+
+def test_ownership_classification_separates_confirmed_from_unresolved() -> None:
+    """The tri-state tells "ours" apart from "could not tell"; the bool cannot.
+
+    Both cases accept, and both SHOULD accept - failing a legitimate boot because
+    a listener pid could not be read is worse than the risk it guards. But a host
+    that can never resolve a listener degrades every readiness probe permanently,
+    and a caller holding only the boolean cannot distinguish that deployment from
+    one where the ownership guarantee still holds. Asserting the two accepting
+    cases are DIFFERENT values is the whole point: collapse them again and this
+    fails, while the boolean assertions below stay green.
+    """
+    listener, port = _spawn_listener()
+    try:
+        assert classify_listener_ownership(port, listener.pid) is (
+            ListenerOwnership.CONFIRMED
+        )
+        # An unbound port resolves no listener at all.
+        assert classify_listener_ownership(_free_port(), listener.pid) is (
+            ListenerOwnership.UNRESOLVED
+        )
+    finally:
+        _reap(listener)
+
+
+def test_ownership_classification_reports_a_positively_foreign_holder() -> None:
+    """A resolved listener outside the root's tree is OUTSIDE, not merely not-ours."""
+    listener, port = _spawn_listener()
+    stranger = subprocess.Popen([sys.executable, "-c", _SLEEP])
+    try:
+        assert classify_listener_ownership(port, stranger.pid) is (
+            ListenerOwnership.OUTSIDE
+        )
+    finally:
+        _reap(listener, stranger)
+
+
+def test_the_boolean_contract_is_unchanged_by_the_classification() -> None:
+    """The bool still accepts both accepting cases and refuses only the foreign one.
+
+    Guards the refactor itself: the tri-state was added underneath an existing
+    fail-open contract that other call sites still rely on, so widening or
+    narrowing that contract would be a silent behaviour change rather than an
+    observability improvement.
+    """
+    listener, port = _spawn_listener()
+    stranger = subprocess.Popen([sys.executable, "-c", _SLEEP])
+    try:
+        assert listener_belongs_to(port, listener.pid) is True  # CONFIRMED
+        assert listener_belongs_to(_free_port(), listener.pid) is True  # UNRESOLVED
+        assert listener_belongs_to(port, stranger.pid) is False  # OUTSIDE
+    finally:
+        _reap(listener, stranger)

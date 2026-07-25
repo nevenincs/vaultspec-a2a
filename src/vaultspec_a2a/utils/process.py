@@ -26,14 +26,17 @@ import logging
 import os
 import subprocess
 import sys
+from enum import StrEnum
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
 __all__ = [
+    "ListenerOwnership",
     "ProcessContainment",
     "ProcessContainmentError",
+    "classify_listener_ownership",
     "kill_pid_tree_async",
     "listener_belongs_to",
     "pid_is_live",
@@ -237,6 +240,38 @@ def posix_descendant_pids(pid: int) -> list[int]:
     return descendants
 
 
+class ListenerOwnership(StrEnum):
+    """How much a readiness probe actually established about a bound port."""
+
+    CONFIRMED = "confirmed"
+    """The listening pid resolved and is the root or a descendant of it."""
+
+    OUTSIDE = "outside"
+    """The listening pid resolved and belongs to a different tree."""
+
+    UNRESOLVED = "unresolved"
+    """No listener pid could be read, so ownership was not established."""
+
+
+def classify_listener_ownership(port: int, root_pid: int) -> ListenerOwnership:
+    """Classify who holds *port*, distinguishing "ours" from "could not tell".
+
+    The boolean form of this check collapses ``CONFIRMED`` and ``UNRESOLVED``
+    into one ``True``, which is the correct thing to *do* and the wrong thing to
+    *report*. A host where the listener pid cannot be read - no ``netstat``, no
+    ``/proc/net`` and no ``lsof``, or an unreadable parent map - degrades every
+    probe to the bare bound-port signal permanently, and a caller that only sees
+    a bool cannot tell that deployment apart from one where the guarantee still
+    holds. Returning the distinction is what lets the caller say so.
+    """
+    listener_pid = port_listener_pid(port)
+    if listener_pid is None:
+        return ListenerOwnership.UNRESOLVED
+    if _pid_in_tree(root_pid, listener_pid):
+        return ListenerOwnership.CONFIRMED
+    return ListenerOwnership.OUTSIDE
+
+
 def listener_belongs_to(port: int, root_pid: int) -> bool:
     """``False`` only when *port*'s LISTENER is positively outside *root_pid*'s tree.
 
@@ -251,11 +286,12 @@ def listener_belongs_to(port: int, root_pid: int) -> bool:
     ``True`` and degrades to the bare bound-port signal, so a normal boot is never
     falsely failed. It returns ``False`` only when a listener pid is resolved AND
     positively shown to descend from a different root.
+
+    Callers that need to know WHICH of the two accepting cases occurred - and a
+    readiness gate on a security-relevant port does - should use
+    :func:`classify_listener_ownership` instead.
     """
-    listener_pid = port_listener_pid(port)
-    if listener_pid is None:
-        return True
-    return _pid_in_tree(root_pid, listener_pid)
+    return classify_listener_ownership(port, root_pid) is not ListenerOwnership.OUTSIDE
 
 
 def port_listener_pid(port: int) -> int | None:

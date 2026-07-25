@@ -125,8 +125,8 @@ Replace irreversible hard deletion with a durable resumable saga whose control s
 
 Review the landed control-state implementation and preserve every newly surfaced issue in the rolling audit trail.
 
-- [ ] `W01.P04.S15` - Run the formal safety intent and quality review for Wave W01 against the implemented diff and real tests; `.vault/audit, .vault/exec`.
-- [ ] `W01.P04.S16` - Classify every Wave W01 review finding and append unresolved work to the codebase-health audit queue; `.vault/audit/2026-07-19-codebase-health-audit.md, .vault/exec`.
+- [x] `W01.P04.S15` - Run the formal safety intent and quality review for Wave W01 against the implemented diff and real tests; `.vault/audit, .vault/exec`.
+- [x] `W01.P04.S16` - Classify every Wave W01 review finding and append unresolved work to the codebase-health audit queue; `.vault/audit/2026-07-19-codebase-health-audit.md, .vault/exec`.
 
 ## Wave `W02` - serve an authenticated positive dashboard edge
 

@@ -1663,3 +1663,57 @@ the stated rationale overreaches. Recorded because a future reader who trusts
 that sentence would conclude the mutation is exploitable, and it is not - the
 only value that classifies as `OWNED` remains the gateway's own `uuid4`
 lifetime, which a process it never spawned cannot learn.
+
+### W01.P02 lifecycle review (2026-07-25)
+
+First-hand review of the startup-transactionality Phase. The dispatched agent
+for this work went idle without delivering, as six before it did.
+
+#### Verified sound
+
+The transactional shape holds and closes what it was meant to. `serve_up`
+(`lifecycle/manager.py:623`) reserves a band port behind an `O_EXCL` marker so
+two concurrent same-band boots cannot claim one port, spawns, awaits readiness,
+and only then commits the claiming record. A commit that fails AFTER readiness
+reaps the child before propagating (`manager.py:709-713`), so
+`serve-up-commit-failure-leaks-child` is genuinely closed rather than narrowed.
+Restart mirrors the same spawn -> await-listener -> commit-or-reap discipline and
+verifies readiness BEFORE publishing (`manager.py:814-820`), so a failed resume
+never publishes a record pointing at a dead pid and the prior generation remains
+the last committed state - `restart-registers-before-readiness` closed.
+
+Readiness is also ownership-aware rather than port-aware: `_await_listener`
+refuses a bound port until `listener_belongs_to` confirms the listening pid is
+the child or a descendant, so an un-reaped orphan of a felled generation, or a
+racer on a fixed resume port, does not read as our process being ready. That is
+the substance of `await-listener-confirms-port-not-process`.
+
+#### `ownership-check-degradation-is-silent` (medium, open)
+
+The ownership check fails open by design, and the design is right - failing a
+legitimate boot because a pid could not be resolved would be worse than the risk
+it guards. `listener_belongs_to` (`utils/process.py:240-258`) returns `True`
+whenever `port_listener_pid` yields `None`, degrading to the bare bound-port
+signal, and `port_listener_pid` yields `None` whenever no owner can be read - no
+`netstat` on Windows, no `/proc/net` and no `lsof` on POSIX, or an unreadable
+parent map.
+
+What is missing is not the fallback but any evidence it happened. Neither
+function logs, increments a counter, or returns the distinction to its caller,
+and `_await_listener` cannot tell "confirmed ours" from "could not tell". So on
+any host where pid resolution routinely fails - a hardened container without
+`lsof`, a restricted-permission POSIX environment, a Windows image without
+`netstat` - the check is a silent no-op everywhere, permanently, and
+`await-listener-confirms-port-not-process` is effectively unfixed there while
+reading as closed.
+
+Failure scenario: a deployment ships without `lsof` in the worker image. Every
+readiness probe degrades. An un-reaped orphan from a previous generation holds
+the band port; the new child binds nothing but the orphan's port reads as bound;
+readiness passes on the stranger; a record is committed pointing at a listener
+the gateway does not own - exactly the condition the check exists to prevent -
+and nothing in the logs distinguishes that boot from a healthy one.
+
+The fix is observability, not behaviour: surface the degraded outcome, so a
+deployment that has silently lost the ownership guarantee is discoverable rather
+than indistinguishable from one that still has it.

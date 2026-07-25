@@ -77,6 +77,8 @@ related:
   - '[[2026-07-19-codebase-health-W04-P15-S69]]'
   - '[[2026-07-19-codebase-health-W04-P15-S71]]'
   - '[[2026-07-19-codebase-health-W04-P16-S73]]'
+  - '[[2026-07-19-codebase-health-W04-P17-S75]]'
+  - '[[2026-07-19-codebase-health-W04-P17-S76]]'
   - '[[2026-07-19-codebase-health-adr]]'
   - '[[2026-07-19-codebase-health-audit]]'
   - '[[2026-07-19-codebase-health-plan]]'
@@ -178,6 +180,8 @@ Auto-generated index of all documents tagged with `#codebase-health`.
 - `2026-07-19-codebase-health-W02-P06-S27` - Prove progress allowlisting with a real authenticated stream client
 - `2026-07-19-codebase-health-W02-P06-S98` - Enforce the positive progress allowlist again at the SSE frame and API event-adapter output boundary
 - `2026-07-19-codebase-health-W02-P06-S99` - Prove forbidden fields cannot cross the encoded A2A SSE boundary
+- `2026-07-19-codebase-health-W04-P17-S75` - Run the formal intent compatibility quality and documentation review for Wave W04
+- `2026-07-19-codebase-health-W04-P17-S76` - Classify every Wave W04 review finding and append unresolved work to the codebase-health audit queue
 
 ### plan
 

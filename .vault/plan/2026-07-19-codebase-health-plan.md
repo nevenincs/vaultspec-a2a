@@ -314,8 +314,8 @@ Use the documentation pipeline for the headless service surface and perform only
 
 Review the evidence, removals, deduplication, decomposition, and documentation changes before certification work begins.
 
-- [ ] `W04.P17.S75` - Run the formal intent compatibility quality and documentation review for Wave W04; `.vault/audit, .vault/exec`.
-- [ ] `W04.P17.S76` - Classify every Wave W04 review finding and append unresolved work to the codebase-health audit queue; `.vault/audit/2026-07-19-codebase-health-audit.md, .vault/exec`.
+- [x] `W04.P17.S75` - Run the formal intent compatibility quality and documentation review for Wave W04; `.vault/audit, .vault/exec`.
+- [x] `W04.P17.S76` - Classify every Wave W04 review finding and append unresolved work to the codebase-health audit queue; `.vault/audit/2026-07-19-codebase-health-audit.md, .vault/exec`.
 
 ## Wave `W05` - certify the assembled dashboard product
 

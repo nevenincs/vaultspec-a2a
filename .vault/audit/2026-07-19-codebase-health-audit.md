@@ -1397,3 +1397,69 @@ repository's Migration Check job, green on the release commit.
 Coverage limit stated honestly: this reviewed `W01.P03`, the new work. `W01.P01`
 and `W01.P02` were reviewed earlier in the campaign and were not re-read here,
 so `W01.P04.S15` is only partly discharged.
+
+### W04 review (2026-07-25)
+
+Performed by the orchestrator directly. Four review agents were dispatched
+across this session and every one went idle without delivering findings, so this
+is first-hand reading.
+
+#### `S104-VERDICT`: the claim holds
+
+`W04.P12.S104` claimed that tautological and shadow-logic tests were replaced
+with assertions against imported production behaviour. Tested adversarially
+across `src/vaultspec_a2a/`, it stands:
+
+- `MagicMock`, `@patch`, `pytest.mark.xfail`: zero occurrences.
+- `unittest` imports: zero. The two files matching the word contain it only in
+  prose.
+- `monkeypatch`: zero actual uses. All 42 matches are docstrings and comments
+  asserting its ABSENCE - "No mock, monkeypatch, or fake", "never by
+  monkeypatching the running interpreter", "real settings, no monkeypatching".
+  A file-level count reads as 36 offenders and is entirely false positives; the
+  method-call form `monkeypatch.<attr>` does not appear anywhere.
+- Suppressions: one `# noqa: SIM115` in `lifecycle/manager.py:295`, on a file
+  handle deliberately outliving its block, and no live `ty: ignore` at all - the
+  single match is a docstring describing when one would be needed.
+
+Layer discipline is also clean: `streaming/`, `graph/`, `context/`, and
+`thread/` contain zero imports of the infrastructure `control.config` settings.
+
+#### `provider-skip-gates-never-run-in-ci` (medium, open)
+
+The one residual from `test-policy-regression-after-closeout`, which named "skip
+gates across provider and live suites". They are still there, and the plan's own
+acceptance criterion - "Required certification jobs must fail when prerequisites
+are unavailable" - is not met, because they silently skip instead.
+
+The gates are `skipif` conditions on external prerequisites: the Codex CLI on
+PATH (`test_codex_chat_model.py:186,194,249`), a configured `ZAI_AUTH_TOKEN`
+(`test_zai_fidelity.py:41`), an available mcp streamable-http transport
+(`test_acp_authoring_bridge.py:136`), plus module-level gates in
+`test_harness_gateway.py:39`, `test_acp_project_mcp.py:435`, and
+`test_codex_config_home.py:267`.
+
+The workflow installs none of them - no Codex install step, no `ZAI_AUTH_TOKEN`
+secret, no mcp transport provisioning appears anywhere in `.github/workflows/`.
+So these tests do not merely skip occasionally; they skip on EVERY CI run, and
+have never executed there.
+
+Failure scenario: a change breaks Codex session handling or the Z.ai fidelity
+contract. Locally the author may have the CLI and see the failure; CI does not,
+reports green across all five jobs, and the regression merges. The suite's own
+reported totals conceal it, because a skip is not a failure and the count of
+skipped tests is not surfaced against a threshold.
+
+Two honest resolutions, and the choice is the owner's: provision the
+prerequisites in the certification job so the tests actually run, or keep them
+local-only but make their absence explicit - a required job that asserts the
+expected set executed, so a silently shrinking suite fails loudly instead of
+passing quietly.
+
+#### Not re-examined
+
+`W04.P14`'s orphan removal and `W04.P15`'s hotspot decomposition were verified
+by their own Steps and by the post-decomposition complexity recalculation
+recorded as `complexity-recalculation-w04-p15`; they were not independently
+re-derived here. `W01.P01` and `W01.P02` were likewise not re-read, so
+`W01.P04.S15` stays open as partly discharged while `W04.P17` closes.

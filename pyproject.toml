@@ -136,6 +136,8 @@ exclude = [
   "src/vaultspec_a2a/desktop_tests/**",
   "src/vaultspec_a2a/service_tests",
   "src/vaultspec_a2a/service_tests/**",
+  "src/vaultspec_a2a/acceptance",
+  "src/vaultspec_a2a/acceptance/**",
   "src/vaultspec_a2a/team/presets/mock",
   "src/vaultspec_a2a/team/presets/mock/**",
   "src/vaultspec_a2a/team/presets/agents/mock-*.toml",

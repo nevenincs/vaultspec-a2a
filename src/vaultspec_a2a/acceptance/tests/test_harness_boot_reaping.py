@@ -133,12 +133,19 @@ def test_failed_boot_releases_the_gateway_log_handle(tmp_path: Path) -> None:
     boot never reaches. The child is failed for a real reason - an invalid
     worker port that the production settings model rejects at import - so the
     gateway genuinely exits non-zero on every attempt rather than being killed.
+
+    The expectation is the exhausted-attempts ``AssertionError`` rather than
+    :class:`GatewayBootError`: the boot helper catches the per-attempt
+    ``GatewayBootError`` and only records it as ``last_error``, so the type that
+    escapes this path is the plain one. ``match`` pins it to that specific
+    failure so an unrelated failing ``assert`` inside the setup cannot satisfy
+    the expectation.
     """
     workdir = tmp_path / "failed-boot"
     workdir.mkdir()
 
     with (
-        pytest.raises(AssertionError),
+        pytest.raises(AssertionError, match="did not boot within"),
         certified_gateway(
             workdir,
             log_name="gateway.log",

@@ -237,7 +237,10 @@ class StateProjector:
     ) -> None:
         """Emit latest runtime execution-state truth over the internal event path."""
         try:
-            state = await asyncio.wait_for(graph.aget_state(config), timeout=10.0)
+            state = await asyncio.wait_for(
+                graph.aget_state(config),
+                timeout=domain_config.aget_state_timeout_seconds,
+            )
             payload = self.normalize_execution_state(cast("StateSnapshot", state))
         except TimeoutError:
             payload = ExecutionStateProjectionPayload(

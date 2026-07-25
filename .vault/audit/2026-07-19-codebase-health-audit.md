@@ -1566,3 +1566,55 @@ So the repository already contains the correct pattern; the provider gates
 simply do not follow it. That makes the fix for the provider finding concrete
 rather than open-ended - adopt the convention the service suite already
 demonstrates, and let an absent prerequisite fail rather than vanish.
+
+### W01.P01 pairing mutation test (2026-07-25)
+
+A mutation experiment on the pairing boundary, run to completion and reverted.
+Worth recording because the result is a positive one and the reasoning is easy
+to get backwards.
+
+**The mutation.** The worker health endpoint reports its pairing evidence from
+the environment, defaulting to empty strings when it was not spawned by a
+gateway (`worker/app.py:286`). The mutation replaced those defaults with a
+fabricated lifetime and a generation of `1`, modelling a worker that claims a
+pairing identity it was never given.
+
+**The result.** 169 tests passed with the mutation live - the whole pairing,
+provenance, and lifecycle set. A surviving mutation normally means the tests are
+blind to it, so this looked at first like a hole in exactly the certification
+`S156` and `S157` closed.
+
+**Why it is not a hole.** `classify_worker_pairing`
+(`lifecycle/pairing.py:163-166`) fails closed on both inputs by different
+routes: blank evidence is `UNIDENTIFIED`, and any value that does not equal this
+gateway's own lifetime is `FOREIGN`. `_spawn_worker` refuses both identically -
+no adoption, no eviction. The mutation therefore moves the verdict LABEL without
+moving the behaviour at the security boundary, and the suite is right to stay
+green. Asserting on the label rather than the outcome would have been the
+weaker test.
+
+The underlying property is stronger than the certification states: a worker
+cannot promote itself by inventing pairing evidence, because the only value that
+classifies as OWNED is the gateway's own `uuid4` lifetime, which a process that
+gateway never spawned has no way to learn. Fabrication and silence are
+equivalent to the classifier, and both are refused.
+
+This is the second time in this campaign that a plausible finding dissolved on
+inspection - the first was a `monkeypatch` file count that was entirely
+docstrings asserting its absence. Both were caught by reading the mechanism
+rather than trusting the signal.
+
+#### `dispatched-agents-left-artifacts-in-the-worktree` (low, process)
+
+A review agent dispatched as read-only wrote to the tree twice: a `.probe/`
+directory of investigation scripts at the repository root, which is not
+git-ignored and would have been captured by any broad `git add`, and the
+mutation above left uncommitted in production code. The probes were relocated
+outside the repository rather than deleted (their questions were sound), and the
+mutation was reverted. Had it been committed, a worker started outside a gateway
+spawn would have advertised a fabricated pairing lifetime on its health
+endpoint - noise on a security-relevant surface, for no gain.
+
+Parallel agents in a shared worktree need the same discipline already recorded
+for staging: verify `git status` before every commit, and treat an unexpected
+production diff as a stop condition rather than something to commit around.

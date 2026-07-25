@@ -3185,7 +3185,7 @@ wheels = [
 
 [[package]]
 name = "vaultspec-a2a"
-version = "0.1.0"
+version = "0.2.0"
 source = { editable = "." }
 dependencies = [
     { name = "aiosqlite" },
@@ -3324,7 +3324,7 @@ requires-dist = [
     { name = "torch", marker = "(sys_platform == 'linux' and extra == 'rag') or (sys_platform == 'win32' and extra == 'rag')", specifier = ">=2.4", index = "https://download.pytorch.org/whl/cu130", conflict = { package = "vaultspec-a2a", extra = "rag" } },
     { name = "torch", marker = "sys_platform != 'linux' and sys_platform != 'win32' and extra == 'rag'", specifier = ">=2.4" },
     { name = "uvicorn", specifier = ">=0.41.0" },
-    { name = "vaultspec-rag", extras = ["mcp"], marker = "extra == 'rag'", specifier = ">=0.3.2,<0.4" },
+    { name = "vaultspec-rag", extras = ["mcp"], marker = "extra == 'rag'", specifier = ">=0.3.8" },
     { name = "websockets", specifier = ">=16.0" },
 ]
 provides-extras = ["server", "rag"]
@@ -3422,7 +3422,7 @@ wheels = [
 
 [[package]]
 name = "vaultspec-rag"
-version = "0.3.2"
+version = "0.3.8"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "click" },
@@ -3444,9 +3444,9 @@ dependencies = [
     { name = "vaultspec-core" },
     { name = "watchfiles" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/16/f3/aba4a5c5427cf0050c09efc2280aa77e80525605ec37794a592d34c765b6/vaultspec_rag-0.3.2.tar.gz", hash = "sha256:0d3d709f6bde863b7a1fb2cf79742d5f2c1b948795719a403841e52404245930", size = 2802362, upload-time = "2026-07-17T12:47:54.136Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/2f/9b/baad07fc07d5f2b602cbf0ebb07a5d80ab91702a1a9100b47f8e273a37b2/vaultspec_rag-0.3.8.tar.gz", hash = "sha256:e50fb7969ea6bc723eae4753566479cc8f03374fdc1d5763879298bb88f54361", size = 4323983, upload-time = "2026-07-24T23:32:57.386Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/bb/e5/5ab9b405af8f3557315d86c97de807f7272262fd3d72f4beb5804b5ae6bb/vaultspec_rag-0.3.2-py3-none-any.whl", hash = "sha256:bdd34f05d9edfb24f2a025974d91d96a5c56cd36e158b1a585f2ec7af7617bbb", size = 963257, upload-time = "2026-07-17T12:47:52.727Z" },
+    { url = "https://files.pythonhosted.org/packages/ac/3a/f73ea2ad8a9ae9e15d2c9d614f86d2d545951d7874f2b65ce646efb9841a/vaultspec_rag-0.3.8-py3-none-any.whl", hash = "sha256:8b049c164d42eb902144dfba5274068ef07c9c7a81dd461421897cb29d35272c", size = 1739708, upload-time = "2026-07-24T23:32:55.617Z" },
 ]
 
 [package.optional-dependencies]

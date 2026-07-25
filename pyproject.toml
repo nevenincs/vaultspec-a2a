@@ -1,6 +1,6 @@
 [project]
 name = "vaultspec-a2a"
-version = "0.1.0"
+version = "0.2.0"
 description = "Headless A2A agent orchestration for the vaultspec workflow (gateway + worker, engine-facing six-member whitelist)"
 requires-python = ">=3.13"
 license = "MIT"
@@ -40,7 +40,7 @@ server = [
 ]
 rag = [
   "torch>=2.4",
-  "vaultspec-rag[mcp]>=0.3.2,<0.4",
+  "vaultspec-rag[mcp]>=0.3.8",
 ]
 
 [project.scripts]

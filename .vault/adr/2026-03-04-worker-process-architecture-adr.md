@@ -247,7 +247,7 @@ lib/
 - `src/vaultspec_a2a/worker/app.py` — FastAPI application + lifespan (checkpointer, bridge, executor)
 - `src/vaultspec_a2a/worker/executor.py` — Executor class (graph compilation, EventAggregator, run dispatch)
 - `src/vaultspec_a2a/worker/ipc.py` — WorkerBridge (httpx client for event forwarding)
-- `src/vaultspec_a2a/core/config.py` — `settings.worker_url`, `settings.worker_port`, `settings.auto_spawn_worker`
+- `src/vaultspec_a2a/control/config.py` — `settings.worker_url`, `settings.worker_port`, `settings.auto_spawn_worker` (the `core/` package this reference was written against no longer exists; infrastructure settings now live here)
 - ADR-007 — FastAPI + SQLite tech stack rationale
 - ADR-010 — OTel for worker spans
 - ADR-017 — Docker Compose multi-service deployment

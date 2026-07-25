@@ -1140,6 +1140,76 @@ product home directories differ deliberately; the `0.0.0.0` default in
 `lifecycle/singleton.py` are distinct concepts and must not be merged; and the
 MCP tool layer delegates over HTTP rather than duplicating control services.
 
+The same sweep's parallel-implementation and architecture axes add the
+following. The two correctness findings were re-verified against the source
+before being queued.
+
+- `worker-health-probe-split-brain` (high, open) - `control/worker_management.py`
+  carries two implementations of "GET the worker's `/health` and decode it".
+  `_probe_worker_health` treats an undecodable 200 as healthy-with-no-body by
+  design, so reporting can never turn a healthy worker unhealthy.
+  `_fetch_worker_health` evaluates `resp.json()` inside the `try` whose
+  `except Exception` returns `None`, so the same malformed 200 is indistinguishable
+  from a dead worker. One live worker therefore reads as up to the watchdog and
+  `/api/health` and as absent to `_classify_worker_body` and the adopt and evict
+  paths, which duplicates or evicts it - striking the authenticated-pairing
+  verdict this audit's own 2026-07-24 pass hardened. Aggravating detail: the
+  surviving primitive's docstring already claims to be the single worker-health
+  primitive for every caller and that its callers "can never drift apart", so
+  the module asserts an invariant it does not hold.
+- `codex-config-home-escapes-desktop-state` (medium, open) - the Claude ACP
+  isolated home is created with `mkdtemp(..., dir=_temp_home_root())` and sweeps
+  orphans on each creation, so an armed desktop install keeps per-run homes
+  inside its own accounted state directory and a system-wide temp sweep cannot
+  delete a live run's home. The Codex equivalent calls `mkdtemp` with no `dir=`
+  at all and has no sweep anywhere in the tree. On an armed desktop install
+  Codex runs therefore drop per-run config homes outside the app's state
+  directory and nothing ever reclaims them: a leak plus an uninstall-completeness
+  gap. Easy to miss because the module's own docstring claims to be the
+  structural analog of the Claude home. The correct repair is narrow - share
+  root-resolution and sweep only. Merging the two modules would be wrong:
+  file-based `auth.json` versus env token, and TOML versus JSON, are correctly
+  divergent because the CLIs differ. Note the existing tests glob the system
+  temp directory and so encode the defect as an expectation; they must be
+  rewritten to cover both the desktop-armed and non-desktop roots.
+- `control-package-is-not-a-facade` (medium, open, needs a decision record) -
+  `control/__init__.py` declares an `__all__` of 20 submodule names with no
+  imports and documents "Import implementations from direct child modules",
+  contradicting the facade mandate. Nothing is broken: `from ... import *`
+  resolves all 20 names through the documented CPython behaviour. The finding
+  is queued rather than fixed because the obvious repair - eagerly importing 20
+  control submodules that reach into `thread`, `database`, `streaming`,
+  `authoring`, and `worker` - carries real cycle and import-cost risk in a
+  repository that has already been bitten twice by exactly that, each time
+  resolved with a lazy PEP-562 facade. Eager facade, lazy facade, or a recorded
+  local exception is an architecture decision. Until it is decided, the 39
+  one-level-deep imports of `control` submodules are structurally forced and are
+  not violations. The parallel case in `thread` is NOT forced - that package has
+  a proper facade - and is being repaired.
+- `module-size-cap-exceeded` (low, open) - three production modules exceed the
+  1000-line cap: `api/routes/gateway.py` (1572), `control/worker_management.py`
+  (1211), and `graph/compiler.py` (1337). Deliberately not taken during a
+  multi-lane campaign. `worker_management.py` specifically should NOT be split:
+  it is the module the 2026-07-24 pass hardened, it has the highest fan-in of
+  the three, and cutting freshly-proven adoption logic for a file-size target is
+  a bad trade. `graph/compiler.py` is the tractable one - the `research_adr` and
+  `pipeline_loop` topology clusters are self-contained and extracting both
+  leaves roughly 770 lines. Nine test modules also exceed the cap, worst at
+  2934; any split there must re-verify the marker-count merge gates that other
+  decision records depend on.
+- `acp-chat-model-size-drift` (low, open) - `providers/acp_chat_model.py` stands
+  at 899 lines against the sub-600 target its own decision record prescribed
+  after an earlier split. Under the cap and so not a violation, but it has
+  consumed half the margin it was given, which is the evidence that size
+  discipline erodes silently here rather than loudly.
+- `legacy-api-deprecation-has-no-expiry` (low, open) - the `/api` surface is in
+  a sanctioned bounded deprecation behind an attach credential while `/v1` is
+  canonical, and the live gating is correct. Its removal is tracked by plan
+  Steps S106 and S163, but no expiry date exists, and the pre- and post-removal
+  certification runs that once gated those Steps were retired with the
+  other-project work, so neither now has an automated proof that no consumer
+  depends on the surface. Whoever executes them must establish that another way.
+
 ### `W01.P02.S06` scoping analysis (2026-07-24) - not closed
 
 S06 asks to "verify the landed desktop owned-tree implementation reaps the

@@ -75,6 +75,12 @@ fields (~18) stay in `core/domain_config.py`. Infrastructure fields (~75) move
 to `control/config.py`. A backwards-compatible `Settings` facade composes both
 during migration. Core functions progressively accept config as parameters.
 
+> As built: the split landed as decided, but the `core/` package was
+> subsequently dissolved, so the domain half is now the top-level
+> `src/vaultspec_a2a/domain_config.py` rather than `core/domain_config.py`. The
+> infrastructure half is at `src/vaultspec_a2a/control/config.py` as stated. The
+> decision stands; only the locator moved.
+
 **D-06: Preserve test isolation — no regressions.** All changes must maintain
 current isolation: `pytest src/vaultspec_a2a/core/tests/` passes with zero
 running services, no new infrastructure imports in core test files.

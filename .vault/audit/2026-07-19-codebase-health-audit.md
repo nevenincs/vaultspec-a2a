@@ -1525,3 +1525,44 @@ member before `S106` removes the legacy route, or `S106` is re-scoped to retain
 that one route, or human-in-the-loop approval is declared out of scope for the
 supported surface. S81 should stay open behind whichever is chosen - certifying
 resume through a facade that cannot resume is not possible.
+
+### `W05.P20` canonical gate runs (2026-07-25)
+
+- `S87` `just dev code check` - PASS. Ruff lint, Ruff format across 560 files,
+  whole-tree `ty`, deptry, and actionlint all clean.
+- `S141` `just dev deps check` - PASS. `uv lock --check` consistent across 189
+  packages.
+- `S143` `just dev test service` - DID NOT PASS here, and the cause is this
+  machine rather than the codebase. Left open rather than marked on CI's behalf.
+
+#### `service-gate-blocked-by-local-docker-credential-store` (low, environment)
+
+The service gate reports 2 failed, 54 passed, 39 skipped, 16 errors. Every one
+of the 16 errors is the session-scoped `service_stack` fixture failing at
+`docker compose ... up -d --build vidaimock jaeger`, and the underlying cause is
+not a missing dependency: Docker is present and healthy (29.6.2). The pull fails
+with `error getting credentials - err: exit status 1, out: 'A specified logon
+session does not exist. It may already have been terminated.'` - the Windows
+credential helper cannot read its logon session, so no image can be pulled.
+
+The same surface is certified in CI, where the Compose server profile regression
+job passes on every push, so this is a local-environment blocker on running the
+gate rather than evidence about the code. Recorded so a later reader does not
+re-diagnose it as a product failure.
+
+#### `service-and-provider-suites-disagree-on-missing-prerequisites` (medium, open)
+
+Worth stating because the two conventions sit in one repository and only one is
+right.
+
+When its prerequisite is absent, the service suite ERRORS - loudly, 16 times,
+impossible to miss - which is exactly what the plan's acceptance criterion asks:
+"Required certification jobs must fail when prerequisites are unavailable." The
+provider suite, under the separate finding
+`provider-skip-gates-never-run-in-ci`, SKIPS instead, and skips silently on
+every CI run because the workflow provisions nothing it needs.
+
+So the repository already contains the correct pattern; the provider gates
+simply do not follow it. That makes the fix for the provider finding concrete
+rather than open-ended - adopt the convention the service suite already
+demonstrates, and let an absent prerequisite fail rather than vanish.

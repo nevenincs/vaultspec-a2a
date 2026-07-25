@@ -352,10 +352,10 @@ Execute both repositories' canonical gates and prove the versioned contract cann
 - [ ] `W05.P20.S147` - Run the pre-removal dashboard-owned a2a-composite-certification workflow; `../../vaultspec-dashboard-worktrees/main/.github/workflows/a2a-composite-certification.yml, ../../vaultspec-dashboard-worktrees/main/.vault/plan`.
 - [ ] `W05.P20.S106` - Remove the legacy product routes after the pre-removal dashboard composite proves no dependency; `src/vaultspec_a2a/api/routes, ../../vaultspec-dashboard-worktrees/main/frontend, ../../vaultspec-dashboard-worktrees/main/engine`.
 - [ ] `W05.P20.S163` - Remove the legacy event WebSocket after the pre-removal dashboard composite proves no dependency; `src/vaultspec_a2a/api/app.py, ../../vaultspec-dashboard-worktrees/main/frontend, ../../vaultspec-dashboard-worktrees/main/engine`.
-- [ ] `W05.P20.S87` - Run the canonical A2A code-quality gate with just dev code check; `Justfile, just/dev/code.just, src, tests`.
+- [x] `W05.P20.S87` - Run the canonical A2A code-quality gate with just dev code check; `Justfile, just/dev/code.just, src, tests`.
 - [ ] `W05.P20.S88` - Run the dashboard full touched-language lint gate with just dev lint all; `../../vaultspec-dashboard-worktrees/main/just, ../../vaultspec-dashboard-worktrees/main/frontend, ../../vaultspec-dashboard-worktrees/main/engine`.
 - [ ] `W05.P20.S89` - Fail certification on positive-schema fingerprint authentication or capability drift between the two repositories; `schemas, tests/acceptance, ../../vaultspec-dashboard-worktrees/main/engine, ../../vaultspec-dashboard-worktrees/main/frontend`.
-- [ ] `W05.P20.S141` - Run the canonical A2A dependency gate with just dev deps check; `Justfile, just/dev/deps.just, pyproject.toml, uv.lock`.
+- [x] `W05.P20.S141` - Run the canonical A2A dependency gate with just dev deps check; `Justfile, just/dev/deps.just, pyproject.toml, uv.lock`.
 - [ ] `W05.P20.S142` - Run the canonical A2A unit gate with just dev test unit; `Justfile, just/dev/test.just, src, tests`.
 - [ ] `W05.P20.S143` - Run the canonical A2A service gate with just dev test service; `Justfile, just/dev/test.just, src/vaultspec_a2a/service_tests`.
 - [ ] `W05.P20.S144` - Run the A2A real-process acceptance suites with uv run --no-sync pytest tests/acceptance src/vaultspec_a2a/desktop_tests src/vaultspec_a2a/service_tests -ra; `tests/acceptance, src/vaultspec_a2a/desktop_tests, src/vaultspec_a2a/service_tests`.

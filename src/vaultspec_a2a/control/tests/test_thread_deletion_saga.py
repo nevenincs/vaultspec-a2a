@@ -29,6 +29,7 @@ from vaultspec_a2a.control.repositories import (
     CleanupItemState,
     CleanupKind,
     advance_deletion_cleanup_item,
+    claim_deletion_saga,
     create_deletion_saga,
     finalize_deletion_saga,
 )
@@ -173,6 +174,96 @@ async def test_crash_recovery_resumes_a_partial_saga(
     async with session_factory() as session:
         assert await get_thread(session, "t-crash") is None
         assert await session.get(ThreadDeletionSagaModel, "t-crash") is None
+
+
+@pytest.mark.asyncio
+async def test_a_delete_racing_a_live_pass_does_not_run_a_second_teardown(
+    session_factory, checkpointer
+) -> None:
+    """A request arriving while a pass owns the saga runs no cleanup of its own.
+
+    A second pass would take its result snapshot before the owning pass records
+    its progress, then overwrite the shared ledger with it. The request must be
+    told the deletion is still in progress and leave every store untouched.
+    """
+    await _write_checkpoint(checkpointer, "t-race", "cp-race")
+    async with session_factory() as session:
+        await create_thread(session, thread_id="t-race", status=ThreadStatus.COMPLETED)
+        await create_deletion_saga(
+            session,
+            thread_id="t-race",
+            manifest=[
+                CleanupItem(
+                    kind=CleanupKind.CHECKPOINT, key="checkpoint", target="t-race"
+                )
+            ],
+        )
+        await session.commit()
+
+    # A live pass owns the saga and has not yet recorded its checkpoint result.
+    async with session_factory() as owner:
+        owning_claim = await claim_deletion_saga(owner, thread_id="t-race")
+        await owner.commit()
+        assert owning_claim is not None and owning_claim.owned is True
+
+        async with session_factory() as session:
+            result = await delete_thread_service(
+                session, "t-race", checkpointer=checkpointer
+            )
+
+    assert result.deleted is False
+    assert result.cleanup_incomplete is True
+    # The racing request touched no store: the owning pass still has work to do.
+    assert await _checkpoint_present(checkpointer, "t-race") is True
+    async with session_factory() as session:
+        assert await get_thread(session, "t-race") is not None
+        assert await session.get(ThreadDeletionSagaModel, "t-race") is not None
+
+
+@pytest.mark.asyncio
+async def test_a_permanently_failing_item_stops_wedging_the_thread(
+    session_factory, checkpointer
+) -> None:
+    """Retries of an unremovable item end in a finalized delete, not a wedge.
+
+    The cleanup item here can never succeed: it was recorded against a
+    workspace root the target no longer sits under, so every pass refuses it as
+    an escaping path. Without a bound the thread would stay hidden from every
+    product read for the life of the deployment. Each retry drives the real
+    service against the real stores.
+    """
+    async with session_factory() as session:
+        await create_thread(session, thread_id="t-wedge", status=ThreadStatus.COMPLETED)
+        await create_deletion_saga(
+            session,
+            thread_id="t-wedge",
+            manifest=[
+                CleanupItem(
+                    kind=CleanupKind.ARTIFACT_FILE,
+                    key="artifact:gone",
+                    target="/elsewhere/out/report.md",
+                    root="/ws",
+                )
+            ],
+        )
+        await session.commit()
+
+    outcomes = []
+    for _ in range(3):
+        async with session_factory() as session:
+            outcomes.append(
+                await delete_thread_service(
+                    session, "t-wedge", checkpointer=checkpointer
+                )
+            )
+
+    assert [outcome.deleted for outcome in outcomes] == [False, False, True]
+    assert [outcome.cleanup_incomplete for outcome in outcomes] == [True, True, False]
+    # The delete completed over an item that could not be cleaned, and says so.
+    assert outcomes[-1].cleanup_abandoned is True
+    async with session_factory() as session:
+        assert await get_thread(session, "t-wedge") is None
+        assert await session.get(ThreadDeletionSagaModel, "t-wedge") is None
 
 
 @pytest.mark.asyncio

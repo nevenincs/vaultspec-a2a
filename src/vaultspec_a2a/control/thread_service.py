@@ -617,16 +617,21 @@ class DeleteResult:
     """Outcome of :func:`delete_thread_service`.
 
     ``deleted`` is true only when the saga finalized and every control row is
-    gone. ``cleanup_incomplete`` means the deletion started durably but at
-    least one cross-store cleanup item did not finish, so the thread stays
-    hidden and the saga is resumable on retry. ``error_detail`` carries a
-    lifecycle-guard refusal reason when the delete was refused before it began.
+    gone. ``cleanup_incomplete`` means the deletion started durably but has not
+    finished - either a cleanup item did not complete, or another pass holds the
+    saga - so the thread stays hidden and the saga is resumable on retry.
+    ``cleanup_abandoned`` means the delete did finalize, but over at least one
+    cleanup item judged permanently unremovable, so external state was left
+    behind; the failure is recorded in the log rather than in a row, because the
+    rows are gone. ``error_detail`` carries a lifecycle-guard refusal reason when
+    the delete was refused before it began.
     """
 
     deleted: bool
     not_found: bool = False
     error_detail: str | None = None
     cleanup_incomplete: bool = False
+    cleanup_abandoned: bool = False
 
 
 async def delete_thread_service(
@@ -676,6 +681,11 @@ async def _run_deletion_saga(
 
     Idempotent by construction: already-done cleanup items are skipped, and a
     saga that another pass finalized between reads reports a completed delete.
+
+    Only the pass that wins the claim drives the manifest. A concurrent request
+    that finds the saga owned reports the delete as still in progress rather
+    than executing a second pass over a result snapshot taken before the owner's
+    progress was recorded.
     """
     saga = await claim_deletion_saga(db, thread_id=thread_id)
     await db.commit()
@@ -683,6 +693,8 @@ async def _run_deletion_saga(
         # The saga was finalized between the status read and the claim; the
         # thread is already fully deleted.
         return DeleteResult(deleted=True)
+    if not saga.owned:
+        return DeleteResult(deleted=False, cleanup_incomplete=True)
 
     async def _advance(result: CleanupItemResult) -> None:
         await advance_deletion_cleanup_item(db, thread_id=thread_id, result=result)
@@ -698,7 +710,7 @@ async def _run_deletion_saga(
     outcome = await finalize_deletion_saga(db, thread_id=thread_id)
     await db.commit()
     if outcome.finalized:
-        return DeleteResult(deleted=True)
+        return DeleteResult(deleted=True, cleanup_abandoned=bool(outcome.abandoned))
     return DeleteResult(deleted=False, cleanup_incomplete=True)
 
 

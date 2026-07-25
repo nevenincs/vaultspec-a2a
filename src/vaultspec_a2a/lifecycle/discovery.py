@@ -37,9 +37,6 @@ import httpx
 
 from ..artifacts import ArtifactDeclaration, RetentionDisposition
 from ..authoring.discovery import (
-    HEARTBEAT_STALE_MS as HEARTBEAT_STALE_MS,
-)
-from ..authoring.discovery import (
     heartbeat_is_fresh,
     read_service_json,
 )
@@ -67,7 +64,6 @@ __all__ = [
     "DESKTOP_PROTOCOL_MAX",
     "DESKTOP_PROTOCOL_MIN",
     "HEARTBEAT_REFRESH_SECONDS",
-    "HEARTBEAT_STALE_MS",
     "SERVICE_CREDENTIAL_DECLARATION",
     "SERVICE_DISCOVERY_DECLARATION",
     "DesktopDiscoveryRecord",

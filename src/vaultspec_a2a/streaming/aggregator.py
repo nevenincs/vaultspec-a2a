@@ -24,13 +24,12 @@ from .emitters import EventEmitters
 from .ingest import IngestManager
 from .subscribers import SubscriberManager
 from .transformer import project_run_progress
-from .types import SequencedEvent, StreamableGraph, classify_tool_kind
+from .types import SequencedEvent, StreamableGraph
 
 __all__ = [
     "EventAggregator",
     "SequencedEvent",
     "StreamableGraph",
-    "classify_tool_kind",
 ]
 
 

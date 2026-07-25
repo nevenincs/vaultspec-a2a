@@ -11,7 +11,7 @@ from ..graph.enums import (
     ToolCallStatus,
     ToolKind,
 )
-from ..streaming.aggregator import EventAggregator, classify_tool_kind
+from ..streaming.types import classify_tool_kind
 from ..thread.snapshots import (
     AgentData,
     ArtifactData,
@@ -29,6 +29,7 @@ if TYPE_CHECKING:
     from langchain_core.runnables import RunnableConfig
 
     from ..database.checkpoints import Checkpointer
+    from ..streaming.aggregator import EventAggregator
 
 
 def enrich_snapshot_from_state(

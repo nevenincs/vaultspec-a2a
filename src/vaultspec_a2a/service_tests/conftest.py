@@ -11,6 +11,8 @@ from .harness import ServiceStack, build_service_stack
 if TYPE_CHECKING:
     from pathlib import Path
 
+    from ..conftest import ExternalPrerequisiteRule
+
 FAILED_SERVICE_TESTS: list[dict[str, str]] = []
 
 
@@ -22,8 +24,19 @@ def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
 
 
 @pytest.fixture(scope="session")
-def service_stack(request: pytest.FixtureRequest) -> ServiceStack:
-    """Start the compose-backed deterministic stack once per test session."""
+def service_stack(
+    request: pytest.FixtureRequest,
+    external_prerequisite: ExternalPrerequisiteRule,
+) -> ServiceStack:
+    """Start the compose-backed deterministic stack once per test session.
+
+    Docker is an external prerequisite, so its absence is reported under the
+    repository's one rule rather than as a fixture error: an honest skip here,
+    a hard failure wherever ``--require-prerequisite=docker`` guarantees it. A
+    Docker that is present but *broken* is deliberately not covered - that
+    surfaces below as the loud startup error it is.
+    """
+    external_prerequisite("docker")
     stack = build_service_stack()
 
     def _finalize() -> None:

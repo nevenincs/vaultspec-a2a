@@ -71,6 +71,8 @@ from .test_pw7_acceptance import (
 if TYPE_CHECKING:
     from pathlib import Path
 
+    from ..conftest import ExternalPrerequisiteRule
+
 # The message frame types that carry an agent's mid-turn narration and output. The
 # read/citation surface here (validated live), not in tool-call frames.
 _MESSAGE_FRAMES = frozenset(
@@ -209,7 +211,9 @@ def _floor_case(feature: str, adr_name: str) -> AcceptanceCase:
 
 @pytest.mark.service
 @pytest.mark.asyncio
-async def test_document_agent_reads_named_adr_midturn_and_cites() -> None:
+async def test_document_agent_reads_named_adr_midturn_and_cites(
+    external_prerequisite: ExternalPrerequisiteRule,
+) -> None:
     """Live: a document agent reads a named .vault ADR mid-turn and cites it.
 
     Zero .vault writes: the run is observed over its SSE stream and cancelled before
@@ -217,12 +221,7 @@ async def test_document_agent_reads_named_adr_midturn_and_cites() -> None:
     """
     stack = _reachable_stack()
     if stack is None:
-        pytest.skip(
-            "no reachable loopback stack; boot a workspace-local `vaultspec serve "
-            "--no-seat` engine plus the a2a gateway/worker with "
-            "VAULTSPEC_AUTHORING_SUBSCRIBER_ENABLED=true (runbook), then set "
-            "VAULTSPEC_ENGINE_SERVICE_JSON and select -m service"
-        )
+        external_prerequisite.absent("loopback-stack")
     engine_base_url, engine_bearer, vault_root = stack
 
     target_adr = _pick_named_adr(vault_root)
@@ -377,7 +376,9 @@ def _resolving_citations(output: str, workspace_root: Path) -> list[str]:
 
 @pytest.mark.service
 @pytest.mark.asyncio
-async def test_document_agent_invokes_rag_search_midturn_and_cites() -> None:
+async def test_document_agent_invokes_rag_search_midturn_and_cites(
+    external_prerequisite: ExternalPrerequisiteRule,
+) -> None:
     """Live: a document agent invokes vaultspec-rag search mid-turn; citations resolve.
 
     The semantic-tier proof (P03.S16 Claude / S17 Z.ai, selected by ``S05_PROFILE``).
@@ -397,12 +398,7 @@ async def test_document_agent_invokes_rag_search_midturn_and_cites() -> None:
     """
     stack = _reachable_stack()
     if stack is None:
-        pytest.skip(
-            "no reachable loopback stack; boot a workspace-local `vaultspec serve "
-            "--no-seat` engine plus the a2a gateway/worker with "
-            "VAULTSPEC_AUTHORING_SUBSCRIBER_ENABLED=true (runbook), then set "
-            "VAULTSPEC_ENGINE_SERVICE_JSON and select -m service"
-        )
+        external_prerequisite.absent("loopback-stack")
     engine_base_url, engine_bearer, vault_root = stack
     workspace_root = vault_root.parent
 

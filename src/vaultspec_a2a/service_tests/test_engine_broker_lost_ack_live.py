@@ -4,6 +4,12 @@ This service test boots the production dashboard engine, production A2A gateway,
 and gateway-owned production worker. A transparent TCP relay forwards every byte
 but deliberately drops the first completed run-start acknowledgement. It models
 transport loss only: no response or application behavior is synthesized.
+
+The dashboard is a separate repository, so this proof carries an external
+prerequisite. It is reported under the repository's one rule (see the root
+conftest): absent ``VAULTSPEC_ENGINE_SERVE_CMD`` is an honest skip naming the
+runbook, exactly like the sibling live suites, and a caller that declares
+``--require-prerequisite=dashboard-engine`` gets a failure instead.
 """
 
 from __future__ import annotations
@@ -38,6 +44,8 @@ from vaultspec_a2a.utils.process import ProcessContainment
 if TYPE_CHECKING:
     from collections.abc import Iterator
     from pathlib import Path
+
+    from vaultspec_a2a.conftest import ExternalPrerequisiteRule
 
 _RUN_ID = "run-cross-repo-lost-ack"
 _ENGINE_COMMAND_ENV = "VAULTSPEC_ENGINE_SERVE_CMD"
@@ -243,11 +251,13 @@ provider = "codex"
 
 
 def _engine_command(port: int, workspace: Path) -> list[str]:
-    template = os.environ.get(_ENGINE_COMMAND_ENV, "").strip()
-    assert template, (
-        f"{_ENGINE_COMMAND_ENV} must name the dashboard serve command when this "
-        "cross-repository service test is selected"
-    )
+    """Render the declared dashboard serve command.
+
+    Only reached once the ``dashboard-engine`` prerequisite has been asserted
+    present, so a blank template is impossible here and every remaining check is
+    a real defect in a command the caller did supply.
+    """
+    template = os.environ[_ENGINE_COMMAND_ENV].strip()
     rendered = template.format(port=port, workspace=str(workspace))
     command = shlex.split(rendered, posix=os.name != "nt")
     assert command and os.path.isabs(command[0]), (
@@ -405,8 +415,10 @@ def _await_exactly_one_worker_dispatch(app_home: Path) -> None:
 
 def test_production_engine_recovers_lost_run_start_ack_exactly_once(
     tmp_path: Path,
+    external_prerequisite: ExternalPrerequisiteRule,
 ) -> None:
     """One accepted start survives response loss without duplicate dispatch."""
+    external_prerequisite("dashboard-engine")
     workspace = tmp_path / "dashboard-workspace"
     _provision_workspace(workspace)
     app_home = tmp_path / "app-home"

@@ -13,6 +13,26 @@ unit *ARGS:
 service *ARGS:
     uv run --no-sync --frozen --no-default-groups --group tooling pytest --override-ini "addopts=--durations=10 --showlocals -ra --capture=sys" -m service {{ ARGS }}
 
+# The durable-replay proof lives in the service tier, which the default gate
+# excludes, so a default run never executed it and a bare service run could
+# report green while it skipped. This tier declares the dashboard engine: it
+# either EXECUTES the proof or fails naming the missing binary and how to supply
+# it. A pass here is evidence; there is no skip-shaped green.
+#
+# Prove durable replay and lost-ack recovery across repositories (never skips).
+cross-repo *ARGS:
+    uv run --no-sync --frozen --no-default-groups --group tooling pytest --override-ini "addopts=--durations=10 --showlocals -ra --capture=sys" --require-prerequisite=dashboard-engine src/vaultspec_a2a/service_tests/test_engine_broker_lost_ack_live.py {{ ARGS }}
+
+# These need the Codex and Claude CLIs on PATH and no credential whatsoever, so
+# a certification job can provision them. Selected by explicit node id and run
+# strict on purpose: a renamed or deleted gate is a usage error, and a gate that
+# skips while its CLI is installed fails the run. Credential-gated provider
+# lanes are deliberately NOT here - they need owner-supplied secrets.
+#
+# Run the provider gates whose prerequisite is an installable CLI (never skips).
+provider-gates *ARGS:
+    uv run --no-sync --frozen --no-default-groups --group tooling pytest --override-ini "addopts=--durations=10 --showlocals -ra --capture=sys" --require-prerequisite=codex-cli --require-prerequisite=claude-cli --require-prerequisite=mcp-streamable-http src/vaultspec_a2a/providers/tests/test_codex_chat_model.py::test_classify_provider_command_resolves_codex src/vaultspec_a2a/providers/tests/test_codex_chat_model.py::test_codex_readiness_ready_when_installed src/vaultspec_a2a/providers/tests/test_codex_config_home.py::TestCodexEntrypointAcceptsEmittedMcpConfig::test_codex_mcp_list_accepts_the_built_config_home src/vaultspec_a2a/providers/tests/test_acp_project_mcp.py::TestAcpEntrypointAcceptsProjectedMcpConfig::test_claude_mcp_list_accepts_the_projected_config {{ ARGS }}
+
 # Run every collected test, removing the project default marker exclusion.
 all *ARGS:
     uv run --no-sync --frozen --no-default-groups --group tooling pytest --override-ini "addopts=--durations=10 --showlocals -ra --capture=sys" {{ ARGS }}

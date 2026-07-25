@@ -82,6 +82,8 @@ if TYPE_CHECKING:
 
     from _pytest.mark.structures import ParameterSet
 
+    from ..conftest import ExternalPrerequisiteRule
+
 from ..authoring import AuthoringClient, mint_actor_token
 from ..authoring._envelope import AuthoringResponse, Denial
 from ..authoring._errors import AuthoringTransportError
@@ -1481,6 +1483,7 @@ def _reachable_stack() -> tuple[str, str, Path] | None:
 @pytest.mark.parametrize("case", [_case_param(c) for c in _ALL_CASES])
 async def test_pw7_research_adr_materializes_two_documents(
     case: AcceptanceCase,
+    external_prerequisite: ExternalPrerequisiteRule,
 ) -> None:
     """The research_adr loop materializes exactly the expected document set.
 
@@ -1500,12 +1503,7 @@ async def test_pw7_research_adr_materializes_two_documents(
         )
     stack = _reachable_stack()
     if stack is None:
-        pytest.skip(
-            "no reachable loopback stack; boot a workspace-local `vaultspec serve "
-            "--no-seat` engine plus the a2a gateway/worker with "
-            "VAULTSPEC_AUTHORING_SUBSCRIBER_ENABLED=true (runbook), then "
-            "set VAULTSPEC_ENGINE_SERVICE_JSON and select -m service"
-        )
+        external_prerequisite.absent("loopback-stack")
     engine_base_url, engine_bearer, vault_root = stack
     harness = AcceptanceHarness(
         case=case,

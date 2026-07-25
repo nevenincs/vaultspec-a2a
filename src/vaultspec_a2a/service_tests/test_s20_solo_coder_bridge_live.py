@@ -66,6 +66,7 @@ from .test_tool_cores_floor_live import (
 
 if TYPE_CHECKING:
     from ..authoring import AuthoringClient
+    from ..conftest import ExternalPrerequisiteRule
 
 _MESSAGE_FRAMES = frozenset(
     {ServerEventType.MESSAGE_CHUNK.value, ServerEventType.THOUGHT_CHUNK.value}
@@ -135,7 +136,9 @@ async def _run_changeset_ids(ec: AuthoringClient, run_id: str) -> set[str]:
 
 @pytest.mark.service
 @pytest.mark.asyncio
-async def test_solo_coder_invokes_bridged_authoring_tool_midturn() -> None:
+async def test_solo_coder_invokes_bridged_authoring_tool_midturn(
+    external_prerequisite: ExternalPrerequisiteRule,
+) -> None:
     """Live: a solo-coder natively invokes a bridged authoring tool mid-turn.
 
     Proven by an engine-side changeset scoped to this run
@@ -148,12 +151,7 @@ async def test_solo_coder_invokes_bridged_authoring_tool_midturn() -> None:
     """
     stack = _reachable_stack()
     if stack is None:
-        pytest.skip(
-            "no reachable loopback stack; boot a workspace-local `vaultspec serve "
-            "--no-seat` engine plus an a2a gateway/worker (this branch's code, "
-            "VAULTSPEC_AUTHORING_SUBSCRIBER_ENABLED=true), then set "
-            "VAULTSPEC_ENGINE_SERVICE_JSON and select -m service"
-        )
+        external_prerequisite.absent("loopback-stack")
     engine_base_url, engine_bearer, vault_root = stack
 
     feature = f"s20-solo-coder-{int(time.time())}"

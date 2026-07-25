@@ -334,7 +334,7 @@ Provide reusable real gateway worker provider and persistence infrastructure plu
 - [x] `W05.P18.S79` - Certify progress reconnection ordering bounded token deltas and forbidden-content exclusion; `tests/acceptance/test_dashboard_stream.py`.
 - [x] `W05.P18.S80` - Certify deletion interruption replay cleanup recovery and final invisibility across real stores; `tests/acceptance/test_dashboard_deletion.py`.
 - [ ] `W05.P18.S81` - Certify proposal review permission resume and terminal settlement through the public facade; `tests/acceptance/test_dashboard_proposal_review.py`.
-- [ ] `W05.P18.S82` - Certify Compose provenance mismatch fails closed without worker adoption or eviction; `src/vaultspec_a2a/service_tests/test_compose_profile_regression.py`.
+- [x] `W05.P18.S82` - Certify Compose provenance mismatch fails closed without worker adoption or eviction; `src/vaultspec_a2a/service_tests/test_compose_profile_regression.py`.
 
 ### Phase `W05.P19` - own composite certification in the dashboard
 

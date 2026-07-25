@@ -1463,3 +1463,65 @@ by their own Steps and by the post-decomposition complexity recalculation
 recorded as `complexity-recalculation-w04-p15`; they were not independently
 re-derived here. `W01.P01` and `W01.P02` were likewise not re-read, so
 `W01.P04.S15` stays open as partly discharged while `W04.P17` closes.
+
+### `W05.P18` closeout findings (2026-07-25)
+
+#### `W05.P18.S82` - already satisfied, no new work written
+
+S82 asks to certify that a Compose provenance mismatch fails closed without
+worker adoption or eviction. That is already proven by
+`test_compose_provenance_mismatch_fails_closed_without_eviction` in
+`service_tests/test_compose_profile_regression.py:481`, landed under
+`W01.P01.S157`, and it covers BOTH halves S82 names rather than only the one
+S157's wording mentions:
+
+- no adoption - `assert spawner.spawned is False`;
+- no eviction - the worker's request log contains only `GET /health`, never a
+  shutdown, and the process survives (`worker.poll() is None`).
+
+It is discriminating in both directions: its docstring records that degrading
+the provenance check to a bare health probe flips `spawned` to True, and the
+sibling `test_compose_matching_provenance_attaches` proves the refusal is
+provenance-specific rather than a harness that always fails. Closed by pointing
+at that evidence; writing a second test would have been duplication dressed as
+coverage.
+
+#### `permission-response-exists-only-on-a-surface-the-plan-removes` (high, open, blocks `W05.P18.S81`)
+
+S81 asks to certify proposal-review permission resume and terminal settlement
+"through the public facade". It cannot be done as worded, and the reason is
+structural rather than a gap in test coverage.
+
+The versioned public facade is a fixed six-member whitelist - `/v1/presets`,
+`/v1/runs` (get and post), `/v1/runs/{run_id}`, `/v1/runs/{run_id}/cancel`,
+`/v1/runs/{run_id}/stream`, `/v1/service`. None of them answers a permission
+request. The status member surfaces `approval_status` and
+`approval_request_id`, so the facade can report that a run is WAITING on a human
+decision, but offers no way to give one.
+
+The only channel that answers is `POST /api/permissions/{request_id}/respond`
+(`api/routes/permissions.py:43`), which is a legacy `/api` product route. The
+legacy event WebSocket is not a second channel: it explicitly refuses the
+command with `PERMISSION_RESPONSE_WS_FORBIDDEN` (`api/websocket.py:444,466`),
+deliberately routing callers to REST.
+
+That makes this a blocker for the campaign's own endgame, not just for S81.
+`W02.P07.S28` disables the legacy product routes in Compose and `W05.P20.S106`
+removes them outright. Executing those Steps as written deletes the sole means
+of answering a permission request, and human-in-the-loop approval - a core
+product behaviour, with a whole review-and-settlement path behind it - stops
+being reachable through any supported surface.
+
+Failure scenario: `S106` lands after the dashboard composite proves no
+dependency on the legacy routes. The composite exercises run control, which is
+fully served by `/v1`, so it passes. A run then requests permission, the
+dashboard reads `approval_status` from `/v1/runs/{run_id}` and displays the
+prompt, and there is no endpoint to POST the answer to. Every run needing a
+human decision hangs at that point.
+
+The decision this needs is the owner's, because it changes the shape of the
+public contract: either the six-member whitelist gains a permission-response
+member before `S106` removes the legacy route, or `S106` is re-scoped to retain
+that one route, or human-in-the-loop approval is declared out of scope for the
+supported surface. S81 should stay open behind whichever is chosen - certifying
+resume through a facade that cannot resume is not possible.

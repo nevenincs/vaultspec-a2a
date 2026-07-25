@@ -1202,6 +1202,53 @@ before being queued.
   after an earlier split. Under the cap and so not a violation, but it has
   consumed half the margin it was given, which is the evidence that size
   discipline erodes silently here rather than loudly.
+- `shim-sweep-analysed-at-the-wrong-granularity` (medium, methodology, closed by
+  re-run) - the sweep's first pass returned a clean negative on forbidden
+  re-export shims after inspecting `__init__.py` files and whole-module
+  candidates. That negative was wrong. It inspected `api/schemas/enums.py`,
+  quoted that module's own docstring stating five domain enums are
+  "re-exported here for backwards compatibility", and cleared it anyway on the
+  reasoning that a module also defining original symbols is not a shim. The
+  inference is the defect: a legitimate module can still carry forbidden
+  symbol-level shims, so module granularity was the wrong unit of analysis for a
+  rule written about symbols, and an explicit backwards-compatibility statement
+  should have settled it outright. Recorded because a clean negative from a
+  mis-scoped sweep is more dangerous than no sweep - it closes the question. A
+  symbol-granularity re-run (symbol imported into a module, listed in its
+  `__all__`, never referenced in its body) produced nine raw hits and five
+  genuine findings, below. The same question - is the unit of analysis the unit
+  the rule is written in - is owed to this campaign's other clean negatives.
+- `schemas-enums-symbol-shim` (medium, being actioned) - `api/schemas/enums.py`
+  re-exports five domain enums from `graph/enums.py`, lists them in `__all__`,
+  and uses none of them, creating a second import path that
+  `api/schemas/rest.py` and `api/tests/test_websocket.py` still take. The
+  canonical path already dominates. The same five lines are also absolute
+  intra-package imports, so closing the shim closes five architecture-mandate
+  violations with it.
+- `aggregator-classify-tool-kind-shim` (medium, open) - `streaming/aggregator.py`
+  re-exports `classify_tool_kind` from `streaming/types.py` without using it.
+  The live harm is present rather than hypothetical: `control/snapshot.py` takes
+  the shim path while `control/projection.py` takes the canonical one, so one
+  symbol has two import paths in the same subsystem.
+- `require-attach-alias-shim` (medium, DEFERRED - do not action during the
+  campaign) - `api/dependencies.py` aliases `authenticate_request` as
+  `require_attach`, exporting one function under two names. Mechanical in shape,
+  but it is authentication surface, `require_attach` is the credential gate on
+  the `/api` surface that is mid-deprecation, and its consumers include a route
+  module under active rewrite. Deferred deliberately: renaming an auth symbol
+  across an in-flight file is a poor trade for a naming cleanup.
+- `heartbeat-stale-ms-dead-re-export` (low, being actioned) - `lifecycle/discovery.py`
+  re-exports `HEARTBEAT_STALE_MS` from `authoring/discovery.py` with no consumer
+  on that path, so it is surplus surface rather than a live second path. The
+  surrounding delegation in the same module is deliberate and documented - the
+  freshness contract is centralised on purpose - and must not be disturbed by
+  removing the constant.
+- `compiler-vault-index-re-export` (low, open, low confidence) -
+  `graph/compiler.py` exports `build_initial_vault_index` from
+  `graph/nodes/vault_reader.py` without using it. Recorded rather than actioned:
+  `compiler.py` is the graph package's public entry point, so this may be
+  intentional package surface rather than a shim, and it entangles with the
+  deferred split in `module-size-cap-exceeded`.
 - `claim-new-directory-orphaned` (low, being actioned) - `claim_new_directory`
   in `desktop/_filesystem_authority.py` has exactly one reference in the tree:
   its own definition. Its only consumer was the capsule subsystem removed in

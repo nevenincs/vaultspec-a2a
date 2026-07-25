@@ -151,7 +151,14 @@ def _spawn_until_ready(
     attempts: int = 3,
     timeout: float = 60.0,
 ) -> tuple[subprocess.Popen[bytes], int, int, str]:
-    """Boot a gateway on a fresh port pair, retrying only the bind-race death."""
+    """Boot a gateway on a fresh port pair, retrying only the bind-race death.
+
+    Every exit that does not hand the caller a running gateway reaps the tree
+    first. Only the returned handle is owned by the caller's ``finally``; an
+    attempt abandoned here has no other owner, so failing to reap it orphans a
+    gateway - and the worker it already spawned - onto the machine, still
+    holding the worker port the next attempt is about to ask for.
+    """
     last_error: GatewayBootError | None = None
     for _ in range(attempts):
         gateway_port = _free_port()
@@ -161,8 +168,16 @@ def _spawn_until_ready(
         try:
             _await_ready(base, proc, log_path=log_path, timeout=timeout)
         except GatewayBootError as exc:
+            # The gateway process is already gone, but a worker it spawned
+            # before dying is not: it outlives its parent and keeps the port.
+            _reap(proc)
             last_error = exc
             continue
+        except BaseException:
+            # Alive but never ready - the whole tree is still running and this
+            # frame is its last owner.
+            _reap(proc)
+            raise
         return proc, gateway_port, worker_port, base
     raise AssertionError(
         f"gateway did not boot within {attempts} attempts; last: {last_error}"
@@ -388,9 +403,17 @@ def certified_gateway(
             start_new_session=os.name != "nt",
         )
 
-    proc, _gateway_port, _worker_port, base = _spawn_until_ready(
-        _spawn, log_path=log_path
-    )
+    try:
+        proc, _gateway_port, _worker_port, base = _spawn_until_ready(
+            _spawn, log_path=log_path
+        )
+    except BaseException:
+        # The boot helper has already reaped its tree; the log handle is this
+        # frame's to release, and the ``finally`` below is never reached when
+        # the boot itself raises.
+        log_handle.close()
+        raise
+
     try:
         yield CertifiedGateway(
             base_url=base, attach_token=attach_token, app_home=app_home

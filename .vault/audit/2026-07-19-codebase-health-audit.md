@@ -1202,6 +1202,55 @@ before being queued.
   after an earlier split. Under the cap and so not a violation, but it has
   consumed half the margin it was given, which is the evidence that size
   discipline erodes silently here rather than loudly.
+- `pairing-identity-disclosed-unauthenticated` (medium, fixed pre-landing) - the
+  in-progress pairing echo placed the gateway lifetime identity and the worker's
+  reported pairing evidence into the shared payload that `api/routes/health.py`
+  serves verbatim on the ungated `/health` under the Compose and development
+  profiles. The value's entire security property is that it is unguessable - the
+  armed adoption check trusts reported pairing evidence precisely because an
+  attacker cannot supply it - so publishing it anonymously destroys the property
+  the pairing work exists to create. Not exploitable as shipped, since the armed
+  profile serves only a liveness response on that route and unarmed profiles do
+  not enforce pairing, but the disclosure and the enforcement were one edit apart.
+  Caught in the authoring lane's own work before it landed and closed by making
+  the echo opt-in and default-closed, requested only by the attach-authenticated
+  service-state verb, with a boundary test asserting both halves in one
+  application so neither can pass vacuously.
+- `boot-harness-orphans-a-live-gateway-tree` (medium, fixed in both homes) - both
+  real-process boot harnesses handed the spawned process to the caller only on
+  success, so an attempt that produced a live-but-never-ready gateway had no
+  owner and no reaper: the caller's cleanup never received a handle. Each failed
+  attempt therefore stranded a gateway and the worker it had already spawned,
+  still holding the port the next attempt was about to request. The two homes -
+  the acceptance harness and the desktop test harness - carried the identical
+  defect and were fixed independently by different agents within hours, together
+  accounting for roughly twenty-six orphaned processes measured live on the
+  development host. The cascade is self-reinforcing: the orphans hold ports and
+  CPU, which times out later boots, which strands more orphans. Recorded because
+  the machine contention that obstructed this campaign's verification was in
+  significant part produced by the campaign's own test harnesses.
+- `boot-harness-protocol-duplicated` (medium, open, analysis requested) - the
+  same-defect-in-both-homes finding above has a structural cause worth its own
+  entry. The two harnesses are parallel implementations of one boot-and-retry
+  protocol - spawn, poll for readiness, retry the bind race, reap on failure,
+  tail the log - written twice in different code, which is why they drifted into
+  the same bug independently and had to be repaired twice. A byte-identical log
+  helper shared between them is the visible tip of that duplication rather than
+  its extent. Explicitly NOT a merge instruction: their failure idioms are
+  correctly divergent, since the acceptance harness raises a typed error its own
+  retry loop catches in order to reap before retrying, and a naive merge would
+  break that reap. What is owed is the analysis of which parts are genuinely one
+  protocol and what a shared core would have to preserve. Also names a sweep
+  blind spot: duplicated multi-step protocols are invisible to an axis that
+  looks only for duplicated symbols.
+- `lost-ack-proof-outside-the-default-gate` (low, open) - the durable-replay and
+  lost-acknowledgement proof demanded by the desktop plan's final step lives in a
+  package whose conftest marks every test `service`, while the project's default
+  pytest options exclude that marker. The proof therefore never executes in the
+  unit tier, so the step cannot be closed honestly on a default gate run and
+  requires the service tier to be requested explicitly. Related to
+  `service-gate-structurally-unpassable`: the same suite both excludes this proof
+  by default and cannot pass at all from this repository alone.
 - `service-gate-structurally-unpassable` (medium, open) - the canonical service
   gate cannot pass from this repository alone, and the cause is the gate rather
   than the code it guards. `test_engine_broker_lost_ack_live` hard-asserts that

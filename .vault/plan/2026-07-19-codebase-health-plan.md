@@ -31,6 +31,8 @@ related:
      - NEVER use [[wiki-links]] or markdown links in the
        document body. -->
 
+<!-- RETIRED: P19, S30, S31, S32, S83, S84, S85, S86, S88, S100, S111, S112, S113, S145, S146, S147, S148, S158, S162, S164, S165, S166, S167, S168, S169 -->
+
 # `codebase-health` plan
 
 Failure-atomic hardening and dashboard-owned product certification for the
@@ -164,28 +166,13 @@ Keep transition surfaces credential-gated and unadvertised while moving the dash
 
 - [ ] `W02.P07.S28` - Disable legacy product routes in Compose when no attach credential is configured after consuming certified desktop route authentication; `src/vaultspec_a2a/api/routes, service`.
 - [ ] `W02.P07.S29` - Remove the credential-gated legacy event WebSocket from dashboard discovery after consuming certified desktop WebSocket authentication; `src/vaultspec_a2a/lifecycle/discovery.py, src/vaultspec_a2a/api/app.py`.
-- [ ] `W02.P07.S100` - Write the dashboard-local research that grounds store engine workflow audit and release-setting changes; `../../vaultspec-dashboard-worktrees/main/.vault/research`.
-- [ ] `W02.P07.S158` - Write the dashboard-local ADR from the approved research decision boundary; `../../vaultspec-dashboard-worktrees/main/.vault/adr, ../../vaultspec-dashboard-worktrees/main/.vault/research`.
-- [ ] `W02.P07.S164` - Obtain explicit acceptance of the dashboard-local ADR; `../../vaultspec-dashboard-worktrees/main/.vault/adr`.
-- [ ] `W02.P07.S165` - Write the dashboard-local implementation plan from the accepted ADR; `../../vaultspec-dashboard-worktrees/main/.vault/plan, ../../vaultspec-dashboard-worktrees/main/.vault/adr`.
-- [ ] `W02.P07.S166` - Obtain explicit approval of the dashboard-local implementation plan before dashboard mutation; `../../vaultspec-dashboard-worktrees/main/.vault/plan`.
-- [ ] `W02.P07.S30` - Consume only the positive progress DTO in the dashboard live A2A store adapter; `../../vaultspec-dashboard-worktrees/main/frontend/src/stores/server/liveAdapters/a2aRelay.ts`.
-- [ ] `W02.P07.S31` - Expose authenticated prepare behavior through the dashboard engine run-control facade without direct worker or provider control; `../../vaultspec-dashboard-worktrees/main/engine/crates/vaultspec-api/src/routes/ops/a2a.rs`.
-- [ ] `W02.P07.S167` - Expose authenticated start behavior through the dashboard engine run-control facade without direct worker or provider control; `../../vaultspec-dashboard-worktrees/main/engine/crates/vaultspec-api/src/routes/ops/a2a.rs`.
-- [ ] `W02.P07.S168` - Expose authenticated status behavior through the dashboard engine run-control facade without direct worker or provider control; `../../vaultspec-dashboard-worktrees/main/engine/crates/vaultspec-api/src/routes/ops/a2a.rs`.
-- [ ] `W02.P07.S169` - Expose authenticated cancel behavior through the dashboard engine run-control facade without direct worker or provider control; `../../vaultspec-dashboard-worktrees/main/engine/crates/vaultspec-api/src/routes/ops/a2a.rs`.
-- [ ] `W02.P07.S32` - Prove bounded token relay through the real dashboard store and engine facade; `../../vaultspec-dashboard-worktrees/main/frontend/src/stores/server/agent, ../../vaultspec-dashboard-worktrees/main/engine/crates/vaultspec-api/tests`.
-- [ ] `W02.P07.S111` - Expose authenticated progress behavior through the dashboard engine stream facade without direct worker or provider control; `../../vaultspec-dashboard-worktrees/main/engine/crates/vaultspec-api/src/routes/ops/a2a_stream.rs`.
-- [ ] `W02.P07.S112` - Prove progress reconnection through the real dashboard store and engine facade; `../../vaultspec-dashboard-worktrees/main/frontend/src/stores/server/agent, ../../vaultspec-dashboard-worktrees/main/engine/crates/vaultspec-api/tests`.
-- [ ] `W02.P07.S113` - Prove forbidden-content exclusion through the real dashboard store and engine facade; `../../vaultspec-dashboard-worktrees/main/frontend/src/stores/server/agent, ../../vaultspec-dashboard-worktrees/main/engine/crates/vaultspec-api/tests`.
-- [ ] `W02.P07.S162` - Prove forbidden fields cannot reach a real dashboard consumer; `../../vaultspec-dashboard-worktrees/main/frontend/src/stores/server/agent, ../../vaultspec-dashboard-worktrees/main/engine/crates/vaultspec-api/tests`.
 
 ### Phase `W02.P08` - review and queue edge findings
 
 Review the two-repository edge implementation and preserve all residual contract or security findings.
 
-- [ ] `W02.P08.S33` - Run the formal architecture security resource-bound and quality review for Wave W02 in both repositories; `.vault/audit, .vault/exec, ../../vaultspec-dashboard-worktrees/main/.vault/audit`.
-- [ ] `W02.P08.S34` - Classify every Wave W02 review finding and append unresolved work to the owning audit queue; `.vault/audit/2026-07-19-codebase-health-audit.md, ../../vaultspec-dashboard-worktrees/main/.vault/audit`.
+- [ ] `W02.P08.S33` - Run the formal architecture security resource-bound and quality review for Wave W02; `.vault/audit, .vault/exec`.
+- [ ] `W02.P08.S34` - Classify every Wave W02 review finding and append unresolved work to the audit queue; `.vault/audit/2026-07-19-codebase-health-audit.md`.
 
 ## Wave `W03` - contain provider and protocol failures
 
@@ -336,39 +323,25 @@ Provide reusable real gateway worker provider and persistence infrastructure plu
 - [ ] `W05.P18.S81` - Certify proposal review permission resume and terminal settlement through the public facade; `tests/acceptance/test_dashboard_proposal_review.py`.
 - [x] `W05.P18.S82` - Certify Compose provenance mismatch fails closed without worker adoption or eviction; `src/vaultspec_a2a/service_tests/test_compose_profile_regression.py`.
 
-### Phase `W05.P19` - own composite certification in the dashboard
-
-Replace synthetic happy-path coverage with the real A2A fixture and make the assembling repository enforce the combined contract.
-
-- [ ] `W05.P19.S83` - Replace the dashboard engine synthetic resident happy path with the real A2A certification fixture; `../../vaultspec-dashboard-worktrees/main/engine/crates/vaultspec-api/src/routes/ops/a2a.rs, ../../vaultspec-dashboard-worktrees/main/engine/crates/vaultspec-api/tests`.
-- [ ] `W05.P19.S84` - Add the dashboard store live happy-path test against the authenticated engine and A2A stack; `../../vaultspec-dashboard-worktrees/main/frontend/src/stores/server/agent/a2aTeam.live.test.ts`.
-- [ ] `W05.P19.S85` - Create the dashboard-owned `a2a-composite-certification` job for engine, gateway, worker, provider, streaming, deletion recovery, and proposal review; `../../vaultspec-dashboard-worktrees/main/.github/workflows/a2a-composite-certification.yml`.
-- [ ] `W05.P19.S86` - Make `a2a-composite-certification` a required dashboard release check with bounded logs, artifacts, and timeouts; `../../vaultspec-dashboard-worktrees/main/.github/workflows/a2a-composite-certification.yml, ../../vaultspec-dashboard-worktrees/main/.vault/plan`.
-
 ### Phase `W05.P20` - run release evidence
 
 Execute both repositories' canonical gates and prove the versioned contract cannot silently drift.
 
-- [ ] `W05.P20.S147` - Run the pre-removal dashboard-owned a2a-composite-certification workflow; `../../vaultspec-dashboard-worktrees/main/.github/workflows/a2a-composite-certification.yml, ../../vaultspec-dashboard-worktrees/main/.vault/plan`.
-- [ ] `W05.P20.S106` - Remove the legacy product routes after the pre-removal dashboard composite proves no dependency; `src/vaultspec_a2a/api/routes, ../../vaultspec-dashboard-worktrees/main/frontend, ../../vaultspec-dashboard-worktrees/main/engine`.
-- [ ] `W05.P20.S163` - Remove the legacy event WebSocket after the pre-removal dashboard composite proves no dependency; `src/vaultspec_a2a/api/app.py, ../../vaultspec-dashboard-worktrees/main/frontend, ../../vaultspec-dashboard-worktrees/main/engine`.
+- [ ] `W05.P20.S106` - Remove the legacy product routes once no supported consumer depends on them; `src/vaultspec_a2a/api/routes`.
+- [ ] `W05.P20.S163` - Remove the legacy event WebSocket once no supported consumer depends on it; `src/vaultspec_a2a/api/app.py`.
 - [x] `W05.P20.S87` - Run the canonical A2A code-quality gate with just dev code check; `Justfile, just/dev/code.just, src, tests`.
-- [ ] `W05.P20.S88` - Run the dashboard full touched-language lint gate with just dev lint all; `../../vaultspec-dashboard-worktrees/main/just, ../../vaultspec-dashboard-worktrees/main/frontend, ../../vaultspec-dashboard-worktrees/main/engine`.
-- [ ] `W05.P20.S89` - Fail certification on positive-schema fingerprint authentication or capability drift between the two repositories; `schemas, tests/acceptance, ../../vaultspec-dashboard-worktrees/main/engine, ../../vaultspec-dashboard-worktrees/main/frontend`.
+- [ ] `W05.P20.S89` - Fail certification on positive-schema fingerprint authentication or capability drift; `schemas, tests/acceptance`.
 - [x] `W05.P20.S141` - Run the canonical A2A dependency gate with just dev deps check; `Justfile, just/dev/deps.just, pyproject.toml, uv.lock`.
 - [x] `W05.P20.S142` - Run the canonical A2A unit gate with just dev test unit; `Justfile, just/dev/test.just, src, tests`.
 - [ ] `W05.P20.S143` - Run the canonical A2A service gate with just dev test service; `Justfile, just/dev/test.just, src/vaultspec_a2a/service_tests`.
 - [x] `W05.P20.S144` - Run the A2A real-process acceptance suites with uv run --no-sync pytest tests/acceptance src/vaultspec_a2a/desktop_tests src/vaultspec_a2a/service_tests -ra; `tests/acceptance, src/vaultspec_a2a/desktop_tests, src/vaultspec_a2a/service_tests`.
-- [ ] `W05.P20.S145` - Run the dashboard frontend gate with just dev test frontend; `../../vaultspec-dashboard-worktrees/main/frontend, ../../vaultspec-dashboard-worktrees/main/just`.
-- [ ] `W05.P20.S146` - Run the dashboard Rust gate with just dev test rust; `../../vaultspec-dashboard-worktrees/main/engine, ../../vaultspec-dashboard-worktrees/main/just`.
-- [ ] `W05.P20.S148` - Rerun the dashboard-owned a2a-composite-certification workflow after legacy-surface removal; `../../vaultspec-dashboard-worktrees/main/.github/workflows/a2a-composite-certification.yml, ../../vaultspec-dashboard-worktrees/main/.vault/plan`.
 
 ### Phase `W05.P21` - review and close the rolling audit cycle
 
 Perform the final cross-repository review, classify every residual, and close only findings supported by implementation and release evidence.
 
-- [ ] `W05.P21.S90` - Run the final formal architecture security resource-bound compatibility and quality review across both repositories; `.vault/audit, .vault/exec, ../../vaultspec-dashboard-worktrees/main/.vault/audit`.
-- [ ] `W05.P21.S91` - Classify every final review finding and append unresolved items to the correct repository audit queue; `.vault/audit/2026-07-19-codebase-health-audit.md, ../../vaultspec-dashboard-worktrees/main/.vault/audit`.
+- [ ] `W05.P21.S90` - Run the final formal architecture security resource-bound compatibility and quality review; `.vault/audit, .vault/exec`.
+- [ ] `W05.P21.S91` - Classify every final review finding and append unresolved items to the audit queue; `.vault/audit/2026-07-19-codebase-health-audit.md`.
 - [ ] `W05.P21.S92` - Reconcile the audit research ADR plan execution records and feature index against the final evidence; `.vault/audit, .vault/research, .vault/adr, .vault/plan, .vault/exec, .vault/index`.
 
 ## Parallelization
@@ -379,11 +352,7 @@ Waves are hard-ordered from W01 through W05. `W01.P01` must close before
 
 `W02.P05` and `W02.P06` may run in parallel only after desktop-product-profile
 `W03.P07.S32`, `W03.P08.S36` through `W03.P08.S46`, `W03.P09.S47` through
-`W03.P09.S51`, and `W04.P12.S63` through `W04.P12.S70` close. The dashboard
-lifecycle sequence `W02.P07.S100`, `W02.P07.S158`, and `W02.P07.S164` through
-`W02.P07.S166` must close in order before `W02.P07.S30`, `W02.P07.S31`,
-`W02.P07.S32`, `W02.P07.S111` through `W02.P07.S113`, `W02.P07.S162`, or
-`W02.P07.S167` through `W02.P07.S169` changes dashboard state. `W02.P08` runs
+`W03.P09.S51`, and `W04.P12.S63` through `W04.P12.S70` close. `W02.P08` runs
 after `W02.P05`, `W02.P06`, and `W02.P07`.
 
 `W03.P09` and `W03.P10` may run in parallel only after
@@ -398,16 +367,13 @@ their modules have no unreviewed W02 or W03 changes.
 writers; `W04.P17` runs last.
 
 `W05.P18.S77` precedes the remaining `W05.P18` scenarios, which may then run in
-parallel. `W05.P19` starts after every `W05.P18` scenario passes.
-`W05.P20.S147` proves dashboard non-dependency before `W05.P20.S106` and
-`W05.P20.S163` remove legacy surfaces. `W05.P20.S148` reruns certification
-after both removals.
-`W05.P20` completes before `W05.P21` begins.
+parallel. `W05.P20` runs after every `W05.P18` scenario passes, and completes
+before `W05.P21` begins.
 
 ## Verification
 
 - `uv run --no-sync vaultspec-core vault plan check
-  .vault/plan/2026-07-19-codebase-health-plan.md` returns zero with all 176
+  .vault/plan/2026-07-19-codebase-health-plan.md` returns zero with all 152
   canonical steps present. Its sole PLAN022 warning must continue to describe
   the reviewed CLI append-only insertions. `uv run --no-sync vaultspec-core
   vault check all -f codebase-health --no-hints` passes.
@@ -454,11 +420,5 @@ after both removals.
   `just dev test service` pass in the A2A repository. `uv run --no-sync pytest
   tests/acceptance src/vaultspec_a2a/desktop_tests
   src/vaultspec_a2a/service_tests -ra` passes.
-- `just dev lint all`, `just dev test frontend`, and `just dev test rust` pass
-  from `../../vaultspec-dashboard-worktrees/main`.
-- The dashboard `a2a-composite-certification` workflow passes before and after
-  legacy removal and is a required release check. Its evidence covers the
-  authenticated engine, gateway, worker, provider, streaming, reconnection,
-  deletion-recovery, and proposal-review path.
 - The final audit, ADR, research, plan, execution records, and feature index
-  agree on what closed, what remains queued, and which repository owns it.
+  agree on what closed and what remains queued.

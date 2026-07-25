@@ -1618,3 +1618,48 @@ endpoint - noise on a security-relevant surface, for no gain.
 Parallel agents in a shared worktree need the same discipline already recorded
 for staging: verify `git status` before every commit, and treat an unexpected
 production diff as a stop condition rather than something to commit around.
+
+### `W01.P01.S02` and `W05.P20.S142` (2026-07-25)
+
+`S142` `just dev test unit` - PASS, 2604 passed, 111 deselected, in 17m15s.
+
+An earlier run of the same gate reported 2602 passed and was DISCARDED rather
+than counted. It overlapped the pairing mutation experiment, and the suite
+spawns real subprocesses that re-read `worker/app.py` from disk, so a
+mid-flight edit could have reached tests collected after it. A certification
+gate whose inputs changed under it certifies nothing; it was re-run against a
+pristine tree with no agents active. The two extra tests are `S02`'s.
+
+`S02` - closed by `35cfe5a6`. The certification proves the prerequisites hold
+and, more importantly, proves the limit the Step's wording insists on: that
+holding them is not evidence of pairing identity. It does so with a REAL second
+production worker started outside any gateway spawn, holding the very same
+gateway-minted IPC credential over the same application home - a genuine worker
+rather than an adversary stand-in - and separates three things that are easy to
+conflate:
+
+- the credential does not identify: the stranger answers the authenticated probe
+  200 and refuses the unauthenticated one 401, exactly as the gateway's own
+  worker does;
+- the addressing does not identify: both report a byte-identical declared
+  `gateway_url`, so the legacy declared-target comparison cannot separate them;
+- only reported pairing evidence identifies.
+
+Verified discriminating rather than assumed: with the worker's pairing defaults
+mutated to a non-blank value, the test FAILS.
+
+#### `s02-docstring-overstates-the-mutation-consequence` (info)
+
+The test's docstring says that defaulting the pairing evidence to anything
+non-blank makes the stranger's verdict "flip to an adoptable verdict". It does
+not. `classify_worker_pairing` sends blank evidence to `UNIDENTIFIED` and any
+non-matching value to `FOREIGN`, and `_spawn_worker` refuses both identically -
+no adoption, no eviction. The mutation degrades the QUALITY of the evidence, not
+the security outcome.
+
+The test is still correct and still discriminating; it fails because it asserts
+the specific verdict `UNIDENTIFIED`, which is the right thing to assert. Only
+the stated rationale overreaches. Recorded because a future reader who trusts
+that sentence would conclude the mutation is exploitable, and it is not - the
+only value that classifies as `OWNED` remains the gateway's own `uuid4`
+lifetime, which a process it never spawned cannot learn.

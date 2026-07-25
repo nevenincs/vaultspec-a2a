@@ -11,10 +11,9 @@ from datetime import datetime
 from pydantic import BaseModel, Field, field_validator
 
 from ...context.metadata import ThreadMetadata
-from ...graph.enums import Model, Provider
+from ...graph.enums import AgentLifecycleState, Model, PermissionOptionKind, Provider
 from ...thread.actor_tokens import ActorTokenBundle
 from ...thread.enums import PermissionRequestStatus, ThreadStatus
-from .enums import AgentLifecycleState, PermissionOptionKind
 
 __all__ = [
     "AgentStatusEntry",

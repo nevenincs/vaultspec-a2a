@@ -1,12 +1,12 @@
 """Wire-protocol enums for the frontend-backend contract.
 
-Domain enums (``ToolKind``, ``PermissionType``, ``PermissionOptionKind``,
-``ToolCallStatus``, ``AgentLifecycleState``) are defined in
-``vaultspec_a2a.graph.enums`` and re-exported here for backwards compatibility.
-
 API-only enums (``ServerEventType``, ``ClientCommandType``,
 ``AgentControlAction``, ``PlanEntryStatus``, ``PlanEntryPriority``) remain
 local — they are wire-protocol concerns, not domain concepts.
+
+Domain enums (``ToolKind``, ``PermissionType``, ``PermissionOptionKind``,
+``ToolCallStatus``, ``AgentLifecycleState``) are defined in
+``vaultspec_a2a.graph.enums``; import them from there directly.
 
 Note: ``Provider`` and ``Model`` live in ``vaultspec_a2a.utils.enums`` and are
 imported (not duplicated) where needed.
@@ -14,23 +14,12 @@ imported (not duplicated) where needed.
 
 from enum import StrEnum
 
-from vaultspec_a2a.graph.enums import AgentLifecycleState as AgentLifecycleState
-from vaultspec_a2a.graph.enums import PermissionOptionKind as PermissionOptionKind
-from vaultspec_a2a.graph.enums import PermissionType as PermissionType
-from vaultspec_a2a.graph.enums import ToolCallStatus as ToolCallStatus
-from vaultspec_a2a.graph.enums import ToolKind as ToolKind
-
 __all__ = [
     "AgentControlAction",
-    "AgentLifecycleState",
     "ClientCommandType",
-    "PermissionOptionKind",
-    "PermissionType",
     "PlanEntryPriority",
     "PlanEntryStatus",
     "ServerEventType",
-    "ToolCallStatus",
-    "ToolKind",
 ]
 
 

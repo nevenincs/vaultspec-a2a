@@ -14,10 +14,11 @@ from starlette.testclient import TestClient
 from starlette.websockets import WebSocket
 
 from ...control.config import settings
+from ...graph.enums import AgentLifecycleState
 from ...streaming.aggregator import EventAggregator
 from ...utils import package_version
 from .. import websocket as websocket_module
-from ..schemas.enums import AgentControlAction, AgentLifecycleState, ServerEventType
+from ..schemas.enums import AgentControlAction, ServerEventType
 from ..websocket import ConnectionManager, WebSocketCommandRejectedError
 from ..websocket import ConnectionManager as WebSocketConnectionManager
 

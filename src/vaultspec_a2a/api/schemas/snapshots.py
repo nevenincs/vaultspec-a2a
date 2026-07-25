@@ -9,14 +9,15 @@ from datetime import datetime
 
 from pydantic import BaseModel, Field
 
-from ...graph.enums import Model, Provider
-from ...thread.enums import ThreadStatus
-from .enums import (
+from ...graph.enums import (
     AgentLifecycleState,
+    Model,
     PermissionOptionKind,
+    Provider,
     ToolCallStatus,
     ToolKind,
 )
+from ...thread.enums import ThreadStatus
 from .events import PlanEntry, ToolCallContent, ToolCallLocation
 
 __all__ = [

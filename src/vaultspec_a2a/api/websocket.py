@@ -22,6 +22,7 @@ from pydantic import TypeAdapter, ValidationError
 from starlette.websockets import WebSocket, WebSocketDisconnect, WebSocketState
 
 from ..control.config import settings
+from ..graph.enums import AgentLifecycleState
 from ..streaming.aggregator import EventAggregator, SequencedEvent
 from ..streaming.fanout import deliver_bounded
 from ..telemetry.instrumentation import get_meter, get_tracer
@@ -38,11 +39,7 @@ from .schemas.commands import (
     SubscribeCommand,
     UnsubscribeCommand,
 )
-from .schemas.enums import (
-    AgentControlAction,
-    AgentLifecycleState,
-    ClientCommandType,
-)
+from .schemas.enums import AgentControlAction, ClientCommandType
 from .schemas.events import ConnectedEvent, ErrorEvent, HeartbeatEvent
 
 logger = logging.getLogger(__name__)

@@ -10,16 +10,17 @@ from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, Field
 
-from ...graph.enums import Model, Provider
-from ...thread.models import PlanEntry
-from .base import EventEnvelope
-from .enums import (
+from ...graph.enums import (
     AgentLifecycleState,
+    Model,
     PermissionOptionKind,
-    ServerEventType,
+    Provider,
     ToolCallStatus,
     ToolKind,
 )
+from ...thread.models import PlanEntry
+from .base import EventEnvelope
+from .enums import ServerEventType
 
 __all__ = [
     # Event models

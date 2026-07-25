@@ -11,6 +11,11 @@ sub-modules directly::
     )
 """
 
+from ...graph.enums import AgentLifecycleState as AgentLifecycleState
+from ...graph.enums import PermissionOptionKind as PermissionOptionKind
+from ...graph.enums import PermissionType as PermissionType
+from ...graph.enums import ToolCallStatus as ToolCallStatus
+from ...graph.enums import ToolKind as ToolKind
 from .base import ClientCommand as ClientCommand
 from .base import EventEnvelope as EventEnvelope
 from .commands import AgentControlCommand as AgentControlCommand
@@ -21,15 +26,10 @@ from .commands import SendMessageCommand as SendMessageCommand
 from .commands import SubscribeCommand as SubscribeCommand
 from .commands import UnsubscribeCommand as UnsubscribeCommand
 from .enums import AgentControlAction as AgentControlAction
-from .enums import AgentLifecycleState as AgentLifecycleState
 from .enums import ClientCommandType as ClientCommandType
-from .enums import PermissionOptionKind as PermissionOptionKind
-from .enums import PermissionType as PermissionType
 from .enums import PlanEntryPriority as PlanEntryPriority
 from .enums import PlanEntryStatus as PlanEntryStatus
 from .enums import ServerEventType as ServerEventType
-from .enums import ToolCallStatus as ToolCallStatus
-from .enums import ToolKind as ToolKind
 from .events import AgentStatusEvent as AgentStatusEvent
 from .events import AgentSummary as AgentSummary
 from .events import ArtifactUpdateEvent as ArtifactUpdateEvent

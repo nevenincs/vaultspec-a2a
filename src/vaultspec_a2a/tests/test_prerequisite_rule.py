@@ -100,3 +100,48 @@ def test_absent_cross_repo_engine_skips_instead_of_failing() -> None:
     assert result.returncode == 0, combined
     assert "1 skipped" in combined, combined
     assert "VAULTSPEC_ENGINE_SERVE_CMD" in combined, combined
+
+
+def test_a_gate_that_skips_despite_its_declaration_fails_the_session(
+    tmp_path: Path,
+) -> None:
+    """The second net: a suite whose own gate disagrees with the probe.
+
+    Configure-time probing catches a prerequisite that is simply missing. It
+    cannot catch a suite that skips anyway - a stale import-time PATH lookup, a
+    gate keyed on something narrower than the probe. That drift is exactly what
+    silently emptied the provider suite in CI, so the session-end rule fails the
+    run on it. Reproduced against a real skip in a real nested session: the rule
+    loads as a plugin outside this repository, where nothing else can explain
+    the outcome.
+    """
+    target = tmp_path / "test_gate_that_skips.py"
+    target.write_text(
+        "import pytest\n\n\n"
+        "def test_gate() -> None:\n"
+        '    pytest.skip("codex CLI not on PATH")\n',
+        encoding="utf-8",
+    )
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "pytest",
+            "-p",
+            "vaultspec_a2a.conftest",
+            "--require-prerequisite=codex-cli",
+            "-ra",
+            str(target),
+        ],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        timeout=300,
+        check=False,
+    )
+    combined = result.stdout + result.stderr
+    # Nothing failed, and yet the session must not report success.
+    assert "1 skipped" in combined, combined
+    assert result.returncode != 0, combined
+    assert "declared prerequisites that did not run" in combined, combined
+    assert "codex-cli" in combined, combined

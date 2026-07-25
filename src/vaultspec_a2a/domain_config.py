@@ -66,6 +66,21 @@ class DomainConfig(BaseModel):
             "default."
         ),
     )
+    max_stream_connections: int = Field(
+        default=256,
+        alias="VAULTSPEC_MAX_STREAM_CONNECTIONS",
+        description=(
+            "Maximum concurrent progress-stream subscribers this gateway admits. "
+            "Each holds a bounded queue and a delivery path, so an unbounded "
+            "count is a resource-exhaustion surface even for an authenticated "
+            "caller. Zero disables the limit, which is a deliberate operator "
+            "choice rather than the default. Declared here rather than beside "
+            "the infrastructure fields because the subscriber registry that this "
+            "bounds lives in the domain layer and must enforce it directly; "
+            "``Settings`` inherits the field, so the operator-facing name and the "
+            "value both stay single-sourced."
+        ),
+    )
     aget_state_timeout_seconds: float = Field(
         default=10.0,
         description="Aggregator: timeout (seconds) for checkpointer aget_state calls.",

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import time
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
@@ -17,6 +18,7 @@ from ...database.thread_repository import get_thread
 from ...streaming.aggregator import EventAggregator, SequencedEvent
 from ...streaming.sse_frames import encode_sse_frame
 from ...thread.enums import TERMINAL_STATUSES
+from ...thread.errors import EventAggregatorError
 from ..dependencies import get_aggregator
 from ..event_adapter import sequenced_to_positive_payload
 from ..schemas.events import HeartbeatEvent
@@ -25,6 +27,8 @@ if TYPE_CHECKING:
     from collections.abc import AsyncIterator
 
     from sqlalchemy.ext.asyncio import AsyncSession
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -51,7 +55,37 @@ async def _stream_thread_events(
 ) -> AsyncIterator[bytes]:
     """Yield thread-scoped events from the shared subscriber queue as SSE."""
     client_id = f"sse-{uuid4()}"
-    queue = aggregator.add_subscriber(client_id)
+    try:
+        queue = aggregator.add_subscriber(client_id)
+    except EventAggregatorError:
+        # The route refuses at capacity before the thread lookup, but that check
+        # and this registration are separated by the response-start boundary:
+        # this generator does not run until the client begins reading the body.
+        # Other callers - including the event WebSocket, which shares the same
+        # subscriber registry - can take the last slot in between. So the
+        # registry's own refusal is authoritative, and the caller learns of it as
+        # a terminal frame rather than a connection that dies mid-response.
+        logger.warning(
+            "Refused SSE stream for thread %s: subscriber registry at capacity",
+            thread_id,
+            extra={
+                "client_id": client_id,
+                "thread_id": thread_id,
+                "action": "stream_refused",
+            },
+        )
+        yield encode_sse_frame(
+            {
+                "type": "stream_rejected",
+                "event_type": "stream_rejected",
+                "thread_id": thread_id,
+                "reason": "stream_limit_exceeded",
+            },
+            event="stream_rejected",
+            thread_id=thread_id,
+        )
+        return
+
     aggregator.subscribe(client_id, [thread_id])
     start_time = time.monotonic()
 
@@ -130,6 +164,11 @@ async def build_thread_stream_response(
     # process-local state rather than after a database round trip that the same
     # flood would also multiply. It says nothing about the request's identity or
     # its target - only that this process is already at capacity.
+    #
+    # This is the cheap early refusal, not the bound itself: registration happens
+    # once the response body starts, and the subscriber registry is shared with
+    # the event WebSocket. The registry enforces the same limit at the moment of
+    # registration, which is where it actually holds.
     limit = settings.max_stream_connections
     if limit > 0 and aggregator.subscriber_count() >= limit:
         raise HTTPException(

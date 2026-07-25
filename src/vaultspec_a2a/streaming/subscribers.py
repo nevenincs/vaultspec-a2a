@@ -44,7 +44,49 @@ class SubscriberManager:
     # ------------------------------------------------------------------
 
     def add_subscriber(self, client_id: str) -> asyncio.Queue[SequencedEvent]:
-        """Register a new subscriber and return its bounded event queue."""
+        """Register a new subscriber and return its bounded event queue.
+
+        Refuses once the registry is at its global capacity. Each subscriber owns
+        a bounded queue and a delivery path, so the count is a resource an
+        authenticated caller can demand without limit unless something says no.
+
+        Enforced here, at the domain seam, rather than only at the route that
+        happens to have asked first. The registry is shared: the SSE stream route
+        and the event WebSocket both register against it, so a bound checked in
+        one route is not a bound - the other path admits subscribers the check
+        never sees. The route keeps its own cheap pre-check because refusing
+        before a database round trip is worth doing; this is where the limit is
+        actually true.
+
+        Re-registering an existing ``client_id`` replaces that client's queue
+        rather than growing the registry, so it is never refused - the same
+        reasoning as the idempotent re-subscribe in :meth:`subscribe`.
+        """
+        limit = domain_config.max_stream_connections
+        if (
+            limit > 0
+            and client_id not in self._subscribers
+            and len(self._subscribers) >= limit
+        ):
+            self._telemetry.increment_counter(
+                "aggregator.subscribers_refused", 1, **{"client_id": client_id}
+            )
+            logger.warning(
+                "Refused subscriber %s: %d registered meets cap %d",
+                client_id,
+                len(self._subscribers),
+                limit,
+                extra={
+                    "client_id": client_id,
+                    "action": "subscriber_refused",
+                    "registered": len(self._subscribers),
+                    "limit": limit,
+                },
+            )
+            raise EventAggregatorError(
+                f"Gateway holds {len(self._subscribers)} stream subscribers, "
+                f"meeting the global limit of {limit}"
+            )
         queue: asyncio.Queue[SequencedEvent] = asyncio.Queue(
             maxsize=domain_config.event_queue_maxsize
         )

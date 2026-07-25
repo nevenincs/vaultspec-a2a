@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -36,7 +35,6 @@ __all__ = [
     "_coerce_permission_request_status",
     "_coerce_repair_status",
     "_coerce_status",
-    "_utcnow",
     "save_model",
 ]
 
@@ -57,10 +55,6 @@ async def save_model[
     session.add(model)
     await session.flush()
     return model
-
-
-def _utcnow() -> datetime:
-    return datetime.now(UTC)
 
 
 class _UnsetType:

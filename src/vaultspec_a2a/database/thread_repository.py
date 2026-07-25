@@ -36,10 +36,9 @@ from ._helpers import (
     _coerce_repair_status,
     _coerce_status,
     _UnsetType,
-    _utcnow,
     save_model,
 )
-from .models import ThreadExecutionStateModel, ThreadModel
+from .models import ThreadExecutionStateModel, ThreadModel, _utcnow
 
 __all__ = [
     "ActiveThreadProjection",

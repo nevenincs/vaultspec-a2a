@@ -24,10 +24,9 @@ from ._helpers import (
     _coerce_control_action_type,
     _coerce_control_result,
     _coerce_permission_request_status,
-    _utcnow,
     save_model,
 )
-from .models import ControlActionModel, PermissionRequestModel
+from .models import ControlActionModel, PermissionRequestModel, _utcnow
 
 __all__ = [
     "create_control_action",

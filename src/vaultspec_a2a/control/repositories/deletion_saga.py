@@ -451,10 +451,10 @@ async def claim_deletion_saga(
     item - would drop that item permanently, leaving a manifest that can never
     settle and a thread that can never finalize.
 
-    The claim is leased rather than permanent. A pass killed mid-teardown would
-    otherwise hold the saga for the life of the deployment, which is the same
-    wedge exclusion exists to prevent; after :data:`_CLAIM_LEASE` the saga is
-    claimable again and the next delete request resumes it.
+    Exclusion is bounded so it cannot become its own wedge. A pass that ends
+    without finalizing releases the claim there, so an ordinary retry resumes
+    immediately; :data:`_CLAIM_LEASE` covers only a pass killed before it could
+    release, which would otherwise hold the saga for the life of the deployment.
     """
     now = _now()
     claim = await session.execute(

@@ -7,6 +7,7 @@ date: '2026-07-25'
 modified: '2026-07-25'
 related:
   - '[[2026-07-19-codebase-health-W01-P01-S01]]'
+  - '[[2026-07-19-codebase-health-W01-P01-S02]]'
   - '[[2026-07-19-codebase-health-W01-P01-S03]]'
   - '[[2026-07-19-codebase-health-W01-P01-S153]]'
   - '[[2026-07-19-codebase-health-W01-P01-S154]]'
@@ -27,6 +28,8 @@ related:
   - '[[2026-07-19-codebase-health-W01-P03-S12]]'
   - '[[2026-07-19-codebase-health-W01-P03-S13]]'
   - '[[2026-07-19-codebase-health-W01-P03-S14]]'
+  - '[[2026-07-19-codebase-health-W01-P04-S15]]'
+  - '[[2026-07-19-codebase-health-W01-P04-S16]]'
   - '[[2026-07-19-codebase-health-W02-P05-S17]]'
   - '[[2026-07-19-codebase-health-W02-P05-S18]]'
   - '[[2026-07-19-codebase-health-W02-P05-S19]]'
@@ -79,6 +82,19 @@ related:
   - '[[2026-07-19-codebase-health-W04-P16-S73]]'
   - '[[2026-07-19-codebase-health-W04-P17-S75]]'
   - '[[2026-07-19-codebase-health-W04-P17-S76]]'
+  - '[[2026-07-19-codebase-health-W05-P18-S170]]'
+  - '[[2026-07-19-codebase-health-W05-P18-S171]]'
+  - '[[2026-07-19-codebase-health-W05-P18-S172]]'
+  - '[[2026-07-19-codebase-health-W05-P18-S173]]'
+  - '[[2026-07-19-codebase-health-W05-P18-S77]]'
+  - '[[2026-07-19-codebase-health-W05-P18-S78]]'
+  - '[[2026-07-19-codebase-health-W05-P18-S79]]'
+  - '[[2026-07-19-codebase-health-W05-P18-S80]]'
+  - '[[2026-07-19-codebase-health-W05-P18-S82]]'
+  - '[[2026-07-19-codebase-health-W05-P20-S141]]'
+  - '[[2026-07-19-codebase-health-W05-P20-S142]]'
+  - '[[2026-07-19-codebase-health-W05-P20-S144]]'
+  - '[[2026-07-19-codebase-health-W05-P20-S87]]'
   - '[[2026-07-19-codebase-health-adr]]'
   - '[[2026-07-19-codebase-health-audit]]'
   - '[[2026-07-19-codebase-health-plan]]'
@@ -163,6 +179,7 @@ Auto-generated index of all documents tagged with `#codebase-health`.
 - `2026-07-19-codebase-health-W01-P01-S155` - Prove unauthenticated legacy readiness never authorizes adoption with real processes
 - `2026-07-19-codebase-health-W01-P01-S95` - Prove authenticated two-gateway one-worker pairing with real processes
 - `2026-07-19-codebase-health-W01-P02-S06` - Verify the landed desktop owned-tree implementation reaps the complete worker tree on startup readiness timeout
+- `2026-07-19-codebase-health-W01-P01-S02` - Certify the landed desktop singleton credential and owned-process prerequisites without treating them as proof of worker pairing identity
 - `2026-07-19-codebase-health-W01-P01-S156` - Prove failed owner-authorized eviction returns conflict without adoption with real processes
 - `2026-07-19-codebase-health-W01-P01-S157` - Prove Compose provenance mismatch fails closed without eviction with real processes
 - `2026-07-19-codebase-health-W01-P03-S08` - Add deleting state cleanup-manifest and cleanup-result persistence to the control schema
@@ -175,6 +192,8 @@ Auto-generated index of all documents tagged with `#codebase-health`.
 - `2026-07-19-codebase-health-W01-P03-S12` - Run checkpoint and artifact cleanup independently so one failure cannot skip later cleanup items
 - `2026-07-19-codebase-health-W01-P03-S13` - Resume the same deletion saga when the delete endpoint receives a replayed request
 - `2026-07-19-codebase-health-W01-P03-S14` - Prove deletion retries crash recovery hidden-state behavior and finalization against real control and checkpoint stores
+- `2026-07-19-codebase-health-W01-P04-S15` - Run the formal safety intent and quality review for Wave W01 against the implemented diff and real tests
+- `2026-07-19-codebase-health-W01-P04-S16` - Classify every Wave W01 review finding and append unresolved work to the codebase-health audit queue
 - `2026-07-19-codebase-health-W02-P06-S159` - Prove bounded token deltas with a real authenticated stream client
 - `2026-07-19-codebase-health-W02-P06-S23` - Transform gateway events through the positive DTO while excluding prompts documents artifacts edit diffs and raw provider payloads
 - `2026-07-19-codebase-health-W02-P06-S27` - Prove progress allowlisting with a real authenticated stream client
@@ -182,6 +201,19 @@ Auto-generated index of all documents tagged with `#codebase-health`.
 - `2026-07-19-codebase-health-W02-P06-S99` - Prove forbidden fields cannot cross the encoded A2A SSE boundary
 - `2026-07-19-codebase-health-W04-P17-S75` - Run the formal intent compatibility quality and documentation review for Wave W04
 - `2026-07-19-codebase-health-W04-P17-S76` - Classify every Wave W04 review finding and append unresolved work to the codebase-health audit queue
+- `2026-07-19-codebase-health-W05-P18-S170` - Certify authenticated start behavior through the supported public surface
+- `2026-07-19-codebase-health-W05-P18-S171` - Certify authenticated status behavior through the supported public surface
+- `2026-07-19-codebase-health-W05-P18-S172` - Certify authenticated cancel behavior through the supported public surface
+- `2026-07-19-codebase-health-W05-P18-S173` - Certify authenticated progress behavior through the supported public surface
+- `2026-07-19-codebase-health-W05-P18-S77` - Build a deterministic real-process fixture that launches an authenticated gateway worker provider and real persistence stores
+- `2026-07-19-codebase-health-W05-P18-S78` - Certify authenticated prepare behavior through the supported public surface
+- `2026-07-19-codebase-health-W05-P18-S79` - Certify progress reconnection ordering bounded token deltas and forbidden-content exclusion
+- `2026-07-19-codebase-health-W05-P18-S80` - Certify deletion interruption replay cleanup recovery and final invisibility across real stores
+- `2026-07-19-codebase-health-W05-P18-S82` - Certify Compose provenance mismatch fails closed without worker adoption or eviction
+- `2026-07-19-codebase-health-W05-P20-S141` - Run the canonical A2A dependency gate with just dev deps check
+- `2026-07-19-codebase-health-W05-P20-S142` - Run the canonical A2A unit gate with just dev test unit
+- `2026-07-19-codebase-health-W05-P20-S144` - Run the A2A real-process acceptance suites
+- `2026-07-19-codebase-health-W05-P20-S87` - Run the canonical A2A code-quality gate with just dev code check
 
 ### plan
 

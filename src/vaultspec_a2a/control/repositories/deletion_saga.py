@@ -285,8 +285,26 @@ async def advance_deletion_cleanup_item(
     that returns ``False``. A later success can supersede an earlier failure
     (a retry that cleaned the item), and a change of detail is persisted, both
     returning ``True``. Returns ``False`` when no saga exists.
+
+    The row is locked for the read-modify-write. Every item's result lives in
+    one serialized blob, so an unlocked read followed by a write is a lost
+    update whenever two passes advance concurrently - and two passes ARE
+    reachable, because claiming a saga does not exclude a second caller and a
+    replayed delete drives its own pass. Losing one item's result is
+    unrecoverable rather than merely untidy: the manifest can then never read as
+    complete, finalization refuses forever, and the thread stays hidden from
+    product reads with its rows intact.
+
+    PARTIAL. This closes the window on the Postgres backend only. SQLAlchemy's
+    SQLite dialect silently discards ``FOR UPDATE``, so on the default backend
+    two connections can still both read before either writes, and the second
+    write still drops the first item's result. Closing it there needs a
+    structural change rather than a lock - per-item result rows, so concurrent
+    advances touch different rows, or an optimistic version guard on the update
+    with a retry. Recorded as an open finding rather than left implied by a
+    lock that does not reach the default deployment.
     """
-    row = await session.get(ThreadDeletionSagaModel, thread_id)
+    row = await session.get(ThreadDeletionSagaModel, thread_id, with_for_update=True)
     if row is None:
         return False
     results = deserialize_results(row.result_json)
@@ -316,8 +334,12 @@ async def finalize_deletion_saga(
     saga that no longer exists returns ``finalized=True`` with
     ``already_final=True``; an incomplete saga returns ``finalized=False`` and
     leaves every row in place so the thread stays hidden and resumable.
+
+    Locked for the same reason as the advance: the completeness check and the
+    row removal must not straddle a concurrent write, or a pass could read a
+    complete manifest while another is still recording an item.
     """
-    row = await session.get(ThreadDeletionSagaModel, thread_id)
+    row = await session.get(ThreadDeletionSagaModel, thread_id, with_for_update=True)
     if row is None:
         return FinalizeOutcome(finalized=True, already_final=True)
     manifest = deserialize_manifest(row.manifest_json)

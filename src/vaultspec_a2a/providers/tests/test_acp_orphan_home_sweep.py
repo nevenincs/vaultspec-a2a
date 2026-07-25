@@ -16,10 +16,8 @@ import os
 import time
 from typing import TYPE_CHECKING
 
-from .._acp_config_home import (
-    ORPHAN_HOME_MIN_AGE_SECONDS,
-    sweep_orphan_config_homes,
-)
+from .._acp_config_home import sweep_orphan_config_homes
+from .._config_home_roots import ORPHAN_HOME_MIN_AGE_SECONDS
 
 if TYPE_CHECKING:
     from pathlib import Path

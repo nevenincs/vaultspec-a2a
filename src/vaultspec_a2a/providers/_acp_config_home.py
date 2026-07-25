@@ -29,7 +29,6 @@ import json
 import logging
 import shutil
 import tempfile
-import time
 from contextlib import suppress
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -39,9 +38,9 @@ if TYPE_CHECKING:
 
 from ..artifacts import ArtifactDeclaration, RetentionDisposition
 from ._acp_project_mcp import enumerate_ancestor_mcp_names
+from ._config_home_roots import sweep_orphan_homes, temp_home_root
 
 __all__ = [
-    "ORPHAN_HOME_MIN_AGE_SECONDS",
     "PRESERVED_SESSION_LIMIT",
     "SESSION_RECORD_DECLARATION",
     "cleanup_isolated_config_home",
@@ -59,14 +58,6 @@ PRESERVED_SESSION_LIMIT = 20
 """How many preserved session records to keep before evicting the oldest."""
 
 _HOME_PREFIX = "vaultspec-acp-home-"
-
-ORPHAN_HOME_MIN_AGE_SECONDS = 24 * 60 * 60
-"""How stale an abandoned home must be before the sweep reclaims it.
-
-A home carries no owning process id, so age stands in for liveness. The window is
-deliberately generous: deleting a live run's configuration is far worse than
-keeping residue for another cycle.
-"""
 
 ORPHAN_HOME_DECLARATION = ArtifactDeclaration(
     name="acp-isolated-config-home",
@@ -186,7 +177,7 @@ def create_isolated_config_home(
     The caller sets ``CLAUDE_CONFIG_DIR`` to the returned path and MUST call
     :func:`cleanup_isolated_config_home` after the subprocess is reaped.
     """
-    home = Path(tempfile.mkdtemp(prefix=_HOME_PREFIX, dir=_temp_home_root()))
+    home = Path(tempfile.mkdtemp(prefix=_HOME_PREFIX, dir=temp_home_root()))
     # Reclaim what earlier crashed runs left behind, once per home creation - the
     # same boot-time cadence the worker-log sweep uses, and for the same reason:
     # there is no supervisor to run it on a schedule.
@@ -257,20 +248,12 @@ def _write_settings(
 def sweep_orphan_config_homes(
     *, keep: Path | None = None, root: Path | None = None
 ) -> list[Path]:
-    """Remove per-run config homes abandoned by a process that never unwound.
+    """Remove per-run Claude/Z.ai config homes abandoned by a crashed run.
 
-    Teardown removes a home when the run unwinds, but a killed or crashed worker
-    leaves one behind and nothing collects it.  On an armed desktop install that
-    residue accumulates inside the application home, where no system-wide
-    temporary sweep will ever reach it.
-
-    A home carries no owning process id in its name, so liveness cannot be
-    established the way the worker-log sweep establishes it from the process
-    registry.  Age is the honest substitute: a home untouched for longer than
-    :data:`ORPHAN_HOME_MIN_AGE_SECONDS` belonged to a run that is no longer
-    writing to it.  The threshold is generous precisely because the cost of
-    deleting a live run's home far exceeds the cost of keeping residue one more
-    cycle.
+    A thin, prefix-bound wrapper over the shared
+    :func:`~._config_home_roots.sweep_orphan_homes` core - partial application to
+    this module's own ``_HOME_PREFIX``, not a re-export shim. The age-gating and
+    root-resolution rationale lives once, in the shared core.
 
     Args:
         keep: A home to leave alone regardless of age - the caller's own.
@@ -279,62 +262,7 @@ def sweep_orphan_config_homes(
     Returns:
         The homes removed, for the caller to log.
     """
-    search_root = root if root is not None else _temp_home_root()
-    if search_root is None:
-        search_root = Path(tempfile.gettempdir())
-    cutoff = time.time() - ORPHAN_HOME_MIN_AGE_SECONDS
-    removed: list[Path] = []
-    try:
-        candidates = list(search_root.glob(f"{_HOME_PREFIX}*"))
-    except OSError:
-        return removed
-    for candidate in candidates:
-        if not candidate.is_dir() or (keep is not None and candidate == keep):
-            continue
-        try:
-            if candidate.stat().st_mtime > cutoff:
-                continue
-        except OSError:
-            continue
-        shutil.rmtree(candidate, ignore_errors=True)
-        if not candidate.exists():
-            removed.append(candidate)
-    if removed:
-        logger.info(
-            "Swept %d orphaned ACP config home(s) from %s", len(removed), search_root
-        )
-    return removed
-
-
-def _temp_home_root() -> Path | None:
-    """Return the directory per-run config homes are created inside.
-
-    An armed desktop install keeps its ephemeral homes under its own application
-    home, so an uninstall can account for them and a system-wide temporary sweep
-    cannot remove a home out from under a live run.  Every other profile returns
-    ``None``, which leaves the operating system temporary directory in charge -
-    the right default for development, where a system sweep reclaiming an
-    abandoned home is a feature rather than a hazard.
-
-    Falls back to the operating system temporary directory if the declared root
-    cannot be created: an unwritable state directory must not stop a run.
-    """
-    from ..control.config import settings
-
-    declared = settings.desktop_temp_homes_dir
-    if declared is None:
-        return None
-    try:
-        declared.mkdir(parents=True, exist_ok=True)
-    except OSError:
-        logger.warning(
-            "Could not create the declared temporary-home root %s; "
-            "falling back to the system temporary directory",
-            declared,
-            exc_info=True,
-        )
-        return None
-    return declared
+    return sweep_orphan_homes(prefix=_HOME_PREFIX, keep=keep, root=root)
 
 
 def preserved_session_root() -> Path:

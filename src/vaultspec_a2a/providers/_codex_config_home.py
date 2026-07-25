@@ -14,7 +14,13 @@ path - the base home's ``auth.json`` is copied in to preserve authentication;
 nothing else is carried, so the operator's ambient MCP config is suppressed.
 
 One registry (``_KNOWN_MCP_SERVERS``), two serializations: this is the Codex
-transport for the same read-only servers the Claude home surfaces.
+transport for the same read-only servers the Claude home surfaces. Root
+resolution and the orphan-home sweep are likewise shared with the Claude side
+via ``_config_home_roots`` (one root, one sweep, two CLI-specific homes): on an
+armed desktop install the Codex home is created inside the same accounted
+application-state root as the Claude home, and a crashed run's home is
+reclaimed by the same age-gated sweep, scoped to this module's own prefix so it
+never collects a Claude home (or vice versa).
 """
 
 from __future__ import annotations
@@ -28,6 +34,8 @@ from contextlib import suppress
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from ._config_home_roots import sweep_orphan_homes, temp_home_root
+
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
@@ -35,7 +43,10 @@ __all__ = [
     "build_codex_config_home",
     "cleanup_codex_config_home",
     "render_codex_config_toml",
+    "sweep_orphan_codex_homes",
 ]
+
+_HOME_PREFIX = "vaultspec-codex-home-"
 
 logger = logging.getLogger(__name__)
 
@@ -114,10 +125,20 @@ def build_codex_config_home(
     file-based auth, then writes a ``config.toml`` with exactly the declared
     ``[mcp_servers.<name>]`` blocks. The caller sets ``CODEX_HOME`` to the
     returned path and MUST call :func:`cleanup_codex_config_home` after reap.
+
+    Created inside the armed desktop profile's temporary-home root when one is
+    declared (else the system temp directory), mirroring the Claude isolated
+    config home so an uninstall can account for it and a system-wide temp sweep
+    cannot delete it out from under a live run.
     """
     # mkdtemp creates an owner-only (0700) directory, so the copied credential is
     # traversal-protected by the dir even before the file's own mode is set.
-    home = Path(tempfile.mkdtemp(prefix="vaultspec-codex-home-"))
+    home = Path(tempfile.mkdtemp(prefix=_HOME_PREFIX, dir=temp_home_root()))
+    # Reclaim what earlier crashed runs left behind, once per home creation -
+    # mirrors the Claude call site: there is no supervisor to run this sweep on
+    # a schedule, so it piggybacks on every creation instead.
+    with suppress(OSError):
+        sweep_orphan_codex_homes(keep=home)
     try:
         _restrict(home)
         if base_home is not None:
@@ -148,3 +169,24 @@ def cleanup_codex_config_home(home: Path | None) -> None:
     if home is None:
         return
     shutil.rmtree(home, ignore_errors=True)
+
+
+def sweep_orphan_codex_homes(
+    *, keep: Path | None = None, root: Path | None = None
+) -> list[Path]:
+    """Remove per-run Codex config homes abandoned by a crashed run.
+
+    A thin, prefix-bound wrapper over the shared
+    :func:`~._config_home_roots.sweep_orphan_homes` core, mirroring the Claude
+    side's ``sweep_orphan_config_homes`` - partial application to this module's
+    own ``_HOME_PREFIX``, not a re-export shim. The age-gating and
+    root-resolution rationale lives once, in the shared core.
+
+    Args:
+        keep: A home to leave alone regardless of age - the caller's own.
+        root: Directory to sweep; defaults to the profile's temporary-home root.
+
+    Returns:
+        The homes removed, for the caller to log.
+    """
+    return sweep_orphan_homes(prefix=_HOME_PREFIX, keep=keep, root=root)

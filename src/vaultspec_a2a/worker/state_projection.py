@@ -12,6 +12,7 @@ import logging
 from datetime import datetime
 from typing import TYPE_CHECKING, Any, cast
 
+from ..domain_config import domain_config
 from ..ipc.schemas import (
     ExecutionStateProjectionPayload,
     ExecutionTaskProjectionPayload,

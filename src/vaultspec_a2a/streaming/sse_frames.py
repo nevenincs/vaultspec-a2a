@@ -31,7 +31,7 @@ from __future__ import annotations
 import json
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from typing import Final, TypeGuard, cast
+from typing import Final, TypeGuard
 
 # Progress frames stamp the semantic phase from the single shared research_adr
 # vocabulary (graph.enums), which run-status also reads - one source of truth,
@@ -173,14 +173,12 @@ class _ObjectList:
             return None
         if not _is_item_sequence(value):
             return _OMIT
-        return [
-            # The key type of a relayed mapping is unknown to the checker; the
-            # rebuild only ever probes the catalog's own string keys, and a
-            # non-string key simply fails that lookup.
-            _project_fields(cast("Mapping[str, object]", item), self.fields)
-            for item in value[: self.max_items]
-            if isinstance(item, Mapping)
-        ]
+        rebuilt: list[object] = []
+        for item in value[: self.max_items]:
+            entry = _string_keyed(item)
+            if entry is not None:
+                rebuilt.append(_project_fields(entry, self.fields))
+        return rebuilt
 
 
 type _FieldSpec = _Text | _Flag | _Number | _Integer | _TextList | _ObjectList
@@ -189,6 +187,19 @@ type _FieldSpec = _Text | _Flag | _Number | _Integer | _TextList | _ObjectList
 def _is_item_sequence(value: object) -> TypeGuard[Sequence[object]]:
     """Whether *value* is a sequence of items rather than a text scalar."""
     return isinstance(value, Sequence) and not isinstance(value, str | bytes)
+
+
+def _string_keyed(source: object) -> dict[str, object] | None:
+    """Narrow a nested relay item to its string-keyed entries, or ``None``.
+
+    A relayed payload's key type is not known statically, so the narrowing
+    belongs here rather than at the call site. The catalog only ever probes its
+    own string keys, so discarding a non-string key loses nothing a later lookup
+    could have matched, and a non-mapping item has no fields to rebuild at all.
+    """
+    if not isinstance(source, Mapping):
+        return None
+    return {key: value for key, value in source.items() if isinstance(key, str)}
 
 
 def _project_fields(

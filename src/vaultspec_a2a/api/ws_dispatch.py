@@ -203,6 +203,18 @@ def create_dispatch_message_handler(
             app_state.worker_last_heartbeat_ts = time.monotonic()
             return
 
+        # A follow-up dispatch the message service resolved to FAILED settles the
+        # run terminally without a worker ever running it, so no terminal event
+        # will arrive to release its admission - the FAILED broadcast below goes
+        # straight to WS clients and never through the relay handler that
+        # releases. Release it here, matching the REST follow-up path. The gate
+        # is only read, never seated: a gate that was never created has admitted
+        # nothing.
+        if result.thread_status == ThreadStatus.FAILED.value:
+            drain_gate = getattr(app_state, "drain_gate", None)
+            if drain_gate is not None:
+                await drain_gate.release(thread_id)
+
         if result.error_detail is not None or result.failure_type is not None:
             # Broadcast terminal WS event for failures that mark the thread FAILED
             if result.failure_type in (FailureType.UNREACHABLE, FailureType.REJECTED):

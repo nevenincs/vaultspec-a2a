@@ -90,6 +90,13 @@ __all__ = [
 
 logger = logging.getLogger(__name__)
 
+# Bound on the shutdown drain: how long the gateway waits, after closing
+# admission, for in-flight runs to reach a terminal outcome and release their
+# admission. Bounded rather than open-ended because a run whose worker died
+# emitting nothing never releases itself; the teardown that follows cancels and
+# reaps what is left.
+_DRAIN_QUIESCENCE_TIMEOUT_SECONDS = 5.0
+
 
 async def _discovery_heartbeat(
     path: Any,
@@ -521,12 +528,24 @@ async def _lifespan(app: FastAPI) -> AsyncGenerator[None]:
         yield
 
         # Close run admission first so the gateway admits no new run while it
-        # drains and reaps its owned worker and run descendants below. Closing
-        # does not wait for quiescence (that composes with terminal settlement);
-        # it just refuses new admissions from this point on.
+        # drains and reaps its owned worker and run descendants below, then wait
+        # a bounded interval for the runs already in flight to reach a terminal
+        # outcome and release themselves. The wait returns immediately when
+        # nothing is active - the common case - and a non-quiescent result names
+        # how many runs the teardown below must cancel and reap, which is the
+        # designed escape for a worker that died emitting nothing.
         from .routes.gateway import admission_gate
 
-        await admission_gate(app).close_admission()
+        gate = admission_gate(app)
+        await gate.close_admission()
+        drain_result = await gate.wait_quiescent(_DRAIN_QUIESCENCE_TIMEOUT_SECONDS)
+        if not drain_result.quiescent:
+            logger.warning(
+                "Gateway drain did not quiesce in %.1fs; %d run(s) still active "
+                "and left to shutdown cancellation and reaping",
+                drain_result.waited_seconds,
+                drain_result.active_runs,
+            )
 
         if verdict_subscriber_task is not None:
             verdict_subscriber_task.cancel()

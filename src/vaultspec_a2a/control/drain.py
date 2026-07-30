@@ -117,6 +117,14 @@ class DrainGate:
         Signals quiescence when the last active run is released, whether or not
         admission is closed, so a drain waiter wakes as soon as the gate is
         empty.
+
+        The set, rather than a reference count, is what makes this safe: a run is
+        admitted at most once, but released from several sites that can each fire
+        for the same run - a retried or duplicated terminal event, a dispatch
+        failure that already settled the run, a cancel that settles it terminally.
+        An idempotent discard absorbs that with no coordination, where a count
+        would demand exactly-once discipline across every one of those sites and
+        would underflow or strand a run the first time one of them fired twice.
         """
         async with self._lock:
             self._active.discard(run_id)
@@ -136,16 +144,6 @@ class DrainGate:
             if not self._active:
                 self._quiescent.set()
             return AdmissionState.DRAINING
-
-    async def reopen(self) -> None:
-        """Re-open admission after a completed drain; idempotent.
-
-        Only a fresh runtime generation re-opens; a gateway that drains toward
-        shutdown never calls this. Kept explicit so the closed flag is never
-        cleared by a side effect of admit or release.
-        """
-        async with self._lock:
-            self._closed = False
 
     async def wait_quiescent(self, timeout: float | None = None) -> DrainResult:
         """Wait until no run is active or *timeout* elapses.

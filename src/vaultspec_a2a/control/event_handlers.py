@@ -16,7 +16,7 @@ import contextlib
 import json
 import logging
 from datetime import datetime
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from ..ipc.schemas import ExecutionStateProjectionPayload
 from ..thread.permission_fsm import (
@@ -33,6 +33,9 @@ from ..thread.snapshots import (
     is_terminal_event,
 )
 from ..thread.terminal_effects import compute_terminal_effects
+
+if TYPE_CHECKING:
+    from .drain import DrainGate
 
 __all__ = [
     "_handle_execution_state_event",
@@ -147,6 +150,7 @@ async def _handle_terminal_event(
     *,
     aggregator: Any | None = None,
     session_factory: Any | None = None,
+    drain_gate: DrainGate | None = None,
 ) -> None:
     """Update thread DB status when a ``thread_terminal`` event arrives.
 
@@ -155,6 +159,10 @@ async def _handle_terminal_event(
 
     When *aggregator* is provided, prune stale permissions and sequence
     counters for the terminated thread.
+
+    When *drain_gate* is provided, this is the run's primary release site: a
+    validated terminal event is the end of the run's execution, so the run
+    leaves the drain gate's active set here and a drain can finally quiesce.
     """
     if not is_terminal_event(payload):
         return
@@ -246,6 +254,16 @@ async def _handle_terminal_event(
                 "action": "thread_terminal_status_update_failed",
             },
         )
+    finally:
+        # Release the run's admission on every exit above, including a failed
+        # status write. The gate counts live executions, not successful
+        # bookkeeping: the terminal event says the work is over, so releasing
+        # after a failed write cannot let a drain quiesce over live work, while
+        # withholding it there would strand exactly the flaky-database runs a
+        # drain most needs to count correctly. Release is idempotent, so racing
+        # with the cancel verb's release for the same run is safe.
+        if drain_gate is not None:
+            await drain_gate.release(thread_id)
 
     # GC aggregator state for the terminated thread.
     if aggregator is not None:
@@ -574,6 +592,7 @@ async def relay_event(
     *,
     aggregator: Any | None = None,
     session_factory: Any | None = None,
+    drain_gate: DrainGate | None = None,
 ) -> None:
     """Consolidated relay: run all 4 event handlers in sequence.
 
@@ -605,10 +624,11 @@ async def relay_event(
         payload,
         session_factory=session_factory,
     )
-    # Terminal status update + aggregator GC.
+    # Terminal status update + aggregator GC + drain-gate release.
     await _handle_terminal_event(
         thread_id,
         payload,
         aggregator=aggregator,
         session_factory=session_factory,
+        drain_gate=drain_gate,
     )

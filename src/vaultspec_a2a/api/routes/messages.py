@@ -13,6 +13,7 @@ from ...domain_config import domain_config
 from ...streaming.aggregator import EventAggregator
 from ...thread.constants import DEFAULT_SUPERVISOR_ID
 from ...thread.dispatch_policy import FailureType
+from ...thread.enums import ThreadStatus
 from .._utils import mark_worker_connected, trace_headers
 from ..dependencies import (
     get_aggregator,
@@ -21,6 +22,7 @@ from ..dependencies import (
     get_worker_spawner,
 )
 from ..schemas.rest import SendMessageRequest, SendMessageResponse
+from .gateway import admission_gate
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -73,6 +75,12 @@ async def send_message_endpoint(
         mark_worker_connected(request)
 
     if result.failure_type is not None:
+        # A follow-up dispatch the message service resolved to FAILED settles the
+        # run terminally without a worker ever running it, so no terminal event
+        # will arrive to release its admission. Release it here, matching the
+        # start-path dispatch-failure release, or the gate never quiesces.
+        if result.thread_status == ThreadStatus.FAILED.value:
+            await admission_gate(request.app).release(result.thread_id)
         if result.failure_type in (FailureType.CIRCUIT_OPEN, FailureType.AT_CAPACITY):
             raise HTTPException(status_code=503, detail=result.error_detail)
         raise HTTPException(status_code=502, detail=result.error_detail)

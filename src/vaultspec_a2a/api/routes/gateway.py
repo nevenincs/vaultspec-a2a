@@ -340,9 +340,15 @@ async def _create_run_core(
 
     # Admission gate: a draining gateway refuses a new run before any durable
     # state is created, so drain closes admission ahead of bounded cancellation.
-    # An admitted run joins the active set the drain waits on; it is released on
-    # a terminal outcome (the execution-state settlement path) or here, in the
-    # finally, on EVERY path that leaves no durable run.
+    # An admitted run joins the active set the drain waits on and is released
+    # from it by whichever of these ends its execution first: the worker's
+    # terminal event (``control.event_handlers._handle_terminal_event``, the
+    # primary release for any run that actually executes), a dispatch failure
+    # that settled the run FAILED - the start-path one below, or a follow-up
+    # one in the messages route or the WS dispatch handler - a cancel that
+    # settles the run terminally (``run_cancel_endpoint``), or here, in the
+    # finally, on EVERY path that leaves no durable run. Release is an
+    # idempotent discard, so more than one of them firing is harmless.
     gate = admission_gate(request.app)
     admission = await gate.admit(run_id)
     if not admission.admitted:
@@ -420,12 +426,23 @@ async def _create_run_core(
                 )
             raise
 
-        # The durable run row now exists and owns its admission; a dispatch failure
-        # below leaves the run durable (released on its terminal outcome), so the
-        # admission is kept.
+        # The durable run row now exists and owns its admission; the finally no
+        # longer releases it, because a durable run is released by its terminal
+        # event in the relay handler.
         persisted = True
         if result.dispatched:
             mark_worker_connected(request)
+
+        # A dispatch failure the policy resolved to FAILED is the one durable
+        # outcome no terminal event ever follows: the run is already terminal and
+        # no worker ever ran it, so nothing would later release its admission.
+        # Release it here, before the failure is raised, or the gate carries a
+        # dead run forever.
+        if (
+            result.failure_type is not None
+            and result.status == ThreadStatus.FAILED.value
+        ):
+            await gate.release(run_id)
 
         _raise_for_dispatch_failure(result.failure_type, result.error_detail)
 
@@ -1310,7 +1327,11 @@ async def run_cancel_endpoint(
     # Cancellation is the drain's tool and is never itself admission-gated. When
     # a cancel settles the run terminally here (e.g. a submitted-but-undispatched
     # run), release it from the admission gate so a concurrent drain can quiesce;
-    # a run that only reaches CANCELLING is released on its terminal event.
+    # a run that only reaches CANCELLING is deliberately left for the worker's
+    # terminal event, which releases it in
+    # ``control.event_handlers._handle_terminal_event``. Both sites can fire for
+    # one run - the gate's release is an idempotent discard, so they cannot
+    # corrupt the active set.
     if result.thread_status in TERMINAL_STATUSES:
         await admission_gate(request.app).release(result.thread_id)
 

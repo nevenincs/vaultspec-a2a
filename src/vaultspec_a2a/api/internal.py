@@ -100,6 +100,7 @@ async def _relay_single_event(
     cm: Any,
     agg: Any,
     session_factory: Any,
+    drain_gate: Any = None,
     transport: str = "http",
 ) -> None:
     """Broadcast, aggregate, and relay a single worker event.
@@ -107,6 +108,10 @@ async def _relay_single_event(
     Shared by all three ingest paths (WS, HTTP POST, HTTP batch) to
     avoid copy-pasting the broadcast → aggregator sync → relay_event
     sequence.
+
+    *drain_gate* is the process-wide run-admission gate seated on ``app.state``;
+    it travels to the terminal handler, which releases the run from it, exactly
+    as *agg* and *session_factory* travel to their handlers.
     """
     payload = _normalize_worker_payload(payload)
     if payload.get("type") == "execution_state_projection":
@@ -136,6 +141,7 @@ async def _relay_single_event(
         payload,
         aggregator=agg,
         session_factory=session_factory,
+        drain_gate=drain_gate,
     )
 
 
@@ -159,12 +165,16 @@ async def _relay_worker_event(websocket: WebSocket, msg: dict, raw: str) -> None
     session_factory = getattr(websocket.app.state, "db_session_factory", None)
     cm = getattr(websocket.app.state, "connection_manager", None)
     agg = getattr(websocket.app.state, "aggregator", None)
+    # Read the seated gate rather than get-or-creating it: a gate that has never
+    # been seated has admitted nothing, so there is nothing to release.
+    drain_gate = getattr(websocket.app.state, "drain_gate", None)
     await _relay_single_event(
         thread_id,
         payload,
         cm=cm,
         agg=agg,
         session_factory=session_factory,
+        drain_gate=drain_gate,
         transport="ws",
     )
 
@@ -291,6 +301,7 @@ async def receive_worker_event(request: Request) -> dict[str, str]:
         cm=cm,
         agg=agg,
         session_factory=getattr(request.app.state, "db_session_factory", None),
+        drain_gate=getattr(request.app.state, "drain_gate", None),
     )
     return {"status": "ok"}
 
@@ -337,6 +348,7 @@ async def receive_worker_event_batch(request: Request) -> dict[str, str]:
         )
 
     session_factory = getattr(request.app.state, "db_session_factory", None)
+    drain_gate = getattr(request.app.state, "drain_gate", None)
 
     for idx, evt in enumerate(events):
         thread_id = evt.get("thread_id", "")
@@ -352,7 +364,12 @@ async def receive_worker_event_batch(request: Request) -> dict[str, str]:
         thread_id = evt.get("thread_id", "")
         payload = evt.get("payload", {})
         await _relay_single_event(
-            thread_id, payload, cm=cm, agg=agg, session_factory=session_factory
+            thread_id,
+            payload,
+            cm=cm,
+            agg=agg,
+            session_factory=session_factory,
+            drain_gate=drain_gate,
         )
 
     return {"status": "ok"}

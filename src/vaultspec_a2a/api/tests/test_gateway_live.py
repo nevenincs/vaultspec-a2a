@@ -19,20 +19,22 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
+import logging
 from typing import TYPE_CHECKING
 
 import httpx
 import pytest
 import uvicorn
 
+from ...database import list_threads
 from ...graph.enums import Provider
 from ...providers.model_profiles import probe_provider_readiness
 from ...streaming.aggregator import EventAggregator
-from ..routes.gateway import _persisted_lease_id
+from ..routes.gateway import _persisted_lease_id, admission_gate
 from .conftest import make_app
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator
+    from collections.abc import AsyncIterator, Callable
 
 _PRESET = "mock-success-single"
 
@@ -64,6 +66,19 @@ async def _live_server(app) -> AsyncIterator[str]:
         server.should_exit = True
         with contextlib.suppress(asyncio.TimeoutError):
             await asyncio.wait_for(task, timeout=5.0)
+
+
+async def _wait_until(
+    predicate: Callable[[], bool], *, what: str, timeout: float = 10.0
+) -> None:
+    """Poll *predicate* until true, failing the test rather than racing on."""
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + timeout
+    while loop.time() < deadline:
+        if predicate():
+            return
+        await asyncio.sleep(0.005)
+    raise AssertionError(f"timed out waiting for {what}")
 
 
 @pytest.mark.asyncio(loop_scope="function")
@@ -1032,6 +1047,110 @@ async def test_run_start_idempotency_is_race_safe(
         # The winner dispatched exactly once; the losers returned it idempotently.
         raced = [d for d in worker.dispatches if d.get("thread_id") == "rid-race"]
         assert len(raced) == 1
+
+
+@pytest.mark.asyncio(loop_scope="function")
+async def test_concurrent_same_run_id_different_bodies_conflicts(
+    engine, session_factory, checkpointer, caplog: pytest.LogCaptureFixture
+) -> None:
+    """The loser of a real insert race is refused when its body differs.
+
+    The sequential retry path compares the whole request before answering with
+    the durable run. Two genuinely simultaneous requests skip that comparison
+    unless the insert-race branch applies it too: both read no run, both insert,
+    and the loser's primary-key violation resolves to the winner. Without the
+    same check there, a racer carrying a different prompt is told its run started
+    and handed the winner's id, its own intention silently dropped.
+
+    The race is driven for real, not simulated. A second connection holds
+    SQLite's write lock (``BEGIN IMMEDIATE``), so both requests complete their
+    check-then-act read while the run genuinely does not exist and both then
+    block at the insert; releasing the lock lets exactly one insert win and
+    drives the other into the integrity branch. The branch's own log record is
+    asserted, so this test cannot pass on the sequential path.
+    """
+    app, _agg, worker, _cp = make_app(session_factory, checkpointer)
+    gate = admission_gate(app)
+    run_id = "rid-race-conflict"
+    shared = {
+        "team_preset": _PRESET,
+        "run_id": run_id,
+        "profile_id": "team-defaults",
+        "autonomous": True,
+    }
+    first_body = {**shared, "message": "first intention"}
+    second_body = {**shared, "message": "second intention"}
+    checked_out = engine.sync_engine.pool.checkedout
+
+    with caplog.at_level(logging.INFO, logger="vaultspec_a2a.api.routes.gateway"):
+        async with (
+            _live_server(app) as base,
+            httpx.AsyncClient(base_url=base, timeout=30.0) as client,
+        ):
+            barrier = await engine.connect()
+            baseline = checked_out()
+            await barrier.exec_driver_sql("BEGIN IMMEDIATE")
+            try:
+                first = asyncio.create_task(client.post("/v1/runs", json=first_body))
+                # Admission happens after the check-then-act read and before the
+                # insert, so an active run id proves the first request read an
+                # absent run and is now held at the barrier.
+                await _wait_until(
+                    lambda: gate.is_active(run_id),
+                    what="the first request to pass its read",
+                )
+                second = asyncio.create_task(client.post("/v1/runs", json=second_body))
+                # A second leased connection proves the second request is issuing
+                # DB work of its own - its read, which can only miss while the
+                # barrier bars every insert.
+                await _wait_until(
+                    lambda: checked_out() >= baseline + 2,
+                    what="the second request to reach the store",
+                )
+                await asyncio.sleep(0.25)
+            finally:
+                await barrier.exec_driver_sql("ROLLBACK")
+                await barrier.close()
+            first_response, second_response = await asyncio.gather(first, second)
+            if first_response.status_code == 201:
+                winner, loser = first_response, second_response
+                winning_body = first_body
+            else:
+                winner, loser = second_response, first_response
+                winning_body = second_body
+            # The refusal is specific to the colliding body, not a blanket
+            # rejection of the raced id: the winner's own request still replays.
+            replay = await client.post("/v1/runs", json=winning_body)
+
+    assert sorted(r.status_code for r in (winner, loser)) == [201, 409], [
+        winner.text,
+        loser.text,
+    ]
+    # Proof the refusal came from the insert-race branch and not the sequential
+    # check-then-act one: only the integrity path records the lost race.
+    assert [
+        record
+        for record in caplog.records
+        if "lost a concurrent insert race" in record.getMessage()
+        and run_id in record.getMessage()
+    ], "the integrity-error branch did not execute"
+    assert winner.json()["run_id"] == run_id
+    assert "different request body" in loser.json()["detail"]
+    assert replay.status_code == 201, replay.text
+    assert replay.json()["run_id"] == run_id
+
+    # The refused racer left no second run, and only the winner's intention was
+    # ever dispatched.
+    async with session_factory() as verify:
+        _rows, total = await list_threads(verify)
+    assert total == 1
+    raced = [d for d in worker.dispatches if d.get("thread_id") == run_id]
+    assert len(raced) == 1
+    assert raced[0]["content"] == winning_body["message"]
+
+    # The durable winner keeps its admission: the refused loser must not release
+    # the drain gate's active run out from under the run that owns it.
+    assert gate.is_active(run_id)
 
 
 @pytest.mark.asyncio(loop_scope="function")

@@ -265,35 +265,9 @@ async def _create_run_core(
     if body.run_id is not None:
         existing = await get_thread(db, body.run_id)
         if existing is not None:
-            existing_profile = _persisted_profile_id(existing.thread_metadata)
-            if existing_profile is not None and existing_profile != body.profile_id:
-                # A retry that changes the frozen profile is a conflict, not a
-                # dispatch-exactly-once replay - the run is already frozen.
-                raise HTTPException(
-                    status_code=409,
-                    detail=(
-                        f"Run {existing.id!r} was already started with profile "
-                        f"{existing_profile!r}; cannot re-start with "
-                        f"{body.profile_id!r}"
-                    ),
-                )
-            # The profile check above covers one field. Every other
-            # behaviour-affecting field - the prompt, the preset, the feature
-            # tag, the feedback batch - could differ on a replay and the original
-            # run was returned as though the request matched, silently
-            # discarding the second intention. Compare the whole request.
-            persisted_digest = _persisted_request_digest(existing.thread_metadata)
-            if persisted_digest is not None and persisted_digest != request_digest(
-                body, prepared=False
-            ):
-                raise HTTPException(
-                    status_code=409,
-                    detail=(
-                        f"Run {existing.id!r} was already started with a "
-                        "different request body; a replay must carry the same "
-                        "request to return the original run"
-                    ),
-                )
+            existing_profile = _replay_identity_or_conflict(
+                existing.id, existing.thread_metadata, body
+            )
             return _RunDispatchResult(
                 thread_id=existing.id,
                 status=existing.status,
@@ -404,19 +378,35 @@ async def _create_run_core(
                 detail=f"Run nickname already exists: {exc.nickname!r}",
             ) from exc
         except IntegrityError:
-            # Insert-or-return idempotency: two simultaneous retries with the same
+            # Insert-or-return idempotency: two simultaneous requests with the same
             # run_id race past the check-then-act guard above; the loser's insert
-            # hits the primary-key unique violation. Roll back and return the
-            # winner's run as the dispatch-exactly-once response rather than a 500.
+            # hits the primary-key unique violation. Roll back and resolve against
+            # the winner's run rather than a 500.
             await db.rollback()
             winner = await get_thread(db, run_id)
             if winner is not None:
+                # The winner owns the durable run and its admission from here on,
+                # whichever way the identity check below resolves; releasing the
+                # admission on the loser's path would drop the winner's active run
+                # out of the drain gate.
                 persisted = True
+                logger.info(
+                    "Run %s lost a concurrent insert race for its run id; "
+                    "resolving the losing request against the durable winner",
+                    run_id,
+                )
+                # A racing loser gets exactly the identity check a sequential
+                # replay gets: same run id plus the same request is the winner's
+                # run replayed, and a colliding body is a different intention that
+                # must be refused rather than answered with someone else's run.
+                winner_profile = _replay_identity_or_conflict(
+                    winner.id, winner.thread_metadata, body
+                )
                 return _RunDispatchResult(
                     thread_id=winner.id,
                     status=winner.status,
                     nickname=winner.nickname,
-                    profile_id=_persisted_profile_id(winner.thread_metadata),
+                    profile_id=winner_profile,
                     frozen=None,
                     replayed=True,
                 )
@@ -799,6 +789,63 @@ def _persisted_request_digest(metadata_json: str | None) -> str | None:
         return None
     digest = data.get(_REQUEST_DIGEST_METADATA_KEY) if isinstance(data, dict) else None
     return digest if isinstance(digest, str) and digest else None
+
+
+def _replay_identity_or_conflict(
+    run_id: str, metadata_json: str | None, body: RunStartRequest
+) -> str | None:
+    """Refuse a same-run-id request that is not a replay of the durable run.
+
+    The single encoding of run-start replay identity, applied wherever a request
+    meets a run that already owns its id: the sequential check-then-act retry,
+    and the loser of a simultaneous insert race. Both arrive at the same
+    question - is this the same intention wearing the same id, or a different
+    one? - and a second encoding of the answer would be free to drift from the
+    first.
+
+    Two things are compared. The frozen model profile is already immutable on the
+    durable run, so a request naming a different one can never be served. Beyond
+    that single field, every other behaviour-affecting field - the prompt, the
+    preset, the feature tag, the feedback batch - is folded into the persisted
+    request digest, so a differing request is refused rather than silently
+    answered with the durable run and its distinct intention discarded. The
+    digest comparison is constant-time, matching the commit path's treatment of
+    the same value.
+
+    Returns:
+        The run's persisted profile id, or ``None`` when the run carries no
+        frozen profile record.
+
+    Raises:
+        HTTPException: 409 when the profile or the request digest differs.
+    """
+    existing_profile = _persisted_profile_id(metadata_json)
+    if existing_profile is not None and existing_profile != body.profile_id:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"Run {run_id!r} was already started with profile "
+                f"{existing_profile!r}; cannot re-start with {body.profile_id!r}"
+            ),
+        )
+    # ``None`` means the run predates digest persistence, not that its request
+    # was empty; refusing on it would break a legitimate replay of an older run.
+    # Compared as bytes so a persisted value that is somehow not ASCII compares
+    # unequal rather than raising out of the constant-time comparison.
+    persisted_digest = _persisted_request_digest(metadata_json)
+    if persisted_digest is not None and not hmac.compare_digest(
+        persisted_digest.encode("utf-8"),
+        request_digest(body, prepared=False).encode("utf-8"),
+    ):
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"Run {run_id!r} was already started with a different request "
+                "body; a replay must carry the same request to return the "
+                "original run"
+            ),
+        )
+    return existing_profile
 
 
 def _persist_lease(metadata_json: str | None, binding: _RunLeaseBinding) -> str:

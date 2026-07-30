@@ -2263,3 +2263,74 @@ worker roles to the intended provider through the profile source. A tree-wide sw
 confirmed no second stale enumeration. The transferable lesson is scope-shaped: a preset
 change reaches every surface that discloses presets, so the gate must follow the
 disclosure surfaces rather than the edited directory.
+
+
+### Hardening review (2026-07-30)
+
+Both hardening commits PASS. The reviewer reproduced the original defect AND the
+drain-gate hazard by mutation against a throwaway source copy rather than reasoning about
+them, ran the race test nine times for nine passes, and independently re-derived the
+unreachability argument behind the slot-leak fix's honest limitation. Test integrity is
+clean in both: no mocks, stubs, fakes, monkeypatching, skips, or expected-failure markers,
+and no tautological assertion - each primary assertion was shown to fail against the
+pre-fix shape.
+
+Verifying one of those claims surfaced a serious pre-existing defect that neither author
+caused.
+
+#### `drain-gate-no-terminal-release` (high, open)
+
+The drain gate is never released on a run's terminal outcome. The comment at
+`api/routes/gateway.py:335-337` states that an admitted run is released on a terminal
+outcome by the execution-state settlement path, and no such call exists anywhere in the
+tree: the only two releases are the pre-durability `finally` at `:434` and the cancel verb
+at `:1300`, and nothing in production calls the gate's quiescence or drain entry points at
+all. Every run that starts and completes normally therefore stays in the active set for the
+life of the process, so a drain can never quiesce. Found while proving that the insert-race
+loser must not release the winner's admission - which means the property that repair
+correctly protects is currently protecting a gate that leaks on the happy path. Another
+module asserting an invariant it does not hold.
+
+#### `commit-path-second-profile-encoding` (medium, open)
+
+The insert-race repair genuinely collapsed the start path's replay identity onto one
+helper, but the claim is slightly wider than the code: the commit stage keeps its own
+profile comparison at `api/routes/gateway.py:575-583`, whose conflict detail string is
+byte-identical to the helper's. One half of run-start replay identity is still encoded
+twice and free to drift.
+
+#### `commit-loser-strands-reservation` (medium, open)
+
+A commit-stage insert-race loser's new conflict lands in the else arm of the durability
+classifier (`api/routes/gateway.py:694-700`) and retains its reservation as committing for
+the full TTL (`control/admission.py:59,380-389`). Retaining is defensible as written -
+the classifier cannot distinguish someone else's durable row from an own row with an
+unexpected binding, and the alternative risks duplicate admission authority - but this
+loser demonstrably never wrote a run and never can under that id, so the retention strands
+real capacity. Bounded, not permanent, and strictly better than the pre-fix behaviour that
+returned the winner's run under the loser's lease. Reachable only across two gateway
+processes on one store, since commits are serialized per run id in-process.
+
+#### `replay-digest-fingerprints-credentials` (high, open)
+
+The plain-start replay fingerprint still folds credential values in
+(`api/run_admission.py:71,76`), which the governing decision now explicitly classifies out.
+Not introduced by the race repair - the sequential path already compared the whole digest -
+but that repair extended the comparison to a second caller, so a racing loser presenting a
+rotated-but-equivalent bundle is now refused where it previously replayed. The persisted
+digest also carries no marker recording which rule computed it, and raw tokens are never
+stored so an old digest cannot be recomputed. Implementation is in flight against the
+landed clause.
+
+#### Lower-severity queue from the same review
+
+`digest-absent-for-server-minted-ids` (low, open) - a run created without a client-supplied
+run id persists no digest, so a later same-id request silently degrades to the profile-only
+comparison, while the docstring attributes an absent digest solely to predating digest
+persistence. `commit-loser-returns-foreign-lease` (low, open, pre-existing) - an
+identical-body commit-stage loser answers with its own lease id bound to the winner's run.
+`race-test-fixed-sleep-window` (low, open) - the race test's barrier rests on a fixed sleep
+inside the store's busy timeout; an overrun fails loudly rather than passing silently, but
+it is the test's least robust element. `gateway-module-over-ceiling` (low, open) - the
+gateway route module grew past 1600 lines, further beyond the project ceiling already
+recorded under the module-size finding above.

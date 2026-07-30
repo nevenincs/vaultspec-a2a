@@ -710,17 +710,18 @@ async def test_sse_stream_delivers_versioned_event_mid_stream(
         agg.relay_payload(
             run_id,
             {
-                "type": "progress",
-                "event_type": "progress",
+                "type": "message_chunk",
+                "event_type": "message_chunk",
                 "thread_id": run_id,
-                "step": 1,
+                "message_id": "m-1",
+                "content": "tick",
             },
         )
 
-        progress = await _read_event(lines, wanted="progress")
+        progress = await _read_event(lines, wanted="message_chunk")
         assert progress["api_version"] == "v1"
-        assert progress["type"] == "progress"
-        assert progress["step"] == 1
+        assert progress["type"] == "message_chunk"
+        assert progress["content"] == "tick"
 
         # A terminal event closes the stream.
         agg.relay_payload(
@@ -741,7 +742,13 @@ async def test_sse_stream_delivers_versioned_event_mid_stream(
 async def test_sse_carries_semantic_phase_and_bounds_document_bodies(
     session_factory, checkpointer
 ) -> None:
-    """Progress frames carry the semantic phase; oversized bodies bound."""
+    """Progress frames carry the semantic phase; oversized bodies bound.
+
+    Bounding now has two layers, and both are exercised here: a document-sized
+    artifact body is projected away by the closed per-event catalog, and a frame
+    that is oversized through an identity key the catalog passes verbatim still
+    degrades to the droppable sentinel at the byte cap.
+    """
     from ...database.thread_repository import create_thread
     from ...streaming.sse_frames import MAX_SSE_FRAME_BYTES
     from ...thread.enums import ThreadStatus
@@ -782,20 +789,41 @@ async def test_sse_carries_semantic_phase_and_bounds_document_bodies(
         assert status_frame["api_version"] == "v1"
         assert status_frame["semantic_phase"] == "synthesizing_research"
 
-        # A document-body-sized frame is bounded: it degrades to a droppable
-        # sentinel rather than streaming the body verbatim.
+        # A document-body-sized artifact frame is bounded by the catalog: the
+        # body is projected away, so the frame crosses as identity alone rather
+        # than streaming the body verbatim.
+        document_body = "D" * (MAX_SSE_FRAME_BYTES + 4096)
         agg.relay_payload(
             run_id,
             {
-                "type": "artifact",
-                "event_type": "artifact",
+                "type": "artifact_update",
+                "event_type": "artifact_update",
                 "thread_id": run_id,
-                "content": "D" * (MAX_SSE_FRAME_BYTES + 4096),
+                "artifact_id": "art-1",
+                "filename": "report.md",
+                "content": document_body,
+            },
+        )
+        artifact_frame = await _read_event(lines, wanted="artifact_update")
+        assert artifact_frame["api_version"] == "v1"
+        assert artifact_frame["artifact_id"] == "art-1"
+        assert "content" not in artifact_frame
+
+        # The byte cap is still the backstop for what the per-field caps cannot
+        # bound - here an identity key, which the catalog passes verbatim.
+        agg.relay_payload(
+            run_id,
+            {
+                "type": "message_chunk",
+                "event_type": "message_chunk",
+                "thread_id": run_id,
+                "message_id": "M" * (MAX_SSE_FRAME_BYTES + 4096),
+                "content": "tick",
             },
         )
         dropped = await _read_event(lines, wanted="progress_dropped")
         assert dropped["api_version"] == "v1"
-        assert dropped["dropped_type"] == "artifact"
+        assert dropped["dropped_type"] == "message_chunk"
 
         agg.relay_payload(
             run_id,
@@ -850,16 +878,17 @@ async def test_run_stream_verb_reserves_versioned_frames(
         agg.relay_payload(
             run_id,
             {
-                "type": "progress",
-                "event_type": "progress",
+                "type": "message_chunk",
+                "event_type": "message_chunk",
                 "thread_id": run_id,
-                "step": 1,
+                "message_id": "m-1",
+                "content": "tick",
             },
         )
-        progress = await _read_event(lines, wanted="progress")
+        progress = await _read_event(lines, wanted="message_chunk")
         assert progress["api_version"] == "v1"
-        assert progress["type"] == "progress"
-        assert progress["step"] == 1
+        assert progress["type"] == "message_chunk"
+        assert progress["content"] == "tick"
 
         # A terminal event closes the run stream.
         agg.relay_payload(

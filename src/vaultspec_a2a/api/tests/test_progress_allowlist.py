@@ -1,10 +1,11 @@
-"""Real authenticated-stream proofs for the positive progress allowlist.
+"""Real authenticated-stream proofs for the closed progress catalog.
 
-The public ``/v1/runs/{run_id}/stream`` edge is a deliberate allowlist: it relays
-a run's identifiers, lifecycle, tool and artifact identity, and a bounded token
-stream, and it must never relay a prompt, document or artifact body, edit diff,
-or raw provider payload. It is also bounded: an authenticated caller cannot open
-an unbounded number of streams.
+The public ``/v1/runs/{run_id}/stream`` edge is a closed per-event catalog: it
+relays a run's identifiers, lifecycle, tool and artifact identity, and bounded
+text, and it must never relay a prompt, document or artifact body, edit diff, raw
+provider payload, or the free-form ``metadata`` dict. A frame type absent from
+the catalog is degraded to its identity keys rather than relayed. It is also
+bounded: an authenticated caller cannot open an unbounded number of streams.
 
 These drive the real edge over a real TCP socket behind the production discovery
 bearer - no mocks, no auth bypass - relaying forbidden content into the same
@@ -36,6 +37,8 @@ if TYPE_CHECKING:
 _SERVICE_TOKEN = "discovery-service-token"
 _ARTIFACT_BODY = "SECRET-ARTIFACT-BODY-8f21c9"
 _DIFF_BODY = "SECRET-EDIT-DIFF-3a7be1"
+_METADATA_BODY = "SECRET-METADATA-VALUE-19dd73"
+_PLAN_BODY = "SECRET-PLAN-PROSE-64c1af"
 
 
 @contextlib.asynccontextmanager
@@ -250,6 +253,185 @@ async def test_authenticated_stream_bounds_the_token_delta(
     assert len(frame["content"]) == MAX_PROGRESS_CONTENT_CHARS
     assert len(frame["content"]) < len(oversized)
     assert frame["message_id"] == "m-1"
+
+
+@pytest.mark.asyncio(loop_scope="function")
+async def test_authenticated_stream_keeps_the_consumer_read_lifecycle_fields(
+    session_factory, checkpointer
+) -> None:
+    """The catalog flip must not silence what the consumer actually renders.
+
+    ``agent_status.state`` drives the live activity indicator,
+    ``team_status.agents[].agent_id``/``state`` drive roster liveness, and
+    ``error.message`` is the rendered fault reason. All three survive today only
+    because their types are now enumerated - before the catalog closed they rode
+    the default-allow path. Each is relayed through the real aggregator and read
+    back off a real socket.
+    """
+    app, agg, _worker, _cp = _secured(session_factory, checkpointer, EventAggregator())
+    run_id = await _seed_running_run(session_factory)
+
+    async with (
+        _live_server(app) as base,
+        httpx.AsyncClient(
+            base_url=base,
+            timeout=10.0,
+            headers={"Authorization": f"Bearer {_SERVICE_TOKEN}"},
+        ) as client,
+        client.stream("GET", f"/v1/runs/{run_id}/stream") as resp,
+    ):
+        assert resp.status_code == 200, resp
+        lines = resp.aiter_lines()
+        await _await_subscriber(agg)
+
+        agg.relay_payload(
+            run_id,
+            {
+                "type": "agent_status",
+                "event_type": "agent_status",
+                "thread_id": run_id,
+                "node_name": "synthesis",
+                "state": "working",
+                "detail": "drafting",
+                "metadata": {"leaked": _METADATA_BODY},
+            },
+        )
+        status_frame, status_raw = await _read_frame(lines, wanted="agent_status")
+
+        agg.relay_payload(
+            run_id,
+            {
+                "type": "team_status",
+                "event_type": "team_status",
+                "thread_id": run_id,
+                "active_thread_ids": [run_id],
+                "agents": [
+                    {
+                        "agent_id": "researcher_00",
+                        "state": "working",
+                        "node_name": "research_dispatch",
+                        "raw_provider_payload": _METADATA_BODY,
+                    }
+                ],
+            },
+        )
+        team_frame, team_raw = await _read_frame(lines, wanted="team_status")
+
+        agg.relay_payload(
+            run_id,
+            {
+                "type": "error",
+                "event_type": "error",
+                "thread_id": run_id,
+                "code": "worker_failed",
+                "message": "provider returned 502",
+                "recoverable": True,
+            },
+        )
+        error_frame, _error_raw = await _read_frame(lines, wanted="error")
+
+    assert status_frame["state"] == "working"
+    assert status_frame["node_name"] == "synthesis"
+    assert "metadata" not in status_frame
+    assert _METADATA_BODY not in status_raw
+
+    assert team_frame["agents"][0]["agent_id"] == "researcher_00"
+    assert team_frame["agents"][0]["state"] == "working"
+    assert team_frame["active_thread_ids"] == [run_id]
+    assert _METADATA_BODY not in team_raw
+
+    assert error_frame["message"] == "provider returned 502"
+    assert error_frame["code"] == "worker_failed"
+
+
+@pytest.mark.asyncio(loop_scope="function")
+async def test_authenticated_stream_degrades_an_uncatalogued_frame(
+    session_factory, checkpointer
+) -> None:
+    """A type nobody enumerated crosses as identity keys only, not verbatim.
+
+    This inverts the pre-catalog edge behaviour. The type NAME survives, so a
+    consumer classifying frames by name still routes it; its payload does not.
+    """
+    app, agg, _worker, _cp = _secured(session_factory, checkpointer, EventAggregator())
+    run_id = await _seed_running_run(session_factory)
+
+    async with (
+        _live_server(app) as base,
+        httpx.AsyncClient(
+            base_url=base,
+            timeout=10.0,
+            headers={"Authorization": f"Bearer {_SERVICE_TOKEN}"},
+        ) as client,
+        client.stream("GET", f"/v1/runs/{run_id}/stream") as resp,
+    ):
+        assert resp.status_code == 200
+        lines = resp.aiter_lines()
+        await _await_subscriber(agg)
+
+        agg.relay_payload(
+            run_id,
+            {
+                "type": "some_future_event",
+                "event_type": "some_future_event",
+                "thread_id": run_id,
+                "agent_id": "worker",
+                "prompt": _ARTIFACT_BODY,
+                "metadata": {"leaked": _METADATA_BODY},
+            },
+        )
+
+        frame, raw_block = await _read_frame(lines, wanted="some_future_event")
+
+    assert _ARTIFACT_BODY not in raw_block
+    assert _METADATA_BODY not in raw_block
+    # The identity keys - and critically the type name - still cross.
+    assert frame["type"] == "some_future_event"
+    assert frame["thread_id"] == run_id
+    assert frame["agent_id"] == "worker"
+
+
+@pytest.mark.asyncio(loop_scope="function")
+async def test_authenticated_stream_drops_plan_prose_and_keeps_classification(
+    session_factory, checkpointer
+) -> None:
+    """Plan entries are rebuilt item by item; the model-authored text stays home."""
+    app, agg, _worker, _cp = _secured(session_factory, checkpointer, EventAggregator())
+    run_id = await _seed_running_run(session_factory)
+
+    async with (
+        _live_server(app) as base,
+        httpx.AsyncClient(
+            base_url=base,
+            timeout=10.0,
+            headers={"Authorization": f"Bearer {_SERVICE_TOKEN}"},
+        ) as client,
+        client.stream("GET", f"/v1/runs/{run_id}/stream") as resp,
+    ):
+        assert resp.status_code == 200
+        lines = resp.aiter_lines()
+        await _await_subscriber(agg)
+
+        agg.relay_payload(
+            run_id,
+            {
+                "type": "plan_update",
+                "event_type": "plan_update",
+                "thread_id": run_id,
+                "entries": [
+                    {
+                        "content": _PLAN_BODY,
+                        "status": "in_progress",
+                        "priority": "high",
+                    }
+                ],
+            },
+        )
+
+        frame, raw_block = await _read_frame(lines, wanted="plan_update")
+
+    assert _PLAN_BODY not in raw_block
+    assert frame["entries"] == [{"status": "in_progress", "priority": "high"}]
 
 
 @pytest.mark.asyncio(loop_scope="function")

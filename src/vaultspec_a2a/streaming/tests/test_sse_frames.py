@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 
 from ..sse_frames import (
+    MAX_PROGRESS_CONTENT_CHARS,
     MAX_SSE_FRAME_BYTES,
     SSE_FRAME_VERSION,
     encode_sse_frame,
@@ -24,37 +25,79 @@ def _data_payload(frame: bytes) -> dict[str, object]:
 
 
 def test_frame_is_stamped_with_the_contract_version() -> None:
-    frame = encode_sse_frame({"type": "progress", "step": 1}, event="progress")
+    frame = encode_sse_frame(
+        {"type": "stream_rejected", "reason": "stream_limit_exceeded"},
+        event="stream_rejected",
+    )
     payload = _data_payload(frame)
     assert payload["api_version"] == SSE_FRAME_VERSION
-    assert payload["type"] == "progress"
-    assert frame.startswith(b"event: progress\n")
+    assert payload["type"] == "stream_rejected"
+    assert frame.startswith(b"event: stream_rejected\n")
 
 
 def test_version_stamp_is_idempotent() -> None:
-    already = {"api_version": SSE_FRAME_VERSION, "type": "progress"}
+    already = {
+        "api_version": SSE_FRAME_VERSION,
+        "type": "stream_rejected",
+        "reason": "stream_limit_exceeded",
+    }
     payload = _data_payload(encode_sse_frame(already))
     # No nested/duplicated version wrapper is introduced.
     assert payload == already
 
 
 def test_oversized_frame_degrades_to_a_versioned_drop_sentinel() -> None:
-    huge = {"type": "artifact", "content": "x" * (MAX_SSE_FRAME_BYTES + 1024)}
-    frame = encode_sse_frame(huge, event="artifact", thread_id="run-1")
+    """The byte cap is the backstop for what the per-field caps cannot bound.
+
+    Every catalogued text field is now truncated to its own cap, so the way over
+    the byte cap is an identity key - here ``message_id`` - which the catalog
+    passes verbatim by design. The frame still degrades rather than blocking the
+    stream.
+    """
+    huge = {
+        "type": "message_chunk",
+        "message_id": "x" * (MAX_SSE_FRAME_BYTES + 1024),
+        "content": "hello",
+    }
+    frame = encode_sse_frame(huge, event="message_chunk", thread_id="run-1")
     assert len(frame) <= MAX_SSE_FRAME_BYTES
     payload = _data_payload(frame)
     assert payload["api_version"] == SSE_FRAME_VERSION
     assert payload["type"] == "progress_dropped"
-    assert payload["dropped_type"] == "artifact"
+    assert payload["dropped_type"] == "message_chunk"
     assert payload["thread_id"] == "run-1"
     assert frame.startswith(b"event: progress_dropped\n")
 
 
-def test_within_bound_frame_passes_through_verbatim() -> None:
+def test_over_cap_catalogued_text_truncates_instead_of_dropping_the_frame() -> None:
+    """A field over its own cap truncates, so the frame survives the byte cap."""
+    frame = encode_sse_frame(
+        {
+            "type": "message_chunk",
+            "thread_id": "run-1",
+            "content": "x" * (MAX_SSE_FRAME_BYTES + 1024),
+        },
+        event="message_chunk",
+        thread_id="run-1",
+    )
+    payload = _data_payload(frame)
+    assert payload["type"] == "message_chunk"
+    content = payload["content"]
+    assert isinstance(content, str)
+    assert len(content) == MAX_PROGRESS_CONTENT_CHARS
+
+
+def test_an_uncatalogued_frame_keeps_only_its_identity_keys() -> None:
+    """The catalog default is closed: an unenumerated field does not pass through.
+
+    This deliberately inverts the pre-catalog contract, under which an unmapped
+    type was relayed verbatim. The type name itself is preserved, so a consumer
+    that classifies frames by name is not silently rerouted.
+    """
     frame = encode_sse_frame({"type": "progress", "n": 2}, event="progress")
     payload = _data_payload(frame)
     assert payload["type"] == "progress"
-    assert payload["n"] == 2
+    assert "n" not in payload
 
 
 # ---------------------------------------------------------------------------

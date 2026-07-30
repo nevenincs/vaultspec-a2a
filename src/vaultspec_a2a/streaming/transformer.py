@@ -58,11 +58,12 @@ def project_run_progress(payload: object) -> object:
     The gateway relays each worker run event onto the public progress edge; this
     is the producer-side projection that drops prompts, document and artifact
     bodies, edit diffs, and raw provider payloads before the event ever reaches a
-    subscriber queue, keeping only the allowlisted identifiers, lifecycle state,
-    tool and artifact identity, and the bounded token-stream field. A non-mapping
-    payload is returned unchanged. The encode boundary re-applies the same
-    allowlist, so the exclusion holds independently even if this projection is
-    bypassed.
+    subscriber queue, keeping only the identifiers, lifecycle state, tool and
+    artifact identity, and bounded text its frame type enumerates in the closed
+    progress catalog. A non-mapping payload is returned unchanged. The encode
+    boundary re-applies the catalog, so the exclusion still holds if this call
+    site is bypassed; both layers call the one shared catalog deliberately, so
+    they cannot drift apart.
     """
     if isinstance(payload, Mapping):
         return enforce_progress_allowlist(cast("Mapping[str, object]", payload))

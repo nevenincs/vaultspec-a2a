@@ -3,7 +3,7 @@ tags:
   - '#exec'
   - '#kimi-provider'
 date: '2026-07-17'
-modified: '2026-07-17'
+modified: '2026-07-30'
 step_id: 'S16'
 related:
   - "[[2026-07-17-kimi-provider-plan]]"
@@ -25,4 +25,8 @@ ARMED, not run - OPEN BY DESIGN pending `KIMI_API_KEY`. The Kimi lane is an `Acp
 
 ## Notes
 
-Re-arm (on `KIMI_API_KEY` arrival): inject `KIMI_API_KEY` (+ optional `KIMI_BASE_URL`/`KIMI_MODEL_NAME`) into the gateway env; add a temporary all-Kimi profile (all four roles on `kimi`, so no role gates on another provider) or select the `[team.profiles.kimi]` overlay with a Kimi doc-reviewer; boot the engine (scoped to an indexed workspace with a real ADR) + gateway per the tool-cores S05/S17 recipe (Git-Bash prerequisite honored via `KIMI_CLI_GIT_BASH_PATH`); run `pytest -m service -k reads_named_adr` with the Kimi profile; capture the run id, the `message_chunk` citation + a distinctive prompt-absent interior token, and the empty document-dir write-delta. Do not flip the checkbox until the run is green. Shares the key gate with `P05.S17`/`S18`.
+Re-arm on credential arrival. A missing external prerequisite now means one thing repository-wide, held in the root conftest: the rule skips with the canonical runbook reason, or fails when the caller guaranteed the resource with `--require-prerequisite`. This proof consults that rule for the loopback-stack id alone. The registry carries a kimi-cli PATH prerequisite and a Z.ai credential entry but no Kimi-credential entry, so an absent `KIMI_API_KEY` is not expressed through the canonical rule; it surfaces at run-start provider eligibility instead, and whether that yields a truthful skip or a hard failure on this lane is not asserted in the code as read - treat it as unconfirmed until observed.
+
+Boot the loopback engine, gateway, and worker directly, export the engine service-json path, and confirm the gateway health endpoint answers 200; discovery reads that env var, so nothing here is harness-provisioned. The runtime-directory and worker-bearer corrections landed against the containerized stack helper, not this path: the floor proofs reach the stack through the reachable-stack accessor and the acceptance harness, and never construct the containerized helper.
+
+Run with the all-Kimi profile selected: `$env:S05_PROFILE="kimi-all"; pytest -m service -k reads_named_adr --require-prerequisite loopback-stack`, the declaration turning an absent stack into a failure rather than a quiet skip. Capture the run id, the `message_chunk` citation plus one prompt-absent interior token, and the empty document-directory write-delta. Do not flip the checkbox until the run is green. Shares the key gate with `P05.S17`/`S18`.

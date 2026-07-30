@@ -3,7 +3,7 @@ tags:
   - '#exec'
   - '#kimi-provider'
 date: '2026-07-17'
-modified: '2026-07-17'
+modified: '2026-07-30'
 step_id: 'S17'
 related:
   - "[[2026-07-17-kimi-provider-plan]]"
@@ -25,4 +25,8 @@ ARMED, not run - OPEN BY DESIGN pending `KIMI_API_KEY`. Reuses the tool-cores ha
 
 ## Notes
 
-Re-arm (on `KIMI_API_KEY` arrival): same stack as `P05.S16` plus the rag pre-flight - restore `:8766` discovery and index the engine-scoped workspace (`uvx vaultspec-rag index --port 8766`, attach); run `pytest -m service -k invokes_rag_search` with the Kimi profile; capture the run id, the agent's `mcp__vaultspec-rag__search_*` invocation, resolving citations, the rag daemon `:8766 /search` corroboration in the run window, and the empty document-dir write-delta. Do not flip until green. Shares the key gate + stack with `P05.S16`.
+Re-arm as for the floor proof - same canonical prerequisite rule, same manually booted loopback stack, same `S05_PROFILE="kimi-all"` selection - with `-k invokes_rag_search`.
+
+The credential alone does NOT arm this one: it additionally needs a live grounding daemon on port 8766 with the engine-scoped workspace indexed, and that daemon is a second external dependency with no entry in the prerequisite registry, so its absence is not covered by the canonical skip rule either. Confirm the daemon answers before running.
+
+Capture the run id, the agent's grounding-search invocation, citations resolving to real locations, daemon-side search corroboration inside the run window, and the empty write-delta. Do not flip the checkbox until the run is green.

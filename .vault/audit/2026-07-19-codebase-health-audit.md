@@ -2461,3 +2461,83 @@ the role grammar. The byte cap is therefore a near-unreachable backstop rather t
 exposed hole, and no edge-side truncation is warranted - truncating an identifier would be
 actively worse, since the consumer keys stream grouping off the message identifier and a
 truncated one could collide.
+
+
+### Delete-contract review and consumer repairs (2026-07-30)
+
+`delete-abandoned-cleanup-not-surfaced` implemented by `1b47d397`, reviewed PASS WITH
+FINDINGS. The review confirmed the five outcomes are exclusively discriminated at the
+service rather than merely ordered at the route - an abandoned finalize that also sets an
+incomplete flag is unconstructible, being the true and false arms of one branch - and that
+the new kinds tuple is provably equivalent to the old boolean, so no outcome changed
+silently.
+
+It then looked one layer further out than its brief required and found the repository's own
+tool consumer did not honour the contract at all. Both are now repaired by `28466b0d`,
+each mutation-proven by reverting the fix and reproducing the exact reported failure.
+
+#### `mcp-delete-tool-crashes-on-clean-204` (high, closed by `28466b0d`)
+
+Pre-existing and unrelated to the contract change. The shared request helper parsed a
+response body unconditionally, so the delete tool raised an uncaught decode error on the
+no-content success path - the most common outcome crashed the tool. The repair belongs at
+the shared seam for a mechanical reason: the parse raises inside the helper before it
+returns, so the calling tool has nothing to catch it with short of abandoning the helper.
+Gated on the response carrying no bytes rather than on a status-code list, which is the
+actual precondition and needs no keeping in sync. A survey of every endpoint reached
+through that helper confirmed the delete verb is today the only body-less success.
+
+#### `abandonment-erased-by-the-mcp-consumer` (medium, closed by `28466b0d`)
+
+The tool flattened every success to a clean-deletion sentence, so the new stranded-state
+outcome reported as clean - re-creating one layer up exactly the misreport the contract
+exists to end. Repairing the edge while its own consumer erased the distinction would have
+been a hollow win. The tool now names the stranded item KINDS, never a locator, and its
+description states the outcome too, since that description is what the calling model reads.
+
+#### `bare-204-on-the-already-final-race` (medium, open)
+
+A concurrent replay that loses the claim race reports a clean deletion for a finalize that
+abandoned items, while both route and schema document that code as every store cleaned.
+The disposition turns on whether the abandoned kinds are still readable at that point: if
+they are, this is a defect and the repair is to read them; if the saga rows are already
+gone, no code can recover them and the bare success is the best available truth - in which
+case it is a documented limit of the contract rather than a defect. Held open pending that
+determination rather than guessed at.
+
+#### `mcp-503-reads-as-a-server-fault` (medium, open - under design ruling)
+
+The resumable-incomplete outcome surfaces through a generic branch as a server error, which
+tells the calling model the server is broken, so it will not retry - defeating the
+resumability the saga was built to provide. That the current behaviour is wrong is not in
+dispute. WHAT the repair should be is: report the retryable condition and let the calling
+model decide, or have the tool retry automatically with its retry state declared. The
+second is under an architecture ruling, because the arguments cut both ways - each call
+drives real cleanup passes rather than a cheap idempotent poll, and the saga already holds
+an internal attempt ceiling that a tool-side loop could consume, silently converting a
+resumable outcome into an abandoned one without the caller seeing the intermediate state;
+against which automatic retry with backoff on a degraded service is genuinely standard
+practice, and this status code exists to carry that signal.
+
+#### `detached-store-premise-unasserted` (low, open)
+
+The abandonment tests infer the checkpoint store's failure from the refusal-refusal-success
+progression and never assert the store actually raises, so the premise is proven only
+indirectly.
+
+#### `delete-response-absent-from-the-schema-facade` (low, open)
+
+The new response model is exported from its module but not re-exported by the schema
+facade, joining a pre-existing gap it shares with two sibling response models.
+
+#### `sse-live-tests-are-load-sensitive` (low, open)
+
+Surfaced by a lane that refused to accept a flaky result as noise. Three live stream tests
+failed once during a full gate run, and two deselect experiments APPEARED to implicate the
+lane's own new tests. The decisive evidence went the other way: the identical command,
+unchanged, then passed twice in a row, and the failing run was also the slowest by a third
+on a box another session was loading. Those tests carry fixed five-second frame deadlines,
+so they are load-sensitive; the shorter deselect runs passed by luck rather than by
+removing a cause. Either the deadline should be generous or the wait should be
+signal-driven. Recorded because a lane correctly declining to blame its own change is the
+same discipline as declining to claim a green.

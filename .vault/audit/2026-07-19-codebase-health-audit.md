@@ -2125,7 +2125,7 @@ One evidence correction: the OpenAPI closure is commonly attributed to `d07cf251
 that commit added only the drift gate. The artifact itself was regenerated earlier, in
 `c0d7d394`. Cite `c0d7d394` for the artifact and `d07cf251` for the gate.
 
-#### `run-replay-unbound-on-integrity-race` (high, open)
+#### `run-replay-unbound-on-integrity-race` (high, closed by `66c5d39b`)
 
 The sequential replay path is correct and complete: it compares the frozen profile,
 then the persisted request digest over the whole body, raising a conflict on either
@@ -2195,7 +2195,7 @@ API. The repair is NOT a retryable error. The saga is settled and its rows are g
 signalling retryable would invite a client to re-drive a completed deletion. Surface it
 as a success carrying the flag, against the existing bare success for the clean case.
 
-#### `sse-subscriber-slot-leak-latent` (low, open)
+#### `sse-subscriber-slot-leak-latent` (low, closed by `2b1b3f84`)
 
 Registration succeeds inside one try block while the subscribe call runs unguarded, and
 the try/finally that removes the subscriber opens only afterwards
@@ -2218,3 +2218,48 @@ unanswered rather than resolved. Rebuilding the engine is another repository's s
 and that tree carries a non-compiling refactor, so neither proof is expressible here
 today. A stale engine binary is now a shared blocker across two campaigns, not an
 incident in one.
+
+
+### Hardening pass (2026-07-30)
+
+Two of the six findings queued by the Wave W02 review are closed with evidence, and
+both carry a proof discipline worth recording rather than just a commit id.
+
+`run-replay-unbound-on-integrity-race` closed by `66c5d39b`. The repair did not copy the
+sequential path's profile and digest checks into the integrity branch; it lifted them
+into one helper both paths call, so there is no second encoding to drift - the failure
+mode this campaign exists to remove. The digest comparison is now constant-time on both
+paths. The branch is proven to execute rather than assumed: the race is forced with a
+real store-level barrier, and the test asserts on a log line that exists only in that
+branch, so it cannot pass on the sequential path. A mutation check reverting the fix
+reproduces the defect verbatim - the racer carrying a different prompt receives success
+and the winner's run id. One knock-on is recorded deliberately: the loser sets its
+persisted flag BEFORE the identity check, because releasing on the way out would discard
+the winner's drain-gate admission and let a drain quiesce with a live run.
+
+`sse-subscriber-slot-leak-latent` closed by `2b1b3f84`, with an honest limit stated
+rather than a manufactured proof. No reachable input, configuration, or schedule makes
+the subscribe call raise today - the per-client cap cannot be satisfied by a single
+thread id, and the two statements are adjacent with no await between them - so no test
+can distinguish the pre-fix code from the post-fix code. Rather than stub the aggregator
+to invent a failing path, which would assert only that the stub raises, the author tested
+the enclosing invariant: the registered window is fully inside the cleanup guard, and the
+released slot is genuinely retakeable by a subsequent client, mutation-checked by
+neutering the release. Recorded because the reasoning is the deliverable here, not the
+diff.
+
+#### `preset-disclosure-guard-went-stale` (medium, closed by `a809f176`)
+
+Self-inflicted and caught only by a neighbouring lane. Adding two single-provider profile
+lanes in `e228b209` left the gateway's preset-disclosure assertion enumerating the old
+set, so that test was red on the mainline from the moment the lanes landed - which means
+the disclosure surface was unguarded for the window, the guard having become the thing
+that was broken. The authoring lane's gate was scoped to the directory it edited and
+passed honestly at 144 tests; the assertion lives in the interface suite. The repair
+keeps the expectation an explicit hand-written literal rather than deriving it from the
+preset loader or the endpoint's own response, which would have converted a real guard
+into a tautology, and adds a disclosure assertion that the new lanes resolve all four
+worker roles to the intended provider through the profile source. A tree-wide sweep
+confirmed no second stale enumeration. The transferable lesson is scope-shaped: a preset
+change reaches every surface that discloses presets, so the gate must follow the
+disclosure surfaces rather than the edited directory.

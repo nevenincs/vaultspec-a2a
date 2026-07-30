@@ -2389,3 +2389,75 @@ edit: either the accepted decision is amended to admit bounded argument and resu
 with explicit caps, or the consumer stops rendering panes that structurally cannot fill.
 Deliberately NOT fixed in passing by the catalog work, which would have meant re-admitting
 a forbidden field without a decision.
+
+
+### Hardening lane closures and new queue (2026-07-30, second pass)
+
+`replay-digest-fingerprints-credentials` closed by `36713034`, reviewed PASS WITH FINDINGS.
+The review found a defect the author's own mutation probe could not see, and it is the most
+instructive result of the pass: the test guarding the fail-closed behaviour on an
+unrecognised rule marker DID NOT DISCRIMINATE. It asserted that an unknown marker carrying
+a current-rule digest does not match - but a fail-OPEN implementation returns the same
+answer for that input, because a credential-free digest never equals a credential-sensitive
+one. Proven by mutation: swapping the refusal for a silent fallback left the file fully
+green while a run written by a newer process would replay on a guess. Closed by `f9612c17`,
+which asserts against a digest the fallback rule would actually match and demonstrates the
+tightened test failing against that mutation. A guard that cannot be shown failing against
+the thing it guards is not a guard.
+
+`delete-abandoned-cleanup-not-surfaced` implemented by `1b47d397`; review in flight.
+
+#### `replay-legacy-rule-not-frozen` (low, open)
+
+The frozen historical fingerprint rule reads its exclusions from the live always-excluded
+table rather than from a frozen copy. That rule describes bytes already on disk and is
+therefore immutable, so a legitimate future addition to that table - precisely the case the
+surrounding comment anticipates - would silently redefine it and refuse every pre-change
+replay. Mitigated in the right direction: the test restates the old rule from its
+specification, so such a change fails loudly rather than green-washing. The residual is
+that the invariant is held by a test rather than structurally.
+
+#### `replay-exclusion-wider-than-adr-wording` (low, open)
+
+The implementation drops the whole credential field, so the SET OF ROLES presented also
+leaves the fingerprint, where the decision record names credential VALUES. Judged within
+intent - a replay returns the original run and never consults the presented bundle, and
+coverage is routed to admission at first start - but a reader reconciling code against the
+record should be told the exclusion is one notch wider than the clause's literal words.
+
+#### `engine-bearer-guard-partial` (low, open)
+
+The guard fails loudly if a refactor lifts the engine bearer OUT of the credential bundle,
+but not if one ADDS a top-level bearer beside the nested one - a variant that would fold a
+credential value back into the fingerprint with every test still green.
+
+#### `replay-constant-time-claim-overstated` (low, open)
+
+A docstring claims a constant-time comparison, but the marker parse and the
+unrecognised-marker short-circuit both return before it. Another instance of a module
+asserting a property it does not hold.
+
+#### `cancel-release-appears-unreachable` (low, open)
+
+Found while implementing the drain-gate release. The cancel verb's terminal-status release
+looks like dead code rather than a live second release site: the cancel service's success
+path always returns a cancelling status, never a terminal one, and the already-terminal
+case is refused with a failure type that raises before the release line is reached.
+Confirmed empirically - cancelling an already-completed run answers with a dispatch failure
+rather than success. The implementer left it untouched as instructed and rewrote its test
+to assert the reachable truth instead of a path that cannot execute. Either the case the
+surrounding comment describes no longer exists, or the failure guard should not pre-empt
+the release for that one failure kind.
+
+#### `identity-keys-unbounded-at-the-edge` (low, closed - bounded by admission)
+
+Raised by the catalog work and resolved on inspection rather than left open. With every
+catalogued text field now capped, the frame byte cap became reachable only through the nine
+always-safe identity keys, which carry no caps of their own - so the drop-sentinel test had
+to change vector to an oversized message identifier. Checked at the source: the
+caller-supplied run identifier, which is the only one of those keys a client controls, is
+bounded to 128 characters at admission. The remaining keys are server-minted or bounded by
+the role grammar. The byte cap is therefore a near-unreachable backstop rather than an
+exposed hole, and no edge-side truncation is warranted - truncating an identifier would be
+actively worse, since the consumer keys stream grouping off the message identifier and a
+truncated one could collide.

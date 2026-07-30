@@ -7,13 +7,14 @@ retryable endpoints for operations that require guaranteed delivery
 
 import re
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator
 
 from ...context.metadata import ThreadMetadata
 from ...graph.enums import AgentLifecycleState, Model, PermissionOptionKind, Provider
 from ...thread.actor_tokens import ActorTokenBundle
-from ...thread.enums import PermissionRequestStatus, ThreadStatus
+from ...thread.enums import CleanupKind, PermissionRequestStatus, ThreadStatus
 
 __all__ = [
     "AgentStatusEntry",
@@ -21,6 +22,7 @@ __all__ = [
     "CancelThreadResponse",
     "CreateThreadRequest",
     "CreateThreadResponse",
+    "DeleteThreadResponse",
     "PendingPermission",
     "PermissionResponseRequest",
     "PermissionResponseResult",
@@ -32,6 +34,8 @@ __all__ = [
     "ThreadListResponse",
     "ThreadSummary",
 ]
+
+_API_VERSION = "v1"
 
 
 class CreateThreadRequest(BaseModel):
@@ -73,6 +77,32 @@ class CreateThreadResponse(BaseModel):
     thread_id: str
     status: str
     nickname: str | None = None
+
+
+class DeleteThreadResponse(BaseModel):
+    """Report a deletion that finished while leaving external state stranded.
+
+    A delete answers with no content when every store was cleaned. This body is
+    returned instead when the deletion finalized over at least one cleanup item
+    judged permanently unremovable: the thread is durably gone - retrying would
+    answer not-found - but some state outside the control database was left
+    behind and a client reconciling against this surface would otherwise read
+    the thread as cleanly deleted.
+
+    ``abandoned_kinds`` names *what* was stranded so the fact is actionable.
+    The concrete targets are deliberately absent: a checkpoint id or an artifact
+    path is control-plane state, not the caller's to receive.
+    """
+
+    api_version: Literal["v1"] = _API_VERSION
+    thread_id: str
+    # Constant discriminators: this body exists only for the abandoned-finalize
+    # outcome, so both facts it asserts are part of its identity rather than
+    # fields a reader has to branch on.
+    deleted: Literal[True] = True
+    cleanup_abandoned: Literal[True] = True
+    # Distinct kinds, in cleanup-manifest order; never empty in this body.
+    abandoned_kinds: list[CleanupKind] = Field(min_length=1)
 
 
 class ArchiveThreadResponse(BaseModel):

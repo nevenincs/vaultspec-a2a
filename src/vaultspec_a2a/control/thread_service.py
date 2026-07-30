@@ -43,6 +43,7 @@ from ..thread.dispatch_policy import FailureType, evaluate_dispatch_failure
 from ..thread.enums import (
     TERMINAL_STATUSES,
     ApprovalStatus,
+    CleanupKind,
     ControlActionType,
     RepairStatus,
     ThreadStatus,
@@ -620,18 +621,26 @@ class DeleteResult:
     gone. ``cleanup_incomplete`` means the deletion started durably but has not
     finished - either a cleanup item did not complete, or another pass holds the
     saga - so the thread stays hidden and the saga is resumable on retry.
-    ``cleanup_abandoned`` means the delete did finalize, but over at least one
-    cleanup item judged permanently unremovable, so external state was left
-    behind; the failure is recorded in the log rather than in a row, because the
-    rows are gone. ``error_detail`` carries a lifecycle-guard refusal reason when
-    the delete was refused before it began.
+    ``abandoned_kinds`` names the kinds of state a finalized delete left behind:
+    it is non-empty exactly when the delete finalized over at least one cleanup
+    item judged permanently unremovable. The kinds are carried rather than
+    flattened to a flag because a caller reporting the outcome has to say *what*
+    was stranded, and the per-item detail behind it - a checkpoint id, an
+    artifact path - stays in the log and never leaves the control plane.
+    ``error_detail`` carries a lifecycle-guard refusal reason when the delete was
+    refused before it began.
     """
 
     deleted: bool
     not_found: bool = False
     error_detail: str | None = None
     cleanup_incomplete: bool = False
-    cleanup_abandoned: bool = False
+    abandoned_kinds: tuple[CleanupKind, ...] = ()
+
+    @property
+    def cleanup_abandoned(self) -> bool:
+        """Return whether the delete finalized over unremovable cleanup state."""
+        return bool(self.abandoned_kinds)
 
 
 async def delete_thread_service(
@@ -710,7 +719,7 @@ async def _run_deletion_saga(
     outcome = await finalize_deletion_saga(db, thread_id=thread_id)
     await db.commit()
     if outcome.finalized:
-        return DeleteResult(deleted=True, cleanup_abandoned=bool(outcome.abandoned))
+        return DeleteResult(deleted=True, abandoned_kinds=outcome.abandoned_kinds)
     return DeleteResult(deleted=False, cleanup_incomplete=True)
 
 

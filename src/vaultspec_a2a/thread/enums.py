@@ -11,6 +11,7 @@ __all__ = [
     "NON_ACTIVE_STATUSES",
     "TERMINAL_STATUSES",
     "ApprovalStatus",
+    "CleanupKind",
     "ControlActionResultStatus",
     "ControlActionType",
     "InvalidTransitionError",
@@ -101,6 +102,19 @@ class TaskQueueStatus(StrEnum):
     IN_PROGRESS = "in_progress"
     COMPLETED = "completed"
     FAILED = "failed"
+
+
+class CleanupKind(StrEnum):
+    """The kind of thread-owned state one deletion cleanup item removes.
+
+    Deliberately a kind and never a locator: it names *what class of state* a
+    delete touched, so both the durable cleanup manifest and the delete
+    response can speak it, while the concrete checkpoint id or artifact path
+    stays inside the control plane.
+    """
+
+    CHECKPOINT = "checkpoint"
+    ARTIFACT_FILE = "artifact_file"
 
 
 TERMINAL_STATUSES: frozenset[ThreadStatus] = frozenset(

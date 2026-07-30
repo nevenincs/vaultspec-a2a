@@ -4,7 +4,8 @@ import logging
 from typing import Any
 
 import httpx
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
+from fastapi.responses import JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ...context.metadata import ThreadMetadata
@@ -37,6 +38,7 @@ from ..schemas.rest import (
     ArchiveThreadResponse,
     CreateThreadRequest,
     CreateThreadResponse,
+    DeleteThreadResponse,
     ThreadListResponse,
     ThreadSummary,
 )
@@ -203,17 +205,40 @@ async def get_thread_metadata_endpoint(
 # ---------------------------------------------------------------------------
 
 
-@router.delete("/threads/{thread_id}", status_code=204)
+@router.delete(
+    "/threads/{thread_id}",
+    status_code=204,
+    response_model=None,
+    responses={
+        200: {
+            "model": DeleteThreadResponse,
+            "description": (
+                "Deleted, but cleanup was abandoned over permanently "
+                "unremovable state; the body names the kinds left behind."
+            ),
+        },
+        204: {"description": "Deleted; every store was cleaned."},
+        404: {"description": "No such thread."},
+        409: {"description": "The thread's lifecycle state refuses deletion."},
+        503: {"description": "Cleanup is unfinished but resumable; retry."},
+    },
+)
 async def delete_thread_endpoint(
     thread_id: str,
     db: AsyncSession = Depends(get_db),
     aggregator: EventAggregator = Depends(get_aggregator),
     checkpointer: Checkpointer = Depends(get_checkpointer),
-) -> None:
+) -> Response:
     """Delete a thread through the durable cross-store deletion saga.
 
     A replayed request resumes the same saga rather than starting a second
     teardown, so repeated calls converge on one deletion.
+
+    The service result distinguishes more states than a two-code surface can
+    carry, so this verb answers with five outcomes: a lifecycle refusal before
+    the saga begins, a clean deletion, a deletion that finalized over
+    unremovable cleanup state, resumable incomplete cleanup, and an
+    already-absent thread.
     """
     result = await delete_thread_service(db, thread_id, checkpointer=checkpointer)
     if result.not_found:
@@ -230,6 +255,17 @@ async def delete_thread_endpoint(
             detail="Thread deletion is in progress; retry to complete cleanup.",
         )
     aggregator.clear_thread_state(thread_id)
+    if result.abandoned_kinds:
+        # Durably deleted, but over state no pass could remove. Not a retryable
+        # state - the rows are gone, so a retry answers 404 - and not a bare
+        # success either, because the stranded external state is a terminal fact
+        # the caller needs in order to reconcile or remediate.
+        body = DeleteThreadResponse(
+            thread_id=thread_id,
+            abandoned_kinds=list(result.abandoned_kinds),
+        )
+        return JSONResponse(status_code=200, content=body.model_dump(mode="json"))
+    return Response(status_code=204)
 
 
 # ---------------------------------------------------------------------------

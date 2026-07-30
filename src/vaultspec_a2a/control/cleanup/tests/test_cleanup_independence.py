@@ -18,8 +18,8 @@ from vaultspec_a2a.control.repositories import (
     CleanupItem,
     CleanupItemResult,
     CleanupItemState,
-    CleanupKind,
 )
+from vaultspec_a2a.thread.enums import CleanupKind
 
 if TYPE_CHECKING:
     import pathlib

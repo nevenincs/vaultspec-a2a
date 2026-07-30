@@ -54,6 +54,7 @@ from ...database import (
     delete_thread,
     mark_thread_deleting,
 )
+from ...thread.enums import CleanupKind
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
@@ -65,7 +66,6 @@ __all__ = [
     "CleanupItem",
     "CleanupItemResult",
     "CleanupItemState",
-    "CleanupKind",
     "DeletionSaga",
     "DeletionSagaContentionError",
     "FinalizeOutcome",
@@ -118,13 +118,6 @@ class DeletionSagaContentionError(RuntimeError):
     can never read as settled - so exhausting the compare-and-swap retries is
     surfaced rather than swallowed.
     """
-
-
-class CleanupKind(StrEnum):
-    """The store a cleanup item removes state from."""
-
-    CHECKPOINT = "checkpoint"
-    ARTIFACT_FILE = "artifact_file"
 
 
 class CleanupItemState(StrEnum):
@@ -206,12 +199,17 @@ class FinalizeOutcome:
     ``abandoned`` carries the items that were finalized as permanently
     unremovable rather than cleaned, so the caller can report - and an operator
     can see - that the control rows went away while some external state did
-    not.
+    not. Those results identify items by ledger key and carry a diagnostic
+    detail, both of which can name a filesystem path, so ``abandoned_kinds``
+    accompanies them: the distinct kinds of state left behind, in manifest
+    order, which is the only part of the fact a caller outside the control
+    plane may be told.
     """
 
     finalized: bool
     already_final: bool = False
     abandoned: tuple[CleanupItemResult, ...] = ()
+    abandoned_kinds: tuple[CleanupKind, ...] = ()
 
 
 def _now() -> datetime:
@@ -342,6 +340,25 @@ def _abandoned_items(
         elif result.state is not CleanupItemState.DONE:
             return None
     return tuple(abandoned)
+
+
+def _distinct_abandoned_kinds(
+    manifest: Sequence[CleanupItem],
+    abandoned: Sequence[CleanupItemResult],
+) -> tuple[CleanupKind, ...]:
+    """Return the distinct kinds of state the abandoned items left behind.
+
+    The manifest is the authority on an item's kind - the ledger records only
+    its key and outcome - so the kinds are read off the manifest and kept in
+    manifest order, which makes the reported vocabulary deterministic for a
+    given saga rather than dependent on ledger iteration.
+    """
+    keys = {result.key for result in abandoned}
+    kinds: list[CleanupKind] = []
+    for item in manifest:
+        if item.key in keys and item.kind not in kinds:
+            kinds.append(item.kind)
+    return tuple(kinds)
 
 
 def _record_for(
@@ -598,4 +615,8 @@ async def finalize_deletion_saga(
     await session.delete(row)
     await session.flush()
     await delete_thread(session, thread_id)
-    return FinalizeOutcome(finalized=True, abandoned=abandoned)
+    return FinalizeOutcome(
+        finalized=True,
+        abandoned=abandoned,
+        abandoned_kinds=_distinct_abandoned_kinds(manifest, abandoned),
+    )

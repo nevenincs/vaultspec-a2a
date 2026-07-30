@@ -26,11 +26,11 @@ import pathlib
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
+from ...thread.enums import CleanupKind
 from ..repositories import (
     CleanupItem,
     CleanupItemResult,
     CleanupItemState,
-    CleanupKind,
 )
 
 if TYPE_CHECKING:

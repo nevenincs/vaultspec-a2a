@@ -27,7 +27,6 @@ from vaultspec_a2a.control.repositories import (
     CleanupItem,
     CleanupItemResult,
     CleanupItemState,
-    CleanupKind,
     advance_deletion_cleanup_item,
     claim_deletion_saga,
     create_deletion_saga,
@@ -36,7 +35,7 @@ from vaultspec_a2a.control.repositories import (
 from vaultspec_a2a.control.thread_service import delete_thread_service
 from vaultspec_a2a.database import create_artifact, create_thread, get_thread
 from vaultspec_a2a.database.models import Base, ThreadDeletionSagaModel
-from vaultspec_a2a.thread.enums import ThreadStatus
+from vaultspec_a2a.thread.enums import CleanupKind, ThreadStatus
 
 
 @pytest_asyncio.fixture
@@ -259,8 +258,12 @@ async def test_a_permanently_failing_item_stops_wedging_the_thread(
 
     assert [outcome.deleted for outcome in outcomes] == [False, False, True]
     assert [outcome.cleanup_incomplete for outcome in outcomes] == [True, True, False]
-    # The delete completed over an item that could not be cleaned, and says so.
+    # The delete completed over an item that could not be cleaned, and says so -
+    # naming the kind of state left behind, not merely that some was.
     assert outcomes[-1].cleanup_abandoned is True
+    assert outcomes[-1].abandoned_kinds == (CleanupKind.ARTIFACT_FILE,)
+    # The passes that had work left report nothing abandoned at all.
+    assert [outcome.abandoned_kinds for outcome in outcomes[:-1]] == [(), ()]
     async with session_factory() as session:
         assert await get_thread(session, "t-wedge") is None
         assert await session.get(ThreadDeletionSagaModel, "t-wedge") is None

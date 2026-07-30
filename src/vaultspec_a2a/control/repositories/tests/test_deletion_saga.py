@@ -23,7 +23,6 @@ from vaultspec_a2a.control.repositories import (
     CleanupItem,
     CleanupItemResult,
     CleanupItemState,
-    CleanupKind,
     advance_deletion_cleanup_item,
     claim_deletion_saga,
     create_deletion_saga,
@@ -35,7 +34,7 @@ from vaultspec_a2a.control.repositories import (
 )
 from vaultspec_a2a.database import create_thread, get_thread
 from vaultspec_a2a.database.models import Base, ThreadDeletionSagaModel
-from vaultspec_a2a.thread.enums import ThreadStatus
+from vaultspec_a2a.thread.enums import CleanupKind, ThreadStatus
 
 
 @pytest_asyncio.fixture
@@ -421,10 +420,65 @@ async def test_repeated_failures_abandon_the_item_and_release_the_saga(
     assert [item.key for item in outcome.abandoned] == ["artifact:a1"]
     assert outcome.abandoned[0].detail == "permission denied"
     assert outcome.abandoned[0].attempts == 3
+    # The reportable projection of the same fact: the kind of state stranded,
+    # read off the manifest, with no key, path, or diagnostic detail in it.
+    assert outcome.abandoned_kinds == (CleanupKind.ARTIFACT_FILE,)
 
     async with session_factory() as session:
         assert await get_thread(session, thread_id) is None
         assert await session.get(ThreadDeletionSagaModel, thread_id) is None
+
+
+@pytest.mark.asyncio
+async def test_abandoned_kinds_are_distinct_and_follow_manifest_order(
+    session_factory,
+) -> None:
+    """Every stranded kind is reported once, in the manifest's own order.
+
+    The reportable projection has to answer "what class of state was left
+    behind", so two abandoned artifact files are one kind, not two, and the
+    order cannot depend on how the result ledger happens to iterate.
+    """
+    thread_id = await _seed_terminal_thread(session_factory)
+    manifest = [
+        *_manifest(thread_id),
+        CleanupItem(
+            kind=CleanupKind.ARTIFACT_FILE,
+            key="artifact:a2",
+            target="/ws/out/second.md",
+            root="/ws",
+        ),
+    ]
+    async with session_factory() as session:
+        await create_deletion_saga(session, thread_id=thread_id, manifest=manifest)
+        await session.commit()
+
+    for _ in range(3):
+        async with session_factory() as session:
+            for key in ("artifact:a2", "artifact:a1", "checkpoint"):
+                await advance_deletion_cleanup_item(
+                    session,
+                    thread_id=thread_id,
+                    result=CleanupItemResult(
+                        key, CleanupItemState.FAILED, detail="unreachable store"
+                    ),
+                )
+            await session.commit()
+
+    async with session_factory() as session:
+        outcome = await finalize_deletion_saga(session, thread_id=thread_id)
+        await session.commit()
+
+    assert outcome.finalized is True
+    assert sorted(item.key for item in outcome.abandoned) == [
+        "artifact:a1",
+        "artifact:a2",
+        "checkpoint",
+    ]
+    assert outcome.abandoned_kinds == (
+        CleanupKind.CHECKPOINT,
+        CleanupKind.ARTIFACT_FILE,
+    )
 
 
 @pytest.mark.asyncio
@@ -470,6 +524,7 @@ async def test_a_success_after_abandonment_still_supersedes(session_factory) -> 
     assert outcome.finalized is True
     # A cleanly finished saga reports nothing abandoned.
     assert outcome.abandoned == ()
+    assert outcome.abandoned_kinds == ()
 
 
 @pytest.mark.asyncio

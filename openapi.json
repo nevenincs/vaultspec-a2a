@@ -226,7 +226,7 @@
     "/api/threads/{thread_id}": {
       "delete": {
         "summary": "Delete Thread Endpoint",
-        "description": "Delete a thread through the durable cross-store deletion saga.\n\nA replayed request resumes the same saga rather than starting a second\nteardown, so repeated calls converge on one deletion.",
+        "description": "Delete a thread through the durable cross-store deletion saga.\n\nA replayed request resumes the same saga rather than starting a second\nteardown, so repeated calls converge on one deletion.\n\nThe service result distinguishes more states than a two-code surface can\ncarry, so this verb answers with five outcomes: a lifecycle refusal before\nthe saga begins, a clean deletion, a deletion that finalized over\nunremovable cleanup state, resumable incomplete cleanup, and an\nalready-absent thread.",
         "operationId": "delete_thread_endpoint_api_threads__thread_id__delete",
         "parameters": [
           {
@@ -257,7 +257,26 @@
         ],
         "responses": {
           "204": {
-            "description": "Successful Response"
+            "description": "Deleted; every store was cleaned."
+          },
+          "200": {
+            "description": "Deleted, but cleanup was abandoned over permanently unremovable state; the body names the kinds left behind.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeleteThreadResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such thread."
+          },
+          "409": {
+            "description": "The thread's lifecycle state refuses deletion."
+          },
+          "503": {
+            "description": "Cleanup is unfinished but resumable; retry."
           },
           "422": {
             "description": "Validation Error",
@@ -1823,6 +1842,15 @@
         "title": "CancelThreadResponse",
         "description": "Response after requesting thread cancellation."
       },
+      "CleanupKind": {
+        "type": "string",
+        "enum": [
+          "checkpoint",
+          "artifact_file"
+        ],
+        "title": "CleanupKind",
+        "description": "The kind of thread-owned state one deletion cleanup item removes.\n\nDeliberately a kind and never a locator: it names *what class of state* a\ndelete touched, so both the durable cleanup manifest and the delete\nresponse can speak it, while the concrete checkpoint id or artifact path\nstays inside the control plane."
+      },
       "ContextRef": {
         "properties": {
           "path": {
@@ -1958,6 +1986,47 @@
         ],
         "title": "CreateThreadResponse",
         "description": "Response after successfully creating a thread."
+      },
+      "DeleteThreadResponse": {
+        "properties": {
+          "api_version": {
+            "type": "string",
+            "const": "v1",
+            "title": "Api Version",
+            "default": "v1"
+          },
+          "thread_id": {
+            "type": "string",
+            "title": "Thread Id"
+          },
+          "deleted": {
+            "type": "boolean",
+            "const": true,
+            "title": "Deleted",
+            "default": true
+          },
+          "cleanup_abandoned": {
+            "type": "boolean",
+            "const": true,
+            "title": "Cleanup Abandoned",
+            "default": true
+          },
+          "abandoned_kinds": {
+            "items": {
+              "$ref": "#/components/schemas/CleanupKind"
+            },
+            "type": "array",
+            "minItems": 1,
+            "title": "Abandoned Kinds"
+          }
+        },
+        "type": "object",
+        "required": [
+          "thread_id",
+          "abandoned_kinds"
+        ],
+        "title": "DeleteThreadResponse",
+        "description": "Report a deletion that finished while leaving external state stranded.\n\nA delete answers with no content when every store was cleaned. This body is\nreturned instead when the deletion finalized over at least one cleanup item\njudged permanently unremovable: the thread is durably gone - retrying would\nanswer not-found - but some state outside the control database was left\nbehind and a client reconciling against this surface would otherwise read\nthe thread as cleanly deleted.\n\n``abandoned_kinds`` names *what* was stranded so the fact is actionable.\nThe concrete targets are deliberately absent: a checkpoint id or an artifact\npath is control-plane state, not the caller's to receive."
       },
       "DesktopReadiness": {
         "properties": {

@@ -86,10 +86,16 @@ async def _stream_thread_events(
         )
         return
 
-    aggregator.subscribe(client_id, [thread_id])
     start_time = time.monotonic()
 
+    # Registration and its cleanup guard open together, deliberately. The client
+    # holds one of the gateway's bounded stream slots from the moment
+    # ``add_subscriber`` returns, so every statement that follows must sit inside
+    # the ``finally`` that gives the slot back - a raise between the two would
+    # strand the registration for the life of the process.
     try:
+        aggregator.subscribe(client_id, [thread_id])
+
         if initial_status in TERMINAL_STATUSES:
             yield encode_sse_frame(
                 {

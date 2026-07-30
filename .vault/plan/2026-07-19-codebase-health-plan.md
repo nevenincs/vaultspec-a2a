@@ -122,6 +122,7 @@ Replace irreversible hard deletion with a durable resumable saga whose control s
 - [x] `W01.P03.S108` - Implement the idempotent repository operation that claims one deletion saga; `src/vaultspec_a2a/control/repositories`.
 - [x] `W01.P03.S109` - Implement the idempotent repository operation that advances one deletion cleanup item; `src/vaultspec_a2a/control/repositories`.
 - [x] `W01.P03.S110` - Implement the idempotent repository operation that finalizes one completed deletion saga; `src/vaultspec_a2a/control/repositories`.
+- [ ] `W01.P03.S181` - Answer the delete verb with its five distinct outcomes and carry abandoned cleanup item kinds through the service result; `src/vaultspec_a2a/api/routes/threads.py, src/vaultspec_a2a/control/thread_service.py`.
 
 ### Phase `W01.P04` - review and queue control-state findings
 
@@ -143,6 +144,8 @@ Make idempotency behavior-complete and derive each run-status response from one 
 - [x] `W02.P05.S19` - Unify launch discovery and acceptance on one profile eligibility decision; `src/vaultspec_a2a/providers/model_profiles.py, src/vaultspec_a2a/api/routes/gateway.py, src/vaultspec_a2a/authoring/discovery.py`.
 - [x] `W02.P05.S20` - Read one project checkpoint tuple and derive all run-status fields from that immutable snapshot; `src/vaultspec_a2a/control/thread_state_service.py`.
 - [x] `W02.P05.S21` - Prove request-fingerprint conflicts profile parity and single-snapshot run status against real persistence; `tests/api, tests/control`.
+- [ ] `W02.P05.S177` - Classify credential values out of the plain-start replay fingerprint and stamp each persisted fingerprint with the rule that computed it; `src/vaultspec_a2a/api/run_admission.py, src/vaultspec_a2a/api/routes/gateway.py`.
+- [ ] `W02.P05.S178` - Release the drain gate on every terminal run outcome and complete the bounded quiescence wait at shutdown; `src/vaultspec_a2a/control/event_handlers.py, src/vaultspec_a2a/control/drain.py, src/vaultspec_a2a/api/app.py`.
 
 ### Phase `W02.P06` - allowlist progress and bound stream resources
 
@@ -159,6 +162,8 @@ Replace payload-shaped relaying with one versioned DTO and enforce resource limi
 - [x] `W02.P06.S159` - Prove bounded token deltas with a real authenticated stream client; `tests/streaming, tests/api`.
 - [ ] `W02.P06.S160` - Prove global and per-principal quotas with real authenticated stream clients; `tests/streaming, tests/api`.
 - [x] `W02.P06.S161` - Prove malformed and stale heartbeat rejection against real discovery records; `tests/authoring`.
+- [x] `W02.P06.S179` - Keep the stream subscriber registration inside its cleanup guard so a raise cannot strand a bounded slot; `src/vaultspec_a2a/api/routes/thread_stream.py`.
+- [ ] `W02.P06.S180` - Close the progress frame-type catalog with per-field allowlists and bounds and project unknown types onto identity keys; `src/vaultspec_a2a/streaming/sse_frames.py, src/vaultspec_a2a/api/schemas/events.py`.
 
 ### Phase `W02.P07` - retire legacy dependencies from the dashboard path
 

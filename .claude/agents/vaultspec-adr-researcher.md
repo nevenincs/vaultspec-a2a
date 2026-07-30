@@ -9,7 +9,7 @@ tools:
 - WebFetch
 - WebSearch
 - Bash
-model: claude-opus-4-8
+model: claude-opus-5
 ---
 
 # Persona: Technical Researcher, Frontier Standards & `<ADR>` Decision Support

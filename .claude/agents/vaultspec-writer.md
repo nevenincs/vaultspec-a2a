@@ -9,7 +9,7 @@ tools:
 - Write
 - Edit
 - Bash
-model: claude-opus-4-8
+model: claude-opus-5
 ---
 
 # Persona: Senior Software Plan Orchestrator & Delegator

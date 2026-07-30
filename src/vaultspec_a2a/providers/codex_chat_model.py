@@ -333,6 +333,10 @@ class CodexChatModel(BaseChatModel):
     harness_mcp_servers: list[str] = Field(default_factory=list)
     approval_policy: str = "never"
     sandbox: str = "read-only"
+    # Bounds the startup and per-request RPC waits only - the single-shot calls
+    # the factory's ``provider_timeout_seconds`` is documented for. A silent
+    # streaming turn is a different quantity and is bounded separately by
+    # ``acp_turn_idle_timeout_seconds``; see ``_consume_turn``.
     timeout: float = 300.0
     agent_config: AgentConfig | None = Field(default=None, exclude=True)
 
@@ -538,10 +542,22 @@ class CodexChatModel(BaseChatModel):
 
         Only frames scoped to *thread_id* are honored so a stray sub-thread
         notification never terminates the turn early.
+
+        The wait below is re-armed on every frame, so it bounds the GAP between
+        frames, not the turn - the same quantity the other ACP-family providers
+        bound with ``acp_turn_idle_timeout_seconds``, and it reads that setting
+        for exactly that reason. ``self.timeout`` is deliberately not used here:
+        it carries ``provider_timeout_seconds``, a single-shot API-call budget
+        that also governs this model's startup RPCs. Spending a request budget
+        as a streaming idle backstop cut Codex turns off after 120s of quiet
+        while the identical workload survived 600s on every other provider.
+        Zero or less disables the backstop, matching the setting's contract.
         """
+        idle_limit = settings.acp_turn_idle_timeout_seconds
         while True:
             message = await asyncio.wait_for(
-                client.notifications.get(), timeout=self.timeout
+                client.notifications.get(),
+                timeout=idle_limit if idle_limit > 0 else None,
             )
             method = message.get("method")
             params = message.get("params") or {}

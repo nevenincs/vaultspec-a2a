@@ -1,7 +1,7 @@
 # <vaultspec type="agents">
 [agents."vaultspec-adr-researcher"]
 description = "Research a problem and formalize the decision as an ADR. Use to turn open questions into an ADR."
-model = "gpt-5.5"
+model = "gpt-5.6-sol"
 prompt = '''
 # Persona: Technical Researcher, Frontier Standards & `<ADR>` Decision Support
 
@@ -189,7 +189,7 @@ dispatching orchestrator for persistence, as described in the Persistence sectio
 
 [agents."vaultspec-code-reviewer"]
 description = "Review code for safety, architectural intent, and quality. Use for final verification before done."
-model = "gpt-5.5"
+model = "gpt-5.6-sol"
 prompt = '''
 # Persona: Lead Code Reviewer & Safety Officer
 
@@ -331,7 +331,7 @@ Classify findings using this scale:
 
 [agents."vaultspec-docs-curator"]
 description = "Reconcile the ADR architecture corpus against the codebase and the lifecycle documents against the single-home-fact boundary - status, supersession, conflicts, restated grounding, displaced decisions. Use to curate architecture decisions."
-model = "gpt-5.4"
+model = "gpt-5.6-terra"
 prompt = '''
 # Persona: ADR Architecture Curator
 
@@ -408,9 +408,10 @@ You act on what is mechanically safe and propose what needs judgment.
 - **Act directly.** Status propagation via
   `vaultspec-core vault adr supersede OLD --by NEW` (preview with `--dry-run`), and
   status encoding and stamp normalization. Always use the CLI mutators
-  (`vault adr supersede`, `vault set-frontmatter`, `vault set-body`, `vault edit`,
-  `vault link`) rather than raw file edits, so the frontmatter contract and the
-  `modified` stamp stay canonical.
+  (`vaultspec-core vault adr supersede`, `vaultspec-core vault set-frontmatter`,
+  `vaultspec-core vault set-body`, `vaultspec-core vault edit`,
+  `vaultspec-core vault link`) rather than raw file edits, so the frontmatter contract
+  and the `modified` stamp stay canonical.
 - **Act directly (boundary conformance).** Replace an ADR's restated evidence with a
   stem citation, and strip decision language from research and audit bodies where an
   accepted ADR records the same decision, leaving a one-line pointer - per the
@@ -458,7 +459,7 @@ surfaced for approval." and link the persisted audit report.
 
 [agents."vaultspec-high-executor"]
 description = "Implement complex, high-reasoning steps: core refactors, architecture, advanced features. Use for the hardest steps."
-model = "gpt-5.5"
+model = "gpt-5.6-sol"
 prompt = '''
 # Persona: Lead Implementation Engineer (High-Tier)
 
@@ -587,7 +588,7 @@ including it in the supervised team workflow.
 
 [agents."vaultspec-low-executor"]
 description = "Implement clear-cut, low-risk steps: small edits, docs, simple logic. Use for routine steps."
-model = "gpt-5.4-mini"
+model = "gpt-5.6-luna"
 prompt = '''
 # Persona: Lead Implementation Engineer (Low-Tier)
 
@@ -720,7 +721,7 @@ including it in the supervised team workflow.
 
 [agents."vaultspec-project-coordinator"]
 description = "Coordinate GitHub Projects: issue triage, milestones, worktrees, releases. Use for project-management tasks."
-model = "gpt-5.4"
+model = "gpt-5.6-terra"
 prompt = '''
 # Persona: Project coordinator
 
@@ -874,7 +875,7 @@ direction. Don't retry or work around failures silently.
 
 [agents."vaultspec-reference-auditor"]
 description = "Audit a codebase to produce a Reference of features, patterns, and best practices. Use to document how code works."
-model = "gpt-5.4"
+model = "gpt-5.6-terra"
 prompt = '''
 # Persona: Reference Codebase Specialist
 
@@ -961,7 +962,7 @@ File(s): <list of relevant files with paths>
 
 [agents."vaultspec-researcher"]
 description = "Gather, analyze, and synthesize information on a question. Use for general research."
-model = "gpt-5.4"
+model = "gpt-5.6-terra"
 prompt = '''
 # Persona: Research Agent
 
@@ -1017,7 +1018,7 @@ cost scales badly on large codebases; grep earns its place at the confirmation s
 
 [agents."vaultspec-standard-executor"]
 description = "Implement typical feature work and well-defined steps. Use for standard execution."
-model = "gpt-5.4"
+model = "gpt-5.6-terra"
 prompt = '''
 # Persona: Lead Implementation Engineer (Standard-Tier)
 
@@ -1146,7 +1147,7 @@ including it in the supervised team workflow.
 
 [agents."vaultspec-writer"]
 description = "Digest research and ADRs into a grounded, auditable implementation plan. Use to author a plan."
-model = "gpt-5.5"
+model = "gpt-5.6-sol"
 prompt = '''
 # Persona: Senior Software Plan Orchestrator & Delegator
 

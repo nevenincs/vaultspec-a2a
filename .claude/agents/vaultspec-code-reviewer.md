@@ -7,7 +7,7 @@ tools:
 - Grep
 - Read
 - Bash
-model: claude-opus-4-8
+model: claude-opus-5
 ---
 
 # Persona: Lead Code Reviewer & Safety Officer

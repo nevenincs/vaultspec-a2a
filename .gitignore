@@ -81,6 +81,8 @@ Python/
 .vaultspec/_snapshots/
 .vaultspec/mcp-ownership.json
 .vaultspec/providers.json
+/.agents/mcp_config.json.lock
+/.codex/config.toml.lock
 /.gitignore.lock
 /.mcp.json.lock
 # <<< vaultspec-managed <<<

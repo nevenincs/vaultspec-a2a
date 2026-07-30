@@ -3,7 +3,7 @@ tags:
   - '#adr'
   - '#codebase-health'
 date: '2026-07-19'
-modified: '2026-07-19'
+modified: '2026-07-30'
 related:
   - "[[2026-07-19-codebase-health-research]]"
   - "[[2026-07-18-desktop-product-profile-adr]]"
@@ -110,6 +110,29 @@ An idempotent cleanup owner deletes checkpoints and artifacts, records each
 result, and retries incomplete work. The final transaction removes control rows
 only after every required cleanup item succeeds. Replayed requests resume the
 same saga.
+
+The delete verb answers with four distinct outcomes, because the saga has four
+distinct terminal states and a single success code cannot carry them. A clean
+deletion returns no content. A deletion that finalized over at least one cleanup
+item judged permanently unremovable returns success WITH a versioned body
+reporting that cleanup was abandoned and naming the kinds of item left behind -
+never their filesystem paths, which are not the caller's to receive. Genuinely
+resumable incomplete cleanup returns service-unavailable, inviting the retry
+that will in fact make progress. An already-absent thread returns not-found.
+
+The abandoned case is deliberately NOT service-unavailable. Its rows are already
+gone, so a retry answers not-found; telling a client to retry a completed
+deletion would be an incoherent contract. It is equally not a bare success: a
+deletion that stranded external artifacts is a terminal fact, and recording it
+only in a server log leaves the product unable to surface remediation and any
+client-side reconciliation reading the thread as cleanly gone. The guarantee this
+surface makes is therefore precise: any success means the deletion is durable and
+the control rows are gone, and a success carrying a body additionally means
+external state was left stranded.
+
+A consumer asserting strictly on the no-content code will misclassify the
+abandoned case. That break is accepted deliberately on this transition surface
+rather than preserving a contract that cannot express the outcome.
 
 ### Authenticated and positive edge contracts
 

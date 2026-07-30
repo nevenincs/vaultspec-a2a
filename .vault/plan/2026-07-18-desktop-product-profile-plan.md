@@ -3,7 +3,7 @@ tags:
   - '#plan'
   - '#desktop-product-profile'
 date: '2026-07-18'
-modified: '2026-07-24'
+modified: '2026-07-30'
 tier: L3
 related:
   - '[[2026-07-18-desktop-product-profile-adr]]'
@@ -270,7 +270,7 @@ Require worker and provider eligibility before durable run creation or actor-tok
 - [x] `W04.P12.S69` - Prove prepare timeout cancellation and failed commit release capacity without a run token or run-owned child process; `src/vaultspec_a2a/desktop_tests/test_run_admission.py`.
 - [x] `W04.P12.S70` - Prove attach-control-authenticated terminal callback retry rejects worker IPC and unrelated credentials while status reconciliation revokes exactly one run-scoped lease without raw tokens; `src/vaultspec_a2a/desktop_tests/test_terminal_settlement.py`.
 - [x] `W04.P12.S71` - Certify a clean installed capsule starts and stops the standalone vaultspec-mcp adapter under caller ownership; `src/vaultspec_a2a/desktop_tests/test_standalone_mcp.py`.
-- [ ] `W04.P12.S104` - Make prepared commit and release crash-recoverable under one stable run identity with a pre-minted lease, a recoverable committing transition, durable exact replay, backward-compatible status, bounded strict wire inputs, and real failure, restart, race, and lost-ack proofs; `src/vaultspec_a2a/control/admission.py, src/vaultspec_a2a/api/body_limit.py, src/vaultspec_a2a/api/app.py, src/vaultspec_a2a/api/schemas/gateway.py, src/vaultspec_a2a/api/routes/gateway.py, src/vaultspec_a2a/api/tests/test_app.py, src/vaultspec_a2a/api/tests/test_gateway_live.py, src/vaultspec_a2a/database/migrations/__init__.py, src/vaultspec_a2a/database/tests/test_checkpoint_state_migration.py, src/vaultspec_a2a/desktop_tests/test_run_admission.py, src/vaultspec_a2a/desktop_tests/test_terminal_settlement.py, src/vaultspec_a2a/thread/actor_tokens.py, src/vaultspec_a2a/thread/tests/test_actor_tokens.py, src/vaultspec_a2a/utils/process.py, src/vaultspec_a2a/worker/app.py, src/vaultspec_a2a/worker/graph_lifecycle.py, src/vaultspec_a2a/worker/tests/test_executor.py, src/vaultspec_a2a/service_tests/_live_desktop_gateway.py, src/vaultspec_a2a/service_tests/test_engine_broker_lost_ack_live.py`.
+- [x] `W04.P12.S104` - Make prepared commit and release crash-recoverable under one stable run identity with a pre-minted lease, a recoverable committing transition, durable exact replay, backward-compatible status, bounded strict wire inputs, and real failure, restart, race, and lost-ack proofs; `src/vaultspec_a2a/control/admission.py, src/vaultspec_a2a/api/body_limit.py, src/vaultspec_a2a/api/app.py, src/vaultspec_a2a/api/schemas/gateway.py, src/vaultspec_a2a/api/routes/gateway.py, src/vaultspec_a2a/api/tests/test_app.py, src/vaultspec_a2a/api/tests/test_gateway_live.py, src/vaultspec_a2a/database/migrations/__init__.py, src/vaultspec_a2a/database/tests/test_checkpoint_state_migration.py, src/vaultspec_a2a/desktop_tests/test_run_admission.py, src/vaultspec_a2a/desktop_tests/test_terminal_settlement.py, src/vaultspec_a2a/thread/actor_tokens.py, src/vaultspec_a2a/thread/tests/test_actor_tokens.py, src/vaultspec_a2a/utils/process.py, src/vaultspec_a2a/worker/app.py, src/vaultspec_a2a/worker/graph_lifecycle.py, src/vaultspec_a2a/worker/tests/test_executor.py, src/vaultspec_a2a/service_tests/_live_desktop_gateway.py, src/vaultspec_a2a/service_tests/test_engine_broker_lost_ack_live.py`.
 
 ## Wave `W05` - certify artifacts without regressing Compose
 

@@ -3,7 +3,7 @@ tags:
   - '#exec'
   - '#desktop-product-profile'
 date: '2026-07-20'
-modified: '2026-07-20'
+modified: '2026-07-30'
 related:
   - "[[2026-07-18-desktop-product-profile-plan]]"
 ---
@@ -62,3 +62,24 @@ skips, or expected failures. Review confirmed every admission and settlement
 invariant from the decision record with two optional low notes accepted
 as-is (a settlement retry nicety and an established private health-probe
 reach-in).
+
+
+The phase later took a tenth Step, which hardened that same admission path for crash
+recovery: one stable run identity, a pre-minted lease, a recoverable committing
+transition, durable exact replay, a backward-compatible status shape, bounded strict
+wire inputs, and real failure, restart, race, and lost-acknowledgement proofs. It is
+implemented, committed, and formally re-certified against current bytes rather than
+against the bytes of its original sign-off, six commits having touched its scoped files
+in between.
+
+Re-certification on HEAD: the combined interface, control, thread, and store packages
+pass 896 tests, the worker package 89, and the real-process desktop suite 43 with skip
+reporting forced on and none reported - no failures and no skips across the three
+commands. That suite executed all four of the Step's named proofs. Two limits are
+recorded rather than papered over. The whole-tree type gate is not clean, standing at
+17 diagnostics, none in a scoped file. And the cross-repository lost-acknowledgement
+proof skipped for want of an engine binary this checkout cannot supply, so that one
+clause still rests on its original run and is queued as a finding; a skip is not a
+pass, and nothing was stubbed to make it look like one.
+
+With that Step closed, Phase P12 is complete.

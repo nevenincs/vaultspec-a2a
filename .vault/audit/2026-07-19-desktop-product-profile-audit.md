@@ -3,7 +3,7 @@ tags:
   - '#audit'
   - '#desktop-product-profile'
 date: '2026-07-19'
-modified: '2026-07-20'
+modified: '2026-07-30'
 related:
   - "[[2026-07-18-desktop-product-profile-plan]]"
 ---
@@ -35,6 +35,48 @@ The `extra = "rag"` selector correctly scopes uv lock resolution, but
 wheel consumers receive the Torch extra without the custom index. The capsule
 must therefore consume the uv-managed lock, and the Step Record must not claim
 that wheel metadata alone carries the override.
+
+
+### lost-ack-clause-rests-on-superseded-bytes | medium | the cross-repository lost-acknowledgement proof cannot be re-certified on HEAD, so that contract clause still rests on the 2026-07-20 run | `src/vaultspec_a2a/service_tests/test_engine_broker_lost_ack_live.py:51`
+
+The staged-admission Step's behavioural contract demands a real lost-acknowledgement
+proof. Re-certifying it needs a cross-repository engine binary supplied through an
+environment template that is absent in this checkout, so the module skips with the
+canonical runbook reason rather than running. Every other named proof for that Step
+executed and passed against HEAD; this one alone is unverified on today's bytes, while
+six commits have touched scoped files since the original run. The absence is now quiet
+by default: the handling moved from a hard assertion in the command builder to the
+repository-wide external-prerequisite fixture, so a plain re-run reports a skip that
+reads as a clean pass unless the caller declares the prerequisite guaranteed. Not
+routed around, stubbed, or substituted - recorded as owed.
+
+### plain-start-digest-covers-tokens | medium | the whole-request replay digest includes actor tokens, so a legitimate plain-start retry with freshly minted tokens receives a conflict instead of a replay | `src/vaultspec_a2a/api/routes/gateway.py:286,350`
+
+The digest helper excludes only the stage and reservation fields, leaving actor tokens
+and the engine bearer inside the compared digest. On the staged commit path that
+strictness was already the certified design. On the plain-start path it is new -
+previously only the profile field was compared - and it is deliberate, covered by a
+real retry test. The open question is cross-repository: a client that retries the same
+run id after re-minting short-lived tokens now gets a conflict rather than its original
+run. The consuming behaviour lives in another repository and cannot be verified from
+here, which is what holds this at medium.
+
+### progress-frame-unbounded-strings | medium | the positive progress frame's docstring promises every field is bounded, yet four of its string fields carry no length cap | `src/vaultspec_a2a/api/schemas/gateway.py:466-474`
+
+The model's own docstring rests its guarantee on a hostile producer being unable to
+overflow a consumer, but the run identifier, active agent, semantic phase, and pause
+cause fields declare no maximum length. This does not touch the Step's bounded
+strict-wire clause, which concerns run-start and actor-token inputs and remains
+enforced - 512-byte tokens, a 63-character role grammar, forbidden extras, and a 1 MiB
+pre-parse cap. It is a docstring-versus-code mismatch in a scoped file: an asserted
+invariant that the code does not hold.
+
+### progress-frame-no-producer | low | the positive progress frame has validation tests but no producer and no consumer anywhere in the tree | `src/vaultspec_a2a/api/schemas/gateway.py:452`
+
+Unexercised surface landed in a scoped file. The same defect is recorded independently
+against the streaming edge in the codebase-health queue, where the wire enforcement is
+a second, separately-maintained encoding of the same policy. Cross-referenced rather
+than duplicated: the repair belongs with whichever queue owns the progress edge.
 
 ## Recommendations
 

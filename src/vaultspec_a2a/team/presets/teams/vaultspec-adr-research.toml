@@ -149,6 +149,34 @@ provider = "codex"
 [team.profiles.codex.roles.vaultspec-adr-author]
 provider = "codex"
 
+# `codex-all` is the single-provider Codex lane: unlike the mixed `codex` profile
+# above, it also routes the inner doc-reviewer to `codex`, so no role falls back
+# to the team default (claude) and a run needs exactly one provider's auth. The
+# lane a Codex-only proof runs on, where a claude-gated role would otherwise make
+# the proof inexpressible. The overlay only sets `provider` per role;
+# capability/fallback fall through the normal precedence chain unchanged.
+[team.profiles.codex-all]
+display_name = "Codex (all roles)"
+description  = """
+Single-provider provider-axis lane: every worker - the researcher fan-out, the
+synthesist, the ADR author, AND the inner doc-reviewer - runs on the codex
+app-server provider, so the run consumes no other provider's credential. Codex
+auth is the file-based persisted ChatGPT session in the Codex home; no credential
+env is injected.
+"""
+
+[team.profiles.codex-all.roles.vaultspec-researcher]
+provider = "codex"
+
+[team.profiles.codex-all.roles.vaultspec-synthesist]
+provider = "codex"
+
+[team.profiles.codex-all.roles.vaultspec-adr-author]
+provider = "codex"
+
+[team.profiles.codex-all.roles.vaultspec-doc-reviewer]
+provider = "codex"
+
 # `zai` is the Z.ai provider-axis lane. Credential-gated on ZAI_AUTH_TOKEN: the
 # harness skips this lane loudly (naming the missing token) when the token is
 # absent from the environment, and never fakes it. The three research/authoring
@@ -192,4 +220,31 @@ provider = "kimi"
 provider = "kimi"
 
 [team.profiles.kimi.roles.vaultspec-adr-author]
+provider = "kimi"
+
+# `kimi-all` is the single-provider Kimi lane, the Kimi counterpart of
+# `codex-all`: it also routes the inner doc-reviewer to `kimi`, so no role falls
+# back to the team default (claude) and the run needs exactly one credential.
+# Credential-gated on KIMI_API_KEY like the mixed lane; the harness skips it
+# loudly when the key is absent and never fakes it.
+[team.profiles.kimi-all]
+display_name = "Kimi (all roles)"
+description  = """
+Single-provider provider-axis lane: every worker - the researcher fan-out, the
+synthesist, the ADR author, AND the inner doc-reviewer - runs on the Kimi
+(Moonshot AI) provider, so the run consumes no other provider's credential.
+Requires a configured Kimi API key; the harness skips this lane with a truthful
+reason when the credential is absent.
+"""
+
+[team.profiles.kimi-all.roles.vaultspec-researcher]
+provider = "kimi"
+
+[team.profiles.kimi-all.roles.vaultspec-synthesist]
+provider = "kimi"
+
+[team.profiles.kimi-all.roles.vaultspec-adr-author]
+provider = "kimi"
+
+[team.profiles.kimi-all.roles.vaultspec-doc-reviewer]
 provider = "kimi"

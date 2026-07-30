@@ -240,9 +240,30 @@ def test_an_unrecognised_rule_marker_is_not_comparable() -> None:
     so no comparison it can make is evidence of anything; reporting no match
     refuses the replay rather than answering with a run whose identity was never
     verified.
-    """
-    body = _request()
 
+    The discriminating input is a fingerprint under the rule an unrecognised
+    marker would fall BACK to if it guessed. A fingerprint under the current
+    rule is not: it disagrees with the older rule's digest anyway, so an
+    implementation that quietly guessed the older rule would report no match for
+    it too and look identical to one that refused.
+    """
+    body = _request(actor_tokens=_bundle("tok-1"))
+    guessable = _legacy_digest(body)
+
+    # Control: under the marker that names it, this fingerprint really does
+    # compare equal - so every refusal below is the MARKER being refused rather
+    # than the digest happening to disagree.
+    assert replay_digest_matches(
+        f"{ReplayDigestRule.CREDENTIAL_SENSITIVE.value}:{guessable}", body
+    )
+
+    assert not replay_digest_matches(f"r99:{guessable}", body), (
+        "an unknown rule marker must refuse, not fall back to a rule it knows"
+    )
+    assert not replay_digest_matches(f":{guessable}", body), (
+        "an empty rule marker names no rule and must refuse just the same"
+    )
+    # A current-rule fingerprint under those markers is refused as well.
     assert not replay_digest_matches(f"r99:{_current(body)}", body)
     assert not replay_digest_matches(f":{_current(body)}", body)
 

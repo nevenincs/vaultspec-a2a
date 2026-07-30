@@ -2334,3 +2334,58 @@ inside the store's busy timeout; an overrun fails loudly rather than passing sil
 it is the test's least robust element. `gateway-module-over-ceiling` (low, open) - the
 gateway route module grew past 1600 lines, further beyond the project ceiling already
 recorded under the module-size finding above.
+
+
+### Consumer consumption inventory (2026-07-30)
+
+The consuming product was read directly rather than assumed, to settle two decisions that
+were being held on guesswork. It settled both and surfaced a defect nobody was looking
+for.
+
+Topology first, because it governs everything else: the consumer's frontend never calls
+the versioned progress stream directly. It transits a whitelisted pass-through in the
+engine, which opens the upstream stream on loopback and pumps frames VERBATIM, adding only
+a sequence field. The engine reads just the type and event-name fields, plus the terminal
+event NAME to latch completion. There is exactly one consumer chain, and it sees this
+repository's frames essentially unfiltered.
+
+The aggregate progress schema has NO mirror. Searches for the type names, for every field
+name in the shape, and for any token-accounting concept at all return nothing across the
+consumer tree - no type, no adapter, no fixture, no UI element. The one overlapping field
+name is read from the run-status envelope, a different response object. Its withdrawal is
+therefore evidence-backed rather than argued, and the paired-amendment requirement that
+guarded the token-delta field is satisfied rather than waived.
+
+The closed catalog gained three MUST-KEEP entries it would otherwise have broken, each
+surviving today only because its frame type is unmapped and passes through untouched: the
+agent status state field, which drives the live activity indicator; the team roster's
+per-agent identifier and state, which the roster liveness read consumes and which the
+consumer's own tests lock as a deliberate contract; and the error message, without which
+the fault banner degrades to a generic literal and the operator loses the real reason.
+Two entries were confirmed droppable: no consumer reads plan-entry content, and none reads
+the permission-request fields. The frame type NAMES are load-bearing in a way the catalog
+work had to be warned about - the consumer classifies by substring on the event name, so
+renaming or projecting a type away would silently downgrade the degrade, heartbeat, and
+dropped frames into an inert lane, and for the terminal frame would leave the consumer's
+upstream socket and pump thread alive indefinitely.
+
+#### `tool-content-stripped-from-a-rendering-consumer` (high, open, cross-repository)
+
+The consumer reads the tool-call content list and RENDERS it as the tool argument and
+result panes, branching on frame status to label one as arguments and the other as result,
+and handling three content variants. This repository's allowlist already permits only the
+identifier, title, kind, status, and locations on those frames - content is excluded as a
+forbidden diff or raw-output body under the accepted decision. Unless some path bypasses
+the encode boundary, those panes are ALREADY permanently empty on the live edge, and have
+been since the allowlist landed. Neither side is individually wrong: the exclusion is the
+accepted decision faithfully implemented, and the rendering is a reasonable consumer of a
+field the schema still declares. The contradiction is that the schema advertises a field
+the edge always removes.
+
+Established by reading both repositories, with no live run, so the "already empty" claim is
+source-derived and unconfirmed against a running system - it should be confirmed by
+observation before any repair is designed. The repair is a paired decision, not a catalog
+edit: either the accepted decision is amended to admit bounded argument and result text
+with explicit caps, or the consumer stops rendering panes that structurally cannot fill.
+Deliberately NOT fixed in passing by the catalog work, which would have meant re-admitting
+a forbidden field without a decision.

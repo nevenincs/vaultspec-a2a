@@ -75,7 +75,12 @@ from ..dependencies import (
     get_worker_spawner,
     require_attach,
 )
-from ..run_admission import commit_singleflight, request_digest
+from ..run_admission import (
+    commit_singleflight,
+    replay_digest_matches,
+    request_digest,
+    stamped_replay_digest,
+)
 from ..schemas.gateway import (
     ActiveRunRecord,
     ActiveRunsResponse,
@@ -320,10 +325,13 @@ async def _create_run_core(
     )
     metadata_json = _persist_frozen(metadata_json, frozen)
     # Persist what this run was started with, so a later replay is compared
-    # against the whole request rather than one field of it.
+    # against the whole request rather than one field of it. The stamped form
+    # records the rule it was computed under: raw tokens are never persisted, so
+    # a stored fingerprint cannot be recomputed and a rule change would
+    # otherwise refuse a byte-identical replay of an older run.
     if body.run_id is not None:
         metadata_json = _persist_request_digest(
-            metadata_json, request_digest(body, prepared=False)
+            metadata_json, stamped_replay_digest(body)
         )
     # Bind the committed reservation's non-secret lease identity to the run,
     # durably, so terminal settlement and post-restart reconciliation recover it.
@@ -757,11 +765,14 @@ _RUN_LEASE_METADATA_KEY = "run_lease"
 # The canonical digest of the request that created a run. Persisted on every
 # create so a later replay can be compared against what the run was actually
 # started with, rather than against the single field the check previously read.
+# The stored value is the rule-stamped form (``<rule>:<digest>``); an unstamped
+# value is a run created before the marker existed and is compared under the
+# rule it was written with.
 _REQUEST_DIGEST_METADATA_KEY = "run_request_digest"
 
 
 def _persist_request_digest(metadata_json: str | None, digest: str) -> str:
-    """Embed the creating request's canonical digest into run metadata."""
+    """Embed the creating request's rule-stamped digest into run metadata."""
     data: dict[str, Any] = {}
     if metadata_json:
         try:
@@ -807,17 +818,24 @@ def _replay_identity_or_conflict(
     durable run, so a request naming a different one can never be served. Beyond
     that single field, every other behaviour-affecting field - the prompt, the
     preset, the feature tag, the feedback batch - is folded into the persisted
-    request digest, so a differing request is refused rather than silently
-    answered with the durable run and its distinct intention discarded. The
-    digest comparison is constant-time, matching the commit path's treatment of
-    the same value.
+    replay fingerprint, so a differing request is refused rather than silently
+    answered with the durable run and its distinct intention discarded.
+
+    Credential VALUES are deliberately not part of that fingerprint. A replay
+    returns the ORIGINAL run and never adopts the retry's bundle, and
+    short-lived credentials are expected to rotate across a retry, so refusing a
+    rotated bundle here would refuse exactly the lost-acknowledgement recovery
+    this path exists to serve. Credential coverage remains enforced at first
+    start by admission, which is where an uncovering bundle is refused. The
+    stored fingerprint is compared under the rule it was written with, so a run
+    created before that classification still replays.
 
     Returns:
         The run's persisted profile id, or ``None`` when the run carries no
         frozen profile record.
 
     Raises:
-        HTTPException: 409 when the profile or the request digest differs.
+        HTTPException: 409 when the profile or the request fingerprint differs.
     """
     existing_profile = _persisted_profile_id(metadata_json)
     if existing_profile is not None and existing_profile != body.profile_id:
@@ -830,12 +848,9 @@ def _replay_identity_or_conflict(
         )
     # ``None`` means the run predates digest persistence, not that its request
     # was empty; refusing on it would break a legitimate replay of an older run.
-    # Compared as bytes so a persisted value that is somehow not ASCII compares
-    # unequal rather than raising out of the constant-time comparison.
     persisted_digest = _persisted_request_digest(metadata_json)
-    if persisted_digest is not None and not hmac.compare_digest(
-        persisted_digest.encode("utf-8"),
-        request_digest(body, prepared=False).encode("utf-8"),
+    if persisted_digest is not None and not replay_digest_matches(
+        persisted_digest, body
     ):
         raise HTTPException(
             status_code=409,

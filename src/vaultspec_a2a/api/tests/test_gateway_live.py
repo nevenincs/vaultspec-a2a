@@ -1001,16 +1001,21 @@ async def test_run_start_conflicts_on_profile_change_retry(
 
 
 @pytest.mark.asyncio(loop_scope="function")
-async def test_run_start_conflicts_on_changed_request_body_retry(
+async def test_run_start_replays_a_rotated_bundle_and_conflicts_on_a_changed_body(
     session_factory, checkpointer
 ) -> None:
-    """A retry with the same run id but a different prompt is a 409, not a replay.
+    """Where the fingerprint draws the line between a retry and a new intention.
 
-    Profile parity covers one field; this proves the whole-request fingerprint
-    check (the digest branch) catches a changed behaviour-affecting field on an
-    otherwise-matching retry, so a second intention is never silently discarded
-    as an idempotent replay of the first. The profile is held equal to the frozen
-    default so the digest branch - not the profile branch - is the one exercised.
+    Two verdicts, on the one durable run, over the real edge. A retry carrying
+    freshly minted credentials is a RETRY: a replay returns the original run and
+    never adopts the presented bundle, and short-lived tokens are expected to
+    rotate between the lost acknowledgement and the retry, so refusing one would
+    refuse exactly the recovery a client-supplied run id exists to serve. A retry
+    carrying a different prompt is a NEW INTENTION wearing an old id and is
+    refused, so it is never silently discarded as an idempotent replay.
+
+    The profile is held equal to the frozen default throughout so the digest
+    branch - not the profile branch - is the one exercised.
     """
     app, _agg, worker, _cp = make_app(session_factory, checkpointer)
     async with (
@@ -1022,22 +1027,53 @@ async def test_run_start_conflicts_on_changed_request_body_retry(
             "message": "go",
             "run_id": "rid-body-conflict",
             "profile_id": "team-defaults",
+            "actor_tokens": {
+                "tokens": {"coder": "tok-minted"},
+                "engine_bearer": "bearer-minted",
+            },
         }
         first = await client.post("/v1/runs", json=payload)
         assert first.status_code == 201, first.text
 
-        # Same run id, same profile, DIFFERENT prompt -> fingerprint conflict.
+        # Same run id, same work, FRESHLY MINTED credentials -> the original run.
+        rotated = await client.post(
+            "/v1/runs",
+            json={
+                **payload,
+                "actor_tokens": {
+                    "tokens": {"coder": "tok-rotated"},
+                    "engine_bearer": "bearer-rotated",
+                },
+            },
+        )
+        assert rotated.status_code == 201, rotated.text
+        assert rotated.json()["run_id"] == "rid-body-conflict"
+
+        # Same run id, same profile, DIFFERENT prompt -> fingerprint conflict,
+        # and the rotated bundle does not buy it a replay either.
         conflict = await client.post(
-            "/v1/runs", json={**payload, "message": "a different intention"}
+            "/v1/runs",
+            json={
+                **payload,
+                "message": "a different intention",
+                "actor_tokens": {
+                    "tokens": {"coder": "tok-rotated"},
+                    "engine_bearer": "bearer-rotated",
+                },
+            },
         )
         assert conflict.status_code == 409, conflict.text
         assert "different request body" in conflict.json()["detail"]
 
-        # The conflicting retry never produced a second dispatch.
+        # Neither the rotated replay nor the conflicting retry started a second
+        # run: the replay returned the first dispatch, the conflict returned none.
         rid_dispatches = [
             d for d in worker.dispatches if d.get("thread_id") == "rid-body-conflict"
         ]
         assert len(rid_dispatches) == 1
+        # The run kept the credentials it was STARTED with; a replay never
+        # re-credentialed it with the bundle the retry presented.
+        assert rid_dispatches[0]["actor_tokens"]["tokens"]["coder"] == "tok-minted"
 
         # An identical replay (the original body) still returns the original run,
         # proving the 409 was the changed body - not a blanket rejection.

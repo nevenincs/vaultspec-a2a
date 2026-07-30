@@ -147,6 +147,29 @@ A consumer asserting strictly on the no-content code will misclassify the
 abandoned case. That break is accepted deliberately on this transition surface
 rather than preserving a contract that cannot express the outcome.
 
+
+The retry invitation carried by the resumable-incomplete answer is addressed to the
+CALLER, and intermediaries do not loop on it. Automatic retry with backoff is the right
+default for a transient fault whose repetition is a cheap, side-effect-free replay - but
+this answer is neither. Each delete request claims the saga and drives the full cleanup
+manifest against real stores, and each recorded failure advances an attempt ledger whose
+ceiling abandons the item permanently. That ceiling assumes retries arrive as separate
+requests, spaced widely enough for a transient cause - a briefly-held file, a restarting
+store - to clear. A client looping at seconds-scale would exhaust the ceiling against the
+same unchanged cause and finalize over stranded state, converting the resumable outcome
+into the abandoned one invisibly, inside a blocking call. One sub-case of this answer means
+another pass merely holds the claim, whose lease is minutes long, so a fast loop performs
+no work at all while occupying its caller.
+
+The surface therefore declares the condition rather than absorbing it: a consumer is told
+the deletion is in progress, that the state is resumable and not a server fault, that
+repeating the same request resumes the same saga and makes progress, and that persistent
+incompleteness will eventually be reported as abandoned. Pacing belongs to whichever layer
+knows whether the work is still wanted, which is the caller, not the transport between
+them. This boundary would move if the resumable pass became a poll that does not advance
+the ledger against an unchanged cause, or if the answer carried a server-computed pacing
+hint - either would make a single bounded client retry defensible.
+
 ### Authenticated and positive edge contracts
 
 The supported public product surface is the five versioned verbs and the

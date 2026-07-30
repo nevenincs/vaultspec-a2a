@@ -111,14 +111,23 @@ result, and retries incomplete work. The final transaction removes control rows
 only after every required cleanup item succeeds. Replayed requests resume the
 same saga.
 
-The delete verb answers with four distinct outcomes, because the saga has four
-distinct terminal states and a single success code cannot carry them. A clean
-deletion returns no content. A deletion that finalized over at least one cleanup
-item judged permanently unremovable returns success WITH a versioned body
-reporting that cleanup was abandoned and naming the kinds of item left behind -
-never their filesystem paths, which are not the caller's to receive. Genuinely
-resumable incomplete cleanup returns service-unavailable, inviting the retry
-that will in fact make progress. An already-absent thread returns not-found.
+The delete verb answers with five distinct outcomes, because the service result
+distinguishes more states than a two-code surface can carry. Before the saga
+begins, a thread whose lifecycle state refuses deletion returns conflict with a
+detail - that eligibility refusal is a separate outcome and is not a saga state
+at all. A clean deletion returns no content. A deletion that finalized over at
+least one cleanup item judged permanently unremovable returns success WITH a
+versioned body reporting that cleanup was abandoned and naming the kinds of item
+left behind - never their filesystem paths, which are not the caller's to
+receive. Genuinely resumable incomplete cleanup returns service-unavailable,
+inviting the retry that will in fact make progress. An already-absent thread
+returns not-found.
+
+Only two of those are terminal saga states. Resumable-incomplete is explicitly
+non-terminal - that is the entire reason it earns a retryable code - and
+not-found describes the absence of a saga rather than one of its states. The
+grounds for the five-outcome surface is the service result's own vocabulary, not
+a count of terminal states.
 
 The abandoned case is deliberately NOT service-unavailable. Its rows are already
 gone, so a retry answers not-found; telling a client to retry a completed
@@ -129,6 +138,10 @@ client-side reconciliation reading the thread as cleanly gone. The guarantee thi
 surface makes is therefore precise: any success means the deletion is durable and
 the control rows are gone, and a success carrying a body additionally means
 external state was left stranded.
+
+Naming the item kinds is required, not optional, so the service result carries
+the abandoned items through from the finalize outcome rather than flattening them
+to a flag.
 
 A consumer asserting strictly on the no-content code will misclassify the
 abandoned case. That break is accepted deliberately on this transition surface
@@ -156,22 +169,28 @@ Run-start replay stores a canonical fingerprint of every behavior-affecting
 request field. A matching `run_id` with a different fingerprint returns HTTP
 `409 Conflict`.
 
-Credentials are not behavior-affecting fields. Actor tokens and the engine
-bearer authorize a request instance; they do not describe the work the run will
-perform, and the prepare fingerprint already classifies them out on exactly that
-ground. The plain-start fingerprint classifies them out for the same reason. A
-replay returns the ORIGINAL run, so a retry's freshly minted bundle is never the
-bundle the run uses - the original is already seated in worker runtime state, and
-tokens are deliberately never checkpointed. Short-lived credentials are expected
-to rotate across a retry, so fingerprinting them would refuse precisely the
-lost-acknowledgement recovery that client-supplied idempotency exists to serve.
-Because the classification is named rather than derived, it is recorded here
-rather than left to the reader of the digest helper.
+Credential VALUES are not part of a run's work identity. Actor tokens and the
+engine bearer authorize a request instance rather than describe the work, which
+is the classification the fingerprint already applies to the fields that identify
+a request rather than describe it. Credential COVERAGE is a different question
+and remains enforced where it belongs: admission evaluates role coverage at first
+start and refuses an uncovering bundle outright. The fingerprint is the wrong
+instrument for coverage in either case.
+
+The plain-start fingerprint therefore excludes credential values. A replay
+returns the ORIGINAL run, so a retry's presented bundle is never the bundle that
+run uses. Short-lived credentials are expected to rotate across a retry, so
+fingerprinting them would refuse precisely the lost-acknowledgement recovery that
+client-supplied idempotency exists to serve. Because the classification is named
+rather than derived, it is recorded here rather than left to the reader of the
+digest helper.
 
 The staged commit binding is deliberately stricter and is unchanged. Its digest
 is compared against the durably bound accepted request under per-run
-single-flight, and a commit retry is a resend of the same body with an
-already-minted bundle in hand, so credentials do not rotate inside that window.
+single-flight, so a commit retry carrying a rotated bundle is REFUSED by design
+at the credential-binding boundary rather than being impossible; the certified
+driver mints once per run and does not rotate inside that window. That deliberate
+refusal is the reason the commit digest stays strict.
 
 Persisted fingerprints carry the rule they were computed under, so a run stored
 before this classification is compared under the older rule. Raw tokens are never

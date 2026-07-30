@@ -303,7 +303,15 @@ async def test_presets_list_is_truthful_and_resilient(
         ]
         assert authoring["default_profile_id"] == "team-defaults"
         profiles = {p["id"]: p for p in authoring["profiles"]}
-        assert set(profiles) == {"team-defaults", "fast", "codex", "zai", "kimi"}
+        assert set(profiles) == {
+            "team-defaults",
+            "fast",
+            "codex",
+            "codex-all",
+            "zai",
+            "kimi",
+            "kimi-all",
+        }
         assert profiles["team-defaults"]["is_default"] is True
 
         # team-defaults effective assignments: safe operational fields only. All
@@ -343,6 +351,19 @@ async def test_presets_list_is_truthful_and_resilient(
             assert codex_by_agent[agent_id]["provider_id"] == "codex"
             assert codex_by_agent[agent_id]["source"] == "profile"
         assert codex_by_agent["vaultspec-doc-reviewer"]["provider_id"] != "codex"
+
+        # The single-provider lanes are the inverse of the mixed ones: every
+        # worker, doc-reviewer included, is overlaid, so a run on them consumes
+        # exactly one provider's credential. Asserting the doc-reviewer here is
+        # the load-bearing part - it is the role the mixed lanes leave behind,
+        # and the reason a provider-only proof cannot be expressed on them.
+        all_roles = (*authoring_roles, "vaultspec-doc-reviewer")
+        for profile_id, provider_id in (("codex-all", "codex"), ("kimi-all", "kimi")):
+            by_agent = {a["agent_id"]: a for a in profiles[profile_id]["assignments"]}
+            assert set(by_agent) == set(all_roles)
+            for agent_id in all_roles:
+                assert by_agent[agent_id]["provider_id"] == provider_id
+                assert by_agent[agent_id]["source"] == "profile"
 
         zai_by_agent = {a["agent_id"]: a for a in profiles["zai"]["assignments"]}
         zai_readiness = probe_provider_readiness(Provider.ZAI)

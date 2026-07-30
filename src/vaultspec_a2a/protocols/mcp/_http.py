@@ -167,7 +167,10 @@ async def _mcp_request(
     ``ToolError(not_found_msg)``.  Otherwise re-raises the
     ``HTTPStatusError`` for handler-specific processing (e.g. 409).
 
-    Returns the parsed JSON dict on success.
+    Returns the parsed JSON dict on success, or an empty dict when the
+    successful response carried no body.  A body-less success is a success:
+    callers that must tell one apart from a success carrying a body test for
+    that body's own fields rather than for the absence of a parse error.
     """
     url = f"{settings.gateway_url}{path}"
     safe_url = _strip_credentials(settings.gateway_url)
@@ -182,6 +185,13 @@ async def _mcp_request(
             timeout=timeout,
         )
         resp.raise_for_status()
+        if not resp.content:
+            # A no-content success carries its whole meaning in the status
+            # line.  Parsing it as JSON raises a decode error that none of the
+            # branches below map, so it would escape this helper uncaught and
+            # crash the calling tool on an outcome the gateway considers a
+            # success.
+            return {}
         return resp.json()
     except httpx.ConnectError as exc:
         raise ToolError(

@@ -210,12 +210,19 @@ async def delete_thread(
     Returns 404 if the thread_id does not match any known thread. Returns 409
     if the thread is still in a non-terminal state.
 
+    A deletion is always durable once it reports success, but it can finalize
+    over state that no cleanup pass could remove.  The returned text says which
+    of the two happened: a clean deletion reports only that, while a deletion
+    that stranded state reports the abandonment and names the kinds of item
+    left behind, so the caller can surface or remediate them instead of
+    reading the thread as cleanly gone.
+
     Args:
         thread_id: The UUID of the thread to delete, e.g.
                    '550e8400-e29b-41d4-a716-446655440000'.
     """
     try:
-        await _mcp_request(
+        data = await _mcp_request(
             "DELETE",
             f"/api/threads/{thread_id}",
             timeout=settings.mcp_query_timeout_seconds,
@@ -231,6 +238,19 @@ async def delete_thread(
                 f"{detail or 'thread is not in a terminal state'}."
             ) from exc
         raise ToolError(f"Server error: HTTP {exc.response.status_code}") from exc
+    # A clean deletion answers with no body at all; a deletion that finalized
+    # over permanently unremovable state answers with one naming the kinds it
+    # stranded.  Reporting both as a bare "deleted" would erase the very
+    # distinction the delete surface exists to carry.  Kinds only — the
+    # concrete checkpoint ids and artifact paths are control-plane state and
+    # are deliberately absent from the wire.
+    abandoned_kinds = [str(kind) for kind in data.get("abandoned_kinds") or []]
+    if abandoned_kinds:
+        return (
+            f"Thread {thread_id} deleted, but cleanup was abandoned: "
+            f"state of kind {', '.join(abandoned_kinds)} could not be removed "
+            f"and remains behind."
+        )
     return f"Thread {thread_id} deleted."
 
 

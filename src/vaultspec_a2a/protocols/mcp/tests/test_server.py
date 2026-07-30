@@ -20,6 +20,7 @@ resident gateway on its real port can never accidentally satisfy them.
 """
 
 import asyncio
+import json
 import socket
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -44,6 +45,7 @@ from ....control.circuit_breaker import WorkerCircuitBreaker
 from ....control.config import settings
 from ....control.worker_management import LazyWorkerSpawner
 from ....database import (
+    create_artifact,
     create_thread,
     record_permission_request,
     record_permission_response_submission,
@@ -55,11 +57,12 @@ from ....database.models import (
     ThreadModel,
 )
 from ....streaming.aggregator import EventAggregator
+from ....thread.enums import CleanupKind
 from .. import _http as mcp_http
 from .._http import _reset_client, _reset_known_presets
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
+    from collections.abc import AsyncIterator, Iterator
 
 from ..tools.discovery import (
     get_pending_permissions,
@@ -1819,6 +1822,147 @@ class TestDeleteArchiveThreadErrorPaths:
 
         assert "Cannot delete thread" in str(exc_info.value)
         assert "input_required" in str(exc_info.value)
+
+
+# ---------------------------------------------------------------------------
+# The delete tool against the DELETE contract's two success outcomes
+# ---------------------------------------------------------------------------
+
+
+@asynccontextmanager
+async def _tool_calls_reach(app) -> "AsyncIterator[None]":
+    """Route the MCP tool surface's gateway calls into *app* for the block.
+
+    Real ASGI transport over the real gateway app, so the tool issues the
+    request it issues in production and reads the route's real response - real
+    status line, real bytes, real absence of bytes.
+    """
+    original_url = settings.gateway_url
+    original_client = mcp_http._shared_client
+    settings.gateway_url = "http://testserver"
+    mcp_http._shared_client = httpx.AsyncClient(
+        transport=ASGITransport(app=app),
+        base_url="http://testserver",
+    )
+    try:
+        yield
+    finally:
+        client = mcp_http._shared_client
+        mcp_http._shared_client = original_client
+        settings.gateway_url = original_url
+        if client is not None:
+            await client.aclose()
+
+
+async def _detached_checkpoint_store(db_file: Path) -> AsyncSqliteSaver:
+    """Return a real checkpoint store that can no longer serve a delete.
+
+    Not a stub and not a patched object: a real ``AsyncSqliteSaver`` over a
+    real database file whose connection has been closed - the state a gateway
+    is left holding when its checkpoint store goes away underneath it. Every
+    cleanup pass against it fails for real, so after the saga's attempt ceiling
+    the checkpoint item is abandoned rather than retried forever.
+    """
+    async with AsyncSqliteSaver.from_conn_string(str(db_file)) as saver:
+        await saver.setup()
+        return saver
+
+
+class TestDeleteThreadSuccessOutcomes:
+    """A success is reported as the outcome it actually was.
+
+    The delete verb answers a clean deletion with no content and a deletion
+    that finalized over permanently unremovable state with a body naming the
+    kinds it stranded. Both are successes and the tool must tell them apart:
+    flattening them loses the only signal a caller has that external state was
+    left behind.
+    """
+
+    @pytest.mark.asyncio(loop_scope="function")
+    async def test_a_clean_deletion_succeeds_and_reads_as_clean(
+        self, session_factory, checkpointer
+    ) -> None:
+        """A no-content success is a success, not a parse failure.
+
+        The regression guard for the crash: the route really answers 204 with
+        an empty body, and before the fix the shared request helper parsed that
+        body unconditionally and raised an unmapped JSON decode error straight
+        out of the tool - so the commonest delete outcome crashed. Asserting on
+        the returned text also proves the call completed rather than escaping.
+        """
+        # A store whose tables exist is what makes this outcome the CLEAN one:
+        # every cleanup item really succeeds, so the saga finalizes with
+        # nothing stranded and the route answers no-content.
+        await checkpointer.setup()
+        with _make_test_client(session_factory, checkpointer) as client:
+            async with session_factory() as session:
+                await create_thread(
+                    session, thread_id="t-clean-delete", status="completed"
+                )
+                await session.commit()
+
+            async with _tool_calls_reach(client.app):
+                result = await delete_thread("t-clean-delete")
+
+            # The rows are really gone: the saga ran, it did not merely answer.
+            async with session_factory() as session:
+                assert await session.get(ThreadModel, "t-clean-delete") is None
+
+        assert result == "Thread t-clean-delete deleted."
+
+    @pytest.mark.asyncio(loop_scope="function")
+    async def test_an_abandoned_cleanup_is_reported_and_names_the_kinds(
+        self, session_factory, tmp_path
+    ) -> None:
+        """A deletion that stranded state says so and names what it stranded.
+
+        Nothing is arranged after the fact: the checkpoint item really fails
+        against a detached store on every pass, and the artifact file is really
+        removed. The first two calls are retryable, so the tool surfaces them
+        as errors; the third finalizes over the item the saga stopped retrying
+        and must report the abandonment rather than a bare 'deleted'. The
+        cleaned artifact kind is absent from that report - only stranded state
+        is named - and no filesystem path reaches the caller.
+        """
+        store = await _detached_checkpoint_store(tmp_path / "detached.db")
+        workspace = tmp_path / "workspace"
+        (workspace / "outputs").mkdir(parents=True)
+        artifact_file = workspace / "outputs" / "report.md"
+        artifact_file.write_text("body", encoding="utf-8")
+
+        with _make_test_client(session_factory, store) as client:
+            async with session_factory() as session:
+                await create_thread(
+                    session,
+                    thread_id="t-strand-delete",
+                    status="completed",
+                    metadata=json.dumps({"workspace_root": workspace.as_posix()}),
+                )
+                await create_artifact(
+                    session,
+                    thread_id="t-strand-delete",
+                    artifact_type="file",
+                    path="outputs/report.md",
+                )
+                await session.commit()
+
+            async with _tool_calls_reach(client.app):
+                # Resumable-incomplete cleanup is retryable, and a retry does
+                # make progress; the ceiling turns the last pass terminal.
+                for _ in range(2):
+                    with pytest.raises(ToolError):
+                        await delete_thread("t-strand-delete")
+                result = await delete_thread("t-strand-delete")
+
+        assert result.startswith("Thread t-strand-delete deleted, but cleanup was")
+        assert CleanupKind.CHECKPOINT.value in result
+        # The removable artifact was really removed, so its kind is not named.
+        assert artifact_file.exists() is False
+        assert CleanupKind.ARTIFACT_FILE.value not in result
+        # Kinds only: a concrete target is control-plane state, never the
+        # caller's to receive.
+        assert workspace.as_posix() not in result
+        assert "report.md" not in result
 
 
 class TestKnownPresetsCache:

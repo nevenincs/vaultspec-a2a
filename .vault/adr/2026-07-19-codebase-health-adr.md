@@ -197,12 +197,32 @@ before this classification is compared under the older rule. Raw tokens are neve
 persisted and a stored fingerprint cannot be recomputed, so without that marker a
 byte-identical replay of an older run would be refused spuriously.
 
-The progress channel uses a versioned positive schema. It carries identifiers,
-lifecycle state, bounded counters, explicitly approved summaries, and one
-dedicated bounded token-delta field. It never carries prompts, document bodies,
-raw provider payloads, artifact bodies, or edit diffs. Durable state remains
-available through `run-status`. Removing the token-delta field requires paired
-dashboard and A2A ADR amendments.
+The progress channel is a CLOSED per-event catalog rather than an aggregate
+snapshot. Every frame type the product emits is enumerated with an explicit
+per-field allowlist and explicit bounds on its text fields; a frame type absent
+from the catalog is projected onto the always-safe identity keys rather than
+passed through, and the frame byte cap remains the backstop. Projection is by
+omission and truncation, never refusal: on a channel whose frames are
+contractually droppable, degrading an unrecognised frame to its identity keys
+preserves the most useful signal, whereas refusing it deletes the frame outright
+and turns additive producer evolution into silent loss. The channel still never
+carries prompts, document bodies, raw provider payloads, artifact bodies, or edit
+diffs, and durable state remains available through `run-status`.
+
+The catalog is closed against evidence of what the product consumes, not against
+assumption. Enumerating every emitted type BEFORE flipping the unknown-type
+default is what keeps the flip non-breaking: an unenumerated content-bearing type
+would otherwise lose its content the moment the default changed.
+
+The aggregate progress schema - counters, explicitly approved summaries, and a
+single bounded token-delta field - is WITHDRAWN. It was never constructed by any
+production path, and a dashboard consumption inventory confirms no consumer
+mirrors it, expects a token delta, or maintains any token-accounting surface at
+all, so its removal takes nothing off any wire. The paired-amendment requirement
+that guarded the token-delta field is satisfied by that evidence rather than
+waived. The token stream the product actually renders is the per-event message
+content, which is retained and bounded, and the phase field the product reads
+lives on the run-status envelope, which is a different object and is unaffected.
 
 Before authentication, connection and global limits protect remaining public
 probes. After authentication, per-principal limits also apply. The progress

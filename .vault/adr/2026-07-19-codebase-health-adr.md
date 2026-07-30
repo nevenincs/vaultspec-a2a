@@ -156,6 +156,28 @@ Run-start replay stores a canonical fingerprint of every behavior-affecting
 request field. A matching `run_id` with a different fingerprint returns HTTP
 `409 Conflict`.
 
+Credentials are not behavior-affecting fields. Actor tokens and the engine
+bearer authorize a request instance; they do not describe the work the run will
+perform, and the prepare fingerprint already classifies them out on exactly that
+ground. The plain-start fingerprint classifies them out for the same reason. A
+replay returns the ORIGINAL run, so a retry's freshly minted bundle is never the
+bundle the run uses - the original is already seated in worker runtime state, and
+tokens are deliberately never checkpointed. Short-lived credentials are expected
+to rotate across a retry, so fingerprinting them would refuse precisely the
+lost-acknowledgement recovery that client-supplied idempotency exists to serve.
+Because the classification is named rather than derived, it is recorded here
+rather than left to the reader of the digest helper.
+
+The staged commit binding is deliberately stricter and is unchanged. Its digest
+is compared against the durably bound accepted request under per-run
+single-flight, and a commit retry is a resend of the same body with an
+already-minted bundle in hand, so credentials do not rotate inside that window.
+
+Persisted fingerprints carry the rule they were computed under, so a run stored
+before this classification is compared under the older rule. Raw tokens are never
+persisted and a stored fingerprint cannot be recomputed, so without that marker a
+byte-identical replay of an older run would be refused spuriously.
+
 The progress channel uses a versioned positive schema. It carries identifiers,
 lifecycle state, bounded counters, explicitly approved summaries, and one
 dedicated bounded token-delta field. It never carries prompts, document bodies,

@@ -600,8 +600,11 @@ async def test_get_thread_status_reports_repair_and_readiness(
             settings.gateway_url = original_gateway_url
 
     assert "Status: input_required" in output
-    assert "Repair status: checkpoint_unavailable" in output
-    assert "Execution readiness: checkpoint_unavailable" in output
+    # A missing checkpoint is a replay gap, not an unknown probe: this path has
+    # established the checkpoint is absent, where checkpoint-unavailable claims
+    # its contents could not be determined.
+    assert "Repair status: replay_gap" in output
+    assert "Execution readiness: replay_gap" in output
 
 
 @pytest.mark.asyncio

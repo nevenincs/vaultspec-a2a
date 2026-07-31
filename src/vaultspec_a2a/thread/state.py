@@ -186,10 +186,11 @@ class TeamState(TypedDict):
     authoring_proposal_ids: NotRequired[Annotated[list[str], _merge_unique_strs]]
 
     # --- plan approval gate ---
-    # Durable approval-state linkage for execution approval. Legacy
-    # checkpoints may still carry ``plan_approved``; consuming code should
-    # treat that as a backward-compatibility alias for ``approval_status ==
-    # "approved"`` during migration.
+    # Durable approval-state linkage for execution approval, and the sole key
+    # the execution gate reads. A checkpoint written before this key existed
+    # cannot reintroduce its predecessor: the checkpointer hydrates channels
+    # from this schema, so any persisted value whose key is absent here is
+    # dropped on load and never reaches a node.
     approval_status: NotRequired[str | None]
     approval_request_id: NotRequired[str | None]
 

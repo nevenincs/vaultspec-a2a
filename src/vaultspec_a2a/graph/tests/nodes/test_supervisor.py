@@ -322,6 +322,32 @@ def test_plan_approval_interrupt_skipped_in_autonomous_mode() -> None:
     assert result.plan_approval_request is None
 
 
+def test_plan_approval_interrupt_suppressed_by_approved_status() -> None:
+    """``approval_status`` alone releases the execution gate."""
+    result = _decision(
+        "vaultspec-coder",
+        workers=["vaultspec-coder"],
+        state=_make_state_for_plan_approval(approval_status="approved"),
+        worker_phase_map={"vaultspec-coder": "exec"},
+        autonomous=False,
+    )
+    assert result.plan_approval_request is None
+    assert result.next_route == "vaultspec-coder"
+
+
+def test_plan_approval_interrupt_fires_for_non_approved_status() -> None:
+    """Any non-approved approval state still gates execution."""
+    for status in ("pending", "rejected", "superseded"):
+        result = _decision(
+            "vaultspec-coder",
+            workers=["vaultspec-coder"],
+            state=_make_state_for_plan_approval(approval_status=status),
+            worker_phase_map={"vaultspec-coder": "exec"},
+            autonomous=False,
+        )
+        assert result.plan_approval_request is not None, status
+
+
 def test_plan_rejection_prefers_plan_phase_worker_for_revision() -> None:
     worker = _select_revision_worker(
         ["vaultspec-reviewer", "vaultspec-planner", "vaultspec-coder"],

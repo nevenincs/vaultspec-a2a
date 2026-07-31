@@ -253,9 +253,7 @@ def _evaluate_supervisor_response(
                     routing_error=gate_result.message,
                 )
 
-    approval_granted = state.get("approval_status") == ApprovalStatus.APPROVED or bool(
-        state.get("plan_approved")
-    )
+    approval_granted = state.get("approval_status") == ApprovalStatus.APPROVED
     if (
         not autonomous
         and worker_phase_map

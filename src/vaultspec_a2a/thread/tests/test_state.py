@@ -1,9 +1,14 @@
 """Tests for TeamState schema, reducers, and JSON serialization round-trip."""
 
 import json
+from typing import TYPE_CHECKING, Any, cast
 
 import pytest
 from langchain_core.messages import HumanMessage
+from langgraph.checkpoint.base import Checkpoint
+from langgraph.checkpoint.base.id import uuid6
+from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
+from langgraph.graph import END, START, StateGraph
 
 from ..state import (
     TeamState,
@@ -13,6 +18,11 @@ from ..state import (
     _merge_unique_strs,
     _replace_plan,
 )
+
+if TYPE_CHECKING:
+    from pathlib import Path
+
+    from langchain_core.runnables import RunnableConfig
 
 # ---------------------------------------------------------------------------
 # Reducer unit tests
@@ -280,3 +290,87 @@ class TestTeamStateStructure:
         }
         actual = set(TeamState.__annotations__)
         assert expected == actual
+
+
+# ---------------------------------------------------------------------------
+# Checkpoint hydration boundary
+# ---------------------------------------------------------------------------
+
+
+class TestUndeclaredCheckpointKeys:
+    """The schema, not the checkpoint row, decides what a node can read.
+
+    A key retired from ``TeamState`` cannot be reintroduced by a checkpoint
+    written while it still existed. That is what makes retiring a key a real
+    retirement rather than a rename that leaves the old value live, and it is
+    why gates read exactly one key instead of a key plus its predecessor.
+    """
+
+    @pytest.mark.asyncio
+    async def test_retired_key_in_a_persisted_checkpoint_never_reaches_a_node(
+        self,
+        tmp_path: "Path",
+    ) -> None:
+        seen: list[dict[str, Any]] = []
+
+        def probe(state: TeamState) -> dict[str, Any]:
+            seen.append(dict(state))
+            return {"active_agent": "probe"}
+
+        builder = StateGraph(cast("Any", TeamState))
+        builder.add_node("probe", probe)
+        builder.add_edge(START, "probe")
+        builder.add_edge("probe", END)
+
+        db = tmp_path / "checkpoints.sqlite"
+        async with AsyncSqliteSaver.from_conn_string(str(db)) as saver:
+            graph = builder.compile(checkpointer=saver)
+            config: RunnableConfig = {
+                "configurable": {"thread_id": "retired-key-thread"},
+            }
+            await graph.ainvoke(
+                {
+                    "messages": [HumanMessage(content="start")],
+                    "active_agent": "start",
+                    "thread_id": "retired-key-thread",
+                    "artifacts": [],
+                    "current_plan": [],
+                    "token_usage": {},
+                },
+                config,
+            )
+
+            # Forge the pre-retirement row: a real checkpoint whose persisted
+            # channel_values carry a key the current schema no longer declares.
+            stored = await saver.aget_tuple(config)
+            assert stored is not None
+            original = stored.checkpoint
+            forged = Checkpoint(
+                v=original["v"],
+                id=str(uuid6(clock_seq=-2)),
+                ts=original["ts"],
+                channel_values={
+                    **original["channel_values"],
+                    "plan_approved": True,
+                },
+                channel_versions={
+                    **original["channel_versions"],
+                    "plan_approved": "00000000000000000000000000000002.retired",
+                },
+                versions_seen=original["versions_seen"],
+                updated_channels=original["updated_channels"],
+            )
+            await saver.aput(stored.config, forged, stored.metadata or {}, {})
+
+            reread = await saver.aget_tuple(config)
+            assert reread is not None
+            assert reread.checkpoint["channel_values"]["plan_approved"] is True
+
+            seen.clear()
+            await graph.ainvoke({"active_agent": "resumed"}, config)
+            resumed_state = seen[-1]
+            assert "plan_approved" not in resumed_state
+            assert resumed_state.get("plan_approved") is None
+
+            snapshot = await graph.aget_state(config)
+            assert "plan_approved" not in snapshot.values

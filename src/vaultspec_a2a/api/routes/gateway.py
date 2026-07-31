@@ -130,6 +130,8 @@ from ..schemas.gateway import (
     RunStartRequest,
     RunStartResponse,
     RunStatusResponse,
+    RunSummariesResponse,
+    RunSummaryRecord,
     ServiceStateResponse,
     TeamStatusV1Response,
     TopologyPosition,
@@ -1232,7 +1234,24 @@ def _raise_for_dispatch_failure(
 # ---------------------------------------------------------------------------
 
 
-@router.get("/runs", response_model=ActiveRunsResponse)
+@router.get(
+    "/runs",
+    # Serialization is left to the two explicit returns below: a single response
+    # model - even a union one - would re-serialize the discovery reading through
+    # a shape it does not own, and that response is certified byte for byte. The
+    # ``responses`` entry restores what turning the model off would otherwise
+    # cost: the documented 200 schema a generated client reads.
+    response_model=None,
+    responses={
+        200: {
+            "model": ActiveRunsResponse | RunSummariesResponse,
+            "description": (
+                "The discovery reading for ``state=active`` and the wider "
+                "history reading for ``state=all``."
+            ),
+        }
+    },
+)
 async def active_runs_endpoint(
     request: Request,
     state: Literal["active", "all"] = Query(default="active"),
@@ -1242,18 +1261,25 @@ async def active_runs_endpoint(
     limit: int = Query(default=50, ge=1, le=100),
     offset: int = Query(default=0, ge=0),
     db: AsyncSession = Depends(get_db),
-) -> ActiveRunsResponse:
+) -> ActiveRunsResponse | RunSummariesResponse:
     """List runs: non-terminal by default, or every run including terminal ones.
 
     The default is unchanged and remains the capped identity projection of
     durable non-terminal runs that the engine contract certified - a caller that
-    passes nothing sees exactly what it saw before.
+    passes nothing sees exactly what it saw before, byte for byte.
 
-    ``state=all`` is the history read, and it deliberately answers through the
-    paginated list service rather than the discovery one: discovery exists to
-    find live work and is capped for that purpose, while history has to be able
-    to walk a store that only grows. That is also why this mode carries a total
-    and an offset and the default mode does not.
+    ``state=all`` is the history read, and it differs from discovery in more than
+    which rows it returns. It answers through the paginated list service rather
+    than the discovery one, because discovery exists to find live work and is
+    capped for that purpose while history has to walk a store that only grows;
+    that is why this mode carries a total and an offset. And it answers with a
+    WIDER record, because the two readings are asked different questions: a
+    viewer binding to live work needs an identity, while a reader of history is
+    asking what happened and needs the projection that separates a healthy run
+    from a degraded one.
+
+    The two shapes are returned as two models rather than one union, so widening
+    history cannot perturb a single byte of the certified discovery response.
     """
     workspace = Path(workspace_root) if workspace_root is not None else None
     if workspace is not None and not workspace.is_absolute():
@@ -1267,13 +1293,23 @@ async def active_runs_endpoint(
             offset=offset,
             checkpointer=request.app.state.checkpointer,
         )
-        return ActiveRunsResponse(
-            state=state,
+        return RunSummariesResponse(
             runs=[
-                ActiveRunRecord(
+                RunSummaryRecord(
                     run_id=thread.thread_id,
                     status=ThreadStatus(thread.status),
                     feature_tag=thread.feature_tag,
+                    title=thread.title,
+                    nickname=thread.nickname,
+                    team_preset=thread.team_preset,
+                    repair_status=thread.repair_status,
+                    execution_readiness=thread.execution_readiness,
+                    approval_status=thread.approval_status,
+                    approval_request_id=thread.approval_request_id,
+                    created_at=thread.created_at,
+                    updated_at=thread.updated_at,
+                    source_branch=thread.source_branch,
+                    callee=thread.callee,
                 )
                 for thread in listing.threads
             ],

@@ -152,11 +152,12 @@ async def list_threads(
     additional pages by increasing the offset.  Threads are returned in reverse
     chronological order (newest first).
 
-    Returns a plain-text listing with one block per thread containing the
-    thread_id, its status (one of: 'submitted', 'running', 'input_required',
-    'completed', 'failed', 'cancelled', 'archived'), and its target feature tag
-    when it has one.  Call ``get_thread_status`` for the full record of any one
-    of them.  Returns 'No threads found.' when no threads exist.
+    Returns a plain-text listing with one block per thread containing:
+    thread_id, status (one of: 'submitted', 'running', 'input_required',
+    'completed', 'failed', 'cancelled', 'archived'), repair status and execution
+    readiness so degraded or non-actionable threads are visible at a glance,
+    team preset ID, creation timestamp, and optional nickname, title and feature
+    tag.  Returns 'No threads found.' when no threads exist.
 
     Args:
         limit:  Maximum number of threads to return, between 1 and 100.
@@ -186,10 +187,25 @@ async def list_threads(
     for run in runs:
         run_id = run.get("run_id", "?")
         status = run.get("status", "unknown")
-        feature_tag = run.get("feature_tag")
-        entry = f"  [{status}] {run_id}\n"
-        if feature_tag:
-            entry += f"    feature: {feature_tag}\n"
+        # Repair status and execution readiness lead the detail line because a
+        # caller scanning this listing is usually looking for work that has
+        # stalled, and a run that reads healthy at a glance but is not
+        # actionable is the one mistake this listing can cause.
+        entry = (
+            f"  [{status}] {run_id}\n"
+            f"    repair: {run.get('repair_status') or 'unknown'}"
+            f"  readiness: {run.get('execution_readiness') or 'unknown'}\n"
+            f"    preset: {run.get('team_preset') or '—'}"
+            f"  created: {run.get('created_at') or '?'}\n"
+        )
+        for label, key in (
+            ("nickname", "nickname"),
+            ("title", "title"),
+            ("feature", "feature_tag"),
+        ):
+            value = run.get(key)
+            if value:
+                entry += f"    {label}: {value}\n"
         lines.append(entry)
     if data.get("truncated"):
         lines.append("  ... more threads remain; increase offset to page on.\n")

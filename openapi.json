@@ -144,7 +144,7 @@
       },
       "get": {
         "summary": "Active Runs Endpoint",
-        "description": "List runs: non-terminal by default, or every run including terminal ones.\n\nThe default is unchanged and remains the capped identity projection of\ndurable non-terminal runs that the engine contract certified - a caller that\npasses nothing sees exactly what it saw before.\n\n``state=all`` is the history read, and it deliberately answers through the\npaginated list service rather than the discovery one: discovery exists to\nfind live work and is capped for that purpose, while history has to be able\nto walk a store that only grows. That is also why this mode carries a total\nand an offset and the default mode does not.",
+        "description": "List runs: non-terminal by default, or every run including terminal ones.\n\nThe default is unchanged and remains the capped identity projection of\ndurable non-terminal runs that the engine contract certified - a caller that\npasses nothing sees exactly what it saw before, byte for byte.\n\n``state=all`` is the history read, and it differs from discovery in more than\nwhich rows it returns. It answers through the paginated list service rather\nthan the discovery one, because discovery exists to find live work and is\ncapped for that purpose while history has to walk a store that only grows;\nthat is why this mode carries a total and an offset. And it answers with a\nWIDER record, because the two readings are asked different questions: a\nviewer binding to live work needs an identity, while a reader of history is\nasking what happened and needs the projection that separates a healthy run\nfrom a degraded one.\n\nThe two shapes are returned as two models rather than one union, so widening\nhistory cannot perturb a single byte of the certified discovery response.",
         "operationId": "active_runs_endpoint_v1_runs_get",
         "parameters": [
           {
@@ -255,11 +255,19 @@
         ],
         "responses": {
           "200": {
-            "description": "Successful Response",
+            "description": "The discovery reading for ``state=active`` and the wider history reading for ``state=all``.",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ActiveRunsResponse"
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/ActiveRunsResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/RunSummariesResponse"
+                    }
+                  ],
+                  "title": "Response 200 Active Runs Endpoint V1 Runs Get"
                 }
               }
             }
@@ -2951,6 +2959,197 @@
         ],
         "title": "RunStatusResponse",
         "description": "The authoritative recovery snapshot for a run.\n\nDesigned as the read a restarted A2A resumes or reports a run from: topology\nposition, per-role state, and the engine proposal/changeset ids the run has\nproduced, plus the checkpoint cursor and repair posture. Non-authoritative\nSSE progress frames may be lost freely; this snapshot is the source of truth."
+      },
+      "RunSummariesResponse": {
+        "properties": {
+          "api_version": {
+            "type": "string",
+            "const": "v1",
+            "title": "Api Version",
+            "default": "v1"
+          },
+          "state": {
+            "type": "string",
+            "const": "all",
+            "title": "State",
+            "default": "all"
+          },
+          "runs": {
+            "items": {
+              "$ref": "#/components/schemas/RunSummaryRecord"
+            },
+            "type": "array",
+            "maxItems": 100,
+            "title": "Runs"
+          },
+          "truncated": {
+            "type": "boolean",
+            "title": "Truncated",
+            "default": false
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          }
+        },
+        "type": "object",
+        "required": [
+          "total"
+        ],
+        "title": "RunSummariesResponse",
+        "description": "The history reading of the run listing.\n\nAnswers ``state=all`` only. The default reading keeps\n:class:`ActiveRunsResponse` and its narrower record, so widening what history\nreports cannot disturb the certified discovery shape.\n\n``total`` is not optional here: this reading walks the paginated store and\nalways knows how many runs matched, which is what makes paging honest."
+      },
+      "RunSummaryRecord": {
+        "properties": {
+          "run_id": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Run Id"
+          },
+          "status": {
+            "$ref": "#/components/schemas/ThreadStatus"
+          },
+          "feature_tag": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 128
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Feature Tag"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 200
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
+          },
+          "nickname": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 128
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Nickname"
+          },
+          "team_preset": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 64
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Team Preset"
+          },
+          "repair_status": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 64
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Repair Status"
+          },
+          "execution_readiness": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 64
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Execution Readiness"
+          },
+          "approval_status": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 64
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Approval Status"
+          },
+          "approval_request_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 256
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Approval Request Id"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updated At"
+          },
+          "source_branch": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 256
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Branch"
+          },
+          "callee": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 128
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Callee"
+          }
+        },
+        "type": "object",
+        "required": [
+          "run_id",
+          "status",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "RunSummaryRecord",
+        "description": "One run as the history reading reports it: identity plus its projection.\n\nDeliberately wider than :class:`ActiveRunRecord`, and deliberately a\nSEPARATE model rather than fields added to it. Discovery answers the narrow\nquestion \"which runs are live, and where do I bind a viewer\" and its shape is\ncertified byte-for-byte; a reader of history is asking what happened, and\nneeds the facts that distinguish a healthy run from a degraded one.\n\nEvery field here is one the list service already resolves - the degradation\nprojections in particular are its reading of checkpoint authority and stale\napproval pointers, not a restatement of stored columns - so nothing is\ninvented that the projection cannot fill."
       },
       "ServiceStateResponse": {
         "properties": {

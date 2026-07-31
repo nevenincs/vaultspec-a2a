@@ -24,7 +24,6 @@ from langgraph.types import Interrupt
 from sqlalchemy import select
 
 from ...control.config import settings
-from ...control.thread_service import ThreadSummaryData, list_threads_service
 from ...database import (
     create_artifact,
     create_control_action,
@@ -138,24 +137,22 @@ class TestCreateThread:
 # ---------------------------------------------------------------------------
 
 
-def _list_summaries(
-    session_factory, checkpointer
-) -> tuple[dict[str, ThreadSummaryData], int]:
-    """Return the run listing projection, keyed by thread id.
+def _list_summaries(session_factory, checkpointer) -> tuple[dict[str, dict], int]:
+    """Return the history reading of the run listing, keyed by run id.
 
-    Drives ``list_threads_service`` directly. The projection assertions below
-    are about the SERVICE's reading of degraded checkpoint authority and stale
-    approval pointers, and the versioned list record deliberately carries only
-    run identity, status and feature tag - so the route can no longer express
-    what these cases are about, while the service still decides it.
+    Drives the real route. The projection these cases are about - the service's
+    reading of degraded checkpoint authority and stale approval pointers - now
+    reaches the wire on the history reading, and the wire contract is what a
+    client consumes, so that is where it is proven. ``state=all`` is explicit
+    because the default reading is capped active-run discovery and answers with
+    a deliberately narrower record.
     """
-
-    async def _run() -> tuple[dict[str, ThreadSummaryData], int]:
-        async with session_factory() as db:
-            result = await list_threads_service(db, checkpointer=checkpointer)
-        return {summary.thread_id: summary for summary in result.threads}, result.total
-
-    return asyncio.run(_run())
+    app, _agg, _worker, _cp = make_app(session_factory, checkpointer)
+    with TestClient(app, raise_server_exceptions=True) as client:
+        resp = client.get("/v1/runs", params={"state": "all"})
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    return {run["run_id"]: run for run in body["runs"]}, body["total"]
 
 
 class TestListThreads:
@@ -186,7 +183,7 @@ class TestListThreads:
         summaries, total = _list_summaries(session_factory, checkpointer)
         assert total == 2
         assert len(summaries) == 2
-        assert {summary.title for summary in summaries.values()} == {
+        assert {summary["title"] for summary in summaries.values()} == {
             "Thread A",
             "Thread B",
         }
@@ -228,8 +225,8 @@ class TestListThreads:
 
         summaries, _total = _list_summaries(session_factory, checkpointer)
         thread = summaries["thread-list-corrupt-plan"]
-        assert thread.approval_status is None
-        assert thread.approval_request_id is None
+        assert thread["approval_status"] is None
+        assert thread["approval_request_id"] is None
 
     def test_list_threads_hides_optionless_plan_approval_metadata(
         self, session_factory, checkpointer
@@ -262,8 +259,8 @@ class TestListThreads:
 
         summaries, _total = _list_summaries(session_factory, checkpointer)
         thread = summaries["thread-list-optionless-plan"]
-        assert thread.approval_status is None
-        assert thread.approval_request_id is None
+        assert thread["approval_status"] is None
+        assert thread["approval_request_id"] is None
 
     def test_list_threads_clears_stale_missing_plan_approval_pointer(
         self, session_factory, checkpointer
@@ -287,8 +284,8 @@ class TestListThreads:
 
         summaries, _total = _list_summaries(session_factory, checkpointer)
         thread = summaries["thread-list-missing-plan"]
-        assert thread.approval_status is None
-        assert thread.approval_request_id is None
+        assert thread["approval_status"] is None
+        assert thread["approval_request_id"] is None
 
     def test_list_threads_prefers_live_plan_approval_over_stale_thread_pointer(
         self, session_factory, checkpointer
@@ -321,8 +318,8 @@ class TestListThreads:
 
         summaries, _total = _list_summaries(session_factory, checkpointer)
         thread = summaries["thread-list-live-plan"]
-        assert thread.approval_status == "pending"
-        assert thread.approval_request_id == "perm-list-live-plan"
+        assert thread["approval_status"] == "pending"
+        assert thread["approval_request_id"] == "perm-list-live-plan"
 
     def test_list_threads_prefers_live_plan_approval_over_stale_rejected_status(
         self, session_factory, checkpointer
@@ -355,8 +352,8 @@ class TestListThreads:
 
         summaries, _total = _list_summaries(session_factory, checkpointer)
         thread = summaries["thread-list-rejected-live-plan"]
-        assert thread.approval_status == "pending"
-        assert thread.approval_request_id == "perm-list-live-after-reject"
+        assert thread["approval_status"] == "pending"
+        assert thread["approval_request_id"] == "perm-list-live-after-reject"
 
     def test_list_threads_clears_stale_rejected_plan_approval_residue(
         self, session_factory, checkpointer
@@ -380,8 +377,8 @@ class TestListThreads:
 
         summaries, _total = _list_summaries(session_factory, checkpointer)
         thread = summaries["thread-list-rejected-residue"]
-        assert thread.approval_status is None
-        assert thread.approval_request_id is None
+        assert thread["approval_status"] is None
+        assert thread["approval_request_id"] is None
 
     def test_list_threads_clears_terminal_thread_pending_approval(
         self, session_factory, checkpointer
@@ -414,8 +411,8 @@ class TestListThreads:
 
         summaries, _total = _list_summaries(session_factory, checkpointer)
         thread = summaries["thread-list-terminal-plan"]
-        assert thread.approval_status is None
-        assert thread.approval_request_id is None
+        assert thread["approval_status"] is None
+        assert thread["approval_request_id"] is None
 
     def test_list_threads_hides_answered_pending_apply_plan_approval(
         self, session_factory, checkpointer
@@ -454,8 +451,8 @@ class TestListThreads:
 
         summaries, _total = _list_summaries(session_factory, checkpointer)
         thread = summaries["thread-list-answered-pending-apply"]
-        assert thread.approval_status is None
-        assert thread.approval_request_id is None
+        assert thread["approval_status"] is None
+        assert thread["approval_request_id"] is None
 
     def test_list_threads_degrades_stale_execution_state_lineage(
         self, session_factory, checkpointer
@@ -492,8 +489,8 @@ class TestListThreads:
 
         summaries, _total = _list_summaries(session_factory, checkpointer)
         thread = summaries["thread-list-stale-state"]
-        assert thread.repair_status == "needs_reconciliation"
-        assert thread.execution_readiness == "needs_reconciliation"
+        assert thread["repair_status"] == "needs_reconciliation"
+        assert thread["execution_readiness"] == "needs_reconciliation"
 
     def test_list_threads_degrades_checkpoint_mismatched_execution_state(
         self, session_factory, checkpointer
@@ -545,8 +542,8 @@ class TestListThreads:
 
         summaries, _total = _list_summaries(session_factory, checkpointer)
         thread = summaries["thread-list-checkpoint-drift"]
-        assert thread.repair_status == "needs_reconciliation"
-        assert thread.execution_readiness == "needs_reconciliation"
+        assert thread["repair_status"] == "needs_reconciliation"
+        assert thread["execution_readiness"] == "needs_reconciliation"
 
     def test_list_threads_degrades_when_checkpoint_probe_is_unverified(
         self, session_factory, tmp_path
@@ -576,8 +573,8 @@ class TestListThreads:
 
         summaries, _total = _list_summaries(session_factory, closed_checkpointer)
         thread = summaries["thread-list-checkpoint-unverified"]
-        assert thread.repair_status == "checkpoint_unavailable"
-        assert thread.execution_readiness == "checkpoint_unavailable"
+        assert thread["repair_status"] == "checkpoint_unavailable"
+        assert thread["execution_readiness"] == "checkpoint_unavailable"
 
     def test_list_threads_hides_pending_approval_when_checkpoint_probe_is_unverified(
         self, session_factory, tmp_path
@@ -618,10 +615,10 @@ class TestListThreads:
 
         summaries, _total = _list_summaries(session_factory, closed_checkpointer)
         thread = summaries["thread-list-checkpoint-unverified-plan"]
-        assert thread.repair_status == "checkpoint_unavailable"
-        assert thread.execution_readiness == "checkpoint_unavailable"
-        assert thread.approval_status is None
-        assert thread.approval_request_id is None
+        assert thread["repair_status"] == "checkpoint_unavailable"
+        assert thread["execution_readiness"] == "checkpoint_unavailable"
+        assert thread["approval_status"] is None
+        assert thread["approval_request_id"] is None
 
 
 class TestHealth:

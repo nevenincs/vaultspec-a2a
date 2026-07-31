@@ -7,37 +7,12 @@ Uses shared make_app() from conftest.py which overrides
 get_checkpointer and get_worker_client so tests never touch vaultspec.db.
 """
 
-import asyncio
 import tempfile
 from pathlib import Path
 
 from fastapi.testclient import TestClient
 
-from ...control.thread_service import ThreadSummaryData, list_threads_service
 from .conftest import make_app as _make_app_4
-
-# A preset that declares no required roles, so a run starts without the
-# engine-minted actor-token bundle the versioned verb demands of every
-# production preset.
-_BUNDLE_FREE_PRESET = "mock-success-single"
-
-
-def _list_summaries(
-    session_factory, checkpointer
-) -> tuple[dict[str, ThreadSummaryData], int]:
-    """Return the run listing projection, keyed by thread id.
-
-    The versioned list record carries run identity, status and feature tag only,
-    so the nickname, branch and callee these cases are about are decided by the
-    service and asserted there.
-    """
-
-    async def _run() -> tuple[dict[str, ThreadSummaryData], int]:
-        async with session_factory() as db:
-            result = await list_threads_service(db, checkpointer=checkpointer)
-        return {s.thread_id: s for s in result.threads}, result.total
-
-    return asyncio.run(_run())
 
 
 def _make_app(session_factory, checkpointer, aggregator=None):
@@ -46,6 +21,28 @@ def _make_app(session_factory, checkpointer, aggregator=None):
         session_factory, checkpointer, aggregator=aggregator
     )
     return app, agg
+
+
+# A preset that declares no required roles, so a run starts without the
+# engine-minted actor-token bundle the versioned verb demands of every
+# production preset.
+_BUNDLE_FREE_PRESET = "mock-success-single"
+
+
+def _list_summaries(session_factory, checkpointer) -> tuple[dict[str, dict], int]:
+    """Return the history reading of the run listing, keyed by run id.
+
+    The nickname, branch and callee these cases are about are carried on the
+    wire by the history reading, so they are asserted against the route a client
+    actually consumes. ``state=all`` is explicit because the default reading is
+    capped active-run discovery and answers with a narrower record.
+    """
+    app, _agg = _make_app(session_factory, checkpointer)
+    with TestClient(app, raise_server_exceptions=True) as client:
+        resp = client.get("/v1/runs", params={"state": "all"})
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    return {run["run_id"]: run for run in body["runs"]}, body["total"]
 
 
 # ---------------------------------------------------------------------------
@@ -213,10 +210,10 @@ class TestListThreadsWithMetadata:
             summaries, _total = _list_summaries(session_factory, checkpointer)
             assert len(summaries) == 1
             t = next(iter(summaries.values()))
-            assert t.nickname is not None
-            assert t.feature_tag == "auth-flow"
-            assert t.source_branch == "feat/auth"
-            assert t.callee == "claude-cli"
+            assert t["nickname"] is not None
+            assert t["feature_tag"] == "auth-flow"
+            assert t["source_branch"] == "feat/auth"
+            assert t["callee"] == "claude-cli"
 
     def test_list_threads_legacy_without_metadata(
         self, session_factory, checkpointer
@@ -236,10 +233,10 @@ class TestListThreadsWithMetadata:
         summaries, _total = _list_summaries(session_factory, checkpointer)
         assert len(summaries) == 1
         t = next(iter(summaries.values()))
-        assert t.nickname is None
-        assert t.feature_tag is None
-        assert t.source_branch is None
-        assert t.callee is None
+        assert t["nickname"] is None
+        assert t["feature_tag"] is None
+        assert t["source_branch"] is None
+        assert t["callee"] is None
 
 
 # ---------------------------------------------------------------------------

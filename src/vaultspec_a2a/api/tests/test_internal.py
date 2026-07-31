@@ -621,9 +621,7 @@ class TestInternalWebSocketLogging:
         assert record.__dict__["transport"] == "ws"
         assert record.__dict__["frame_size"] > 0
 
-    def test_missing_relay_target_log_includes_runtime_fields(
-        self, caplog
-    ) -> None:
+    def test_missing_relay_target_log_includes_runtime_fields(self, caplog) -> None:
         """Dropped relay events should log thread and event correlation fields."""
         app = _make_test_app()
 

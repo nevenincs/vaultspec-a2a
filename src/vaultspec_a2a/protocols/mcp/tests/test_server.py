@@ -796,16 +796,15 @@ async def test_list_threads_raises_when_server_unavailable(
 
 
 @pytest.mark.asyncio(loop_scope="function")
-async def test_list_threads_lists_a_non_terminal_thread_with_its_status(
+async def test_list_threads_reports_repair_and_readiness(
     session_factory, checkpointer
 ) -> None:
-    """MCP list_threads reports each thread's identity and status.
+    """MCP list_threads must surface degraded checkpoint authority explicitly.
 
-    Degraded checkpoint authority is NOT asserted here: the versioned list
-    record carries the run identity, status, and feature tag only, and this test
-    must not claim a field the response does not carry.
-    ``test_get_thread_status_reports_repair_and_readiness`` holds that coverage,
-    against the verb that does carry it.
+    A caller scans this listing to find work that has stalled, so a thread that
+    is non-actionable has to say so HERE. Reading healthy at a glance and only
+    revealing the degradation on a per-thread follow-up is the one mistake this
+    listing can cause.
     """
     with _make_test_client(session_factory, checkpointer) as client:
         async with session_factory() as session:
@@ -835,6 +834,8 @@ async def test_list_threads_lists_a_non_terminal_thread_with_its_status(
 
     assert "[input_required] mcp-list-threads-checkpoint-unavailable" in output
     assert "of 1" in output
+    assert "repair: checkpoint_unavailable" in output
+    assert "readiness: checkpoint_unavailable" in output
 
 
 @pytest.mark.asyncio(loop_scope="function")

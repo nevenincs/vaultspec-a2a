@@ -420,3 +420,57 @@ async def test_active_run_discovery_rejects_unbounded_selectors(
 
         oversized_limit = await client.get("/v1/runs", params={"limit": 101})
         assert oversized_limit.status_code == 422
+
+
+@pytest.mark.asyncio(loop_scope="function")
+async def test_the_two_readings_answer_with_different_records(tmp_path) -> None:
+    """Discovery stays narrow while history carries the projection.
+
+    The two readings of one verb are asked different questions, so they answer
+    with different records, and this pins BOTH halves of that against the same
+    run in one application - neither half can pass vacuously.
+
+    Discovery's record is asserted by exact key set rather than by presence,
+    because the point is that widening history did not leak a single field into
+    the shape the engine contract certified. History is asserted on the
+    degradation projection specifically: those fields are the reason it is a
+    separate record, and a caller scanning for stalled work reads them here.
+    """
+    async with (
+        _production_gateway(tmp_path) as (base_url, session_factory),
+        httpx.AsyncClient(
+            base_url=base_url,
+            timeout=10.0,
+            headers={"Authorization": f"Bearer {_SERVICE_TOKEN}"},
+        ) as client,
+    ):
+        async with session_factory() as session:
+            await create_thread(
+                session,
+                thread_id="two-readings",
+                status=ThreadStatus.INPUT_REQUIRED,
+                repair_status="checkpoint_unavailable",
+                execution_readiness="checkpoint_unavailable",
+                team_preset="mock-success-single",
+            )
+            await session.commit()
+
+        active = await client.get("/v1/runs", params={"state": "active"})
+        assert active.status_code == 200, active.text
+        active_record = next(
+            run for run in active.json()["runs"] if run["run_id"] == "two-readings"
+        )
+        assert set(active_record) == {"run_id", "status", "feature_tag"}
+
+        history = await client.get("/v1/runs", params={"state": "all"})
+        assert history.status_code == 200, history.text
+        hbody = history.json()
+        assert hbody["state"] == "all"
+        assert hbody["total"] == 1
+        record = next(run for run in hbody["runs"] if run["run_id"] == "two-readings")
+        assert record["status"] == ThreadStatus.INPUT_REQUIRED.value
+        assert record["repair_status"] == "checkpoint_unavailable"
+        assert record["execution_readiness"] == "checkpoint_unavailable"
+        assert record["team_preset"] == "mock-success-single"
+        assert record["created_at"]
+        assert record["updated_at"]

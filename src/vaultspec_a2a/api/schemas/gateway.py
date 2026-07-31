@@ -8,10 +8,9 @@ to wrap under the engine's 8 MiB / 120 s caps.
 
 The gateway contract reshapes the existing service surface rather than
 reinventing it:
-``run-start`` delegates to the same thread-create/dispatch flow the internal
-``/api`` surface uses, ``run-status`` composes the recovery snapshot, active-run
-discovery projects bounded durable identities, and the operator verbs roll up
-cancel, preset listing, and health.
+``run-start`` delegates to the same thread-create/dispatch flow, ``run-status``
+composes the recovery snapshot, active-run discovery projects bounded durable
+identities, and the operator verbs roll up cancel, preset listing, and health.
 
 The run-start models expose ``start``, ``prepare``, ``commit``, and ``release``
 for :mod:`vaultspec_a2a.api.routes.gateway`. Commit binds the exact role set to
@@ -22,6 +21,7 @@ a bearer credential; release applies only to an uncommitted reservation.
 from __future__ import annotations
 
 import re
+from datetime import datetime
 from enum import StrEnum
 from typing import Annotated, Literal
 
@@ -57,6 +57,8 @@ __all__ = [
     "RunStartRequest",
     "RunStartResponse",
     "RunStatusResponse",
+    "RunSummariesResponse",
+    "RunSummaryRecord",
     "ServiceStateResponse",
     "TerminalSettlement",
     "TopologyPosition",
@@ -354,6 +356,58 @@ class ActiveRunsResponse(BaseModel):
     total: int | None = None
 
 
+class RunSummaryRecord(BaseModel):
+    """One run as the history reading reports it: identity plus its projection.
+
+    Deliberately wider than :class:`ActiveRunRecord`, and deliberately a
+    SEPARATE model rather than fields added to it. Discovery answers the narrow
+    question "which runs are live, and where do I bind a viewer" and its shape is
+    certified byte-for-byte; a reader of history is asking what happened, and
+    needs the facts that distinguish a healthy run from a degraded one.
+
+    Every field here is one the list service already resolves - the degradation
+    projections in particular are its reading of checkpoint authority and stale
+    approval pointers, not a restatement of stored columns - so nothing is
+    invented that the projection cannot fill.
+    """
+
+    run_id: str = Field(min_length=1, max_length=128)
+    status: ThreadStatus
+    feature_tag: str | None = Field(default=None, max_length=128)
+    title: str | None = Field(default=None, max_length=200)
+    nickname: str | None = Field(default=None, max_length=128)
+    team_preset: str | None = Field(default=None, max_length=64)
+    # The projection's verdict on this run's recoverability. A caller scanning
+    # history for work that needs attention reads these, and they are the whole
+    # reason this record exists rather than the discovery one.
+    repair_status: str | None = Field(default=None, max_length=64)
+    execution_readiness: str | None = Field(default=None, max_length=64)
+    approval_status: str | None = Field(default=None, max_length=64)
+    approval_request_id: str | None = Field(default=None, max_length=256)
+    created_at: datetime
+    updated_at: datetime
+    source_branch: str | None = Field(default=None, max_length=256)
+    callee: str | None = Field(default=None, max_length=128)
+
+
+class RunSummariesResponse(BaseModel):
+    """The history reading of the run listing.
+
+    Answers ``state=all`` only. The default reading keeps
+    :class:`ActiveRunsResponse` and its narrower record, so widening what history
+    reports cannot disturb the certified discovery shape.
+
+    ``total`` is not optional here: this reading walks the paginated store and
+    always knows how many runs matched, which is what makes paging honest.
+    """
+
+    api_version: Literal["v1"] = _API_VERSION
+    state: Literal["all"] = "all"
+    runs: list[RunSummaryRecord] = Field(default_factory=list, max_length=100)
+    truncated: bool = False
+    total: int
+
+
 class TopologyPosition(BaseModel):
     """Where a run sits in its team topology (recovery snapshot).
 
@@ -556,10 +610,17 @@ class RunPermissionRespondRequest(BaseModel):
 class RunPermissionRespondResponse(BaseModel):
     """Report what an answer did, including when it did nothing.
 
-    ``accepted`` says the answer was taken; ``applied`` says it was the one that
-    resumed the run. A duplicate answer reports accepted with ``applied`` false
-    rather than acting twice, so a caller that retries after a lost response
-    learns the outcome instead of re-answering.
+    ``accepted`` says the answer was taken; ``applied`` reports whether the
+    worker had durably confirmed applying this request's resolution when this
+    response was assembled - never whether THIS call resumed the run. A first
+    accepted answer therefore returns ``applied`` false with ``action_status``
+    ``accepted_not_applied``: the resume is dispatched and application is
+    confirmed asynchronously. A duplicate replays the stored outcome rather
+    than acting twice - byte-identical to the first response until that
+    confirmation lands, ``applied`` true after it - so a caller retrying after
+    a lost response learns the current outcome instead of re-answering. An
+    answer arriving after the request was already applied reports ``accepted``
+    with ``applied`` true and ``action_status`` ``duplicate``.
     """
 
     api_version: Literal["v1"] = _API_VERSION

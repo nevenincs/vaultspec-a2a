@@ -323,6 +323,12 @@ async def test_active_run_discovery_rebinds_to_authoritative_status(
                 }
             ],
             "truncated": True,
+            # Discovery caps its answer by design and so has no honest total to
+            # report; the field is null here and carries a count only in the
+            # history reading. Asserted as part of the exact shape rather than
+            # loosened to a subset match, because this comparison being exact is
+            # what makes it a contract test.
+            "total": None,
         }
 
         service_state = await client.get("/v1/service")

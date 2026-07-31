@@ -926,7 +926,7 @@
       },
       "get": {
         "summary": "Active Runs Endpoint",
-        "description": "Return a capped identity projection for durable non-terminal runs.",
+        "description": "List runs: non-terminal by default, or every run including terminal ones.\n\nThe default is unchanged and remains the capped identity projection of\ndurable non-terminal runs that the engine contract certified - a caller that\npasses nothing sees exactly what it saw before.\n\n``state=all`` is the history read, and it deliberately answers through the\npaginated list service rather than the discovery one: discovery exists to\nfind live work and is capped for that purpose, while history has to be able\nto walk a store that only grows. That is also why this mode carries a total\nand an offset and the default mode does not.",
         "operationId": "active_runs_endpoint_v1_runs_get",
         "parameters": [
           {
@@ -934,7 +934,10 @@
             "in": "query",
             "required": false,
             "schema": {
-              "const": "active",
+              "enum": [
+                "active",
+                "all"
+              ],
               "type": "string",
               "default": "active",
               "title": "State"
@@ -977,6 +980,22 @@
             }
           },
           {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/ThreadStatus"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Status"
+            }
+          },
+          {
             "name": "limit",
             "in": "query",
             "required": false,
@@ -986,6 +1005,17 @@
               "minimum": 1,
               "default": 50,
               "title": "Limit"
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0,
+              "title": "Offset"
             }
           },
           {
@@ -2026,7 +2056,10 @@
           },
           "state": {
             "type": "string",
-            "const": "active",
+            "enum": [
+              "active",
+              "all"
+            ],
             "title": "State",
             "default": "active"
           },
@@ -2042,11 +2075,22 @@
             "type": "boolean",
             "title": "Truncated",
             "default": false
+          },
+          "total": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total"
           }
         },
         "type": "object",
         "title": "ActiveRunsResponse",
-        "description": "Bounded, non-authoritative discovery result for active runs."
+        "description": "Bounded, non-authoritative run listing.\n\n``state`` distinguishes the two readings deliberately. The default is the\ncapped discovery projection of non-terminal runs - what the engine contract\ncertified, unchanged. ``all`` is the history read over the paginated store,\nwhich is the only mode that can report a ``total``: discovery caps its answer\nby design and has no honest total to give."
       },
       "ActorTokenBundle": {
         "properties": {

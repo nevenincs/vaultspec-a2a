@@ -64,6 +64,7 @@ from ...control.thread_service import (
     create_and_dispatch_thread,
     delete_thread_service,
     generate_thread_id,
+    list_threads_service,
     process_metadata,
 )
 from ...control.thread_state_service import (
@@ -1233,16 +1234,52 @@ def _raise_for_dispatch_failure(
 
 @router.get("/runs", response_model=ActiveRunsResponse)
 async def active_runs_endpoint(
-    state: Literal["active"] = Query(default="active"),
+    request: Request,
+    state: Literal["active", "all"] = Query(default="active"),
     workspace_root: str | None = Query(default=None, min_length=1, max_length=4096),
     feature_tag: str | None = Query(default=None, min_length=1, max_length=128),
+    status: ThreadStatus | None = Query(default=None),
     limit: int = Query(default=50, ge=1, le=100),
+    offset: int = Query(default=0, ge=0),
     db: AsyncSession = Depends(get_db),
 ) -> ActiveRunsResponse:
-    """Return a capped identity projection for durable non-terminal runs."""
+    """List runs: non-terminal by default, or every run including terminal ones.
+
+    The default is unchanged and remains the capped identity projection of
+    durable non-terminal runs that the engine contract certified - a caller that
+    passes nothing sees exactly what it saw before.
+
+    ``state=all`` is the history read, and it deliberately answers through the
+    paginated list service rather than the discovery one: discovery exists to
+    find live work and is capped for that purpose, while history has to be able
+    to walk a store that only grows. That is also why this mode carries a total
+    and an offset and the default mode does not.
+    """
     workspace = Path(workspace_root) if workspace_root is not None else None
     if workspace is not None and not workspace.is_absolute():
         raise HTTPException(status_code=422, detail="workspace_root must be absolute")
+
+    if state == "all":
+        listing = await list_threads_service(
+            db,
+            status_filter=status,
+            limit=limit,
+            offset=offset,
+            checkpointer=request.app.state.checkpointer,
+        )
+        return ActiveRunsResponse(
+            state=state,
+            runs=[
+                ActiveRunRecord(
+                    run_id=thread.thread_id,
+                    status=ThreadStatus(thread.status),
+                    feature_tag=thread.feature_tag,
+                )
+                for thread in listing.threads
+            ],
+            truncated=(offset + len(listing.threads)) < listing.total,
+            total=listing.total,
+        )
 
     result = await discover_active_runs(
         db,

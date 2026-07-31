@@ -336,12 +336,22 @@ class ActiveRunRecord(BaseModel):
 
 
 class ActiveRunsResponse(BaseModel):
-    """Bounded, non-authoritative discovery result for active runs."""
+    """Bounded, non-authoritative run listing.
+
+    ``state`` distinguishes the two readings deliberately. The default is the
+    capped discovery projection of non-terminal runs - what the engine contract
+    certified, unchanged. ``all`` is the history read over the paginated store,
+    which is the only mode that can report a ``total``: discovery caps its answer
+    by design and has no honest total to give.
+    """
 
     api_version: Literal["v1"] = _API_VERSION
-    state: Literal["active"] = "active"
+    state: Literal["active", "all"] = "active"
     runs: list[ActiveRunRecord] = Field(default_factory=list, max_length=100)
     truncated: bool = False
+    #: Total matching runs. Present only for the history reading; ``None`` in
+    #: discovery, where a capped projection cannot honestly report one.
+    total: int | None = None
 
 
 class TopologyPosition(BaseModel):

@@ -23,6 +23,7 @@ from ..workspace.environment import resolve_env_vars
 from ._acp_types import _AcpModelConfig, _AcpSessionContext
 from ._subprocess import _CONTAINMENT_ATTR
 from ._subprocess import kill_process_tree as _kill_process_tree
+from .acp_exceptions import AcpErrorCode
 
 __all__: list[str] = []
 
@@ -535,6 +536,43 @@ async def on_terminal_create(
         }
 
 
+def _resolve_terminal(
+    rpc_id: int | str,
+    params: dict,
+    ctx: _AcpSessionContext,
+) -> tuple[asyncio.subprocess.Process | None, dict[str, object]]:
+    """Resolve ``params["terminalId"]`` to its live process, or to the refusal.
+
+    Returns ``(process, refusal)``: on a hit the live process and an empty
+    refusal, on a miss ``None`` and the ready-to-send JSON-RPC response. The
+    caller branches on the process being ``None`` - which is what narrows it for
+    the type checker - and returns the refusal verbatim.
+
+    The refusal is protocol error-MAPPING, not framework preamble: its code, its
+    message wording and its envelope are all wire contract, so every handler that
+    addresses a live terminal by id owes an unknown one the same answer. Built in
+    one place, a correction to any part of that contract cannot land in two of the
+    three handlers and miss the third. The code comes from the canonical
+    :class:`AcpErrorCode` rather than a literal, so the wire value has a single
+    definition across the ACP surface.
+
+    ``terminal/release`` is deliberately NOT a caller: releasing a terminal that
+    is already gone is idempotent success, not an invalid-params refusal.
+    """
+    terminal_id = params.get("terminalId", "")
+    process = ctx.terminals.get(terminal_id)
+    if process is not None:
+        return process, {}
+    return None, {
+        "jsonrpc": "2.0",
+        "id": rpc_id,
+        "error": {
+            "code": AcpErrorCode.INVALID_PARAMS,
+            "message": f"Unknown terminal: {terminal_id}",
+        },
+    }
+
+
 async def on_terminal_kill(
     rpc_id: int | str,
     params: dict,
@@ -543,16 +581,9 @@ async def on_terminal_kill(
 ) -> dict[str, object]:
     """Handle terminal/kill RPC."""
     terminal_id = params.get("terminalId", "")
-    process = ctx.terminals.get(terminal_id)
+    process, refusal = _resolve_terminal(rpc_id, params, ctx)
     if process is None:
-        return {
-            "jsonrpc": "2.0",
-            "id": rpc_id,
-            "error": {
-                "code": -32602,
-                "message": f"Unknown terminal: {terminal_id}",
-            },
-        }
+        return refusal
     await _kill_process_tree(process)
     ctx.terminals.pop(terminal_id, None)
     return {"jsonrpc": "2.0", "id": rpc_id, "result": {}}
@@ -565,17 +596,9 @@ async def on_terminal_output(
     _config: _AcpModelConfig,
 ) -> dict[str, object]:
     """Handle terminal/output RPC."""
-    terminal_id = params.get("terminalId", "")
-    process = ctx.terminals.get(terminal_id)
+    process, refusal = _resolve_terminal(rpc_id, params, ctx)
     if process is None:
-        return {
-            "jsonrpc": "2.0",
-            "id": rpc_id,
-            "error": {
-                "code": -32602,
-                "message": f"Unknown terminal: {terminal_id}",
-            },
-        }
+        return refusal
     stdout_data = b""
     stderr_data = b""
     if process.stdout:
@@ -606,17 +629,9 @@ async def on_terminal_wait_for_exit(
     _config: _AcpModelConfig,
 ) -> dict[str, object]:
     """Handle terminal/wait_for_exit RPC."""
-    terminal_id = params.get("terminalId", "")
-    process = ctx.terminals.get(terminal_id)
+    process, refusal = _resolve_terminal(rpc_id, params, ctx)
     if process is None:
-        return {
-            "jsonrpc": "2.0",
-            "id": rpc_id,
-            "error": {
-                "code": -32602,
-                "message": f"Unknown terminal: {terminal_id}",
-            },
-        }
+        return refusal
     timeout = min(float(params.get("timeout") or 60.0), _MAX_TERMINAL_TIMEOUT)
     try:
         await asyncio.wait_for(process.wait(), timeout=timeout)

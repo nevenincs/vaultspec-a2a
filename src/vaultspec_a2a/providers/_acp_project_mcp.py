@@ -163,6 +163,28 @@ def _safe_unlink(path: Path) -> None:
             logger.warning("failed to remove projected .mcp.json at %s", path)
 
 
+def _split_projection(
+    parsed: dict[str, Any],
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Split a parsed ``.mcp.json`` into its ``mcpServers`` map and its other keys.
+
+    Both halves are copies, so a caller may strip or merge without mutating the
+    parsed document. The marker is excluded from BOTH: recovery and cleanup each
+    rewrite or drop it, so carrying it in ``other`` would re-emit a stale one. A
+    non-dict (or absent) ``mcpServers`` yields an empty map rather than raising -
+    a file that names no servers has no servers, and the caller's collision check
+    treats it as such.
+    """
+    servers_raw = parsed.get("mcpServers")
+    servers: dict[str, Any] = dict(servers_raw) if isinstance(servers_raw, dict) else {}
+    other = {
+        k: v
+        for k, v in parsed.items()
+        if k not in ("mcpServers", PROJECTION_MARKER_KEY)
+    }
+    return servers, other
+
+
 def _recover_base(
     parsed: dict[str, Any],
 ) -> tuple[dict[str, Any], dict[str, Any], bool, str | None]:
@@ -183,13 +205,7 @@ def _recover_base(
     an absent file), so the base is empty and absent. No marker means a genuine
     foreign file: its content IS the base, present and fingerprinted.
     """
-    servers_raw = parsed.get("mcpServers")
-    servers: dict[str, Any] = dict(servers_raw) if isinstance(servers_raw, dict) else {}
-    other = {
-        k: v
-        for k, v in parsed.items()
-        if k not in ("mcpServers", PROJECTION_MARKER_KEY)
-    }
+    servers, other = _split_projection(parsed)
     marker = parsed.get(PROJECTION_MARKER_KEY)
 
     if marker is True:
@@ -328,13 +344,7 @@ def cleanup_projected_mcp(path: Path | None) -> None:
         # Foreign / not ours - never touch.
         return
 
-    servers_raw = parsed.get("mcpServers")
-    servers: dict[str, Any] = dict(servers_raw) if isinstance(servers_raw, dict) else {}
-    other = {
-        k: v
-        for k, v in parsed.items()
-        if k not in ("mcpServers", PROJECTION_MARKER_KEY)
-    }
+    servers, other = _split_projection(parsed)
 
     recovered: dict[str, Any] = dict(servers)
     for name in marker.get("added") or []:

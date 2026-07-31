@@ -139,6 +139,46 @@ def _windows_native_library() -> _WindowsNativeLibrary:
     )
 
 
+def _create_file_w(library: _WindowsLibrary) -> _NativeFunction:
+    """Return ``CreateFileW`` with its one canonical prototype declared.
+
+    Every native call site in this module - the directory lease and the private
+    file claim - reaches kernel32 through here. Two independently maintained
+    ``argtypes`` tuples for one native function is not a style concern: a tuple
+    that drifts from its call site corrupts argument marshalling in a call that
+    creates and deletes files under this module's security authority, and it does
+    so silently, with no exception to observe and nothing for a test to catch.
+    Declared once, the call sites differ only where they genuinely differ - the
+    path, access mask, share mode, disposition and flags that distinguish leasing
+    a directory from claiming a file.
+    """
+    create_file = library.CreateFileW
+    create_file.argtypes = (
+        ctypes.c_wchar_p,  # lpFileName
+        ctypes.c_uint32,  # dwDesiredAccess
+        ctypes.c_uint32,  # dwShareMode
+        ctypes.c_void_p,  # lpSecurityAttributes
+        ctypes.c_uint32,  # dwCreationDisposition
+        ctypes.c_uint32,  # dwFlagsAndAttributes
+        ctypes.c_void_p,  # hTemplateFile
+    )
+    create_file.restype = ctypes.c_void_p
+    return create_file
+
+
+def _close_handle(library: _WindowsLibrary) -> _NativeFunction:
+    """Return ``CloseHandle`` with its one canonical prototype declared.
+
+    Same reasoning as :func:`_create_file_w`: this is the release half of the
+    handle contract, and a drifting prototype here would mis-marshal the handle
+    being closed rather than fail loudly.
+    """
+    close_handle = library.CloseHandle
+    close_handle.argtypes = (ctypes.c_void_p,)  # hObject
+    close_handle.restype = ctypes.c_int
+    return close_handle
+
+
 def _last_windows_error(path: Path) -> OSError:
     if sys.platform != "win32":
         raise OSError(errno.ENOSYS, "Windows error codes are unavailable", path)
@@ -212,17 +252,7 @@ def _windows_directory_lease(
     publication: bool,
 ) -> Iterator[DirectoryAuthority]:
     library = _windows_library()
-    create_file = library.CreateFileW
-    create_file.argtypes = (
-        ctypes.c_wchar_p,
-        ctypes.c_uint32,
-        ctypes.c_uint32,
-        ctypes.c_void_p,
-        ctypes.c_uint32,
-        ctypes.c_uint32,
-        ctypes.c_void_p,
-    )
-    create_file.restype = ctypes.c_void_p
+    create_file = _create_file_w(library)
     handle_value = create_file(
         str(authority.path),
         _FILE_READ_ATTRIBUTES | _FILE_TRAVERSE | (_DELETE if publication else 0),
@@ -237,9 +267,7 @@ def _windows_directory_lease(
         raise _last_windows_error(authority.path)
     handle = cast("int", handle_value)
     leased = replace(authority, native_handle=handle)
-    close_handle = library.CloseHandle
-    close_handle.argtypes = (ctypes.c_void_p,)
-    close_handle.restype = ctypes.c_int
+    close_handle = _close_handle(library)
     try:
         assert_directory_authority(leased)
         yield leased
@@ -308,17 +336,7 @@ def create_private_file(authority: DirectoryAuthority, name: str) -> BinaryIO:
         if authority.native_handle is None or authority.dir_fd is not None:
             raise OSError(errno.EBADF, "Windows file authority is not leased")
         library = _windows_library()
-        create_file = library.CreateFileW
-        create_file.argtypes = (
-            ctypes.c_wchar_p,
-            ctypes.c_uint32,
-            ctypes.c_uint32,
-            ctypes.c_void_p,
-            ctypes.c_uint32,
-            ctypes.c_uint32,
-            ctypes.c_void_p,
-        )
-        create_file.restype = ctypes.c_void_p
+        create_file = _create_file_w(library)
         handle_value = create_file(
             str(authority.path / name),
             _FILE_GENERIC_READ | _FILE_GENERIC_WRITE | _DELETE,
@@ -341,10 +359,7 @@ def create_private_file(authority: DirectoryAuthority, name: str) -> BinaryIO:
                 os.O_RDWR | getattr(os, "O_BINARY", 0),
             )
         except BaseException:
-            close_handle = library.CloseHandle
-            close_handle.argtypes = (ctypes.c_void_p,)
-            close_handle.restype = ctypes.c_int
-            close_handle(handle)
+            _close_handle(library)(handle)
             raise
         try:
             return os.fdopen(descriptor, "w+b", buffering=0, closefd=True)

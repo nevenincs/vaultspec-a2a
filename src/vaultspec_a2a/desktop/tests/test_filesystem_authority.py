@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ctypes
 import errno
 import os
 from typing import TYPE_CHECKING
@@ -7,6 +8,9 @@ from typing import TYPE_CHECKING
 import pytest
 
 from ...desktop._filesystem_authority import (
+    _create_file_w,
+    _windows_library,
+    assert_directory_authority,
     create_private_file,
     directory_lease,
     publish_no_replace,
@@ -122,3 +126,122 @@ if os.name == "posix":
         assert raised.value.errno == errno.ENOSYS
         assert source_path.is_dir()
         assert (destination_path / "existing").read_bytes() == b"preserved"
+
+
+if os.name == "nt":
+    # The whole of the block above is POSIX-gated, so before these tests this
+    # module executed NOTHING on Windows - the platform whose native CreateFileW
+    # prototype the module actually declares. These drive both native call sites
+    # for real: a mis-declared argtypes slot mis-marshals the access mask,
+    # disposition or flags and fails here rather than corrupting a file silently.
+
+    def test_create_file_w_declares_one_seven_slot_prototype() -> None:
+        """The prototype is declared once, with CreateFileW's real arity."""
+        library = _windows_library()
+        create_file = _create_file_w(library)
+
+        assert create_file.argtypes == (
+            ctypes.c_wchar_p,
+            ctypes.c_uint32,
+            ctypes.c_uint32,
+            ctypes.c_void_p,
+            ctypes.c_uint32,
+            ctypes.c_uint32,
+            ctypes.c_void_p,
+        )
+        assert create_file.restype is ctypes.c_void_p
+        # Re-declaring is idempotent: the accessor is the only writer, so two
+        # consumers of one library instance cannot disagree about the signature.
+        assert _create_file_w(library).argtypes == create_file.argtypes
+
+    def test_directory_lease_opens_a_real_native_handle(tmp_path: Path) -> None:
+        """The lease call site: CreateFileW must return a usable directory handle.
+
+        ``assert_directory_authority`` re-reads the handle through
+        ``GetFileInformationByHandle`` and compares its file index to the
+        identity resolved by name, so a handle opened against the wrong object -
+        the observable symptom of a mis-marshalled path or flags argument -
+        fails rather than passing silently.
+        """
+        authority = resolve_directory_authority(tmp_path)
+        assert authority.native_handle is None
+
+        with directory_lease(authority) as leased:
+            assert leased.native_handle is not None
+            assert leased.native_handle not in (0, ctypes.c_void_p(-1).value)
+            assert leased.dir_fd is None
+            # Proves the handle addresses THIS directory, not some other object.
+            assert_directory_authority(leased)
+            assert leased.identity == authority.identity
+
+    def test_private_file_claim_honours_create_new_disposition(
+        tmp_path: Path,
+    ) -> None:
+        """The file call site: CREATE_NEW must land in the disposition slot.
+
+        If the disposition argument were marshalled into the wrong slot the
+        second claim would silently reopen (or truncate) the first file instead
+        of failing, so the ``FileExistsError`` is the marshalling assertion.
+        """
+        authority = resolve_directory_authority(tmp_path)
+        with directory_lease(authority) as leased:
+            with create_private_file(leased, "claimed") as handle:
+                handle.write(b"private-payload")
+                handle.flush()
+                os.fsync(handle.fileno())
+
+            # The read/write access mask really was granted.
+            assert (tmp_path / "claimed").read_bytes() == b"private-payload"
+
+            with pytest.raises(FileExistsError) as raised:
+                create_private_file(leased, "claimed")
+
+        assert raised.value.errno == errno.EEXIST
+        assert (tmp_path / "claimed").read_bytes() == b"private-payload"
+
+    def test_private_file_publishes_the_exact_held_handle(tmp_path: Path) -> None:
+        """Both call sites in one flow, ending in a rename of the live handle.
+
+        Publication renames the handle ``create_private_file`` returned, which
+        only succeeds when the DELETE bit was marshalled into that call's access
+        mask - the one bit distinguishing the two call sites' masks.
+        """
+        authority = resolve_directory_authority(tmp_path)
+        with (
+            directory_lease(authority, publication=True) as leased,
+            create_private_file(leased, "staged") as source,
+        ):
+            source.write(b"capsule")
+            source.flush()
+            os.fsync(source.fileno())
+            publish_no_replace(
+                leased,
+                "staged",
+                "published",
+                source_fd=source.fileno(),
+            )
+
+        assert (tmp_path / "published").read_bytes() == b"capsule"
+        assert not (tmp_path / "staged").exists()
+
+    def test_publication_refuses_an_existing_destination(tmp_path: Path) -> None:
+        """``replace_if_exists = 0`` still holds after the prototype rehoming."""
+        (tmp_path / "published").write_bytes(b"preserved")
+        authority = resolve_directory_authority(tmp_path)
+        with (
+            directory_lease(authority, publication=True) as leased,
+            create_private_file(leased, "staged") as source,
+        ):
+            source.write(b"capsule")
+            source.flush()
+            os.fsync(source.fileno())
+            with pytest.raises(FileExistsError) as raised:
+                publish_no_replace(
+                    leased,
+                    "staged",
+                    "published",
+                    source_fd=source.fileno(),
+                )
+
+        assert raised.value.errno == errno.EEXIST
+        assert (tmp_path / "published").read_bytes() == b"preserved"

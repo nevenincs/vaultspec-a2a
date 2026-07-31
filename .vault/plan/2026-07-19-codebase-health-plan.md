@@ -154,16 +154,17 @@ Replace payload-shaped relaying with one versioned DTO and enforce resource limi
 - [x] `W02.P06.S22` - Define the versioned positive progress DTO with identifiers lifecycle state bounded counters approved summaries and one bounded token-delta field; `src/vaultspec_a2a/api/schemas/gateway.py, src/vaultspec_a2a/streaming`.
 - [x] `W02.P06.S23` - Transform gateway events through the positive DTO while excluding prompts documents artifacts edit diffs and raw provider payloads; `src/vaultspec_a2a/streaming/aggregator.py, src/vaultspec_a2a/streaming/transformer.py`.
 - [x] `W02.P06.S24` - Authenticate the progress stream and enforce global connection limits before principal lookup; `src/vaultspec_a2a/api/routes/gateway.py, src/vaultspec_a2a/api/dependencies.py`.
-- [ ] `W02.P06.S25` - Enforce per-principal stream and subscription quotas after authentication; `src/vaultspec_a2a/streaming/subscribers.py, src/vaultspec_a2a/api/routes/thread_stream.py`.
+- [ ] `W02.P06.S25` - Enforce global stream and per-connection subscription quotas on the authenticated stream path; `src/vaultspec_a2a/streaming/subscribers.py, src/vaultspec_a2a/api/routes/thread_stream.py`.
 - [x] `W02.P06.S26` - Parse numeric and ISO heartbeat values strictly and reject stale malformed non-finite and implausibly future values; `src/vaultspec_a2a/authoring/discovery.py`.
 - [x] `W02.P06.S27` - Prove progress allowlisting with a real authenticated stream client; `tests/streaming, tests/api`.
 - [x] `W02.P06.S98` - Enforce the positive progress allowlist again at the SSE frame and API event-adapter output boundary; `src/vaultspec_a2a/streaming/sse_frames.py, src/vaultspec_a2a/api/event_adapter.py`.
 - [x] `W02.P06.S99` - Prove forbidden fields cannot cross the encoded A2A SSE boundary; `tests/streaming, tests/api`.
 - [x] `W02.P06.S159` - Prove bounded token deltas with a real authenticated stream client; `tests/streaming, tests/api`.
-- [ ] `W02.P06.S160` - Prove global and per-principal quotas with real authenticated stream clients; `tests/streaming, tests/api`.
+- [ ] `W02.P06.S160` - Prove global and per-connection quotas with real authenticated multi-client stream sessions; `src/vaultspec_a2a/streaming/tests, src/vaultspec_a2a/api/tests`.
 - [x] `W02.P06.S161` - Prove malformed and stale heartbeat rejection against real discovery records; `tests/authoring`.
 - [x] `W02.P06.S179` - Keep the stream subscriber registration inside its cleanup guard so a raise cannot strand a bounded slot; `src/vaultspec_a2a/api/routes/thread_stream.py`.
 - [x] `W02.P06.S180` - Close the progress frame-type catalog with per-field allowlists and bounds and project unknown types onto identity keys; `src/vaultspec_a2a/streaming/sse_frames.py, src/vaultspec_a2a/api/schemas/events.py`.
+- [ ] `W02.P06.S182` - Key stream quotas on a per-consumer identity once a second credential plane mints one, paired with the consuming product; `src/vaultspec_a2a/api/dependencies.py, src/vaultspec_a2a/streaming/subscribers.py`.
 
 ### Phase `W02.P07` - retire legacy dependencies from the dashboard path
 
@@ -171,6 +172,7 @@ Keep transition surfaces credential-gated and unadvertised while moving the dash
 
 - [ ] `W02.P07.S28` - Disable legacy product routes in Compose when no attach credential is configured after consuming certified desktop route authentication; `src/vaultspec_a2a/api/routes, service`.
 - [ ] `W02.P07.S29` - Remove the credential-gated legacy event WebSocket from dashboard discovery after consuming certified desktop WebSocket authentication; `src/vaultspec_a2a/lifecycle/discovery.py, src/vaultspec_a2a/api/app.py`.
+- [ ] `W02.P07.S183` - Answer a permission request through a run-scoped versioned verb; `src/vaultspec_a2a/api/routes/gateway.py, src/vaultspec_a2a/api/schemas/gateway.py`.
 
 ### Phase `W02.P08` - review and queue edge findings
 

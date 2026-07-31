@@ -21,6 +21,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import TYPE_CHECKING, Any
 
+from ..authoring.contract import is_document_authoring_role
 from ..thread.errors import ConfigError
 
 if TYPE_CHECKING:
@@ -30,11 +31,13 @@ if TYPE_CHECKING:
     from langchain_core.language_models import BaseChatModel
 
 __all__ = [
+    "NATIVE_READ_TOOL_NAMES",
     "HarnessMcpCapabilityUnavailable",
     "HarnessMcpResolution",
     "HarnessMcpRuntimeProfile",
     "codex_mcp_server_specs",
     "compose_harness_mcp_servers",
+    "compose_native_read_tools",
     "config_home_mcp_servers",
     "harness_allowed_tool_names",
     "reject_duplicate_identities",
@@ -548,3 +551,47 @@ def _project_composition_onto_model(
         t for t in admitted_tools if t not in allow_seen
     ]
     return attach(combined, merged_allowed)
+
+
+# The spawned CLI's own built-in read tools. These execute agent-side over the
+# workspace fs (no MCP, no registration-scope surfacing gate) and give document
+# roles their deterministic grounding floor: read a named .vault document, grep
+# code, discover files. They are added by exact name — never a wildcard — so a
+# document role in autonomous mode can invoke them without a local prompt while
+# every write/exec built-in stays gated (the .vault deny remains write-only).
+NATIVE_READ_TOOL_NAMES: tuple[str, ...] = ("Read", "Grep", "Glob")
+
+
+def compose_native_read_tools(
+    model: BaseChatModel,
+    *,
+    autonomous: bool,
+    role: str | None,
+) -> BaseChatModel:
+    """Permit the native read built-ins for autonomous document-authoring roles.
+
+    In autonomous (headless) mode ONLY, and for a document-authoring role ONLY,
+    union the CLI's native Read/Grep/Glob into the session's exact-name
+    ``allowedTools`` so the floor grounding is invocable without a local prompt.
+    The existing allowlist (e.g. the bridged authoring tools) and the advertised
+    MCP servers are preserved unchanged; the read names are added by exact name,
+    never a wildcard, and never for human-in-loop runs, which keep their prompts.
+    Models with no ACP allowlist surface (mock, hosted APIs) are returned
+    unchanged.
+
+    The native-built-in counterpart of :func:`compose_harness_mcp_servers`: both
+    mutate only the ACP session's advertised surface and allowlist, so they live
+    together rather than in the graph node that sequences them.
+    """
+    if not autonomous or not is_document_authoring_role(role):
+        return model
+    attach = getattr(model, "with_mcp_servers", None)
+    if attach is None:
+        return model
+    existing = list(getattr(model, "allowed_tools", []) or [])
+    combined = existing + [
+        name for name in NATIVE_READ_TOOL_NAMES if name not in existing
+    ]
+    if combined == existing:
+        return model
+    return attach(list(getattr(model, "mcp_servers", []) or []), combined)

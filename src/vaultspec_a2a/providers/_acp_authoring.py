@@ -66,6 +66,8 @@ from ..utils.runtime_exec import is_module_invocation, module_command
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
+    from langchain_core.language_models import BaseChatModel
+
     from ..authoring import CatalogSnapshot
 
 __all__ = [
@@ -73,6 +75,7 @@ __all__ = [
     "AUTHORING_STDIO_MODULE",
     "LOOPBACK_HOSTS",
     "AuthoringToolBinding",
+    "attach_authoring_tools",
     "authoring_allowed_tool_names",
     "build_authoring_mcp_servers",
     "build_authoring_stdio_mcp_servers",
@@ -313,6 +316,52 @@ def build_authoring_stdio_mcp_servers(
             "env": env,
         }
     ]
+
+
+def attach_authoring_tools(
+    model: BaseChatModel,
+    binding: AuthoringToolBinding | None,
+    *,
+    autonomous: bool,
+) -> BaseChatModel:
+    """Surface the run's bridged authoring tools to an ACP session model.
+
+    When a binding is present and the model exposes an ACP ``mcp_servers``
+    surface, return a copy whose ``session/new`` advertises the run's authoring
+    MCP server so the spawned CLI sees the propose/read tools. The transport is
+    chosen from the binding fields present: the stdio bridge (spawned subprocess)
+    when the binding carries the engine transport (``engine_base_url`` +
+    ``run_id``), otherwise the HTTP bridge. Session INJECTION of this spec does
+    not surface it on the pinned stack — the registration-scope matrix found
+    only user-global home-config servers surface — so the stdio bridge reaches the
+    model by a second step: its spec is admitted into the isolated config home as
+    user-global config (:func:`config_home_authoring_entry`, at the spawn seam),
+    which does surface. That makes the transport choice load-bearing: only the
+    stdio shape rides the home channel. Models without an MCP surface (mock,
+    hosted APIs) are returned unchanged. The binding lives only in the calling
+    worker closure — never in graph state or a checkpoint.
+
+    In autonomous (headless) mode ONLY, the exact bridged tool names are
+    auto-permitted so the CLI can invoke them without a local prompt — a
+    recorded approval policy, never a wildcard, and never for human-in-loop
+    runs, which keep their prompts. The real human gate stays the engine review
+    lane; the .vault deny policy still blocks fs writes.
+
+    This is the composer for the builders above; it holds no orchestration state
+    and touches nothing but the model's ACP surface, which is why it lives beside
+    them rather than in the graph node that calls it.
+    """
+    if binding is None:
+        return model
+    attach = getattr(model, "with_mcp_servers", None)
+    if attach is None:
+        return model
+    allowed_tools = authoring_allowed_tool_names(binding) if autonomous else None
+    if binding.engine_base_url is not None and binding.run_id is not None:
+        mcp_servers = build_authoring_stdio_mcp_servers(binding)
+    else:
+        mcp_servers = build_authoring_mcp_servers(binding)
+    return attach(mcp_servers, allowed_tools)
 
 
 def config_home_authoring_entry(

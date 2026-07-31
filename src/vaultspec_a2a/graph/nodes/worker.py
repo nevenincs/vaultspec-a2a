@@ -25,7 +25,6 @@ if TYPE_CHECKING:
     from langchain_core.tools import BaseTool
 
     from ...authoring import FeedbackContextReader
-    from ...providers._acp_authoring import AuthoringToolBinding
     from ...worker.authoring_binding import AuthoringBindingProvider
 
 _logger = logging.getLogger(__name__)
@@ -133,94 +132,6 @@ def _resolve_effective_worker_model(
     return model.model_copy(
         update={"permission_callback": _interrupt_permission_callback}
     )
-
-
-def _attach_authoring_tools(
-    model: BaseChatModel,
-    binding: "AuthoringToolBinding | None",
-    *,
-    autonomous: bool,
-) -> BaseChatModel:
-    """Surface the run's bridged authoring tools to an ACP session model.
-
-    When a binding is present and the model exposes an ACP ``mcp_servers``
-    surface, return a copy whose ``session/new`` advertises the run's authoring
-    MCP server so the spawned CLI sees the propose/read tools. The transport is
-    chosen from the binding fields present: the stdio bridge (spawned subprocess)
-    when the binding carries the engine transport (``engine_base_url`` +
-    ``run_id``), otherwise the HTTP bridge. Session INJECTION of this spec does
-    not surface it on the pinned stack — the S20 registration-scope matrix found
-    only user-global home-config servers surface — so the stdio bridge reaches the
-    model by a second step: its spec is admitted into the isolated config home as
-    user-global config (S18, ``config_home_authoring_entry`` at the spawn seam),
-    which does surface. That makes the transport choice load-bearing: only the
-    stdio shape rides the home channel. Models without an MCP surface (mock,
-    hosted APIs) are returned unchanged. The binding lives only in this worker
-    closure — never in graph state or a checkpoint.
-
-    In autonomous (headless) mode ONLY, the exact bridged tool names are
-    auto-permitted so the CLI can invoke them without a local prompt — a
-    recorded approval policy, never a wildcard, and never for human-in-loop
-    runs, which keep their prompts. The real human gate stays the engine review
-    lane; the .vault deny policy still blocks fs writes.
-    """
-    if binding is None:
-        return model
-    attach = getattr(model, "with_mcp_servers", None)
-    if attach is None:
-        return model
-    from ...providers._acp_authoring import (
-        authoring_allowed_tool_names,
-        build_authoring_mcp_servers,
-        build_authoring_stdio_mcp_servers,
-    )
-
-    allowed_tools = authoring_allowed_tool_names(binding) if autonomous else None
-    if binding.engine_base_url is not None and binding.run_id is not None:
-        mcp_servers = build_authoring_stdio_mcp_servers(binding)
-    else:
-        mcp_servers = build_authoring_mcp_servers(binding)
-    return attach(mcp_servers, allowed_tools)
-
-
-# The spawned CLI's own built-in read tools. These execute agent-side over the
-# workspace fs (no MCP, no registration-scope surfacing gate) and give document
-# roles their deterministic grounding floor: read a named .vault document, grep
-# code, discover files. They are added by exact name — never a wildcard — so a
-# document role in autonomous mode can invoke them without a local prompt while
-# every write/exec built-in stays gated (the .vault deny remains write-only).
-NATIVE_READ_TOOL_NAMES: tuple[str, ...] = ("Read", "Grep", "Glob")
-
-
-def _compose_native_read_tools(
-    model: BaseChatModel,
-    *,
-    autonomous: bool,
-    role: str | None,
-) -> BaseChatModel:
-    """Permit the native read built-ins for autonomous document-authoring roles.
-
-    In autonomous (headless) mode ONLY, and for a document-authoring role ONLY,
-    union the CLI's native Read/Grep/Glob into the session's exact-name
-    ``allowedTools`` so the floor grounding is invocable without a local prompt.
-    The existing allowlist (e.g. the bridged authoring tools) and the advertised
-    MCP servers are preserved unchanged; the read names are added by exact name,
-    never a wildcard, and never for human-in-loop runs, which keep their prompts.
-    Models with no ACP allowlist surface (mock, hosted APIs) are returned
-    unchanged.
-    """
-    if not autonomous or not is_document_authoring_role(role):
-        return model
-    attach = getattr(model, "with_mcp_servers", None)
-    if attach is None:
-        return model
-    existing = list(getattr(model, "allowed_tools", []) or [])
-    combined = existing + [
-        name for name in NATIVE_READ_TOOL_NAMES if name not in existing
-    ]
-    if combined == existing:
-        return model
-    return attach(list(getattr(model, "mcp_servers", []) or []), combined)
 
 
 def _wrap_worker_exception(
@@ -564,9 +475,18 @@ def create_worker_node(
                 authoring_binding = await authoring_binding_provider.binding_for(
                     thread_id, name
                 )
-        effective_model = _attach_authoring_tools(
-            effective_model, authoring_binding, autonomous=autonomous
-        )
+        if authoring_binding is not None:
+            # Import guarded by the binding, not just deferred: the authoring
+            # provider module costs ~0.85s to load (it pulls the stdio bridge's
+            # env contract and the catalog codec), and a run with no binding must
+            # never pay it. Hoisting this to module scope would charge every
+            # worker turn — the import-time cold-start class that already cost
+            # this project a lost CLI tool-registration race once.
+            from ...providers._acp_authoring import attach_authoring_tools
+
+            effective_model = attach_authoring_tools(
+                effective_model, authoring_binding, autonomous=autonomous
+            )
         if harness_mcp_servers:
             from ...providers._acp_mcp import (
                 compose_harness_mcp_servers,
@@ -584,7 +504,9 @@ def create_worker_node(
             effective_model = compose_harness_mcp_servers(
                 effective_model, harness_mcp_servers, allowed_tools=harness_allowed
             )
-        effective_model = _compose_native_read_tools(
+        from ...providers._acp_mcp import compose_native_read_tools
+
+        effective_model = compose_native_read_tools(
             effective_model, autonomous=autonomous, role=role
         )
 

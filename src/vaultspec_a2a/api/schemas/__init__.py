@@ -52,8 +52,11 @@ from .events import ToolCallLocation as ToolCallLocation
 from .events import ToolCallStartEvent as ToolCallStartEvent
 from .events import ToolCallUpdateEvent as ToolCallUpdateEvent
 from .rest import AgentStatusEntry as AgentStatusEntry
+from .rest import ArchiveThreadResponse as ArchiveThreadResponse
+from .rest import CancelThreadResponse as CancelThreadResponse
 from .rest import CreateThreadRequest as CreateThreadRequest
 from .rest import CreateThreadResponse as CreateThreadResponse
+from .rest import DeleteThreadResponse as DeleteThreadResponse
 from .rest import PendingPermission as PendingPermission
 from .rest import PermissionResponseRequest as PermissionResponseRequest
 from .rest import PermissionResponseResult as PermissionResponseResult
@@ -77,14 +80,17 @@ __all__ = [
     "AgentStatusEntry",
     "AgentStatusEvent",
     "AgentSummary",
+    "ArchiveThreadResponse",
     "ArtifactSnapshot",
     "ArtifactUpdateEvent",
+    "CancelThreadResponse",
     "ClientCommand",
     "ClientCommandType",
     "ClientMessage",
     "ConnectedEvent",
     "CreateThreadRequest",
     "CreateThreadResponse",
+    "DeleteThreadResponse",
     "ErrorEvent",
     "EventEnvelope",
     "ExecutionTaskSnapshot",

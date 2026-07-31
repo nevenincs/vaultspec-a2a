@@ -124,12 +124,20 @@ class ReplayDigestRule(StrEnum):
 #: The rule every newly persisted replay fingerprint is computed and stamped with.
 CURRENT_REPLAY_DIGEST_RULE: Final = ReplayDigestRule.CREDENTIAL_FREE
 
-# Named per rule for the same reason the exclusion sets themselves are named: a
-# rule added later must state its own exclusions rather than inherit whichever
-# set happens to be current.
+# Each rule states its COMPLETE exclusion set as a frozen literal rather than
+# composing one from the sets that happen to be current. A rule describes bytes
+# already on disk, so it is immutable: composing it would let a later addition
+# to the shared set silently redefine an older rule and refuse byte-identical
+# replays of runs stored under it - and those digests cannot be recomputed,
+# because raw tokens are deliberately never persisted. Changing what is excluded
+# therefore means MINTING A NEW RULE and moving the current pointer to it, never
+# editing an existing entry. The duplication with the staged sets above is the
+# price of that immutability and is deliberate.
 _REPLAY_RULE_EXCLUSIONS: Final[dict[ReplayDigestRule, frozenset[str]]] = {
-    ReplayDigestRule.CREDENTIAL_SENSITIVE: frozenset(),
-    ReplayDigestRule.CREDENTIAL_FREE: _REPLAY_CREDENTIAL_EXCLUDED,
+    ReplayDigestRule.CREDENTIAL_SENSITIVE: frozenset({"stage", "reservation_id"}),
+    ReplayDigestRule.CREDENTIAL_FREE: frozenset(
+        {"stage", "reservation_id", "actor_tokens"}
+    ),
 }
 
 # Separates a stored fingerprint's rule marker from its hex digest. A stored
@@ -176,8 +184,12 @@ def replay_digest(body: RunStartRequest, *, rule: ReplayDigestRule) -> str:
     different prompt or preset is a new intention wearing an old id. *rule* is
     explicit rather than defaulted so a comparison against a stored fingerprint
     cannot silently drift onto the current rule.
+
+    The rule's exclusion set is used WHOLE rather than combined with the staged
+    sets, so an older rule keeps describing exactly the bytes it was computed
+    over however the current classification later changes.
     """
-    return _digest(body, _ALWAYS_EXCLUDED | _REPLAY_RULE_EXCLUSIONS[rule])
+    return _digest(body, _REPLAY_RULE_EXCLUSIONS[rule])
 
 
 def stamped_replay_digest(body: RunStartRequest) -> str:

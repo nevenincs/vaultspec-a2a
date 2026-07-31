@@ -597,15 +597,7 @@ async def _run_commit_locked(
                 detail="existing run has no committed model profile binding",
             )
         existing_profile = existing_frozen.profile_id
-        if existing_profile != body.profile_id:
-            raise HTTPException(
-                status_code=409,
-                detail=(
-                    f"Run {existing.id!r} was already started with profile "
-                    f"{existing_profile!r}; cannot re-start with "
-                    f"{body.profile_id!r}"
-                ),
-            )
+        _refuse_profile_mismatch(existing.id, existing_profile, body)
         binding = _persisted_lease_binding(existing.thread_metadata)
         if binding is None:
             raise HTTPException(
@@ -819,6 +811,35 @@ def _persisted_request_digest(metadata_json: str | None) -> str | None:
     return digest if isinstance(digest, str) and digest else None
 
 
+def _refuse_profile_mismatch(
+    run_id: str, existing_profile: str, body: RunStartRequest
+) -> None:
+    """Refuse a request naming a different model profile than the durable run.
+
+    The single encoding of that refusal, shared by the plain-start replay check
+    and the staged commit's recovery of a lost acknowledgement. Both ask the
+    same question of the same immutable field, and both answered it with their
+    own copy of the same message - two encodings free to drift apart the first
+    time either was touched.
+
+    Only the profile comparison is shared. The two paths deliberately fingerprint
+    the rest of the request under DIFFERENT rules - the commit binding folds
+    credential values in, the plain-start replay classifies them out - and those
+    rules are not harmonised here or anywhere else.
+
+    Raises:
+        HTTPException: 409 when the profile differs.
+    """
+    if existing_profile != body.profile_id:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"Run {run_id!r} was already started with profile "
+                f"{existing_profile!r}; cannot re-start with {body.profile_id!r}"
+            ),
+        )
+
+
 def _replay_identity_or_conflict(
     run_id: str, metadata_json: str | None, body: RunStartRequest
 ) -> str | None:
@@ -855,14 +876,8 @@ def _replay_identity_or_conflict(
         HTTPException: 409 when the profile or the request fingerprint differs.
     """
     existing_profile = _persisted_profile_id(metadata_json)
-    if existing_profile is not None and existing_profile != body.profile_id:
-        raise HTTPException(
-            status_code=409,
-            detail=(
-                f"Run {run_id!r} was already started with profile "
-                f"{existing_profile!r}; cannot re-start with {body.profile_id!r}"
-            ),
-        )
+    if existing_profile is not None:
+        _refuse_profile_mismatch(run_id, existing_profile, body)
     # ``None`` means the run predates digest persistence, not that its request
     # was empty; refusing on it would break a legitimate replay of an older run.
     persisted_digest = _persisted_request_digest(metadata_json)

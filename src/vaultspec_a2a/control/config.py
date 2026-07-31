@@ -303,18 +303,6 @@ class InfraConfig(BaseSettings):
         ),
     )
 
-    cors_allowed_origins: list[str] = Field(
-        default=[
-            "http://localhost:18000",  # local gateway (operator tooling / health)
-            "http://127.0.0.1:18000",
-        ],
-        description=(
-            "Allowed CORS origins.  A2A is headless (no browser frontend); the "
-            "former Vite dev-server origins were removed with src/ui.  Retained "
-            "loopback gateway origins for local operator tooling."
-        ),
-    )
-
     # Worker process settings
     worker_port: int = Field(
         default=18001,

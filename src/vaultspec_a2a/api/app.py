@@ -2,7 +2,6 @@
 
 Creates the ASGI application with:
 - Lifespan management (init/close DB, EventAggregator, telemetry)
-- CORS middleware (permissive in dev)
 - REST router from per-resource route modules
 - Internal router from ``internal.py`` (worker relay)
 
@@ -23,7 +22,6 @@ from typing import Any, cast
 import httpx
 import uvicorn
 from fastapi import Depends, FastAPI, Request
-from fastapi.middleware.cors import CORSMiddleware
 from opentelemetry import metrics, trace
 from opentelemetry.sdk.metrics import MeterProvider as SdkMeterProvider
 from opentelemetry.sdk.trace import TracerProvider as SdkTracerProvider
@@ -648,15 +646,6 @@ def create_app(
         # dashboard-created attach credential, load the ownership capability, and
         # mint the worker IPC secret. Fails closed if a dashboard file is absent.
         _load_desktop_credentials(app)
-
-    cors_origins: list[str] = list(settings.cors_allowed_origins)
-    app.add_middleware(
-        cast("Any", CORSMiddleware),
-        allow_origins=cors_origins,
-        allow_credentials=True,
-        allow_methods=["*"],
-        allow_headers=["*"],
-    )
 
     app.add_middleware(cast("Any", BoundedV1WriteBodyMiddleware))
     app.add_middleware(cast("Any", TelemetryMiddleware))

@@ -2463,7 +2463,7 @@
           "action_status"
         ],
         "title": "RunPermissionRespondResponse",
-        "description": "Report what an answer did, including when it did nothing.\n\n``accepted`` says the answer was taken; ``applied`` says it was the one that\nresumed the run. A duplicate answer reports accepted with ``applied`` false\nrather than acting twice, so a caller that retries after a lost response\nlearns the outcome instead of re-answering."
+        "description": "Report what an answer did, including when it did nothing.\n\n``accepted`` says the answer was taken; ``applied`` reports whether the\nworker had durably confirmed applying this request's resolution when this\nresponse was assembled - never whether THIS call resumed the run. A first\naccepted answer therefore returns ``applied`` false with ``action_status``\n``accepted_not_applied``: the resume is dispatched and application is\nconfirmed asynchronously. A duplicate replays the stored outcome rather\nthan acting twice - byte-identical to the first response until that\nconfirmation lands, ``applied`` true after it - so a caller retrying after\na lost response learns the current outcome instead of re-answering. An\nanswer arriving after the request was already applied reports ``accepted``\nwith ``applied`` true and ``action_status`` ``duplicate``."
       },
       "RunPrepareResponse": {
         "properties": {

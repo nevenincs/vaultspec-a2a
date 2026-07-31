@@ -202,6 +202,34 @@ jobs:
             echo "===== end gateway log ====="
             echo "===== app home after the failed start ====="
             find "$home" -maxdepth 2 2>/dev/null | sed "s|^$home|<app-home>|" | sort || true
+
+            # DISCRIMINATOR, not a retry. The failure above is a Windows sharing
+            # violation while the gateway publishes its OWN discovery credential,
+            # and the log shows a worker child being started moments earlier. If
+            # a handle leaked into that child, the parent's publish would collide
+            # with itself through the child — so suppressing the autospawn either
+            # makes the publish succeed (the child is the conflict) or does not
+            # (the child is exonerated and the fault is in the publish path).
+            #
+            # This runs into a FRESH app home so partial state from the failed
+            # attempt cannot confound it, and the step exits non-zero either way:
+            # it is here to answer a question, never to turn this job green.
+            echo "===== DISCRIMINATOR: start again with the worker autospawn suppressed ====="
+            home2="${RUNNER_TEMP}/a2a-smoke-home-noworker"
+            gwlog2="${RUNNER_TEMP}/gateway-noworker.log"
+            mkdir -p "$home2"
+            "$bin" setup --app-home "$home2" >/dev/null 2>&1 || true
+            if VAULTSPEC_AUTO_SPAWN_WORKER=false "$bin" start \
+                 --app-home "$home2" --host 127.0.0.1 --port 18874 --log "$gwlog2" > start2.json 2>&1; then
+              echo "DISCRIMINATOR: start SUCCEEDED with the autospawn suppressed"
+              echo "  => the conflicting handle comes from the spawned worker child"
+              cat start2.json || true
+              "$bin" stop --app-home "$home2" >/dev/null 2>&1 || true
+            else
+              echo "DISCRIMINATOR: start ALSO FAILED with the autospawn suppressed"
+              echo "  => the worker child is NOT the conflict; that hypothesis is dead"
+              tail -25 "$gwlog2" 2>/dev/null || echo "(no second gateway log)"
+            fi
             exit 1
           fi
           cat start.json

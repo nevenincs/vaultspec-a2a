@@ -3,14 +3,19 @@
 Handler: ``send_message``.
 """
 
-import contextlib
 from typing import Annotated
 
 from mcp.server.mcpserver.exceptions import ToolError
 from pydantic import Field
 
 from ....control.config import settings
-from .._http import _HTTP_CONFLICT, HTTPStatusError, _mcp_request
+from .._http import (
+    _HTTP_CONFLICT,
+    _HTTP_SERVICE_UNAVAILABLE,
+    HTTPStatusError,
+    _mcp_request,
+    _response_detail,
+)
 from ..server import mcp
 
 
@@ -44,13 +49,15 @@ async def send_message(
     ``start_thread`` instead.  Call ``list_threads`` first if you need to
     find the thread_id.
 
-    This tool is asynchronous: it delivers the message and returns immediately
-    without waiting for the agents to process it.  The message is queued and
-    will be picked up by the next graph iteration.  Returns 404 if the
-    thread_id does not match any known thread.
+    This tool is asynchronous: it hands the message to the worker and returns
+    immediately without waiting for the agents to process it.  Acceptance is
+    not completion — reconcile progress with ``get_thread_status`` rather than
+    from this confirmation.  Returns 404 if the thread_id does not match any
+    known thread, and reports a refusal when the thread is in a state that
+    takes no follow-up.
 
-    Returns a plain-text confirmation that the message was accepted for
-    delivery, e.g. 'Message delivered to thread {thread_id}.'
+    Returns a plain-text confirmation that the message was accepted, naming the
+    action status and, when the gateway assigned one, the action id.
 
     Args:
         thread_id: The UUID of the target thread. Obtain from ``start_thread``
@@ -62,21 +69,36 @@ async def send_message(
                    should be split across multiple sends.
     """
     try:
-        await _mcp_request(
+        data = await _mcp_request(
             "POST",
-            f"/api/threads/{thread_id}/messages",
+            f"/v1/runs/{thread_id}/messages",
             json={"content": message},
             timeout=settings.mcp_query_timeout_seconds,
             not_found_msg=f"Thread {thread_id!r} not found.",
         )
     except HTTPStatusError as exc:
-        if exc.response.status_code == _HTTP_CONFLICT:
-            detail = ""
-            with contextlib.suppress(Exception):
-                detail = exc.response.json().get("detail", "")
+        status = exc.response.status_code
+        detail = _response_detail(exc.response)
+        if status == _HTTP_CONFLICT:
             raise ToolError(
                 f"Cannot send message to thread {thread_id}: "
                 f"{detail or 'thread is not accepting follow-up messages'}."
             ) from exc
-        raise ToolError(f"Server error: HTTP {exc.response.status_code}") from exc
-    return f"Message delivered to thread {thread_id}."
+        if status == _HTTP_SERVICE_UNAVAILABLE:
+            # The gateway is draining or at capacity, or the worker circuit is
+            # open. The turn was NOT queued, so reporting delivery here would
+            # tell the caller its message is on its way when nothing holds it.
+            raise ToolError(
+                f"Could not deliver the message to thread {thread_id}: "
+                f"{detail or 'the gateway is at capacity or draining'}. Retry later."
+            ) from exc
+        raise ToolError(f"Server error: HTTP {status}") from exc
+    # Acceptance is not application: the turn is handed to the worker and the
+    # run continues asynchronously, so the confirmation says accepted rather
+    # than done and names the action a caller can reconcile against.
+    action_status = data.get("action_status", "accepted")
+    action_id = data.get("action_id")
+    confirmation = f"Message accepted for thread {thread_id} (status: {action_status})."
+    if action_id:
+        confirmation += f" Action: {action_id}."
+    return confirmation

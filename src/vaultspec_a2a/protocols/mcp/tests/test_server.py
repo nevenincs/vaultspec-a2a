@@ -78,7 +78,6 @@ from ..tools.thread_lifecycle import (
     start_thread,
 )
 from ..tools.thread_query import (
-    _ws_url_from_api_base,
     get_thread_status,
     list_threads,
 )
@@ -760,47 +759,6 @@ async def test_send_message_raises_tool_error_for_repair_needed_thread(
 
 
 # ---------------------------------------------------------------------------
-# _ws_url_from_api_base unit tests
-# ---------------------------------------------------------------------------
-
-
-def test_ws_url_http_converts_to_ws() -> None:
-    """_ws_url_from_api_base converts http:// to ws://."""
-    result = _ws_url_from_api_base("http://localhost:8000")
-    assert result.startswith("ws://")
-    assert "localhost" in result
-    assert "8000" in result
-
-
-def test_ws_url_https_converts_to_wss() -> None:
-    """_ws_url_from_api_base converts https:// to wss://."""
-    result = _ws_url_from_api_base("https://example.com")
-    assert result.startswith("wss://")
-    assert "example.com" in result
-
-
-def test_ws_url_strips_credentials() -> None:
-    """_ws_url_from_api_base removes userinfo (user:password) from the netloc."""
-    result = _ws_url_from_api_base("http://user:pass@localhost:8000")
-    assert "user" not in result
-    assert "pass" not in result
-    assert "localhost" in result
-
-
-def test_ws_url_preserves_port() -> None:
-    """_ws_url_from_api_base keeps the port number in the output URL."""
-    result = _ws_url_from_api_base("http://localhost:9999")
-    assert "9999" in result
-
-
-def test_ws_url_no_port_omits_colon() -> None:
-    """_ws_url_from_api_base omits port suffix when not specified."""
-    result = _ws_url_from_api_base("https://api.example.com")
-    # Should not have a trailing colon with no port
-    assert ":/" not in result.replace("wss://", "").replace("ws://", "")
-
-
-# ---------------------------------------------------------------------------
 # list_threads tests
 # ---------------------------------------------------------------------------
 
@@ -825,10 +783,17 @@ async def test_list_threads_raises_when_server_unavailable(
 
 
 @pytest.mark.asyncio(loop_scope="function")
-async def test_list_threads_reports_repair_and_readiness(
+async def test_list_threads_lists_a_non_terminal_thread_with_its_status(
     session_factory, checkpointer
 ) -> None:
-    """MCP list_threads must surface degraded checkpoint authority explicitly."""
+    """MCP list_threads reports each thread's identity and status.
+
+    Degraded checkpoint authority is NOT asserted here: the versioned list
+    record carries the run identity, status, and feature tag only, and this test
+    must not claim a field the response does not carry.
+    ``test_get_thread_status_reports_repair_and_readiness`` holds that coverage,
+    against the verb that does carry it.
+    """
     with _make_test_client(session_factory, checkpointer) as client:
         async with session_factory() as session:
             await create_thread(
@@ -856,8 +821,45 @@ async def test_list_threads_reports_repair_and_readiness(
             settings.gateway_url = original_gateway_url
 
     assert "[input_required] mcp-list-threads-checkpoint-unavailable" in output
-    assert "repair: checkpoint_unavailable" in output
-    assert "readiness: checkpoint_unavailable" in output
+    assert "of 1" in output
+
+
+@pytest.mark.asyncio(loop_scope="function")
+async def test_list_threads_includes_terminal_threads(
+    session_factory, checkpointer
+) -> None:
+    """MCP list_threads reads history, not just live work.
+
+    The versioned list verb defaults to capped active-run discovery, which omits
+    terminal runs entirely. The tool must ask for the history reading, so a
+    completed thread has to appear. Seeding one terminal and one non-terminal
+    thread proves the listing is not merely the active projection.
+    """
+    with _make_test_client(session_factory, checkpointer) as client:
+        async with session_factory() as session:
+            await create_thread(
+                session, thread_id="mcp-list-terminal", status="completed"
+            )
+            await create_thread(session, thread_id="mcp-list-running", status="running")
+            await session.commit()
+
+        original_gateway_url = settings.gateway_url
+        original_client = mcp_http._shared_client
+        try:
+            settings.gateway_url = "http://testserver"
+            mcp_http._shared_client = httpx.AsyncClient(
+                transport=ASGITransport(app=client.app),
+                base_url="http://testserver",
+            )
+            output = await list_threads()
+        finally:
+            if mcp_http._shared_client is not None:
+                await mcp_http._shared_client.aclose()
+            mcp_http._shared_client = original_client
+            settings.gateway_url = original_gateway_url
+
+    assert "[completed] mcp-list-terminal" in output
+    assert "[running] mcp-list-running" in output
 
 
 class TestListThreadsViaApp:
@@ -1306,6 +1308,7 @@ async def test_respond_to_permission_raises_when_server_unavailable(
     """respond_to_permission raises when the server is unreachable."""
     with pytest.raises(ToolError) as exc_info:
         await respond_to_permission(
+            thread_id="fake-thread",
             permission_request_id="fake-thread:fake-uuid",
             option_id="allow",
         )
@@ -1320,61 +1323,148 @@ class TestRespondToPermissionViaApp:
     def test_respond_to_permission_404_for_unknown_thread(
         self, session_factory, checkpointer
     ) -> None:
-        """POST /api/permissions/{id}/respond returns 404 when thread not found."""
+        """The respond verb answers 404 when the run does not exist."""
         with _make_test_client(session_factory, checkpointer) as client:
             resp = client.post(
-                "/api/permissions/nonexistent:some-uuid/respond",
+                "/v1/runs/nonexistent/permissions/nonexistent:some-uuid/respond",
                 json={"option_id": "allow"},
             )
         assert resp.status_code == 404
 
-    def test_respond_to_permission_dispatches_for_existing_thread(
+    @pytest.mark.asyncio(loop_scope="function")
+    async def test_respond_to_permission_dispatches_for_existing_thread(
         self, session_factory, checkpointer
     ) -> None:
-        """POST /api/permissions/{thread_id}:{uuid}/respond dispatches to worker.
+        """The MCP tool answers a durably-pending request through the run path.
 
-        The endpoint now requires a durably-pending PermissionRequestModel row
-        (added in the 0002 migration hardening sprint).  We seed one directly
-        via the CRUD layer before calling the endpoint.
+        Drives the real tool rather than the route, so the run-scoped path the
+        tool now builds is exercised end to end. The expected action status is
+        derived from the service contract, not from a run: a fresh acceptance
+        dispatches the answer and records ``accepted_not_applied``, because the
+        worker has not yet carried it out. The durable request row is then read
+        back, so the test proves the answer reached storage rather than only
+        that a string came back.
         """
         with _make_test_client(session_factory, checkpointer) as client:
-            # Create a thread first so the permission endpoint can find it
             create_resp = client.post(
-                "/api/threads",
-                json={"initial_message": "Permission test"},
+                "/v1/runs",
+                json={
+                    "team_preset": "mock-success-single",
+                    "message": "Permission test",
+                },
             )
             assert create_resp.status_code == 201
-            thread_id = create_resp.json()["thread_id"]
+            thread_id = create_resp.json()["run_id"]
 
             request_id = f"{thread_id}:fake-uuid"
 
-            # Seed a durable pending permission request so the endpoint can
-            # validate it exists (required since the 0002 hardening sprint).
-            async def _seed_permission() -> None:
-                async with session_factory() as session:
-                    await record_permission_request(
-                        session,
-                        request_id=request_id,
-                        thread_id=thread_id,
-                        pause_reason_type="tool_call",
-                        description="Approve running dangerous-tool?",
-                        allowed_options=[
-                            {"option_id": "allow", "name": "Allow"},
-                            {"option_id": "deny", "name": "Deny"},
-                        ],
-                    )
-                    await session.commit()
+            async with session_factory() as session:
+                await record_permission_request(
+                    session,
+                    request_id=request_id,
+                    thread_id=thread_id,
+                    pause_reason_type="tool_call",
+                    description="Approve running dangerous-tool?",
+                    allowed_options=[
+                        {"option_id": "allow", "name": "Allow"},
+                        {"option_id": "deny", "name": "Deny"},
+                    ],
+                )
+                await session.commit()
 
-            asyncio.run(_seed_permission())
+            original_gateway_url = settings.gateway_url
+            original_client = mcp_http._shared_client
+            try:
+                settings.gateway_url = "http://testserver"
+                mcp_http._shared_client = httpx.AsyncClient(
+                    transport=ASGITransport(app=client.app),
+                    base_url="http://testserver",
+                )
+                output = await respond_to_permission(
+                    thread_id=thread_id,
+                    permission_request_id=request_id,
+                    option_id="allow",
+                )
+            finally:
+                if mcp_http._shared_client is not None:
+                    await mcp_http._shared_client.aclose()
+                mcp_http._shared_client = original_client
+                settings.gateway_url = original_gateway_url
 
-            resp = client.post(
-                f"/api/permissions/{request_id}/respond",
-                json={"option_id": "allow"},
+        assert "Permission response accepted." in output
+        assert "Action status: accepted_not_applied" in output
+        assert request_id in output
+        assert thread_id in output
+
+        async with session_factory() as session:
+            row = await session.get(PermissionRequestModel, request_id)
+            assert row is not None
+            assert row.request_status != "pending"
+
+    @pytest.mark.asyncio(loop_scope="function")
+    async def test_respond_to_permission_refuses_another_threads_request(
+        self, session_factory, checkpointer
+    ) -> None:
+        """A request id belonging to another thread is refused with no effect.
+
+        The versioned verb resolves the request and checks it against the run in
+        the path BEFORE anything acts on it, so a guessed request id cannot
+        answer a different thread's question. The request must still be pending
+        afterwards - a refusal that consumed the request would be worse than no
+        guard at all.
+        """
+        with _make_test_client(session_factory, checkpointer) as client:
+            owner = client.post(
+                "/v1/runs",
+                json={"team_preset": "mock-success-single", "message": "owner"},
             )
-        assert resp.status_code == 200
-        data = resp.json()
-        assert data["request_id"] == request_id
-        assert data["accepted"] is True
+            other = client.post(
+                "/v1/runs",
+                json={"team_preset": "mock-success-single", "message": "other"},
+            )
+            assert owner.status_code == 201
+            assert other.status_code == 201
+            owner_id = owner.json()["run_id"]
+            other_id = other.json()["run_id"]
+            request_id = f"{owner_id}:scoped-uuid"
+
+            async with session_factory() as session:
+                await record_permission_request(
+                    session,
+                    request_id=request_id,
+                    thread_id=owner_id,
+                    pause_reason_type="tool_call",
+                    description="Approve running dangerous-tool?",
+                    allowed_options=[{"option_id": "allow", "name": "Allow"}],
+                )
+                await session.commit()
+
+            original_gateway_url = settings.gateway_url
+            original_client = mcp_http._shared_client
+            try:
+                settings.gateway_url = "http://testserver"
+                mcp_http._shared_client = httpx.AsyncClient(
+                    transport=ASGITransport(app=client.app),
+                    base_url="http://testserver",
+                )
+                with pytest.raises(ToolError) as exc_info:
+                    await respond_to_permission(
+                        thread_id=other_id,
+                        permission_request_id=request_id,
+                        option_id="allow",
+                    )
+            finally:
+                if mcp_http._shared_client is not None:
+                    await mcp_http._shared_client.aclose()
+                mcp_http._shared_client = original_client
+                settings.gateway_url = original_gateway_url
+
+            assert "not found" in str(exc_info.value)
+
+            async with session_factory() as session:
+                row = await session.get(PermissionRequestModel, request_id)
+                assert row is not None
+                assert row.request_status == "pending"
 
     @pytest.mark.asyncio(loop_scope="function")
     async def test_respond_to_permission_raises_tool_error_for_stale_request(
@@ -1429,6 +1519,7 @@ class TestRespondToPermissionViaApp:
                 )
                 with pytest.raises(ToolError) as exc_info:
                     await respond_to_permission(
+                        thread_id=thread_id,
                         permission_request_id=old_request_id,
                         option_id="allow_once",
                     )

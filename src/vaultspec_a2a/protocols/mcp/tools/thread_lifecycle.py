@@ -140,7 +140,7 @@ async def start_thread(
         f"Thread started: {thread_id}\n"
         f"Preset: {preset}\n"
         f"Monitor: {settings.gateway_url}/\n"
-        f"Status: GET {settings.gateway_url}/api/threads/{thread_id}/state"
+        f"Status: GET {settings.gateway_url}/v1/runs/{thread_id}"
     )
 
 
@@ -180,7 +180,7 @@ async def cancel_thread(
     """
     data = await _mcp_request(
         "POST",
-        f"/api/threads/{thread_id}/cancel",
+        f"/v1/runs/{thread_id}/cancel",
         timeout=settings.mcp_query_timeout_seconds,
         not_found_msg=f"Thread {thread_id!r} not found.",
     )
@@ -232,7 +232,7 @@ async def delete_thread(
     try:
         data = await _mcp_request(
             "DELETE",
-            f"/api/threads/{thread_id}",
+            f"/v1/runs/{thread_id}",
             timeout=settings.mcp_query_timeout_seconds,
             not_found_msg=f"Thread {thread_id!r} not found.",
         )
@@ -313,7 +313,7 @@ async def archive_thread(
     try:
         data = await _mcp_request(
             "POST",
-            f"/api/threads/{thread_id}/archive",
+            f"/v1/runs/{thread_id}/archive",
             timeout=settings.mcp_query_timeout_seconds,
             not_found_msg=f"Thread {thread_id!r} not found.",
         )

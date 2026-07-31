@@ -5,7 +5,7 @@ tags:
 date: '2026-07-31'
 modified: '2026-07-31'
 body_schema: 'body-v1'
-body_hash: 'sha256:b33122a65d0194abd665318c89aa690761f20b8f316ee78d13496f2d5658db3c'
+body_hash: 'sha256:70ac29f30c2f88863cad570d5740de955247facd7df17265b0871c06e15f2c35'
 related:
   - "[[2026-07-19-codebase-health-audit]]"
   - "[[2026-07-19-codebase-health-plan]]"
@@ -253,6 +253,64 @@ permissions this is a durable reporting and audit defect rather than an
 execution defect. For plan approvals, as recorded above, it is an execution
 defect. One incomplete vocabulary produces both.
 
+### authoring-bearer-fallback-documented-but-never-implemented | medium | A docstring promises a discovery-file fallback that no code performs, while the fallback value sits unused in scope
+
+"Which engine bearer authenticates a run's authoring-bridge traffic when the
+run-start payload carried none" is answered two ways: one documented, one coded,
+and they disagree.
+
+The documented answer is explicit. The engine-bearer field on the actor-token
+bundle in `thread/actor_tokens.py` is typed optional, and its docstring states
+that when the bearer is absent the worker resolves it from the engine discovery
+file instead. The gateway forwards the bundle through with no backfill, so the
+absent-bearer shape reaches the worker exactly as sent, and the type system
+permits it.
+
+No code performs that fallback. The token store returns the bundle's bearer as a
+bare pass-through with no resolution logic. Both production consumers treat
+absence as give-up rather than fall-back. The authoring binding provider - whose
+own docstring calls it the production construction site, so no other home for
+the fallback exists - returns nothing when the bearer is missing, leaving the
+bridge unarmed. The run-end session close is the sharper case: it calls the
+engine resolver on one line, obtaining an endpoint whose bearer field is
+non-optional and therefore always populated, and on the very next line gates on
+the token-store bearer and returns. The documented fallback source is not merely
+available; it has already been resolved and is sitting in scope, unused, at
+exactly the point the docstring says to consult it.
+
+The consequence for a run whose bundle carries per-role actor tokens but no
+engine bearer is silent and total: the authoring bridge never arms for any
+worker, because a null binding is treated as leave-the-surface-unchanged rather
+than as an error, so the coding agent simply never receives the propose and read
+tools. The run-end session close then no-ops instead of using the bearer it
+fetched moments earlier. No test covers it - the binding tests exercise only the
+no-bundle-at-all case, never a registered bundle with a null bearer.
+
+Rated medium rather than high because reachability is established per contract
+rather than observed: the type, the docstring, and the unconstrained forwarding
+path all permit the shape, but whether current engine traffic ever sends it was
+not confirmed. Confirming that it does would make this high. The code and its own
+documentation disagree regardless of how often the input occurs.
+
+### ws-heartbeat-interval-scoped-to-websocket-also-drives-sse | low | A knob documented under the WebSocket section also retunes the SSE stream heartbeat
+
+The heartbeat-interval setting is documented in the environment example beneath
+a WebSocket section header, flanked by two genuinely WebSocket-only knobs, which
+presents it as governing that transport alone. It is declared once and consumed
+twice: by the WebSocket keep-alive cadence, which is the documented use, and by
+the heartbeat cadence of the Server-Sent Events thread and run stream endpoints,
+which is a different transport entirely.
+
+There is no value disagreement - both consumers read the one setting, so nothing
+diverges numerically. The defect is the documented scope, and it is the same
+shape as the already-recorded finding in which an MCP-scoped variable is aliased
+onto the global gateway URL. An operator who reads the WebSocket section and
+changes this value to tune keep-alive cadence silently retunes the SSE progress
+stream too, which has its own independent interaction with reverse-proxy idle
+timeouts. The two neighbouring WebSocket knobs were traced and are clean,
+single-consumer, and correctly scoped, which is what makes this one an outlier
+rather than a section-wide labelling issue.
+
 ### process-containment-handle-leaks-when-the-spawn-call-itself-raises | medium | Three spawn sites release the OS containment on every failure except the spawn call raising
 
 Three sites hand-implement the same protocol - create an operating-system
@@ -309,12 +367,37 @@ that replaces the original - so the queue-tool call is never dispatched, never
 durably marked complete, and its identifier is discarded. This is plausible
 precisely on the deterministic mock provider the gate exists to serve.
 
-It is neither proven to fire nor proven safe: the two call types are exercised
-in entirely separate test classes and no test drives a single turn emitting
-both. Recorded in this audit because it is the same family as the rejection
-findings - code asserting a shared convention with a sibling it does not
-actually implement equivalently - and it was found by checking a docstring's
-claim rather than trusting it.
+Reachability was investigated specifically and settled at reachable in
+principle, not proven reachable. No shipped test constructs the mixed turn: the
+two call types are exercised in entirely separate test classes, and the two
+other suites referencing the queue tool invoke it directly without passing
+through the dispatcher or the gate at all. The canned responses that would
+decide the question are not in this repository - the mock chat model is a thin
+proxy to an external tape server, and no per-agent tape lives in the tree - so
+the fixture side is genuinely out of reach rather than merely unchecked.
+
+The response path, however, has no structural barrier. The tool-call extractor
+returns an unfiltered list, and the stream builder iterates every entry,
+appending each to one chunk with no cap and no filtering on tool name, then
+yields them together in a single message chunk that standard accumulation merges
+into one response. A tape emitting both names in one array would therefore
+produce exactly the message this finding's drop scenario requires, and nothing
+in the parsing path would object.
+
+The finding stays at medium on that basis, and the actionable gap is a missing
+test rather than a latent bug: nothing asserts what the gate and dispatcher do
+when a single turn carries both names, and nothing constrains the tape layer
+from ever constructing one. Two fix shapes are available - correct the docstring
+to state the real and much narrower relationship, or merge the two into one
+dispatch loop that collects every recognised call before building a single
+follow-up turn. The second makes the multi-call case safe by construction rather
+than by the continued absence of a triggering tape, which is the difference
+between a fix and a reprieve.
+
+Recorded in this audit because it is the same family as the rejection findings -
+code asserting a shared convention with a sibling it does not actually implement
+equivalently - and because it was found by checking a docstring's claim rather
+than trusting it, which is the method this whole pass argues for.
 
 ### approval-interrupt-gate-protocol-duplicated | medium | Two live human-approval gate factories share a declared lineage and no conventions
 
@@ -519,16 +602,30 @@ Coverage was not complete, and the gaps are known and named rather than papered
 over. Closed during follow-up passes: the `ipc/` package holds no process,
 connection, or resource lifecycle code at all, only schemas, so there was
 nothing on that axis to find; the ACP terminal handlers were opened and cleared,
-delegating correctly through the shared bounded escalation; and the operational
-tuning defaults in the environment example were spot-checked against their
-declaring fields and matched exactly.
+delegating correctly through the shared bounded escalation; and the desktop
+credential path authority was confirmed to be genuinely single, with the
+settings property delegating to the profile layout rather than restating it.
+
+The environment example is now swept in full rather than sampled. Every declared
+knob across the watchdog, websocket, internal IPC, ACP, OAuth, MCP, database,
+authoring-subscriber, and context-sizing families was checked against its
+declaring field default and then traced to its consumers for scope. Exactly one
+scope mismatch surfaced, recorded above; every other default matched exactly.
+The only names not comparable are the third-party passthrough variables read
+directly from the process environment by external SDKs, which have no declaring
+field to compare against and no second binding site in the tree. A negative
+result of that breadth is worth recording, because it bounds where this class of
+defect can still hide.
+
+The mock-fixture question was investigated and settled at reachable in
+principle, recorded in that finding. It surfaced a standing limit worth keeping:
+the canned responses that drive the mock provider are not in this repository at
+all, so no audit of the mock path can settle a question about what a mock turn
+emits from this tree alone.
 
 Still unreached: the database repository row mappings and the `team/` preset
-translation on the mapping axis; the authoring-bridge token construction and the
-desktop credential boundary on the resolution axis; the remaining environment
-variable families beyond the operational tuning block; and the watchdog restart
+translation on the mapping axis; the HTTP-transport half of the ACP authoring
+binding, where only the stdio path was read end to end; and the watchdog restart
 loop, which the containment-leak finding's accumulation claim infers from
-surrounding structure rather than direct reading. Whether a shipped mock fixture
-actually drives a single turn emitting both a permission request and a
-queue-tool call is the one open question that would move a finding between
-proven-reachable and theoretical.
+surrounding structure rather than direct reading - that claim should be read as
+inferred until someone reads the loop.

@@ -24,12 +24,14 @@ from sqlalchemy.ext.asyncio import (
 from starlette.datastructures import State
 from starlette.requests import Request
 
-from ...thread.errors import NicknameConflictError
-from .. import (
+from ...thread.enums import (
     ApprovalStatus,
     InvalidTransitionError,
     PermissionRequestStatus,
     ThreadStatus,
+)
+from ...thread.errors import NicknameConflictError
+from .. import (
     append_cost_record,
     append_permission_log,
     create_artifact,

@@ -34,7 +34,6 @@ __all__ = [
     "get_aggregator",
     "get_checkpointer",
     "get_circuit_breaker",
-    "get_db",
     "get_services",
     "get_worker_client",
     "get_worker_spawner",

@@ -34,7 +34,6 @@ __all__ = [
     "MessageChunkEvent",
     "PermissionOption",
     "PermissionRequestEvent",
-    "PlanEntry",
     "PlanUpdateEvent",
     # Union
     "ServerEvent",

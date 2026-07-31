@@ -61,7 +61,6 @@ if TYPE_CHECKING:
 
 __all__ = [
     "PROJECTION_MARKER_KEY",
-    "ProjectionRefusedError",
     "cleanup_projected_mcp",
     "enumerate_ancestor_mcp_names",
     "project_declared_mcp",

@@ -12,12 +12,18 @@ from typing import Any, TypedDict
 import pytest
 from pydantic import TypeAdapter
 
-from ....graph.enums import Model, Provider
+from ....graph.enums import (
+    AgentLifecycleState,
+    Model,
+    PermissionOptionKind,
+    Provider,
+    ToolCallStatus,
+    ToolKind,
+)
 from ....thread.enums import ThreadStatus
 from .. import (
     AgentControlAction,
     AgentControlCommand,
-    AgentLifecycleState,
     AgentStatusEntry,
     AgentStatusEvent,
     AgentSummary,
@@ -34,7 +40,6 @@ from .. import (
     MessageSnapshot,
     PendingPermission,
     PermissionOption,
-    PermissionOptionKind,
     PermissionRequestEvent,
     PermissionResponseCommand,
     PermissionResponseRequest,
@@ -61,9 +66,7 @@ from .. import (
     ToolCallLocation,
     ToolCallSnapshot,
     ToolCallStartEvent,
-    ToolCallStatus,
     ToolCallUpdateEvent,
-    ToolKind,
     UnsubscribeCommand,
 )
 

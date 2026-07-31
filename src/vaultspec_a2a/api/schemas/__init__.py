@@ -11,11 +11,6 @@ sub-modules directly::
     )
 """
 
-from ...graph.enums import AgentLifecycleState as AgentLifecycleState
-from ...graph.enums import PermissionOptionKind as PermissionOptionKind
-from ...graph.enums import PermissionType as PermissionType
-from ...graph.enums import ToolCallStatus as ToolCallStatus
-from ...graph.enums import ToolKind as ToolKind
 from .base import ClientCommand as ClientCommand
 from .base import EventEnvelope as EventEnvelope
 from .commands import AgentControlCommand as AgentControlCommand
@@ -76,7 +71,6 @@ from .snapshots import ToolCallSnapshot as ToolCallSnapshot
 __all__ = [
     "AgentControlAction",
     "AgentControlCommand",
-    "AgentLifecycleState",
     "AgentStatusEntry",
     "AgentStatusEvent",
     "AgentSummary",
@@ -99,12 +93,10 @@ __all__ = [
     "MessageSnapshot",
     "PendingPermission",
     "PermissionOption",
-    "PermissionOptionKind",
     "PermissionRequestEvent",
     "PermissionResponseCommand",
     "PermissionResponseRequest",
     "PermissionResponseResult",
-    "PermissionType",
     "PingCommand",
     "PlanEntry",
     "PlanEntryPriority",
@@ -131,8 +123,6 @@ __all__ = [
     "ToolCallLocation",
     "ToolCallSnapshot",
     "ToolCallStartEvent",
-    "ToolCallStatus",
     "ToolCallUpdateEvent",
-    "ToolKind",
     "UnsubscribeCommand",
 ]

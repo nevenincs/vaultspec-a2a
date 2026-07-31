@@ -42,7 +42,6 @@ from ..authoring import (
     verdict_from_event,
 )
 from ..database import (
-    ThreadStatus,
     get_authoring_cursor,
     get_pending_permission_requests,
     get_thread,
@@ -53,7 +52,7 @@ from ..database import (
     update_thread_status,
 )
 from ..ipc.schemas import DispatchRequest, to_dispatch_action
-from ..thread.enums import ControlActionType
+from ..thread.enums import ControlActionType, ThreadStatus
 from .dispatch import safe_dispatch
 
 if TYPE_CHECKING:

@@ -5,7 +5,7 @@ tags:
 date: '2026-07-31'
 modified: '2026-07-31'
 body_schema: 'body-v1'
-body_hash: 'sha256:9bce8e75a8b10ee8afaa78f98bbe69462fa0843ad84bad1db4046dca7a132ded'
+body_hash: 'sha256:c2dc12e197699f87cb99583ed6365c426e44a00a16395d6970b571095e41d30e'
 related:
   - "[[2026-07-19-codebase-health-audit]]"
   - "[[2026-07-19-codebase-health-plan]]"
@@ -352,19 +352,70 @@ system refusing a new process under handle or process-table pressure -
 therefore propagates out of the restart routine, out of the poll tick, and out
 of the loop, ending the background task.
 
-Nothing restarts it. The attempt cap and exponential backoff that bound the
-ordinary failure case do not apply, because they bound only the path where the
-spawn function returns nothing; an exception leaves the loop entirely rather
-than continuing it. From that moment the gateway has no worker auto-recovery at
-all, and there is no error surface saying so - the task is simply gone. The
-failure is silent, permanent for the process lifetime, and most likely to fire
-in exactly the degraded conditions where automatic recovery matters most.
+Nothing restarts it, and this was checked rather than assumed. The application
+lifespan creates the watchdog task and never references it again until shutdown:
+there is no supervisor, no completion callback, and no health check on the task
+itself. At shutdown it is cancelled and awaited through a gather that collects
+exceptions rather than raising them, so the original error is swallowed there
+too and never surfaces anywhere. The attempt cap and exponential backoff that
+bound the ordinary failure case do not apply either, because they bound only the
+path where the spawn function returns nothing; an exception leaves the loop
+entirely rather than continuing it.
+
+From that moment the gateway has no worker auto-recovery at all, and nothing
+says so. The failure is silent, permanent for the process lifetime, and
+correlated with the conditions it exists to handle: a worker misbehaving badly
+enough that the respawn attempt itself fails - not merely the worker, but the
+spawn call - is exactly the scenario that kills the watchdog, so it is most
+likely to die at the moment it is most needed.
 
 This was found while investigating whether the containment leak below
 accumulates under watchdog retry. It does not, because the retry mechanism
 destroys itself on the first occurrence - which is the more serious defect of
 the two and is recorded separately here rather than folded into that finding's
 severity.
+
+### worker-adoption-and-conflict-paths-never-close-the-callers-containment | high | A spawn contract honoured on two of six exits, and the branch that breaks it most often is not an error at all
+
+The lazy spawner creates the operating-system containment before calling the
+spawn function and passes it in. Its entire error handling is one comment and
+one assignment: it assumes any empty return means the spawn already closed the
+containment, so dropping the reference is safe. That assumption holds on two of
+the spawn function's six exits.
+
+Two honour it. The process-exited-early path closes the containment explicitly;
+the never-became-ready path terminates through it, which always ends in a close.
+One raises past it entirely, which is the finding below. The remaining three
+return empty before the function has touched the containment parameter at all -
+no assignment into it, no close, no terminate - and the caller responds by
+discarding its only reference to a still-open handle.
+
+Those three are the worker-already-owned adoption, the authorized eviction that
+fails to free the port, and the occupant whose pairing verdict authorizes
+neither adoption nor eviction. The first is the important one, because it is not
+a failure. It is the correct and expected outcome every time an armed gateway
+process restarts while the worker it previously spawned is still alive - a
+routine sequence during a rolling update, a supervisor restart, or a gateway
+crash-loop caused by something else entirely. A leak on that path needs no
+misconfiguration and no error to occur.
+
+The consequences differ by branch, which is why this is filed apart from the
+raised-spawn leak. Adoption is self-limiting within one process: a successful
+adoption sets the spawned flag, and the re-entry guard then blocks the function
+for the life of that spawner, so it costs one handle per gateway process - but
+it recurs on every restart-while-worker-survives cycle. The two conflict
+branches are not self-limiting: neither sets the spawned flag, because a foreign
+or unadoptable occupant satisfies neither condition that would, so the guard
+never engages and every subsequent dispatch creates a fresh containment and
+leaks again for as long as the occupant persists. That is the same unbounded,
+per-dispatch, no-breaker shape as the raised-spawn case, reached through a
+persistent port conflict instead of an operating-system error.
+
+One root cause covers all four non-honouring exits. The spawn function has an
+implicit contract with its caller - you will receive either a live process, or I
+have already closed what you gave me - and it is honoured on a third of its exit
+paths, while the caller trusts it unconditionally rather than closing what it
+still holds.
 
 ### process-containment-handle-leaks-when-the-spawn-call-itself-raises | high | Three spawn sites release the OS containment on every failure except the spawn call raising, and one leaks without bound
 
@@ -712,8 +763,19 @@ in production, because the field that would select HTTP has no production
 constructor at all - an absence of a path rather than a second path that could
 diverge.
 
+The ACP RPC handler module is now read top to bottom across the campaign -
+permission, both filesystem handlers, and all five terminal handlers - and
+carries no teardown gap; the filesystem handlers close through context managers
+on every exit, and the terminal handlers delegate to the shared bounded
+escalation.
+
 Still unreached: five modules in the database layer covering the authoring
 cursor, checkpoint schema and storage, compatibility, and migration, which
-should be treated as unproven rather than cleared; and the pairing helpers
-behind the worker ownership verdict, together with the circuit-breaker class
-itself, neither of which was opened during the watchdog pass.
+should be treated as unproven rather than cleared. Two sub-claims rest on call
+sites rather than implementations and are flagged as such: that the adoption
+branch is capped at one leaked handle per gateway process depends on the
+ownership verdict's semantics, which were not read, and the absence of a breaker
+in front of the lazy spawner is established by the absence of any reference to
+one in that function rather than by reading the breaker class. Neither affects
+the unbounded conclusion for the two conflict branches, which needs only that
+the spawned flag stays unset for a foreign occupant.

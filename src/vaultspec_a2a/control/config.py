@@ -171,10 +171,13 @@ class InfraConfig(BaseSettings):
         description="Global timeout (seconds) for LLM provider API calls.",
     )
     # API Keys — bare ecosystem names only; no VAULTSPEC_ prefix aliases.
-    anthropic_api_key: str | None = Field(
-        default=None,
-        validation_alias="ANTHROPIC_API_KEY",
-    )
+    # ANTHROPIC_API_KEY is deliberately absent. The Claude lane authenticates with
+    # claude_code_oauth_token, and every agent subprocess has ANTHROPIC_API_KEY
+    # actively stripped from its environment (workspace/environment.py scrubs it;
+    # providers/acp_chat_model.py pops it again whenever an OAuth token is present,
+    # because the pair together silently downgrades a flat-rate subscription to
+    # pay-as-you-go billing). Declaring it here would advertise a credential the
+    # code exists to remove.
     gemini_api_key: str | None = Field(
         default=None,
         validation_alias="GEMINI_API_KEY",
@@ -186,17 +189,6 @@ class InfraConfig(BaseSettings):
     google_application_credentials: str | None = Field(
         default=None,
         validation_alias="GOOGLE_APPLICATION_CREDENTIALS",
-    )
-    google_cloud_project: str | None = Field(
-        default=None,
-        validation_alias=AliasChoices(
-            "GOOGLE_CLOUD_PROJECT",
-            "GOOGLE_CLOUD_PROJECT_ID",
-        ),
-    )
-    google_cloud_location: str | None = Field(
-        default=None,
-        validation_alias="GOOGLE_CLOUD_LOCATION",
     )
     gemini_cli_home: str | None = Field(
         default=None,
@@ -419,27 +411,13 @@ class InfraConfig(BaseSettings):
         alias="VAULTSPEC_ACP_BACKEND",
     )
 
-    # LangSmith tracing — bare ecosystem names only
-    langsmith_tracing: bool = Field(
-        default=False,
-        validation_alias="LANGSMITH_TRACING",
-        description=(
-            "Enable LangSmith tracing. Defaults OFF"
-            " to avoid unexpected quota consumption."
-        ),
-    )
-    langsmith_api_key: str | None = Field(
-        default=None,
-        validation_alias="LANGSMITH_API_KEY",
-    )
-    langsmith_project: str | None = Field(
-        default=None,
-        validation_alias="LANGSMITH_PROJECT",
-    )
-    langsmith_endpoint: str | None = Field(
-        default=None,
-        validation_alias="LANGSMITH_ENDPOINT",
-    )
+    # LangSmith tracing is deliberately NOT a setting. Its only consumer is the
+    # langsmith SDK, which resolves LANGSMITH_*/LANGCHAIN_* out of os.environ
+    # itself (langsmith.utils.get_env_var). Settings loads .env into this object,
+    # never into os.environ, so a field here could not switch tracing on or off —
+    # it would only mint a second, non-authoritative answer that disagrees with the
+    # SDK. The process environment is the single home; telemetry/instrumentation.py
+    # mirrors it for reporting.
 
     # Worker gateway — heartbeat & circuit-breaker
     worker_heartbeat_timeout_seconds: float = Field(

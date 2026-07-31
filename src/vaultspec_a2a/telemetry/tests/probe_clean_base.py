@@ -56,7 +56,12 @@ def _initialize_profile(profile: str) -> dict[str, Any]:
 def _run_profile(profile: str) -> dict[str, Any]:
     env = dict(os.environ)
     for key in (
+        # Every name the langsmith SDK consults; stripping only the one this repo
+        # documents would leave a developer's shell able to steer the probe.
+        "LANGSMITH_TRACING_V2",
+        "LANGCHAIN_TRACING_V2",
         "LANGSMITH_TRACING",
+        "LANGCHAIN_TRACING",
         "OTEL_EXPORTER_CONSOLE",
         "OTEL_SDK_DISABLED",
         "OTEL_SERVICE_NAME",

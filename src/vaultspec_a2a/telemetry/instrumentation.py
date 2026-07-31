@@ -7,24 +7,25 @@ packages are installed. Without those packages the opentelemetry-api
 no-op implementation is used, so all instrumented code remains functional
 with zero overhead.
 
-LangSmith tracing is configured separately via environment variables
-(``LANGSMITH_TRACING`` / ``LANGSMITH_API_KEY``) and does not require
-any code here — LangChain reads those variables automatically on import.
+LangSmith tracing is not configured here and is not a project setting. Its sole
+consumer is the ``langsmith`` SDK, which resolves its own ``LANGSMITH_*`` /
+``LANGCHAIN_*`` names out of ``os.environ``. This module only *reports* what that
+SDK decided, and it obtains that answer by asking the SDK rather than by
+re-deriving it — a second derivation is free to disagree, and did: the SDK accepts
+exactly ``"true"`` across four env names, where an open-coded truthiness check
+accepted ``1``/``yes`` and saw only one name.
 
 Credential safety: this module never reads, logs, or forwards
-``CLAUDE_CODE_OAUTH_TOKEN``, ``ANTHROPIC_API_KEY``, or any other secret.
-The only env vars consumed are the standard OTel and LangSmith vars listed
-below.
+``CLAUDE_CODE_OAUTH_TOKEN`` or any other secret. The only env vars it reads
+itself are the standard OTel vars listed below.
 
-Environment variables consumed (all read at import time):
+OTel environment variables consumed (all read at import time):
     OTEL_SERVICE_NAME: Service name emitted in every span (default: vaultspec-a2a).
     OTEL_SERVICE_VERSION: Version string (default: the installed package version).
     OTEL_EXPORTER_OTLP_ENDPOINT: gRPC endpoint (default: http://localhost:4317).
     OTEL_EXPORTER_OTLP_INSECURE: Set to "true" to disable TLS (default: true).
     OTEL_SDK_DISABLED: Set to "true" to force no-op mode.
     OTEL_EXPORTER_CONSOLE: Set to "true" to log spans to stdout (dev only).
-    LANGSMITH_TRACING: Set to "true" to enable LangSmith tracing.
-    LANGSMITH_PROJECT: LangSmith project name.
 """
 
 from __future__ import annotations
@@ -75,12 +76,6 @@ _CONSOLE_EXPORT = os.environ.get("OTEL_EXPORTER_CONSOLE", "").lower() in (
     "true",
     "yes",
 )
-_LANGSMITH_ENABLED = os.environ.get("LANGSMITH_TRACING", "").lower() in (
-    "1",
-    "true",
-    "yes",
-)
-_LANGSMITH_PROJECT = os.environ.get("LANGSMITH_PROJECT", "default")
 
 _OTLP_EXPORTER_MODULES = (
     "opentelemetry.exporter",
@@ -102,7 +97,10 @@ class TelemetryConfig:
         sdk_enabled: True when SDK is installed and OTEL_SDK_DISABLED is not set.
         service_name: The OTel service name in use.
         otlp_endpoint: The configured OTLP endpoint.
-        langsmith_enabled: True when LANGCHAIN_TRACING_V2=true is set.
+        langsmith_enabled: Whatever the ``langsmith`` SDK reports for its own
+            tracing state at the moment ``configure_telemetry`` ran. This is a
+            report, not a switch — nothing in this package can turn LangSmith
+            tracing on or off.
     """
 
     sdk_available: bool
@@ -151,6 +149,34 @@ def _module_importable(module_name: str) -> bool:
         # the whole failure class this guard exists to prevent.
         return False
     return True
+
+
+def _resolve_langsmith() -> tuple[bool, str]:
+    """Ask the ``langsmith`` SDK whether it is tracing, and into which project.
+
+    The SDK owns this decision end to end: it reads ``LANGSMITH_TRACING_V2``,
+    ``LANGCHAIN_TRACING_V2``, ``LANGSMITH_TRACING`` and ``LANGCHAIN_TRACING`` from
+    ``os.environ`` in that order, and honours the context-var and global overrides
+    a caller may have installed. Delegating means the reported value cannot drift
+    from the real one; re-deriving it here would create a second answer with no
+    authority behind it.
+
+    Called from ``configure_telemetry`` rather than at module import so the answer
+    reflects the process at startup, not at first import of this module.
+
+    Neither symbol appears in ``langsmith.__all__``, but
+    ``langchain_core.tracers.context`` — a first-order dependency here — calls
+    these same two at this same path, so a rename breaks langchain-core in the
+    same release rather than singling this module out. A telemetry test pins the
+    pair so a dependency bump fails there instead of during lifespan startup.
+
+    Returns:
+        ``(enabled, project)``. ``enabled`` is True for both remote and local
+        tracing modes; ``project`` is the SDK's resolved project name.
+    """
+    from langsmith.utils import get_tracer_project, tracing_is_enabled
+
+    return bool(tracing_is_enabled()), get_tracer_project() or "default"
 
 
 def _check_sdk() -> bool:
@@ -292,6 +318,7 @@ def configure_telemetry(*, service_name: str | None = None) -> TelemetryConfig:
     sdk_available = _check_sdk()
     otlp_available = _check_otlp() if sdk_available else False
     sdk_enabled = sdk_available and not _SDK_DISABLED
+    langsmith_enabled, langsmith_project = _resolve_langsmith()
 
     effective_service = service_name or _SERVICE_NAME
 
@@ -307,7 +334,7 @@ def configure_telemetry(*, service_name: str | None = None) -> TelemetryConfig:
             "OTel SDK TracerProvider configured service=%s otlp=%s langsmith=%s",
             effective_service,
             otlp_available,
-            _LANGSMITH_ENABLED,
+            langsmith_enabled,
         )
     elif _SDK_DISABLED:
         logger.info("OTel SDK explicitly disabled via OTEL_SDK_DISABLED")
@@ -317,10 +344,10 @@ def configure_telemetry(*, service_name: str | None = None) -> TelemetryConfig:
             "Install 'opentelemetry-sdk' to enable real tracing."
         )
 
-    if _LANGSMITH_ENABLED:
+    if langsmith_enabled:
         logger.info(
-            "LangSmith tracing enabled via LANGCHAIN_TRACING_V2 project=%r",
-            _LANGSMITH_PROJECT,
+            "LangSmith SDK reports tracing enabled project=%r",
+            langsmith_project,
         )
 
     # opentelemetry-instrumentation-fastapi is declared as a dependency
@@ -336,7 +363,7 @@ def configure_telemetry(*, service_name: str | None = None) -> TelemetryConfig:
         sdk_enabled=sdk_enabled,
         service_name=effective_service,
         otlp_endpoint=_OTLP_ENDPOINT,
-        langsmith_enabled=_LANGSMITH_ENABLED,
+        langsmith_enabled=langsmith_enabled,
     )
 
 

@@ -49,14 +49,23 @@ from .. import (
 _HTTP_OK = 200
 _HTTP_SERVER_ERROR = 500
 
-# The telemetry config constants (``_SDK_DISABLED``, ``_LANGSMITH_ENABLED``) are
-# evaluated once at import time from the environment, so a running-interpreter
-# monkeypatch cannot vary them. This probe imports the module and calls
+# ``_SDK_DISABLED`` is evaluated once at import time from the environment, and the
+# langsmith SDK caches its own env reads, so a running-interpreter monkeypatch
+# cannot vary either. This probe imports the module and calls
 # ``configure_telemetry`` inside a spawned child whose environment the parent
-# controls, exercising the real import-time env read across a process boundary.
+# controls, exercising the real env read across a process boundary.
+#
+# ``langsmith_agrees`` is the load-bearing assertion: the child asks the langsmith
+# SDK directly and compares. ``configure_telemetry`` only *reports* LangSmith's
+# state, so a report that disagrees with the SDK is the bug, not a lesser value.
+# The import lives inside this string rather than in the test module because
+# langsmith is a runtime dependency of langgraph that this package never imports
+# directly, and pyproject records it as such.
 _TELEMETRY_PROBE_SCRIPT = textwrap.dedent(
     """
     import json
+
+    from langsmith.utils import tracing_is_enabled
 
     from vaultspec_a2a.telemetry import configure_telemetry
 
@@ -65,8 +74,19 @@ _TELEMETRY_PROBE_SCRIPT = textwrap.dedent(
         "sdk_available": cfg.sdk_available,
         "sdk_enabled": cfg.sdk_enabled,
         "langsmith_enabled": cfg.langsmith_enabled,
+        "langsmith_agrees": cfg.langsmith_enabled == bool(tracing_is_enabled()),
     }))
     """
+)
+
+# Every name the langsmith SDK consults for its tracing decision. The parent must
+# strip all of them, not just the one this repo happens to document, or a
+# developer's shell can pre-decide the result and green-wash the probe.
+_LANGSMITH_TRACING_ENV = (
+    "LANGSMITH_TRACING_V2",
+    "LANGCHAIN_TRACING_V2",
+    "LANGSMITH_TRACING",
+    "LANGCHAIN_TRACING",
 )
 
 
@@ -80,7 +100,7 @@ def _run_telemetry_probe(tmp_path: Path, env_overrides: dict[str, str]) -> dict:
     script = tmp_path / "telemetry_probe.py"
     script.write_text(_TELEMETRY_PROBE_SCRIPT, encoding="utf-8")
     env = dict(os.environ)
-    for key in ("OTEL_SDK_DISABLED", "LANGSMITH_TRACING"):
+    for key in ("OTEL_SDK_DISABLED", *_LANGSMITH_TRACING_ENV):
         env.pop(key, None)
     env.update(env_overrides)
     result = subprocess.run(
@@ -267,11 +287,10 @@ def test_an_unusable_optional_dependency_reports_unavailable(tmp_path: Path) -> 
 
 
 def test_configure_telemetry_langsmith_flag() -> None:
-    """TelemetryConfig.langsmith_enabled reflects the module-level constant.
+    """TelemetryConfig.langsmith_enabled is a bool whatever the host env holds.
 
-    Note: _LANGSMITH_ENABLED is evaluated at import time from LANGCHAIN_TRACING_V2.
-    Monkeypatching the env var after import has no effect. This test verifies the
-    field is a bool, not a specific value (which depends on the test environment).
+    The value itself depends on the developer's environment, so this asserts only
+    the type. The value is pinned against the real SDK in the probe tests below.
     """
     cfg = configure_telemetry()
     assert isinstance(cfg.langsmith_enabled, bool)
@@ -291,18 +310,82 @@ def test_telemetry_config_langsmith_enabled_field() -> None:
 
 
 def test_configure_telemetry_langsmith_off(tmp_path: Path) -> None:
-    """LangSmith tracing reflects LANGSMITH_TRACING read at import in a fresh process.
+    """The reported LangSmith state tracks the process environment, both ways.
 
-    ``_LANGSMITH_ENABLED`` is frozen at import from ``LANGSMITH_TRACING``. With the
-    var absent the config reports LangSmith disabled; a control run with
-    ``LANGSMITH_TRACING=true`` reports it enabled — proving the real import-time env
-    read in both directions rather than asserting a bare type.
+    With every tracing name absent the config reports LangSmith disabled; a control
+    run with ``LANGSMITH_TRACING=true`` reports it enabled — proving a real env read
+    in a fresh process rather than asserting a bare type.
     """
     off = _run_telemetry_probe(tmp_path, {})
     assert off["langsmith_enabled"] is False
 
     on = _run_telemetry_probe(tmp_path, {"LANGSMITH_TRACING": "true"})
     assert on["langsmith_enabled"] is True
+
+
+@pytest.mark.parametrize("tracing_var", _LANGSMITH_TRACING_ENV)
+def test_reported_langsmith_state_matches_the_sdk(
+    tmp_path: Path, tracing_var: str
+) -> None:
+    """Our report must equal what the langsmith SDK itself decides.
+
+    LangSmith tracing has exactly one home — the process environment, read by the
+    SDK. This package owns no switch for it, so ``langsmith_enabled`` is only ever
+    a mirror, and a mirror that disagrees with its subject is worse than no mirror.
+
+    Each of the four names the SDK honours is exercised: an open-coded read of a
+    single name reports "off" for a process the SDK is in fact tracing.
+    """
+    on = _run_telemetry_probe(tmp_path, {tracing_var: "true"})
+    assert on["langsmith_agrees"] is True, (
+        f"reported langsmith_enabled={on['langsmith_enabled']} disagrees with the "
+        f"SDK when {tracing_var}=true"
+    )
+    assert on["langsmith_enabled"] is True
+
+
+def test_the_langsmith_symbols_we_delegate_to_still_exist() -> None:
+    """Pin the two SDK symbols ``_resolve_langsmith`` depends on.
+
+    ``tracing_is_enabled`` and ``get_tracer_project`` live in ``langsmith.utils``
+    and are absent from ``langsmith.__all__``, so they are not formally public.
+    Depending on them is still right: ``langchain_core.tracers.context`` — a
+    first-order dependency of this project — calls those exact two symbols at that
+    exact path (lines 135 and 156), so a rename breaks langchain-core in the same
+    release and this package takes on no risk it did not already carry.
+
+    What that argument does not buy is a warning. Without this test a rename would
+    first surface as an exception inside ``configure_telemetry`` during FastAPI
+    lifespan startup, taking down gateway and worker boot for the sake of one
+    reported field. This converts that into a failing test on the dependency bump.
+    """
+    from langsmith.utils import get_tracer_project, tracing_is_enabled
+
+    enabled = tracing_is_enabled()
+    assert isinstance(enabled, bool) or enabled == "local", (
+        f"tracing_is_enabled returned {enabled!r}; _resolve_langsmith coerces this "
+        "to bool and assumes those are the only shapes"
+    )
+
+    project = get_tracer_project()
+    assert project is None or isinstance(project, str), (
+        f"get_tracer_project returned {project!r}; _resolve_langsmith assumes a "
+        "str or None"
+    )
+
+
+def test_reported_langsmith_state_rejects_values_the_sdk_rejects(
+    tmp_path: Path,
+) -> None:
+    """A value the SDK does not accept must not be reported as tracing.
+
+    The SDK accepts the exact string ``"true"`` and nothing else, so ``1`` leaves
+    tracing off. Reporting it as on would tell an operator their runs are being
+    traced when no trace is ever sent.
+    """
+    probe = _run_telemetry_probe(tmp_path, {"LANGSMITH_TRACING": "1"})
+    assert probe["langsmith_agrees"] is True
+    assert probe["langsmith_enabled"] is False
 
 
 def test_telemetry_config_repr() -> None:

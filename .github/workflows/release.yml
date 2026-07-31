@@ -202,6 +202,14 @@ jobs:
           echo "--- status must exit 0 while the gateway is running"
           "$bin" status --app-home "$home"
 
+          # What the running gateway actually publishes into its app home, by
+          # NAME only. This is the discovery handshake a consumer has to find,
+          # and reading it off a live run is better evidence than reading it off
+          # the source. Names only, never contents: this directory holds an
+          # owner-restricted bearer token.
+          echo "--- discovery surface published into the app home"
+          find "$home" -maxdepth 2 -type f | sed "s|^$home|<app-home>|" | sort
+
           echo "--- USE THE API: /health must answer 200 AND report ready"
           ok=""
           for _ in $(seq 1 30); do

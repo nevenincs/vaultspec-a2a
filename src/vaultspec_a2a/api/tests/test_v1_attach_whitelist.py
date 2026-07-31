@@ -28,12 +28,14 @@ _EXPECTED_V1_ROUTES = {
     "GET /v1/runs",
     "GET /v1/runs/{run_id}",
     "DELETE /v1/runs/{run_id}",
+    "POST /v1/runs/{run_id}/archive",
     "POST /v1/runs/{run_id}/cancel",
     "POST /v1/runs/{run_id}/messages",
     "POST /v1/runs/{run_id}/permissions/{request_id}/respond",
     "GET /v1/runs/{run_id}/stream",
     "GET /v1/presets",
     "GET /v1/service",
+    "GET /v1/team/status",
 }
 
 # The reviewed control whitelist that must reject an unauthenticated caller
@@ -46,8 +48,10 @@ _WHITELIST_REQUESTS = (
     ("POST", "/v1/runs/some-run-id/cancel"),
     ("POST", "/v1/runs/some-run-id/messages"),
     ("POST", "/v1/runs/some-run-id/permissions/some-request-id/respond"),
+    ("POST", "/v1/runs/some-run-id/archive"),
     ("GET", "/v1/presets"),
     ("GET", "/v1/service"),
+    ("GET", "/v1/team/status"),
 )
 
 

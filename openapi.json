@@ -1289,6 +1289,112 @@
         }
       }
     },
+    "/v1/runs/{run_id}/archive": {
+      "post": {
+        "summary": "Run Archive Endpoint",
+        "description": "Move a terminal run to the archived state.\n\nArchiving is not deletion: the run and its records survive, marked\nhistorical. A run whose state does not permit archiving is refused rather\nthan silently ignored, and repeating the call on an already-archived run is\nthat same refusal - the conflict IS the replay signal here.",
+        "operationId": "run_archive_endpoint_v1_runs__run_id__archive_post",
+        "parameters": [
+          {
+            "name": "run_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^[A-Za-z0-9_][A-Za-z0-9_-]{0,127}$",
+              "title": "Run Id"
+            }
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunArchiveResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/team/status": {
+      "get": {
+        "summary": "Team Status Endpoint",
+        "description": "Report the team's live operational projection.\n\nA read, and deliberately a narrow one: which agents exist and what state\nthey are in, which runs are active, and what is awaiting an answer. It\ncarries no prompt, no document body, and no credential - the same\ndisclosure discipline the progress channel holds.",
+        "operationId": "team_status_endpoint_v1_team_status_get",
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TeamStatusV1Response"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/runs/{run_id}/messages": {
       "post": {
         "summary": "Run Message Endpoint",
@@ -1980,7 +2086,7 @@
           "state"
         ],
         "title": "AgentStatusEntry",
-        "description": "Agent status within a team status response."
+        "description": "Wire projection of the canonical agent descriptor for ``/team/status``.\n\nMirrors ``thread.snapshots.AgentData``."
       },
       "ArchiveThreadResponse": {
         "properties": {
@@ -2986,6 +3092,60 @@
         "title": "RunAdmission",
         "description": "Whether the gateway would admit a run right now - the execution-ready fact.\n\n``ready`` means execution-ready: a reachable worker and an eligible provider.\n``deferred`` means gateway-ready but not yet execution-ready - the worker is\ncold or starting and will start on demand. It remains informational on the\nreadiness surface, while staged ``prepare`` admission refuses it fail-closed.\n``blocked`` means a hard gateway dependency (the database) is unavailable."
       },
+      "RunAgentSummary": {
+        "properties": {
+          "agent_id": {
+            "type": "string",
+            "title": "Agent Id"
+          },
+          "display_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Display Name"
+          },
+          "state": {
+            "type": "string",
+            "title": "State"
+          }
+        },
+        "type": "object",
+        "required": [
+          "agent_id",
+          "state"
+        ],
+        "title": "RunAgentSummary",
+        "description": "One agent's disclosed operational state in the team projection."
+      },
+      "RunArchiveResponse": {
+        "properties": {
+          "api_version": {
+            "type": "string",
+            "const": "v1",
+            "title": "Api Version",
+            "default": "v1"
+          },
+          "run_id": {
+            "type": "string",
+            "title": "Run Id"
+          },
+          "status": {
+            "$ref": "#/components/schemas/ThreadStatus",
+            "default": "archived"
+          }
+        },
+        "type": "object",
+        "required": [
+          "run_id"
+        ],
+        "title": "RunArchiveResponse",
+        "description": "Acknowledge a run moved to the archived state."
+      },
       "RunCancelResponse": {
         "properties": {
           "api_version": {
@@ -3238,6 +3398,41 @@
         ],
         "title": "RunMessageResponse",
         "description": "Acknowledge a follow-up turn as accepted for dispatch.\n\nAcceptance is not completion: the turn is handed to the worker and the run\ncontinues asynchronously, so a caller reconciles progress from the stream or\nrun-status rather than from this body."
+      },
+      "RunPendingPermission": {
+        "properties": {
+          "request_id": {
+            "type": "string",
+            "title": "Request Id"
+          },
+          "run_id": {
+            "type": "string",
+            "title": "Run Id"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "request_status": {
+            "type": "string",
+            "title": "Request Status"
+          }
+        },
+        "type": "object",
+        "required": [
+          "request_id",
+          "run_id",
+          "request_status"
+        ],
+        "title": "RunPendingPermission",
+        "description": "A permission awaiting an answer, addressed by the run that raised it."
       },
       "RunPermissionRespondRequest": {
         "properties": {
@@ -4192,6 +4387,40 @@
         "title": "TeamStatusResponse",
         "description": "Current team status snapshot via REST."
       },
+      "TeamStatusV1Response": {
+        "properties": {
+          "api_version": {
+            "type": "string",
+            "const": "v1",
+            "title": "Api Version",
+            "default": "v1"
+          },
+          "agents": {
+            "items": {
+              "$ref": "#/components/schemas/RunAgentSummary"
+            },
+            "type": "array",
+            "title": "Agents"
+          },
+          "active_runs": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Active Runs"
+          },
+          "pending_permissions": {
+            "items": {
+              "$ref": "#/components/schemas/RunPendingPermission"
+            },
+            "type": "array",
+            "title": "Pending Permissions"
+          }
+        },
+        "type": "object",
+        "title": "TeamStatusV1Response",
+        "description": "The team's live operational projection.\n\nSafe operational metadata only - which agents exist, what state they are in,\nwhich runs are active, and what is awaiting an answer. Never a credential,\na prompt, or a document body."
+      },
       "ThreadListResponse": {
         "properties": {
           "threads": {
@@ -5015,7 +5244,7 @@
           "state"
         ],
         "title": "_AgentSnapshot",
-        "description": "Agent state within a thread snapshot."
+        "description": "Wire projection of the canonical agent descriptor within a snapshot.\n\nMirrors ``thread.snapshots.AgentData``."
       },
       "_PermissionOptionSnapshot": {
         "properties": {

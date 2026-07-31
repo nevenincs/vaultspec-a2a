@@ -424,6 +424,45 @@ class RunCancelResponse(BaseModel):
     idempotency_key: str | None = None
 
 
+class RunArchiveResponse(BaseModel):
+    """Acknowledge a run moved to the archived state."""
+
+    api_version: Literal["v1"] = _API_VERSION
+    run_id: str
+    status: ThreadStatus = ThreadStatus.ARCHIVED
+
+
+class RunAgentSummary(BaseModel):
+    """One agent's disclosed operational state in the team projection."""
+
+    agent_id: str
+    display_name: str | None = None
+    state: str
+
+
+class RunPendingPermission(BaseModel):
+    """A permission awaiting an answer, addressed by the run that raised it."""
+
+    request_id: str
+    run_id: str
+    description: str | None = None
+    request_status: str
+
+
+class TeamStatusV1Response(BaseModel):
+    """The team's live operational projection.
+
+    Safe operational metadata only - which agents exist, what state they are in,
+    which runs are active, and what is awaiting an answer. Never a credential,
+    a prompt, or a document body.
+    """
+
+    api_version: Literal["v1"] = _API_VERSION
+    agents: list[RunAgentSummary] = Field(default_factory=list)
+    active_runs: list[str] = Field(default_factory=list)
+    pending_permissions: list[RunPendingPermission] = Field(default_factory=list)
+
+
 class RunDeleteResponse(BaseModel):
     """Report a deletion that finalized over state no pass could remove.
 

@@ -55,8 +55,10 @@ from ...control.run_start_policy import (
     evaluate_run_start_eligibility,
     required_role_ids,
 )
+from ...control.team_service import build_team_status
 from ...control.thread_service import (
     ThreadCreationRequest,
+    archive_thread,
     create_and_dispatch_thread,
     delete_thread_service,
     generate_thread_id,
@@ -77,7 +79,11 @@ from ...domain_config import domain_config
 from ...streaming.aggregator import EventAggregator
 from ...thread.constants import DEFAULT_SUPERVISOR_ID
 from ...thread.dispatch_policy import FailureType
-from ...thread.enums import TERMINAL_STATUSES, ThreadStatus
+from ...thread.enums import (
+    TERMINAL_STATUSES,
+    PermissionRequestStatus,
+    ThreadStatus,
+)
 from ...thread.errors import NicknameConflictError
 from .._utils import mark_worker_connected, trace_headers
 from ..dependencies import (
@@ -104,11 +110,14 @@ from ..schemas.gateway import (
     ProfileSummary,
     RoleAssignmentSummary,
     RoleState,
+    RunAgentSummary,
+    RunArchiveResponse,
     RunCancelResponse,
     RunCommitResponse,
     RunDeleteResponse,
     RunMessageRequest,
     RunMessageResponse,
+    RunPendingPermission,
     RunPermissionRespondRequest,
     RunPermissionRespondResponse,
     RunPrepareResponse,
@@ -118,6 +127,7 @@ from ..schemas.gateway import (
     RunStartResponse,
     RunStatusResponse,
     ServiceStateResponse,
+    TeamStatusV1Response,
     TopologyPosition,
 )
 from .thread_stream import build_thread_stream_response
@@ -1389,6 +1399,78 @@ async def run_cancel_endpoint(
         applied=result.applied,
         action_status=result.action_status,
         idempotency_key=result.idempotency_key,
+    )
+
+
+# ---------------------------------------------------------------------------
+# run-archive
+# ---------------------------------------------------------------------------
+
+
+@router.post("/runs/{run_id}/archive", response_model=RunArchiveResponse)
+async def run_archive_endpoint(
+    run_id: PathSafeRunId,
+    db: AsyncSession = Depends(get_db),
+) -> RunArchiveResponse:
+    """Move a terminal run to the archived state.
+
+    Archiving is not deletion: the run and its records survive, marked
+    historical. A run whose state does not permit archiving is refused rather
+    than silently ignored, and repeating the call on an already-archived run is
+    that same refusal - the conflict IS the replay signal here.
+    """
+    result = await archive_thread(db, run_id)
+    if result.not_found:
+        raise HTTPException(status_code=404, detail="Run not found")
+    if not result.archived:
+        raise HTTPException(status_code=409, detail=result.error_detail)
+    return RunArchiveResponse(run_id=run_id)
+
+
+# ---------------------------------------------------------------------------
+# team-status
+# ---------------------------------------------------------------------------
+
+
+@router.get("/team/status", response_model=TeamStatusV1Response)
+async def team_status_endpoint(
+    request: Request,
+    aggregator: EventAggregator = Depends(get_aggregator),
+    db: AsyncSession = Depends(get_db),
+) -> TeamStatusV1Response:
+    """Report the team's live operational projection.
+
+    A read, and deliberately a narrow one: which agents exist and what state
+    they are in, which runs are active, and what is awaiting an answer. It
+    carries no prompt, no document body, and no credential - the same
+    disclosure discipline the progress channel holds.
+    """
+    status = await build_team_status(
+        db=db,
+        aggregator=aggregator,
+        heartbeat_threads=getattr(request.app.state, "worker_active_threads", []),
+    )
+    return TeamStatusV1Response(
+        agents=[
+            RunAgentSummary(
+                agent_id=agent.agent_id,
+                display_name=agent.display_name,
+                state=agent.state,
+            )
+            for agent in status.agents
+        ],
+        active_runs=list(status.active_threads),
+        pending_permissions=[
+            RunPendingPermission(
+                request_id=pending.request_id,
+                run_id=pending.thread_id,
+                description=pending.description,
+                request_status=(
+                    pending.request_status or PermissionRequestStatus.PENDING
+                ),
+            )
+            for pending in status.pending_permissions
+        ],
     )
 
 

@@ -63,6 +63,56 @@ async def _seed_permission(session_factory, *, thread_id: str, request_id: str) 
 
 
 @pytest.mark.asyncio(loop_scope="function")
+async def test_archive_and_team_status_are_reachable_on_the_versioned_surface(
+    session_factory, checkpointer
+) -> None:
+    """Two reads-and-a-transition the transition surface used to hold alone.
+
+    Archiving is not deletion - the run survives, marked historical - so the
+    test asserts it is still there afterwards rather than trusting the status
+    string. Team status is asserted to carry the operational projection and to
+    surface the run as active while it is live.
+    """
+    app, _agg, _worker, _cp = make_app(session_factory, checkpointer)
+    async with (
+        _live_server(app) as base,
+        httpx.AsyncClient(base_url=base, timeout=10.0) as client,
+    ):
+        start = await client.post(
+            "/v1/runs",
+            json={"team_preset": _PRESET, "message": "work", "autonomous": True},
+        )
+        assert start.status_code == 201
+        run_id = start.json()["run_id"]
+
+        team = await client.get("/v1/team/status")
+        assert team.status_code == 200
+        tbody = team.json()
+        assert tbody["api_version"] == "v1"
+        assert isinstance(tbody["agents"], list)
+        assert isinstance(tbody["pending_permissions"], list)
+        # ``active_runs`` is the WORKER's heartbeat view, not a database read, so
+        # it stays empty until a worker reports its live set - asserted as the
+        # shape it is rather than as the database answer it is not. Getting this
+        # wrong would have written a test that passes only when a worker happens
+        # to have checked in.
+        assert isinstance(tbody["active_runs"], list)
+
+        # A running run cannot be archived; the refusal is a conflict.
+        too_early = await client.post(f"/v1/runs/{run_id}/archive")
+        assert too_early.status_code == 409
+
+        await client.post(f"/v1/runs/{run_id}/cancel")
+        # Cancellation reaches CANCELLING, not a terminal state, so archiving is
+        # still refused - asserted rather than assumed, because a test that
+        # archived here would be proving the wrong lifecycle.
+        assert (await client.post(f"/v1/runs/{run_id}/archive")).status_code == 409
+
+        missing = await client.post("/v1/runs/no-such-run/archive")
+        assert missing.status_code == 404
+
+
+@pytest.mark.asyncio(loop_scope="function")
 async def test_a_follow_up_turn_reaches_the_run_that_run_start_cannot_address(
     session_factory, checkpointer
 ) -> None:

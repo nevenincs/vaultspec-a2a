@@ -1,7 +1,7 @@
 """Expose the lazy Model Context Protocol bridge.
 
 The ``vaultspec-a2a-mcp`` entry point enters :mod:`vaultspec_a2a.protocols.mcp`.
-Importing this package must not eagerly load the FastMCP server.
+Importing this package must not eagerly load the MCP server.
 
 Server behavior belongs to :mod:`vaultspec_a2a.protocols.mcp.server`.
 Authoring transport belongs to
@@ -23,7 +23,7 @@ def __getattr__(name: str) -> object:
     """Lazily resolve the ``mcp`` server on first attribute access (PEP 562).
 
     Mirrors the lazy re-export in ``protocols.mcp``: importing a lightweight
-    submodule under this package must not eagerly load the heavy FastMCP server
+    submodule under this package must not eagerly load the heavy MCPServer
     chain. The public ``mcp`` attribute is preserved, resolved on demand.
     """
     if name == "mcp":

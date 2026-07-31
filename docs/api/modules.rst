@@ -298,7 +298,7 @@ API and protocols
    :synopsis: Model Context Protocol package boundary.
 
 .. py:module:: vaultspec_a2a.protocols.mcp.server
-   :synopsis: FastMCP server construction.
+   :synopsis: MCPServer construction.
 
 .. py:module:: vaultspec_a2a.protocols.mcp.authoring_stdio
    :synopsis: Engine authoring transport over standard input and output.

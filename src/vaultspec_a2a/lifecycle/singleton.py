@@ -140,6 +140,9 @@ def default_owner() -> str:
     read as the same owner so a crash-restart is an owner-matching takeover, while a
     different principal reads as foreign. Falls back through the numeric uid and a
     constant so this never raises on a stripped environment.
+
+    Distinct from :func:`~.manager.default_procs_owner`, which labels a dev-process
+    registry record with the claiming session or agent rather than the principal.
     """
     try:
         user = getpass.getuser()

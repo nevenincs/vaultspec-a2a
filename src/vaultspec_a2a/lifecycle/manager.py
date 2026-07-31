@@ -58,7 +58,7 @@ __all__ = [
     "LifecycleError",
     "ProcVerdict",
     "attach",
-    "default_owner",
+    "default_procs_owner",
     "endpoint_for",
     "kill",
     "list_verdicts",
@@ -101,11 +101,17 @@ class ProcVerdict:
     endpoint: str
 
 
-def default_owner() -> str:
-    """The owner label stamped on CLI-spawned records.
+def default_procs_owner() -> str:
+    """The owner label stamped on CLI-spawned registry records.
 
     Honours ``VAULTSPEC_PROCS_OWNER`` (a session or agent label) so concurrent
     operators claim distinct ownership; falls back to a process-scoped label.
+
+    This is a *registry* label, not an operating-system principal: it identifies
+    the session or agent that claimed a :class:`~.registry.ProcRecord`, and it
+    changes with the process. The desktop runtime singleton's owner identity is a
+    different concept with a different lifetime -
+    :func:`~.singleton.default_owner`.
     """
     return os.environ.get(_OWNER_ENV) or f"cli-{os.getpid()}"
 
@@ -659,7 +665,7 @@ def serve_up(
     if not role_cfg.serve:
         raise LifecycleError(f"role {role!r} declares no serve command in procs.toml")
     _ensure_explicit_repo(role_cfg, repo, f"{role}-{name}")
-    owner_label = owner if owner is not None else default_owner()
+    owner_label = owner if owner is not None else default_procs_owner()
     cwd = _Path(repo) if repo else _default_repo()
     # The build tree captured for rebuild/rerun; the boot build_sha reflects it, not
     # the serve tree, when a role's build and serve repos differ (engine-dev).
@@ -856,7 +862,7 @@ def _start_from_record(
         port=record.port,
         workspace=record.workspace,
         name=record.name,
-        owner=record.owner or default_owner(),
+        owner=record.owner or default_procs_owner(),
         engine_service_json=record.engine_service_json,
         internal_token_file=record.internal_token_file,
         gateway_url=record.gateway_url,

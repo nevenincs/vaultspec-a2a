@@ -1,10 +1,12 @@
 """Live verdict-round-trip proof for the subscriber.
 
 No mocks: exercises the real ``AuthoringClient`` lifecycle stream against a live
-dashboard engine on loopback, resolved through the same discovery contract the
-subscriber uses in production (``resolve_engine``). ``service``-marked and
-excluded from the default profile; when no engine is reachable it skips with a
-runbook pointer (an infrastructure gate, not a masked failure). Point
+dashboard engine on loopback, attached through the shared ``live_engine``
+fixture, which resolves the endpoint with the same discovery contract the
+subscriber uses in production (``resolve_engine``) and reports an absent engine
+through the repository's one external-prerequisite rule - a skip naming the
+runbook line, or a failure when the caller declared ``loopback-stack`` present.
+``service``-marked and excluded from the default profile. Point
 ``VAULTSPEC_ENGINE_SERVICE_JSON`` at the engine's discovery file for a
 ``--no-seat`` workspace-local serve.
 
@@ -57,7 +59,6 @@ from ...authoring import (
     EngineEndpoint,
     LifecycleEvent,
     mint_actor_token,
-    resolve_engine,
     verdict_from_event,
 )
 from ...control.circuit_breaker import WorkerCircuitBreaker
@@ -79,21 +80,11 @@ from ...database.models import Base
 from ...thread.enums import PermissionRequestStatus, ThreadStatus
 
 
-@pytest.fixture(scope="module")
-def engine() -> tuple[str, str]:
-    endpoint = resolve_engine(liveness_timeout=3.0)
-    if endpoint is None:
-        pytest.skip(
-            "no reachable authoring engine; start `vaultspec serve` per the "
-            "runbook or set VAULTSPEC_ENGINE_SERVICE_JSON"
-        )
-    return endpoint.base_url, endpoint.bearer_token
-
-
 @pytest_asyncio.fixture
-async def client(engine: tuple[str, str]):
-    base_url, bearer = engine
-    async with AuthoringClient(base_url, bearer) as authoring_client:
+async def client(live_engine: EngineEndpoint):
+    async with AuthoringClient(
+        live_engine.base_url, live_engine.bearer_token
+    ) as authoring_client:
         yield authoring_client
 
 
@@ -441,7 +432,7 @@ async def _seed_parked_gate(
 @pytest.mark.service
 @pytest.mark.asyncio
 async def test_live_missed_reject_is_recovered_by_parked_reconcile(
-    client: AuthoringClient, engine: tuple[str, str], tmp_path
+    client: AuthoringClient, live_engine: EngineEndpoint, tmp_path
 ) -> None:
     """A HUMAN reject consumed BEFORE the run parks is recovered by the reconcile.
 
@@ -464,8 +455,6 @@ async def test_live_missed_reject_is_recovered_by_parked_reconcile(
     from starlette.applications import Starlette
     from starlette.responses import JSONResponse
     from starlette.routing import Route
-
-    base_url, bearer = engine
 
     # --- engine side: agent proposes, human rejects via edit (request_changes) ---
     run_id = f"mr-{uuid.uuid4().hex[:8]}"
@@ -543,14 +532,11 @@ async def test_live_missed_reject_is_recovered_by_parked_reconcile(
             worker_spawner=LazyWorkerSpawner(
                 worker_url="http://worker", worker_port=1, auto_spawn=False
             ),
-            endpoint_provider=lambda: EngineEndpoint(
-                base_url=base_url, bearer_token=bearer
-            ),
+            endpoint_provider=lambda: live_engine,
             recursion_limit=25,
         )
 
-        endpoint = EngineEndpoint(base_url=base_url, bearer_token=bearer)
-        await subscriber._reconcile_parked_runs(endpoint)
+        await subscriber._reconcile_parked_runs(live_engine)
 
         # The reconcile recovered the missed reject and re-dispatched exactly one
         # resume carrying request_changes to the (real, recording) worker.
@@ -576,7 +562,7 @@ async def test_live_missed_reject_is_recovered_by_parked_reconcile(
 @pytest.mark.service
 @pytest.mark.asyncio
 async def test_live_running_clobbered_parked_run_is_recovered_by_parked_reconcile(
-    client: AuthoringClient, engine: tuple[str, str], tmp_path
+    client: AuthoringClient, live_engine: EngineEndpoint, tmp_path
 ) -> None:
     """A run parked at a gate but mis-statused RUNNING is still recovered.
 
@@ -598,8 +584,6 @@ async def test_live_running_clobbered_parked_run_is_recovered_by_parked_reconcil
     from starlette.applications import Starlette
     from starlette.responses import JSONResponse
     from starlette.routing import Route
-
-    base_url, bearer = engine
 
     run_id = f"cl-{uuid.uuid4().hex[:8]}"
     minted = await mint_actor_token(client, actor_id=f"agent:{run_id}", kind="agent")
@@ -676,14 +660,11 @@ async def test_live_running_clobbered_parked_run_is_recovered_by_parked_reconcil
             worker_spawner=LazyWorkerSpawner(
                 worker_url="http://worker", worker_port=1, auto_spawn=False
             ),
-            endpoint_provider=lambda: EngineEndpoint(
-                base_url=base_url, bearer_token=bearer
-            ),
+            endpoint_provider=lambda: live_engine,
             recursion_limit=25,
         )
 
-        endpoint = EngineEndpoint(base_url=base_url, bearer_token=bearer)
-        await subscriber._reconcile_parked_runs(endpoint)
+        await subscriber._reconcile_parked_runs(live_engine)
 
         # The RUNNING-clobbered parked run was recovered by checkpoint truth: one
         # resume carrying the missed request_changes was re-dispatched for it.
@@ -699,7 +680,7 @@ async def test_live_running_clobbered_parked_run_is_recovered_by_parked_reconcil
 @pytest.mark.service
 @pytest.mark.asyncio
 async def test_live_running_with_fresh_resume_claim_is_not_re_driven(
-    client: AuthoringClient, engine: tuple[str, str], tmp_path
+    client: AuthoringClient, live_engine: EngineEndpoint, tmp_path
 ) -> None:
     """The broadened RUNNING candidacy does NOT false-re-drive an in-flight resume.
 
@@ -721,8 +702,6 @@ async def test_live_running_with_fresh_resume_claim_is_not_re_driven(
     from starlette.applications import Starlette
     from starlette.responses import JSONResponse
     from starlette.routing import Route
-
-    base_url, bearer = engine
 
     run_id = f"fc-{uuid.uuid4().hex[:8]}"
     minted = await mint_actor_token(client, actor_id=f"agent:{run_id}", kind="agent")
@@ -797,14 +776,11 @@ async def test_live_running_with_fresh_resume_claim_is_not_re_driven(
             worker_spawner=LazyWorkerSpawner(
                 worker_url="http://worker", worker_port=1, auto_spawn=False
             ),
-            endpoint_provider=lambda: EngineEndpoint(
-                base_url=base_url, bearer_token=bearer
-            ),
+            endpoint_provider=lambda: live_engine,
             recursion_limit=25,
         )
 
-        endpoint = EngineEndpoint(base_url=base_url, bearer_token=bearer)
-        await subscriber._reconcile_parked_runs(endpoint)
+        await subscriber._reconcile_parked_runs(live_engine)
 
         # The fresh claim short-circuited the resume: NO false re-drive.
         assert recorded == [], f"in-flight resume was falsely re-driven: {recorded}"

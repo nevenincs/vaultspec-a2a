@@ -81,10 +81,10 @@ def register_serve(
     role_cfg = resolved_config.roles.get(role)
     if role_cfg is None or port not in role_cfg.band:
         return None
-    from .manager import default_owner
+    from .manager import default_procs_owner
 
     resolved_name = name or os.environ.get(NAME_ENV) or str(port)
-    resolved_owner = owner if owner is not None else default_owner()
+    resolved_owner = owner if owner is not None else default_procs_owner()
     stamp = now_ms()
     existing = read_record(record_path(role, resolved_name, home=home))
     if existing is not None:

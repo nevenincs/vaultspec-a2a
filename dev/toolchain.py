@@ -60,20 +60,30 @@ PYTHON_PATHS = ("src", "dev", "docs", "scripts", "packaging")
 #: cannot encode them, which aborts the run before any finding is reported.
 UTF8 = {"PYTHONIOENCODING": "utf-8"}
 
-#: Test tiers held out of every production-scoped scan.
+#: The test tiers, as glob suffixes. Every production-scoped scan excludes all
+#: four; naming only the two top-level ones covers a fraction of the tree,
+#: because most test code lives in per-package `*/tests/` directories.
+TEST_TIERS = ("tests", "service_tests", "desktop_tests", "acceptance")
+
+#: Test tiers held out of the cognitive-complexity scan.
 #:
 #: A guard test that walks the AST of every module to prove a structural
 #: invariant scores badly on every complexity dimension, because branching over
 #: a syntax tree is what such a test IS. Gating them at a production threshold
 #: would price the guard out rather than simplify it.
-COMPLEXIPY_EXCLUDES = (
-    "--exclude",
-    "**/tests/**",
-    "--exclude",
-    "**/service_tests/**",
-    "--exclude",
-    "**/desktop_tests/**",
+COMPLEXIPY_EXCLUDES = tuple(
+    part for tier in TEST_TIERS for part in ("--exclude", f"**/{tier}/**")
 )
+
+#: Test tiers held out of the security scan, as bandit's own comma-joined form.
+#:
+#: This is passed on the COMMAND LINE, not through `[tool.bandit] exclude_dirs`
+#: in pyproject.toml. The config key is silently ignored under `-r` - setting it
+#: left the scan covering all 105k lines and reporting a single High that was a
+#: wheel-extraction test validating every member for absolute paths and `..` on
+#: the line above the extract. `-x` actually excludes: 356 findings became 51,
+#: and the false High disappeared with the tier it lived in.
+BANDIT_EXCLUDES = ("-x", ",".join(f"*/{tier}/*" for tier in TEST_TIERS))
 
 #: Ruff rules for per-function shape, selected explicitly rather than through
 #: ``[tool.ruff.lint] select`` in pyproject.toml.
@@ -456,7 +466,17 @@ AUDIT = Verb(
         Target(
             "security",
             "Bandit security scan over production code.",
-            (uv_run("bandit", "-c", "pyproject.toml", "-r", PACKAGE, "-q"),),
+            (
+                uv_run(
+                    "bandit",
+                    "-c",
+                    "pyproject.toml",
+                    "-r",
+                    PACKAGE,
+                    *BANDIT_EXCLUDES,
+                    "-q",
+                ),
+            ),
             advisory=True,
         ),
         Target(

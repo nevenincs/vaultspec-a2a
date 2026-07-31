@@ -421,7 +421,10 @@ sort_by_size = true
 # on purpose, so the scan reports that deliberate design alongside anything
 # real.
 [tool.bandit]
-exclude_dirs = ["src/vaultspec_a2a/tests", "src/vaultspec_a2a/service_tests"]
+# Test-tier exclusion is NOT set here. `exclude_dirs` is silently ignored when
+# bandit runs with `-r`, so the setting looked correct while the scan kept
+# covering all 105k lines. The exclusion lives on the command line in
+# `dev/toolchain.py` (`BANDIT_EXCLUDES`), which does take effect.
 skips = [
   # B101: pytest and the internal invariant checks use `assert` by design.
   "B101",

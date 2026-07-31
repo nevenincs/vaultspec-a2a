@@ -4,6 +4,7 @@ tags:
   - '#codebase-health'
 date: '2026-07-19'
 modified: '2026-07-31'
+body_hash: 'sha256:a648e5ef589e57d07527b0f2ee60f74f18793897ce872f2977bd209bc6875be5'
 related:
   - "[[2026-07-14-a2a-edge-conformance-adr]]"
   - "[[2026-07-18-desktop-product-profile-plan]]"
@@ -2797,3 +2798,80 @@ a running system, which is the first thing any repair should establish.
 
 `bare-204-on-the-already-final-race` - closed as a documented limit, since the information
 is genuinely unrecoverable at that point rather than merely unread.
+
+
+### Legacy surface teardown (2026-07-31)
+
+The owner directed that no legacy or deprecated surface remain in either repository. The
+transition product mount and its websocket are DELETED - 6,807 lines in the deletion
+commit alone, plus the websocket module, its dispatcher, the connection manager, the
+command and legacy response schemas, a diagnostics module, the websocket configuration
+knobs, and cross-origin middleware.
+
+The ordering was the whole discipline: every capability was PORTED to the versioned
+surface before anything was removed, because deleting first would have destroyed working
+function rather than deadweight. Six ports landed - a follow-up turn into an existing run,
+the five-outcome deletion, archive, team status, the wide per-run read, and a history
+reading of the run listing - followed by a seventh verb for answering a permission, which
+four retirement Steps had been blocked behind. The versioned surface could pose that
+question as an enumerated stream frame while only the transition surface could accept the
+answer; retiring it first would have stranded every paused run.
+
+The surface count moved from five verbs to a closed enumerated catalog, by explicit
+amendment rather than drift. The whitelist test that asserts the surface does not grow
+caught every addition, which is what it exists for, and each was declared deliberately
+rather than loosened.
+
+#### `mcp-start-tool-can-never-start-a-production-run` (high, closed by deletion)
+
+Surfaced, not caused, by the teardown. The protocol server's start tool could not start
+ANY production preset: every one is credential-gated, the consuming product's engine is the
+sole minter of the per-role credentials, and this service holds no engine bearer and no
+minting path. Obtaining one would require calling the engine from here, inverting the
+certified edge direction.
+
+It was invisible because the legacy route ACCEPTED the start and the run then died
+mid-flight. Only repointing onto the versioned verb - which refuses an ineligible request
+before creating durable state - made the failure honest and therefore visible. The tool's
+entire reachable input domain was mock acceptance scaffolding, so it is deleted rather
+than kept as something that always fails. Restoring the capability legitimately is work
+for the consuming product's repository: its engine fronting an externally-initiated start
+and minting at its own run-start. Deliberately not stubbed here. The remaining protocol
+tools are NOT orphaned - credentials bind at run-start and live worker-side, so they need
+only this service's own bearer against engine-started runs.
+
+#### `stored-metadata-fails-its-own-model` (medium, open)
+
+A run started without a workspace root persists metadata that the metadata model rejects
+as incomplete, so the now-deleted metadata route answered a server error for exactly those
+runs. The writer and the model disagree. The wide read reports unparseable metadata as
+absent and logs it rather than failing the whole record for one field, but the underlying
+disagreement is untouched.
+
+#### `product-control-calls-endpoints-that-do-not-exist` (medium, open, cross-repository)
+
+The consuming product's lifecycle control client calls readiness, drain, and lifecycle
+operations that exist in no router here. Not legacy usage - an unimplemented contract - and
+out of the teardown's scope, but a real dangling dependency. Its shutdown call was
+separately found pointing at a path matching neither the old nor the new surface, and is
+fixed.
+
+#### Consumer inventory correction
+
+The teardown brief assumed the consuming product needed migrating off the legacy surface.
+It did not: it was ALREADY fully versioned, its frontend never contacts this service
+directly, and the thread vocabulary appears nowhere in its production code. The agent said
+so rather than manufacturing churn to satisfy the brief, which was the correct reading. Its
+only real defect was the shutdown path above.
+
+A related decision: seven newly-ported verbs were NOT added to that product's brokered
+pass-through whitelist. Each entry is authority granted to a browser client, three of them
+destructive or authorization-bearing, and adding them with zero callers would create
+exactly the deadweight this directive removes.
+
+#### Verification
+
+Whole-tree lint and type gates clean. The full package passes 2,784 tests with no failures
+over twenty minutes of real processes and stores, taken while no other writer was touching
+the tree - which is what makes the real-process suites trustworthy here rather than
+contended. The consuming product passes 376 native and 281 interface tests.

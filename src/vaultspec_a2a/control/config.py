@@ -8,8 +8,9 @@ database URLs, API keys, filesystem paths, pool sizes, service timeouts, etc.
 a drop-in replacement for the former ``core.config.Settings``.
 """
 
+import json
 from pathlib import Path
-from typing import TYPE_CHECKING, Literal, Self
+from typing import TYPE_CHECKING, Annotated, Literal, Self
 
 from pydantic import (
     AliasChoices,
@@ -18,7 +19,7 @@ from pydantic import (
     field_validator,
     model_validator,
 )
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 from ..domain_config import DomainSettingsConfig
 from ..utils.enums import Environment, LogLevel
@@ -288,6 +289,26 @@ class InfraConfig(BaseSettings):
         default=8200,
         alias="VAULTSPEC_MCP_PORT",
         description="Bind port for MCP streamable-http transport.",
+    )
+    # NoDecode: without it pydantic-settings JSON-decodes the env value before
+    # any validator runs, so the comma form below could never be normalized.
+    mcp_allowed_hosts: Annotated[list[str], NoDecode] = Field(
+        default=["localhost:*", "127.0.0.1:*"],
+        alias="VAULTSPEC_MCP_ALLOWED_HOSTS",
+        description=(
+            "Host header values the MCP streamable-http transport accepts. "
+            "Defaults to loopback only; a deployment that fronts MCP under a "
+            "real hostname must name it here. Empty disables the Host check."
+        ),
+    )
+    mcp_allowed_origins: Annotated[list[str], NoDecode] = Field(
+        default=["http://localhost:*", "http://127.0.0.1:*"],
+        alias="VAULTSPEC_MCP_ALLOWED_ORIGINS",
+        description=(
+            "Origin header values the MCP streamable-http transport accepts. "
+            "Guards against DNS-rebinding from a browser context. A request "
+            "with no Origin header (the normal non-browser MCP client) passes."
+        ),
     )
 
     cors_allowed_origins: list[str] = Field(
@@ -651,6 +672,25 @@ class InfraConfig(BaseSettings):
         if isinstance(value, str) and not value.strip():
             return None
         return value
+
+    @field_validator("mcp_allowed_hosts", "mcp_allowed_origins", mode="before")
+    @classmethod
+    def _split_comma_separated_list(cls, value: object) -> object:
+        """Accept a comma-separated or JSON-array env value for these settings.
+
+        These fields carry ``NoDecode``, so the raw environment string arrives
+        here undecoded. Plain ``a,b`` is the documented form - pydantic-settings
+        would otherwise JSON-parse it and fail startup on the obvious spelling.
+        A JSON array is still honoured, because silently reading ``["a","b"]``
+        as two malformed comma items would be worse than either supporting it
+        or rejecting it.
+        """
+        if not isinstance(value, str):
+            return value
+        text = value.strip()
+        if text.startswith("["):
+            return json.loads(text)
+        return [item.strip() for item in text.split(",") if item.strip()]
 
 
 class Settings(DomainSettingsConfig, InfraConfig):

@@ -172,6 +172,50 @@ class _PermissionTransition:
     workspace_root: str | None
 
 
+async def _journal_rejection(
+    db: AsyncSession,
+    *,
+    request_id: str,
+    thread_id: str,
+    option_id: str,
+    idempotency_key: str,
+    approval_status: str | None,
+    error_detail: str,
+    error_status_code: int,
+) -> PermissionResult:
+    """Journal a rejected permission response durably and report the rejection.
+
+    Every read-side guard that rejects a response records the same entry: a
+    ``REJECTED_INVALID_STATE`` control action carrying the original reason, so a
+    replay under the same idempotency key reads that reason back instead of
+    re-deciding it. The commit is part of the sequence - the action must be
+    durable before the rejection is reported, or a replay arriving after the
+    reply would find no record of the original decision.
+    """
+    action = await create_control_action(
+        db,
+        thread_id=thread_id,
+        action_type=ControlActionType.PERMISSION_RESPONSE_SUBMITTED,
+        request_id=request_id,
+        idempotency_key=idempotency_key,
+        payload=_rejected_payload(option_id, error_detail),
+        result_status=ControlActionResultStatus.REJECTED_INVALID_STATE,
+    )
+    await db.commit()
+    return PermissionResult(
+        request_id=request_id,
+        thread_id=thread_id,
+        accepted=False,
+        applied=False,
+        action_status=ControlActionResultStatus.REJECTED_INVALID_STATE.value,
+        action_id=action.id,
+        idempotency_key=idempotency_key,
+        approval_status=approval_status,
+        error_detail=error_detail,
+        error_status_code=error_status_code,
+    )
+
+
 async def respond_to_permission(
     db: AsyncSession,
     *,
@@ -371,23 +415,11 @@ async def _authorize_permission_response(
             option_id=option_id,
             valid_option_ids=_allowed_option_ids(permission),
         )
-        action = await create_control_action(
+        return await _journal_rejection(
             db,
-            thread_id=thread_id,
-            action_type=ControlActionType.PERMISSION_RESPONSE_SUBMITTED,
-            request_id=request_id,
-            idempotency_key=resolved_idempotency_key,
-            payload=_rejected_payload(option_id, error_detail),
-            result_status=ControlActionResultStatus.REJECTED_INVALID_STATE,
-        )
-        await db.commit()
-        return PermissionResult(
             request_id=request_id,
             thread_id=thread_id,
-            accepted=False,
-            applied=False,
-            action_status=ControlActionResultStatus.REJECTED_INVALID_STATE.value,
-            action_id=action.id,
+            option_id=option_id,
             idempotency_key=resolved_idempotency_key,
             approval_status=thread_record.approval_status,
             error_detail=error_detail,
@@ -455,23 +487,11 @@ async def _authorize_permission_response(
                 "action": "permission_response",
             },
         )
-        action = await create_control_action(
+        return await _journal_rejection(
             db,
-            thread_id=thread_id,
-            action_type=ControlActionType.PERMISSION_RESPONSE_SUBMITTED,
-            request_id=request_id,
-            idempotency_key=resolved_idempotency_key,
-            payload=_rejected_payload(option_id, error_detail),
-            result_status=ControlActionResultStatus.REJECTED_INVALID_STATE,
-        )
-        await db.commit()
-        return PermissionResult(
             request_id=request_id,
             thread_id=thread_id,
-            accepted=False,
-            applied=False,
-            action_status=ControlActionResultStatus.REJECTED_INVALID_STATE.value,
-            action_id=action.id,
+            option_id=option_id,
             idempotency_key=resolved_idempotency_key,
             approval_status=thread_record.approval_status,
             error_detail=error_detail,
@@ -495,23 +515,11 @@ async def _authorize_permission_response(
                 "action": "permission_response",
             },
         )
-        action = await create_control_action(
+        return await _journal_rejection(
             db,
-            thread_id=thread_id,
-            action_type=ControlActionType.PERMISSION_RESPONSE_SUBMITTED,
-            request_id=request_id,
-            idempotency_key=resolved_idempotency_key,
-            payload=_rejected_payload(option_id, error_detail),
-            result_status=ControlActionResultStatus.REJECTED_INVALID_STATE,
-        )
-        await db.commit()
-        return PermissionResult(
             request_id=request_id,
             thread_id=thread_id,
-            accepted=False,
-            applied=False,
-            action_status=ControlActionResultStatus.REJECTED_INVALID_STATE.value,
-            action_id=action.id,
+            option_id=option_id,
             idempotency_key=resolved_idempotency_key,
             approval_status=thread_record.approval_status,
             error_detail=error_detail,
@@ -537,23 +545,11 @@ async def _authorize_permission_response(
                 "valid_option_ids": sorted(valid_option_ids),
             },
         )
-        action = await create_control_action(
+        return await _journal_rejection(
             db,
-            thread_id=thread_id,
-            action_type=ControlActionType.PERMISSION_RESPONSE_SUBMITTED,
-            request_id=request_id,
-            idempotency_key=resolved_idempotency_key,
-            payload=_rejected_payload(option_id, error_detail),
-            result_status=ControlActionResultStatus.REJECTED_INVALID_STATE,
-        )
-        await db.commit()
-        return PermissionResult(
             request_id=request_id,
             thread_id=thread_id,
-            accepted=False,
-            applied=False,
-            action_status=ControlActionResultStatus.REJECTED_INVALID_STATE.value,
-            action_id=action.id,
+            option_id=option_id,
             idempotency_key=resolved_idempotency_key,
             approval_status=thread_record.approval_status,
             error_detail=error_detail,

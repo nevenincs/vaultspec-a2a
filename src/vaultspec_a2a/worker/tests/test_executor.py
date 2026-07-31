@@ -19,14 +19,20 @@ import pytest
 from fastapi import FastAPI, Request
 from fastapi.responses import Response
 from httpx import ASGITransport
+from langchain_core.messages import AIMessage
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
+from langgraph.graph import END, START, StateGraph
+from langgraph.types import interrupt
+from opentelemetry.sdk.resources import Resource
+from opentelemetry.sdk.trace import ReadableSpan, Span, TracerProvider
 from pydantic import ValidationError
 
 from ...ipc.schemas import DispatchRequest
 from ...thread.actor_tokens import ActorTokenBundle
 from ...thread.enums import ThreadStatus
-from ..executor import Executor
-from ..graph_lifecycle import GraphLifecycleManager
+from ...thread.state import TeamState
+from ..executor import _INGEST_GUARDS, _RESUME_GUARDS, Executor
+from ..graph_lifecycle import GraphCompilationError, GraphLifecycleManager
 from ..ipc import WorkerBridge
 
 # ---------------------------------------------------------------------------
@@ -719,6 +725,378 @@ class TestShutdown:
                 await executor.shutdown()
             finally:
                 await bridge.close()
+
+
+# ---------------------------------------------------------------------------
+# Shared pre-run guards — trace fidelity
+# ---------------------------------------------------------------------------
+
+
+def _recording_span() -> Span:
+    """Start a real, recording SDK span the production guard can write to.
+
+    A real ``TracerProvider`` and a real span, per the pattern the telemetry
+    tests use. ``InMemorySpanExporter`` is banned repo-wide and the Jaeger-backed
+    alternative is a ``service`` test, so the assertion reads the live recording
+    span rather than an intercepted export of it.
+    """
+    provider = TracerProvider(resource=Resource.create({"service.name": "guard-test"}))
+    tracer = provider.get_tracer(__name__)
+    span = tracer.start_span("executor.guard-test")
+    assert isinstance(span, Span), "the SDK tracer must hand back a recording span"
+    assert span.is_recording()
+    return span
+
+
+def _span_attributes(span: ReadableSpan) -> dict[str, Any]:
+    return dict(span.attributes or {})
+
+
+class TestPreRunGuardTraceFidelity:
+    """Both dispatch modes mark the run's span when a pre-run guard rejects it.
+
+    The three pre-run guards are one behaviour each, reached from two dispatch
+    modes. The resume arms used to log the rejection but leave the span clean, so
+    the same failure was visible in logs and invisible in traces depending on
+    which mode hit it. These pin the trace side for both modes.
+
+    Reaching each guard from a real ``handle_dispatch`` is covered by
+    ``TestHandleDispatch`` and ``TestLazyRecompilation``, which assert the log
+    record's exact fields; the guard writes the log record and the span
+    attributes in one straight line, so those tests pin the wiring and these pin
+    the payload.
+    """
+
+    @pytest.mark.asyncio(loop_scope="function")
+    @pytest.mark.parametrize("guards", [_INGEST_GUARDS, _RESUME_GUARDS])
+    async def test_missing_graph_marks_the_span_failed(self, guards: Any) -> None:
+        async with AsyncSqliteSaver.from_conn_string(":memory:") as cp:
+            await cp.setup()
+            bridge = _make_bridge()
+            try:
+                executor = Executor(checkpointer=cp, bridge=bridge)
+                req = DispatchRequest(
+                    action=guards.runtime_mode,
+                    thread_id="t-guard-no-graph",
+                    content="hello",
+                    option_id="allow_once",
+                    recursion_limit=25,
+                )
+                span = _recording_span()
+                await executor._reject_missing_graph(req, span, guards)
+
+                attributes = _span_attributes(span)
+                assert attributes["error"] is True
+                assert attributes["error.message"] == "No team preset"
+            finally:
+                await bridge.close()
+
+    @pytest.mark.asyncio(loop_scope="function")
+    @pytest.mark.parametrize("guards", [_INGEST_GUARDS, _RESUME_GUARDS])
+    async def test_slot_held_marks_the_span_failed(self, guards: Any) -> None:
+        async with AsyncSqliteSaver.from_conn_string(":memory:") as cp:
+            await cp.setup()
+            bridge = _make_bridge()
+            try:
+                executor = Executor(checkpointer=cp, bridge=bridge)
+                req = DispatchRequest(
+                    action=guards.runtime_mode,
+                    thread_id="t-guard-slot",
+                    content="hello",
+                    option_id="allow_once",
+                    recursion_limit=25,
+                )
+                span = _recording_span()
+                executor._reject_slot_held(req, span, guards)
+
+                attributes = _span_attributes(span)
+                assert attributes["error"] is True
+                assert attributes["error.message"] == "Ingest already active"
+            finally:
+                await bridge.close()
+
+    @pytest.mark.asyncio(loop_scope="function")
+    @pytest.mark.parametrize("guards", [_INGEST_GUARDS, _RESUME_GUARDS])
+    async def test_compile_failure_marks_the_span_with_the_reason(
+        self, guards: Any
+    ) -> None:
+        async with AsyncSqliteSaver.from_conn_string(":memory:") as cp:
+            await cp.setup()
+            bridge = _make_bridge()
+            try:
+                executor = Executor(checkpointer=cp, bridge=bridge)
+                req = DispatchRequest(
+                    action=guards.runtime_mode,
+                    thread_id="t-guard-compile",
+                    content="hello",
+                    option_id="allow_once",
+                    recursion_limit=25,
+                )
+                span = _recording_span()
+                exc = GraphCompilationError("engine unreachable")
+                await executor._reject_compile_failure(req, span, exc, guards)
+
+                attributes = _span_attributes(span)
+                assert attributes["error"] is True
+                assert attributes["error.message"] == "engine unreachable"
+            finally:
+                await bridge.close()
+
+    @pytest.mark.asyncio(loop_scope="function")
+    async def test_resume_slot_reject_keeps_its_distinct_log_action(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Unifying the guards must not flatten the two modes' log identities.
+
+        ``ingest_rejected_active`` and ``resume_rejected_active`` are distinct
+        operator-facing actions; a shared implementation that collapsed them
+        would erase which mode was dropped.
+        """
+        async with AsyncSqliteSaver.from_conn_string(":memory:") as cp:
+            await cp.setup()
+            bridge = _make_bridge()
+            try:
+                executor = Executor(checkpointer=cp, bridge=bridge)
+                ingest_req = DispatchRequest(
+                    action="ingest",
+                    thread_id="t-actions",
+                    content="hello",
+                    recursion_limit=25,
+                )
+                resume_req = DispatchRequest(
+                    action="resume",
+                    thread_id="t-actions",
+                    option_id="allow_once",
+                    recursion_limit=25,
+                )
+                with caplog.at_level(
+                    logging.WARNING, logger="vaultspec_a2a.worker.executor"
+                ):
+                    executor._reject_slot_held(
+                        ingest_req, _recording_span(), _INGEST_GUARDS
+                    )
+                    executor._reject_slot_held(
+                        resume_req, _recording_span(), _RESUME_GUARDS
+                    )
+
+                actions = [
+                    rec.__dict__["action"]
+                    for rec in caplog.records
+                    if "action" in rec.__dict__
+                ]
+                assert actions == ["ingest_rejected_active", "resume_rejected_active"]
+            finally:
+                await bridge.close()
+
+
+# ---------------------------------------------------------------------------
+# Shared settle epilogue — ordering
+# ---------------------------------------------------------------------------
+
+
+def _make_observing_bridge(
+    observations: list[dict[str, Any]],
+    holder: dict[str, Any],
+) -> WorkerBridge:
+    """A real bridge whose in-process gateway records each event as it arrives.
+
+    The gateway handler runs inside the worker's own flush, so what it reads off
+    the executor is the executor's state at the instant the event was relayed —
+    a live observation of settle ordering, not a reconstruction after the fact.
+    """
+    app = FastAPI()
+
+    @app.post("/internal/events/batch")
+    async def _batch(request: Request) -> Response:
+        body = await request.json()
+        executor = holder.get("executor")
+        thread_id = holder.get("thread_id", "")
+        for item in body.get("events", []):
+            payload = item.get("payload", {})
+            observations.append(
+                {
+                    "kind": payload.get("type") or payload.get("event_type"),
+                    "status": payload.get("status"),
+                    "tokens_held": (
+                        executor.token_store.has(thread_id)
+                        if executor is not None
+                        else None
+                    ),
+                    "tracked": thread_id in holder["bridge"].active_threads,
+                }
+            )
+        return Response(content='{"status":"ok"}', media_type="application/json")
+
+    @app.post("/internal/heartbeat")
+    async def _heartbeat(request: Request) -> Response:
+        return Response(content='{"status":"ok"}', media_type="application/json")
+
+    bridge = WorkerBridge(api_url="http://control:8000", worker_id="settle-worker")
+    bridge._client = httpx.AsyncClient(
+        transport=ASGITransport(app=app),
+        base_url="http://control:8000",
+    )
+    holder["bridge"] = bridge
+    return bridge
+
+
+def _install_completing_graph(executor: Executor, thread_id: str) -> None:
+    """Compile a real one-node graph that runs straight to a COMPLETED outcome."""
+
+    async def worker_node(state: Any) -> dict[str, Any]:
+        return {"messages": [AIMessage(content="done")], "next": "FINISH"}
+
+    builder = StateGraph(cast("Any", TeamState))
+    builder.add_node("worker", worker_node)
+    builder.add_edge(START, "worker")
+    builder.add_edge("worker", END)
+    graph = builder.compile(checkpointer=executor._checkpointer)
+
+    cache_key = ("settle-preset", None, False)
+    executor._graph_cache[cache_key] = graph
+    executor._thread_to_cache_key[thread_id] = cache_key
+    executor.aggregator.register_graph(cast("Any", graph))
+
+
+def _install_gated_graph(executor: Executor, thread_id: str) -> None:
+    """Compile a real one-node graph that parks on an interrupt, then completes."""
+
+    async def gate_node(state: Any) -> dict[str, Any]:
+        decision = interrupt({"type": "plan_approval_request", "prompt": "ok?"})
+        return {
+            "messages": [AIMessage(content=f"resumed:{decision}")],
+            "next": "FINISH",
+        }
+
+    builder = StateGraph(cast("Any", TeamState))
+    builder.add_node("gate", gate_node)
+    builder.add_edge(START, "gate")
+    builder.add_edge("gate", END)
+    graph = builder.compile(checkpointer=executor._checkpointer)
+
+    cache_key = ("settle-gated-preset", None, False)
+    executor._graph_cache[cache_key] = graph
+    executor._thread_to_cache_key[thread_id] = cache_key
+    executor.aggregator.register_graph(cast("Any", graph))
+
+
+class TestSettleOrdering:
+    """The settle epilogue keeps its load-bearing order on both dispatch paths.
+
+    The order is a contract, not a style: the execution-state projection and the
+    run's terminal status land first, and only then may the run's tokens be
+    dropped — the benign engine session close sits in that window and
+    authenticates with those tokens. A settle that dropped the tokens first would
+    strand the close, and one that dropped the thread's tracking before the
+    terminal event would relay the terminal for an untracked thread.
+    """
+
+    @pytest.mark.asyncio(loop_scope="function")
+    async def test_ingest_settle_lands_terminal_before_dropping_tokens(self) -> None:
+        thread_id = "settle-ingest"
+        observations: list[dict[str, Any]] = []
+        holder: dict[str, Any] = {"thread_id": thread_id, "executor": None}
+        async with AsyncSqliteSaver.from_conn_string(":memory:") as cp:
+            await cp.setup()
+            bridge = _make_observing_bridge(observations, holder)
+            executor = Executor(checkpointer=cp, bridge=bridge)
+            holder["executor"] = executor
+            try:
+                _install_completing_graph(executor, thread_id)
+                req = DispatchRequest(
+                    action="ingest",
+                    thread_id=thread_id,
+                    content="build it",
+                    team_preset="settle-preset",
+                    recursion_limit=10,
+                    actor_tokens=ActorTokenBundle(
+                        tokens={"vaultspec-synthesist": "settle-token"},
+                        engine_bearer="settle-bearer",
+                    ),
+                )
+                await executor.handle_dispatch(req)
+
+                kinds = [obs["kind"] for obs in observations]
+                assert "execution_state_projection" in kinds
+                assert "thread_terminal" in kinds
+                assert kinds.index("execution_state_projection") < kinds.index(
+                    "thread_terminal"
+                )
+
+                terminal = observations[kinds.index("thread_terminal")]
+                assert terminal["status"] == ThreadStatus.COMPLETED
+                # The close's window: terminal has landed, tokens are still held.
+                assert terminal["tokens_held"] is True
+                assert terminal["tracked"] is True
+                # And the window closes once the settle finishes.
+                assert executor.token_store.has(thread_id) is False
+                assert thread_id not in bridge.active_threads
+            finally:
+                await bridge.close()
+                await executor.shutdown()
+
+    @pytest.mark.asyncio(loop_scope="function")
+    async def test_resume_settle_lands_terminal_before_dropping_tokens(self) -> None:
+        """The resume path settles through the same epilogue as ingest.
+
+        A gated run completes on its FINAL resume, so the resume settle — not the
+        ingest one — is what closes an authoring run's engine session.
+        """
+        thread_id = "settle-resume"
+        observations: list[dict[str, Any]] = []
+        holder: dict[str, Any] = {"thread_id": thread_id, "executor": None}
+        async with AsyncSqliteSaver.from_conn_string(":memory:") as cp:
+            await cp.setup()
+            bridge = _make_observing_bridge(observations, holder)
+            executor = Executor(checkpointer=cp, bridge=bridge)
+            holder["executor"] = executor
+            try:
+                _install_gated_graph(executor, thread_id)
+                bundle = ActorTokenBundle(
+                    tokens={"vaultspec-synthesist": "settle-token"},
+                    engine_bearer="settle-bearer",
+                )
+                await executor.handle_dispatch(
+                    DispatchRequest(
+                        action="ingest",
+                        thread_id=thread_id,
+                        content="build it",
+                        team_preset="settle-gated-preset",
+                        recursion_limit=10,
+                        actor_tokens=bundle,
+                    )
+                )
+                # Parked at the gate: not terminal, so the tokens survive.
+                assert executor.token_store.has(thread_id) is True
+                observations.clear()
+
+                await executor.handle_dispatch(
+                    DispatchRequest(
+                        action="resume",
+                        thread_id=thread_id,
+                        option_id="approve",
+                        team_preset="settle-gated-preset",
+                        recursion_limit=10,
+                        actor_tokens=bundle,
+                    )
+                )
+
+                kinds = [obs["kind"] for obs in observations]
+                assert "execution_state_projection" in kinds
+                assert "thread_terminal" in kinds
+                assert kinds.index("execution_state_projection") < kinds.index(
+                    "thread_terminal"
+                )
+
+                terminal = observations[kinds.index("thread_terminal")]
+                assert terminal["status"] == ThreadStatus.COMPLETED
+                assert terminal["tokens_held"] is True
+                assert terminal["tracked"] is True
+                assert executor.token_store.has(thread_id) is False
+                assert thread_id not in bridge.active_threads
+            finally:
+                await bridge.close()
+                await executor.shutdown()
 
 
 class TestAuthoringBridgeFailClosed:

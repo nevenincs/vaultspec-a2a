@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
@@ -27,6 +28,8 @@ from .state_projection import StateProjector
 from .token_store import RunTokenStore
 
 if TYPE_CHECKING:
+    from opentelemetry.trace import Span
+
     from ..database.checkpoints import Checkpointer
     from ..ipc.schemas import DispatchRequest
     from .ipc import WorkerBridge
@@ -38,6 +41,40 @@ __all__ = ["ConcurrentCapError", "Executor", "GraphCompilationError"]
 # session once, in the research phase, under this role. The benign close is
 # dual-auth (ResolvedCommand principal), so the owner token is the right principal.
 _CLOSE_SESSION_ROLE = "vaultspec-synthesist"
+
+
+@dataclass(frozen=True, slots=True)
+class _GuardWording:
+    """Per-runtime-mode wording for the guard arms ingest and resume share.
+
+    The pre-run guards (compile failure, missing graph, ingest slot already held)
+    are one behaviour each, reached from two dispatch modes. Only the operator-
+    facing wording and the slot-rejection log action differ between the modes, so
+    they are data here and the guard itself has a single implementation.
+    """
+
+    runtime_mode: str
+    compile_failure: str
+    graph_missing: str
+    slot_held: str
+    slot_held_action: str
+
+
+_INGEST_GUARDS = _GuardWording(
+    runtime_mode="ingest",
+    compile_failure="Graph compilation failed for thread %s: %s",
+    graph_missing="No graph for thread %s -- no team preset provided",
+    slot_held="Ingest already active for thread %s -- dropping",
+    slot_held_action="ingest_rejected_active",
+)
+
+_RESUME_GUARDS = _GuardWording(
+    runtime_mode="resume",
+    compile_failure="Graph recompile failed for thread %s: %s",
+    graph_missing="No graph for thread %s -- cannot resume",
+    slot_held="Ingest already active for thread %s -- cannot resume",
+    slot_held_action="resume_rejected_active",
+)
 
 
 class ConcurrentCapError(RuntimeError):
@@ -263,6 +300,105 @@ class Executor:
                 exc_info=True,
             )
 
+    async def _reject_compile_failure(
+        self,
+        req: DispatchRequest,
+        span: Span,
+        exc: GraphCompilationError,
+        guards: _GuardWording,
+    ) -> None:
+        """Journal an uncompilable graph and drive the run to FAILED."""
+        logger.warning(
+            guards.compile_failure,
+            req.thread_id,
+            exc,
+            extra=self._dispatch_log_extra(
+                req,
+                action="compile_graph_failed",
+                runtime_mode=guards.runtime_mode,
+                error_type=type(exc).__name__,
+            ),
+        )
+        span.set_attribute("error", True)
+        span.set_attribute("error.message", str(exc))
+        await self._state_projector.emit_terminal_status(
+            req.thread_id, ThreadStatus.FAILED, error_detail=str(exc)
+        )
+
+    async def _reject_missing_graph(
+        self,
+        req: DispatchRequest,
+        span: Span,
+        guards: _GuardWording,
+    ) -> None:
+        """Journal a dispatch with no graph to run and drive the run to FAILED."""
+        logger.warning(
+            guards.graph_missing,
+            req.thread_id,
+            extra=self._dispatch_log_extra(
+                req,
+                action="graph_missing",
+                runtime_mode=guards.runtime_mode,
+            ),
+        )
+        span.set_attribute("error", True)
+        span.set_attribute("error.message", "No team preset")
+        await self._state_projector.emit_terminal_status(
+            req.thread_id, ThreadStatus.FAILED
+        )
+
+    def _reject_slot_held(
+        self,
+        req: DispatchRequest,
+        span: Span,
+        guards: _GuardWording,
+    ) -> None:
+        """Journal a dispatch dropped because the thread's ingest slot is held.
+
+        Emits nothing beyond the trace and log record: the run that owns the slot
+        settles on its own and would be corrupted by a terminal emitted here.
+        """
+        logger.warning(
+            guards.slot_held,
+            req.thread_id,
+            extra=self._dispatch_log_extra(
+                req,
+                action=guards.slot_held_action,
+                runtime_mode=guards.runtime_mode,
+            ),
+        )
+        span.set_attribute("error", True)
+        span.set_attribute("error.message", "Ingest already active")
+
+    async def _settle_run(
+        self,
+        req: DispatchRequest,
+        graph: StreamableGraph,
+        config: dict[str, Any],
+        outcome: str,
+    ) -> None:
+        """Settle a finished graph run; the call order here is load-bearing.
+
+        The execution-state projection and the run's terminal status land first.
+        The benign engine session close runs on SUCCESS only, AFTER that terminal
+        status has landed and BEFORE ``_mark_ingest_done`` drops the run's tokens,
+        which the close needs to authenticate. Cancel and failure outcomes emit
+        their own terminal above and never reach the close arm.
+
+        Both the ingest and the resume settle route through here: a gated
+        research_adr run completes on its FINAL gate resume, so the close must
+        cover the resume path too.
+        """
+        await self._state_projector.emit_execution_state_projection(
+            req.thread_id, graph, config
+        )
+        await self._state_projector.emit_terminal_status(req.thread_id, outcome)
+        if outcome == ThreadStatus.COMPLETED:
+            await self._close_authoring_session_best_effort(
+                req.thread_id, graph, config
+            )
+        await self._mark_ingest_done(req.thread_id, outcome)
+
     async def handle_dispatch(self, req: DispatchRequest) -> None:
         """Route a ``DispatchRequest``; top-level guard protects the task group."""
         try:
@@ -387,52 +523,15 @@ class Executor:
             try:
                 graph = await self._graph_lifecycle.get_or_compile_graph(req)
             except GraphCompilationError as exc:
-                logger.warning(
-                    "Graph compilation failed for thread %s: %s",
-                    req.thread_id,
-                    exc,
-                    extra=self._dispatch_log_extra(
-                        req,
-                        action="compile_graph_failed",
-                        error_type=type(exc).__name__,
-                    ),
-                )
-                span.set_attribute("error", True)
-                span.set_attribute("error.message", str(exc))
-                await self._state_projector.emit_terminal_status(
-                    req.thread_id, ThreadStatus.FAILED, error_detail=str(exc)
-                )
+                await self._reject_compile_failure(req, span, exc, _INGEST_GUARDS)
                 return
 
             if graph is None:
-                logger.warning(
-                    "No graph for thread %s -- no team preset provided",
-                    req.thread_id,
-                    extra=self._dispatch_log_extra(
-                        req,
-                        action="graph_missing",
-                        runtime_mode="ingest",
-                    ),
-                )
-                span.set_attribute("error", True)
-                span.set_attribute("error.message", "No team preset")
-                await self._state_projector.emit_terminal_status(
-                    req.thread_id, ThreadStatus.FAILED
-                )
+                await self._reject_missing_graph(req, span, _INGEST_GUARDS)
                 return
 
             if not await self._mark_ingest_active(req.thread_id):
-                logger.warning(
-                    "Ingest already active for thread %s -- dropping",
-                    req.thread_id,
-                    extra=self._dispatch_log_extra(
-                        req,
-                        action="ingest_rejected_active",
-                        runtime_mode="ingest",
-                    ),
-                )
-                span.set_attribute("error", True)
-                span.set_attribute("error.message", "Ingest already active")
+                self._reject_slot_held(req, span, _INGEST_GUARDS)
                 return
 
             self._bridge.track_thread(req.thread_id)
@@ -474,23 +573,9 @@ class Executor:
                 )
                 span.record_exception(Exception("Graph execution failed"))
             finally:
-                await self._state_projector.emit_execution_state_projection(
-                    req.thread_id,
-                    cast("StreamableGraph", graph),
-                    config,
+                await self._settle_run(
+                    req, cast("StreamableGraph", graph), config, outcome
                 )
-                await self._state_projector.emit_terminal_status(req.thread_id, outcome)
-                # Benign session close on SUCCESS only, AFTER the run's terminal
-                # status has landed and BEFORE _mark_ingest_done drops the run's
-                # tokens (the close needs the session owner's token). Cancel/fail
-                # outcomes emit their own terminal above and never reach this arm.
-                # Both the ingest and resume settles reach here: a gated research_adr
-                # run completes on the FINAL gate resume, so the close must cover it.
-                if outcome == ThreadStatus.COMPLETED:
-                    await self._close_authoring_session_best_effort(
-                        req.thread_id, cast("StreamableGraph", graph), config
-                    )
-                await self._mark_ingest_done(req.thread_id, outcome)
 
     async def _handle_resume(self, req: DispatchRequest) -> None:
         """Resume a graph from a LangGraph interrupt via ``Command(resume=...)``."""
@@ -501,49 +586,15 @@ class Executor:
             try:
                 graph = await self._graph_lifecycle.get_or_compile_graph(req)
             except GraphCompilationError as exc:
-                logger.warning(
-                    "Graph recompile failed for thread %s: %s",
-                    req.thread_id,
-                    exc,
-                    extra=self._dispatch_log_extra(
-                        req,
-                        action="compile_graph_failed",
-                        runtime_mode="resume",
-                        error_type=type(exc).__name__,
-                    ),
-                )
-                span.set_attribute("error", True)
-                span.set_attribute("error.message", str(exc))
-                await self._state_projector.emit_terminal_status(
-                    req.thread_id, ThreadStatus.FAILED, error_detail=str(exc)
-                )
+                await self._reject_compile_failure(req, span, exc, _RESUME_GUARDS)
                 return
 
             if graph is None:
-                logger.warning(
-                    "No graph for thread %s -- cannot resume",
-                    req.thread_id,
-                    extra=self._dispatch_log_extra(
-                        req,
-                        action="graph_missing",
-                        runtime_mode="resume",
-                    ),
-                )
-                await self._state_projector.emit_terminal_status(
-                    req.thread_id, ThreadStatus.FAILED
-                )
+                await self._reject_missing_graph(req, span, _RESUME_GUARDS)
                 return
 
             if not await self._mark_ingest_active(req.thread_id):
-                logger.warning(
-                    "Ingest already active for thread %s -- cannot resume",
-                    req.thread_id,
-                    extra=self._dispatch_log_extra(
-                        req,
-                        action="resume_rejected_active",
-                        runtime_mode="resume",
-                    ),
-                )
+                self._reject_slot_held(req, span, _RESUME_GUARDS)
                 return
 
             self._bridge.track_thread(req.thread_id)
@@ -609,23 +660,9 @@ class Executor:
                 )
                 span.record_exception(Exception("Graph resume failed"))
             finally:
-                await self._state_projector.emit_execution_state_projection(
-                    req.thread_id,
-                    cast("StreamableGraph", graph),
-                    config,
+                await self._settle_run(
+                    req, cast("StreamableGraph", graph), config, outcome
                 )
-                await self._state_projector.emit_terminal_status(req.thread_id, outcome)
-                # Benign session close on SUCCESS only, AFTER the run's terminal
-                # status has landed and BEFORE _mark_ingest_done drops the run's
-                # tokens (the close needs the session owner's token). Cancel/fail
-                # outcomes emit their own terminal above and never reach this arm.
-                # Both the ingest and resume settles reach here: a gated research_adr
-                # run completes on the FINAL gate resume, so the close must cover it.
-                if outcome == ThreadStatus.COMPLETED:
-                    await self._close_authoring_session_best_effort(
-                        req.thread_id, cast("StreamableGraph", graph), config
-                    )
-                await self._mark_ingest_done(req.thread_id, outcome)
 
     async def shutdown(self) -> None:
         """Release held resources (aggregator debounce tasks, etc.)."""

@@ -2601,3 +2601,41 @@ asserting slightly more than it holds.
 The derived boolean retained for compatibility now has no production reader - the route
 branches on the kinds tuple, and only a test asserts the property. Either use it or drop
 it.
+
+
+### Ranked closures (2026-07-31)
+
+Three findings closed by `9d1fd49a`, taken in the order adjudication ranked them.
+
+`commit-path-second-profile-encoding` (medium) - CLOSED. The commit stage carried its own
+model-profile comparison whose conflict message was byte-identical to the shared replay
+helper's, so one half of run-start replay identity was encoded twice on a refusal surface.
+Both sites now call one refusal. Only the COMPARISON is shared: the two paths deliberately
+fingerprint the rest of the request under different rules, and unifying those would have
+been the wrong repair - the instruction was explicitly to stop rather than force it if the
+two could not be separated.
+
+`replay-legacy-rule-not-frozen` (low) - CLOSED, and it mattered more than its severity
+suggested because it was an conformance gap against a clause landed the same day. Each
+replay rule now states its complete exclusion set as a frozen literal instead of composing
+one from the shared set that happens to be current. A rule describes bytes already on
+disk; composing it meant a later legitimate addition would silently redefine an older rule
+and spuriously refuse byte-identical replays of runs stored under it - digests that cannot
+be recomputed, since raw credentials are deliberately never persisted. Changing what is
+excluded now requires minting a NEW rule rather than editing an existing one. The
+verification is the existing test that recomputes the old fingerprint from its
+specification rather than from production tables: it still passes, which is what proves
+the frozen sets are byte-identical to what they replaced rather than merely plausible.
+
+`delete-response-absent-from-the-schema-facade` (low) - CLOSED, together with the two
+sibling response models sharing the same pre-existing gap.
+
+LEFT RECORDED by decision rather than oversight: the commit-stage loser that retains its
+reservation for the full expiry, twice adjudicated defensible because the durability
+classifier cannot distinguish another party's durable row from an own row with an
+unexpected binding, and the alternative risks duplicate admission authority - recording IS
+the disposition. Likewise the unreachable cancel release, the partial engine-bearer guard,
+the overstated constant-time claim, the indirectly-proven detached-store premise, the
+load-sensitive live stream tests, the absent digest for server-minted identifiers, and the
+over-ceiling route module, whose repair is refactor-sized and should not be chased for its
+own sake.

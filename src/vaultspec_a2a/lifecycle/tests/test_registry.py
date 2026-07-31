@@ -18,6 +18,7 @@ from typing import Any
 
 import pytest
 
+from ...tests.gateway_boot import free_port
 from ..procs_config import PortBand, ProcsConfig, RoleConfig
 from ..registry import (
     ProcRecord,
@@ -329,7 +330,7 @@ def test_port_free_and_reserve_skip_a_foreign_reuseaddr_listener(tmp_path) -> No
         # The foreign listener answers a connect, so the port reads as taken ...
         assert _port_is_free(held_port) is False
         # ... and a truly free port still reads as free.
-        assert _port_is_free(_unused_port()) is True
+        assert _port_is_free(free_port()) is True
 
         # reserve_port must SKIP the foreign-held port: a single-port band holding
         # only it is exhausted, never handed out to a colliding boot.
@@ -343,10 +344,3 @@ def test_port_free_and_reserve_skip_a_foreign_reuseaddr_listener(tmp_path) -> No
             )
     finally:
         foreign.close()
-
-
-def _unused_port() -> int:
-    """An ephemeral port with no listener (bound then released), for a free probe."""
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-        sock.bind(("127.0.0.1", 0))
-        return sock.getsockname()[1]

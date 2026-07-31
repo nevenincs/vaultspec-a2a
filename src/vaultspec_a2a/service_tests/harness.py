@@ -6,7 +6,6 @@ import contextlib
 import json
 import os
 import shutil
-import socket
 import subprocess
 import sys
 import time
@@ -19,6 +18,7 @@ import httpx
 
 from ..control.config import settings
 from ..lifecycle.manager import tree_kill
+from ..tests.gateway_boot import free_port
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -32,12 +32,6 @@ RUNTIME_ROOT = settings.a2a_home / "runtime" / "service-tests"
 # worker. It is the single source: injected into the worker env and presented on
 # the harness's own worker probes, which the gated worker surface now requires.
 _INTERNAL_TOKEN = "vaultspec-integration-token"
-
-
-def _pick_free_port() -> int:
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-        sock.bind(("127.0.0.1", 0))
-        return sock.getsockname()[1]
 
 
 def _compose_env(ports: dict[str, int], project_name: str) -> dict[str, str]:
@@ -710,11 +704,11 @@ class ServiceStack:
 
 def build_service_stack() -> ServiceStack:
     ports = {
-        "gateway": _pick_free_port(),
-        "worker": _pick_free_port(),
-        "vidaimock": _pick_free_port(),
-        "jaeger_ui": _pick_free_port(),
-        "jaeger_otlp": _pick_free_port(),
+        "gateway": free_port(),
+        "worker": free_port(),
+        "vidaimock": free_port(),
+        "jaeger_ui": free_port(),
+        "jaeger_otlp": free_port(),
     }
     project_name = f"vaultspec-service-tests-{uuid.uuid4().hex[:8]}"
     return ServiceStack(project_name=project_name, ports=ports)

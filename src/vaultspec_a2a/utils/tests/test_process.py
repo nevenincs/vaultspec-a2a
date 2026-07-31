@@ -19,6 +19,7 @@ import pytest
 
 from ...lifecycle.discovery import is_pid_alive
 from ...lifecycle.manager import _await_listener
+from ...tests.gateway_boot import free_port
 from ...utils.process import (
     ListenerOwnership,
     classify_listener_ownership,
@@ -142,13 +143,6 @@ _BIND_AND_HOLD = (
 _SLEEP = "import time; time.sleep(120)"
 
 
-def _free_port() -> int:
-    """A loopback port with no listener, for the unresolved-owner case."""
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
-        probe.bind(("127.0.0.1", 0))
-        return probe.getsockname()[1]
-
-
 def _spawn_listener() -> tuple[subprocess.Popen[str], int]:
     """Spawn a real child that holds a loopback port; return it and the port."""
     proc = subprocess.Popen(
@@ -257,7 +251,7 @@ def test_ownership_classification_separates_confirmed_from_unresolved() -> None:
             ListenerOwnership.CONFIRMED
         )
         # An unbound port resolves no listener at all.
-        assert classify_listener_ownership(_free_port(), listener.pid) is (
+        assert classify_listener_ownership(free_port(), listener.pid) is (
             ListenerOwnership.UNRESOLVED
         )
     finally:
@@ -288,7 +282,7 @@ def test_the_boolean_contract_is_unchanged_by_the_classification() -> None:
     stranger = subprocess.Popen([sys.executable, "-c", _SLEEP])
     try:
         assert listener_belongs_to(port, listener.pid) is True  # CONFIRMED
-        assert listener_belongs_to(_free_port(), listener.pid) is True  # UNRESOLVED
+        assert listener_belongs_to(free_port(), listener.pid) is True  # UNRESOLVED
         assert listener_belongs_to(port, stranger.pid) is False  # OUTSIDE
     finally:
         _reap(listener, stranger)

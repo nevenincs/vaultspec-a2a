@@ -26,6 +26,8 @@ from typing import Final
 
 import pytest
 
+from ..tests.gateway_boot import clean_subprocess_environment, free_port
+
 _PROJECT_ROOT: Final = Path(__file__).resolve().parents[3]
 _MCP_SCRIPT: Final = "vaultspec-a2a-mcp"
 
@@ -39,25 +41,11 @@ class InstalledCapsule:
     scripts_dir: Path
 
 
-def _clean_environment() -> dict[str, str]:
-    environment = dict(os.environ)
-    for name in (
-        "PYTHONHOME",
-        "PYTHONPATH",
-        "UV_PROJECT_ENVIRONMENT",
-        "VIRTUAL_ENV",
-    ):
-        environment.pop(name, None)
-    environment["NO_COLOR"] = "1"
-    environment["UV_NO_PROGRESS"] = "1"
-    return environment
-
-
 def _run(command: list[str], *, cwd: Path, timeout: int = 600) -> None:
     result = subprocess.run(
         command,
         cwd=cwd,
-        env=_clean_environment(),
+        env=clean_subprocess_environment(),
         capture_output=True,
         text=True,
         timeout=timeout,
@@ -84,12 +72,6 @@ def _mcp_script(capsule: InstalledCapsule) -> Path:
     """Return the installed ``vaultspec-a2a-mcp`` console script path."""
     suffix = ".exe" if os.name == "nt" else ""
     return capsule.scripts_dir / f"{_MCP_SCRIPT}{suffix}"
-
-
-def _free_port() -> int:
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-        sock.bind(("127.0.0.1", 0))
-        return sock.getsockname()[1]
 
 
 def _port_listening(port: int, *, timeout: float = 0.5) -> bool:
@@ -164,7 +146,7 @@ def test_installed_capsule_ships_caller_owned_mcp_entrypoint(
     result = subprocess.run(
         [str(script), "--help"],
         cwd=installed_capsule.sandbox,
-        env=_clean_environment(),
+        env=clean_subprocess_environment(),
         capture_output=True,
         text=True,
         timeout=60,
@@ -187,9 +169,9 @@ def test_caller_owned_standalone_mcp_starts_and_stops(
     and be reaped entirely under caller ownership, never launched or adopted by the
     desktop lifecycle.
     """
-    port = _free_port()
+    port = free_port()
     log_path = tmp_path / "mcp.log"
-    env = _clean_environment()
+    env = clean_subprocess_environment()
     # A bogus gateway URL proves the adapter binds without a live gateway: it
     # connects to the gateway lazily on a tool call, not at startup.
     env["VAULTSPEC_GATEWAY_URL"] = "http://127.0.0.1:1"

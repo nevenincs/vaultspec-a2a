@@ -26,13 +26,7 @@ every child is reaped in a ``finally`` by killing the gateway process tree.
 
 from __future__ import annotations
 
-import asyncio
-import contextlib
 import json
-import os
-import signal
-import subprocess
-import sys
 import time
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
@@ -40,68 +34,30 @@ from typing import TYPE_CHECKING, Any
 
 import httpx
 
-from ..desktop._platform_acl import harden_credential_file
-from ..desktop.credentials import (
-    ATTACH_CREDENTIAL_NAME,
-    OWNERSHIP_CAPABILITY_NAME,
+from ..tests.gateway_boot import (
+    armed_gateway_env,
+    gateway_script,
+    reap_gateway,
+    seat_valid_database,
+    seed_credentials,
+    spawn_gateway,
+    spawn_until_ready,
 )
-from ..desktop.profile import derive_state_paths
-from ..utils import kill_pid_tree_async
-from ._boot import spawn_until_ready
 
 if TYPE_CHECKING:
+    import subprocess
     from collections.abc import Iterator
     from pathlib import Path
 
 _ATTACH = "attach-credential-admission-1234567890abcdef"
 _OWNERSHIP = "ownership-capability-admission-fedcba0987654321"
-_DIGEST = "a" * 64
-_MODULE = "vaultspec_a2a.cli.main"
 _PRESET = "mock-success-single"
 _REQUIRED_ROLE = "mock-coder-success"
 _SPAWN_LINE = "Auto-spawning worker on port"
 
-_GATEWAY = """
-import logging
-import sys
-
-logging.basicConfig(level=logging.INFO)
-import uvicorn
-from vaultspec_a2a.api.app import create_app
-
-port = int(sys.argv[1])
-uvicorn.run(create_app(), host="127.0.0.1", port=port, log_level="info")
-"""
-
-
-def _seed_credentials(app_home: Path) -> None:
-    """Write the dashboard-created attach and ownership files."""
-    state = derive_state_paths(app_home)
-    state.credentials_dir.mkdir(parents=True, exist_ok=True)
-    for name, secret in (
-        (ATTACH_CREDENTIAL_NAME, _ATTACH),
-        (OWNERSHIP_CAPABILITY_NAME, _OWNERSHIP),
-    ):
-        path = state.credentials_dir / name
-        path.write_text(secret, encoding="utf-8")
-        harden_credential_file(path)
-
-
-def _seat_valid_database(app_home: Path) -> None:
-    """Seat a valid desktop database via the real migrate entrypoint."""
-    command = [
-        sys.executable,
-        "-m",
-        _MODULE,
-        "migrate",
-        "--app-home",
-        str(app_home),
-    ]
-    result = subprocess.run(command, capture_output=True, text=True, timeout=180)
-    assert result.returncode == 0, f"migrate failed: {result.stdout}\n{result.stderr}"
-    payload = json.loads(result.stdout.strip())
-    assert payload["status"] == "succeeded", payload
-    assert derive_state_paths(app_home).database_path.is_file()
+# The INFO variant: its root logging handler is the only reason the auto-spawn
+# announcement asserted on below is written to the gateway log at all.
+_GATEWAY = gateway_script(log_level="info")
 
 
 @contextmanager
@@ -117,19 +73,17 @@ def _running_gateway(
     log_handle = log_path.open("wb")
 
     def _spawn(gateway_port: int, worker_port: int) -> subprocess.Popen[bytes]:
-        env = os.environ.copy()
-        env["VAULTSPEC_DESKTOP_APP_HOME"] = str(app_home)
-        env["VAULTSPEC_ENVIRONMENT"] = "production"
-        env["VAULTSPEC_PORT"] = str(gateway_port)
-        env["VAULTSPEC_WORKER_PORT"] = str(worker_port)
-        env["VAULTSPEC_AUTO_SPAWN_WORKER"] = "true"
-        env.update(extra_env)
-        return subprocess.Popen(
-            [sys.executable, "-c", _GATEWAY, str(gateway_port)],
-            env=env,
-            stdout=log_handle,
-            stderr=subprocess.STDOUT,
-            start_new_session=os.name != "nt",
+        return spawn_gateway(
+            script=_GATEWAY,
+            gateway_port=gateway_port,
+            env=armed_gateway_env(
+                app_home,
+                gateway_port=gateway_port,
+                worker_port=worker_port,
+                extra=extra_env,
+            ),
+            log_handle=log_handle,
+            new_session=True,
         )
 
     proc, _gateway_port, _worker_port, base = spawn_until_ready(
@@ -138,27 +92,7 @@ def _running_gateway(
     try:
         yield base, f"Bearer {_ATTACH}"
     finally:
-        with contextlib.suppress(Exception):
-            if os.name == "nt":
-                asyncio.run(
-                    kill_pid_tree_async(proc.pid, term_timeout=10.0, kill_timeout=5.0)
-                )
-            else:
-                for sig, timeout in ((signal.SIGTERM, 10.0), (signal.SIGKILL, 5.0)):
-                    with contextlib.suppress(ProcessLookupError):
-                        os.killpg(proc.pid, sig)
-                    deadline = time.monotonic() + timeout
-                    while time.monotonic() < deadline:
-                        try:
-                            os.killpg(proc.pid, 0)
-                        except ProcessLookupError:
-                            break
-                        time.sleep(0.05)
-                    else:
-                        continue
-                    break
-        with contextlib.suppress(subprocess.TimeoutExpired):
-            proc.wait(timeout=15)
+        reap_gateway(proc)
         log_handle.close()
 
 
@@ -167,8 +101,8 @@ def _armed_gateway(tmp_path: Path, **extra_env: str) -> Iterator[tuple[str, str]
     """Seat and boot a real armed desktop gateway over a migrated app home."""
     app_home = tmp_path / "app-home"
     app_home.mkdir()
-    _seed_credentials(app_home)
-    _seat_valid_database(app_home)
+    seed_credentials(app_home, attach=_ATTACH, ownership=_OWNERSHIP)
+    seat_valid_database(app_home)
     with _running_gateway(tmp_path, app_home, **extra_env) as gateway:
         yield gateway
 
@@ -553,8 +487,8 @@ def test_gateway_restart_recovers_durable_lease_and_exact_commit_replay(
     """A new gateway process recovers one run and lease without redispatch."""
     app_home = tmp_path / "app-home"
     app_home.mkdir()
-    _seed_credentials(app_home)
-    _seat_valid_database(app_home)
+    seed_credentials(app_home, attach=_ATTACH, ownership=_OWNERSHIP)
+    seat_valid_database(app_home)
     run_id = "run-restart-recovery"
 
     with _running_gateway(tmp_path, app_home, log_name="gateway-first.log") as (

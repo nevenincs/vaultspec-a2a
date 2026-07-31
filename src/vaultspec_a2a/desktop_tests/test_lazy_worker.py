@@ -25,83 +25,38 @@ tree.
 
 from __future__ import annotations
 
-import asyncio
-import contextlib
-import json
-import os
 import socket
-import subprocess
-import sys
 import time
 from concurrent.futures import ThreadPoolExecutor
 from typing import TYPE_CHECKING
 
 import httpx
 
-from ..desktop._platform_acl import harden_credential_file
-from ..desktop.credentials import (
-    ATTACH_CREDENTIAL_NAME,
-    OWNERSHIP_CAPABILITY_NAME,
+from ..tests.gateway_boot import (
+    armed_gateway_env,
+    gateway_script,
+    reap_gateway,
+    seat_valid_database,
+    seed_credentials,
+    spawn_gateway,
+    spawn_until_ready,
 )
-from ..desktop.profile import derive_state_paths
-from ..utils import kill_pid_tree_async
-from ._boot import spawn_until_ready
 
 if TYPE_CHECKING:
+    import subprocess
     from pathlib import Path
 
 _ATTACH = "attach-credential-lazyworker-1234567890abcdef"
 _OWNERSHIP = "ownership-capability-lazyworker-fedcba0987654321"
-_DIGEST = "e" * 64
-_MODULE = "vaultspec_a2a.cli.main"
 _PRESET = "mock-success-single"
 _SPAWN_LINE = "Auto-spawning worker on port"
 
 # A real armed desktop gateway booting the *production* lifespan with auto-spawn
 # enabled: create_app runs the armed credential loading, mints the worker-IPC
-# secret, and the gateway owns its worker spawner. INFO logging is configured so
-# the one-shot spawn line is observable in the captured log.
-_GATEWAY = """
-import logging
-import sys
-
-logging.basicConfig(level=logging.INFO)
-import uvicorn
-from vaultspec_a2a.api.app import create_app
-
-port = int(sys.argv[1])
-uvicorn.run(create_app(), host="127.0.0.1", port=port, log_level="info")
-"""
-
-
-def _seed_credentials(app_home: Path) -> None:
-    """Write the dashboard-created attach and ownership files."""
-    state = derive_state_paths(app_home)
-    state.credentials_dir.mkdir(parents=True, exist_ok=True)
-    for name, secret in (
-        (ATTACH_CREDENTIAL_NAME, _ATTACH),
-        (OWNERSHIP_CAPABILITY_NAME, _OWNERSHIP),
-    ):
-        path = state.credentials_dir / name
-        path.write_text(secret, encoding="utf-8")
-        harden_credential_file(path)
-
-
-def _seat_valid_database(app_home: Path) -> None:
-    """Seat a valid desktop database via the real migrate entrypoint."""
-    command = [
-        sys.executable,
-        "-m",
-        _MODULE,
-        "migrate",
-        "--app-home",
-        str(app_home),
-    ]
-    result = subprocess.run(command, capture_output=True, text=True, timeout=180)
-    assert result.returncode == 0, f"migrate failed: {result.stdout}\n{result.stderr}"
-    payload = json.loads(result.stdout.strip())
-    assert payload["status"] == "succeeded", payload
-    assert derive_state_paths(app_home).database_path.is_file()
+# secret, and the gateway owns its worker spawner. The INFO variant is required,
+# not incidental: its root logging handler is the only reason the one-shot spawn
+# line asserted on below reaches the captured log at all.
+_GATEWAY = gateway_script(log_level="info")
 
 
 def _port_listening(port: int, *, timeout: float = 0.5) -> bool:
@@ -149,26 +104,22 @@ def test_idle_boot_starts_no_worker_and_concurrent_demand_starts_exactly_one(
     """Idle armed boot starts no worker; concurrent demand starts exactly one."""
     app_home = tmp_path / "app-home"
     app_home.mkdir()
-    _seed_credentials(app_home)
-    _seat_valid_database(app_home)
+    seed_credentials(app_home, attach=_ATTACH, ownership=_OWNERSHIP)
+    seat_valid_database(app_home)
 
     log_path = tmp_path / "gateway.log"
     log_handle = log_path.open("wb")
     auth = {"Authorization": f"Bearer {_ATTACH}"}
 
     def _spawn(gateway_port: int, worker_port: int) -> subprocess.Popen[bytes]:
-        env = os.environ.copy()
-        env["VAULTSPEC_DESKTOP_APP_HOME"] = str(app_home)
-        env["VAULTSPEC_ENVIRONMENT"] = "production"
-        env["VAULTSPEC_PORT"] = str(gateway_port)
-        env["VAULTSPEC_WORKER_PORT"] = str(worker_port)
         # The gateway owns and spawns its worker; boot must still not start it.
-        env["VAULTSPEC_AUTO_SPAWN_WORKER"] = "true"
-        return subprocess.Popen(
-            [sys.executable, "-c", _GATEWAY, str(gateway_port)],
-            env=env,
-            stdout=log_handle,
-            stderr=subprocess.STDOUT,
+        return spawn_gateway(
+            script=_GATEWAY,
+            gateway_port=gateway_port,
+            env=armed_gateway_env(
+                app_home, gateway_port=gateway_port, worker_port=worker_port
+            ),
+            log_handle=log_handle,
         )
 
     proc, _gateway_port, worker_port, base = spawn_until_ready(
@@ -210,10 +161,5 @@ def test_idle_boot_starts_no_worker_and_concurrent_demand_starts_exactly_one(
             state = _worker_state(base, auth)
         assert state in {"starting", "ready"}, state
     finally:
-        with contextlib.suppress(Exception):
-            asyncio.run(
-                kill_pid_tree_async(proc.pid, term_timeout=10.0, kill_timeout=5.0)
-            )
-        with contextlib.suppress(subprocess.TimeoutExpired):
-            proc.wait(timeout=15)
+        reap_gateway(proc)
         log_handle.close()

@@ -15,7 +15,6 @@ Skips with a pointer when the Claude CLI is unavailable (an infra gate).
 import asyncio
 import json
 import shutil
-import socket
 import threading
 from collections.abc import AsyncIterator
 from pathlib import Path
@@ -29,6 +28,7 @@ from starlette.types import Receive, Scope, Send
 
 from ...authoring.catalog import CATALOG_SCHEMA_VERSION, parse_catalog
 from ...control.config import settings
+from ...tests.gateway_boot import free_port
 from ...workspace.environment import resolve_env_vars
 from .._subprocess import kill_process_tree, spawn_acp_process
 from ..factory import _classify_acp_command
@@ -63,17 +63,11 @@ _CATALOG = {
 }
 
 
-def _free_port() -> int:
-    with socket.socket() as sock:
-        sock.bind(("127.0.0.1", 0))
-        return sock.getsockname()[1]
-
-
 class _AuthoringHttpServer:
     """Serve the committed authoring MCP server over streamable HTTP in a thread."""
 
     def __init__(self) -> None:
-        self.port = _free_port()
+        self.port = free_port()
         self.connected = threading.Event()
         self._uvicorn: uvicorn.Server | None = None
         self._thread: threading.Thread | None = None

@@ -7,6 +7,12 @@ gateway armed with the desktop profile so it owns and spawns its own worker, and
 wait for readiness with a death-aware poll that fails fast on a child that dies
 before it answers rather than after a silent timeout.
 
+The lifecycle primitives themselves live one tier down, in
+:mod:`vaultspec_a2a.tests.gateway_boot`, which every real-process tier shares.
+This module owns only what is genuinely specific to certification: the bundled
+deterministic preset it certifies against, and the authenticated handle
+scenarios drive.
+
 The deterministic provider backend the worker proxies to (VidaiMock) is a
 separate real process. Where a certifying environment runs it, pass its base URL
 as ``MOCK_API_BASE`` through the keyword environment and the gateway-owned worker
@@ -24,30 +30,26 @@ spread across scenario files.
 
 from __future__ import annotations
 
-import asyncio
-import contextlib
-import json
-import os
-import socket
-import subprocess
-import sys
-import time
 from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 import httpx
 
-from ..desktop._platform_acl import harden_credential_file
-from ..desktop.credentials import (
-    ATTACH_CREDENTIAL_NAME,
-    OWNERSHIP_CAPABILITY_NAME,
+from ..tests.gateway_boot import (
+    GatewayBootError,
+    armed_gateway_env,
+    gateway_script,
+    reap_gateway,
+    seat_valid_database,
+    seed_credentials,
+    spawn_gateway,
+    spawn_until_ready,
 )
-from ..desktop.profile import derive_state_paths
-from ..utils import kill_pid_tree_async
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Iterator
+    import subprocess
+    from collections.abc import Iterator
     from pathlib import Path
 
 __all__ = [
@@ -63,159 +65,6 @@ __all__ = [
 # a published wheel, which is why this harness is source-only.
 DEFAULT_TEAM_PRESET = "mock-success-single"
 DEFAULT_REQUIRED_ROLE = "mock-coder-success"
-
-_MIGRATE_MODULE = "vaultspec_a2a.cli.main"
-_LOG_TAIL_BYTES = 4096
-
-# The child gateway is a real interpreter running the production ASGI app under
-# uvicorn; nothing here is stubbed. The armed desktop profile is selected by the
-# environment the parent passes, so this script carries no test-only wiring.
-_GATEWAY_SCRIPT = """
-import logging
-import sys
-
-logging.basicConfig(level=logging.INFO)
-import uvicorn
-from vaultspec_a2a.api.app import create_app
-
-port = int(sys.argv[1])
-uvicorn.run(create_app(), host="127.0.0.1", port=port, log_level="info")
-"""
-
-
-class GatewayBootError(AssertionError):
-    """The gateway process exited before its readiness endpoint answered."""
-
-
-def _free_port() -> int:
-    """Return a currently-free loopback port (bind-then-close; racy by nature).
-
-    The port is a CANDIDATE only: nothing reserves it between this close and the
-    child's bind, which is exactly why :func:`_spawn_until_ready` retries a child
-    that dies before readiness - the Windows bind race that otherwise burns a
-    whole readiness window.
-    """
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-        sock.bind(("127.0.0.1", 0))
-        return sock.getsockname()[1]
-
-
-def _log_tail(log_path: Path | None) -> str:
-    if log_path is None:
-        return ""
-    try:
-        data = log_path.read_bytes()
-    except OSError:
-        return ""
-    tail = data[-_LOG_TAIL_BYTES:].decode("utf-8", errors="replace")
-    return f"; log tail:\n{tail}" if tail else ""
-
-
-def _await_ready(
-    base: str,
-    proc: subprocess.Popen[bytes],
-    *,
-    log_path: Path | None,
-    timeout: float,
-) -> None:
-    """Wait until ``GET /health`` answers 200, failing fast on a dead child.
-
-    A process that exits before readiness raises :class:`GatewayBootError`
-    immediately (the bind-race signature) carrying its exit code and log tail; a
-    process that stays alive but never answers raises a plain
-    :class:`AssertionError` at the deadline - a genuine readiness failure that is
-    never retried.
-    """
-    deadline = time.monotonic() + timeout
-    last: str | None = None
-    while time.monotonic() < deadline:
-        if proc.poll() is not None:
-            raise GatewayBootError(
-                f"gateway exited before readiness (exit {proc.returncode})"
-                f"{_log_tail(log_path)}"
-            )
-        try:
-            with httpx.Client(base_url=base, timeout=2.0) as client:
-                if client.get("/health").status_code == 200:
-                    return
-        except httpx.HTTPError as exc:
-            last = repr(exc)
-        time.sleep(0.1)
-    raise AssertionError(f"gateway never became ready ({last}){_log_tail(log_path)}")
-
-
-def _spawn_until_ready(
-    spawn: Callable[[int, int], subprocess.Popen[bytes]],
-    *,
-    log_path: Path | None,
-    attempts: int = 3,
-    timeout: float = 60.0,
-) -> tuple[subprocess.Popen[bytes], int, int, str]:
-    """Boot a gateway on a fresh port pair, retrying only the bind-race death.
-
-    Every exit that does not hand the caller a running gateway reaps the tree
-    first. Only the returned handle is owned by the caller's ``finally``; an
-    attempt abandoned here has no other owner, so failing to reap it orphans a
-    gateway - and the worker it already spawned - onto the machine, still
-    holding the worker port the next attempt is about to ask for.
-    """
-    last_error: GatewayBootError | None = None
-    for _ in range(attempts):
-        gateway_port = _free_port()
-        worker_port = _free_port()
-        proc = spawn(gateway_port, worker_port)
-        base = f"http://127.0.0.1:{gateway_port}"
-        try:
-            _await_ready(base, proc, log_path=log_path, timeout=timeout)
-        except GatewayBootError as exc:
-            # The gateway process is already gone, but a worker it spawned
-            # before dying is not: it outlives its parent and keeps the port.
-            _reap(proc)
-            last_error = exc
-            continue
-        except BaseException:
-            # Alive but never ready - the whole tree is still running and this
-            # frame is its last owner.
-            _reap(proc)
-            raise
-        return proc, gateway_port, worker_port, base
-    raise AssertionError(
-        f"gateway did not boot within {attempts} attempts; last: {last_error}"
-    )
-
-
-def _seed_credentials(app_home: Path, *, attach: str, ownership: str) -> None:
-    """Write the dashboard-created attach and ownership credential files."""
-    state = derive_state_paths(app_home)
-    state.credentials_dir.mkdir(parents=True, exist_ok=True)
-    for name, secret in (
-        (ATTACH_CREDENTIAL_NAME, attach),
-        (OWNERSHIP_CAPABILITY_NAME, ownership),
-    ):
-        path = state.credentials_dir / name
-        path.write_text(secret, encoding="utf-8")
-        harden_credential_file(path)
-
-
-def _seat_valid_database(app_home: Path) -> None:
-    """Seat a valid desktop database via the real ``migrate`` entrypoint."""
-    result = subprocess.run(
-        [sys.executable, "-m", _MIGRATE_MODULE, "migrate", "--app-home", str(app_home)],
-        capture_output=True,
-        text=True,
-        timeout=180,
-        check=False,
-    )
-    if result.returncode != 0:
-        raise GatewayBootError(
-            f"migrate failed (exit {result.returncode}): "
-            f"{result.stdout}\n{result.stderr}"
-        )
-    payload = json.loads(result.stdout.strip())
-    if payload.get("status") != "succeeded":
-        raise GatewayBootError(f"migrate did not succeed: {payload}")
-    if not derive_state_paths(app_home).database_path.is_file():
-        raise GatewayBootError("migrate reported success but no database file exists")
 
 
 @dataclass(slots=True)
@@ -349,14 +198,6 @@ class CertifiedGateway:
             return client.delete(f"/api/threads/{run_id}")
 
 
-def _reap(proc: subprocess.Popen[bytes]) -> None:
-    """Reap the whole gateway-owned process tree, best effort."""
-    with contextlib.suppress(Exception):
-        asyncio.run(kill_pid_tree_async(proc.pid, term_timeout=10.0, kill_timeout=5.0))
-    with contextlib.suppress(subprocess.TimeoutExpired):
-        proc.wait(timeout=15)
-
-
 @contextmanager
 def certified_gateway(
     workdir: Path,
@@ -379,32 +220,30 @@ def certified_gateway(
     """
     app_home = workdir / "app-home"
     app_home.mkdir(parents=True, exist_ok=True)
-    _seed_credentials(app_home, attach=attach_token, ownership=ownership_capability)
-    _seat_valid_database(app_home)
+    seed_credentials(app_home, attach=attach_token, ownership=ownership_capability)
+    seat_valid_database(app_home)
 
     log_path = workdir / log_name
     log_handle = log_path.open("wb")
+    script = gateway_script(log_level="info")
 
     def _spawn(gateway_port: int, worker_port: int) -> subprocess.Popen[bytes]:
-        env = os.environ.copy()
-        env["VAULTSPEC_DESKTOP_APP_HOME"] = str(app_home)
-        env["VAULTSPEC_ENVIRONMENT"] = "production"
-        env["VAULTSPEC_PORT"] = str(gateway_port)
-        env["VAULTSPEC_WORKER_PORT"] = str(worker_port)
-        env["VAULTSPEC_AUTO_SPAWN_WORKER"] = "true"
+        env = armed_gateway_env(
+            app_home, gateway_port=gateway_port, worker_port=worker_port
+        )
         if settlement_url is not None:
             env["VAULTSPEC_DESKTOP_SETTLEMENT_URL"] = settlement_url
         env.update(extra_env)
-        return subprocess.Popen(
-            [sys.executable, "-c", _GATEWAY_SCRIPT, str(gateway_port)],
+        return spawn_gateway(
+            script=script,
+            gateway_port=gateway_port,
             env=env,
-            stdout=log_handle,
-            stderr=subprocess.STDOUT,
-            start_new_session=os.name != "nt",
+            log_handle=log_handle,
+            new_session=True,
         )
 
     try:
-        proc, _gateway_port, _worker_port, base = _spawn_until_ready(
+        proc, _gateway_port, _worker_port, base = spawn_until_ready(
             _spawn, log_path=log_path
         )
     except BaseException:
@@ -419,5 +258,5 @@ def certified_gateway(
             base_url=base, attach_token=attach_token, app_home=app_home
         )
     finally:
-        _reap(proc)
+        reap_gateway(proc)
         log_handle.close()

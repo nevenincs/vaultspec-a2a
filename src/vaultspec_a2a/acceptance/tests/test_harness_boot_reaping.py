@@ -9,7 +9,7 @@ spawns its own worker, so the orphan keeps holding the worker port, and the
 next boot meets its own leftover there and refuses it as an unidentified
 occupant. An incomplete reap wedges the port band rather than merely leaking.
 
-These scenarios drive the real :func:`_spawn_until_ready` seam with real
+These scenarios drive the real :func:`spawn_until_ready` seam with real
 subprocesses - the ``spawn`` callable is a first-class parameter of the
 function under test, so passing a real process launcher exercises the seam
 rather than substituting for it. The success path is the negative control: the
@@ -26,7 +26,8 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from .._harness import _reap, _spawn_until_ready, certified_gateway
+from ...tests.gateway_boot import reap_gateway, spawn_until_ready
+from .._harness import certified_gateway
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -82,8 +83,8 @@ def test_gateway_that_never_becomes_ready_is_reaped_not_orphaned() -> None:
     """
     spawned: list[subprocess.Popen[bytes]] = []
     try:
-        with pytest.raises(AssertionError, match="never became ready"):
-            _spawn_until_ready(
+        with pytest.raises(AssertionError, match="readiness never came up"):
+            spawn_until_ready(
                 _launcher(_SILENT_CHILD, spawned, pass_port=False),
                 log_path=None,
                 attempts=1,
@@ -98,7 +99,7 @@ def test_gateway_that_never_becomes_ready_is_reaped_not_orphaned() -> None:
             )
     finally:
         for proc in spawned:
-            _reap(proc)
+            reap_gateway(proc)
 
 
 def test_ready_gateway_is_returned_alive() -> None:
@@ -111,7 +112,7 @@ def test_ready_gateway_is_returned_alive() -> None:
     """
     spawned: list[subprocess.Popen[bytes]] = []
     try:
-        proc, _gateway_port, _worker_port, base = _spawn_until_ready(
+        proc, _gateway_port, _worker_port, base = spawn_until_ready(
             _launcher(_READY_CHILD, spawned, pass_port=True),
             log_path=None,
             attempts=3,
@@ -121,7 +122,7 @@ def test_ready_gateway_is_returned_alive() -> None:
         assert base.startswith("http://127.0.0.1:")
     finally:
         for candidate in spawned:
-            _reap(candidate)
+            reap_gateway(candidate)
 
 
 def test_failed_boot_releases_the_gateway_log_handle(tmp_path: Path) -> None:

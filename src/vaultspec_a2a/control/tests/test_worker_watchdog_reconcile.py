@@ -11,7 +11,6 @@ climbing every tick and the breaker flapping open; post-fix it stays 0 and close
 from __future__ import annotations
 
 import http.server
-import socket
 import subprocess
 import sys
 import threading
@@ -29,6 +28,7 @@ from ...control.worker_management import (
     WorkerState,
     WorkerWatchdog,
 )
+from ...tests.gateway_boot import free_port
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -59,13 +59,6 @@ def _health_server() -> Iterator[int]:
     finally:
         server.shutdown()
         server.server_close()
-
-
-def _free_port() -> int:
-    """An unbound loopback port (nothing listening — an unreachable worker)."""
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-        sock.bind(("127.0.0.1", 0))
-        return sock.getsockname()[1]
 
 
 def _stale_app_state(**singletons: object) -> SimpleNamespace:
@@ -190,7 +183,7 @@ async def test_adopted_worker_recovers_from_transient_down_to_up() -> None:
 @pytest.mark.asyncio
 async def test_unowned_down_worker_is_reported_not_restarted() -> None:
     # No listener → worker unreachable; auto_spawn False → external (not ours).
-    port = _free_port()
+    port = free_port()
     spawner = LazyWorkerSpawner(f"http://127.0.0.1:{port}", port, auto_spawn=False)
     spawner.replace_process(None)
     app_state = _stale_app_state(

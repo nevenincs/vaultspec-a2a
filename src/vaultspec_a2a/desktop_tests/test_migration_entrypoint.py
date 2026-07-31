@@ -29,6 +29,7 @@ import pytest
 
 from ..desktop.migration import package_migration_range
 from ..desktop.profile import derive_state_paths
+from ..tests.gateway_boot import clean_subprocess_environment
 
 _PROJECT_ROOT: Final = Path(__file__).resolve().parents[3]
 _MODULE: Final = "vaultspec_a2a.cli.main"
@@ -42,27 +43,13 @@ class InstalledRuntime:
     sandbox: Path
 
 
-def _clean_environment() -> dict[str, str]:
-    environment = dict(os.environ)
-    for name in (
-        "PYTHONHOME",
-        "PYTHONPATH",
-        "UV_PROJECT_ENVIRONMENT",
-        "VIRTUAL_ENV",
-    ):
-        environment.pop(name, None)
-    environment["NO_COLOR"] = "1"
-    environment["UV_NO_PROGRESS"] = "1"
-    return environment
-
-
 def _run(
     command: list[str], *, cwd: Path, timeout: int = 600
 ) -> subprocess.CompletedProcess[str]:
     result = subprocess.run(
         command,
         cwd=cwd,
-        env=_clean_environment(),
+        env=clean_subprocess_environment(),
         capture_output=True,
         text=True,
         timeout=timeout,
@@ -97,7 +84,7 @@ def _run_migrate(
             *extra,
         ],
         cwd=runtime.sandbox,
-        env=_clean_environment(),
+        env=clean_subprocess_environment(),
         capture_output=True,
         text=True,
         timeout=120,

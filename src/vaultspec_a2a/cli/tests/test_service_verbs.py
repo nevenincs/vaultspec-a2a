@@ -19,6 +19,8 @@ from typing import TYPE_CHECKING
 
 import pytest
 
+from ...tests.gateway_boot import free_port
+
 if TYPE_CHECKING:
     from pathlib import Path
 
@@ -36,12 +38,6 @@ from ..service import (
     start_service,
     stop_service,
 )
-
-
-def _free_port() -> int:
-    with socket.socket() as sock:
-        sock.bind(("127.0.0.1", 0))
-        return sock.getsockname()[1]
 
 
 def test_status_on_empty_home_reports_stopped(tmp_path: Path) -> None:
@@ -67,7 +63,7 @@ def test_status_with_dead_recorded_pid_reports_stopped(tmp_path: Path) -> None:
     dead.wait()
     write_service_json(
         service_json_path(home),
-        port=_free_port(),
+        port=free_port(),
         pid=dead.pid,
         allow_tokenless=True,
     )
@@ -138,7 +134,7 @@ def test_start_status_stop_restart_cycle_on_scratch_home(tmp_path: Path) -> None
     gone and reports stopped. This is the dashboard's contract end to end.
     """
     home = tmp_path / "home"
-    port = _free_port()
+    port = free_port()
 
     started = start_service(home, port=port, log_path=str(tmp_path / "gateway.log"))
     assert started.state == "running", started

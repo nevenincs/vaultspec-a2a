@@ -22,7 +22,6 @@ import contextlib
 import json
 import os
 import shutil
-import socket
 import subprocess
 import sys
 import time
@@ -34,6 +33,8 @@ from typing import TYPE_CHECKING, Any
 import httpx
 import pytest
 import yaml
+
+from ..tests.gateway_boot import free_port
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -64,12 +65,6 @@ def _worker_healthcheck_cmd(compose_path: Path) -> str:
     assert isinstance(test, list), "expected list-form healthcheck test"
     script_parts = [part for part in test if part not in ("CMD", "CMD-SHELL")]
     return " ".join(script_parts)
-
-
-def _pick_free_port() -> int:
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-        sock.bind(("127.0.0.1", 0))
-        return sock.getsockname()[1]
 
 
 def _resolve_docker() -> str:
@@ -260,10 +255,10 @@ def compose_integration_stack() -> Any:
     (including the now-authenticated worker ``/health``) before yielding.
     """
     docker = _resolve_docker()
-    gateway_port = _pick_free_port()
-    jaeger_ui_port = _pick_free_port()
-    jaeger_otlp_port = _pick_free_port()
-    vidaimock_port = _pick_free_port()
+    gateway_port = free_port()
+    jaeger_ui_port = free_port()
+    jaeger_otlp_port = free_port()
+    vidaimock_port = free_port()
     project = f"vaultspec-compose-regression-{uuid.uuid4().hex[:8]}"
 
     compose_env = {
@@ -501,7 +496,7 @@ def test_compose_provenance_mismatch_fails_closed_without_eviction(
     from ..control.config import settings
     from ..control.worker_management import LazyWorkerSpawner
 
-    port = _pick_free_port()
+    port = free_port()
     foreign_gateway_url = "http://127.0.0.1:2"
     assert foreign_gateway_url.rstrip("/") != settings.gateway_url.rstrip("/"), (
         "the modeled mismatch must actually differ from this gateway's URL"
@@ -534,7 +529,7 @@ def test_compose_matching_provenance_attaches(tmp_path: Path) -> None:
     from ..control.config import settings
     from ..control.worker_management import LazyWorkerSpawner
 
-    port = _pick_free_port()
+    port = free_port()
     body = {"status": "healthy", "gateway_url": settings.gateway_url}
 
     with _worker_on_port(tmp_path, port, body) as (worker, request_log):

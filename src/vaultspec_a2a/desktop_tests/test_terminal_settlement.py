@@ -24,12 +24,7 @@ monkeypatch, stub, skip, or expected failure is used; children are reaped in a
 
 from __future__ import annotations
 
-import asyncio
-import contextlib
 import json
-import os
-import subprocess
-import sys
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -37,40 +32,34 @@ from typing import TYPE_CHECKING, Any
 
 import httpx
 
-from ..desktop._platform_acl import harden_credential_file
 from ..desktop.credentials import (
-    ATTACH_CREDENTIAL_NAME,
-    OWNERSHIP_CAPABILITY_NAME,
     WORKER_IPC_CREDENTIAL_NAME,
     create_worker_ipc_credential,
 )
 from ..desktop.profile import derive_state_paths
-from ..utils import kill_pid_tree_async
-from ._boot import spawn_until_ready
+from ..tests.gateway_boot import (
+    armed_gateway_env,
+    gateway_script,
+    reap_gateway,
+    seat_valid_database,
+    seed_credentials,
+    spawn_gateway,
+    spawn_until_ready,
+)
 
 if TYPE_CHECKING:
+    import subprocess
     from pathlib import Path
 
 _ATTACH = "attach-credential-settlement-1234567890abcdef"
 _OWNERSHIP = "ownership-capability-settlement-fedcba0987654321"
 _UNRELATED = "unrelated-credential-000000000000000000"
-_DIGEST = "b" * 64
-_MODULE = "vaultspec_a2a.cli.main"
 _PRESET = "mock-success-single"
 _REQUIRED_ROLE = "mock-coder-success"
 _ACTOR_TOKEN = "tok-coder-secret-value"
 
-_GATEWAY = """
-import logging
-import sys
-
-logging.basicConfig(level=logging.INFO)
-import uvicorn
-from vaultspec_a2a.api.app import create_app
-
-port = int(sys.argv[1])
-uvicorn.run(create_app(), host="127.0.0.1", port=port, log_level="info")
-"""
+# The INFO variant, so the gateway's settlement narration reaches the log.
+_GATEWAY = gateway_script(log_level="info")
 
 
 # ---------------------------------------------------------------------------
@@ -148,36 +137,6 @@ def _start_receiver(
 # ---------------------------------------------------------------------------
 
 
-def _seed_credentials(app_home: Path) -> None:
-    """Write the dashboard-created attach and ownership files."""
-    state = derive_state_paths(app_home)
-    state.credentials_dir.mkdir(parents=True, exist_ok=True)
-    for name, secret in (
-        (ATTACH_CREDENTIAL_NAME, _ATTACH),
-        (OWNERSHIP_CAPABILITY_NAME, _OWNERSHIP),
-    ):
-        path = state.credentials_dir / name
-        path.write_text(secret, encoding="utf-8")
-        harden_credential_file(path)
-
-
-def _seat_valid_database(app_home: Path) -> None:
-    """Seat a valid desktop database via the real migrate entrypoint."""
-    command = [
-        sys.executable,
-        "-m",
-        _MODULE,
-        "migrate",
-        "--app-home",
-        str(app_home),
-    ]
-    result = subprocess.run(command, capture_output=True, text=True, timeout=180)
-    assert result.returncode == 0, f"migrate failed: {result.stdout}\n{result.stderr}"
-    payload = json.loads(result.stdout.strip())
-    assert payload["status"] == "succeeded", payload
-    assert derive_state_paths(app_home).database_path.is_file()
-
-
 def _prepare_and_commit(base: str, auth: str) -> dict[str, Any]:
     """Prepare then commit one mock run; return the commit response body."""
     run_id = "run-terminal-settlement"
@@ -220,8 +179,8 @@ def test_terminal_settlement_authenticates_with_attach_retries_and_revokes_once(
     """A completed run settles with attach-control, retries, and revokes one lease."""
     app_home = tmp_path / "app-home"
     app_home.mkdir()
-    _seed_credentials(app_home)
-    _seat_valid_database(app_home)
+    seed_credentials(app_home, attach=_ATTACH, ownership=_OWNERSHIP)
+    seat_valid_database(app_home)
 
     server, receiver_port, state = _start_receiver(_ATTACH, fail_first=True)
 
@@ -230,20 +189,20 @@ def test_terminal_settlement_authenticates_with_attach_retries_and_revokes_once(
     log_handle = log_path.open("wb")
 
     def _spawn(gateway_port: int, worker_port: int) -> subprocess.Popen[bytes]:
-        env = os.environ.copy()
-        env["VAULTSPEC_DESKTOP_APP_HOME"] = str(app_home)
-        env["VAULTSPEC_ENVIRONMENT"] = "production"
-        env["VAULTSPEC_PORT"] = str(gateway_port)
-        env["VAULTSPEC_WORKER_PORT"] = str(worker_port)
-        env["VAULTSPEC_AUTO_SPAWN_WORKER"] = "true"
-        env["VAULTSPEC_DESKTOP_SETTLEMENT_URL"] = (
-            f"http://127.0.0.1:{receiver_port}/settle"
-        )
-        return subprocess.Popen(
-            [sys.executable, "-c", _GATEWAY, str(gateway_port)],
-            env=env,
-            stdout=log_handle,
-            stderr=subprocess.STDOUT,
+        return spawn_gateway(
+            script=_GATEWAY,
+            gateway_port=gateway_port,
+            env=armed_gateway_env(
+                app_home,
+                gateway_port=gateway_port,
+                worker_port=worker_port,
+                extra={
+                    "VAULTSPEC_DESKTOP_SETTLEMENT_URL": (
+                        f"http://127.0.0.1:{receiver_port}/settle"
+                    )
+                },
+            ),
+            log_handle=log_handle,
         )
 
     proc, _gateway_port, _worker_port, base = spawn_until_ready(
@@ -307,12 +266,7 @@ def test_terminal_settlement_authenticates_with_attach_retries_and_revokes_once(
         assert set(revoked) == {lease_id}, revoked
     finally:
         server.shutdown()
-        with contextlib.suppress(Exception):
-            asyncio.run(
-                kill_pid_tree_async(proc.pid, term_timeout=10.0, kill_timeout=5.0)
-            )
-        with contextlib.suppress(subprocess.TimeoutExpired):
-            proc.wait(timeout=15)
+        reap_gateway(proc)
         log_handle.close()
 
 

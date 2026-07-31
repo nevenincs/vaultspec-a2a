@@ -39,6 +39,7 @@ from ..service_tests._live_desktop_gateway import (
     ATTACH_CREDENTIAL,
     armed_gateway,
 )
+from ..tests.gateway_boot import free_port
 from ..utils.process import ProcessContainment
 
 if TYPE_CHECKING:
@@ -50,12 +51,6 @@ if TYPE_CHECKING:
 _RUN_ID = "run-cross-repo-lost-ack"
 _ENGINE_COMMAND_ENV = "VAULTSPEC_ENGINE_SERVE_CMD"
 _MAX_RELAY_MESSAGE_BYTES = 4 * 1024 * 1024
-
-
-def _free_port() -> int:
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-        sock.bind(("127.0.0.1", 0))
-        return int(sock.getsockname()[1])
 
 
 def _read_http_request(stream: socket.socket) -> bytes:
@@ -422,7 +417,7 @@ def test_production_engine_recovers_lost_run_start_ack_exactly_once(
     workspace = tmp_path / "dashboard-workspace"
     _provision_workspace(workspace)
     app_home = tmp_path / "app-home"
-    engine_port = _free_port()
+    engine_port = free_port()
     engine_base = f"http://127.0.0.1:{engine_port}"
     engine_log = tmp_path / "engine.log"
 

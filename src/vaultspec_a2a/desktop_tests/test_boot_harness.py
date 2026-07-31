@@ -23,11 +23,11 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from ..desktop_tests._boot import (
+from ..lifecycle.discovery import is_pid_alive
+from ..tests.gateway_boot import (
     GatewayBootError,
     spawn_until_ready,
 )
-from ..lifecycle.discovery import is_pid_alive
 
 if TYPE_CHECKING:
     from pathlib import Path

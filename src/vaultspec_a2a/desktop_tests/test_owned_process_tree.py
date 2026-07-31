@@ -19,7 +19,6 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-import json
 import os
 import socket
 import subprocess
@@ -30,12 +29,6 @@ from typing import TYPE_CHECKING, Any, cast
 import httpx
 import pytest
 
-from ..desktop._platform_acl import harden_credential_file
-from ..desktop.credentials import (
-    ATTACH_CREDENTIAL_NAME,
-    OWNERSHIP_CAPABILITY_NAME,
-)
-from ..desktop.profile import derive_state_paths
 from ..lifecycle.discovery import is_pid_alive
 from ..providers._acp_rpc_handlers import (
     on_terminal_create,
@@ -43,9 +36,17 @@ from ..providers._acp_rpc_handlers import (
 )
 from ..providers._acp_types import _AcpModelConfig, _AcpSessionContext
 from ..providers._subprocess import kill_process_tree, spawn_acp_process
+from ..tests.gateway_boot import (
+    armed_gateway_env,
+    gateway_script,
+    reap_gateway,
+    seat_valid_database,
+    seed_credentials,
+    spawn_gateway,
+    spawn_until_ready,
+)
 from ..utils import kill_pid_tree_async
 from ..utils.process import ProcessContainment
-from ._boot import spawn_until_ready
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -226,47 +227,10 @@ async def test_terminal_child_tree_contained_and_reaped(tmp_path: Path) -> None:
 
 _ATTACH = "attach-credential-ownedtree-1234567890abcdef"
 _OWNERSHIP = "ownership-capability-ownedtree-fedcba0987654321"
-_DIGEST = "e" * 64
-_MODULE = "vaultspec_a2a.cli.main"
 _PRESET = "mock-success-single"
 
-_GATEWAY = """
-import logging
-import sys
-
-logging.basicConfig(level=logging.INFO)
-import uvicorn
-from vaultspec_a2a.api.app import create_app
-
-port = int(sys.argv[1])
-uvicorn.run(create_app(), host="127.0.0.1", port=port, log_level="info")
-"""
-
-
-def _seed_credentials(app_home: Path) -> None:
-    state = derive_state_paths(app_home)
-    state.credentials_dir.mkdir(parents=True, exist_ok=True)
-    for name, secret in (
-        (ATTACH_CREDENTIAL_NAME, _ATTACH),
-        (OWNERSHIP_CAPABILITY_NAME, _OWNERSHIP),
-    ):
-        path = state.credentials_dir / name
-        path.write_text(secret, encoding="utf-8")
-        harden_credential_file(path)
-
-
-def _seat_valid_database(app_home: Path) -> None:
-    command = [
-        sys.executable,
-        "-m",
-        _MODULE,
-        "migrate",
-        "--app-home",
-        str(app_home),
-    ]
-    result = subprocess.run(command, capture_output=True, text=True, timeout=180)
-    assert result.returncode == 0, f"migrate failed: {result.stdout}\n{result.stderr}"
-    assert json.loads(result.stdout.strip())["status"] == "succeeded"
+# The INFO variant, so the gateway's own worker-spawn narration reaches the log.
+_GATEWAY = gateway_script(log_level="info")
 
 
 def _port_listening(port: int, *, timeout: float = 0.5) -> bool:
@@ -290,25 +254,21 @@ def test_desktop_worker_tree_contained_and_reaped_on_graceful_shutdown(
     """
     app_home = tmp_path / "app-home"
     app_home.mkdir()
-    _seed_credentials(app_home)
-    _seat_valid_database(app_home)
+    seed_credentials(app_home, attach=_ATTACH, ownership=_OWNERSHIP)
+    seat_valid_database(app_home)
 
     auth = {"Authorization": f"Bearer {_ATTACH}"}
     log_path = tmp_path / "gateway.log"
     log_handle = log_path.open("wb")
 
     def _spawn(gateway_port: int, worker_port: int) -> subprocess.Popen[bytes]:
-        env = os.environ.copy()
-        env["VAULTSPEC_DESKTOP_APP_HOME"] = str(app_home)
-        env["VAULTSPEC_ENVIRONMENT"] = "production"
-        env["VAULTSPEC_PORT"] = str(gateway_port)
-        env["VAULTSPEC_WORKER_PORT"] = str(worker_port)
-        env["VAULTSPEC_AUTO_SPAWN_WORKER"] = "true"
-        return subprocess.Popen(
-            [sys.executable, "-c", _GATEWAY, str(gateway_port)],
-            env=env,
-            stdout=log_handle,
-            stderr=subprocess.STDOUT,
+        return spawn_gateway(
+            script=_GATEWAY,
+            gateway_port=gateway_port,
+            env=armed_gateway_env(
+                app_home, gateway_port=gateway_port, worker_port=worker_port
+            ),
+            log_handle=log_handle,
         )
 
     proc, _gateway_port, worker_port, base = spawn_until_ready(
@@ -372,9 +332,4 @@ def test_desktop_worker_tree_contained_and_reaped_on_graceful_shutdown(
             "graceful shutdown must free the gateway's pinned worker port"
         )
     finally:
-        with contextlib.suppress(Exception):
-            asyncio.run(
-                kill_pid_tree_async(proc.pid, term_timeout=10.0, kill_timeout=5.0)
-            )
-        with contextlib.suppress(subprocess.TimeoutExpired):
-            proc.wait(timeout=15)
+        reap_gateway(proc)

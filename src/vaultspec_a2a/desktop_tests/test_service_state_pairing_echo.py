@@ -27,7 +27,6 @@ reaped in a ``finally``.
 
 from __future__ import annotations
 
-import contextlib
 import subprocess
 import sys
 from typing import TYPE_CHECKING, Any
@@ -39,11 +38,10 @@ from ..control.worker_management import (
     GATEWAY_LIFETIME_ID,
     WORKER_GENERATION_ENV,
 )
+from ..tests.gateway_boot import armed_gateway_env, reap_gateway
 from .test_ownership_prerequisites import (
-    _armed_env,
     _armed_serve,
     _prepare,
-    _reap,
     _worker_health,
     _worker_ipc_secret,
 )
@@ -164,11 +162,11 @@ def test_service_state_reports_blank_for_a_worker_it_did_not_spawn(
         # A real production worker that no gateway spawned. Both pairing
         # variables are cleared so an inherited value from the test host cannot
         # forge the evidence at issue.
-        stray_env = _armed_env(
+        stray_env = armed_gateway_env(
             app_home,
             gateway_port=port,
             worker_port=worker_port,
-            auto_spawn=False,
+            auto_spawn_worker=False,
         )
         stray_env["VAULTSPEC_INTERNAL_TOKEN"] = secret
         stray_env.pop(GATEWAY_LIFETIME_ENV, None)
@@ -200,7 +198,5 @@ def test_service_state_reports_blank_for_a_worker_it_did_not_spawn(
             assert after["worker_paired_gateway_lifetime"] != gateway_lifetime, after
             assert after["worker_generation"] == "", after
         finally:
-            _reap(stray.pid)
-            with contextlib.suppress(subprocess.TimeoutExpired):
-                stray.wait(timeout=15)
+            reap_gateway(stray)
             stray_log.close()

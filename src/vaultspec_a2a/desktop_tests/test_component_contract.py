@@ -16,7 +16,6 @@ dashboard release-set verifier.
 from __future__ import annotations
 
 import json
-import os
 import shutil
 import subprocess
 import tarfile
@@ -32,6 +31,7 @@ from ..desktop import (
     ComponentIdentity,
     export_component_manifest_schema,
 )
+from ..tests.gateway_boot import clean_subprocess_environment
 
 _PROJECT_ROOT: Final = Path(__file__).resolve().parents[3]
 _SCHEMA_SNAPSHOT: Final = _PROJECT_ROOT / "schemas" / "desktop-capsule-manifest.json"
@@ -70,25 +70,11 @@ class WheelEvidence:
     license_expression: str
 
 
-def _clean_environment() -> dict[str, str]:
-    environment = dict(os.environ)
-    for name in (
-        "PYTHONHOME",
-        "PYTHONPATH",
-        "UV_PROJECT_ENVIRONMENT",
-        "VIRTUAL_ENV",
-    ):
-        environment.pop(name, None)
-    environment["NO_COLOR"] = "1"
-    environment["UV_NO_PROGRESS"] = "1"
-    return environment
-
-
 def _run(command: list[str], *, cwd: Path, timeout: int = 300) -> str:
     result = subprocess.run(
         command,
         cwd=cwd,
-        env=_clean_environment(),
+        env=clean_subprocess_environment(),
         capture_output=True,
         text=True,
         timeout=timeout,

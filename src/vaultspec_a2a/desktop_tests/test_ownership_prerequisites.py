@@ -35,9 +35,6 @@ expected failure is used; every child is reaped in a ``finally``.
 
 from __future__ import annotations
 
-import asyncio
-import contextlib
-import os
 import subprocess
 import sys
 import time
@@ -65,14 +62,16 @@ from ..lifecycle.singleton import (
     recorded_process_is_live,
     singleton_record_path,
 )
-from ..utils import kill_pid_tree_async
-from ._boot import free_port, spawn_until_ready
-from .test_run_admission import (
-    _ATTACH,
-    _OWNERSHIP,
-    _seat_valid_database,
-    _seed_credentials,
+from ..tests.gateway_boot import (
+    READINESS_TIMEOUT,
+    armed_gateway_env,
+    free_port,
+    reap_gateway,
+    seat_valid_database,
+    seed_credentials,
+    spawn_until_ready,
 )
+from .test_run_admission import _ATTACH, _OWNERSHIP
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -82,24 +81,6 @@ _CLI_MODULE = "vaultspec_a2a.cli.main"
 _PRESET = "mock-success-single"
 # Raised by the runtime singleton when a second gateway contends one home.
 _CONFLICT_REFUSAL = "refusing to start a second gateway on one application home"
-
-
-def _armed_env(
-    app_home: Path, *, gateway_port: int, worker_port: int, auto_spawn: bool
-) -> dict[str, str]:
-    """Build the armed desktop environment shared by a real gateway and worker.
-
-    The worker derives its declared ``gateway_url`` from the same gateway port,
-    which is what lets a gateway-spawned worker and an independently started one
-    be compared on identical addressing facts.
-    """
-    env = os.environ.copy()
-    env["VAULTSPEC_DESKTOP_APP_HOME"] = str(app_home)
-    env["VAULTSPEC_ENVIRONMENT"] = "production"
-    env["VAULTSPEC_PORT"] = str(gateway_port)
-    env["VAULTSPEC_WORKER_PORT"] = str(worker_port)
-    env["VAULTSPEC_AUTO_SPAWN_WORKER"] = "true" if auto_spawn else "false"
-    return env
 
 
 @contextmanager
@@ -116,40 +97,32 @@ def _armed_serve(
     """
     app_home = tmp_path / "app-home"
     app_home.mkdir()
-    _seed_credentials(app_home)
-    _seat_valid_database(app_home)
+    seed_credentials(app_home, attach=_ATTACH, ownership=_OWNERSHIP)
+    seat_valid_database(app_home)
     log_path = tmp_path / "gateway.log"
     log_handle = log_path.open("wb")
 
     def _spawn(gateway_port: int, worker_port: int) -> subprocess.Popen[bytes]:
         return subprocess.Popen(
             [sys.executable, "-m", _CLI_MODULE, "serve"],
-            env=_armed_env(
+            env=armed_gateway_env(
                 app_home,
                 gateway_port=gateway_port,
                 worker_port=worker_port,
-                auto_spawn=auto_spawn,
+                auto_spawn_worker=auto_spawn,
             ),
             stdout=log_handle,
             stderr=subprocess.STDOUT,
         )
 
     proc, gateway_port, worker_port, base = spawn_until_ready(
-        _spawn, log_path=log_path, timeout=60.0
+        _spawn, log_path=log_path, timeout=READINESS_TIMEOUT
     )
     try:
         yield app_home, gateway_port, worker_port, base
     finally:
-        _reap(proc.pid)
-        with contextlib.suppress(subprocess.TimeoutExpired):
-            proc.wait(timeout=15)
+        reap_gateway(proc)
         log_handle.close()
-
-
-def _reap(pid: int) -> None:
-    """Terminate a real process tree, tolerating an already-dead root."""
-    with contextlib.suppress(Exception):
-        asyncio.run(kill_pid_tree_async(pid, term_timeout=10.0, kill_timeout=5.0))
 
 
 def _worker_ipc_secret(app_home: Path) -> str:
@@ -237,11 +210,11 @@ def test_armed_serve_holds_the_singleton_and_hardens_every_credential(
         # A second gateway, same home, DIFFERENT port: refused at acquisition.
         second = subprocess.run(
             [sys.executable, "-m", _CLI_MODULE, "serve"],
-            env=_armed_env(
+            env=armed_gateway_env(
                 app_home,
                 gateway_port=free_port(),
                 worker_port=free_port(),
-                auto_spawn=False,
+                auto_spawn_worker=False,
             ),
             capture_output=True,
             text=True,
@@ -326,11 +299,11 @@ def test_ownership_prerequisites_never_identify_a_worker(tmp_path: Path) -> None
         # gateway-minted credential. The two pairing variables are cleared so an
         # inherited value from the test host cannot forge the evidence at issue.
         stray_port = free_port()
-        stray_env = _armed_env(
+        stray_env = armed_gateway_env(
             app_home,
             gateway_port=port,
             worker_port=stray_port,
-            auto_spawn=False,
+            auto_spawn_worker=False,
         )
         stray_env["VAULTSPEC_INTERNAL_TOKEN"] = secret
         stray_env.pop(GATEWAY_LIFETIME_ENV, None)
@@ -405,7 +378,5 @@ def test_ownership_prerequisites_never_identify_a_worker(tmp_path: Path) -> None
                 is WorkerPairingVerdict.FOREIGN
             )
         finally:
-            _reap(stray.pid)
-            with contextlib.suppress(subprocess.TimeoutExpired):
-                stray.wait(timeout=15)
+            reap_gateway(stray)
             stray_log.close()

@@ -17,6 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 
 from ...database.models import ThreadModel
 from ...database.thread_repository import create_thread
+from ...tests.gateway_boot import free_port
 from ...thread.enums import ThreadStatus
 
 if TYPE_CHECKING:
@@ -36,26 +37,12 @@ _READY_ATTEMPTS = 3000
 _READY_INTERVAL_SECONDS = 0.02
 
 
-def _unused_loopback_port() -> int:
-    """Return a loopback port that was free a moment ago.
-
-    Binding to port zero and closing hands back a number rather than a
-    reservation, so the port can be taken between this call and the child
-    binding it. The window is small but real, and it widens under a loaded
-    suite - callers that fail to become ready should treat a bind conflict as a
-    plausible cause rather than assuming the service is broken.
-    """
-    with socket.socket() as listener:
-        listener.bind(("127.0.0.1", 0))
-        return int(listener.getsockname()[1])
-
-
 @asynccontextmanager
 async def _production_gateway(
     tmp_path: Path,
 ) -> AsyncIterator[tuple[str, async_sessionmaker[AsyncSession]]]:
     """Boot the installed gateway with its production lifespan and real storage."""
-    port = _unused_loopback_port()
+    port = free_port()
     database_path = tmp_path / "gateway.db"
     database_url = f"sqlite+aiosqlite:///{database_path.as_posix()}"
     checkpoint_path = tmp_path / "checkpoints.db"
@@ -75,7 +62,7 @@ async def _production_gateway(
             "VAULTSPEC_WORKSPACE_ROOT": str(tmp_path / "managed-workspaces"),
             "VAULTSPEC_AUTO_SPAWN_WORKER": "false",
             "VAULTSPEC_REPAIR_ON_STARTUP": "false",
-            "VAULTSPEC_WORKER_URL": f"http://127.0.0.1:{_unused_loopback_port()}",
+            "VAULTSPEC_WORKER_URL": f"http://127.0.0.1:{free_port()}",
             "VAULTSPEC_INTERNAL_TOKEN": _WORKER_TOKEN,
             "VAULTSPEC_A2A_GATEWAY_TOKEN": _SERVICE_TOKEN,
         }

@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import contextlib
 import json
+import os
 import subprocess
 import sys
 import time
@@ -29,19 +30,23 @@ from typing import TYPE_CHECKING, Any
 import httpx
 
 from ..lifecycle.discovery import is_pid_alive
-from .test_run_admission import (
-    _ATTACH,
-    _GATEWAY,
-    _seat_valid_database,
-    _seed_credentials,
+from ..tests.gateway_boot import (
+    armed_gateway_env,
+    await_gateway_ready,
+    free_port,
+    gateway_script,
+    reap_gateway,
+    seat_valid_database,
+    seed_credentials,
+    spawn_gateway,
+    spawn_until_ready,
 )
+from .test_run_admission import _ATTACH, _OWNERSHIP
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
 
-import os
-
-from ._boot import await_gateway_ready, free_port, spawn_until_ready
+_GATEWAY = gateway_script(log_level="info")
 
 _SQUATTER = """
 import json
@@ -118,39 +123,26 @@ def _armed_gateway_on_worker_port(
     """
     app_home = tmp_path / home_name
     app_home.mkdir()
-    _seed_credentials(app_home)
-    _seat_valid_database(app_home)
+    seed_credentials(app_home, attach=_ATTACH, ownership=_OWNERSHIP)
+    seat_valid_database(app_home)
     log_path = tmp_path / f"{home_name}-gateway.log"
     log_handle = log_path.open("wb")
 
     def _spawn(gateway_port: int, _ignored: int) -> subprocess.Popen[bytes]:
-        env = os.environ.copy()
-        env["VAULTSPEC_DESKTOP_APP_HOME"] = str(app_home)
-        env["VAULTSPEC_ENVIRONMENT"] = "production"
-        env["VAULTSPEC_PORT"] = str(gateway_port)
-        env["VAULTSPEC_WORKER_PORT"] = str(worker_port)
-        env["VAULTSPEC_AUTO_SPAWN_WORKER"] = "true"
-        return subprocess.Popen(
-            [sys.executable, "-c", _GATEWAY, str(gateway_port)],
-            env=env,
-            stdout=log_handle,
-            stderr=subprocess.STDOUT,
+        return spawn_gateway(
+            script=_GATEWAY,
+            gateway_port=gateway_port,
+            env=armed_gateway_env(
+                app_home, gateway_port=gateway_port, worker_port=worker_port
+            ),
+            log_handle=log_handle,
         )
 
     proc, _gateway_port, _ignored, base = spawn_until_ready(_spawn, log_path=log_path)
     try:
         yield base, f"Bearer {_ATTACH}", log_path
     finally:
-        import asyncio
-
-        from ..utils import kill_pid_tree_async
-
-        with contextlib.suppress(Exception):
-            asyncio.run(
-                kill_pid_tree_async(proc.pid, term_timeout=10.0, kill_timeout=5.0)
-            )
-        with contextlib.suppress(subprocess.TimeoutExpired):
-            proc.wait(timeout=15)
+        reap_gateway(proc)
         log_handle.close()
 
 
@@ -243,22 +235,18 @@ def test_legacy_gateway_url_echo_never_authorizes_adoption(tmp_path: Path) -> No
     }
     app_home = tmp_path / "app-home"
     app_home.mkdir()
-    _seed_credentials(app_home)
-    _seat_valid_database(app_home)
+    seed_credentials(app_home, attach=_ATTACH, ownership=_OWNERSHIP)
+    seat_valid_database(app_home)
     log_path = tmp_path / "gateway.log"
     log_handle = log_path.open("wb")
     with _squatter(tmp_path, worker_port, body) as (squatter, request_log):
-        env = os.environ.copy()
-        env["VAULTSPEC_DESKTOP_APP_HOME"] = str(app_home)
-        env["VAULTSPEC_ENVIRONMENT"] = "production"
-        env["VAULTSPEC_PORT"] = str(gateway_port)
-        env["VAULTSPEC_WORKER_PORT"] = str(worker_port)
-        env["VAULTSPEC_AUTO_SPAWN_WORKER"] = "true"
-        proc = subprocess.Popen(
-            [sys.executable, "-c", _GATEWAY, str(gateway_port)],
-            env=env,
-            stdout=log_handle,
-            stderr=subprocess.STDOUT,
+        proc = spawn_gateway(
+            script=_GATEWAY,
+            gateway_port=gateway_port,
+            env=armed_gateway_env(
+                app_home, gateway_port=gateway_port, worker_port=worker_port
+            ),
+            log_handle=log_handle,
         )
         try:
             base = f"http://127.0.0.1:{gateway_port}"
@@ -272,16 +260,7 @@ def test_legacy_gateway_url_echo_never_authorizes_adoption(tmp_path: Path) -> No
             requests = request_log.read_text(encoding="utf-8").splitlines()
             assert all(line.startswith("GET /health") for line in requests), requests
         finally:
-            import asyncio
-
-            from ..utils import kill_pid_tree_async
-
-            with contextlib.suppress(Exception):
-                asyncio.run(
-                    kill_pid_tree_async(proc.pid, term_timeout=10.0, kill_timeout=5.0)
-                )
-            with contextlib.suppress(subprocess.TimeoutExpired):
-                proc.wait(timeout=15)
+            reap_gateway(proc)
             log_handle.close()
 
 

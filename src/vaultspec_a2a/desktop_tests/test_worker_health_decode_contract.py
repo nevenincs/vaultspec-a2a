@@ -41,7 +41,7 @@ from ..control.worker_management import (
     _probe_worker_health,
     _worker_ready_and_ours,
 )
-from ._boot import free_port
+from ..tests.gateway_boot import free_port
 
 if TYPE_CHECKING:
     from collections.abc import Iterator

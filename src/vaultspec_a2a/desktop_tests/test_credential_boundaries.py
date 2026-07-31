@@ -23,98 +23,61 @@ stub, skip, or expected failure is used; the child is always torn down in a
 
 from __future__ import annotations
 
-import json
-import os
-import subprocess
-import sys
 from typing import TYPE_CHECKING
 
 import httpx
 
-from ..desktop._platform_acl import harden_credential_file
 from ..desktop.credentials import (
     ATTACH_CREDENTIAL_NAME,
-    OWNERSHIP_CAPABILITY_NAME,
 )
-from ..desktop.profile import derive_state_paths
-from ._boot import spawn_until_ready
+from ..tests.gateway_boot import (
+    armed_gateway_env,
+    gateway_script,
+    reap_gateway,
+    seat_valid_database,
+    seed_credentials,
+    spawn_gateway,
+    spawn_until_ready,
+)
 
 if TYPE_CHECKING:
+    import subprocess
     from pathlib import Path
 
 _ATTACH = "attach-credential-token-1234567890abcdef"
 _OWNERSHIP = "ownership-capability-token-fedcba0987654321"
 _LIFECYCLE_HEADER = "X-Vaultspec-Lifecycle-Capability"
-_DIGEST = "c" * 64
-_MODULE = "vaultspec_a2a.cli.main"
-
-# A real armed desktop gateway booting the *production* lifespan: create_app runs
-# the armed credential loading, and the lifespan validates the seated schema,
-# seats the application state, and publishes the versioned discovery record.
-_GATEWAY = """
-import sys
-import uvicorn
-from vaultspec_a2a.api.app import create_app
-
-port = int(sys.argv[1])
-uvicorn.run(create_app(), host="127.0.0.1", port=port, log_level="warning")
-"""
-
-
-def _seed_credentials(app_home: Path) -> Path:
-    """Write the dashboard-created attach and ownership files; return creds dir."""
-    state = derive_state_paths(app_home)
-    state.credentials_dir.mkdir(parents=True, exist_ok=True)
-    for name, secret in (
-        (ATTACH_CREDENTIAL_NAME, _ATTACH),
-        (OWNERSHIP_CAPABILITY_NAME, _OWNERSHIP),
-    ):
-        path = state.credentials_dir / name
-        path.write_text(secret, encoding="utf-8")
-        harden_credential_file(path)
-    return state.credentials_dir
-
-
-def _seat_valid_database(app_home: Path) -> None:
-    """Seat a valid desktop database via the real migrate entrypoint."""
-    command = [
-        sys.executable,
-        "-m",
-        _MODULE,
-        "migrate",
-        "--app-home",
-        str(app_home),
-    ]
-    result = subprocess.run(command, capture_output=True, text=True, timeout=180)
-    assert result.returncode == 0, f"migrate failed: {result.stdout}\n{result.stderr}"
-    payload = json.loads(result.stdout.strip())
-    assert payload["status"] == "succeeded", payload
-    assert derive_state_paths(app_home).database_path.is_file()
 
 
 def test_credential_planes_are_isolated_and_secret_free(tmp_path: Path) -> None:
     """The three planes are non-interchangeable and no secret ever leaks."""
     app_home = tmp_path / "app-home"
     app_home.mkdir()
-    credentials_dir = _seed_credentials(app_home)
-    _seat_valid_database(app_home)
+    credentials_dir = seed_credentials(app_home, attach=_ATTACH, ownership=_OWNERSHIP)
+    seat_valid_database(app_home)
     log_path = tmp_path / "gateway.log"
     log_handle = log_path.open("wb")
+    # A real armed desktop gateway booting the *production* lifespan: create_app
+    # runs the armed credential loading, and the lifespan validates the seated
+    # schema, seats the application state, and publishes the discovery record.
+    # The quiet variant keeps the log free of routine INFO chatter, so the
+    # secret-absence scan below reads a log carrying only real warnings.
+    script = gateway_script(log_level="warning")
 
-    def _spawn(port: int, _worker_port: int) -> subprocess.Popen[bytes]:
-        env = os.environ.copy()
-        env["VAULTSPEC_DESKTOP_APP_HOME"] = str(app_home)
-        env["VAULTSPEC_ENVIRONMENT"] = "production"
-        env["VAULTSPEC_PORT"] = str(port)
-        # The credential planes are the subject; keep the worker cold so no
-        # worker process is started behind this test.
-        env["VAULTSPEC_AUTO_SPAWN_WORKER"] = "false"
-        env["VAULTSPEC_REPAIR_ON_STARTUP"] = "false"
-        return subprocess.Popen(
-            [sys.executable, "-c", _GATEWAY, str(port)],
-            env=env,
-            stdout=log_handle,
-            stderr=subprocess.STDOUT,
+    def _spawn(port: int, worker_port: int) -> subprocess.Popen[bytes]:
+        return spawn_gateway(
+            script=script,
+            gateway_port=port,
+            env=armed_gateway_env(
+                app_home,
+                gateway_port=port,
+                worker_port=worker_port,
+                # The credential planes are the subject; keep the worker cold so
+                # no worker process is started behind this test.
+                auto_spawn_worker=False,
+                extra={"VAULTSPEC_REPAIR_ON_STARTUP": "false"},
+            ),
+            log_handle=log_handle,
         )
 
     proc, _port, _worker_port, base = spawn_until_ready(_spawn, log_path=log_path)
@@ -192,10 +155,9 @@ def test_credential_planes_are_isolated_and_secret_free(tmp_path: Path) -> None:
         for secret in (_ATTACH, _OWNERSHIP, worker_ipc):
             assert secret.encode("utf-8") not in log_bytes
     finally:
-        proc.terminate()
-        try:
-            proc.wait(timeout=25)
-        except subprocess.TimeoutExpired:  # pragma: no cover - defensive teardown
-            proc.kill()
-            proc.wait(timeout=25)
+        # The TREE, not the handle: on Windows the virtual-environment
+        # interpreter is a launcher stub, so a terminate() aimed at this handle
+        # leaves the real uvicorn gateway alive holding its port and its SQLite
+        # handles for the rest of the session.
+        reap_gateway(proc)
         log_handle.close()

@@ -17,9 +17,9 @@ from typing import Any
 
 import pytest
 
-from vaultspec_a2a.lifecycle.discovery import is_pid_alive
-from vaultspec_a2a.lifecycle.manager import _await_listener
-from vaultspec_a2a.utils.process import (
+from ...lifecycle.discovery import is_pid_alive
+from ...lifecycle.manager import _await_listener
+from ...utils.process import (
     ListenerOwnership,
     classify_listener_ownership,
     kill_pid_tree_async,

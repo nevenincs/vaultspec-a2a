@@ -16,9 +16,9 @@ import time
 
 import pytest
 
-from vaultspec_a2a.lifecycle.discovery import is_pid_alive
-from vaultspec_a2a.providers._subprocess import kill_process_tree, spawn_acp_process
-from vaultspec_a2a.utils.process import ProcessContainment
+from ...lifecycle.discovery import is_pid_alive
+from ...providers._subprocess import kill_process_tree, spawn_acp_process
+from ...utils.process import ProcessContainment
 
 # A "provider" that spawns a long-lived grandchild, prints its pid, then sleeps.
 _PROVIDER_WITH_GRANDCHILD = (
@@ -59,6 +59,6 @@ async def test_provider_tree_contained_and_reaped_whole() -> None:
         assert not is_pid_alive(grandchild_pid)
     finally:
         if is_pid_alive(grandchild_pid):
-            from vaultspec_a2a.utils.process import kill_pid_tree_async
+            from ...utils.process import kill_pid_tree_async
 
             await kill_pid_tree_async(grandchild_pid)

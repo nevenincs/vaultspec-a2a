@@ -9,7 +9,7 @@ import asyncio
 
 import pytest
 
-from vaultspec_a2a.control.drain import AdmissionState, DrainGate
+from ...control.drain import AdmissionState, DrainGate
 
 
 @pytest.mark.asyncio

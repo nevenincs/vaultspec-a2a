@@ -18,13 +18,13 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from vaultspec_a2a.control.config import settings
-from vaultspec_a2a.control.worker_management import (
+from ...control.config import settings
+from ...control.worker_management import (
     _evict_stale_worker,
     _worker_stderr_log_path,
     sweep_orphan_worker_logs,
 )
-from vaultspec_a2a.lifecycle.registry import ProcRecord, now_ms, write_record
+from ...lifecycle.registry import ProcRecord, now_ms, write_record
 
 if TYPE_CHECKING:
     from collections.abc import Iterator

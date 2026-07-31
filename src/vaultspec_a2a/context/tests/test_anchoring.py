@@ -1,7 +1,7 @@
 """Tests for build_anchoring_context."""
 
-from vaultspec_a2a.context.anchoring import build_anchoring_context
-from vaultspec_a2a.domain_config import domain_config
+from ...context.anchoring import build_anchoring_context
+from ...domain_config import domain_config
 
 
 def _make_state(**overrides):

@@ -28,8 +28,7 @@ from typing import TYPE_CHECKING, Any
 
 import httpx
 
-from vaultspec_a2a.lifecycle.discovery import is_pid_alive
-
+from ..lifecycle.discovery import is_pid_alive
 from .test_run_admission import (
     _ATTACH,
     _GATEWAY,
@@ -144,7 +143,7 @@ def _armed_gateway_on_worker_port(
     finally:
         import asyncio
 
-        from vaultspec_a2a.utils import kill_pid_tree_async
+        from ..utils import kill_pid_tree_async
 
         with contextlib.suppress(Exception):
             asyncio.run(
@@ -275,7 +274,7 @@ def test_legacy_gateway_url_echo_never_authorizes_adoption(tmp_path: Path) -> No
         finally:
             import asyncio
 
-            from vaultspec_a2a.utils import kill_pid_tree_async
+            from ..utils import kill_pid_tree_async
 
             with contextlib.suppress(Exception):
                 asyncio.run(
@@ -511,7 +510,7 @@ def test_failed_owner_authorized_eviction_is_conflict_without_adoption(
     finally:
         import asyncio
 
-        from vaultspec_a2a.utils import kill_pid_tree_async
+        from ..utils import kill_pid_tree_async
 
         with contextlib.suppress(Exception):
             asyncio.run(

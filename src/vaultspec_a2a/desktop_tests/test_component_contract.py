@@ -28,7 +28,7 @@ from typing import Final
 
 import pytest
 
-from vaultspec_a2a.desktop import (
+from ..desktop import (
     ComponentIdentity,
     export_component_manifest_schema,
 )

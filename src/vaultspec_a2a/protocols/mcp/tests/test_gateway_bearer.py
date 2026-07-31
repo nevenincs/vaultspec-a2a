@@ -19,9 +19,9 @@ from httpx import ASGITransport
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
 
-from vaultspec_a2a.control.config import settings
-from vaultspec_a2a.protocols.mcp import _http as mcp_http
-from vaultspec_a2a.protocols.mcp._http import (
+from ....control.config import settings
+from ....protocols.mcp import _http as mcp_http
+from ....protocols.mcp._http import (
     _get_known_presets,
     _mcp_request,
     _reset_known_presets,

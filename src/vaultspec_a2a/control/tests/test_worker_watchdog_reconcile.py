@@ -21,10 +21,10 @@ from typing import TYPE_CHECKING, Any
 
 import pytest
 
-from vaultspec_a2a.control.circuit_breaker import WorkerCircuitBreaker
-from vaultspec_a2a.control.config import settings
-from vaultspec_a2a.control.health import assemble_health_status
-from vaultspec_a2a.control.worker_management import (
+from ...control.circuit_breaker import WorkerCircuitBreaker
+from ...control.config import settings
+from ...control.health import assemble_health_status
+from ...control.worker_management import (
     LazyWorkerSpawner,
     WorkerState,
     WorkerWatchdog,

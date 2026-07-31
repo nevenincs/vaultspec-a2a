@@ -16,7 +16,7 @@ from typing import TYPE_CHECKING
 import httpx
 import pytest
 
-from vaultspec_a2a.control.worker_management import _check_worker_health
+from ...control.worker_management import _check_worker_health
 
 if TYPE_CHECKING:
     from collections.abc import Iterator

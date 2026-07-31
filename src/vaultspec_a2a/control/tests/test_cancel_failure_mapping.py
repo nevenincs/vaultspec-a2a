@@ -13,11 +13,11 @@ from __future__ import annotations
 import pytest
 from fastapi import HTTPException
 
-from vaultspec_a2a.control.cancel_service import (
+from ...control.cancel_service import (
     CancelResult,
     raise_for_cancel_failure,
 )
-from vaultspec_a2a.thread.dispatch_policy import FailureType
+from ...thread.dispatch_policy import FailureType
 
 
 def _result(failure: FailureType | None, *, detail: str | None = None) -> CancelResult:

@@ -110,7 +110,7 @@ def test_only_run_owned_specs_enter_the_projected_provider_tree(
     assert "foreign-ancestor-srv" in enumerated
     assert "foreign-ancestor-srv" not in run_owned
 
-    import vaultspec_a2a.providers._acp_project_mcp as mod
+    from .. import _acp_project_mcp as mod
 
     for banned in (
         "subprocess",

@@ -14,9 +14,9 @@ from typing import Any
 import pytest
 from langchain_core.language_models.fake_chat_models import FakeChatModel
 
-from vaultspec_a2a.team.team_config import load_agent_config, load_team_config
-from vaultspec_a2a.thread.errors import IsolationRequiredError
-from vaultspec_a2a.worker.graph_lifecycle import assert_armed_lanes_authenticated
+from ...team.team_config import load_agent_config, load_team_config
+from ...thread.errors import IsolationRequiredError
+from ...worker.graph_lifecycle import assert_armed_lanes_authenticated
 
 
 class _LaneModel(FakeChatModel):

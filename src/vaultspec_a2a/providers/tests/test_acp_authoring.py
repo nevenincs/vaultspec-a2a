@@ -368,7 +368,7 @@ class TestAcpWriteGitSerialization:
         re-imports the module attribute on every call) contend on the same loop,
         then restore the original so the global is never left mutated.
         """
-        import vaultspec_a2a.workspace.concurrency as concurrency
+        from ...workspace import concurrency
 
         original = concurrency.git_workspace_mutex
         fresh = asyncio.Lock()

@@ -20,7 +20,7 @@ from typing import Any
 
 from langchain_core.messages import AIMessage, AIMessageChunk
 
-from vaultspec_a2a.streaming.aggregator import EventAggregator
+from ...streaming.aggregator import EventAggregator
 
 _THREAD = "t-char"
 _AGENT = "a-char"

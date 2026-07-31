@@ -8,13 +8,13 @@ from typing import TYPE_CHECKING
 
 import click
 
-from vaultspec_a2a.cli.main import main
-from vaultspec_a2a.control.config import settings
-from vaultspec_a2a.desktop._platform_acl import harden_credential_file
-from vaultspec_a2a.desktop.credentials import ATTACH_CREDENTIAL_NAME
-from vaultspec_a2a.desktop.profile import derive_state_paths
-from vaultspec_a2a.gateway_auth import gateway_auth_headers
-from vaultspec_a2a.lifecycle.discovery import (
+from ...cli.main import main
+from ...control.config import settings
+from ...desktop._platform_acl import harden_credential_file
+from ...desktop.credentials import ATTACH_CREDENTIAL_NAME
+from ...desktop.profile import derive_state_paths
+from ...gateway_auth import gateway_auth_headers
+from ...lifecycle.discovery import (
     service_json_path,
     write_desktop_discovery,
 )

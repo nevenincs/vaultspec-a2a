@@ -13,13 +13,13 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from vaultspec_a2a.control.cleanup import execute_cleanup_manifest
-from vaultspec_a2a.control.repositories import (
+from ....control.cleanup import execute_cleanup_manifest
+from ....control.repositories import (
     CleanupItem,
     CleanupItemResult,
     CleanupItemState,
 )
-from vaultspec_a2a.thread.enums import CleanupKind
+from ....thread.enums import CleanupKind
 
 if TYPE_CHECKING:
     import pathlib

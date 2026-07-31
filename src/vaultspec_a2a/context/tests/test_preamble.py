@@ -4,8 +4,8 @@ from pathlib import Path
 
 from langchain_core.messages import SystemMessage
 
-from vaultspec_a2a.context.metadata import ContextRef, ThreadMetadata
-from vaultspec_a2a.context.preamble import build_context_preamble
+from ...context.metadata import ContextRef, ThreadMetadata
+from ...context.preamble import build_context_preamble
 
 
 class TestBuildContextPreamble:

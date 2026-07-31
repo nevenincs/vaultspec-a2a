@@ -15,15 +15,15 @@ from types import SimpleNamespace
 import httpx
 import pytest
 
-from vaultspec_a2a.control.circuit_breaker import WorkerCircuitBreaker
-from vaultspec_a2a.control.dispatch import (
+from ...control.circuit_breaker import WorkerCircuitBreaker
+from ...control.dispatch import (
     _REDISPATCH_LOG_EVERY_N,
     redispatch_reconciling_threads,
 )
-from vaultspec_a2a.control.worker_management import LazyWorkerSpawner
-from vaultspec_a2a.database import create_thread
-from vaultspec_a2a.database.session import close_db, get_session_factory, init_db
-from vaultspec_a2a.thread.enums import ThreadStatus
+from ...control.worker_management import LazyWorkerSpawner
+from ...database import create_thread
+from ...database.session import close_db, get_session_factory, init_db
+from ...thread.enums import ThreadStatus
 
 _LOGGER_NAME = "vaultspec_a2a.control.dispatch"
 

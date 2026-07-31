@@ -2,7 +2,7 @@
 
 from sqlalchemy.dialects import postgresql, sqlite
 
-from vaultspec_a2a.database.thread_repository import _active_thread_page_statement
+from ...database.thread_repository import _active_thread_page_statement
 
 
 def test_run_id_filter_compiles_for_sqlite_and_postgresql() -> None:

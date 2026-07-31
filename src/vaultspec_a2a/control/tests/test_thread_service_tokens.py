@@ -22,16 +22,16 @@ from httpx import ASGITransport
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
-from vaultspec_a2a.control.circuit_breaker import WorkerCircuitBreaker
-from vaultspec_a2a.control.thread_service import (
+from ...control.circuit_breaker import WorkerCircuitBreaker
+from ...control.thread_service import (
     ThreadCreationRequest,
     create_and_dispatch_thread,
     generate_thread_id,
 )
-from vaultspec_a2a.control.worker_management import LazyWorkerSpawner
-from vaultspec_a2a.database.models import Base, ControlActionModel
-from vaultspec_a2a.domain_config import domain_config
-from vaultspec_a2a.thread.actor_tokens import ActorTokenBundle
+from ...control.worker_management import LazyWorkerSpawner
+from ...database.models import Base, ControlActionModel
+from ...domain_config import domain_config
+from ...thread.actor_tokens import ActorTokenBundle
 
 _CODER_TOKEN = "secret-coder-xyz"
 _REVIEWER_TOKEN = "secret-reviewer-xyz"

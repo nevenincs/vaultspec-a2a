@@ -8,15 +8,15 @@ import pytest
 from starlette.testclient import TestClient
 from starlette.websockets import WebSocketDisconnect
 
-from vaultspec_a2a.api.app import create_app
-from vaultspec_a2a.streaming.aggregator import EventAggregator
+from ...api.app import create_app
+from ...streaming.aggregator import EventAggregator
 
 _TOKEN = "attach-credential-token-0f1e2d3c4b5a6978"
 
 
 def _gated_ws_app():
     """A real gateway app with the WS attach gate armed and a connection manager."""
-    from vaultspec_a2a.api.websocket import ConnectionManager
+    from ...api.websocket import ConnectionManager
 
     @asynccontextmanager
     async def _noop_lifespan(_app):

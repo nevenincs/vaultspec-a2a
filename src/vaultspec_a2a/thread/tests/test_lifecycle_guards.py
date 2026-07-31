@@ -1,4 +1,4 @@
-from vaultspec_a2a.thread.lifecycle_guards import can_delete
+from ...thread.lifecycle_guards import can_delete
 
 
 def test_can_delete_rejects_input_required_threads() -> None:

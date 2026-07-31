@@ -23,13 +23,12 @@ if TYPE_CHECKING:
 
 from langchain_core.messages import AIMessage
 
-from vaultspec_a2a.team.team_config import (
+from ...team.team_config import (
     ResearchThreadSpec,
     load_agent_config,
     load_team_config,
 )
-from vaultspec_a2a.thread.errors import ConfigError
-
+from ...thread.errors import ConfigError
 from ..compiler import _doc_review_router, compile_team_graph
 
 

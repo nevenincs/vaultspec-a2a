@@ -31,10 +31,10 @@ from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
 from langchain_core.outputs import ChatGeneration, ChatResult
 from pydantic import PrivateAttr
 
-from vaultspec_a2a.authoring import FeedbackContextReader
-from vaultspec_a2a.graph.nodes.worker import create_worker_node
-from vaultspec_a2a.thread.actor_tokens import ActorTokenBundle
-from vaultspec_a2a.worker.token_store import RunTokenStore
+from ....authoring import FeedbackContextReader
+from ....graph.nodes.worker import create_worker_node
+from ....thread.actor_tokens import ActorTokenBundle
+from ....worker.token_store import RunTokenStore
 
 _STALE_MS = 120_000
 _SYNTHESIST = "vaultspec-synthesist"

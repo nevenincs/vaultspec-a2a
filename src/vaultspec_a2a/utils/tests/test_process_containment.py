@@ -14,8 +14,8 @@ import time
 
 import pytest
 
-from vaultspec_a2a.lifecycle.discovery import is_pid_alive
-from vaultspec_a2a.utils.process import ProcessContainment
+from ...lifecycle.discovery import is_pid_alive
+from ...utils.process import ProcessContainment
 
 # A parent that spawns a long-lived grandchild, prints its pid, then sleeps.
 _SPAWN_GRANDCHILD = (
@@ -67,7 +67,7 @@ async def test_terminate_fells_the_contained_tree() -> None:
             parent.kill()
             parent.wait()
         if is_pid_alive(grandchild_pid):
-            from vaultspec_a2a.utils.process import kill_pid_tree_async
+            from ...utils.process import kill_pid_tree_async
 
             await kill_pid_tree_async(grandchild_pid)
 
@@ -130,7 +130,7 @@ async def test_terminate_reaps_orphaned_descendant_without_parent_link() -> None
             parent.kill()
             parent.wait()
         if is_pid_alive(grandchild_pid):
-            from vaultspec_a2a.utils.process import kill_pid_tree_async
+            from ...utils.process import kill_pid_tree_async
 
             await kill_pid_tree_async(grandchild_pid)
 

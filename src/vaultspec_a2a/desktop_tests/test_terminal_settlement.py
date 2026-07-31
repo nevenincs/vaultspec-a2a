@@ -37,16 +37,15 @@ from typing import TYPE_CHECKING, Any
 
 import httpx
 
-from vaultspec_a2a.desktop._platform_acl import harden_credential_file
-from vaultspec_a2a.desktop.credentials import (
+from ..desktop._platform_acl import harden_credential_file
+from ..desktop.credentials import (
     ATTACH_CREDENTIAL_NAME,
     OWNERSHIP_CAPABILITY_NAME,
     WORKER_IPC_CREDENTIAL_NAME,
     create_worker_ipc_credential,
 )
-from vaultspec_a2a.desktop.profile import derive_state_paths
-from vaultspec_a2a.utils import kill_pid_tree_async
-
+from ..desktop.profile import derive_state_paths
+from ..utils import kill_pid_tree_async
 from ._boot import spawn_until_ready
 
 if TYPE_CHECKING:

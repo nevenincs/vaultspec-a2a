@@ -5,8 +5,8 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
-from vaultspec_a2a.api.schemas.gateway import RunStartRequest
-from vaultspec_a2a.thread.actor_tokens import ActorTokenBundle
+from ...api.schemas.gateway import RunStartRequest
+from ...thread.actor_tokens import ActorTokenBundle
 
 
 def test_actor_token_bundle_accepts_production_role_grammar_and_redacts() -> None:

@@ -18,8 +18,8 @@ from typing import TYPE_CHECKING
 import click
 import pytest
 
-from vaultspec_a2a.cli.main import _acquire_singleton_for_serve
-from vaultspec_a2a.lifecycle.singleton import (
+from ...cli.main import _acquire_singleton_for_serve
+from ...lifecycle.singleton import (
     active_singleton,
     clear_active_singleton,
     default_owner,

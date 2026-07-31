@@ -7,10 +7,10 @@ from typing import TYPE_CHECKING
 import pytest
 from langchain_core.messages import HumanMessage, SystemMessage
 
-from vaultspec_a2a.thread.errors import WorkerExecutionError
+from ....thread.errors import WorkerExecutionError
 
 if TYPE_CHECKING:
-    from vaultspec_a2a.thread.state import TeamState
+    from ....thread.state import TeamState
 
 from ...nodes.worker import (
     _build_worker_messages,

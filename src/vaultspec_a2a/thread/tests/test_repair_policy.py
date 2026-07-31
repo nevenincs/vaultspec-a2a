@@ -1,7 +1,7 @@
 """Pure repair-policy lookups stay aligned with runtime repair transitions."""
 
-from vaultspec_a2a.thread.enums import ControlActionType, RepairStatus
-from vaultspec_a2a.thread.repair_policy import repair_state_for_action
+from ...thread.enums import ControlActionType, RepairStatus
+from ...thread.repair_policy import repair_state_for_action
 
 
 def test_message_followup_applied_uses_applied_enum_key() -> None:

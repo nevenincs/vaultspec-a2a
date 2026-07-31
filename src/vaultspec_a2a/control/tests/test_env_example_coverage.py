@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import pathlib
 
-from vaultspec_a2a.control.config import Settings
+from ...control.config import Settings
 
 # Settings that belong to the packaged desktop profile, which seats its own state
 # root and capsule assets. Neither is meaningful for a Compose deployment, so the

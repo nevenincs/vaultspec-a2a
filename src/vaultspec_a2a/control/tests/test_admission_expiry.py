@@ -1,6 +1,6 @@
 """Capacity expiry invariants for the production admission state machine."""
 
-from vaultspec_a2a.control.admission import (
+from ...control.admission import (
     AdmissionBroker,
     ReservationState,
     _Reservation,

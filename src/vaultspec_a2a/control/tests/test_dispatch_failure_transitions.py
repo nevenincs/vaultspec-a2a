@@ -7,19 +7,19 @@ import pytest
 import pytest_asyncio
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
-from vaultspec_a2a.control.circuit_breaker import WorkerCircuitBreaker
-from vaultspec_a2a.control.diagnostics import mark_thread_failed
-from vaultspec_a2a.control.message_service import send_followup_message
-from vaultspec_a2a.control.worker_management import LazyWorkerSpawner
-from vaultspec_a2a.database import (
+from ...control.circuit_breaker import WorkerCircuitBreaker
+from ...control.diagnostics import mark_thread_failed
+from ...control.message_service import send_followup_message
+from ...control.worker_management import LazyWorkerSpawner
+from ...database import (
     create_thread,
     get_pending_permission_requests,
     get_thread,
     record_permission_request,
 )
-from vaultspec_a2a.database.models import Base
-from vaultspec_a2a.graph.events import PermissionRequest
-from vaultspec_a2a.streaming.aggregator import EventAggregator
+from ...database.models import Base
+from ...graph.events import PermissionRequest
+from ...streaming.aggregator import EventAggregator
 
 
 @pytest_asyncio.fixture

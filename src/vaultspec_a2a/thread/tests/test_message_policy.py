@@ -1,4 +1,4 @@
-from vaultspec_a2a.thread.message_policy import can_send_followup
+from ...thread.message_policy import can_send_followup
 
 
 def test_repair_needed_threads_are_not_message_eligible() -> None:

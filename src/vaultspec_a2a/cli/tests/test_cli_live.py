@@ -273,7 +273,7 @@ def test_cli_reports_installed_package_version() -> None:
     expected value is derived from the same authority the CLI reports from
     rather than a hardcoded literal that would drift from the package version.
     """
-    from vaultspec_a2a.utils import package_version
+    from ...utils import package_version
 
     result = _run_cli("--version")
     assert result.returncode == 0, result.stderr

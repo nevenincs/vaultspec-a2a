@@ -11,18 +11,17 @@ from __future__ import annotations
 
 import pytest
 
-from vaultspec_a2a.context.harness import HarnessReadiness
-from vaultspec_a2a.control.config import settings
-from vaultspec_a2a.graph.enums import MODEL_MAP, Model, Provider
-from vaultspec_a2a.team.team_config import (
+from ...context.harness import HarnessReadiness
+from ...control.config import settings
+from ...graph.enums import MODEL_MAP, Model, Provider
+from ...team.team_config import (
     AgentConfig,
     TeamConfig,
     TeamProfileRoleConfig,
     WorkerRef,
     load_team_config,
 )
-from vaultspec_a2a.thread.errors import ConfigError
-
+from ...thread.errors import ConfigError
 from ..model_profiles import (
     _ACCEPTANCE_GATE_REASON,
     AssignmentSource,

@@ -1498,7 +1498,7 @@ class TestGetPendingPermissionsViaApp:
         """Aggregator-only permissions must not become public pending truth."""
         import time
 
-        from vaultspec_a2a.graph.events import PermissionRequest
+        from ....graph.events import PermissionRequest
 
         agg = EventAggregator()
         event = PermissionRequest(

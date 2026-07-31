@@ -2,7 +2,7 @@
 
 import pytest
 
-from vaultspec_a2a.context.stage import PHASE_ORDER, infer_phase_from_vault_index
+from ...context.stage import PHASE_ORDER, infer_phase_from_vault_index
 
 
 def test_empty_vault_index_returns_research() -> None:

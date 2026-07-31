@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import asyncio
 
-from vaultspec_a2a.control.worker_management import (
+from ...control.worker_management import (
     GATEWAY_LIFETIME_ENV,
     GATEWAY_LIFETIME_ID,
     WORKER_GENERATION_ENV,
@@ -34,7 +34,7 @@ def test_the_lifetime_identity_is_a_stable_non_empty_value() -> None:
     assert GATEWAY_LIFETIME_ID
     assert len(GATEWAY_LIFETIME_ID) == 32
 
-    import vaultspec_a2a.control.worker_management as worker_management
+    from .. import worker_management
 
     assert worker_management.GATEWAY_LIFETIME_ID == GATEWAY_LIFETIME_ID
 

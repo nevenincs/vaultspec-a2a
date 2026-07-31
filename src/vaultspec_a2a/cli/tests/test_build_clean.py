@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from vaultspec_a2a.cli.build_clean import _remove_directory, clean_build_artifacts
+from ...cli.build_clean import _remove_directory, clean_build_artifacts
 
 if TYPE_CHECKING:
     from pathlib import Path

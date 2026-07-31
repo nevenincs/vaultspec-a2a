@@ -15,7 +15,7 @@ import pytest
 import pytest_asyncio
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
-from vaultspec_a2a.control.repair_transitions import (
+from ...control.repair_transitions import (
     apply_dispatch_failure,
     mark_cancel_requested,
     mark_dispatch_failed,
@@ -26,10 +26,10 @@ from vaultspec_a2a.control.repair_transitions import (
     mark_permission_response_applied,
     mark_permission_response_requested,
 )
-from vaultspec_a2a.database import create_thread
-from vaultspec_a2a.database.models import Base
-from vaultspec_a2a.thread.enums import ControlActionType, ThreadStatus
-from vaultspec_a2a.thread.repair_policy import (
+from ...database import create_thread
+from ...database.models import Base
+from ...thread.enums import ControlActionType, ThreadStatus
+from ...thread.repair_policy import (
     DISPATCH_FAILED_TRANSITION,
     repair_state_for_action,
 )

@@ -33,19 +33,19 @@ from typing import TYPE_CHECKING
 
 import httpx
 
-from vaultspec_a2a.desktop.profile import derive_state_paths
-from vaultspec_a2a.lifecycle.discovery import write_service_json
-from vaultspec_a2a.service_tests._live_desktop_gateway import (
+from ..desktop.profile import derive_state_paths
+from ..lifecycle.discovery import write_service_json
+from ..service_tests._live_desktop_gateway import (
     ATTACH_CREDENTIAL,
     armed_gateway,
 )
-from vaultspec_a2a.utils.process import ProcessContainment
+from ..utils.process import ProcessContainment
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
     from pathlib import Path
 
-    from vaultspec_a2a.conftest import ExternalPrerequisiteRule
+    from ..conftest import ExternalPrerequisiteRule
 
 _RUN_ID = "run-cross-repo-lost-ack"
 _ENGINE_COMMAND_ENV = "VAULTSPEC_ENGINE_SERVE_CMD"

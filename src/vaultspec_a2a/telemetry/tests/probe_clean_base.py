@@ -24,11 +24,11 @@ def _initialize_profile(profile: str) -> dict[str, Any]:
         )
 
     if profile == "gateway":
-        from vaultspec_a2a.api.app import configure_telemetry
+        from ...api.app import configure_telemetry
 
         service_name = None
     else:
-        from vaultspec_a2a.worker.app import configure_telemetry
+        from ...worker.app import configure_telemetry
 
         service_name = "vaultspec-worker"
     config = configure_telemetry(service_name=service_name)

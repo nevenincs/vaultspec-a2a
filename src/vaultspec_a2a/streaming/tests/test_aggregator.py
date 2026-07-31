@@ -8,8 +8,6 @@ import pytest
 from langchain_core.messages import AIMessageChunk
 from langgraph.errors import GraphInterrupt
 
-from vaultspec_a2a.thread.errors import EventAggregatorError
-
 from ...domain_config import domain_config
 from ...graph.enums import (
     AgentLifecycleState,
@@ -28,6 +26,7 @@ from ...graph.events import (
     ToolCallStart,
     ToolCallUpdate,
 )
+from ...thread.errors import EventAggregatorError
 from .. import EventAggregator as CoreAggregator
 from .. import aggregator as agg_module
 from ..aggregator import EventAggregator, SequencedEvent, StreamableGraph

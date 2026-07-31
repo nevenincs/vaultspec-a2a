@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from vaultspec_a2a.utils.enums import Environment
-from vaultspec_a2a.utils.ipc_auth import BearerVerdict, verify_internal_bearer
+from ...utils.enums import Environment
+from ...utils.ipc_auth import BearerVerdict, verify_internal_bearer
 
 
 def test_dev_mode_unset_token_disables_auth() -> None:

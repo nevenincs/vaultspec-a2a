@@ -13,9 +13,8 @@ declares nothing, which is the exact failure it exists to catch.
 
 from __future__ import annotations
 
-from vaultspec_a2a.control import worker_management
-from vaultspec_a2a.lifecycle import discovery
-
+from ...control import worker_management
+from ...lifecycle import discovery
 from ..retention import ArtifactDeclaration, RetentionDisposition
 
 _DECLARING_MODULES = (discovery, worker_management)

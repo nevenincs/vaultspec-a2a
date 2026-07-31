@@ -19,8 +19,7 @@ from typing import TYPE_CHECKING
 import pytest
 from langchain_core.messages import HumanMessage
 
-from vaultspec_a2a.providers._acp_authoring import authoring_allowed_tool_names
-
+from ....providers._acp_authoring import authoring_allowed_tool_names
 from ...nodes.worker import (
     NATIVE_READ_TOOL_NAMES,
     _compose_native_read_tools,
@@ -29,7 +28,7 @@ from ...nodes.worker import (
 from .test_worker_authoring_wiring import _binding, _stdio_provider
 
 if TYPE_CHECKING:
-    from vaultspec_a2a.thread.state import TeamState
+    from ....thread.state import TeamState
 
 SIMULATOR_PATH = Path(__file__).parent.parent / "acp_simulator.py"
 PYTHON_EXE = sys.executable
@@ -48,7 +47,7 @@ def _make_state() -> TeamState:
 
 
 def _model(record_file: Path, tmp_path: Path):
-    from vaultspec_a2a.providers.acp_chat_model import AcpChatModel
+    from ....providers.acp_chat_model import AcpChatModel
 
     return AcpChatModel(
         command=[
@@ -166,12 +165,12 @@ class TestComposeNativeReadTools:
     """The native-read composition is exact, role-scoped, and autonomous-only."""
 
     def _fresh_model(self):
-        from vaultspec_a2a.providers.acp_chat_model import AcpChatModel
+        from ....providers.acp_chat_model import AcpChatModel
 
         return AcpChatModel(command=["echo"], env_vars={}, workspace_root="/tmp/ws")
 
     def test_autonomous_document_role_unions_read_names(self) -> None:
-        from vaultspec_a2a.providers.acp_chat_model import AcpChatModel
+        from ....providers.acp_chat_model import AcpChatModel
 
         wired = _compose_native_read_tools(
             self._fresh_model(), autonomous=True, role="researcher"
@@ -180,7 +179,7 @@ class TestComposeNativeReadTools:
         assert wired.allowed_tools == list(NATIVE_READ_TOOL_NAMES)
 
     def test_non_document_role_is_unchanged(self) -> None:
-        from vaultspec_a2a.providers.acp_chat_model import AcpChatModel
+        from ....providers.acp_chat_model import AcpChatModel
 
         model = self._fresh_model()
         wired = _compose_native_read_tools(model, autonomous=True, role=None)
@@ -188,7 +187,7 @@ class TestComposeNativeReadTools:
         assert wired.allowed_tools == []
 
     def test_human_in_loop_is_unchanged(self) -> None:
-        from vaultspec_a2a.providers.acp_chat_model import AcpChatModel
+        from ....providers.acp_chat_model import AcpChatModel
 
         model = self._fresh_model()
         wired = _compose_native_read_tools(model, autonomous=False, role="researcher")
@@ -196,7 +195,7 @@ class TestComposeNativeReadTools:
         assert wired.allowed_tools == []
 
     def test_existing_allowlist_is_preserved_and_deduped(self) -> None:
-        from vaultspec_a2a.providers.acp_chat_model import AcpChatModel
+        from ....providers.acp_chat_model import AcpChatModel
 
         model = self._fresh_model().model_copy(
             update={"allowed_tools": ["mcp__x__y", "Read"]}

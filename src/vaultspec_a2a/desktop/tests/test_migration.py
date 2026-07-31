@@ -15,11 +15,10 @@ import pytest
 from langgraph.checkpoint.base import empty_checkpoint
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
-from vaultspec_a2a.database.checkpoint_schema import (
+from ...database.checkpoint_schema import (
     CHECKPOINT_SCHEMA_DIGEST,
     CHECKPOINT_SCHEMA_VERSION,
 )
-
 from ..migration import (
     MigrationStage,
     StoreName,

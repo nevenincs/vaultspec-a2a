@@ -498,8 +498,8 @@ def test_compose_provenance_mismatch_fails_closed_without_eviction(
       Any ``POST /admin/shutdown`` would mean the Compose profile tried to evict
       an independently managed worker it does not own.
     """
-    from vaultspec_a2a.control.config import settings
-    from vaultspec_a2a.control.worker_management import LazyWorkerSpawner
+    from ..control.config import settings
+    from ..control.worker_management import LazyWorkerSpawner
 
     port = _pick_free_port()
     foreign_gateway_url = "http://127.0.0.1:2"
@@ -531,8 +531,8 @@ def test_compose_matching_provenance_attaches(tmp_path: Path) -> None:
     through the identical unarmed ``ensure_worker`` seam, again without any
     eviction.
     """
-    from vaultspec_a2a.control.config import settings
-    from vaultspec_a2a.control.worker_management import LazyWorkerSpawner
+    from ..control.config import settings
+    from ..control.worker_management import LazyWorkerSpawner
 
     port = _pick_free_port()
     body = {"status": "healthy", "gateway_url": settings.gateway_url}

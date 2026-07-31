@@ -8,7 +8,7 @@ import httpx
 import pytest
 from httpx import ASGITransport
 
-from vaultspec_a2a.api.app import create_app
+from ...api.app import create_app
 
 _TOKEN = "attach-credential-token-0123456789abcdef"
 

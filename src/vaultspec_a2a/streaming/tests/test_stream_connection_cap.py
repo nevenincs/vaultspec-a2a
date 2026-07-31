@@ -16,11 +16,10 @@ from __future__ import annotations
 
 import pytest
 
-from vaultspec_a2a.control.config import Settings
-from vaultspec_a2a.thread.errors import EventAggregatorError
-
+from ...control.config import Settings
 from ...domain_config import domain_config
 from ...telemetry.aggregator_hook import OTelAggregatorHook
+from ...thread.errors import EventAggregatorError
 from ..aggregator import EventAggregator
 
 

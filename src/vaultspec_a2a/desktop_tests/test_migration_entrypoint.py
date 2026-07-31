@@ -27,8 +27,8 @@ from typing import Final, cast
 
 import pytest
 
-from vaultspec_a2a.desktop.migration import package_migration_range
-from vaultspec_a2a.desktop.profile import derive_state_paths
+from ..desktop.migration import package_migration_range
+from ..desktop.profile import derive_state_paths
 
 _PROJECT_ROOT: Final = Path(__file__).resolve().parents[3]
 _MODULE: Final = "vaultspec_a2a.cli.main"

@@ -19,8 +19,8 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from vaultspec_a2a.control.config import settings
-from vaultspec_a2a.control.worker_management import (
+from ...control.config import settings
+from ...control.worker_management import (
     LazyWorkerSpawner,
     _evict_stale_worker,
     _fetch_worker_health,

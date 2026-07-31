@@ -16,7 +16,7 @@ import threading
 import time
 from typing import TYPE_CHECKING
 
-from vaultspec_a2a.lifecycle.discovery import (
+from ...lifecycle.discovery import (
     DESKTOP_DISCOVERY_VERSION,
     DesktopDiscoveryState,
     classify_desktop_discovery,

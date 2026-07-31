@@ -25,10 +25,10 @@ import time
 
 import pytest
 
-from vaultspec_a2a.control.worker_management import _reap_unready_worker
-from vaultspec_a2a.lifecycle.discovery import is_pid_alive
-from vaultspec_a2a.utils import kill_pid_tree_async
-from vaultspec_a2a.utils.process import ProcessContainment
+from ...control.worker_management import _reap_unready_worker
+from ...lifecycle.discovery import is_pid_alive
+from ...utils import kill_pid_tree_async
+from ...utils.process import ProcessContainment
 
 # A stand-in for the half-started worker: spawns real grandchildren, prints their
 # pids so the test can watch them independently of the parent, then sleeps well

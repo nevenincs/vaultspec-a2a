@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import pytest
 
-from vaultspec_a2a.ipc.schemas import DispatchRequest, to_dispatch_action
-from vaultspec_a2a.thread.enums import ControlActionType
+from ...ipc.schemas import DispatchRequest, to_dispatch_action
+from ...thread.enums import ControlActionType
 
 
 @pytest.mark.parametrize(

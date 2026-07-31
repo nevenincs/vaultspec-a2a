@@ -31,13 +31,12 @@ from typing import TYPE_CHECKING
 
 import httpx
 
-from vaultspec_a2a.desktop._platform_acl import harden_credential_file
-from vaultspec_a2a.desktop.credentials import (
+from ..desktop._platform_acl import harden_credential_file
+from ..desktop.credentials import (
     ATTACH_CREDENTIAL_NAME,
     OWNERSHIP_CAPABILITY_NAME,
 )
-from vaultspec_a2a.desktop.profile import derive_state_paths
-
+from ..desktop.profile import derive_state_paths
 from ._boot import spawn_until_ready
 
 if TYPE_CHECKING:

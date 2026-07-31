@@ -20,17 +20,17 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from vaultspec_a2a.control.cleanup import (
+from ....control.cleanup import (
     build_cleanup_manifest,
     execute_cleanup_manifest,
     resolve_contained_artifact_path,
 )
-from vaultspec_a2a.database.models import ArtifactModel, ThreadModel
+from ....database.models import ArtifactModel, ThreadModel
 
 if TYPE_CHECKING:
     import pathlib
 
-    from vaultspec_a2a.control.repositories import CleanupItemResult
+    from ....control.repositories import CleanupItemResult
 
 
 def _thread(workspace_root: pathlib.Path | None) -> ThreadModel:

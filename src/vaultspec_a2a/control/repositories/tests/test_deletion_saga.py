@@ -19,7 +19,7 @@ import pytest_asyncio
 from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
-from vaultspec_a2a.control.repositories import (
+from ....control.repositories import (
     CleanupItem,
     CleanupItemResult,
     CleanupItemState,
@@ -32,9 +32,9 @@ from vaultspec_a2a.control.repositories import (
     serialize_manifest,
     serialize_results,
 )
-from vaultspec_a2a.database import create_thread, get_thread
-from vaultspec_a2a.database.models import Base, ThreadDeletionSagaModel
-from vaultspec_a2a.thread.enums import CleanupKind, ThreadStatus
+from ....database import create_thread, get_thread
+from ....database.models import Base, ThreadDeletionSagaModel
+from ....thread.enums import CleanupKind, ThreadStatus
 
 
 @pytest_asyncio.fixture

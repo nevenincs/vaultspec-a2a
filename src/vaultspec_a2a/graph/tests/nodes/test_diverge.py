@@ -17,13 +17,13 @@ from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.graph import END, START, StateGraph
 from langgraph.types import Command
 
-from vaultspec_a2a.graph.compiler import _wire_diverge_stage
-from vaultspec_a2a.graph.nodes.diverge import (
+from ....graph.compiler import _wire_diverge_stage
+from ....graph.nodes.diverge import (
     create_research_dispatch_node,
     create_researcher_node,
     researcher_node_name,
 )
-from vaultspec_a2a.thread.state import TeamState
+from ....thread.state import TeamState
 
 _SPECS: list[dict[str, Any]] = [
     {"thread_id": "codebase", "locators": ["compiler.py:402"]},
@@ -140,7 +140,7 @@ async def test_diverge_stage_accumulates_findings_and_joins() -> None:
 
 @pytest.mark.asyncio
 async def test_wire_diverge_stage_rejects_empty_specs() -> None:
-    from vaultspec_a2a.thread.errors import ConfigError
+    from ....thread.errors import ConfigError
 
     builder: StateGraph = StateGraph(cast("Any", TeamState))
     with pytest.raises(ConfigError, match="at least one research thread spec"):

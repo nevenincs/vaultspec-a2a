@@ -77,7 +77,7 @@ def test_authoring_bridge_is_a_provider_child_launch_spec_not_self_spawned() -> 
     root's OS containment. This module never spawns a process itself, so there is
     no separate reaper to wire - the property that keeps the bridge contained.
     """
-    import vaultspec_a2a.providers._acp_authoring as mod
+    from .. import _acp_authoring as mod
 
     entry = build_authoring_stdio_mcp_servers(_stdio_binding())[0]
     # A child-launch spec the provider spawns: a command + args, no live process.

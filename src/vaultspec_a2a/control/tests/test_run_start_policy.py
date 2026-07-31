@@ -8,14 +8,14 @@ non-authoring coder preset.
 
 from __future__ import annotations
 
-from vaultspec_a2a.context.harness import HarnessReadiness
-from vaultspec_a2a.control.run_start_policy import (
+from ...context.harness import HarnessReadiness
+from ...control.run_start_policy import (
     evaluate_run_start_eligibility,
     is_document_authoring_preset,
     required_role_ids,
 )
-from vaultspec_a2a.team.team_config import load_team_config
-from vaultspec_a2a.thread.actor_tokens import ActorTokenBundle
+from ...team.team_config import load_team_config
+from ...thread.actor_tokens import ActorTokenBundle
 
 _AUTHORING = "vaultspec-adr-research"
 _CODER = "mock-success-single"

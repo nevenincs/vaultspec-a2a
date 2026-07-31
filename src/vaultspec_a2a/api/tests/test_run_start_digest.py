@@ -25,7 +25,7 @@ from typing import Any
 
 import pytest
 
-from vaultspec_a2a.api.run_admission import (
+from ...api.run_admission import (
     _ALWAYS_EXCLUDED,
     _PREPARE_EXCLUDED,
     _REPLAY_CREDENTIAL_EXCLUDED,
@@ -36,8 +36,8 @@ from vaultspec_a2a.api.run_admission import (
     request_digest,
     stamped_replay_digest,
 )
-from vaultspec_a2a.api.schemas.gateway import RunStartRequest
-from vaultspec_a2a.thread.actor_tokens import ActorTokenBundle
+from ...api.schemas.gateway import RunStartRequest
+from ...thread.actor_tokens import ActorTokenBundle
 
 
 def _request(**overrides: Any) -> RunStartRequest:
@@ -303,7 +303,7 @@ def test_an_unrecognised_rule_marker_is_not_comparable() -> None:
 
 def test_persisted_digest_round_trips_through_metadata() -> None:
     """What is written must be readable, or the replay check silently disables."""
-    from vaultspec_a2a.api.routes.gateway import (
+    from ...api.routes.gateway import (
         _persist_request_digest,
         _persisted_request_digest,
     )
@@ -322,7 +322,7 @@ def test_a_run_predating_digest_persistence_reads_as_unknown() -> None:
     as a mismatch would refuse every legitimate replay of an existing run, so the
     caller falls back to the narrower comparison instead.
     """
-    from vaultspec_a2a.api.routes.gateway import _persisted_request_digest
+    from ...api.routes.gateway import _persisted_request_digest
 
     assert _persisted_request_digest(None) is None
     assert _persisted_request_digest("{}") is None
@@ -332,7 +332,7 @@ def test_a_run_predating_digest_persistence_reads_as_unknown() -> None:
 
 def test_persisting_a_digest_preserves_the_lease_beside_it() -> None:
     """Two writers share this blob; neither may clobber the other."""
-    from vaultspec_a2a.api.routes.gateway import (
+    from ...api.routes.gateway import (
         _persist_request_digest,
         _persisted_lease_id,
     )

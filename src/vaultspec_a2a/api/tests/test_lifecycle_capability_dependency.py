@@ -7,8 +7,8 @@ import pytest
 from fastapi import Depends, FastAPI
 from httpx import ASGITransport
 
-from vaultspec_a2a.api import auth
-from vaultspec_a2a.api.dependencies import (
+from ...api import auth
+from ...api.dependencies import (
     LIFECYCLE_CAPABILITY_HEADER,
     require_attach,
     require_lifecycle_capability,

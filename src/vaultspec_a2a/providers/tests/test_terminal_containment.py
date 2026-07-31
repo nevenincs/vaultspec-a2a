@@ -16,9 +16,8 @@ from typing import Any, cast
 
 import pytest
 
-from vaultspec_a2a.lifecycle.discovery import is_pid_alive
-from vaultspec_a2a.utils.process import ProcessContainment
-
+from ...lifecycle.discovery import is_pid_alive
+from ...utils.process import ProcessContainment
 from .._acp_rpc_handlers import on_terminal_create, on_terminal_kill
 from .._acp_types import _AcpModelConfig, _AcpSessionContext
 
@@ -102,6 +101,6 @@ async def test_terminal_child_contained_and_reaped_whole(tmp_path) -> None:
         assert not is_pid_alive(grandchild_pid)
     finally:
         if is_pid_alive(grandchild_pid):
-            from vaultspec_a2a.utils.process import kill_pid_tree_async
+            from ...utils.process import kill_pid_tree_async
 
             await kill_pid_tree_async(grandchild_pid)

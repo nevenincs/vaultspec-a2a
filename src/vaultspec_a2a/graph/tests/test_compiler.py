@@ -16,7 +16,7 @@ if TYPE_CHECKING:
     from ...thread.state import TeamState
     from ..protocols import ProviderFactoryProtocol
 
-from vaultspec_a2a.team.team_config import (
+from ...team.team_config import (
     TeamConfig,
     TopologyConfig,
     TopologyType,
@@ -24,8 +24,7 @@ from vaultspec_a2a.team.team_config import (
     load_agent_config,
     load_team_config,
 )
-from vaultspec_a2a.thread.errors import ConfigError
-
+from ...thread.errors import ConfigError
 from ..compiler import (
     _build_supervisor_prompt,
     _loop_route,
@@ -395,7 +394,7 @@ def test_route_from_supervisor_honors_approval_then_the_next_decision() -> None:
 
 def test_worker_retry_on_timeout_wrapped_in_worker_error_is_retried() -> None:
     """WorkerExecutionError wrapping TimeoutError must be retried."""
-    from vaultspec_a2a.thread.errors import WorkerExecutionError
+    from ...thread.errors import WorkerExecutionError
 
     cause = TimeoutError("connection timed out")
     wrapped = WorkerExecutionError(
@@ -412,7 +411,7 @@ def test_worker_retry_on_connection_error_is_retried() -> None:
 
 def test_worker_retry_on_connection_error_wrapped_in_worker_error_is_retried() -> None:
     """WorkerExecutionError wrapping ConnectionError is retried via __cause__."""
-    from vaultspec_a2a.thread.errors import WorkerExecutionError
+    from ...thread.errors import WorkerExecutionError
 
     cause = ConnectionError("refused")
     wrapped = WorkerExecutionError(
@@ -429,7 +428,7 @@ def test_worker_retry_on_runtime_error_not_retried() -> None:
 
 def test_worker_retry_on_worker_error_with_runtime_cause_not_retried() -> None:
     """WorkerExecutionError wrapping RuntimeError is not retried."""
-    from vaultspec_a2a.thread.errors import WorkerExecutionError
+    from ...thread.errors import WorkerExecutionError
 
     cause = RuntimeError("deterministic failure")
     wrapped = WorkerExecutionError(
@@ -488,7 +487,7 @@ async def test_compile_team_graph_step_timeout_falls_back_to_toml(
 
 def test_build_supervisor_prompt_injects_directive() -> None:
     """_build_supervisor_prompt appends team directive after roster when set."""
-    from vaultspec_a2a.team.team_config import AgentConfig
+    from ...team.team_config import AgentConfig
 
     agents: list[AgentConfig] = []
     base = "You are a supervisor."
@@ -581,7 +580,7 @@ async def test_compile_team_graph_does_not_set_recursion_limit(
 
 def test_resolve_worker_model_preferences_honors_worker_override_precedence() -> None:
     """Worker-level provider/capability/fallback overrides win over defaults."""
-    from vaultspec_a2a.graph.enums import Model, Provider
+    from ...graph.enums import Model, Provider
 
     team = load_team_config("vaultspec-solo-coder")
     agent_cfg = load_agent_config("vaultspec-coder")
@@ -611,7 +610,7 @@ def test_resolve_worker_model_preferences_honors_worker_override_precedence() ->
 
 def test_resolve_worker_model_preferences_consumes_frozen_assignment() -> None:
     """A frozen assignment wins outright and is applied verbatim (restart reuse)."""
-    from vaultspec_a2a.graph.enums import Model, Provider
+    from ...graph.enums import Model, Provider
 
     team = load_team_config("vaultspec-solo-coder")
     agent_cfg = load_agent_config("vaultspec-coder")

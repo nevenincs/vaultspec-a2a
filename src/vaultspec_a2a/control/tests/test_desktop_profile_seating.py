@@ -16,8 +16,8 @@ from typing import TYPE_CHECKING
 import pytest
 from pydantic import ValidationError
 
-from vaultspec_a2a.control.config import Settings
-from vaultspec_a2a.desktop.profile import derive_state_paths
+from ...control.config import Settings
+from ...desktop.profile import derive_state_paths
 
 if TYPE_CHECKING:
     from collections.abc import Iterator

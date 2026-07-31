@@ -6,7 +6,7 @@ import os
 import subprocess
 from typing import TYPE_CHECKING
 
-from vaultspec_a2a.control import hooks
+from ...control import hooks
 
 if TYPE_CHECKING:
     from pathlib import Path

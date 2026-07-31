@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from vaultspec_a2a.graph.events import PermissionRequest
-from vaultspec_a2a.ipc.serializers import sequenced_to_dict
-from vaultspec_a2a.streaming.aggregator import SequencedEvent
+from ...graph.events import PermissionRequest
+from ...ipc.serializers import sequenced_to_dict
+from ...streaming.aggregator import SequencedEvent
 
 
 def test_sequenced_to_dict_includes_permission_event_type_fields() -> None:

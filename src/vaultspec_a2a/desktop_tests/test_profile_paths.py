@@ -26,13 +26,13 @@ from typing import TYPE_CHECKING
 import pytest
 from pydantic import ValidationError
 
-from vaultspec_a2a.control.config import Settings
-from vaultspec_a2a.desktop.profile import (
+from ..control.config import Settings
+from ..desktop.profile import (
     DesktopProfile,
     DesktopProfileError,
     derive_state_paths,
 )
-from vaultspec_a2a.providers.factory import (
+from ..providers.factory import (
     _capsule_acp_entry,
     _capsule_node_executable,
 )
@@ -171,7 +171,7 @@ def test_discovery_path_matches_the_discovery_authority(tmp_path: Path) -> None:
     settings construction; this guard keeps that constant in sync with the
     canonical ``service_json_path`` placement so the two never drift.
     """
-    from vaultspec_a2a.lifecycle.discovery import service_json_path
+    from ..lifecycle.discovery import service_json_path
 
     home = (tmp_path / "app-home").resolve()
     assert derive_state_paths(home).discovery_path == service_json_path(home)

@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from vaultspec_a2a.desktop._filesystem_authority import (
+from ...desktop._filesystem_authority import (
     create_private_file,
     directory_lease,
     publish_no_replace,

@@ -7,14 +7,14 @@ from langgraph.checkpoint.base import empty_checkpoint
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
-from vaultspec_a2a.database import (
+from ...database import (
     create_thread,
     get_thread,
     record_permission_request,
     record_permission_response_submission,
 )
-from vaultspec_a2a.database.models import Base
-from vaultspec_a2a.database.reconciliation import reconcile_threads_on_startup
+from ...database.models import Base
+from ...database.reconciliation import reconcile_threads_on_startup
 
 
 @pytest.mark.asyncio

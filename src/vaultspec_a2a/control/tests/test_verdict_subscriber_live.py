@@ -50,7 +50,7 @@ from sqlalchemy.ext.asyncio import (
     create_async_engine,
 )
 
-from vaultspec_a2a.authoring import (
+from ...authoring import (
     AuthoringClient,
     AuthoringResponse,
     AuthoringSession,
@@ -60,14 +60,14 @@ from vaultspec_a2a.authoring import (
     resolve_engine,
     verdict_from_event,
 )
-from vaultspec_a2a.control.circuit_breaker import WorkerCircuitBreaker
-from vaultspec_a2a.control.verdict_subscriber import (
+from ...control.circuit_breaker import WorkerCircuitBreaker
+from ...control.verdict_subscriber import (
     _RESUME_CLAIM_TTL_SECONDS,
     VerdictSubscriber,
     _with_resume_claim,
 )
-from vaultspec_a2a.control.worker_management import LazyWorkerSpawner
-from vaultspec_a2a.database import (
+from ...control.worker_management import LazyWorkerSpawner
+from ...database import (
     create_thread,
     get_permission_request,
     get_thread,
@@ -75,8 +75,8 @@ from vaultspec_a2a.database import (
     update_thread_metadata,
     update_thread_status,
 )
-from vaultspec_a2a.database.models import Base
-from vaultspec_a2a.thread.enums import PermissionRequestStatus, ThreadStatus
+from ...database.models import Base
+from ...thread.enums import PermissionRequestStatus, ThreadStatus
 
 
 @pytest.fixture(scope="module")

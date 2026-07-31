@@ -17,10 +17,10 @@ import pytest
 import pytest_asyncio
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
-from vaultspec_a2a.control.thread_service import list_threads_service
-from vaultspec_a2a.database import create_thread
-from vaultspec_a2a.database.models import Base
-from vaultspec_a2a.thread.enums import RepairStatus
+from ...control.thread_service import list_threads_service
+from ...database import create_thread
+from ...database.models import Base
+from ...thread.enums import RepairStatus
 
 
 @pytest_asyncio.fixture
@@ -113,7 +113,7 @@ async def test_an_uncertain_checkpoint_degrades_the_thread(session_factory) -> N
     """
     await _seed(session_factory, 6)
 
-    from vaultspec_a2a.domain_config import domain_config
+    from ...domain_config import domain_config
 
     original = domain_config.thread_list_checkpoint_deadline_seconds
     domain_config.thread_list_checkpoint_deadline_seconds = 0.05
@@ -138,7 +138,7 @@ async def test_the_whole_list_stays_bounded_under_a_slow_store(
     """A page of slow-reading threads must not cost the per-read sum."""
     await _seed(session_factory, 10)
 
-    from vaultspec_a2a.domain_config import domain_config
+    from ...domain_config import domain_config
 
     original = domain_config.thread_list_checkpoint_deadline_seconds
     domain_config.thread_list_checkpoint_deadline_seconds = 0.3

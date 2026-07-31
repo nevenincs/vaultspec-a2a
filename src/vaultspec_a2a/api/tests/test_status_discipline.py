@@ -11,8 +11,8 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from vaultspec_a2a.api.routes.gateway import _active_role
-from vaultspec_a2a.api.schemas.gateway import TopologyPosition
+from ...api.routes.gateway import _active_role
+from ...api.schemas.gateway import TopologyPosition
 
 
 def _agent(agent_id: str, role: str) -> SimpleNamespace:

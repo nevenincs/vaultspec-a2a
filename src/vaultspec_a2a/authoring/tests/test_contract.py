@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from vaultspec_a2a.authoring.contract import (
+from ...authoring.contract import (
     DOCUMENT_AUTHORING_ROLE_SET,
     DOCUMENT_AUTHORING_ROLES,
     DOCUMENT_AUTHORING_TOPOLOGIES,
@@ -45,7 +45,7 @@ def test_is_document_authoring_topology_by_string() -> None:
 
 def test_is_document_authoring_topology_accepts_strenum_member() -> None:
     """A ``TopologyType`` member is accepted directly (StrEnum hashes as its str)."""
-    from vaultspec_a2a.team.team_config import TopologyType
+    from ...team.team_config import TopologyType
 
     assert is_document_authoring_topology(TopologyType.RESEARCH_ADR)
     assert not is_document_authoring_topology(TopologyType.STAR)
@@ -58,7 +58,7 @@ def test_contract_matches_bundled_rule_file_roles() -> None:
     contract drifting apart (a role added to one but not the other), which would
     silently break role-scoped rule delivery for the un-tagged role.
     """
-    from vaultspec_a2a.context.rules import _read_frontmatter, _roles_from_meta
+    from ...context.rules import _read_frontmatter, _roles_from_meta
 
     bundled = (
         Path(__file__).resolve().parents[2]

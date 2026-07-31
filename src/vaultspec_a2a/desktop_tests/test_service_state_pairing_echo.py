@@ -34,12 +34,11 @@ from typing import TYPE_CHECKING, Any
 
 import httpx
 
-from vaultspec_a2a.control.worker_management import (
+from ..control.worker_management import (
     GATEWAY_LIFETIME_ENV,
     GATEWAY_LIFETIME_ID,
     WORKER_GENERATION_ENV,
 )
-
 from .test_ownership_prerequisites import (
     _armed_env,
     _armed_serve,

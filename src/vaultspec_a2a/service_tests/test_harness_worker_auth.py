@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from vaultspec_a2a.service_tests.harness import _INTERNAL_TOKEN, ServiceStack
+from ..service_tests.harness import _INTERNAL_TOKEN, ServiceStack
 
 _PORTS = {
     "gateway": 18000,

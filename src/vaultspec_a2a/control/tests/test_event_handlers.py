@@ -7,17 +7,17 @@ import pytest_asyncio
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
-from vaultspec_a2a.control.event_handlers import (
+from ...control.event_handlers import (
     _handle_permission_event,
     _handle_progress_event,
 )
-from vaultspec_a2a.database import (
+from ...database import (
     create_thread,
     get_permission_request,
     record_permission_request,
     record_permission_response_submission,
 )
-from vaultspec_a2a.database.models import Base, ControlActionModel, ThreadModel
+from ...database.models import Base, ControlActionModel, ThreadModel
 
 
 @pytest_asyncio.fixture

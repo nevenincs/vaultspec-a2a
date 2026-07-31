@@ -5,13 +5,13 @@ from __future__ import annotations
 import sys
 from typing import TYPE_CHECKING
 
-from vaultspec_a2a.control.config import Settings
-from vaultspec_a2a.desktop.credentials import (
+from ...control.config import Settings
+from ...desktop.credentials import (
     ATTACH_CREDENTIAL_NAME,
     OWNERSHIP_CAPABILITY_NAME,
     WORKER_IPC_CREDENTIAL_NAME,
 )
-from vaultspec_a2a.desktop.profile import derive_state_paths
+from ...desktop.profile import derive_state_paths
 
 if TYPE_CHECKING:
     from pathlib import Path

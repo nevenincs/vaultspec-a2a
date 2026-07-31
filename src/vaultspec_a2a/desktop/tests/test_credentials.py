@@ -11,11 +11,11 @@ import pytest
 if TYPE_CHECKING:
     from pathlib import Path
 
-from vaultspec_a2a.desktop._platform_acl import (
+from ...desktop._platform_acl import (
     credential_file_is_owner_restricted,
     harden_credential_file,
 )
-from vaultspec_a2a.desktop.credentials import (
+from ...desktop.credentials import (
     ATTACH_CREDENTIAL_NAME,
     OWNERSHIP_CAPABILITY_NAME,
     WORKER_IPC_CREDENTIAL_NAME,

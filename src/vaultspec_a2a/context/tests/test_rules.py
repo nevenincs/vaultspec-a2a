@@ -7,8 +7,8 @@ import shutil
 import time
 from pathlib import Path
 
-from vaultspec_a2a.authoring.contract import DOCUMENT_AUTHORING_ROLES
-from vaultspec_a2a.context.rules import DEFAULT_BUNDLED_RULES_DIR, RuleManager
+from ...authoring.contract import DOCUMENT_AUTHORING_ROLES
+from ...context.rules import DEFAULT_BUNDLED_RULES_DIR, RuleManager
 
 
 def _rules_dir(tmp_path: Path) -> Path:

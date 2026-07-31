@@ -10,9 +10,9 @@ import pytest
 from fastapi import FastAPI
 from httpx import ASGITransport
 
-from vaultspec_a2a.api.internal import internal_router
-from vaultspec_a2a.control.config import settings
-from vaultspec_a2a.utils.enums import Environment
+from ...api.internal import internal_router
+from ...control.config import settings
+from ...utils.enums import Environment
 
 if TYPE_CHECKING:
     from collections.abc import Iterator

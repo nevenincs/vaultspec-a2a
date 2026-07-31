@@ -30,9 +30,9 @@ if TYPE_CHECKING:
     from starlette.applications import Starlette
     from starlette.requests import Request
 
-from vaultspec_a2a.authoring import AuthoringClient, LifecycleEvent, StreamError
-from vaultspec_a2a.control.circuit_breaker import WorkerCircuitBreaker
-from vaultspec_a2a.control.verdict_subscriber import (
+from ...authoring import AuthoringClient, LifecycleEvent, StreamError
+from ...control.circuit_breaker import WorkerCircuitBreaker
+from ...control.verdict_subscriber import (
     _RESUME_CLAIM_TTL_SECONDS,
     VerdictSubscriber,
     _gate_resume_verdict,
@@ -42,8 +42,8 @@ from vaultspec_a2a.control.verdict_subscriber import (
     _StreamInterruptedError,
     _with_resume_claim,
 )
-from vaultspec_a2a.control.worker_management import LazyWorkerSpawner
-from vaultspec_a2a.database import (
+from ...control.worker_management import LazyWorkerSpawner
+from ...database import (
     create_thread,
     get_authoring_cursor,
     get_permission_request,
@@ -52,8 +52,8 @@ from vaultspec_a2a.database import (
     update_thread_metadata,
     update_thread_status,
 )
-from vaultspec_a2a.database.models import Base
-from vaultspec_a2a.thread.enums import PermissionRequestStatus, ThreadStatus
+from ...database.models import Base
+from ...thread.enums import PermissionRequestStatus, ThreadStatus
 
 
 @pytest_asyncio.fixture
@@ -561,7 +561,7 @@ async def test_reconcile_recovery_terminal_verdict_dispatches_without_crash(
 
 
 def test_gate_resume_verdict_maps_applied_as_approved() -> None:
-    from vaultspec_a2a.authoring import VERDICT_APPROVED, VERDICT_REJECTED
+    from ...authoring import VERDICT_APPROVED, VERDICT_REJECTED
 
     # An AUTO gate resolves-and-applies in one step, so a still-parked run's own
     # proposal reads `applied`; it (and the transient `approved`) resume approved.
@@ -584,7 +584,7 @@ def test_proposal_reconcile_verdict_recovers_missed_request_changes() -> None:
     than stalling forever. The prior code (changeset status only) returned ``None``
     here, which was the defect.
     """
-    from vaultspec_a2a.authoring import (
+    from ...authoring import (
         VERDICT_APPROVED,
         VERDICT_REJECTED,
         VERDICT_REQUEST_CHANGES,
@@ -707,7 +707,7 @@ async def test_reconcile_parked_runs_noops_when_none_parked_and_throttles(
     endpoint would raise if it tried to fetch a snapshot) and must not re-run within
     the throttle window.
     """
-    from vaultspec_a2a.authoring import EngineEndpoint
+    from ...authoring import EngineEndpoint
 
     checkpoints = tmp_path / "cp-parked-reconcile.db"
     async with (

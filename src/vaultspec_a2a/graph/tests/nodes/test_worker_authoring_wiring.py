@@ -18,21 +18,20 @@ from typing import TYPE_CHECKING
 import pytest
 from langchain_core.messages import HumanMessage
 
-from vaultspec_a2a.authoring import AgentTool, CatalogSnapshot
-from vaultspec_a2a.providers._acp_authoring import (
+from ....authoring import AgentTool, CatalogSnapshot
+from ....providers._acp_authoring import (
     AUTHORING_MCP_SERVER_NAME,
     AuthoringToolBinding,
     authoring_allowed_tool_names,
 )
-from vaultspec_a2a.thread.actor_tokens import ActorTokenBundle
-from vaultspec_a2a.worker.authoring_binding import AuthoringBindingProvider
-from vaultspec_a2a.worker.catalog_store import RunCatalogStore
-from vaultspec_a2a.worker.token_store import RunTokenStore
-
+from ....thread.actor_tokens import ActorTokenBundle
+from ....worker.authoring_binding import AuthoringBindingProvider
+from ....worker.catalog_store import RunCatalogStore
+from ....worker.token_store import RunTokenStore
 from ...nodes.worker import _attach_authoring_tools, create_worker_node
 
 if TYPE_CHECKING:
-    from vaultspec_a2a.thread.state import TeamState
+    from ....thread.state import TeamState
 
 SIMULATOR_PATH = Path(__file__).parent.parent / "acp_simulator.py"
 PYTHON_EXE = sys.executable
@@ -122,7 +121,7 @@ async def test_binding_surfaces_authoring_server_to_real_subprocess(
     tmp_path: Path,
 ) -> None:
     """A bound worker turn makes the real CLI receive the authoring MCP server."""
-    from vaultspec_a2a.providers.acp_chat_model import AcpChatModel
+    from ....providers.acp_chat_model import AcpChatModel
 
     record_file = tmp_path / "session_new.json"
     model = AcpChatModel(
@@ -201,8 +200,8 @@ async def test_stdio_binding_wires_stdio_server_to_real_subprocess(
     CLI receives must carry a stdio server entry (command + args, no url/type) whose
     env carries the run's engine facts — proving the wiring reaches a subprocess.
     """
-    from vaultspec_a2a.providers._acp_authoring import AUTHORING_MCP_SERVER_NAME
-    from vaultspec_a2a.providers.acp_chat_model import AcpChatModel
+    from ....providers._acp_authoring import AUTHORING_MCP_SERVER_NAME
+    from ....providers.acp_chat_model import AcpChatModel
 
     record_file = tmp_path / "session_new.json"
     model = AcpChatModel(
@@ -266,7 +265,7 @@ async def test_stdio_binding_surfaces_bridge_into_isolated_home(
     placeholders and carry NO real token, while the real bearer must be present in
     the spawn env (proving ``config_home_authoring_entry`` is wired live, not dead).
     """
-    from vaultspec_a2a.providers.acp_chat_model import AcpChatModel
+    from ....providers.acp_chat_model import AcpChatModel
 
     record_file = tmp_path / "config_home.json"
     model = AcpChatModel(
@@ -322,7 +321,7 @@ class TestAuthoringAllowlist:
         assert "*" not in "".join(names)
 
     def test_autonomous_attaches_allowlist(self) -> None:
-        from vaultspec_a2a.providers.acp_chat_model import AcpChatModel
+        from ....providers.acp_chat_model import AcpChatModel
 
         model = AcpChatModel(command=["echo"], env_vars={}, workspace_root="/tmp/ws")
         wired = _attach_authoring_tools(model, _binding(), autonomous=True)
@@ -330,7 +329,7 @@ class TestAuthoringAllowlist:
         assert wired.allowed_tools == authoring_allowed_tool_names(_binding())
 
     def test_human_in_loop_gets_no_allowlist(self) -> None:
-        from vaultspec_a2a.providers.acp_chat_model import AcpChatModel
+        from ....providers.acp_chat_model import AcpChatModel
 
         model = AcpChatModel(command=["echo"], env_vars={}, workspace_root="/tmp/ws")
         wired = _attach_authoring_tools(model, _binding(), autonomous=False)
@@ -344,7 +343,7 @@ async def test_no_binding_leaves_session_without_mcp_servers(
     tmp_path: Path,
 ) -> None:
     """Without a binding the real CLI receives no MCP server (no new surface)."""
-    from vaultspec_a2a.providers.acp_chat_model import AcpChatModel
+    from ....providers.acp_chat_model import AcpChatModel
 
     record_file = tmp_path / "session_new.json"
     model = AcpChatModel(

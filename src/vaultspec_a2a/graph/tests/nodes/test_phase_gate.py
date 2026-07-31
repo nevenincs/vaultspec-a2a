@@ -16,13 +16,13 @@ from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.graph import END, START, StateGraph
 from langgraph.types import Command
 
-from vaultspec_a2a.graph.nodes.phase_gate import (
+from ....graph.nodes.phase_gate import (
     DocumentProposalSubmitter,
     ProposalRevisionRequiredError,
     create_phase_gate_node,
     create_phase_submit_node,
 )
-from vaultspec_a2a.thread.state import TeamState
+from ....thread.state import TeamState
 
 
 class _RefusingSubmitter:

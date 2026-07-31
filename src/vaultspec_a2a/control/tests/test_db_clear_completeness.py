@@ -17,8 +17,8 @@ from typing import TYPE_CHECKING
 
 from sqlalchemy import create_engine, inspect, text
 
-from vaultspec_a2a.control.db import _CHECKPOINT_TABLES, _CLEAR_ORDER
-from vaultspec_a2a.database.models import (
+from ...control.db import _CHECKPOINT_TABLES, _CLEAR_ORDER
+from ...database.models import (
     ArtifactModel,
     Base,
     ControlActionModel,

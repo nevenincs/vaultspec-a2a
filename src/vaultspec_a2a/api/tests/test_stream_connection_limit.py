@@ -16,9 +16,9 @@ from typing import TYPE_CHECKING, cast
 import pytest
 from fastapi import HTTPException
 
-from vaultspec_a2a.api.routes.thread_stream import build_thread_stream_response
-from vaultspec_a2a.control.config import Settings
-from vaultspec_a2a.streaming.aggregator import EventAggregator
+from ...api.routes.thread_stream import build_thread_stream_response
+from ...control.config import Settings
+from ...streaming.aggregator import EventAggregator
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession

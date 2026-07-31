@@ -45,7 +45,7 @@ def test_harness_specs_are_provider_child_launch_specs_not_self_spawned() -> Non
     inherits that root's OS containment. This registry module never spawns a
     process itself, so there is no separate reaper to wire.
     """
-    import vaultspec_a2a.providers._acp_mcp as mod
+    from .. import _acp_mcp as mod
 
     spec = resolve_harness_mcp_servers(["vaultspec-rag"])[0]
     # A child-launch spec the provider spawns: command + args, no live process.

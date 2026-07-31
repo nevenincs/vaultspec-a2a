@@ -12,8 +12,7 @@ from langgraph.graph import END, StateGraph
 from langgraph.types import Command
 from pydantic import PrivateAttr
 
-from vaultspec_a2a.thread.state import TeamState
-
+from ....thread.state import TeamState
 from ...nodes.supervisor import (
     _build_supervisor_messages,
     _evaluate_supervisor_response,

@@ -27,14 +27,13 @@ from fastapi.testclient import TestClient
 from langgraph.checkpoint.base import empty_checkpoint
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
-from vaultspec_a2a.control.repositories import (
+from ...control.repositories import (
     CleanupItem,
     create_deletion_saga,
 )
-from vaultspec_a2a.database import create_artifact, create_thread, get_thread
-from vaultspec_a2a.database.models import ThreadDeletionSagaModel
-from vaultspec_a2a.thread.enums import CleanupKind
-
+from ...database import create_artifact, create_thread, get_thread
+from ...database.models import ThreadDeletionSagaModel
+from ...thread.enums import CleanupKind
 from .conftest import make_app
 
 if TYPE_CHECKING:

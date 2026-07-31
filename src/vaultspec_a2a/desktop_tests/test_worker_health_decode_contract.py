@@ -34,14 +34,13 @@ from typing import TYPE_CHECKING
 import httpx
 import pytest
 
-from vaultspec_a2a.control.config import settings
-from vaultspec_a2a.control.worker_management import (
+from ..control.config import settings
+from ..control.worker_management import (
     _check_worker_health,
     _fetch_worker_health,
     _probe_worker_health,
     _worker_ready_and_ours,
 )
-
 from ._boot import free_port
 
 if TYPE_CHECKING:

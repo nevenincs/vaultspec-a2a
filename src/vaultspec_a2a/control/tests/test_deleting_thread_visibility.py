@@ -17,13 +17,13 @@ import pytest_asyncio
 from langgraph.checkpoint.memory import InMemorySaver
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
-from vaultspec_a2a.control.repositories import create_deletion_saga
-from vaultspec_a2a.control.thread_service import list_threads_service
-from vaultspec_a2a.control.thread_state_service import build_thread_state
-from vaultspec_a2a.database import create_thread, get_thread
-from vaultspec_a2a.database.models import Base
-from vaultspec_a2a.streaming.aggregator import EventAggregator
-from vaultspec_a2a.thread.enums import ThreadStatus
+from ...control.repositories import create_deletion_saga
+from ...control.thread_service import list_threads_service
+from ...control.thread_state_service import build_thread_state
+from ...database import create_thread, get_thread
+from ...database.models import Base
+from ...streaming.aggregator import EventAggregator
+from ...thread.enums import ThreadStatus
 
 
 @pytest_asyncio.fixture

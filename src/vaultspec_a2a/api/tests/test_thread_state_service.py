@@ -10,20 +10,20 @@ from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from langgraph.types import Interrupt
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
-from vaultspec_a2a.control.thread_state_service import build_thread_state
-from vaultspec_a2a.database import (
+from ...control.thread_state_service import build_thread_state
+from ...database import (
     create_thread,
     record_permission_request,
     record_permission_response_submission,
 )
-from vaultspec_a2a.database.models import (
+from ...database.models import (
     Base,
     PermissionRequestModel,
     ThreadExecutionStateModel,
     ThreadModel,
 )
-from vaultspec_a2a.graph.events import PermissionRequest
-from vaultspec_a2a.streaming.aggregator import EventAggregator
+from ...graph.events import PermissionRequest
+from ...streaming.aggregator import EventAggregator
 
 if TYPE_CHECKING:
     from pathlib import Path

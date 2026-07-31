@@ -17,7 +17,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from vaultspec_a2a.lifecycle.singleton import (
+from ...lifecycle.singleton import (
     SingletonConflictError,
     SingletonHeldError,
     SingletonState,

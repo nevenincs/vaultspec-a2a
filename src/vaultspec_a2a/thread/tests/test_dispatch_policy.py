@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from vaultspec_a2a.thread.dispatch_policy import (
+from ...thread.dispatch_policy import (
     FailureType,
     classify_dispatch_failure,
     evaluate_dispatch_failure,

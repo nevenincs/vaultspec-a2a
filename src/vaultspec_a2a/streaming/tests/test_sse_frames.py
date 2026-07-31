@@ -161,6 +161,6 @@ def test_existing_semantic_phase_is_not_overwritten() -> None:
 
 def test_streaming_reads_the_shared_phase_vocabulary() -> None:
     """The SSE stamper is the single shared graph.enums vocabulary, not a copy."""
-    from vaultspec_a2a.graph.enums import research_adr_semantic_phase
+    from ...graph.enums import research_adr_semantic_phase
 
     assert semantic_phase_for_node is research_adr_semantic_phase

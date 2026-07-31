@@ -30,22 +30,21 @@ from typing import TYPE_CHECKING, Any, cast
 import httpx
 import pytest
 
-from vaultspec_a2a.desktop._platform_acl import harden_credential_file
-from vaultspec_a2a.desktop.credentials import (
+from ..desktop._platform_acl import harden_credential_file
+from ..desktop.credentials import (
     ATTACH_CREDENTIAL_NAME,
     OWNERSHIP_CAPABILITY_NAME,
 )
-from vaultspec_a2a.desktop.profile import derive_state_paths
-from vaultspec_a2a.lifecycle.discovery import is_pid_alive
-from vaultspec_a2a.providers._acp_rpc_handlers import (
+from ..desktop.profile import derive_state_paths
+from ..lifecycle.discovery import is_pid_alive
+from ..providers._acp_rpc_handlers import (
     on_terminal_create,
     on_terminal_kill,
 )
-from vaultspec_a2a.providers._acp_types import _AcpModelConfig, _AcpSessionContext
-from vaultspec_a2a.providers._subprocess import kill_process_tree, spawn_acp_process
-from vaultspec_a2a.utils import kill_pid_tree_async
-from vaultspec_a2a.utils.process import ProcessContainment
-
+from ..providers._acp_types import _AcpModelConfig, _AcpSessionContext
+from ..providers._subprocess import kill_process_tree, spawn_acp_process
+from ..utils import kill_pid_tree_async
+from ..utils.process import ProcessContainment
 from ._boot import spawn_until_ready
 
 if TYPE_CHECKING:

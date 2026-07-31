@@ -4,13 +4,13 @@ from pathlib import Path
 
 import pytest
 
-from vaultspec_a2a.context.metadata import (
+from ...context.metadata import (
     ContextRef,
     ThreadMetadata,
     discover_context_refs,
     generate_nickname,
 )
-from vaultspec_a2a.domain_config import domain_config
+from ...domain_config import domain_config
 
 # ---------------------------------------------------------------------------
 # ContextRef validation

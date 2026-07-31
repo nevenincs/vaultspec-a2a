@@ -46,27 +46,26 @@ from typing import TYPE_CHECKING, Any
 
 import httpx
 
-from vaultspec_a2a.control.worker_management import (
+from ..control.worker_management import (
     GATEWAY_LIFETIME_ENV,
     GATEWAY_LIFETIME_ID,
     WORKER_GENERATION_ENV,
 )
-from vaultspec_a2a.desktop._platform_acl import credential_file_is_owner_restricted
-from vaultspec_a2a.desktop.credentials import credential_paths
-from vaultspec_a2a.desktop.profile import derive_state_paths
-from vaultspec_a2a.lifecycle.pairing import (
+from ..desktop._platform_acl import credential_file_is_owner_restricted
+from ..desktop.credentials import credential_paths
+from ..desktop.profile import derive_state_paths
+from ..lifecycle.pairing import (
     WorkerPairingVerdict,
     classify_worker_pairing,
 )
-from vaultspec_a2a.lifecycle.singleton import (
+from ..lifecycle.singleton import (
     SingletonState,
     classify_app_home,
     default_owner,
     recorded_process_is_live,
     singleton_record_path,
 )
-from vaultspec_a2a.utils import kill_pid_tree_async
-
+from ..utils import kill_pid_tree_async
 from ._boot import free_port, spawn_until_ready
 from .test_run_admission import (
     _ATTACH,

@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from vaultspec_a2a.team.team_config import (
+from ...team.team_config import (
     TopologyType,
     authoring_capability,
     discover_team_preset_ids,

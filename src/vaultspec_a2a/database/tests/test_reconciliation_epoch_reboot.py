@@ -16,19 +16,19 @@ from langgraph.checkpoint.base import empty_checkpoint
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
-from vaultspec_a2a.database import (
+from ...database import (
     create_thread,
     get_thread,
     record_permission_request,
 )
-from vaultspec_a2a.database.models import Base
-from vaultspec_a2a.database.permission_repository import (
+from ...database.models import Base
+from ...database.permission_repository import (
     create_control_action,
     get_control_action_by_idempotency_key,
     get_or_create_control_action,
 )
-from vaultspec_a2a.database.reconciliation import reconcile_threads_on_startup
-from vaultspec_a2a.thread.enums import ControlActionType
+from ...database.reconciliation import reconcile_threads_on_startup
+from ...thread.enums import ControlActionType
 
 
 async def _seed_paused_thread(session: AsyncSession, tid: str) -> None:

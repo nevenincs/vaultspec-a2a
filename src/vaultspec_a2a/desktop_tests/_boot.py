@@ -126,7 +126,7 @@ def reap_gateway(proc: subprocess.Popen[bytes]) -> None:
         return
     import asyncio
 
-    from vaultspec_a2a.utils import kill_pid_tree_async
+    from ..utils import kill_pid_tree_async
 
     with contextlib.suppress(Exception):
         asyncio.run(kill_pid_tree_async(proc.pid, term_timeout=10.0, kill_timeout=5.0))

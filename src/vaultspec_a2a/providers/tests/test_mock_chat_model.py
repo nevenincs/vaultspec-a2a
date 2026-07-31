@@ -1,6 +1,6 @@
 """Focused regressions for VidaiMock chunk parsing."""
 
-from vaultspec_a2a.providers.mock_chat_model import (
+from ...providers.mock_chat_model import (
     _extract_chunk_text,
     _extract_tool_calls,
 )

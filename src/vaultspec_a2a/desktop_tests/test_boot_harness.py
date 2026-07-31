@@ -23,11 +23,11 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from vaultspec_a2a.desktop_tests._boot import (
+from ..desktop_tests._boot import (
     GatewayBootError,
     spawn_until_ready,
 )
-from vaultspec_a2a.lifecycle.discovery import is_pid_alive
+from ..lifecycle.discovery import is_pid_alive
 
 if TYPE_CHECKING:
     from pathlib import Path

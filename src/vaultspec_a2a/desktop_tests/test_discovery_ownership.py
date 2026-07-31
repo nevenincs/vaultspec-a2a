@@ -30,14 +30,14 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from vaultspec_a2a.lifecycle.discovery import (
+from ..lifecycle.discovery import (
     DesktopDiscoveryState,
     classify_desktop_discovery,
     desktop_record_process_is_live,
     read_desktop_discovery,
     service_json_path,
 )
-from vaultspec_a2a.lifecycle.singleton import (
+from ..lifecycle.singleton import (
     SingletonConflictError,
     SingletonState,
     acquire_singleton,

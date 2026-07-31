@@ -25,14 +25,14 @@ from ....graph.compiler import _make_research_producer
 from ...nodes.worker import create_worker_node
 
 if TYPE_CHECKING:
-    from vaultspec_a2a.thread.state import TeamState
+    from ....thread.state import TeamState
 
 SIMULATOR_PATH = Path(__file__).parent.parent / "acp_simulator.py"
 PYTHON_EXE = sys.executable
 
 
 def _recording_model(record_file: Path, tmp_path: Path):
-    from vaultspec_a2a.providers.acp_chat_model import AcpChatModel
+    from ....providers.acp_chat_model import AcpChatModel
 
     return AcpChatModel(
         command=[

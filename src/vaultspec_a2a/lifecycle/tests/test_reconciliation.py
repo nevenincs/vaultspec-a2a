@@ -4,7 +4,7 @@ from typing import Any
 
 import pytest
 
-from vaultspec_a2a.lifecycle.reconciliation import (
+from ...lifecycle.reconciliation import (
     ReconciliationAction,
     ThreadSnapshot,
     compute_reconciliation_actions,

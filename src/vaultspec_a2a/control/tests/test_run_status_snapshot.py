@@ -16,7 +16,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from vaultspec_a2a.control.thread_state_service import (
+from ...control.thread_state_service import (
     _ACTIVE_FEATURE_FIELD,
     _AUTHORING_SESSION_FIELD,
     _CHANGESET_ID_FIELD,

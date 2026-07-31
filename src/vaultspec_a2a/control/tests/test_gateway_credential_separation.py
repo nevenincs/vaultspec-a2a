@@ -3,7 +3,7 @@
 import pytest
 from pydantic import ValidationError
 
-from vaultspec_a2a.control.config import Settings
+from ...control.config import Settings
 
 
 def test_settings_reject_reused_gateway_and_worker_credentials() -> None:

@@ -8,8 +8,8 @@ from __future__ import annotations
 
 import pytest
 
-from vaultspec_a2a.control.thread_state_service import project_semantic_phase
-from vaultspec_a2a.thread.enums import RepairStatus, ThreadStatus
+from ...control.thread_state_service import project_semantic_phase
+from ...thread.enums import RepairStatus, ThreadStatus
 
 
 @pytest.mark.parametrize(
@@ -119,7 +119,7 @@ def test_end_and_empty_nodes_are_skipped() -> None:
 
 def test_run_status_projection_reads_the_shared_phase_vocabulary() -> None:
     """run-status projects every shared-map node to that map's phase (one source)."""
-    from vaultspec_a2a.graph.enums import RESEARCH_ADR_NODE_PHASE
+    from ...graph.enums import RESEARCH_ADR_NODE_PHASE
 
     for node, expected in RESEARCH_ADR_NODE_PHASE.items():
         assert (

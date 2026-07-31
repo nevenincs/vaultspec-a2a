@@ -398,7 +398,7 @@ async def test_presets_list_is_truthful_and_resilient(
         # strong, value-based check asserts the real configured secret values are
         # absent, plus canary markers that would only surface in a raw env/
         # credential dump.
-        from vaultspec_a2a.control.config import settings
+        from ...control.config import settings
 
         raw = resp.text
         for secret_value in (

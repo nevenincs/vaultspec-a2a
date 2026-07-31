@@ -8,8 +8,8 @@ import httpx
 import pytest
 from httpx import ASGITransport
 
-from vaultspec_a2a.api.app import create_app
-from vaultspec_a2a.api.dependencies import LIFECYCLE_CAPABILITY_HEADER
+from ...api.app import create_app
+from ...api.dependencies import LIFECYCLE_CAPABILITY_HEADER
 
 _ATTACH = "attach-credential-token-1122334455667788"
 _CAPABILITY = "ownership-capability-token-99aabbccddeeff00"

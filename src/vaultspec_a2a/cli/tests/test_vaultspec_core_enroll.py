@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from vaultspec_a2a.cli.core_enroll import (
+from ...cli.core_enroll import (
     _assert_tracked_projection,
     _require_clean_owned_paths,
     _seed_runtime_without_overwrite,

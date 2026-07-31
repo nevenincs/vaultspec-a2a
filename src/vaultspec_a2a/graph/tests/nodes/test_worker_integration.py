@@ -15,8 +15,7 @@ from langgraph.graph import END, StateGraph
 from langgraph.types import Command
 from pydantic import PrivateAttr
 
-from vaultspec_a2a.thread.state import TeamState
-
+from ....thread.state import TeamState
 from ...nodes.worker import create_worker_node
 
 if TYPE_CHECKING:
@@ -95,7 +94,7 @@ class RecordingMockPermissionModel(BaseChatModel):
 @pytest.mark.asyncio
 async def test_worker_execution_integration() -> None:
     """Worker node executes correctly using a real ACP subprocess."""
-    from vaultspec_a2a.providers.acp_chat_model import AcpChatModel
+    from ....providers.acp_chat_model import AcpChatModel
 
     model = AcpChatModel(
         command=[PYTHON_EXE, str(SIMULATOR_PATH), "--response", "HelloWorld"],
@@ -116,7 +115,7 @@ async def test_worker_execution_integration() -> None:
 @pytest.mark.asyncio
 async def test_worker_context_compaction_integration() -> None:
     """Worker node handles large context with compaction."""
-    from vaultspec_a2a.providers.acp_chat_model import AcpChatModel
+    from ....providers.acp_chat_model import AcpChatModel
 
     model = AcpChatModel(
         command=[PYTHON_EXE, str(SIMULATOR_PATH), "--response", "Compacted"],
@@ -139,7 +138,7 @@ async def test_worker_context_compaction_integration() -> None:
 @pytest.mark.asyncio
 async def test_worker_error_handling_integration() -> None:
     """Worker node handles ACP subprocess errors correctly."""
-    from vaultspec_a2a.providers.acp_chat_model import AcpChatModel
+    from ....providers.acp_chat_model import AcpChatModel
 
     model = AcpChatModel(
         command=[PYTHON_EXE, str(SIMULATOR_PATH), "--error", "Internal agent failure"],
@@ -197,7 +196,7 @@ async def test_worker_resume_reinvokes_model_with_tool_result() -> None:
 @pytest.mark.asyncio
 async def test_worker_turn_clears_consumed_approval_residue() -> None:
     """A worker turn must consume the approval state that authorized it."""
-    from vaultspec_a2a.providers.acp_chat_model import AcpChatModel
+    from ....providers.acp_chat_model import AcpChatModel
 
     model = AcpChatModel(
         command=[PYTHON_EXE, str(SIMULATOR_PATH), "--response", "approved once"],
@@ -285,9 +284,9 @@ async def test_worker_dispatches_mark_complete_command_through_graph(
         create_async_engine,
     )
 
-    from vaultspec_a2a.database import create_thread, seed_task_queue
-    from vaultspec_a2a.database.models import Base
-    from vaultspec_a2a.worker.task_queue_port import SqlTaskQueuePort
+    from ....database import create_thread, seed_task_queue
+    from ....database.models import Base
+    from ....worker.task_queue_port import SqlTaskQueuePort
 
     db_file = tmp_path / "queue.db"
     engine = create_async_engine(f"sqlite+aiosqlite:///{db_file.as_posix()}")

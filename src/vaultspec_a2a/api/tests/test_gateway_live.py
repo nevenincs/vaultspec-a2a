@@ -63,6 +63,56 @@ async def _seed_permission(session_factory, *, thread_id: str, request_id: str) 
 
 
 @pytest.mark.asyncio(loop_scope="function")
+async def test_run_history_is_the_wide_read_that_run_status_deliberately_is_not(
+    session_factory, checkpointer
+) -> None:
+    """History carries the record; run-status stays the bounded authority read.
+
+    The two are asserted against each other rather than in isolation, because
+    the point of adding history was NOT to widen run-status: an engine
+    reconciling authority should not pay for a transcript it never reads. So
+    this pins that history carries the transcript and metadata, and that
+    run-status still does not.
+    """
+    app, _agg, _worker, _cp = make_app(session_factory, checkpointer)
+    async with (
+        _live_server(app) as base,
+        httpx.AsyncClient(base_url=base, timeout=10.0) as client,
+    ):
+        start = await client.post(
+            "/v1/runs",
+            json={
+                "team_preset": _PRESET,
+                "message": "remember this",
+                "autonomous": True,
+            },
+        )
+        assert start.status_code == 201
+        run_id = start.json()["run_id"]
+
+        history = await client.get(f"/v1/runs/{run_id}/history")
+        assert history.status_code == 200
+        hbody = history.json()
+        assert hbody["api_version"] == "v1"
+        assert hbody["run_id"] == run_id
+        # The wide read: the state snapshot is embedded whole.
+        assert "messages" in hbody["state"]
+        assert "agents" in hbody["state"]
+        # Present as a field whether or not this run carried metadata; the wide
+        # read reports its absence rather than omitting the key.
+        assert "metadata" in hbody
+
+        # Run-status is deliberately narrower - it is the recovery snapshot, and
+        # widening it was the alternative this verb exists to avoid.
+        status = await client.get(f"/v1/runs/{run_id}")
+        assert status.status_code == 200
+        assert "messages" not in status.json()
+
+        missing = await client.get("/v1/runs/no-such-run/history")
+        assert missing.status_code == 404
+
+
+@pytest.mark.asyncio(loop_scope="function")
 async def test_archive_and_team_status_are_reachable_on_the_versioned_surface(
     session_factory, checkpointer
 ) -> None:

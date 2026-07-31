@@ -19,7 +19,7 @@ import hmac
 import json
 import logging
 import os
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Literal
 
@@ -35,9 +35,11 @@ from fastapi import (
     Response,
 )
 from fastapi.responses import JSONResponse, StreamingResponse
+from pydantic import ValidationError
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from ...context.metadata import ThreadMetadata
 from ...control.admission import AdmissionBroker, AdmissionReadiness
 from ...control.cancel_service import cancel_thread, raise_for_cancel_failure
 from ...control.config import settings
@@ -71,7 +73,7 @@ from ...control.thread_state_service import (
     project_semantic_phase,
     read_run_snapshot,
 )
-from ...database import get_thread
+from ...database import get_thread, get_thread_metadata
 from ...database.checkpoints import Checkpointer
 from ...database.permission_repository import get_permission_request
 from ...database.session import get_db
@@ -115,6 +117,7 @@ from ..schemas.gateway import (
     RunCancelResponse,
     RunCommitResponse,
     RunDeleteResponse,
+    RunHistoryResponse,
     RunMessageRequest,
     RunMessageResponse,
     RunPendingPermission,
@@ -130,6 +133,7 @@ from ..schemas.gateway import (
     TeamStatusV1Response,
     TopologyPosition,
 )
+from ..schemas.snapshots import ThreadStateSnapshot
 from .thread_stream import build_thread_stream_response
 
 router = APIRouter(
@@ -1445,6 +1449,68 @@ async def run_cancel_endpoint(
         applied=result.applied,
         action_status=result.action_status,
         idempotency_key=result.idempotency_key,
+    )
+
+
+# ---------------------------------------------------------------------------
+# run-history
+# ---------------------------------------------------------------------------
+
+
+@router.get("/runs/{run_id}/history", response_model=RunHistoryResponse)
+async def run_history_endpoint(
+    run_id: PathSafeRunId,
+    db: AsyncSession = Depends(get_db),
+    aggregator: EventAggregator = Depends(get_aggregator),
+    checkpointer: Checkpointer = Depends(get_checkpointer),
+) -> RunHistoryResponse:
+    """Read one run whole, including a terminal or archived one.
+
+    Distinct from run-status by design. Run-status is the BOUNDED recovery
+    snapshot an engine reconciles authority from, and widening it would have
+    made every reconciliation pay for a transcript it does not read. This is the
+    wide read for a consumer that wants the record: transcript, agents, plan,
+    pending answers, and the run's metadata.
+
+    The state snapshot is embedded rather than restated, so this response cannot
+    drift from the snapshot it reports.
+    """
+    snapshot = await build_thread_state(
+        db,
+        thread_id=run_id,
+        aggregator=aggregator,
+        checkpointer=checkpointer,
+    )
+    if snapshot is None:
+        raise HTTPException(status_code=404, detail="Run not found")
+
+    # Absent metadata is stored as null OR as an empty string depending on how
+    # the run was created, and an empty string is not parseable JSON - so the
+    # guard is truthiness, not "is not None".
+    #
+    # Unparseable metadata is reported as absent rather than failing the read.
+    # Not defensive padding: the stored blob and the metadata model genuinely
+    # disagree today - a run started without a workspace root persists metadata
+    # the model rejects as incomplete - and this is the WIDE read, whose job is
+    # to report the record, not to enforce a schema on it. Failing here would
+    # cost a caller the whole transcript over one unrelated field. The
+    # disagreement is queued as its own finding; the legacy metadata route
+    # shares it and answers a server error for exactly these runs.
+    metadata_json = await get_thread_metadata(db, run_id)
+    metadata: ThreadMetadata | None = None
+    if metadata_json:
+        try:
+            metadata = ThreadMetadata.model_validate_json(metadata_json)
+        except ValidationError:
+            logger.warning(
+                "run history: stored metadata for %s does not satisfy the "
+                "metadata model; reporting it absent",
+                run_id,
+            )
+    return RunHistoryResponse(
+        run_id=run_id,
+        state=ThreadStateSnapshot.model_validate(asdict(snapshot)),
+        metadata=metadata,
     )
 
 

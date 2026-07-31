@@ -30,6 +30,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 from ...context.metadata import ThreadMetadata
 from ...thread.actor_tokens import ActorTokenBundle
 from ...thread.enums import CleanupKind, ThreadStatus
+from .snapshots import ThreadStateSnapshot
 
 __all__ = [
     "ActiveRunRecord",
@@ -422,6 +423,24 @@ class RunCancelResponse(BaseModel):
     applied: bool = False
     action_status: str = "rejected_invalid_state"
     idempotency_key: str | None = None
+
+
+class RunHistoryResponse(BaseModel):
+    """The full read of one run, including terminal and archived ones.
+
+    Deliberately distinct from run-status, which is the BOUNDED recovery
+    snapshot an engine reconciles from. This is the wide read - transcript,
+    agents, plan, pending answers, and the run's metadata - for a consumer that
+    wants the whole record rather than the authority fields.
+
+    The state snapshot is embedded by reference rather than restated field by
+    field, so the two cannot drift apart as the snapshot evolves.
+    """
+
+    api_version: Literal["v1"] = _API_VERSION
+    run_id: str
+    state: ThreadStateSnapshot
+    metadata: ThreadMetadata | None = None
 
 
 class RunArchiveResponse(BaseModel):

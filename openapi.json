@@ -1289,6 +1289,65 @@
         }
       }
     },
+    "/v1/runs/{run_id}/history": {
+      "get": {
+        "summary": "Run History Endpoint",
+        "description": "Read one run whole, including a terminal or archived one.\n\nDistinct from run-status by design. Run-status is the BOUNDED recovery\nsnapshot an engine reconciles authority from, and widening it would have\nmade every reconciliation pay for a transcript it does not read. This is the\nwide read for a consumer that wants the record: transcript, agents, plan,\npending answers, and the run's metadata.\n\nThe state snapshot is embedded rather than restated, so this response cannot\ndrift from the snapshot it reports.",
+        "operationId": "run_history_endpoint_v1_runs__run_id__history_get",
+        "parameters": [
+          {
+            "name": "run_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^[A-Za-z0-9_][A-Za-z0-9_-]{0,127}$",
+              "title": "Run Id"
+            }
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunHistoryResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/runs/{run_id}/archive": {
       "post": {
         "summary": "Run Archive Endpoint",
@@ -3312,6 +3371,40 @@
         ],
         "title": "RunDeleteResponse",
         "description": "Report a deletion that finalized over state no pass could remove.\n\nCarried only on that one outcome. A clean deletion answers with no body at\nall, so the presence of this body IS the signal that external state was\nstranded. Names the KINDS of item left behind and nothing more: a concrete\ncheckpoint id or artifact path is control-plane state and never the\ncaller's to receive."
+      },
+      "RunHistoryResponse": {
+        "properties": {
+          "api_version": {
+            "type": "string",
+            "const": "v1",
+            "title": "Api Version",
+            "default": "v1"
+          },
+          "run_id": {
+            "type": "string",
+            "title": "Run Id"
+          },
+          "state": {
+            "$ref": "#/components/schemas/ThreadStateSnapshot"
+          },
+          "metadata": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ThreadMetadata"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "run_id",
+          "state"
+        ],
+        "title": "RunHistoryResponse",
+        "description": "The full read of one run, including terminal and archived ones.\n\nDeliberately distinct from run-status, which is the BOUNDED recovery\nsnapshot an engine reconciles from. This is the wide read - transcript,\nagents, plan, pending answers, and the run's metadata - for a consumer that\nwants the whole record rather than the authority fields.\n\nThe state snapshot is embedded by reference rather than restated field by\nfield, so the two cannot drift apart as the snapshot evolves."
       },
       "RunMessageRequest": {
         "properties": {

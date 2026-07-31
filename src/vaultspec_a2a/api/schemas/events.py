@@ -28,7 +28,6 @@ __all__ = [
     # Component models
     "AgentSummary",
     "ArtifactUpdateEvent",
-    "ConnectedEvent",
     "ErrorEvent",
     "HeartbeatEvent",
     "MessageChunkEvent",
@@ -224,16 +223,6 @@ class ErrorEvent(EventEnvelope):
 # ---------------------------------------------------------------------------
 
 
-class ConnectedEvent(BaseModel):
-    """Sent once on WebSocket open; connection-scoped, not thread-scoped."""
-
-    type: Literal[ServerEventType.CONNECTED] = ServerEventType.CONNECTED
-    client_id: str
-    server_version: str
-    active_threads: list[str] = Field(default_factory=list)
-    metadata: dict[str, Any] | None = None
-
-
 class HeartbeatEvent(BaseModel):
     """Periodic keepalive; connection-scoped, not thread-scoped."""
 
@@ -258,7 +247,6 @@ ServerEvent = Annotated[
     | PlanUpdateEvent
     | TeamStatusEvent
     | ErrorEvent
-    | ConnectedEvent
     | HeartbeatEvent,
     Field(discriminator="type"),
 ]

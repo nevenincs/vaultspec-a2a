@@ -6,29 +6,17 @@ sub-modules directly::
 
     from vaultspec_a2a.api.schemas import (
         ServerEvent,
-        ClientMessage,
         ThreadStateSnapshot,
     )
 """
 
-from .base import ClientCommand as ClientCommand
 from .base import EventEnvelope as EventEnvelope
-from .commands import AgentControlCommand as AgentControlCommand
-from .commands import ClientMessage as ClientMessage
-from .commands import PermissionResponseCommand as PermissionResponseCommand
-from .commands import PingCommand as PingCommand
-from .commands import SendMessageCommand as SendMessageCommand
-from .commands import SubscribeCommand as SubscribeCommand
-from .commands import UnsubscribeCommand as UnsubscribeCommand
-from .enums import AgentControlAction as AgentControlAction
-from .enums import ClientCommandType as ClientCommandType
 from .enums import PlanEntryPriority as PlanEntryPriority
 from .enums import PlanEntryStatus as PlanEntryStatus
 from .enums import ServerEventType as ServerEventType
 from .events import AgentStatusEvent as AgentStatusEvent
 from .events import AgentSummary as AgentSummary
 from .events import ArtifactUpdateEvent as ArtifactUpdateEvent
-from .events import ConnectedEvent as ConnectedEvent
 from .events import ErrorEvent as ErrorEvent
 from .events import HeartbeatEvent as HeartbeatEvent
 from .events import MessageChunkEvent as MessageChunkEvent
@@ -46,22 +34,6 @@ from .events import ToolCallContentText as ToolCallContentText
 from .events import ToolCallLocation as ToolCallLocation
 from .events import ToolCallStartEvent as ToolCallStartEvent
 from .events import ToolCallUpdateEvent as ToolCallUpdateEvent
-from .rest import AgentStatusEntry as AgentStatusEntry
-from .rest import ArchiveThreadResponse as ArchiveThreadResponse
-from .rest import CancelThreadResponse as CancelThreadResponse
-from .rest import CreateThreadRequest as CreateThreadRequest
-from .rest import CreateThreadResponse as CreateThreadResponse
-from .rest import DeleteThreadResponse as DeleteThreadResponse
-from .rest import PendingPermission as PendingPermission
-from .rest import PermissionResponseRequest as PermissionResponseRequest
-from .rest import PermissionResponseResult as PermissionResponseResult
-from .rest import SendMessageRequest as SendMessageRequest
-from .rest import SendMessageResponse as SendMessageResponse
-from .rest import TeamPresetsResponse as TeamPresetsResponse
-from .rest import TeamPresetSummary as TeamPresetSummary
-from .rest import TeamStatusResponse as TeamStatusResponse
-from .rest import ThreadListResponse as ThreadListResponse
-from .rest import ThreadSummary as ThreadSummary
 from .snapshots import ArtifactSnapshot as ArtifactSnapshot
 from .snapshots import ExecutionTaskSnapshot as ExecutionTaskSnapshot
 from .snapshots import MessageSnapshot as MessageSnapshot
@@ -69,53 +41,27 @@ from .snapshots import ThreadStateSnapshot as ThreadStateSnapshot
 from .snapshots import ToolCallSnapshot as ToolCallSnapshot
 
 __all__ = [
-    "AgentControlAction",
-    "AgentControlCommand",
-    "AgentStatusEntry",
     "AgentStatusEvent",
     "AgentSummary",
-    "ArchiveThreadResponse",
     "ArtifactSnapshot",
     "ArtifactUpdateEvent",
-    "CancelThreadResponse",
-    "ClientCommand",
-    "ClientCommandType",
-    "ClientMessage",
-    "ConnectedEvent",
-    "CreateThreadRequest",
-    "CreateThreadResponse",
-    "DeleteThreadResponse",
     "ErrorEvent",
     "EventEnvelope",
     "ExecutionTaskSnapshot",
     "HeartbeatEvent",
     "MessageChunkEvent",
     "MessageSnapshot",
-    "PendingPermission",
     "PermissionOption",
     "PermissionRequestEvent",
-    "PermissionResponseCommand",
-    "PermissionResponseRequest",
-    "PermissionResponseResult",
-    "PingCommand",
     "PlanEntry",
     "PlanEntryPriority",
     "PlanEntryStatus",
     "PlanUpdateEvent",
-    "SendMessageCommand",
-    "SendMessageRequest",
-    "SendMessageResponse",
     "ServerEvent",
     "ServerEventType",
-    "SubscribeCommand",
-    "TeamPresetSummary",
-    "TeamPresetsResponse",
     "TeamStatusEvent",
-    "TeamStatusResponse",
     "ThoughtChunkEvent",
-    "ThreadListResponse",
     "ThreadStateSnapshot",
-    "ThreadSummary",
     "ToolCallContent",
     "ToolCallContentDiff",
     "ToolCallContentTerminal",
@@ -124,5 +70,4 @@ __all__ = [
     "ToolCallSnapshot",
     "ToolCallStartEvent",
     "ToolCallUpdateEvent",
-    "UnsubscribeCommand",
 ]

@@ -2,7 +2,7 @@
 
 The worker process communicates with the gateway via two channels:
 
-1. **WebSocket** (``/internal/ws``) -- legacy streaming path where the worker
+1. **WebSocket** (``/internal/ws``) -- streaming path where the worker
    pushes ``WorkerEventEnvelope`` and ``HeartbeatMessage`` JSON frames.
 2. **HTTP POST** (``/internal/events``, ``/internal/heartbeat``) -- preferred
    path that avoids the need for a WebSocket client library in the worker.
@@ -86,17 +86,15 @@ async def _relay_single_event(
     thread_id: str,
     payload: dict[str, Any],
     *,
-    cm: Any,
     agg: Any,
     session_factory: Any,
     drain_gate: Any = None,
     transport: str = "http",
 ) -> None:
-    """Broadcast, aggregate, and relay a single worker event.
+    """Aggregate and relay a single worker event.
 
     Shared by all three ingest paths (WS, HTTP POST, HTTP batch) to
-    avoid copy-pasting the broadcast → aggregator sync → relay_event
-    sequence.
+    avoid copy-pasting the aggregator sync → relay_event sequence.
 
     *drain_gate* is the process-wide run-admission gate seated on ``app.state``;
     it travels to the terminal handler, which releases the run from it, exactly
@@ -112,8 +110,6 @@ async def _relay_single_event(
     if agg is not None:
         agg.relay_payload(thread_id, payload)
         agg.sync_worker_event(thread_id, payload)
-    elif cm is not None:
-        await cm.broadcast_to_thread(thread_id, payload)
     else:
         logger.warning(
             "No relay target available -- dropping event for %s",
@@ -152,7 +148,6 @@ async def _relay_worker_event(websocket: WebSocket, msg: dict, raw: str) -> None
         )
         return
     session_factory = getattr(websocket.app.state, "db_session_factory", None)
-    cm = getattr(websocket.app.state, "connection_manager", None)
     agg = getattr(websocket.app.state, "aggregator", None)
     # Read the seated gate rather than get-or-creating it: a gate that has never
     # been seated has admitted nothing, so there is nothing to release.
@@ -160,7 +155,6 @@ async def _relay_worker_event(websocket: WebSocket, msg: dict, raw: str) -> None
     await _relay_single_event(
         thread_id,
         payload,
-        cm=cm,
         agg=agg,
         session_factory=session_factory,
         drain_gate=drain_gate,
@@ -276,9 +270,8 @@ async def receive_worker_event(request: Request) -> dict[str, str]:
     payload: dict[str, Any] = body.get("payload", {})
     _validate_event_envelope(thread_id, payload, context="worker event POST")
 
-    cm = getattr(request.app.state, "connection_manager", None)
     agg = getattr(request.app.state, "aggregator", None)
-    if cm is None and agg is None:
+    if agg is None:
         raise HTTPException(
             status_code=503,
             detail="No relay target available -- gateway not ready",
@@ -287,7 +280,6 @@ async def receive_worker_event(request: Request) -> dict[str, str]:
     await _relay_single_event(
         thread_id,
         payload,
-        cm=cm,
         agg=agg,
         session_factory=getattr(request.app.state, "db_session_factory", None),
         drain_gate=getattr(request.app.state, "drain_gate", None),
@@ -328,9 +320,8 @@ async def receive_worker_event_batch(request: Request) -> dict[str, str]:
     # even if the batch was assembled out of order.
     events.sort(key=lambda e: e.get("ts", 0.0))
 
-    cm = getattr(request.app.state, "connection_manager", None)
     agg = getattr(request.app.state, "aggregator", None)
-    if cm is None and agg is None:
+    if agg is None:
         raise HTTPException(
             status_code=503,
             detail="No relay target available -- gateway not ready",
@@ -355,7 +346,6 @@ async def receive_worker_event_batch(request: Request) -> dict[str, str]:
         await _relay_single_event(
             thread_id,
             payload,
-            cm=cm,
             agg=agg,
             session_factory=session_factory,
             drain_gate=drain_gate,

@@ -2,7 +2,7 @@
 
 Real loopback HTTP servers, no mocks. Pins the equivalence the dedup exists to
 guarantee: an exact 200 is healthy and a 204 is NOT, for both the self-contained
-client path (watchdog/boot) and the injected pooled-client path (/api/health), so
+client path (watchdog/boot) and the injected pooled-client path (/health), so
 the two can never silently disagree on a worker's health.
 """
 
@@ -58,7 +58,7 @@ async def test_worker_health_200_is_healthy_via_both_client_paths() -> None:
 
 @pytest.mark.asyncio
 async def test_worker_health_204_is_unhealthy_identically_via_both_paths() -> None:
-    # 204 passed the old /api/health raise_for_status but fails the watchdog's exact
+    # 204 passed the old readiness raise_for_status but fails the watchdog's exact
     # 200 - the silent disagreement this unification removes. Both must now say False.
     with _health_server(204) as url:
         own = await _check_worker_health(url)

@@ -239,14 +239,14 @@ async def _probe_worker_health(
     """Probe the worker's ``GET /health`` once, returning ``(healthy, body)``.
 
     The single worker-health primitive for every caller - the boot/spawn paths,
-    the watchdog's authoritative crash check, and ``/api/health``. Request-path
+    the watchdog's authoritative crash check, and ``/health``. Request-path
     callers pass the app-pooled *client* to reuse its connection pool (already
     carrying the worker IPC bearer); the watchdog and boot paths pass none and get
     a self-contained one-shot client that presents the same bearer, so a worker
     that enforces the credential on ``/health`` still answers its owner.
 
     The health verdict is an exact ``200`` and nothing else, so every caller
-    agrees and ``/api/health`` can never silently diverge from the watchdog's
+    agrees and ``/health`` can never silently diverge from the watchdog's
     restart decision (a ``204`` fails both, not one). The decoded body is a
     strictly additive by-product for callers that also want what the worker
     *reported*: a body that will not decode leaves the verdict untouched and

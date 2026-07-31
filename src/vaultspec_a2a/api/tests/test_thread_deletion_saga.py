@@ -194,7 +194,7 @@ class TestVersionedDeletionVerb:
 
 
 class TestDeletionSagaEndpoint:
-    """DELETE /api/threads/{id} under replay and mid-flight resume."""
+    """DELETE /v1/runs/{id} under replay and mid-flight resume."""
 
     def test_replayed_delete_after_completion_is_idempotent(
         self, session_factory, checkpointer
@@ -211,8 +211,8 @@ class TestDeletionSagaEndpoint:
         asyncio.run(_seed())
 
         with TestClient(app, raise_server_exceptions=True) as client:
-            first = client.delete("/api/threads/t-replay")
-            second = client.delete("/api/threads/t-replay")
+            first = client.delete("/v1/runs/t-replay")
+            second = client.delete("/v1/runs/t-replay")
 
         assert first.status_code == 204
         assert second.status_code == 404
@@ -267,7 +267,7 @@ class TestDeletionSagaEndpoint:
         assert asyncio.run(_checkpoint_exists()) is True
 
         with TestClient(app, raise_server_exceptions=True) as client:
-            resp = client.delete("/api/threads/t-resume")
+            resp = client.delete("/v1/runs/t-resume")
 
         assert resp.status_code == 204
         assert asyncio.run(_checkpoint_exists()) is False
@@ -301,7 +301,7 @@ class TestDeletionSagaEndpoint:
         asyncio.run(_seed())
 
         with TestClient(app, raise_server_exceptions=True) as client:
-            resp = client.delete("/api/threads/t-running")
+            resp = client.delete("/v1/runs/t-running")
 
         assert resp.status_code == 409
         assert resp.json()["detail"] == "Cannot delete thread in 'running' state"
@@ -349,15 +349,15 @@ class TestDeletionSagaEndpoint:
         asyncio.run(_seed())
 
         with TestClient(app, raise_server_exceptions=True) as client:
-            responses = [client.delete("/api/threads/t-strand") for _ in range(3)]
+            responses = [client.delete("/v1/runs/t-strand") for _ in range(3)]
             # The rows are gone, so the retry this outcome does NOT invite finds
             # nothing - which is exactly why abandonment is not service-unavailable.
-            replay = client.delete("/api/threads/t-strand")
+            replay = client.delete("/v1/runs/t-strand")
 
         assert [resp.status_code for resp in responses] == [503, 503, 200]
         assert responses[-1].json() == {
             "api_version": "v1",
-            "thread_id": "t-strand",
+            "run_id": "t-strand",
             "deleted": True,
             "cleanup_abandoned": True,
             "abandoned_kinds": [CleanupKind.CHECKPOINT.value],
@@ -404,7 +404,7 @@ class TestDeletionSagaEndpoint:
         asyncio.run(_seed())
 
         with TestClient(app, raise_server_exceptions=True) as client:
-            responses = [client.delete("/api/threads/t-both") for _ in range(3)]
+            responses = [client.delete("/v1/runs/t-both") for _ in range(3)]
 
         assert [resp.status_code for resp in responses] == [503, 503, 200]
         assert responses[-1].json()["abandoned_kinds"] == [

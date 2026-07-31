@@ -13,10 +13,10 @@ from ...api.app import create_app
 _TOKEN = "attach-credential-token-fedcba9876543210"
 
 # Representative product routes that must reject an unauthenticated caller. Each
-# lives under a router the register helper gates with attach.
+# lives under the versioned router the register helper gates with attach.
 _GATED_REQUESTS = (
-    ("GET", "/api/threads"),
-    ("GET", "/api/teams"),
+    ("GET", "/v1/runs"),
+    ("GET", "/v1/presets"),
 )
 
 

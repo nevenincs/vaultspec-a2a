@@ -91,13 +91,12 @@ def test_desktop_readiness_liveness_minimal_and_readiness_authenticated(
                 "backend",
                 "status",
             )
-            for path in ("/health", "/api/health"):
-                live = client.get(path)
-                assert live.status_code == 200, path
-                assert live.content == b'{"liveness":"alive"}', path
-                assert live.json() == {"liveness": "alive"}, path
-                for token in leaks:
-                    assert token not in live.text, (path, token)
+            live = client.get("/health")
+            assert live.status_code == 200
+            assert live.content == b'{"liveness":"alive"}'
+            assert live.json() == {"liveness": "alive"}
+            for token in leaks:
+                assert token not in live.text, token
 
             # --- Readiness facts are reachable only through the attach credential. ---
             assert client.get("/v1/service").status_code == 401

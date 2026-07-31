@@ -34,7 +34,7 @@ import pytest
 from ...domain_config import domain_config
 from ...streaming.aggregator import EventAggregator
 from ...thread.enums import ThreadStatus
-from ..routes.thread_stream import _stream_thread_events
+from ..thread_stream import _stream_thread_events
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator

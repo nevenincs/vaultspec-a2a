@@ -16,7 +16,7 @@ from typing import TYPE_CHECKING, cast
 import pytest
 from fastapi import HTTPException
 
-from ...api.routes.thread_stream import build_thread_stream_response
+from ...api.thread_stream import build_thread_stream_response
 from ...control.config import Settings
 from ...streaming.aggregator import EventAggregator
 

@@ -1,6 +1,6 @@
 """Consolidated health-data assembly for gateway health endpoints.
 
-Both ``/health`` (liveness) and ``/api/health`` (readiness) share a common
+The single ``/health`` surface serves both liveness and readiness from a common
 set of worker, circuit breaker, spawner, and infrastructure diagnostics.
 This module provides ``assemble_health_status()`` as the single source of
 truth for that shared data, plus ``build_sqlite_fallback_diagnostics()``
@@ -8,7 +8,7 @@ which was previously inlined in ``api/app.py``.
 
 ``build_full_health()`` is the async service function that runs all probes
 (database, worker HTTP, checkpoint, circuit breaker) and returns the
-complete readiness payload consumed by ``/api/health``.
+complete readiness payload ``/health`` serves on the unarmed profiles.
 
 ``assemble_desktop_readiness()`` is also the single readiness authority used by
 :mod:`vaultspec_a2a.control.admission` through
@@ -146,8 +146,8 @@ def assemble_health_status(
 
     Reads circuit breaker, spawner, worker state, repair summary, and SQLite
     fallback diagnostics from ``app_state``.  The returned dict contains all
-    fields shared by both ``/health`` and ``/api/health``; each route adds its
-    own unique fields on top.
+    fields the readiness aggregate and the desktop projection share; each caller
+    adds its own unique fields on top.
 
     Parameters
     ----------
@@ -400,7 +400,7 @@ async def build_full_health(
 ) -> dict[str, Any]:
     """Run all health probes and return the complete readiness payload.
 
-    This is the service-layer orchestration consumed by ``/api/health``.
+    This is the service-layer orchestration ``/health`` serves unarmed.
     It runs the DB probe, worker HTTP check, checkpoint presence test,
     circuit breaker and spawner inspection, then computes overall readiness.
 

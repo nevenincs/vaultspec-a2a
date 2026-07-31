@@ -135,7 +135,7 @@ from ..schemas.gateway import (
     TopologyPosition,
 )
 from ..schemas.snapshots import ThreadStateSnapshot
-from .thread_stream import build_thread_stream_response
+from ..thread_stream import build_thread_stream_response
 
 router = APIRouter(
     prefix="/v1",
@@ -1422,7 +1422,7 @@ async def run_stream_endpoint(
     The public streaming companion to run-status: run-status is the authoritative
     recovery snapshot, this is the droppable live progress relay. A run id is the
     thread id, so this delegates to the same stream builder the internal
-    ``/api/threads/{id}/stream`` route uses - one code path, the same versioned
+    progress stream has always used - one code path, the same versioned
     256 KiB-bounded frames, the same terminal-replay-then-close semantics. Frames
     are non-authoritative by contract: a consumer reconciles run state from
     run-status, never from a relay frame.
@@ -1494,6 +1494,17 @@ async def run_cancel_endpoint(
 # ---------------------------------------------------------------------------
 
 
+def snapshot_to_wire(data: Any) -> ThreadStateSnapshot:
+    """Project the domain run-state snapshot onto its wire model.
+
+    Named rather than inlined so the conversion has a single production seam a
+    parity test can drive directly. A field added to the domain snapshot but
+    absent from the wire model is dropped silently here, which is exactly the
+    kind of loss a test that re-derives the conversion cannot catch.
+    """
+    return ThreadStateSnapshot.model_validate(asdict(data))
+
+
 @router.get("/runs/{run_id}/history", response_model=RunHistoryResponse)
 async def run_history_endpoint(
     run_id: PathSafeRunId,
@@ -1546,7 +1557,7 @@ async def run_history_endpoint(
             )
     return RunHistoryResponse(
         run_id=run_id,
-        state=ThreadStateSnapshot.model_validate(asdict(snapshot)),
+        state=snapshot_to_wire(snapshot),
         metadata=metadata,
     )
 

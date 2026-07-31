@@ -1,8 +1,8 @@
 """Contract schema round-trip tests.
 
-Instantiates every model in the ServerEvent and ClientMessage unions,
-serializes to JSON, and deserializes back to verify Pydantic validation
-and discriminated union dispatch.
+Instantiates every model in the ServerEvent union and the snapshot models,
+serializes to JSON, and deserializes back to verify Pydantic validation and
+discriminated union dispatch.
 """
 
 from collections.abc import Callable
@@ -22,44 +22,25 @@ from ....graph.enums import (
 )
 from ....thread.enums import ThreadStatus
 from .. import (
-    AgentControlAction,
-    AgentControlCommand,
-    AgentStatusEntry,
     AgentStatusEvent,
     AgentSummary,
     ArtifactSnapshot,
     ArtifactUpdateEvent,
-    ClientMessage,
-    ConnectedEvent,
-    CreateThreadRequest,
-    CreateThreadResponse,
     ErrorEvent,
     ExecutionTaskSnapshot,
     HeartbeatEvent,
     MessageChunkEvent,
     MessageSnapshot,
-    PendingPermission,
     PermissionOption,
     PermissionRequestEvent,
-    PermissionResponseCommand,
-    PermissionResponseRequest,
-    PermissionResponseResult,
-    PingCommand,
     PlanEntry,
     PlanEntryPriority,
     PlanEntryStatus,
     PlanUpdateEvent,
-    SendMessageCommand,
-    SendMessageRequest,
-    SendMessageResponse,
     ServerEvent,
-    SubscribeCommand,
     TeamStatusEvent,
-    TeamStatusResponse,
     ThoughtChunkEvent,
-    ThreadListResponse,
     ThreadStateSnapshot,
-    ThreadSummary,
     ToolCallContentDiff,
     ToolCallContentTerminal,
     ToolCallContentText,
@@ -67,7 +48,6 @@ from .. import (
     ToolCallSnapshot,
     ToolCallStartEvent,
     ToolCallUpdateEvent,
-    UnsubscribeCommand,
 )
 
 NOW = datetime.now(tz=UTC)
@@ -90,7 +70,6 @@ ENVELOPE: Envelope = {
 }
 
 server_event_adapter = TypeAdapter(ServerEvent)
-client_message_adapter = TypeAdapter(ClientMessage)
 
 
 # ---------------------------------------------------------------------------
@@ -222,14 +201,6 @@ def _error_event() -> ErrorEvent:
     )
 
 
-def _connected() -> ConnectedEvent:
-    return ConnectedEvent(
-        client_id="client-abc",
-        server_version="0.1.0",
-        active_threads=["thread-1"],
-    )
-
-
 def _heartbeat() -> HeartbeatEvent:
     return HeartbeatEvent(
         timestamp=NOW,
@@ -248,58 +219,7 @@ ALL_SERVER_EVENTS = [
     _plan_update,
     _team_status,
     _error_event,
-    _connected,
     _heartbeat,
-]
-
-
-# ---------------------------------------------------------------------------
-# Client command fixtures
-# ---------------------------------------------------------------------------
-
-
-def _subscribe() -> SubscribeCommand:
-    return SubscribeCommand(thread_ids=["thread-1", "thread-2"])
-
-
-def _unsubscribe() -> UnsubscribeCommand:
-    return UnsubscribeCommand(thread_ids=["thread-1"])
-
-
-def _send_message() -> SendMessageCommand:
-    return SendMessageCommand(
-        thread_id="thread-1",
-        content="Hello agent",
-        agent_id="agent-1",
-    )
-
-
-def _agent_control() -> AgentControlCommand:
-    return AgentControlCommand(
-        thread_id="thread-1",
-        agent_id="agent-1",
-        action=AgentControlAction.PAUSE,
-    )
-
-
-def _permission_response() -> PermissionResponseCommand:
-    return PermissionResponseCommand(
-        request_id="perm-1",
-        option_id="opt-1",
-    )
-
-
-def _ping() -> PingCommand:
-    return PingCommand()
-
-
-ALL_CLIENT_COMMANDS = [
-    _subscribe,
-    _unsubscribe,
-    _send_message,
-    _agent_control,
-    _permission_response,
-    _ping,
 ]
 
 
@@ -337,23 +257,6 @@ class TestServerEventRoundTrip:
         assert type(restored) is type(event)
 
 
-class TestClientMessageRoundTrip:
-    """Every ClientMessage model survives JSON serialization and deserialization."""
-
-    @pytest.mark.parametrize(
-        "factory",
-        ALL_CLIENT_COMMANDS,
-        ids=[f.__name__.lstrip("_") for f in ALL_CLIENT_COMMANDS],
-    )
-    def test_round_trip(self, factory: Callable[[], Any]) -> None:
-        """Serialize ClientMessage to JSON and deserialize back."""
-        cmd = factory()
-        json_bytes = cmd.model_dump_json()
-        restored = client_message_adapter.validate_json(json_bytes)
-        assert type(restored) is type(cmd)
-        assert restored.type == cmd.type
-
-
 class TestToolCallContentDiscriminator:
     """ToolCallContent discriminated union dispatches correctly."""
 
@@ -372,88 +275,6 @@ class TestToolCallContentDiscriminator:
         """ToolCallContentTerminal has correct discriminator."""
         tc = ToolCallContentTerminal(terminal_id="term-1")
         assert tc.content_type == "terminal"
-
-
-class TestRESTModels:
-    """REST models serialize and validate correctly."""
-
-    def test_create_thread_request(self) -> None:
-        """CreateThreadRequest round-trip with nickname validation."""
-        req = CreateThreadRequest(
-            initial_message="Hello",
-            team_preset="vaultspec-solo-coder",
-            nickname="my-thread-01",
-        )
-        data = req.model_dump()
-        restored = CreateThreadRequest.model_validate(data)
-        assert restored.initial_message == "Hello"
-        assert restored.team_preset == "vaultspec-solo-coder"
-        assert restored.nickname == "my-thread-01"
-
-    def test_create_thread_request_nickname_validation(self) -> None:
-        """CreateThreadRequest rejects invalid nickname slugs."""
-        import pytest
-
-        with pytest.raises(Exception, match="lowercase slug"):
-            CreateThreadRequest(
-                initial_message="Hello",
-                nickname="Invalid Name!",
-            )
-
-    def test_create_thread_response(self) -> None:
-        """CreateThreadResponse validates thread_id and status."""
-        resp = CreateThreadResponse(thread_id="t-1", status="submitted")
-        assert resp.thread_id == "t-1"
-
-    def test_thread_list_response(self) -> None:
-        """ThreadListResponse round-trip with nested ThreadSummary."""
-        resp = ThreadListResponse(
-            threads=[
-                ThreadSummary(
-                    thread_id="t-1",
-                    status=ThreadStatus.RUNNING,
-                    approval_status="pending",
-                    approval_request_id="approval-1",
-                    created_at=NOW,
-                    updated_at=NOW,
-                ),
-            ],
-            total=1,
-        )
-        json_bytes = resp.model_dump_json()
-        restored = ThreadListResponse.model_validate_json(json_bytes)
-        assert restored.total == 1
-        assert len(restored.threads) == 1
-
-    def test_send_message_request(self) -> None:
-        """SendMessageRequest allows optional agent_id."""
-        req = SendMessageRequest(content="test")
-        assert req.agent_id is None
-
-    def test_team_status_response(self) -> None:
-        """TeamStatusResponse with empty lists validates."""
-        resp = TeamStatusResponse(agents=[], active_threads=[], pending_permissions=[])
-        data = resp.model_dump()
-        restored = TeamStatusResponse.model_validate(data)
-        assert restored.agents == []
-
-    def test_permission_response_request(self) -> None:
-        """PermissionResponseRequest allows optional kind."""
-        req = PermissionResponseRequest(option_id="opt-1")
-        assert req.kind is None
-
-    def test_permission_response_result(self) -> None:
-        """PermissionResponseResult round-trip preserves accepted flag."""
-        result = PermissionResponseResult(
-            request_id="perm-1",
-            accepted=True,
-            thread_id="t-1",
-            approval_status="pending",
-        )
-        json_bytes = result.model_dump_json()
-        restored = PermissionResponseResult.model_validate_json(json_bytes)
-        assert restored.accepted is True
-        assert restored.approval_status == "pending"
 
 
 class TestSnapshotModels:
@@ -569,61 +390,3 @@ class TestSnapshotModels:
         assert snapshot.pause_cause is None
         assert snapshot.approval_status is None
         assert snapshot.approval_request_id is None
-
-
-class TestMissingFacadeTypes:
-    """Round-trip tests for types previously missing from the schemas facade.
-
-    SendMessageResponse, AgentStatusEntry, PendingPermission were
-    missing from schemas/__init__.py — this class verifies they are now
-    importable and round-trip correctly.
-    """
-
-    def test_send_message_response_round_trip(self) -> None:
-        """SendMessageResponse serializes and deserializes correctly."""
-        resp = SendMessageResponse(status="accepted", thread_id="t-1")
-        json_bytes = resp.model_dump_json()
-        restored = SendMessageResponse.model_validate_json(json_bytes)
-        assert restored.status == "accepted"
-        assert restored.thread_id == "t-1"
-
-    def test_agent_status_entry_round_trip(self) -> None:
-        """AgentStatusEntry serializes with optional provider/model fields."""
-        entry = AgentStatusEntry(
-            agent_id="agent-1",
-            node_name="coder",
-            state=AgentLifecycleState.WORKING,
-            provider=Provider.CLAUDE,
-            model=Model.MID,
-            role="worker",
-            display_name="Coder",
-            description="Writes code",
-        )
-        json_bytes = entry.model_dump_json()
-        restored = AgentStatusEntry.model_validate_json(json_bytes)
-        assert restored.agent_id == "agent-1"
-        assert restored.state == AgentLifecycleState.WORKING
-        assert restored.provider == Provider.CLAUDE
-
-    def test_agent_status_entry_optional_provider(self) -> None:
-        """AgentStatusEntry allows provider and model to be None."""
-        entry = AgentStatusEntry(
-            agent_id="agent-2",
-            node_name="planner",
-            state=AgentLifecycleState.IDLE,
-        )
-        assert entry.provider is None
-        assert entry.model is None
-
-    def test_pending_permission_round_trip(self) -> None:
-        """PendingPermission serializes and deserializes correctly."""
-        perm = PendingPermission(
-            request_id="req-1",
-            thread_id="t-1",
-            description="Execute shell command",
-        )
-        json_bytes = perm.model_dump_json()
-        restored = PendingPermission.model_validate_json(json_bytes)
-        assert restored.request_id == "req-1"
-        assert restored.thread_id == "t-1"
-        assert restored.description == "Execute shell command"

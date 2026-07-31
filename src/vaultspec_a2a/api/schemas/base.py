@@ -1,7 +1,6 @@
-"""Base envelope models for the WebSocket wire protocol.
+"""Base envelope model for the progress-stream wire protocol.
 
 ``EventEnvelope`` is the base for all thread-scoped server-to-client events.
-``ClientCommand`` is the base for all client-to-server commands.
 """
 
 from datetime import datetime
@@ -9,16 +8,15 @@ from typing import Any
 
 from pydantic import BaseModel
 
-from .enums import ClientCommandType, ServerEventType
+from .enums import ServerEventType
 
 __all__ = [
-    "ClientCommand",
     "EventEnvelope",
 ]
 
 
 class EventEnvelope(BaseModel):
-    """Base model for thread-scoped server-to-client WebSocket events.
+    """Base model for thread-scoped server-to-client progress events.
 
     Every event carries routing metadata so the frontend can dispatch it
     to the correct thread store without inspecting the payload.
@@ -30,14 +28,3 @@ class EventEnvelope(BaseModel):
     timestamp: datetime
     sequence: int
     metadata: dict[str, Any] | None = None
-
-
-class ClientCommand(BaseModel):
-    """Base model for client-to-server WebSocket commands.
-
-    The ``request_id`` field enables request/response correlation for
-    commands that expect an acknowledgement.
-    """
-
-    type: ClientCommandType
-    request_id: str | None = None

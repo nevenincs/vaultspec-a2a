@@ -499,22 +499,14 @@ class InfraConfig(BaseSettings):
         ),
     )
 
-    # WebSocket
-    ws_heartbeat_interval_seconds: float = Field(
+    # Progress stream
+    stream_heartbeat_interval_seconds: float = Field(
         default=30.0,
-        alias="VAULTSPEC_WS_HEARTBEAT_INTERVAL_SECONDS",
-        description="WebSocket heartbeat cadence (seconds).",
-    )
-    ws_dead_client_timeout_seconds: float = Field(
-        default=90.0,
-        alias="VAULTSPEC_WS_DEAD_CLIENT_TIMEOUT_SECONDS",
-        description="Disconnect WebSocket clients silent for this long.",
-    )
-    ws_max_message_bytes: int = Field(
-        default=1_048_576,
-        alias="VAULTSPEC_WS_MAX_MESSAGE_BYTES",
+        alias="VAULTSPEC_STREAM_HEARTBEAT_INTERVAL_SECONDS",
         description=(
-            "Maximum WebSocket frame size (bytes) to prevent memory exhaustion."
+            "Idle cadence at which the progress stream emits a keepalive frame "
+            "(seconds). Bounds how long a quiet run can look indistinguishable "
+            "from a dead connection to a reader."
         ),
     )
 

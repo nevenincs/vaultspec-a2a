@@ -2,7 +2,7 @@
 
 A worker that answers ``200`` with a body the decoder cannot read is the case
 where the gateway's two health readers used to disagree. The watchdog and
-``/api/health`` read it through the probe primitive and saw the worker UP; the
+``/health`` read it through the probe primitive and saw the worker UP; the
 boot, adopt, and evict paths read it through the body-returning helper, which
 evaluated ``resp.json()`` inside the same ``try`` that caught transport
 failures, and so received the identical ``None`` it receives for a DEAD worker.
@@ -137,7 +137,7 @@ async def test_an_unreadable_worker_is_up_present_and_not_ours(
         assert healthy is True, (healthy, body)
         assert body is None, body
 
-        # The watchdog and /api/health agree, through the boolean face.
+        # The watchdog and /health agree, through the boolean face.
         assert await _check_worker_health(url) is True
 
         # LOAD-BEARING: something demonstrably holds this port. Not None - which

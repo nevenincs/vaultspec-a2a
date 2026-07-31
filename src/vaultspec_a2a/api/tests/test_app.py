@@ -9,11 +9,9 @@ from typing import TYPE_CHECKING, cast
 import httpx
 import pytest
 from httpx import ASGITransport
-from langgraph.checkpoint.base import empty_checkpoint
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
 from ...control.circuit_breaker import WorkerCircuitBreaker
-from ...control.diagnostics import classify_missing_ws_thread
 from ...control.health import build_sqlite_fallback_diagnostics
 from ...control.worker_management import (
     LazyWorkerSpawner,
@@ -22,9 +20,6 @@ from ...control.worker_management import (
     _build_worker_restart_detail,
     _worker_stderr_log_path,
 )
-from ...database.models import ThreadExecutionStateModel
-from ..websocket import WebSocketCommandRejectedError
-from ..ws_dispatch import create_dispatch_message_handler
 from .conftest import make_app
 
 if TYPE_CHECKING:
@@ -290,173 +285,3 @@ async def test_health_degrades_when_checkpointer_backend_is_unusable(
     assert body["status"] == "degraded"
     assert body["checks"]["checkpoint"]["status"] == "error"
     assert body["checks"]["checkpoint"]["detail"] == "checkpoint probe failed"
-
-
-@pytest.mark.asyncio
-async def test_classify_missing_ws_thread_reports_not_found(
-    session_factory,
-    checkpointer,
-) -> None:
-    """Missing thread with no backend residue should return THREAD_NOT_FOUND."""
-    result = await classify_missing_ws_thread(
-        thread_id="missing-thread",
-        session_factory=session_factory,
-        checkpointer=checkpointer,
-    )
-
-    assert result.code == "THREAD_NOT_FOUND"
-    assert result.metadata == {
-        "execution_state_present": False,
-        "checkpoint_present": False,
-        "checkpoint_unverified": False,
-    }
-
-
-@pytest.mark.asyncio
-async def test_classify_missing_ws_thread_reports_state_drift(
-    session_factory,
-    checkpointer,
-) -> None:
-    """Missing thread with durable checkpoint residue should report drift."""
-    await checkpointer.setup()
-    checkpoint = empty_checkpoint()
-    checkpoint["id"] = "cp-123"
-    await checkpointer.aput(
-        {"configurable": {"thread_id": "drift-thread", "checkpoint_ns": ""}},
-        checkpoint,
-        {"source": "loop", "step": 1, "parents": {}},
-        {},
-    )
-
-    result = await classify_missing_ws_thread(
-        thread_id="drift-thread",
-        session_factory=session_factory,
-        checkpointer=checkpointer,
-    )
-
-    assert result.code == "THREAD_STATE_DRIFT"
-    assert result.metadata is not None
-    assert result.metadata["execution_state_present"] is False
-    assert result.metadata["checkpoint_present"] is True
-
-
-@pytest.mark.asyncio
-async def test_classify_missing_ws_thread_prefers_unverified_over_execution_state(
-    session_factory,
-    tmp_path: Path,
-) -> None:
-    """Checkpoint uncertainty must outrank orphaned execution-state residue."""
-    case_dir = tmp_path / "api-test-app"
-    case_dir.mkdir(parents=True, exist_ok=True)
-    checkpoints_file = case_dir / "closed-checkpoints.db"
-
-    async with AsyncSqliteSaver.from_conn_string(str(checkpoints_file)) as checkpointer:
-        pass
-
-    async with session_factory() as session:
-        session.add(
-            ThreadExecutionStateModel(
-                thread_id="unverified-thread",
-                checkpoint_id="cp-orphaned",
-                parent_checkpoint_id=None,
-                recovery_epoch=0,
-                task_count=0,
-                interrupt_count=0,
-                next_nodes_json="[]",
-                interrupt_types_json="[]",
-                tasks_json="[]",
-                degraded_reasons_json="[]",
-            )
-        )
-        await session.commit()
-
-    result = await classify_missing_ws_thread(
-        thread_id="unverified-thread",
-        session_factory=session_factory,
-        checkpointer=checkpointer,
-    )
-
-    assert result.code == "THREAD_STATE_UNVERIFIED"
-    assert result.metadata == {
-        "execution_state_present": True,
-        "checkpoint_present": False,
-        "checkpoint_unverified": True,
-    }
-
-
-@pytest.mark.asyncio
-async def test_dispatch_message_handler_rejects_missing_thread(
-    session_factory,
-    checkpointer,
-) -> None:
-    """WS dispatch handler should reject missing threads before worker dispatch."""
-    app, _aggregator, worker, _checkpointer = make_app(session_factory, checkpointer)
-    handler = create_dispatch_message_handler(
-        worker.client,
-        session_factory,
-        checkpointer,
-        app.state.circuit_breaker,
-        app.state.worker_spawner,
-        None,
-        app.state,
-    )
-
-    with pytest.raises(WebSocketCommandRejectedError) as excinfo:
-        await handler("missing-thread", "hello", None)
-
-    rejection = excinfo.value
-    assert rejection.code == "THREAD_NOT_FOUND"
-    assert worker.dispatches == []
-
-
-@pytest.mark.asyncio
-async def test_dispatch_message_handler_prefers_unverified_over_not_found(
-    session_factory,
-    tmp_path: Path,
-) -> None:
-    """Send-message WS rejection must preserve checkpoint-unverified classification."""
-    case_dir = tmp_path / "api-test-app"
-    case_dir.mkdir(parents=True, exist_ok=True)
-    checkpoints_file = case_dir / "closed-checkpoints.db"
-
-    async with AsyncSqliteSaver.from_conn_string(str(checkpoints_file)) as checkpointer:
-        pass
-
-    async with session_factory() as session:
-        session.add(
-            ThreadExecutionStateModel(
-                thread_id="unverified-thread",
-                checkpoint_id="cp-orphaned",
-                parent_checkpoint_id=None,
-                recovery_epoch=0,
-                task_count=0,
-                interrupt_count=0,
-                next_nodes_json="[]",
-                interrupt_types_json="[]",
-                tasks_json="[]",
-                degraded_reasons_json="[]",
-            )
-        )
-        await session.commit()
-
-    app, _aggregator, worker, _checkpointer = make_app(session_factory, checkpointer)
-    handler = create_dispatch_message_handler(
-        worker.client,
-        session_factory,
-        checkpointer,
-        app.state.circuit_breaker,
-        app.state.worker_spawner,
-        None,
-        app.state,
-    )
-
-    with pytest.raises(WebSocketCommandRejectedError) as excinfo:
-        await handler("unverified-thread", "hello", None)
-
-    rejection = excinfo.value
-    assert rejection.code == "THREAD_STATE_UNVERIFIED"
-    assert rejection.metadata == {
-        "execution_state_present": True,
-        "checkpoint_present": False,
-        "checkpoint_unverified": True,
-    }

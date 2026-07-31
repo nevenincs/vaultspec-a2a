@@ -53,7 +53,6 @@ from ....database import (
 from ....database.models import (
     Base,
     PermissionRequestModel,
-    ThreadExecutionStateModel,
     ThreadModel,
 )
 from ....streaming.aggregator import EventAggregator
@@ -396,68 +395,78 @@ async def test_start_thread_reports_the_missing_feature_tag_refusal(
 # ---------------------------------------------------------------------------
 
 
+# A preset that declares no required roles, so a run starts without the
+# engine-minted actor-token bundle the versioned verb demands of every
+# production preset.
+_BUNDLE_FREE_PRESET = "mock-success-single"
+
+
 class TestCreateThreadViaApp:
     """Tests that exercise the real FastAPI app the MCP tools talk to."""
 
     def test_post_threads_without_autonomous_returns_201(
         self, session_factory, checkpointer
     ) -> None:
-        """POST /api/threads without autonomous field returns 201."""
+        """POST /v1/runs without autonomous field returns 201."""
         with _make_test_client(session_factory, checkpointer) as client:
             resp = client.post(
-                "/api/threads",
-                json={"initial_message": "Hello from MCP test"},
+                "/v1/runs",
+                json={
+                    "team_preset": _BUNDLE_FREE_PRESET,
+                    "message": "Hello from MCP test",
+                },
             )
         assert resp.status_code == 201
         data = resp.json()
-        assert "thread_id" in data
+        assert "run_id" in data
 
     def test_post_threads_with_autonomous_true_returns_201(
         self, session_factory, checkpointer
     ) -> None:
-        """POST /api/threads with autonomous=True returns 201."""
+        """POST /v1/runs with autonomous=True returns 201."""
         with _make_test_client(session_factory, checkpointer) as client:
             resp = client.post(
-                "/api/threads",
+                "/v1/runs",
                 json={
-                    "initial_message": "Hello autonomous",
+                    "team_preset": _BUNDLE_FREE_PRESET,
+                    "message": "Hello autonomous",
                     "autonomous": True,
                 },
             )
         assert resp.status_code == 201
         data = resp.json()
-        assert "thread_id" in data
-        assert data["status"] == "submitted"
+        assert "run_id" in data
+        assert data["status"] == "running"
 
     def test_get_thread_state_404_for_unknown(
         self, session_factory, checkpointer
     ) -> None:
-        """GET /api/threads/{id}/state returns 404 for unknown thread."""
+        """GET /v1/runs/{id}/history returns 404 for unknown thread."""
         with _make_test_client(session_factory, checkpointer) as client:
-            resp = client.get("/api/threads/nonexistent-id/state")
+            resp = client.get("/v1/runs/nonexistent-id/history")
         assert resp.status_code == 404
 
     def test_get_thread_state_200_for_existing(
         self, session_factory, checkpointer
     ) -> None:
-        """GET /api/threads/{id}/state returns 200 with thread data."""
+        """GET /v1/runs/{id}/history returns 200 with thread data."""
         with _make_test_client(session_factory, checkpointer) as client:
             create_resp = client.post(
-                "/api/threads",
-                json={"initial_message": "Hello"},
+                "/v1/runs",
+                json={"team_preset": _BUNDLE_FREE_PRESET, "message": "Hello"},
             )
             assert create_resp.status_code == 201
-            thread_id = create_resp.json()["thread_id"]
+            thread_id = create_resp.json()["run_id"]
 
-            state_resp = client.get(f"/api/threads/{thread_id}/state")
+            state_resp = client.get(f"/v1/runs/{thread_id}/history")
         assert state_resp.status_code == 200
-        data = state_resp.json()
+        data = state_resp.json()["state"]
         assert data["thread_id"] == thread_id
 
     def test_get_thread_state_excludes_terminal_pending_permission_residue(
         self, session_factory, checkpointer
     ) -> None:
-        """GET /api/threads/{id}/state must hide stale terminal approvals."""
+        """GET /v1/runs/{id}/history must hide stale terminal approvals."""
 
         async def _seed_terminal_thread() -> None:
             await checkpointer.setup()
@@ -503,11 +512,11 @@ class TestCreateThreadViaApp:
 
         with _make_test_client(session_factory, checkpointer) as client:
             resp = client.get(
-                "/api/threads/mcp-thread-state-terminal-permission-residue/state"
+                "/v1/runs/mcp-thread-state-terminal-permission-residue/history"
             )
 
         assert resp.status_code == 200
-        data = resp.json()
+        data = resp.json()["state"]
         assert data["pending_permissions"] == []
         assert data["approval_status"] is None
         assert data["approval_request_id"] is None
@@ -518,27 +527,28 @@ class TestCreateThreadViaApp:
     def test_post_threads_with_workspace_root_returns_201(
         self, session_factory, checkpointer, workspace_root: Path
     ) -> None:
-        """POST /api/threads with workspace_root in metadata passes through to 201."""
+        """POST /v1/runs with workspace_root in metadata passes through to 201."""
         with _make_test_client(session_factory, checkpointer) as client:
             resp = client.post(
-                "/api/threads",
+                "/v1/runs",
                 json={
-                    "initial_message": "Hello workspace",
+                    "team_preset": _BUNDLE_FREE_PRESET,
+                    "message": "Hello workspace",
                     "autonomous": True,
                     "metadata": {"workspace_root": str(workspace_root)},
                 },
             )
         assert resp.status_code == 201
         data = resp.json()
-        assert "thread_id" in data
+        assert "run_id" in data
 
     def test_send_message_returns_404_for_unknown_thread(
         self, session_factory, checkpointer
     ) -> None:
-        """POST /api/threads/{id}/messages returns 404 for unknown thread."""
+        """POST /v1/runs/{id}/messages returns 404 for unknown thread."""
         with _make_test_client(session_factory, checkpointer) as client:
             resp = client.post(
-                "/api/threads/nonexistent/messages",
+                "/v1/runs/nonexistent/messages",
                 json={"content": "hello"},
             )
         assert resp.status_code == 404
@@ -546,16 +556,16 @@ class TestCreateThreadViaApp:
     def test_send_message_returns_202_for_existing_thread(
         self, session_factory, checkpointer
     ) -> None:
-        """POST /api/threads/{id}/messages returns 202 for an existing thread."""
+        """POST /v1/runs/{id}/messages returns 202 for an existing thread."""
         with _make_test_client(session_factory, checkpointer) as client:
             create_resp = client.post(
-                "/api/threads",
-                json={"initial_message": "Hello"},
+                "/v1/runs",
+                json={"team_preset": _BUNDLE_FREE_PRESET, "message": "Hello"},
             )
-            thread_id = create_resp.json()["thread_id"]
+            thread_id = create_resp.json()["run_id"]
 
             send_resp = client.post(
-                f"/api/threads/{thread_id}/messages",
+                f"/v1/runs/{thread_id}/messages",
                 json={"content": "follow-up"},
             )
         assert send_resp.status_code == 202
@@ -724,11 +734,14 @@ async def test_send_message_raises_tool_error_for_repair_needed_thread(
     """send_message must surface backend 409s for repair-state threads."""
     with _make_test_client(session_factory, checkpointer) as client:
         create_resp = client.post(
-            "/api/threads",
-            json={"initial_message": "message tool conflict"},
+            "/v1/runs",
+            json={
+                "team_preset": _BUNDLE_FREE_PRESET,
+                "message": "message tool conflict",
+            },
         )
         assert create_resp.status_code == 201
-        thread_id = create_resp.json()["thread_id"]
+        thread_id = create_resp.json()["run_id"]
 
         async with session_factory() as session:
             thread = await session.get(ThreadModel, thread_id)
@@ -866,434 +879,60 @@ class TestListThreadsViaApp:
     """Tests that exercise list_threads via the real FastAPI app."""
 
     def test_list_threads_empty(self, session_factory, checkpointer) -> None:
-        """GET /api/threads returns empty list when no threads exist."""
+        """GET /v1/runs returns empty list when no threads exist."""
         with _make_test_client(session_factory, checkpointer) as client:
-            resp = client.get("/api/threads")
+            resp = client.get("/v1/runs", params={"state": "all"})
         assert resp.status_code == 200
         data = resp.json()
-        assert data["threads"] == []
+        assert data["runs"] == []
         assert data["total"] == 0
 
     def test_list_threads_returns_created_thread(
         self, session_factory, checkpointer
     ) -> None:
-        """GET /api/threads includes a thread created via POST /api/threads."""
+        """GET /v1/runs includes a run created via POST /v1/runs."""
         with _make_test_client(session_factory, checkpointer) as client:
             create_resp = client.post(
-                "/api/threads",
+                "/v1/runs",
                 json={
-                    "initial_message": "MCP list test",
-                    "team_preset": "vaultspec-solo-coder",
+                    "team_preset": _BUNDLE_FREE_PRESET,
+                    "message": "MCP list test",
                 },
             )
             assert create_resp.status_code == 201
-            thread_id = create_resp.json()["thread_id"]
+            thread_id = create_resp.json()["run_id"]
 
-            list_resp = client.get("/api/threads")
+            list_resp = client.get("/v1/runs", params={"state": "all"})
         assert list_resp.status_code == 200
         data = list_resp.json()
         assert data["total"] >= 1
-        thread_ids = [t["thread_id"] for t in data["threads"]]
+        thread_ids = [run["run_id"] for run in data["runs"]]
         assert thread_id in thread_ids
-        # Verify team_preset is present in the response
-        matching = [t for t in data["threads"] if t["thread_id"] == thread_id]
-        assert matching[0]["team_preset"] == "vaultspec-solo-coder"
+        # The versioned list record carries run identity, status and feature tag
+        # only, so the preset the run was started under is NOT asserted here -
+        # ``get_thread_status`` is where a caller reads a run's detail.
+        matching = [run for run in data["runs"] if run["run_id"] == thread_id]
+        assert matching[0]["status"]
 
     def test_list_threads_pagination(self, session_factory, checkpointer) -> None:
-        """GET /api/threads respects limit and offset params."""
+        """GET /v1/runs respects limit and offset params."""
         with _make_test_client(session_factory, checkpointer) as client:
             for i in range(3):
-                client.post(
-                    "/api/threads",
-                    json={"initial_message": f"Thread {i}"},
+                started = client.post(
+                    "/v1/runs",
+                    json={
+                        "team_preset": _BUNDLE_FREE_PRESET,
+                        "message": f"Thread {i}",
+                    },
                 )
-            resp = client.get("/api/threads", params={"limit": 2, "offset": 0})
-        assert resp.status_code == 200
-        data = resp.json()
-        assert len(data["threads"]) == 2
-        assert data["total"] == 3
-
-    def test_list_threads_degrades_stale_execution_state_summary(
-        self, session_factory, checkpointer
-    ) -> None:
-        """GET /api/threads must not report healthy readiness on stale lineage."""
-
-        async def _seed_stale_execution_state() -> None:
-            async with session_factory() as session:
-                await create_thread(
-                    session,
-                    thread_id="mcp-thread-list-stale-state",
-                    status="running",
-                    repair_status="healthy",
-                    execution_readiness="healthy",
-                )
-                thread = await session.get(ThreadModel, "mcp-thread-list-stale-state")
-                assert thread is not None
-                thread.recovery_epoch = 4
-                session.add(
-                    ThreadExecutionStateModel(
-                        thread_id="mcp-thread-list-stale-state",
-                        checkpoint_id="cp-mcp-stale",
-                        parent_checkpoint_id=None,
-                        recovery_epoch=1,
-                        task_count=1,
-                        interrupt_count=0,
-                        next_nodes_json='["worker"]',
-                        interrupt_types_json="[]",
-                        tasks_json="[]",
-                        degraded_reasons_json="[]",
-                    )
-                )
-                await session.commit()
-
-        asyncio.run(_seed_stale_execution_state())
-
-        with _make_test_client(session_factory, checkpointer) as client:
-            resp = client.get("/api/threads")
-
-        assert resp.status_code == 200
-        data = resp.json()
-        thread = next(
-            item
-            for item in data["threads"]
-            if item["thread_id"] == "mcp-thread-list-stale-state"
-        )
-        assert thread["repair_status"] == "needs_reconciliation"
-        assert thread["execution_readiness"] == "needs_reconciliation"
-
-    def test_list_threads_hides_optionless_plan_approval_summary(
-        self, session_factory, checkpointer
-    ) -> None:
-        """GET /api/threads must not expose optionless plan approvals."""
-
-        async def _seed_optionless_plan_thread() -> None:
-            async with session_factory() as session:
-                thread = await create_thread(
-                    session,
-                    thread_id="mcp-thread-list-optionless-plan",
-                    status="input_required",
-                    repair_status="healthy",
-                    execution_readiness="healthy",
-                )
-                thread.approval_status = "pending"
-                thread.approval_request_id = "mcp-thread-list-optionless-plan:perm-1"
-                await record_permission_request(
-                    session,
-                    request_id="mcp-thread-list-optionless-plan:perm-1",
-                    thread_id="mcp-thread-list-optionless-plan",
-                    pause_reason_type="plan_approval_request",
-                    description="Approve optionless plan?",
-                    allowed_options=[],
-                    tool_call="plan_approval",
-                )
-                await session.commit()
-
-        asyncio.run(_seed_optionless_plan_thread())
-
-        with _make_test_client(session_factory, checkpointer) as client:
-            resp = client.get("/api/threads")
-
-        assert resp.status_code == 200
-        data = resp.json()
-        thread = next(
-            item
-            for item in data["threads"]
-            if item["thread_id"] == "mcp-thread-list-optionless-plan"
-        )
-        assert thread["approval_status"] is None
-        assert thread["approval_request_id"] is None
-
-    def test_list_threads_clears_terminal_pending_approval_summary(
-        self, session_factory, checkpointer
-    ) -> None:
-        """GET /api/threads must not keep pending approval on terminal threads."""
-
-        async def _seed_terminal_plan_thread() -> None:
-            async with session_factory() as session:
-                thread = await create_thread(
-                    session,
-                    thread_id="mcp-thread-list-terminal-plan",
-                    status="failed",
-                    repair_status="healthy",
-                    execution_readiness="healthy",
-                )
-                thread.approval_status = "pending"
-                thread.approval_request_id = "mcp-thread-list-terminal-plan:perm-1"
-                await record_permission_request(
-                    session,
-                    request_id="mcp-thread-list-terminal-plan:perm-1",
-                    thread_id="mcp-thread-list-terminal-plan",
-                    pause_reason_type="plan_approval_request",
-                    description="Approve terminal plan?",
-                    allowed_options=[{"option_id": "approve", "name": "Approve"}],
-                    tool_call="plan_approval",
-                )
-                await session.commit()
-
-        asyncio.run(_seed_terminal_plan_thread())
-
-        with _make_test_client(session_factory, checkpointer) as client:
-            resp = client.get("/api/threads")
-
-        assert resp.status_code == 200
-        data = resp.json()
-        thread = next(
-            item
-            for item in data["threads"]
-            if item["thread_id"] == "mcp-thread-list-terminal-plan"
-        )
-        assert thread["approval_status"] is None
-        assert thread["approval_request_id"] is None
-
-    def test_list_threads_hides_answered_pending_apply_summary(
-        self, session_factory, checkpointer
-    ) -> None:
-        """GET /api/threads must not expose already-answered approvals."""
-
-        async def _seed_answered_plan_thread() -> None:
-            async with session_factory() as session:
-                thread = await create_thread(
-                    session,
-                    thread_id="mcp-thread-list-answered-pending-apply",
-                    status="input_required",
-                    repair_status="healthy",
-                    execution_readiness="healthy",
-                )
-                thread.approval_status = "pending"
-                thread.approval_request_id = (
-                    "mcp-thread-list-answered-pending-apply:perm-1"
-                )
-                await record_permission_request(
-                    session,
-                    request_id="mcp-thread-list-answered-pending-apply:perm-1",
-                    thread_id="mcp-thread-list-answered-pending-apply",
-                    pause_reason_type="plan_approval_request",
-                    description="Already answered plan approval",
-                    allowed_options=[{"option_id": "approve", "name": "Approve"}],
-                    tool_call=None,
-                )
-                await record_permission_response_submission(
-                    session,
-                    request_id="mcp-thread-list-answered-pending-apply:perm-1",
-                    option_id="approve",
-                    idempotency_key="idem-mcp-thread-list-answered-pending-apply",
-                )
-                await session.commit()
-
-        asyncio.run(_seed_answered_plan_thread())
-
-        with _make_test_client(session_factory, checkpointer) as client:
-            resp = client.get("/api/threads")
-
-        assert resp.status_code == 200
-        data = resp.json()
-        thread = next(
-            item
-            for item in data["threads"]
-            if item["thread_id"] == "mcp-thread-list-answered-pending-apply"
-        )
-        assert thread["approval_status"] is None
-        assert thread["approval_request_id"] is None
-
-    def test_list_threads_prefers_live_plan_after_rejected_residue(
-        self, session_factory, checkpointer
-    ) -> None:
-        """GET /api/threads must not let stale rejected state hide live approval."""
-
-        async def _seed_live_plan_thread() -> None:
-            async with session_factory() as session:
-                thread = await create_thread(
-                    session,
-                    thread_id="mcp-thread-list-rejected-live-plan",
-                    status="input_required",
-                    repair_status="healthy",
-                    execution_readiness="healthy",
-                )
-                thread.approval_status = "rejected"
-                thread.approval_request_id = (
-                    "mcp-thread-list-stale-rejected-plan:perm-1"
-                )
-                await record_permission_request(
-                    session,
-                    request_id="mcp-thread-list-live-after-reject:perm-1",
-                    thread_id="mcp-thread-list-rejected-live-plan",
-                    pause_reason_type="plan_approval_request",
-                    description="Approve revised plan?",
-                    allowed_options=[{"option_id": "approve", "name": "Approve"}],
-                    tool_call=None,
-                )
-                await session.commit()
-
-        asyncio.run(_seed_live_plan_thread())
-
-        with _make_test_client(session_factory, checkpointer) as client:
-            resp = client.get("/api/threads")
-
-        assert resp.status_code == 200
-        data = resp.json()
-        thread = next(
-            item
-            for item in data["threads"]
-            if item["thread_id"] == "mcp-thread-list-rejected-live-plan"
-        )
-        assert thread["approval_status"] == "pending"
-        assert (
-            thread["approval_request_id"] == "mcp-thread-list-live-after-reject:perm-1"
-        )
-
-    def test_list_threads_degrades_checkpoint_mismatched_summary(
-        self, session_factory, checkpointer
-    ) -> None:
-        """GET /api/threads must not hide checkpoint-id drift in summaries."""
-
-        async def _seed_checkpoint_mismatch() -> None:
-            await checkpointer.setup()
-            from langgraph.checkpoint.base import empty_checkpoint
-
-            checkpoint = empty_checkpoint()
-            checkpoint["id"] = "cp-mcp-current"
-            await checkpointer.aput(
-                {
-                    "configurable": {
-                        "thread_id": "mcp-thread-list-checkpoint-drift",
-                        "checkpoint_ns": "",
-                    }
-                },
-                checkpoint,
-                {"source": "loop", "step": 1, "parents": {}},
-                {},
+                assert started.status_code == 201, started.text
+            resp = client.get(
+                "/v1/runs", params={"state": "all", "limit": 2, "offset": 0}
             )
-            async with session_factory() as session:
-                await create_thread(
-                    session,
-                    thread_id="mcp-thread-list-checkpoint-drift",
-                    status="running",
-                    repair_status="healthy",
-                    execution_readiness="healthy",
-                )
-                session.add(
-                    ThreadExecutionStateModel(
-                        thread_id="mcp-thread-list-checkpoint-drift",
-                        checkpoint_id="cp-mcp-stale",
-                        parent_checkpoint_id=None,
-                        recovery_epoch=0,
-                        task_count=1,
-                        interrupt_count=0,
-                        next_nodes_json='["worker"]',
-                        interrupt_types_json="[]",
-                        tasks_json="[]",
-                        degraded_reasons_json="[]",
-                    )
-                )
-                await session.commit()
-
-        asyncio.run(_seed_checkpoint_mismatch())
-
-        with _make_test_client(session_factory, checkpointer) as client:
-            resp = client.get("/api/threads")
-
         assert resp.status_code == 200
         data = resp.json()
-        thread = next(
-            item
-            for item in data["threads"]
-            if item["thread_id"] == "mcp-thread-list-checkpoint-drift"
-        )
-        assert thread["repair_status"] == "needs_reconciliation"
-        assert thread["execution_readiness"] == "needs_reconciliation"
-
-    def test_list_threads_degrades_when_checkpoint_probe_is_unverified(
-        self, session_factory, tmp_path
-    ) -> None:
-        """GET /api/threads must fail closed when checkpoint probing fails."""
-        checkpoints_file = tmp_path / "closed-mcp-list-threads-checkpoints.db"
-
-        async def _closed_checkpointer() -> AsyncSqliteSaver:
-            async with AsyncSqliteSaver.from_conn_string(str(checkpoints_file)) as cp:
-                await cp.setup()
-                return cp
-
-        closed_checkpointer = asyncio.run(_closed_checkpointer())
-
-        async def _seed_thread() -> None:
-            async with session_factory() as session:
-                await create_thread(
-                    session,
-                    thread_id="mcp-thread-list-checkpoint-unverified",
-                    status="running",
-                    repair_status="healthy",
-                    execution_readiness="healthy",
-                )
-                await session.commit()
-
-        asyncio.run(_seed_thread())
-
-        with _make_test_client(session_factory, closed_checkpointer) as client:
-            resp = client.get("/api/threads")
-
-        assert resp.status_code == 200
-        data = resp.json()
-        thread = next(
-            item
-            for item in data["threads"]
-            if item["thread_id"] == "mcp-thread-list-checkpoint-unverified"
-        )
-        assert thread["repair_status"] == "checkpoint_unavailable"
-        assert thread["execution_readiness"] == "checkpoint_unavailable"
-
-    def test_list_threads_hides_pending_approval_when_checkpoint_probe_is_unverified(
-        self, session_factory, tmp_path
-    ) -> None:
-        """Checkpoint-unverified MCP summaries must not expose approvals."""
-        checkpoints_file = tmp_path / "closed-mcp-list-threads-plan-approval.db"
-
-        async def _closed_checkpointer() -> AsyncSqliteSaver:
-            async with AsyncSqliteSaver.from_conn_string(str(checkpoints_file)) as cp:
-                await cp.setup()
-                return cp
-
-        closed_checkpointer = asyncio.run(_closed_checkpointer())
-
-        async def _seed_thread() -> None:
-            async with session_factory() as session:
-                thread = await create_thread(
-                    session,
-                    thread_id="mcp-thread-list-checkpoint-unverified-plan",
-                    status="input_required",
-                    repair_status="healthy",
-                    execution_readiness="healthy",
-                )
-                thread.approval_status = "pending"
-                thread.approval_request_id = (
-                    "mcp-thread-list-checkpoint-unverified-plan:perm-1"
-                )
-                await record_permission_request(
-                    session,
-                    request_id="mcp-thread-list-checkpoint-unverified-plan:perm-1",
-                    thread_id="mcp-thread-list-checkpoint-unverified-plan",
-                    pause_reason_type="plan_approval_request",
-                    description="Approve MCP plan?",
-                    allowed_options=[{"option_id": "approve", "name": "Approve"}],
-                    tool_call=None,
-                )
-                await session.commit()
-
-        asyncio.run(_seed_thread())
-
-        with _make_test_client(session_factory, closed_checkpointer) as client:
-            resp = client.get("/api/threads")
-
-        assert resp.status_code == 200
-        data = resp.json()
-        thread = next(
-            item
-            for item in data["threads"]
-            if item["thread_id"] == "mcp-thread-list-checkpoint-unverified-plan"
-        )
-        assert thread["repair_status"] == "checkpoint_unavailable"
-        assert thread["execution_readiness"] == "checkpoint_unavailable"
-        assert thread["approval_status"] is None
-        assert thread["approval_request_id"] is None
+        assert len(data["runs"]) == 2
+        assert data["total"] == 3
 
 
 # ---------------------------------------------------------------------------
@@ -1473,11 +1112,14 @@ class TestRespondToPermissionViaApp:
         """MCP must surface stale permission conflicts as ToolError."""
         with _make_test_client(session_factory, checkpointer) as client:
             create_resp = client.post(
-                "/api/threads",
-                json={"initial_message": "permission tool conflict"},
+                "/v1/runs",
+                json={
+                    "team_preset": _BUNDLE_FREE_PRESET,
+                    "message": "permission tool conflict",
+                },
             )
             assert create_resp.status_code == 201
-            thread_id = create_resp.json()["thread_id"]
+            thread_id = create_resp.json()["run_id"]
             old_request_id = f"{thread_id}:req-old"
             new_request_id = f"{thread_id}:req-new"
 
@@ -1554,13 +1196,13 @@ class TestGetTeamStatusViaApp:
     """Tests exercising get_team_status through the real FastAPI app."""
 
     def test_get_team_status_returns_200(self, session_factory, checkpointer) -> None:
-        """GET /api/team/status returns 200 with valid structure."""
+        """GET /v1/team/status returns 200 with valid structure."""
         with _make_test_client(session_factory, checkpointer) as client:
-            resp = client.get("/api/team/status")
+            resp = client.get("/v1/team/status")
         assert resp.status_code == 200
         data = resp.json()
         assert "agents" in data
-        assert "active_threads" in data
+        assert "active_runs" in data
         assert "pending_permissions" in data
 
 
@@ -1587,7 +1229,7 @@ class TestGetPendingPermissionsViaApp:
     def test_get_pending_permissions_empty(self, session_factory, checkpointer) -> None:
         """When no permissions are pending, the endpoint returns an empty list."""
         with _make_test_client(session_factory, checkpointer) as client:
-            resp = client.get("/api/team/status")
+            resp = client.get("/v1/team/status")
         assert resp.status_code == 200
         data = resp.json()
         assert data["pending_permissions"] == []
@@ -1626,7 +1268,7 @@ class TestGetPendingPermissionsViaApp:
         asyncio.run(_seed_answered_permission())
 
         with _make_test_client(session_factory, checkpointer) as client:
-            resp = client.get("/api/team/status")
+            resp = client.get("/v1/team/status")
 
         assert resp.status_code == 200
         data = resp.json()
@@ -1663,11 +1305,11 @@ class TestGetPendingPermissionsViaApp:
         asyncio.run(_seed_durable_pending_permission())
 
         with _make_test_client(session_factory, checkpointer) as client:
-            resp = client.get("/api/team/status")
+            resp = client.get("/v1/team/status")
 
         assert resp.status_code == 200
         data = resp.json()
-        assert "team-status-durable-pending" in data["active_threads"]
+        assert "team-status-durable-pending" in data["active_runs"]
         assert len(data["pending_permissions"]) == 1
         assert (
             data["pending_permissions"][0]["request_id"]
@@ -1701,7 +1343,7 @@ class TestGetPendingPermissionsViaApp:
             checkpointer,
             aggregator=agg,
         ) as client:
-            resp = client.get("/api/team/status")
+            resp = client.get("/v1/team/status")
 
         assert resp.status_code == 200
         data = resp.json()
@@ -1741,11 +1383,11 @@ class TestGetPendingPermissionsViaApp:
         asyncio.run(_seed_malformed_permission())
 
         with _make_test_client(session_factory, checkpointer) as client:
-            resp = client.get("/api/team/status")
+            resp = client.get("/v1/team/status")
 
         assert resp.status_code == 200
         data = resp.json()
-        assert "mcp-team-status-malformed-durable" in data["active_threads"]
+        assert "mcp-team-status-malformed-durable" in data["active_runs"]
         assert data["pending_permissions"] == []
 
     def test_team_status_excludes_orphaned_durable_permission_rows(
@@ -1769,11 +1411,11 @@ class TestGetPendingPermissionsViaApp:
         asyncio.run(_seed_orphaned_permission())
 
         with _make_test_client(session_factory, checkpointer) as client:
-            resp = client.get("/api/team/status")
+            resp = client.get("/v1/team/status")
 
         assert resp.status_code == 200
         data = resp.json()
-        assert "mcp-team-status-orphaned" not in data["active_threads"]
+        assert "mcp-team-status-orphaned" not in data["active_runs"]
         assert data["pending_permissions"] == []
 
     def test_team_status_hides_checkpoint_unavailable_pending_permission(
@@ -1804,11 +1446,11 @@ class TestGetPendingPermissionsViaApp:
         asyncio.run(_seed_thread())
 
         with _make_test_client(session_factory, checkpointer) as client:
-            resp = client.get("/api/team/status")
+            resp = client.get("/v1/team/status")
 
         assert resp.status_code == 200
         data = resp.json()
-        assert "mcp-team-status-checkpoint-unavailable" in data["active_threads"]
+        assert "mcp-team-status-checkpoint-unavailable" in data["active_runs"]
         assert data["pending_permissions"] == []
 
 
@@ -1833,9 +1475,9 @@ class TestListTeamPresetsViaApp:
     """Tests exercising list_team_presets through the real FastAPI app."""
 
     def test_list_team_presets_returns_200(self, session_factory, checkpointer) -> None:
-        """GET /api/teams returns 200 with presets."""
+        """GET /v1/presets returns 200 with presets."""
         with _make_test_client(session_factory, checkpointer) as client:
-            resp = client.get("/api/teams")
+            resp = client.get("/v1/presets")
         assert resp.status_code == 200
         data = resp.json()
         assert "presets" in data
@@ -1846,7 +1488,7 @@ class TestListTeamPresetsViaApp:
     ) -> None:
         """Each preset has id, display_name, description, topology, worker_count."""
         with _make_test_client(session_factory, checkpointer) as client:
-            resp = client.get("/api/teams")
+            resp = client.get("/v1/presets")
         data = resp.json()
         preset = data["presets"][0]
         assert "id" in preset
@@ -1885,27 +1527,27 @@ class TestCancelThreadViaApp:
     """Tests exercising cancel_thread through the real FastAPI app."""
 
     def test_cancel_thread_404_for_unknown(self, session_factory, checkpointer) -> None:
-        """POST /api/threads/{id}/cancel returns 404 for unknown thread."""
+        """POST /v1/runs/{id}/cancel returns 404 for unknown thread."""
         with _make_test_client(session_factory, checkpointer) as client:
-            resp = client.post("/api/threads/nonexistent/cancel")
+            resp = client.post("/v1/runs/nonexistent/cancel")
         assert resp.status_code == 404
 
     def test_cancel_thread_cancels_running_thread(
         self, session_factory, checkpointer
     ) -> None:
-        """POST /api/threads/{id}/cancel returns an accepted cancelling state."""
+        """POST /v1/runs/{id}/cancel returns an accepted cancelling state."""
         with _make_test_client(session_factory, checkpointer) as client:
             create_resp = client.post(
-                "/api/threads",
-                json={"initial_message": "Cancel me"},
+                "/v1/runs",
+                json={"team_preset": _BUNDLE_FREE_PRESET, "message": "Cancel me"},
             )
             assert create_resp.status_code == 201
-            thread_id = create_resp.json()["thread_id"]
+            thread_id = create_resp.json()["run_id"]
 
-            cancel_resp = client.post(f"/api/threads/{thread_id}/cancel")
+            cancel_resp = client.post(f"/v1/runs/{thread_id}/cancel")
         assert cancel_resp.status_code == 200
         data = cancel_resp.json()
-        assert data["thread_id"] == thread_id
+        assert data["run_id"] == thread_id
         assert data["cancelled"] is True
         assert data["status"] == "cancelling"
 
@@ -1917,15 +1559,15 @@ class TestCancelThreadViaApp:
         """
         with _make_test_client(session_factory, checkpointer) as client:
             create_resp = client.post(
-                "/api/threads",
-                json={"initial_message": "Cancel twice"},
+                "/v1/runs",
+                json={"team_preset": _BUNDLE_FREE_PRESET, "message": "Cancel twice"},
             )
-            thread_id = create_resp.json()["thread_id"]
+            thread_id = create_resp.json()["run_id"]
 
             # First cancel
-            client.post(f"/api/threads/{thread_id}/cancel")
+            client.post(f"/v1/runs/{thread_id}/cancel")
             # Second cancel
-            cancel_resp = client.post(f"/api/threads/{thread_id}/cancel")
+            cancel_resp = client.post(f"/v1/runs/{thread_id}/cancel")
         assert cancel_resp.status_code == 200
         data = cancel_resp.json()
         assert data["cancelled"] is True
@@ -1963,11 +1605,14 @@ class TestDeleteArchiveThreadErrorPaths:
         """delete_thread must surface backend 409s as ToolError."""
         with _make_test_client(session_factory, checkpointer) as client:
             create_resp = client.post(
-                "/api/threads",
-                json={"initial_message": "delete tool conflict"},
+                "/v1/runs",
+                json={
+                    "team_preset": _BUNDLE_FREE_PRESET,
+                    "message": "delete tool conflict",
+                },
             )
             assert create_resp.status_code == 201
-            thread_id = create_resp.json()["thread_id"]
+            thread_id = create_resp.json()["run_id"]
 
             async with session_factory() as session:
                 thread = await session.get(ThreadModel, thread_id)

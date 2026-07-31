@@ -24,6 +24,7 @@ from langgraph.types import Interrupt
 from sqlalchemy import select
 
 from ...control.config import settings
+from ...control.thread_service import ThreadSummaryData, list_threads_service
 from ...database import (
     create_artifact,
     create_control_action,
@@ -45,8 +46,14 @@ from .conftest import make_app
 # ---------------------------------------------------------------------------
 
 
+# A preset that declares no required roles, so a run starts without the
+# engine-minted actor-token bundle the versioned verb demands of every
+# production preset. These are route-behaviour tests, not eligibility tests.
+_BUNDLE_FREE_PRESET = "mock-success-single"
+
+
 class TestCreateThread:
-    """Tests for POST /api/threads."""
+    """Tests for POST /v1/runs."""
 
     def test_creates_thread_without_preset(self, session_factory, checkpointer) -> None:
         """Creating a thread without team_preset returns 201 with thread_id."""
@@ -54,13 +61,17 @@ class TestCreateThread:
 
         with TestClient(app, raise_server_exceptions=True) as client:
             resp = client.post(
-                "/api/threads",
-                json={"initial_message": "Hello", "title": "Test thread"},
+                "/v1/runs",
+                json={
+                    "team_preset": _BUNDLE_FREE_PRESET,
+                    "message": "Hello",
+                    "title": "Test thread",
+                },
             )
         assert resp.status_code == 201
         data = resp.json()
-        assert "thread_id" in data
-        assert data["status"] == "submitted"
+        assert "run_id" in data
+        assert data["status"] == "running"
 
     def test_creates_thread_with_preset_dispatches_to_worker(
         self, session_factory, checkpointer
@@ -70,21 +81,21 @@ class TestCreateThread:
 
         with TestClient(app, raise_server_exceptions=True) as client:
             resp = client.post(
-                "/api/threads",
+                "/v1/runs",
                 json={
-                    "initial_message": "Hello",
-                    "team_preset": "vaultspec-solo-coder",
+                    "message": "Hello",
+                    "team_preset": _BUNDLE_FREE_PRESET,
                 },
             )
         assert resp.status_code == 201
-        thread_id = resp.json()["thread_id"]
+        thread_id = resp.json()["run_id"]
 
         # Verify dispatch was sent to worker
         assert len(worker.dispatches) == 1
         dispatch = worker.dispatches[0]
         assert dispatch["action"] == "ingest"
         assert dispatch["thread_id"] == thread_id
-        assert dispatch["team_preset"] == "vaultspec-solo-coder"
+        assert dispatch["team_preset"] == _BUNDLE_FREE_PRESET
         assert dispatch["content"] == "Hello"
 
     def test_dispatch_includes_internal_token_when_configured(
@@ -97,10 +108,10 @@ class TestCreateThread:
             app, _agg, worker, _cp = make_app(session_factory, checkpointer)
             with TestClient(app, raise_server_exceptions=True) as client:
                 resp = client.post(
-                    "/api/threads",
+                    "/v1/runs",
                     json={
-                        "initial_message": "Hello",
-                        "team_preset": "vaultspec-solo-coder",
+                        "message": "Hello",
+                        "team_preset": _BUNDLE_FREE_PRESET,
                     },
                 )
             assert resp.status_code == 201
@@ -116,8 +127,8 @@ class TestCreateThread:
 
         with TestClient(app, raise_server_exceptions=True) as client:
             resp = client.post(
-                "/api/threads",
-                json={"initial_message": oversized},
+                "/v1/runs",
+                json={"team_preset": _BUNDLE_FREE_PRESET, "message": oversized},
             )
         assert resp.status_code == 422
 
@@ -127,45 +138,63 @@ class TestCreateThread:
 # ---------------------------------------------------------------------------
 
 
+def _list_summaries(
+    session_factory, checkpointer
+) -> tuple[dict[str, ThreadSummaryData], int]:
+    """Return the run listing projection, keyed by thread id.
+
+    Drives ``list_threads_service`` directly. The projection assertions below
+    are about the SERVICE's reading of degraded checkpoint authority and stale
+    approval pointers, and the versioned list record deliberately carries only
+    run identity, status and feature tag - so the route can no longer express
+    what these cases are about, while the service still decides it.
+    """
+
+    async def _run() -> tuple[dict[str, ThreadSummaryData], int]:
+        async with session_factory() as db:
+            result = await list_threads_service(db, checkpointer=checkpointer)
+        return {summary.thread_id: summary for summary in result.threads}, result.total
+
+    return asyncio.run(_run())
+
+
 class TestListThreads:
-    """Tests for GET /api/threads."""
+    """Tests for the run listing projection assembled by ``list_threads_service``."""
 
     def test_empty_list(self, session_factory, checkpointer) -> None:
-        """Returns an empty list when no threads exist."""
-        app, _agg, _worker, _cp = make_app(session_factory, checkpointer)
-
-        with TestClient(app, raise_server_exceptions=True) as client:
-            resp = client.get("/api/threads")
-        assert resp.status_code == 200
-        data = resp.json()
-        assert data["threads"] == []
-        assert data["total"] == 0
+        """Returns an empty listing when no runs exist."""
+        summaries, total = _list_summaries(session_factory, checkpointer)
+        assert summaries == {}
+        assert total == 0
 
     def test_lists_created_threads(self, session_factory, checkpointer) -> None:
-        """Returns threads that were created."""
+        """Runs started through the versioned verb appear in the listing."""
         app, _agg, _worker, _cp = make_app(session_factory, checkpointer)
 
         with TestClient(app, raise_server_exceptions=True) as client:
-            client.post(
-                "/api/threads",
-                json={"initial_message": "A", "title": "Thread A"},
-            )
-            client.post(
-                "/api/threads",
-                json={"initial_message": "B", "title": "Thread B"},
-            )
-            resp = client.get("/api/threads")
+            for title in ("Thread A", "Thread B"):
+                started = client.post(
+                    "/v1/runs",
+                    json={
+                        "team_preset": _BUNDLE_FREE_PRESET,
+                        "message": title,
+                        "title": title,
+                    },
+                )
+                assert started.status_code == 201, started.text
 
-        assert resp.status_code == 200
-        data = resp.json()
-        assert data["total"] == 2
-        assert len(data["threads"]) == 2
+        summaries, total = _list_summaries(session_factory, checkpointer)
+        assert total == 2
+        assert len(summaries) == 2
+        assert {summary.title for summary in summaries.values()} == {
+            "Thread A",
+            "Thread B",
+        }
 
     def test_list_threads_hides_unreadable_plan_approval_metadata(
         self, session_factory, checkpointer
     ) -> None:
         """Thread summaries must not expose corrupt plan-approval state."""
-        app, _agg, _worker, _cp = make_app(session_factory, checkpointer)
 
         async def _seed_corrupt_plan_thread() -> None:
             async with session_factory() as session:
@@ -197,24 +226,15 @@ class TestListThreads:
 
         asyncio.run(_seed_corrupt_plan_thread())
 
-        with TestClient(app, raise_server_exceptions=True) as client:
-            resp = client.get("/api/threads")
-
-        assert resp.status_code == 200
-        data = resp.json()
-        thread = next(
-            item
-            for item in data["threads"]
-            if item["thread_id"] == "thread-list-corrupt-plan"
-        )
-        assert thread["approval_status"] is None
-        assert thread["approval_request_id"] is None
+        summaries, _total = _list_summaries(session_factory, checkpointer)
+        thread = summaries["thread-list-corrupt-plan"]
+        assert thread.approval_status is None
+        assert thread.approval_request_id is None
 
     def test_list_threads_hides_optionless_plan_approval_metadata(
         self, session_factory, checkpointer
     ) -> None:
         """Thread summaries must not expose optionless plan-approval state."""
-        app, _agg, _worker, _cp = make_app(session_factory, checkpointer)
 
         async def _seed_optionless_plan_thread() -> None:
             async with session_factory() as session:
@@ -240,24 +260,15 @@ class TestListThreads:
 
         asyncio.run(_seed_optionless_plan_thread())
 
-        with TestClient(app, raise_server_exceptions=True) as client:
-            resp = client.get("/api/threads")
-
-        assert resp.status_code == 200
-        data = resp.json()
-        thread = next(
-            item
-            for item in data["threads"]
-            if item["thread_id"] == "thread-list-optionless-plan"
-        )
-        assert thread["approval_status"] is None
-        assert thread["approval_request_id"] is None
+        summaries, _total = _list_summaries(session_factory, checkpointer)
+        thread = summaries["thread-list-optionless-plan"]
+        assert thread.approval_status is None
+        assert thread.approval_request_id is None
 
     def test_list_threads_clears_stale_missing_plan_approval_pointer(
         self, session_factory, checkpointer
     ) -> None:
         """Thread summaries must not expose a missing pending plan approval."""
-        app, _agg, _worker, _cp = make_app(session_factory, checkpointer)
 
         async def _seed_missing_plan_thread() -> None:
             async with session_factory() as session:
@@ -274,24 +285,15 @@ class TestListThreads:
 
         asyncio.run(_seed_missing_plan_thread())
 
-        with TestClient(app, raise_server_exceptions=True) as client:
-            resp = client.get("/api/threads")
-
-        assert resp.status_code == 200
-        data = resp.json()
-        thread = next(
-            item
-            for item in data["threads"]
-            if item["thread_id"] == "thread-list-missing-plan"
-        )
-        assert thread["approval_status"] is None
-        assert thread["approval_request_id"] is None
+        summaries, _total = _list_summaries(session_factory, checkpointer)
+        thread = summaries["thread-list-missing-plan"]
+        assert thread.approval_status is None
+        assert thread.approval_request_id is None
 
     def test_list_threads_prefers_live_plan_approval_over_stale_thread_pointer(
         self, session_factory, checkpointer
     ) -> None:
         """Thread summaries must resolve pending approval from live durable rows."""
-        app, _agg, _worker, _cp = make_app(session_factory, checkpointer)
 
         async def _seed_live_plan_thread() -> None:
             async with session_factory() as session:
@@ -317,24 +319,15 @@ class TestListThreads:
 
         asyncio.run(_seed_live_plan_thread())
 
-        with TestClient(app, raise_server_exceptions=True) as client:
-            resp = client.get("/api/threads")
-
-        assert resp.status_code == 200
-        data = resp.json()
-        thread = next(
-            item
-            for item in data["threads"]
-            if item["thread_id"] == "thread-list-live-plan"
-        )
-        assert thread["approval_status"] == "pending"
-        assert thread["approval_request_id"] == "perm-list-live-plan"
+        summaries, _total = _list_summaries(session_factory, checkpointer)
+        thread = summaries["thread-list-live-plan"]
+        assert thread.approval_status == "pending"
+        assert thread.approval_request_id == "perm-list-live-plan"
 
     def test_list_threads_prefers_live_plan_approval_over_stale_rejected_status(
         self, session_factory, checkpointer
     ) -> None:
         """Thread summaries must not let stale rejected state hide live approval."""
-        app, _agg, _worker, _cp = make_app(session_factory, checkpointer)
 
         async def _seed_live_plan_thread() -> None:
             async with session_factory() as session:
@@ -360,24 +353,15 @@ class TestListThreads:
 
         asyncio.run(_seed_live_plan_thread())
 
-        with TestClient(app, raise_server_exceptions=True) as client:
-            resp = client.get("/api/threads")
-
-        assert resp.status_code == 200
-        data = resp.json()
-        thread = next(
-            item
-            for item in data["threads"]
-            if item["thread_id"] == "thread-list-rejected-live-plan"
-        )
-        assert thread["approval_status"] == "pending"
-        assert thread["approval_request_id"] == "perm-list-live-after-reject"
+        summaries, _total = _list_summaries(session_factory, checkpointer)
+        thread = summaries["thread-list-rejected-live-plan"]
+        assert thread.approval_status == "pending"
+        assert thread.approval_request_id == "perm-list-live-after-reject"
 
     def test_list_threads_clears_stale_rejected_plan_approval_residue(
         self, session_factory, checkpointer
     ) -> None:
         """Thread summaries must not expose non-actionable rejected approval residue."""
-        app, _agg, _worker, _cp = make_app(session_factory, checkpointer)
 
         async def _seed_rejected_residue_thread() -> None:
             async with session_factory() as session:
@@ -394,24 +378,15 @@ class TestListThreads:
 
         asyncio.run(_seed_rejected_residue_thread())
 
-        with TestClient(app, raise_server_exceptions=True) as client:
-            resp = client.get("/api/threads")
-
-        assert resp.status_code == 200
-        data = resp.json()
-        thread = next(
-            item
-            for item in data["threads"]
-            if item["thread_id"] == "thread-list-rejected-residue"
-        )
-        assert thread["approval_status"] is None
-        assert thread["approval_request_id"] is None
+        summaries, _total = _list_summaries(session_factory, checkpointer)
+        thread = summaries["thread-list-rejected-residue"]
+        assert thread.approval_status is None
+        assert thread.approval_request_id is None
 
     def test_list_threads_clears_terminal_thread_pending_approval(
         self, session_factory, checkpointer
     ) -> None:
         """Thread summaries must not keep pending approval on terminal threads."""
-        app, _agg, _worker, _cp = make_app(session_factory, checkpointer)
 
         async def _seed_terminal_plan_thread() -> None:
             async with session_factory() as session:
@@ -437,24 +412,15 @@ class TestListThreads:
 
         asyncio.run(_seed_terminal_plan_thread())
 
-        with TestClient(app, raise_server_exceptions=True) as client:
-            resp = client.get("/api/threads")
-
-        assert resp.status_code == 200
-        data = resp.json()
-        thread = next(
-            item
-            for item in data["threads"]
-            if item["thread_id"] == "thread-list-terminal-plan"
-        )
-        assert thread["approval_status"] is None
-        assert thread["approval_request_id"] is None
+        summaries, _total = _list_summaries(session_factory, checkpointer)
+        thread = summaries["thread-list-terminal-plan"]
+        assert thread.approval_status is None
+        assert thread.approval_request_id is None
 
     def test_list_threads_hides_answered_pending_apply_plan_approval(
         self, session_factory, checkpointer
     ) -> None:
         """List summaries must not expose already-answered approvals as pending."""
-        app, _agg, _worker, _cp = make_app(session_factory, checkpointer)
 
         async def _seed_answered_plan_thread() -> None:
             async with session_factory() as session:
@@ -486,24 +452,15 @@ class TestListThreads:
 
         asyncio.run(_seed_answered_plan_thread())
 
-        with TestClient(app, raise_server_exceptions=True) as client:
-            resp = client.get("/api/threads")
-
-        assert resp.status_code == 200
-        data = resp.json()
-        thread = next(
-            item
-            for item in data["threads"]
-            if item["thread_id"] == "thread-list-answered-pending-apply"
-        )
-        assert thread["approval_status"] is None
-        assert thread["approval_request_id"] is None
+        summaries, _total = _list_summaries(session_factory, checkpointer)
+        thread = summaries["thread-list-answered-pending-apply"]
+        assert thread.approval_status is None
+        assert thread.approval_request_id is None
 
     def test_list_threads_degrades_stale_execution_state_lineage(
         self, session_factory, checkpointer
     ) -> None:
         """Thread summaries must not keep healthy readiness on stale lineage."""
-        app, _agg, _worker, _cp = make_app(session_factory, checkpointer)
 
         async def _seed_stale_execution_state() -> None:
             async with session_factory() as session:
@@ -533,24 +490,15 @@ class TestListThreads:
 
         asyncio.run(_seed_stale_execution_state())
 
-        with TestClient(app, raise_server_exceptions=True) as client:
-            resp = client.get("/api/threads")
-
-        assert resp.status_code == 200
-        data = resp.json()
-        thread = next(
-            item
-            for item in data["threads"]
-            if item["thread_id"] == "thread-list-stale-state"
-        )
-        assert thread["repair_status"] == "needs_reconciliation"
-        assert thread["execution_readiness"] == "needs_reconciliation"
+        summaries, _total = _list_summaries(session_factory, checkpointer)
+        thread = summaries["thread-list-stale-state"]
+        assert thread.repair_status == "needs_reconciliation"
+        assert thread.execution_readiness == "needs_reconciliation"
 
     def test_list_threads_degrades_checkpoint_mismatched_execution_state(
         self, session_factory, checkpointer
     ) -> None:
         """Thread summaries must not stay healthy when checkpoint ids drift."""
-        app, _agg, _worker, _cp = make_app(session_factory, checkpointer)
 
         async def _seed_checkpoint_mismatch() -> None:
             await checkpointer.setup()
@@ -595,18 +543,10 @@ class TestListThreads:
 
         asyncio.run(_seed_checkpoint_mismatch())
 
-        with TestClient(app, raise_server_exceptions=True) as client:
-            resp = client.get("/api/threads")
-
-        assert resp.status_code == 200
-        data = resp.json()
-        thread = next(
-            item
-            for item in data["threads"]
-            if item["thread_id"] == "thread-list-checkpoint-drift"
-        )
-        assert thread["repair_status"] == "needs_reconciliation"
-        assert thread["execution_readiness"] == "needs_reconciliation"
+        summaries, _total = _list_summaries(session_factory, checkpointer)
+        thread = summaries["thread-list-checkpoint-drift"]
+        assert thread.repair_status == "needs_reconciliation"
+        assert thread.execution_readiness == "needs_reconciliation"
 
     def test_list_threads_degrades_when_checkpoint_probe_is_unverified(
         self, session_factory, tmp_path
@@ -620,7 +560,6 @@ class TestListThreads:
                 return cp
 
         closed_checkpointer = asyncio.run(_closed_checkpointer())
-        app, _agg, _worker, _cp = make_app(session_factory, closed_checkpointer)
 
         async def _seed_thread() -> None:
             async with session_factory() as session:
@@ -635,18 +574,10 @@ class TestListThreads:
 
         asyncio.run(_seed_thread())
 
-        with TestClient(app, raise_server_exceptions=True) as client:
-            resp = client.get("/api/threads")
-
-        assert resp.status_code == 200
-        data = resp.json()
-        thread = next(
-            item
-            for item in data["threads"]
-            if item["thread_id"] == "thread-list-checkpoint-unverified"
-        )
-        assert thread["repair_status"] == "checkpoint_unavailable"
-        assert thread["execution_readiness"] == "checkpoint_unavailable"
+        summaries, _total = _list_summaries(session_factory, closed_checkpointer)
+        thread = summaries["thread-list-checkpoint-unverified"]
+        assert thread.repair_status == "checkpoint_unavailable"
+        assert thread.execution_readiness == "checkpoint_unavailable"
 
     def test_list_threads_hides_pending_approval_when_checkpoint_probe_is_unverified(
         self, session_factory, tmp_path
@@ -660,7 +591,6 @@ class TestListThreads:
                 return cp
 
         closed_checkpointer = asyncio.run(_closed_checkpointer())
-        app, _agg, _worker, _cp = make_app(session_factory, closed_checkpointer)
 
         async def _seed_thread() -> None:
             async with session_factory() as session:
@@ -686,20 +616,12 @@ class TestListThreads:
 
         asyncio.run(_seed_thread())
 
-        with TestClient(app, raise_server_exceptions=True) as client:
-            resp = client.get("/api/threads")
-
-        assert resp.status_code == 200
-        data = resp.json()
-        thread = next(
-            item
-            for item in data["threads"]
-            if item["thread_id"] == "thread-list-checkpoint-unverified-plan"
-        )
-        assert thread["repair_status"] == "checkpoint_unavailable"
-        assert thread["execution_readiness"] == "checkpoint_unavailable"
-        assert thread["approval_status"] is None
-        assert thread["approval_request_id"] is None
+        summaries, _total = _list_summaries(session_factory, closed_checkpointer)
+        thread = summaries["thread-list-checkpoint-unverified-plan"]
+        assert thread.repair_status == "checkpoint_unavailable"
+        assert thread.execution_readiness == "checkpoint_unavailable"
+        assert thread.approval_status is None
+        assert thread.approval_request_id is None
 
 
 class TestHealth:
@@ -733,14 +655,14 @@ class TestHealth:
 
 
 class TestThreadState:
-    """Tests for GET /api/threads/{id}/state."""
+    """Tests for GET /v1/runs/{id}/history."""
 
     def test_404_for_unknown_thread(self, session_factory, checkpointer) -> None:
         """Returns 404 for a thread that does not exist."""
         app, _agg, _worker, _cp = make_app(session_factory, checkpointer)
 
         with TestClient(app, raise_server_exceptions=True) as client:
-            resp = client.get("/api/threads/nonexistent/state")
+            resp = client.get("/v1/runs/nonexistent/history")
         assert resp.status_code == 404
 
     def test_returns_snapshot_for_existing_thread(
@@ -751,14 +673,18 @@ class TestThreadState:
 
         with TestClient(app, raise_server_exceptions=True) as client:
             create_resp = client.post(
-                "/api/threads",
-                json={"initial_message": "Hello"},
+                "/v1/runs",
+                json={"team_preset": _BUNDLE_FREE_PRESET, "message": "Hello"},
             )
-            thread_id = create_resp.json()["thread_id"]
-            resp = client.get(f"/api/threads/{thread_id}/state")
+            thread_id = create_resp.json()["run_id"]
+            resp = client.get(f"/v1/runs/{thread_id}/history")
 
         assert resp.status_code == 200
-        data = resp.json()
+        body = resp.json()
+        # The envelope names the run; the snapshot it embeds keeps its own
+        # thread vocabulary, so both identities are asserted.
+        assert body["run_id"] == thread_id
+        data = body["state"]
         assert data["thread_id"] == thread_id
         assert "last_sequence" in data
         assert data["last_sequence"] == 0
@@ -824,10 +750,10 @@ class TestThreadState:
         asyncio.run(_corrupt_permission())
 
         with TestClient(app, raise_server_exceptions=True) as client:
-            resp = client.get("/api/threads/thread-corrupt-permission-state/state")
+            resp = client.get("/v1/runs/thread-corrupt-permission-state/history")
 
         assert resp.status_code == 200
-        data = resp.json()
+        data = resp.json()["state"]
         assert data["pending_permissions"] == []
         assert data["snapshot_complete"] is False
         assert "permission_projection_unreadable" in data["degraded_reasons"]
@@ -887,10 +813,10 @@ class TestThreadState:
         asyncio.run(_seed_stale_execution_state())
 
         with TestClient(app, raise_server_exceptions=True) as client:
-            resp = client.get("/api/threads/thread-stale-state-endpoint/state")
+            resp = client.get("/v1/runs/thread-stale-state-endpoint/history")
 
         assert resp.status_code == 200
-        data = resp.json()
+        data = resp.json()["state"]
         assert data["snapshot_complete"] is False
         assert "execution_state_projection_stale" in data["degraded_reasons"]
         assert data["repair_status"] == "needs_reconciliation"
@@ -947,10 +873,10 @@ class TestThreadState:
         asyncio.run(_seed_plan_without_tool_call())
 
         with TestClient(app, raise_server_exceptions=True) as client:
-            resp = client.get("/api/threads/thread-plan-no-tool-call-endpoint/state")
+            resp = client.get("/v1/runs/thread-plan-no-tool-call-endpoint/history")
 
         assert resp.status_code == 200
-        data = resp.json()
+        data = resp.json()["state"]
         assert data["approval_status"] == "pending"
         assert data["approval_request_id"] == "perm-plan-no-tool-call-endpoint"
         assert len(data["pending_permissions"]) == 1
@@ -1014,10 +940,10 @@ class TestThreadState:
         asyncio.run(_seed_thread())
 
         with TestClient(app, raise_server_exceptions=True) as client:
-            resp = client.get("/api/threads/thread-state-aggregator-only/state")
+            resp = client.get("/v1/runs/thread-state-aggregator-only/history")
 
         assert resp.status_code == 200
-        data = resp.json()
+        data = resp.json()["state"]
         assert data["pending_permissions"] == []
         assert data["approval_status"] is None
         assert data["approval_request_id"] is None
@@ -1068,11 +994,11 @@ class TestThreadState:
 
         with TestClient(app, raise_server_exceptions=True) as client:
             resp = client.get(
-                "/api/threads/thread-state-missing-checkpoint-permission/state"
+                "/v1/runs/thread-state-missing-checkpoint-permission/history"
             )
 
         assert resp.status_code == 200
-        data = resp.json()
+        data = resp.json()["state"]
         assert data["pending_permissions"] == []
         assert data["approval_status"] is None
         assert data["approval_request_id"] is None
@@ -1118,12 +1044,10 @@ class TestThreadState:
         asyncio.run(_seed_thread())
 
         with TestClient(app, raise_server_exceptions=True) as client:
-            resp = client.get(
-                "/api/threads/thread-state-submitted-stale-approval/state"
-            )
+            resp = client.get("/v1/runs/thread-state-submitted-stale-approval/history")
 
         assert resp.status_code == 200
-        data = resp.json()
+        data = resp.json()["state"]
         assert data["status"] == "submitted"
         assert data["pending_permissions"] == []
         assert data["approval_status"] is None
@@ -1183,11 +1107,11 @@ class TestThreadState:
 
         with TestClient(app, raise_server_exceptions=True) as client:
             resp = client.get(
-                "/api/threads/thread-state-terminal-permission-residue/state"
+                "/v1/runs/thread-state-terminal-permission-residue/history"
             )
 
         assert resp.status_code == 200
-        data = resp.json()
+        data = resp.json()["state"]
         assert data["pending_permissions"] == []
         assert data["approval_status"] is None
         assert data["approval_request_id"] is None
@@ -1248,10 +1172,10 @@ class TestThreadState:
         asyncio.run(_seed_answered_permission())
 
         with TestClient(app, raise_server_exceptions=True) as client:
-            resp = client.get("/api/threads/thread-state-answered-pending-apply/state")
+            resp = client.get("/v1/runs/thread-state-answered-pending-apply/history")
 
         assert resp.status_code == 200
-        data = resp.json()
+        data = resp.json()["state"]
         assert data["pending_permissions"] == []
         assert data["approval_status"] is None
         assert data["approval_request_id"] is None
@@ -1317,10 +1241,10 @@ class TestThreadState:
         asyncio.run(_seed_thread())
 
         with TestClient(app, raise_server_exceptions=True) as client:
-            resp = client.get("/api/threads/thread-state-checkpoint-only/state")
+            resp = client.get("/v1/runs/thread-state-checkpoint-only/history")
 
         assert resp.status_code == 200
-        data = resp.json()
+        data = resp.json()["state"]
         assert data["pending_permissions"] == []
         assert data["approval_status"] is None
         assert data["approval_request_id"] is None
@@ -1335,7 +1259,7 @@ class TestThreadState:
 
 
 class TestSendMessage:
-    """Tests for POST /api/threads/{id}/messages."""
+    """Tests for POST /v1/runs/{run_id}/messages."""
 
     def test_404_for_unknown_thread(self, session_factory, checkpointer) -> None:
         """Returns 404 when the thread does not exist."""
@@ -1343,7 +1267,7 @@ class TestSendMessage:
 
         with TestClient(app, raise_server_exceptions=True) as client:
             resp = client.post(
-                "/api/threads/nonexistent/messages",
+                "/v1/runs/nonexistent/messages",
                 json={"content": "Hello"},
             )
         assert resp.status_code == 404
@@ -1356,20 +1280,21 @@ class TestSendMessage:
 
         with TestClient(app, raise_server_exceptions=True) as client:
             create_resp = client.post(
-                "/api/threads",
-                json={"initial_message": "Hello"},
+                "/v1/runs",
+                json={"team_preset": _BUNDLE_FREE_PRESET, "message": "Hello"},
             )
-            thread_id = create_resp.json()["thread_id"]
+            thread_id = create_resp.json()["run_id"]
             worker.clear()  # Clear the create dispatch if any
 
             resp = client.post(
-                f"/api/threads/{thread_id}/messages",
+                f"/v1/runs/{thread_id}/messages",
                 json={"content": "Follow-up message"},
             )
         assert resp.status_code == 202
         data = resp.json()
-        assert data["status"] == "accepted"
-        assert data["thread_id"] == thread_id
+        assert data["accepted"] is True
+        assert data["action_status"]
+        assert data["run_id"] == thread_id
 
         # Verify dispatch was sent to worker
         assert len(worker.dispatches) == 1
@@ -1387,15 +1312,15 @@ class TestSendMessage:
 
         with TestClient(app, raise_server_exceptions=True) as client:
             create_resp = client.post(
-                "/api/threads",
-                json={"initial_message": "Hello"},
+                "/v1/runs",
+                json={"team_preset": _BUNDLE_FREE_PRESET, "message": "Hello"},
             )
             assert create_resp.status_code == 201
-            thread_id = create_resp.json()["thread_id"]
+            thread_id = create_resp.json()["run_id"]
             worker.clear()
 
             resp = client.post(
-                f"/api/threads/{thread_id}/messages",
+                f"/v1/runs/{thread_id}/messages",
                 json={"content": "Follow-up message"},
             )
 
@@ -1425,18 +1350,18 @@ class TestSendMessage:
 
         with TestClient(app, raise_server_exceptions=True) as client:
             create_resp = client.post(
-                "/api/threads",
+                "/v1/runs",
                 json={
-                    "initial_message": "Hello",
-                    "team_preset": "vaultspec-solo-coder",
+                    "message": "Hello",
+                    "team_preset": _BUNDLE_FREE_PRESET,
                 },
             )
             assert create_resp.status_code == 201
-            thread_id = create_resp.json()["thread_id"]
+            thread_id = create_resp.json()["run_id"]
             worker.dispatches.clear()
 
             resp = client.post(
-                f"/api/threads/{thread_id}/messages",
+                f"/v1/runs/{thread_id}/messages",
                 json={"content": "Follow-up"},
             )
 
@@ -1444,7 +1369,7 @@ class TestSendMessage:
         assert len(worker.dispatches) == 1
         dispatch = worker.dispatches[0]
         assert dispatch["action"] == "ingest"
-        assert dispatch["team_preset"] == "vaultspec-solo-coder"
+        assert dispatch["team_preset"] == _BUNDLE_FREE_PRESET
 
     def test_content_length_limit(self, session_factory, checkpointer) -> None:
         """content exceeding 64KB is rejected with 422."""
@@ -1453,12 +1378,12 @@ class TestSendMessage:
 
         with TestClient(app, raise_server_exceptions=True) as client:
             create_resp = client.post(
-                "/api/threads",
-                json={"initial_message": "Hello"},
+                "/v1/runs",
+                json={"team_preset": _BUNDLE_FREE_PRESET, "message": "Hello"},
             )
-            thread_id = create_resp.json()["thread_id"]
+            thread_id = create_resp.json()["run_id"]
             resp = client.post(
-                f"/api/threads/{thread_id}/messages",
+                f"/v1/runs/{thread_id}/messages",
                 json={"content": oversized},
             )
         assert resp.status_code == 422
@@ -1484,7 +1409,7 @@ class TestSendMessage:
 
         with TestClient(app, raise_server_exceptions=True) as client:
             resp = client.post(
-                "/api/threads/thread-message-repair-needed/messages",
+                "/v1/runs/thread-message-repair-needed/messages",
                 json={"content": "retry work"},
             )
 
@@ -1515,7 +1440,7 @@ class TestSendMessage:
 
         with TestClient(app, raise_server_exceptions=True) as client:
             resp = client.post(
-                "/api/threads/thread-message-reconciling/messages",
+                "/v1/runs/thread-message-reconciling/messages",
                 json={"content": "retry work"},
             )
 
@@ -1527,19 +1452,19 @@ class TestSendMessage:
 
 
 # ---------------------------------------------------------------------------
-# GET /api/teams
+# GET /v1/presets
 # ---------------------------------------------------------------------------
 
 
 class TestListTeamPresets:
-    """Tests for GET /api/teams."""
+    """Tests for GET /v1/presets."""
 
     def test_returns_bundled_presets(self, session_factory, checkpointer) -> None:
         """Returns all bundled team presets."""
         app, _agg, _worker, _cp = make_app(session_factory, checkpointer)
 
         with TestClient(app, raise_server_exceptions=True) as client:
-            resp = client.get("/api/teams")
+            resp = client.get("/v1/presets")
 
         assert resp.status_code == 200
         data = resp.json()
@@ -1553,7 +1478,7 @@ class TestListTeamPresets:
         app, _agg, _worker, _cp = make_app(session_factory, checkpointer)
 
         with TestClient(app, raise_server_exceptions=True) as client:
-            resp = client.get("/api/teams")
+            resp = client.get("/v1/presets")
 
         for preset in resp.json()["presets"]:
             assert "id" in preset
@@ -1564,24 +1489,24 @@ class TestListTeamPresets:
 
 
 # ---------------------------------------------------------------------------
-# GET /api/team/status
+# GET /v1/team/status
 # ---------------------------------------------------------------------------
 
 
 class TestTeamStatus:
-    """Tests for GET /api/team/status."""
+    """Tests for GET /v1/team/status."""
 
     def test_returns_team_status(self, session_factory, checkpointer) -> None:
-        """Returns a TeamStatusResponse with agents and active_threads."""
+        """The versioned team projection names agents, active runs and pendings."""
         app, _agg, _worker, _cp = make_app(session_factory, checkpointer)
 
         with TestClient(app, raise_server_exceptions=True) as client:
-            resp = client.get("/api/team/status")
+            resp = client.get("/v1/team/status")
 
         assert resp.status_code == 200
         data = resp.json()
         assert "agents" in data
-        assert "active_threads" in data
+        assert "active_runs" in data
         assert "pending_permissions" in data
 
     def test_team_status_excludes_answered_pending_apply_permission(
@@ -1619,13 +1544,13 @@ class TestTeamStatus:
         asyncio.run(_seed_answered_permission())
 
         with TestClient(app, raise_server_exceptions=True) as client:
-            resp = client.get("/api/team/status")
+            resp = client.get("/v1/team/status")
 
         assert resp.status_code == 200
         data = resp.json()
         assert data["pending_permissions"] == []
         assert isinstance(data["agents"], list)
-        assert isinstance(data["active_threads"], list)
+        assert isinstance(data["active_runs"], list)
         assert isinstance(data["pending_permissions"], list)
 
     def test_returns_empty_lists_when_no_activity(
@@ -1635,12 +1560,12 @@ class TestTeamStatus:
         app, _agg, _worker, _cp = make_app(session_factory, checkpointer)
 
         with TestClient(app, raise_server_exceptions=True) as client:
-            resp = client.get("/api/team/status")
+            resp = client.get("/v1/team/status")
 
         assert resp.status_code == 200
         data = resp.json()
         assert data["agents"] == []
-        assert data["active_threads"] == []
+        assert data["active_runs"] == []
         assert data["pending_permissions"] == []
 
     def test_pending_permissions_do_not_surface_from_aggregator_without_durable_row(
@@ -1671,7 +1596,7 @@ class TestTeamStatus:
         )
 
         with TestClient(app, raise_server_exceptions=True) as client:
-            resp = client.get("/api/team/status")
+            resp = client.get("/v1/team/status")
 
         assert resp.status_code == 200
         data = resp.json()
@@ -1712,11 +1637,11 @@ class TestTeamStatus:
         asyncio.run(_seed_malformed_permission())
 
         with TestClient(app, raise_server_exceptions=True) as client:
-            resp = client.get("/api/team/status")
+            resp = client.get("/v1/team/status")
 
         assert resp.status_code == 200
         data = resp.json()
-        assert "team-status-malformed-durable" in data["active_threads"]
+        assert "team-status-malformed-durable" in data["active_runs"]
         assert data["pending_permissions"] == []
 
     def test_team_status_excludes_orphaned_durable_permission_rows(
@@ -1741,11 +1666,11 @@ class TestTeamStatus:
         asyncio.run(_seed_orphaned_permission())
 
         with TestClient(app, raise_server_exceptions=True) as client:
-            resp = client.get("/api/team/status")
+            resp = client.get("/v1/team/status")
 
         assert resp.status_code == 200
         data = resp.json()
-        assert "team-status-orphaned" not in data["active_threads"]
+        assert "team-status-orphaned" not in data["active_runs"]
         assert data["pending_permissions"] == []
 
     def test_team_status_hides_pending_permissions_without_checkpoint_truth(
@@ -1777,11 +1702,11 @@ class TestTeamStatus:
         asyncio.run(_seed_thread())
 
         with TestClient(app, raise_server_exceptions=True) as client:
-            resp = client.get("/api/team/status")
+            resp = client.get("/v1/team/status")
 
         assert resp.status_code == 200
         data = resp.json()
-        assert "team-status-checkpoint-unavailable" in data["active_threads"]
+        assert "team-status-checkpoint-unavailable" in data["active_runs"]
         assert data["pending_permissions"] == []
 
     def test_node_summaries_surface_as_agents(
@@ -1804,26 +1729,28 @@ class TestTeamStatus:
         )
 
         with TestClient(app, raise_server_exceptions=True) as client:
-            resp = client.get("/api/team/status")
+            resp = client.get("/v1/team/status")
 
         assert resp.status_code == 200
         data = resp.json()
         assert len(data["agents"]) == 1
         agent = data["agents"][0]
+        # The versioned projection discloses operational state only: which agents
+        # exist, what they are called, and what they are doing. The graph node
+        # name and the internal role are topology detail and are deliberately
+        # absent, so they are not asserted here.
         assert agent["agent_id"] == "vaultspec-coder"
-        assert agent["node_name"] == "vaultspec-coder"
-        assert agent["role"] == "coder"
         assert agent["display_name"] == "Coder Agent"
         assert agent["state"] == "idle"
 
 
 # ---------------------------------------------------------------------------
-# POST /api/permissions/{id}/respond
+# POST /v1/runs/{run_id}/permissions/{id}/respond
 # ---------------------------------------------------------------------------
 
 
 class TestPermissionRespond:
-    """Tests for POST /api/permissions/{request_id}/respond."""
+    """Tests for POST /v1/runs/{run_id}/permissions/{request_id}/respond."""
 
     @staticmethod
     def _seed_permission(
@@ -1865,11 +1792,11 @@ class TestPermissionRespond:
         ):
             # Create a thread first so the permission endpoint can find it.
             create_resp = client.post(
-                "/api/threads",
-                json={"initial_message": "permission test"},
+                "/v1/runs",
+                json={"team_preset": _BUNDLE_FREE_PRESET, "message": "permission test"},
             )
             assert create_resp.status_code == 201
-            thread_id = create_resp.json()["thread_id"]
+            thread_id = create_resp.json()["run_id"]
             request_id = f"{thread_id}:req-456"
             self._seed_permission(
                 session_factory, thread_id=thread_id, request_id=request_id
@@ -1879,7 +1806,7 @@ class TestPermissionRespond:
             worker.dispatches.clear()
 
             resp = client.post(
-                f"/api/permissions/{request_id}/respond",
+                f"/v1/runs/{thread_id}/permissions/{request_id}/respond",
                 json={"option_id": "allow_once"},
             )
 
@@ -1887,7 +1814,7 @@ class TestPermissionRespond:
         data = resp.json()
         assert data["request_id"] == request_id
         assert data["accepted"] is True
-        assert data["thread_id"] == thread_id
+        assert data["run_id"] == thread_id
 
         # Verify resume dispatch was sent to worker
         assert len(worker.dispatches) == 1
@@ -1914,11 +1841,11 @@ class TestPermissionRespond:
 
         with TestClient(app, raise_server_exceptions=True) as client:
             create_resp = client.post(
-                "/api/threads",
-                json={"initial_message": "permission test"},
+                "/v1/runs",
+                json={"team_preset": _BUNDLE_FREE_PRESET, "message": "permission test"},
             )
             assert create_resp.status_code == 201
-            thread_id = create_resp.json()["thread_id"]
+            thread_id = create_resp.json()["run_id"]
             request_id = f"{thread_id}:req-applied-state"
             self._seed_permission(
                 session_factory, thread_id=thread_id, request_id=request_id
@@ -1926,7 +1853,7 @@ class TestPermissionRespond:
 
             worker.dispatches.clear()
             resp = client.post(
-                f"/api/permissions/{request_id}/respond",
+                f"/v1/runs/{thread_id}/permissions/{request_id}/respond",
                 json={"option_id": "allow_once"},
             )
 
@@ -1959,14 +1886,14 @@ class TestPermissionRespond:
         with TestClient(app, raise_server_exceptions=True) as client:
             # First create a thread with a team_preset so it's stored in DB.
             create_resp = client.post(
-                "/api/threads",
+                "/v1/runs",
                 json={
-                    "initial_message": "Hello",
-                    "team_preset": "vaultspec-solo-coder",
+                    "message": "Hello",
+                    "team_preset": _BUNDLE_FREE_PRESET,
                 },
             )
             assert create_resp.status_code == 201
-            thread_id = create_resp.json()["thread_id"]
+            thread_id = create_resp.json()["run_id"]
             request_id = f"{thread_id}:req-001"
             self._seed_permission(
                 session_factory, thread_id=thread_id, request_id=request_id
@@ -1975,7 +1902,7 @@ class TestPermissionRespond:
             # Now respond to a permission for that thread.
             worker.dispatches.clear()
             resp = client.post(
-                f"/api/permissions/{request_id}/respond",
+                f"/v1/runs/{thread_id}/permissions/{request_id}/respond",
                 json={"option_id": "allow_once"},
             )
 
@@ -1986,23 +1913,39 @@ class TestPermissionRespond:
         assert len(worker.dispatches) == 1
         dispatch = worker.dispatches[0]
         assert dispatch["action"] == "resume"
-        assert dispatch["team_preset"] == "vaultspec-solo-coder"
+        assert dispatch["team_preset"] == _BUNDLE_FREE_PRESET
 
-    def test_responds_without_thread_id_returns_not_accepted(
+    def test_responds_to_an_unknown_request_returns_not_found(
         self, session_factory, checkpointer
     ) -> None:
-        """Returns accepted=False when request_id has no thread_id component."""
+        """A request id that names no durable request is refused, not accepted.
+
+        The legacy surface answered this with 200 and ``accepted=False``, because
+        a bare request id carried its own thread reference and an unparseable one
+        left nothing to refuse against. The versioned verb resolves the request
+        against the run in the PATH before anything acts, so an unknown request
+        is simply not found - and being refused outright is the stronger answer,
+        since a 200 invites a caller to treat a no-op as an outcome.
+        """
         app, _agg, _worker, _cp = make_app(session_factory, checkpointer)
 
         with TestClient(app, raise_server_exceptions=True) as client:
+            started = client.post(
+                "/v1/runs",
+                json={
+                    "team_preset": _BUNDLE_FREE_PRESET,
+                    "message": "unknown permission request",
+                },
+            )
+            assert started.status_code == 201, started.text
+            thread_id = started.json()["run_id"]
+
             resp = client.post(
-                "/api/permissions/no-colon-here/respond",
+                f"/v1/runs/{thread_id}/permissions/no-such-request/respond",
                 json={"option_id": "allow_once"},
             )
 
-        assert resp.status_code == 200
-        data = resp.json()
-        assert data["accepted"] is False
+        assert resp.status_code == 404
 
     def test_rejects_unknown_option_id_without_dispatching(
         self, session_factory, checkpointer
@@ -2012,11 +1955,11 @@ class TestPermissionRespond:
 
         with TestClient(app, raise_server_exceptions=True) as client:
             create_resp = client.post(
-                "/api/threads",
-                json={"initial_message": "permission test"},
+                "/v1/runs",
+                json={"team_preset": _BUNDLE_FREE_PRESET, "message": "permission test"},
             )
             assert create_resp.status_code == 201
-            thread_id = create_resp.json()["thread_id"]
+            thread_id = create_resp.json()["run_id"]
             request_id = f"{thread_id}:req-invalid"
             self._seed_permission(
                 session_factory, thread_id=thread_id, request_id=request_id
@@ -2024,7 +1967,7 @@ class TestPermissionRespond:
 
             worker.dispatches.clear()
             resp = client.post(
-                f"/api/permissions/{request_id}/respond",
+                f"/v1/runs/{thread_id}/permissions/{request_id}/respond",
                 json={"option_id": "hostile-option"},
             )
 
@@ -2052,11 +1995,11 @@ class TestPermissionRespond:
 
         with TestClient(app, raise_server_exceptions=True) as client:
             create_resp = client.post(
-                "/api/threads",
-                json={"initial_message": "permission test"},
+                "/v1/runs",
+                json={"team_preset": _BUNDLE_FREE_PRESET, "message": "permission test"},
             )
             assert create_resp.status_code == 201
-            thread_id = create_resp.json()["thread_id"]
+            thread_id = create_resp.json()["run_id"]
             request_id = f"{thread_id}:req-invalid-replay"
             self._seed_permission(
                 session_factory, thread_id=thread_id, request_id=request_id
@@ -2065,12 +2008,12 @@ class TestPermissionRespond:
             worker.dispatches.clear()
             headers = {"Idempotency-Key": "same-invalid-response"}
             first = client.post(
-                f"/api/permissions/{request_id}/respond",
+                f"/v1/runs/{thread_id}/permissions/{request_id}/respond",
                 json={"option_id": "hostile-option"},
                 headers=headers,
             )
             second = client.post(
-                f"/api/permissions/{request_id}/respond",
+                f"/v1/runs/{thread_id}/permissions/{request_id}/respond",
                 json={"option_id": "hostile-option"},
                 headers=headers,
             )
@@ -2121,17 +2064,17 @@ class TestPermissionRespond:
 
         with TestClient(app, raise_server_exceptions=True) as client:
             create_resp = client.post(
-                "/api/threads",
-                json={"initial_message": "permission test"},
+                "/v1/runs",
+                json={"team_preset": _BUNDLE_FREE_PRESET, "message": "permission test"},
             )
             assert create_resp.status_code == 201
-            thread_id = create_resp.json()["thread_id"]
+            thread_id = create_resp.json()["run_id"]
             request_id = f"{thread_id}:req-invalid-replay-malformed-payload"
             asyncio.run(_seed_rejected_action())
 
             worker.dispatches.clear()
             resp = client.post(
-                f"/api/permissions/{request_id}/respond",
+                f"/v1/runs/{thread_id}/permissions/{request_id}/respond",
                 json={"option_id": "hostile-option"},
                 headers={"Idempotency-Key": "same-invalid-response"},
             )
@@ -2167,27 +2110,27 @@ class TestPermissionRespond:
 
         with TestClient(app, raise_server_exceptions=True) as client:
             create_resp = client.post(
-                "/api/threads",
-                json={"initial_message": "permission test"},
+                "/v1/runs",
+                json={"team_preset": _BUNDLE_FREE_PRESET, "message": "permission test"},
             )
             assert create_resp.status_code == 201
-            thread_id = create_resp.json()["thread_id"]
+            thread_id = create_resp.json()["run_id"]
             request_id = f"{thread_id}:req-invalid-then-valid"
             asyncio.run(_seed_permission())
 
             worker.dispatches.clear()
             invalid_headers = {"Idempotency-Key": "same-invalid-response"}
             invalid = client.post(
-                f"/api/permissions/{request_id}/respond",
+                f"/v1/runs/{thread_id}/permissions/{request_id}/respond",
                 json={"option_id": "hostile-option"},
                 headers=invalid_headers,
             )
             valid = client.post(
-                f"/api/permissions/{request_id}/respond",
+                f"/v1/runs/{thread_id}/permissions/{request_id}/respond",
                 json={"option_id": "allow_once"},
             )
             replayed_invalid = client.post(
-                f"/api/permissions/{request_id}/respond",
+                f"/v1/runs/{thread_id}/permissions/{request_id}/respond",
                 json={"option_id": "hostile-option"},
                 headers=invalid_headers,
             )
@@ -2243,22 +2186,22 @@ class TestPermissionRespond:
 
         with TestClient(app, raise_server_exceptions=True) as client:
             create_resp = client.post(
-                "/api/threads",
-                json={"initial_message": "permission test"},
+                "/v1/runs",
+                json={"team_preset": _BUNDLE_FREE_PRESET, "message": "permission test"},
             )
             assert create_resp.status_code == 201
-            thread_id = create_resp.json()["thread_id"]
+            thread_id = create_resp.json()["run_id"]
             old_request_id = f"{thread_id}:req-old"
             new_request_id = f"{thread_id}:req-new"
             asyncio.run(_seed_permissions())
 
             worker.dispatches.clear()
             stale = client.post(
-                f"/api/permissions/{old_request_id}/respond",
+                f"/v1/runs/{thread_id}/permissions/{old_request_id}/respond",
                 json={"option_id": "allow_once"},
             )
             active = client.post(
-                f"/api/permissions/{new_request_id}/respond",
+                f"/v1/runs/{thread_id}/permissions/{new_request_id}/respond",
                 json={"option_id": "allow_once"},
             )
 
@@ -2304,18 +2247,21 @@ class TestPermissionRespond:
 
         with TestClient(app, raise_server_exceptions=True) as client:
             create_resp = client.post(
-                "/api/threads",
-                json={"initial_message": "plan approval test"},
+                "/v1/runs",
+                json={
+                    "team_preset": _BUNDLE_FREE_PRESET,
+                    "message": "plan approval test",
+                },
             )
             assert create_resp.status_code == 201
-            thread_id = create_resp.json()["thread_id"]
+            thread_id = create_resp.json()["run_id"]
             stale_request_id = f"{thread_id}:req-stale-plan"
             live_request_id = f"{thread_id}:req-live-plan"
             asyncio.run(_seed_plan_approval())
 
             worker.dispatches.clear()
             live = client.post(
-                f"/api/permissions/{live_request_id}/respond",
+                f"/v1/runs/{thread_id}/permissions/{live_request_id}/respond",
                 json={"option_id": "approve"},
             )
 
@@ -2325,7 +2271,7 @@ class TestPermissionRespond:
 
 
 class TestDeleteThread:
-    """Tests for DELETE /api/threads/{thread_id}."""
+    """Tests for DELETE /v1/runs/{thread_id}."""
 
     def test_rejects_input_required_thread_with_pending_permission(
         self, session_factory, checkpointer
@@ -2372,7 +2318,7 @@ class TestDeleteThread:
         asyncio.run(_seed_thread())
 
         with TestClient(app, raise_server_exceptions=True) as client:
-            resp = client.delete("/api/threads/thread-delete-input-required")
+            resp = client.delete("/v1/runs/thread-delete-input-required")
 
         assert resp.status_code == 409
         assert resp.json()["detail"] == "Cannot delete thread in 'input_required' state"
@@ -2449,7 +2395,7 @@ class TestDeleteThread:
         assert asyncio.run(_checkpoint_history_count()) >= 2
 
         with TestClient(app, raise_server_exceptions=True) as client:
-            resp = client.delete("/api/threads/thread-delete-terminal")
+            resp = client.delete("/v1/runs/thread-delete-terminal")
 
         assert resp.status_code == 204
         assert asyncio.run(_checkpoint_exists()) is False
@@ -2491,7 +2437,7 @@ class TestDeleteThread:
         assert artifact_path.exists() is True
 
         with TestClient(app, raise_server_exceptions=True) as client:
-            resp = client.delete("/api/threads/thread-delete-artifacts")
+            resp = client.delete("/v1/runs/thread-delete-artifacts")
 
         assert resp.status_code == 204
         assert artifact_path.exists() is False
@@ -2504,11 +2450,14 @@ class TestDeleteThread:
 
         with TestClient(app, raise_server_exceptions=True) as client:
             create_resp = client.post(
-                "/api/threads",
-                json={"initial_message": "plan approval relay test"},
+                "/v1/runs",
+                json={
+                    "team_preset": _BUNDLE_FREE_PRESET,
+                    "message": "plan approval relay test",
+                },
             )
             assert create_resp.status_code == 201
-            thread_id = create_resp.json()["thread_id"]
+            thread_id = create_resp.json()["run_id"]
             request_id = f"{thread_id}:req-plan-relay"
 
             relay = client.post(
@@ -2542,7 +2491,7 @@ class TestDeleteThread:
 
             worker.dispatches.clear()
             resp = client.post(
-                f"/api/permissions/{request_id}/respond",
+                f"/v1/runs/{thread_id}/permissions/{request_id}/respond",
                 json={"option_id": "approve"},
             )
 
@@ -2585,21 +2534,21 @@ class TestDeleteThread:
 
         with TestClient(app, raise_server_exceptions=True) as client:
             create_resp = client.post(
-                "/api/threads",
-                json={"initial_message": "permission test"},
+                "/v1/runs",
+                json={"team_preset": _BUNDLE_FREE_PRESET, "message": "permission test"},
             )
             assert create_resp.status_code == 201
-            thread_id = create_resp.json()["thread_id"]
+            thread_id = create_resp.json()["run_id"]
             request_id = f"{thread_id}:req-stale"
             asyncio.run(_seed_permission())
 
             worker.dispatches.clear()
             first = client.post(
-                f"/api/permissions/{request_id}/respond",
+                f"/v1/runs/{thread_id}/permissions/{request_id}/respond",
                 json={"option_id": "allow_once"},
             )
             second = client.post(
-                f"/api/permissions/{request_id}/respond",
+                f"/v1/runs/{thread_id}/permissions/{request_id}/respond",
                 json={"option_id": "deny_once"},
                 headers={"Idempotency-Key": "different-response"},
             )
@@ -2640,11 +2589,14 @@ class TestDeleteThread:
 
         with TestClient(app, raise_server_exceptions=True) as client:
             create_resp = client.post(
-                "/api/threads",
-                json={"initial_message": "permission dispatch failure"},
+                "/v1/runs",
+                json={
+                    "team_preset": _BUNDLE_FREE_PRESET,
+                    "message": "permission dispatch failure",
+                },
             )
             assert create_resp.status_code == 201
-            thread_id = create_resp.json()["thread_id"]
+            thread_id = create_resp.json()["run_id"]
             request_id = f"{thread_id}:req-dispatch-fail"
             expected_idempotency_key = hashlib.sha256(
                 f"{request_id}:allow_once".encode()
@@ -2654,7 +2606,7 @@ class TestDeleteThread:
             worker.dispatches.clear()
             app.state.worker_client = failing_client
             first = client.post(
-                f"/api/permissions/{request_id}/respond",
+                f"/v1/runs/{thread_id}/permissions/{request_id}/respond",
                 json={"option_id": "allow_once"},
             )
 
@@ -2688,7 +2640,7 @@ class TestDeleteThread:
 
             app.state.worker_client = original_client
             second = client.post(
-                f"/api/permissions/{request_id}/respond",
+                f"/v1/runs/{thread_id}/permissions/{request_id}/respond",
                 json={"option_id": "allow_once"},
             )
 
@@ -2720,17 +2672,17 @@ class TestDeleteThread:
 
         with TestClient(app, raise_server_exceptions=True) as client:
             create_resp = client.post(
-                "/api/threads",
-                json={"initial_message": "permission test"},
+                "/v1/runs",
+                json={"team_preset": _BUNDLE_FREE_PRESET, "message": "permission test"},
             )
             assert create_resp.status_code == 201
-            thread_id = create_resp.json()["thread_id"]
+            thread_id = create_resp.json()["run_id"]
             request_id = f"{thread_id}:req-empty"
             asyncio.run(_seed_permission())
 
             worker.dispatches.clear()
             resp = client.post(
-                f"/api/permissions/{request_id}/respond",
+                f"/v1/runs/{thread_id}/permissions/{request_id}/respond",
                 json={"option_id": "allow_once"},
             )
 
@@ -2770,17 +2722,17 @@ class TestDeleteThread:
 
         with TestClient(app, raise_server_exceptions=True) as client:
             create_resp = client.post(
-                "/api/threads",
-                json={"initial_message": "permission test"},
+                "/v1/runs",
+                json={"team_preset": _BUNDLE_FREE_PRESET, "message": "permission test"},
             )
             assert create_resp.status_code == 201
-            thread_id = create_resp.json()["thread_id"]
+            thread_id = create_resp.json()["run_id"]
             request_id = f"{thread_id}:req-malformed"
             asyncio.run(_seed_permission())
 
             worker.dispatches.clear()
             resp = client.post(
-                f"/api/permissions/{request_id}/respond",
+                f"/v1/runs/{thread_id}/permissions/{request_id}/respond",
                 json={"option_id": "allow_once"},
             )
 
@@ -2795,7 +2747,7 @@ class TestDeleteThread:
 
 
 class TestCreateThreadAutonomous:
-    """Tests for the autonomous field on POST /api/threads."""
+    """Tests for the autonomous field on POST /v1/runs."""
 
     def test_create_thread_autonomous_defaults_false(
         self, session_factory, checkpointer
@@ -2805,12 +2757,15 @@ class TestCreateThreadAutonomous:
 
         with TestClient(app, raise_server_exceptions=True) as client:
             resp = client.post(
-                "/api/threads",
-                json={"initial_message": "Hello, supervised mode"},
+                "/v1/runs",
+                json={
+                    "team_preset": _BUNDLE_FREE_PRESET,
+                    "message": "Hello, supervised mode",
+                },
             )
         assert resp.status_code == 201
         data = resp.json()
-        assert "thread_id" in data
+        assert "run_id" in data
         # No crash = autonomous=False default accepted correctly
 
     def test_create_thread_autonomous_true_accepted(
@@ -2821,16 +2776,17 @@ class TestCreateThreadAutonomous:
 
         with TestClient(app, raise_server_exceptions=True) as client:
             resp = client.post(
-                "/api/threads",
+                "/v1/runs",
                 json={
-                    "initial_message": "Hello, autonomous mode",
+                    "team_preset": _BUNDLE_FREE_PRESET,
+                    "message": "Hello, autonomous mode",
                     "autonomous": True,
                 },
             )
         assert resp.status_code == 201
         data = resp.json()
-        assert "thread_id" in data
-        assert data["status"] == "submitted"
+        assert "run_id" in data
+        assert data["status"] == "running"
 
     def test_create_thread_with_preset_autonomous_dispatches(
         self, session_factory, checkpointer
@@ -2840,10 +2796,10 @@ class TestCreateThreadAutonomous:
 
         with TestClient(app, raise_server_exceptions=True) as client:
             resp = client.post(
-                "/api/threads",
+                "/v1/runs",
                 json={
-                    "initial_message": "Run autonomously",
-                    "team_preset": "vaultspec-solo-coder",
+                    "message": "Run autonomously",
+                    "team_preset": _BUNDLE_FREE_PRESET,
                     "autonomous": True,
                 },
             )
@@ -2853,7 +2809,7 @@ class TestCreateThreadAutonomous:
         assert len(worker.dispatches) == 1
         dispatch = worker.dispatches[0]
         assert dispatch["action"] == "ingest"
-        assert dispatch["team_preset"] == "vaultspec-solo-coder"
+        assert dispatch["team_preset"] == _BUNDLE_FREE_PRESET
         assert dispatch["autonomous"] is True
 
     def test_create_thread_autonomous_inherits_team_auto_approve(
@@ -2866,10 +2822,10 @@ class TestCreateThreadAutonomous:
 
         with TestClient(app, raise_server_exceptions=True) as client:
             resp = client.post(
-                "/api/threads",
+                "/v1/runs",
                 json={
-                    "initial_message": "Run with team default",
-                    "team_preset": "vaultspec-solo-coder",
+                    "message": "Run with team default",
+                    "team_preset": _BUNDLE_FREE_PRESET,
                     # autonomous not set — should inherit auto_approve=True from preset
                 },
             )
@@ -2886,7 +2842,7 @@ class TestCreateThreadAutonomous:
 
 
 class TestCancelThread:
-    """Tests for POST /api/threads/{thread_id}/cancel."""
+    """Tests for POST /v1/runs/{thread_id}/cancel."""
 
     def test_failed_cancel_dispatch_restores_repair_state(
         self, session_factory, checkpointer
@@ -2898,28 +2854,35 @@ class TestCancelThread:
 
         with TestClient(app, raise_server_exceptions=True) as client:
             create_resp = client.post(
-                "/api/threads",
-                json={"initial_message": "cancel dispatch failure"},
+                "/v1/runs",
+                json={
+                    "team_preset": _BUNDLE_FREE_PRESET,
+                    "message": "cancel dispatch failure",
+                },
             )
             assert create_resp.status_code == 201
-            thread_id = create_resp.json()["thread_id"]
+            thread_id = create_resp.json()["run_id"]
 
-            async def _assert_initial() -> None:
+            async def _status_before() -> str:
                 async with session_factory() as session:
                     thread = await session.get(ThreadModel, thread_id)
                     assert thread is not None
                     assert thread.last_requested_action == "ingest"
+                    return thread.status
 
-            asyncio.run(_assert_initial())
+            # Captured rather than hardcoded: the property under test is that a
+            # failed cancel RESTORES the status the run held, not that the run
+            # holds any particular one.
+            status_before = asyncio.run(_status_before())
 
             app.state.worker_client = failing_client
-            cancel_resp = client.post(f"/api/threads/{thread_id}/cancel")
+            cancel_resp = client.post(f"/v1/runs/{thread_id}/cancel")
 
             async def _assert_reset() -> None:
                 async with session_factory() as session:
                     thread = await session.get(ThreadModel, thread_id)
                     assert thread is not None
-                    assert thread.status == "submitted"
+                    assert thread.status == status_before
                     assert thread.repair_status == "healthy"
                     assert thread.execution_readiness == "healthy"
                     assert thread.repair_reason is None

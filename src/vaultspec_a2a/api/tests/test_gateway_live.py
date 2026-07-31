@@ -1030,7 +1030,7 @@ async def test_sse_stream_delivers_versioned_event_mid_stream(
     async with (
         _live_server(app) as base,
         httpx.AsyncClient(base_url=base, timeout=10.0) as client,
-        client.stream("GET", f"/api/threads/{run_id}/stream") as resp,
+        client.stream("GET", f"/v1/runs/{run_id}/stream") as resp,
     ):
         assert resp.status_code == 200
         assert resp.headers["content-type"].startswith("text/event-stream")
@@ -1104,7 +1104,7 @@ async def test_sse_carries_semantic_phase_and_bounds_document_bodies(
     async with (
         _live_server(app) as base,
         httpx.AsyncClient(base_url=base, timeout=10.0) as client,
-        client.stream("GET", f"/api/threads/{run_id}/stream") as resp,
+        client.stream("GET", f"/v1/runs/{run_id}/stream") as resp,
     ):
         assert resp.status_code == 200
         lines = resp.aiter_lines()
@@ -1585,45 +1585,34 @@ async def test_pairing_identity_is_authenticated_surface_only(
 ) -> None:
     """The gateway's lifetime identity never reaches an ungated health body.
 
-    Under the Compose and development profiles both health surfaces are
-    unauthenticated, and ``GET /api/health`` serves the full readiness
-    aggregate - the very dict the pairing echo is assembled into - verbatim.
-    The gateway's lifetime identity must not ride along: the armed adoption
-    check trusts a worker's reported lifetime precisely because a port squatter
-    cannot guess it, so publishing it to anonymous callers would hand over the
-    one value that check depends on.
+    Under the Compose and development profiles ``GET /health`` is
+    unauthenticated and serves the full readiness aggregate - the very dict the
+    pairing echo is assembled into - verbatim. The gateway's lifetime identity
+    must not ride along: the armed adoption check trusts a worker's reported
+    lifetime precisely because a port squatter cannot guess it, so publishing it
+    to anonymous callers would hand over the one value that check depends on.
 
     Discriminating on both halves of the boundary in ONE application, so
     neither half can pass vacuously: the same worker probe result is served
     WITH the identity on the attach-authenticated readiness verb and WITHOUT it
-    on both ungated ones. Drop the ``include_pairing`` gate - assemble the
-    pairing evidence into the aggregate unconditionally - and the health
-    assertions below fail while the service-state ones still pass.
+    on the ungated one. Drop the ``include_pairing`` gate - assemble the pairing
+    evidence into the aggregate unconditionally - and the health assertions
+    below fail while the service-state ones still pass.
     """
     app, _agg, _worker, _cp = make_app(session_factory, checkpointer)
     async with (
         _live_server(app) as base,
         httpx.AsyncClient(base_url=base, timeout=10.0) as client,
     ):
-        # The aggregate surface: the unarmed full body, not a liveness stub, so
-        # the absences asserted against it are absences from a payload that
-        # demonstrably carries the rest of the probe's findings.
-        aggregate = await client.get("/api/health")
-        assert aggregate.status_code == 200
-        abody = aggregate.json()
-        assert "checks" in abody, abody
-        assert abody["checks"]["worker"]["status"] == "ok", abody
-        assert "worker_paired_gateway_lifetime" not in abody, abody
-        assert "worker_reported_generation" not in abody, abody
-        assert "gateway_lifetime_id" not in abody, abody
-
-        # The top-level probe surface, ungated on these profiles as well.
+        # The ungated probe surface, serving the unarmed full body rather than a
+        # liveness stub, so the absences asserted against it are absences from a
+        # payload that demonstrably carries the rest of the probe's findings.
         health = await client.get("/health")
         assert health.status_code == 200
         hbody = health.json()
-        # The rich unarmed body, not the minimal armed liveness stub, so the
-        # absences below are absences from a payload that discloses plenty.
         assert hbody["service"] == "gateway", hbody
+        assert "checks" in hbody, hbody
+        assert hbody["checks"]["worker"]["status"] == "ok", hbody
         assert "worker_status" in hbody, hbody
         assert "worker_paired_gateway_lifetime" not in hbody, hbody
         assert "worker_reported_generation" not in hbody, hbody

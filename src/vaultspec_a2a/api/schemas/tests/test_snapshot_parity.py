@@ -193,12 +193,12 @@ def test_production_seam_carries_every_domain_field_to_the_wire() -> None:
     conversion, so a field that the seam drops fails here even if the pairwise
     declaration checks above were somehow satisfied.
     """
-    # Imported inside the test: ``routes.thread_state`` imports this schema
-    # module, so a module-level import would close a cycle at collection time.
-    from ...routes.thread_state import _to_pydantic
+    # Imported inside the test: ``routes.gateway`` imports this schema module,
+    # so a module-level import would close a cycle at collection time.
+    from ...routes.gateway import snapshot_to_wire
 
     data = _populated_thread_state()
-    snapshot = _to_pydantic(data)
+    snapshot = snapshot_to_wire(data)
     emitted = snapshot.model_dump()
     missing = set(dataclasses.asdict(data)) - set(emitted)
     assert not missing, (

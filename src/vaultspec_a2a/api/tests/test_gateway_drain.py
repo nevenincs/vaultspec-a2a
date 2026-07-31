@@ -22,8 +22,6 @@ from ...control.drain import DrainGate
 from ...database import get_thread
 from ...thread.enums import TERMINAL_STATUSES, ThreadStatus
 from ..dependencies import LIFECYCLE_CAPABILITY_HEADER
-from ..websocket import ConnectionManager
-from ..ws_dispatch import create_dispatch_message_handler
 from .conftest import make_app
 from .test_gateway_live import _live_server
 
@@ -325,7 +323,7 @@ async def test_followup_dispatch_failure_that_marks_run_failed_releases_admissio
         ) as unreachable:
             app.state.worker_client = unreachable
             followup = await client.post(
-                f"/api/threads/{run_id}/messages",
+                f"/v1/runs/{run_id}/messages",
                 json={"content": "keep going"},
             )
             assert followup.status_code == 502, followup.text
@@ -338,56 +336,6 @@ async def test_followup_dispatch_failure_that_marks_run_failed_releases_admissio
         assert not gate.is_active(run_id)
         result = await gate.drain(timeout=1.0)
         assert result.quiescent and result.active_runs == 0, result
-
-
-@pytest.mark.asyncio(loop_scope="function")
-async def test_ws_followup_dispatch_failure_releases_admission(
-    session_factory, checkpointer
-) -> None:
-    """The WS follow-up path releases a run its dispatch failure settled FAILED.
-
-    The WS handler marks the thread FAILED and broadcasts the terminal frame
-    straight to its clients - that broadcast never travels the relay handler that
-    releases - so the handler itself is the only site that can free the
-    admission. Driven through the real handler the production lifespan installs,
-    over a real ``ConnectionManager`` and a real transport refusal.
-    """
-    app, agg, worker, _cp = make_app(session_factory, checkpointer)
-    run_id = "run-drain-ws-followup-failure"
-    async with (
-        _live_server(app) as base,
-        httpx.AsyncClient(base_url=base, timeout=10.0) as client,
-    ):
-        started = await client.post("/v1/runs", json={**_run_body(), "run_id": run_id})
-        assert started.status_code == 201, started.text
-        assert worker.dispatches
-
-        gate = app.state.drain_gate
-        assert isinstance(gate, DrainGate)
-        assert gate.is_active(run_id)
-
-    async with httpx.AsyncClient(
-        base_url=_UNREACHABLE_WORKER, timeout=2.0
-    ) as unreachable:
-        handler = create_dispatch_message_handler(
-            unreachable,
-            session_factory,
-            checkpointer,
-            app.state.circuit_breaker,
-            app.state.worker_spawner,
-            ConnectionManager(agg),
-            app.state,
-        )
-        await handler(run_id, "keep going", None)
-
-    async with session_factory() as db:
-        thread = await get_thread(db, run_id)
-    assert thread is not None
-    assert thread.status == ThreadStatus.FAILED.value
-
-    assert not gate.is_active(run_id)
-    result = await gate.drain(timeout=1.0)
-    assert result.quiescent and result.active_runs == 0, result
 
 
 @pytest.mark.asyncio(loop_scope="function")

@@ -1,4 +1,10 @@
-"""GET /threads/{thread_id}/stream -- Server-Sent Events for thread activity."""
+"""Server-Sent Events body for a run's progress stream.
+
+The generator and the response builder behind the versioned
+``GET /v1/runs/{run_id}/stream`` verb. They live beside the gateway rather than
+inside it because the verb's module is already large and this is a
+self-contained streaming concern with no routing of its own.
+"""
 
 from __future__ import annotations
 
@@ -9,20 +15,18 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 from uuid import uuid4
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import HTTPException
 from fastapi.responses import StreamingResponse
 
-from ...control.config import settings
-from ...database.session import get_db
-from ...database.thread_repository import get_thread
-from ...streaming.aggregator import EventAggregator, SequencedEvent
-from ...streaming.sse_frames import encode_sse_frame
-from ...thread.enums import TERMINAL_STATUSES
-from ...thread.errors import EventAggregatorError
-from ...thread.snapshots import normalize_wire_event_type
-from ..dependencies import get_aggregator
-from ..event_adapter import sequenced_to_positive_payload
-from ..schemas.events import HeartbeatEvent
+from ..control.config import settings
+from ..database.thread_repository import get_thread
+from ..streaming.aggregator import EventAggregator, SequencedEvent
+from ..streaming.sse_frames import encode_sse_frame
+from ..thread.enums import TERMINAL_STATUSES
+from ..thread.errors import EventAggregatorError
+from ..thread.snapshots import normalize_wire_event_type
+from .event_adapter import sequenced_to_positive_payload
+from .schemas.events import HeartbeatEvent
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
@@ -31,7 +35,7 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter()
+__all__ = ["build_thread_stream_response"]
 
 
 async def _stream_thread_events(
@@ -48,8 +52,7 @@ async def _stream_thread_events(
         # The route refuses at capacity before the thread lookup, but that check
         # and this registration are separated by the response-start boundary:
         # this generator does not run until the client begins reading the body.
-        # Other callers - including the event WebSocket, which shares the same
-        # subscriber registry - can take the last slot in between. So the
+        # A concurrent stream can take the last slot in between, so the
         # registry's own refusal is authoritative, and the caller learns of it as
         # a terminal frame rather than a connection that dies mid-response.
         logger.warning(
@@ -101,7 +104,7 @@ async def _stream_thread_events(
             try:
                 item = await asyncio.wait_for(
                     queue.get(),
-                    timeout=settings.ws_heartbeat_interval_seconds,
+                    timeout=settings.stream_heartbeat_interval_seconds,
                 )
             except TimeoutError:
                 heartbeat = HeartbeatEvent(
@@ -145,12 +148,9 @@ async def build_thread_stream_response(
 ) -> StreamingResponse:
     """Build the SSE ``StreamingResponse`` for a thread, or raise a 404.
 
-    The single code path behind both the internal ``/api/threads/{id}/stream``
-    route and the versioned ``/v1/runs/{run_id}/stream`` gateway verb: the run
-    surface reuses this verbatim (a run id is the thread id), so the public edge
-    re-serves the same bounded, versioned v1 progress frames without a second
-    implementation. Callers pass ``not_found_detail`` to speak their own resource
-    vocabulary in the 404.
+    The single code path behind the versioned ``/v1/runs/{run_id}/stream`` verb
+    (a run id is the thread id). Callers pass ``not_found_detail`` so the 404
+    speaks their own resource vocabulary.
     """
     # Refused before the thread lookup, deliberately. The limit exists to stop a
     # caller exhausting queues and delivery tasks, so it must be decided from
@@ -159,9 +159,8 @@ async def build_thread_stream_response(
     # its target - only that this process is already at capacity.
     #
     # This is the cheap early refusal, not the bound itself: registration happens
-    # once the response body starts, and the subscriber registry is shared with
-    # the event WebSocket. The registry enforces the same limit at the moment of
-    # registration, which is where it actually holds.
+    # once the response body starts, and the shared subscriber registry enforces
+    # the same limit at the moment of registration, which is where it holds.
     limit = settings.max_stream_connections
     if limit > 0 and aggregator.subscriber_count() >= limit:
         raise HTTPException(
@@ -186,16 +185,4 @@ async def build_thread_stream_response(
             "Connection": "keep-alive",
             "X-Accel-Buffering": "no",
         },
-    )
-
-
-@router.get("/threads/{thread_id}/stream")
-async def stream_thread_events(
-    thread_id: str,
-    db: AsyncSession = Depends(get_db),
-    aggregator: EventAggregator = Depends(get_aggregator),
-) -> StreamingResponse:
-    """Stream thread events over SSE for clients that do not use WebSockets."""
-    return await build_thread_stream_response(
-        db=db, aggregator=aggregator, thread_id=thread_id
     )

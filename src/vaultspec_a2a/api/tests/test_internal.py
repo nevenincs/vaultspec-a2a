@@ -3,7 +3,7 @@
 Validates the /internal/health, /internal/events, and /internal/heartbeat
 HTTP endpoints using a real FastAPI test client with httpx.ASGITransport.
 
-Uses real ConnectionManager + EventAggregator (no fakes or mocks).
+Uses a real EventAggregator as the relay target (no fakes or mocks).
 """
 
 from __future__ import annotations
@@ -22,7 +22,6 @@ from ...database import (
 )
 from ...streaming.aggregator import EventAggregator
 from ..internal import internal_router
-from ..websocket import ConnectionManager
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -31,14 +30,13 @@ from ..websocket import ConnectionManager
 
 def _make_test_app(
     *,
-    with_connection_manager: bool = False,
     with_aggregator: bool = False,
     session_factory=None,
 ) -> FastAPI:
     """Create a minimal FastAPI app with the internal router and wired state.
 
-    When ``with_connection_manager`` is True, a real ``ConnectionManager``
-    backed by a real ``EventAggregator`` is attached (no fakes).
+    When ``with_aggregator`` is True, a real ``EventAggregator`` - the relay
+    target the ingest paths write to - is attached (no fakes).
     """
     app = FastAPI()
     app.include_router(internal_router)
@@ -49,13 +47,9 @@ def _make_test_app(
     if session_factory is not None:
         app.state.db_session_factory = session_factory
 
-    app.state.connection_manager = None
     app.state.aggregator = None
 
-    if with_connection_manager:
-        aggregator = EventAggregator()
-        app.state.connection_manager = ConnectionManager(aggregator)
-    elif with_aggregator:
+    if with_aggregator:
         app.state.aggregator = EventAggregator()
 
     return app
@@ -208,14 +202,14 @@ class TestInternalHeartbeat:
 class TestInternalEvents:
     """Verify the /internal/events endpoint.
 
-    When at least one relay target is present, the endpoint accepts the event.
-    When no relay target is present, it returns 503 so the worker can detect
-    the unready gateway and retry or backoff.
+    When the relay target is present, the endpoint accepts the event. When it is
+    absent, it returns 503 so the worker can detect the unready gateway and retry
+    or backoff.
     """
 
     @pytest.mark.asyncio(loop_scope="function")
     async def test_valid_event_returns_ok(self) -> None:
-        app = _make_test_app(with_connection_manager=True)
+        app = _make_test_app(with_aggregator=True)
         async with AsyncClient(
             transport=ASGITransport(app=app), base_url="http://test"
         ) as client:
@@ -236,7 +230,6 @@ class TestInternalEvents:
     ) -> None:
         """The HTTP path should accept events when the aggregator is available."""
         app = _make_test_app(with_aggregator=True)
-        assert app.state.connection_manager is None
         async with AsyncClient(
             transport=ASGITransport(app=app), base_url="http://test"
         ) as client:
@@ -253,9 +246,13 @@ class TestInternalEvents:
 
     @pytest.mark.asyncio(loop_scope="function")
     async def test_event_without_relay_target_returns_503(self) -> None:
-        """When both relay targets are absent, /internal/events returns 503."""
+        """With no relay target seated, /internal/events returns 503.
+
+        The guard survives the collapse to a single relay: a gateway whose
+        aggregator is not yet seated must tell the worker to back off rather
+        than accept an event it will silently drop.
+        """
         app = _make_test_app()
-        assert app.state.connection_manager is None
         assert app.state.aggregator is None
         async with AsyncClient(
             transport=ASGITransport(app=app), base_url="http://test"
@@ -271,36 +268,11 @@ class TestInternalEvents:
             assert resp.status_code == 503
 
     @pytest.mark.asyncio(loop_scope="function")
-    async def test_event_with_real_connection_manager_calls_broadcast(self) -> None:
-        """When a real ConnectionManager is present, broadcast_to_thread runs.
-
-        Since no WebSocket clients are connected, the broadcast is a no-op
-        in terms of external effects, but the code path executes fully.
-        We verify that the endpoint completes successfully with a real CM.
-        """
-        app = _make_test_app(with_connection_manager=True)
-        _cm: ConnectionManager = app.state.connection_manager
-
-        async with AsyncClient(
-            transport=ASGITransport(app=app), base_url="http://test"
-        ) as client:
-            resp = await client.post(
-                "/internal/events",
-                json={
-                    "type": "event",
-                    "thread_id": "t-42",
-                    "payload": {"event_type": "chunk", "data": "hello"},
-                },
-            )
-            assert resp.status_code == 200
-            assert resp.json() == {"status": "ok"}
-
-    @pytest.mark.asyncio(loop_scope="function")
     async def test_missing_thread_id_is_malformed(
         self, caplog: pytest.LogCaptureFixture
     ) -> None:
         """A malformed event without thread_id is rejected."""
-        app = _make_test_app(with_connection_manager=True)
+        app = _make_test_app(with_aggregator=True)
         async with AsyncClient(
             transport=ASGITransport(app=app), base_url="http://test"
         ) as client:
@@ -320,7 +292,7 @@ class TestInternalEvents:
     ) -> None:
         """Execution-state projection events should persist via the internal path."""
         app = _make_test_app(
-            with_connection_manager=True,
+            with_aggregator=True,
             session_factory=session_factory,
         )
 
@@ -431,7 +403,7 @@ class TestInternalEvents:
 
         with TestClient(app, raise_server_exceptions=True) as client:
             resp = client.post(
-                f"/api/permissions/{request_id}/respond",
+                f"/v1/runs/{thread.id}/permissions/{request_id}/respond",
                 json={"option_id": "approve"},
             )
 
@@ -446,7 +418,7 @@ class TestInternalEvents:
     ) -> None:
         """A degraded-only update must not erase the last good execution-state row."""
         app = _make_test_app(
-            with_connection_manager=True,
+            with_aggregator=True,
             session_factory=session_factory,
         )
 
@@ -518,7 +490,7 @@ class TestInternalEvents:
     @pytest.mark.asyncio(loop_scope="function")
     async def test_missing_payload_is_malformed(self) -> None:
         """A malformed event without payload is rejected."""
-        app = _make_test_app(with_connection_manager=True)
+        app = _make_test_app(with_aggregator=True)
         async with AsyncClient(
             transport=ASGITransport(app=app), base_url="http://test"
         ) as client:
@@ -534,7 +506,7 @@ class TestInternalEvents:
     @pytest.mark.asyncio(loop_scope="function")
     async def test_empty_thread_id_is_treated_as_malformed(self) -> None:
         """An empty string thread_id is treated as missing (falsy)."""
-        app = _make_test_app(with_connection_manager=True)
+        app = _make_test_app(with_aggregator=True)
         async with AsyncClient(
             transport=ASGITransport(app=app), base_url="http://test"
         ) as client:
@@ -551,7 +523,7 @@ class TestInternalEvents:
     @pytest.mark.asyncio(loop_scope="function")
     async def test_empty_payload_is_treated_as_malformed(self) -> None:
         """An empty dict payload is treated as missing (falsy)."""
-        app = _make_test_app(with_connection_manager=True)
+        app = _make_test_app(with_aggregator=True)
         async with AsyncClient(
             transport=ASGITransport(app=app), base_url="http://test"
         ) as client:
@@ -568,7 +540,7 @@ class TestInternalEvents:
     @pytest.mark.asyncio(loop_scope="function")
     async def test_batch_with_malformed_event_is_rejected(self) -> None:
         """Malformed entries in /internal/events/batch fail the whole batch."""
-        app = _make_test_app(with_connection_manager=True)
+        app = _make_test_app(with_aggregator=True)
         async with AsyncClient(
             transport=ASGITransport(app=app), base_url="http://test"
         ) as client:
@@ -649,7 +621,7 @@ class TestInternalWebSocketLogging:
         assert record.__dict__["transport"] == "ws"
         assert record.__dict__["frame_size"] > 0
 
-    def test_missing_connection_manager_log_includes_runtime_fields(
+    def test_missing_relay_target_log_includes_runtime_fields(
         self, caplog
     ) -> None:
         """Dropped relay events should log thread and event correlation fields."""

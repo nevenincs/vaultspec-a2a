@@ -1,8 +1,8 @@
 """Wire-protocol enums for the frontend-backend contract.
 
-API-only enums (``ServerEventType``, ``ClientCommandType``,
-``AgentControlAction``, ``PlanEntryStatus``, ``PlanEntryPriority``) remain
-local — they are wire-protocol concerns, not domain concepts.
+API-only enums (``ServerEventType``, ``PlanEntryStatus``,
+``PlanEntryPriority``) remain local — they are wire-protocol concerns, not
+domain concepts.
 
 Domain enums (``ToolKind``, ``PermissionType``, ``PermissionOptionKind``,
 ``ToolCallStatus``, ``AgentLifecycleState``) are defined in
@@ -15,8 +15,6 @@ imported (not duplicated) where needed.
 from enum import StrEnum
 
 __all__ = [
-    "AgentControlAction",
-    "ClientCommandType",
     "PlanEntryPriority",
     "PlanEntryStatus",
     "ServerEventType",
@@ -24,7 +22,7 @@ __all__ = [
 
 
 class ServerEventType(StrEnum):
-    """Discriminator for server-to-client WebSocket events."""
+    """Discriminator for server-to-client progress-stream events."""
 
     AGENT_STATUS = "agent_status"
     MESSAGE_CHUNK = "message_chunk"
@@ -36,27 +34,7 @@ class ServerEventType(StrEnum):
     PLAN_UPDATE = "plan_update"
     TEAM_STATUS = "team_status"
     ERROR = "error"
-    CONNECTED = "connected"
     HEARTBEAT = "heartbeat"
-
-
-class ClientCommandType(StrEnum):
-    """Discriminator for client-to-server WebSocket commands."""
-
-    SUBSCRIBE = "subscribe"
-    UNSUBSCRIBE = "unsubscribe"
-    SEND_MESSAGE = "send_message"
-    PERMISSION_RESPONSE = "permission_response"
-    AGENT_CONTROL = "agent_control"
-    PING = "ping"
-
-
-class AgentControlAction(StrEnum):
-    """Actions a user can issue to control a running agent."""
-
-    PAUSE = "pause"
-    RESUME = "resume"
-    TERMINATE = "terminate"
 
 
 class PlanEntryStatus(StrEnum):

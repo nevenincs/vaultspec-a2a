@@ -5,7 +5,6 @@ Creates the ASGI application with:
 - CORS middleware (permissive in dev)
 - REST router from per-resource route modules
 - Internal router from ``internal.py`` (worker relay)
-- WebSocket route via ``ConnectionManager``
 
 The gateway NO LONGER runs agent execution locally.  All graph
 compilation and ``aggregator.ingest()`` calls are dispatched to the
@@ -29,7 +28,6 @@ from opentelemetry import metrics, trace
 from opentelemetry.sdk.metrics import MeterProvider as SdkMeterProvider
 from opentelemetry.sdk.trace import TracerProvider as SdkTracerProvider
 from sqlalchemy.ext.asyncio import AsyncSession
-from starlette.websockets import WebSocket
 
 from ..authoring import resolve_engine
 from ..control.circuit_breaker import WorkerCircuitBreaker
@@ -80,11 +78,6 @@ from .body_limit import BoundedV1WriteBodyMiddleware
 from .internal import internal_router
 from .routes import register_routes
 from .schemas.gateway import LivenessResponse
-from .websocket import ConnectionManager
-from .ws_dispatch import (
-    create_dispatch_control_handler,
-    create_dispatch_message_handler,
-)
 
 __all__ = [
     "create_app",
@@ -249,11 +242,10 @@ def _http_attach_authorized(request: Request, app: FastAPI) -> bool:
     """Return whether an HTTP request presents a valid attach credential.
 
     The liveness surface answers every caller, but only a caller that proves the
-    attach credential in constant time is disclosed the readiness projection. This
-    mirrors the WebSocket attach check exactly, so the liveness boundary cannot
-    weaken the P08 attach gate: the explicit test-only bypass short-circuits for
-    route-behaviour tests, and corrupted runtime state with no token discloses
-    nothing.
+    attach credential in constant time is disclosed the readiness projection, so
+    the liveness boundary cannot weaken the attach gate: the explicit test-only
+    bypass short-circuits for route-behaviour tests, and corrupted runtime state
+    with no token discloses nothing.
     """
     if bool(getattr(app.state, "allow_unauthenticated_v1_for_testing", False)):
         return True
@@ -261,22 +253,6 @@ def _http_attach_authorized(request: Request, app: FastAPI) -> bool:
     if not isinstance(expected, str) or not expected:
         return False
     supplied = request.headers.get("authorization", "").encode("utf-8")
-    return hmac.compare_digest(supplied, f"Bearer {expected}".encode())
-
-
-def _websocket_attach_authorized(websocket: WebSocket, app: FastAPI) -> bool:
-    """Return whether a desktop event WebSocket presents a valid attach credential.
-
-    Constant-time comparison against the loaded attach credential; the explicit
-    test-only bypass short-circuits for route-behaviour tests. A missing runtime
-    credential is corrupted state and refuses the connection.
-    """
-    if bool(getattr(app.state, "allow_unauthenticated_v1_for_testing", False)):
-        return True
-    expected = getattr(app.state, "v1_service_token", None)
-    if not isinstance(expected, str) or not expected:
-        return False
-    supplied = websocket.headers.get("authorization", "").encode("utf-8")
     return hmac.compare_digest(supplied, f"Bearer {expected}".encode())
 
 
@@ -295,9 +271,8 @@ async def _lifespan(app: FastAPI) -> AsyncGenerator[None]:
     1. Database (SQLAlchemy)
     2. Read-only checkpointer (for snapshot queries -- safe under WAL mode)
     3. EventAggregator (lightweight -- for local event relay only)
-    4. ConnectionManager
-    5. Telemetry
-    6. httpx.AsyncClient for worker dispatch
+    4. Telemetry
+    5. httpx.AsyncClient for worker dispatch
     """
     logger.info("Starting gateway lifespan")
     settings.validate_postgres_requirement()
@@ -352,9 +327,6 @@ async def _lifespan(app: FastAPI) -> AsyncGenerator[None]:
         aggregator = EventAggregator(telemetry=OTelAggregatorHook())
         app.state.aggregator = aggregator
 
-        connection_manager = ConnectionManager(aggregator)
-        app.state.connection_manager = connection_manager
-
         app.state.db_engine = engine
 
         configure_telemetry()
@@ -391,27 +363,6 @@ async def _lifespan(app: FastAPI) -> AsyncGenerator[None]:
             worker_spawner, circuit_breaker, worker_state, app.state
         )
         watchdog_task = asyncio.create_task(watchdog.run())
-
-        msg_handler = create_dispatch_message_handler(
-            worker_client,
-            get_session_factory(),
-            checkpointer,
-            circuit_breaker,
-            worker_spawner,
-            connection_manager,
-            app.state,
-        )
-        connection_manager.set_message_handler(msg_handler)
-
-        ctrl_handler = create_dispatch_control_handler(
-            worker_client,
-            get_session_factory(),
-            checkpointer,
-            circuit_breaker,
-            worker_spawner,
-            app.state,
-        )
-        connection_manager.set_agent_control_handler(ctrl_handler)
 
         # Deferred-reconciliation gate: ordinary armed desktop boot must not start
         # the worker. The worker starts only on the first authenticated execution
@@ -625,7 +576,6 @@ async def _lifespan(app: FastAPI) -> AsyncGenerator[None]:
 
         await worker_spawner.shutdown()
         await worker_client.aclose()
-        await connection_manager.shutdown()
         await aggregator.shutdown()
         await close_db()
 
@@ -769,21 +719,6 @@ def create_app(
                 and settings.resolved_checkpoint_backend == "postgres"
             ),
         }
-
-    @app.websocket("/ws")
-    async def websocket_endpoint(websocket: WebSocket) -> None:
-        """WebSocket endpoint for multiplexed real-time events.
-
-        Desktop event streams carry product state, so the attach credential is
-        required before the connection is accepted; an unauthenticated or
-        unverifiable client is closed with a policy-violation code.
-        """
-        if not _websocket_attach_authorized(websocket, app):
-            await websocket.close(code=1008, reason="Unauthorized")
-            return
-        cm: ConnectionManager = app.state.connection_manager
-        client_id = await cm.connect(websocket)
-        await cm.listen(client_id)
 
     return app
 

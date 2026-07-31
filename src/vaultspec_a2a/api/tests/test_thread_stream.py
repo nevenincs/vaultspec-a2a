@@ -32,7 +32,7 @@ class TestStreamThreadEvents:
         """Streaming an unknown thread id is a clean 404, not a hanging stream."""
         app, _agg, _worker, _cp = make_app(session_factory, checkpointer)
         with TestClient(app, raise_server_exceptions=True) as client:
-            resp = client.get("/api/threads/does-not-exist/stream")
+            resp = client.get("/v1/runs/does-not-exist/stream")
         assert resp.status_code == 404
 
     def test_stream_terminal_thread_replays_terminal_frame(
@@ -57,7 +57,7 @@ class TestStreamThreadEvents:
         thread_id = asyncio.run(_seed())
 
         with TestClient(app, raise_server_exceptions=True) as client:
-            resp = client.get(f"/api/threads/{thread_id}/stream")
+            resp = client.get(f"/v1/runs/{thread_id}/stream")
 
         assert resp.status_code == 200
         assert resp.headers["content-type"].startswith("text/event-stream")

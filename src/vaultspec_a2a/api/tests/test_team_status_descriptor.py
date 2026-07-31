@@ -1,10 +1,16 @@
-"""``GET /team/status`` must report each agent's resolved model assignment.
+"""The team status must report each agent's resolved model assignment.
 
 These exercise the whole chain the descriptor travels — team config resolution,
-graph compilation, the aggregator's node-metadata cache, the team-status
-service, and the REST route — because the field loss they guard against was
-invisible at every individual layer: every model in the chain *declared*
-``provider``/``model``, and only the seam between them dropped the values.
+graph compilation, the aggregator's node-metadata cache, and the team-status
+service — because the field loss they guard against was invisible at every
+individual layer: every model in the chain *declared* ``provider``/``model``,
+and only the seam between them dropped the values.
+
+They stop at the SERVICE rather than a route. The versioned team-status verb is
+a deliberately narrow operational projection - agent id, display name, state -
+and carries neither field, so the route can no longer express what these cases
+are about while the service still resolves it. Asserting there would have meant
+deleting the very assertions this module exists for.
 """
 
 from __future__ import annotations
@@ -17,6 +23,7 @@ from fastapi.testclient import TestClient
 from langgraph.checkpoint.base import empty_checkpoint
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
+from ...control.team_service import build_team_status
 from ...database import create_thread
 from ...graph.compiler import compile_team_graph
 from ...graph.enums import AgentLifecycleState, Model, Provider
@@ -105,18 +112,15 @@ async def test_team_status_reports_the_resolved_provider_and_model(
     aggregator = EventAggregator()
     aggregator.register_graph(cast("StreamableGraph", graph))
 
-    app, _agg, _worker, _cp = make_app(
-        session_factory, checkpointer, aggregator=aggregator
-    )
-    with TestClient(app, raise_server_exceptions=True) as client:
-        resp = client.get("/api/team/status")
-
-    assert resp.status_code == 200
-    agents = {a["agent_id"]: a for a in resp.json()["agents"]}
+    async with session_factory() as db:
+        status = await build_team_status(
+            db=db, aggregator=aggregator, heartbeat_threads=[]
+        )
+    agents = {agent.agent_id: agent for agent in status.agents}
     assert _WORKER_ID in agents, f"compiled worker missing from {list(agents)}"
     worker = agents[_WORKER_ID]
-    assert worker["provider"] == Provider.DETERMINISTIC.value
-    assert worker["model"] == Model.LOW.value
+    assert worker.provider == Provider.DETERMINISTIC.value
+    assert worker.model == Model.LOW.value
     # The agent's own TOML declares "claude"; seeing it here would mean the
     # route reported a configured default rather than the resolved assignment.
     assert load_agent_config(_WORKER_ID).model.provider == Provider.CLAUDE
@@ -146,15 +150,12 @@ async def test_team_status_honours_a_per_worker_model_override(
     aggregator = EventAggregator()
     aggregator.register_graph(cast("StreamableGraph", graph))
 
-    app, _agg, _worker, _cp = make_app(
-        session_factory, checkpointer, aggregator=aggregator
-    )
-    with TestClient(app, raise_server_exceptions=True) as client:
-        resp = client.get("/api/team/status")
-
-    assert resp.status_code == 200
-    agents = {a["agent_id"]: a for a in resp.json()["agents"]}
-    assert agents[_WORKER_ID]["model"] == Model.MAX.value
+    async with session_factory() as db:
+        status = await build_team_status(
+            db=db, aggregator=aggregator, heartbeat_threads=[]
+        )
+    agents = {agent.agent_id: agent for agent in status.agents}
+    assert agents[_WORKER_ID].model == Model.MAX.value
 
 
 @pytest.mark.asyncio
@@ -205,10 +206,10 @@ async def test_thread_state_snapshot_reports_the_resolved_assignment(
         await session.commit()
 
     with TestClient(app, raise_server_exceptions=True) as client:
-        resp = client.get(f"/api/threads/{thread_id}/state")
+        resp = client.get(f"/v1/runs/{thread_id}/history")
 
     assert resp.status_code == 200
-    agents = {a["agent_id"]: a for a in resp.json()["agents"]}
+    agents = {a["agent_id"]: a for a in resp.json()["state"]["agents"]}
     assert agents[_WORKER_ID]["provider"] == Provider.DETERMINISTIC.value
     assert agents[_WORKER_ID]["model"] == Model.LOW.value
 
@@ -291,8 +292,9 @@ async def test_aggregator_agent_states_are_enum_members_not_strings() -> None:
     assert observed is AgentLifecycleState.WORKING
 
 
-def test_team_status_reports_unknown_assignment_as_null(
-    session_factory, checkpointer
+@pytest.mark.asyncio
+async def test_team_status_reports_unknown_assignment_as_null(
+    session_factory,
 ) -> None:
     """An agent registered without a resolved assignment reports null, not a guess.
 
@@ -310,13 +312,11 @@ def test_team_status_reports_unknown_assignment_as_null(
         }
     )
 
-    app, _agg, _worker, _cp = make_app(
-        session_factory, checkpointer, aggregator=aggregator
-    )
-    with TestClient(app, raise_server_exceptions=True) as client:
-        resp = client.get("/api/team/status")
+    async with session_factory() as db:
+        status = await build_team_status(
+            db=db, aggregator=aggregator, heartbeat_threads=[]
+        )
 
-    assert resp.status_code == 200
-    agent = resp.json()["agents"][0]
-    assert agent["provider"] is None
-    assert agent["model"] is None
+    agent = status.agents[0]
+    assert agent.provider is None
+    assert agent.model is None

@@ -27,6 +27,7 @@ __all__ = [
     "CHECKPOINT_ERROR_REPAIR_MAP",
     "PLAN_APPROVAL_PAUSE_CAUSES",
     "TERMINAL_STATUS_MAP",
+    "WIRE_EVENT_TYPE_KEYS",
     "AgentData",
     "ArtifactData",
     "CheckpointProjection",
@@ -51,7 +52,9 @@ __all__ = [
     "is_terminal_event",
     "normalize_artifacts",
     "normalize_plan_entries",
+    "normalize_wire_event_type",
     "project_checkpoint_tuple",
+    "wire_event_type",
 ]
 
 # Shared constant — previously duplicated in control/projection.py and
@@ -79,9 +82,17 @@ TERMINAL_STATUS_MAP: dict[str, str] = {
 # Checkpoint error → repair status mapping.  Used by snapshot replay
 # logic to decide which RepairStatus to assign when a checkpoint probe
 # fails or returns degraded data.
+#
+# ``checkpoint_missing`` and ``checkpoint_unavailable`` are distinct conditions
+# and classify differently. Unavailable means the probe itself failed - the
+# checkpoint's contents are unknown, so the run may still be intact. Missing
+# means the probe succeeded and found nothing: the history a replay would rebuild
+# from is provably absent, which is a replay gap, not an unknown. Collapsing the
+# two onto CHECKPOINT_UNAVAILABLE reported a known gap as an unknown probe and
+# left REPLAY_GAP with no producer at all.
 CHECKPOINT_ERROR_REPAIR_MAP: dict[str, RepairStatus] = {
     "checkpoint_unavailable": RepairStatus.CHECKPOINT_UNAVAILABLE,
-    "checkpoint_missing": RepairStatus.CHECKPOINT_UNAVAILABLE,
+    "checkpoint_missing": RepairStatus.REPLAY_GAP,
     "checkpoint_corrupt": RepairStatus.OPERATOR_INTERVENTION_REQUIRED,
     "checkpoint_timeout": RepairStatus.NEEDS_RECONCILIATION,
 }
@@ -99,6 +110,56 @@ _PROGRESS_EVENT_TYPES: frozenset[str] = frozenset(
 
 
 # ---------------------------------------------------------------------------
+# Wire event-type key pair
+# ---------------------------------------------------------------------------
+
+# A relayed event names its type under two keys. ``type`` is the original
+# discriminator every wire consumer reads; ``event_type`` is the mirror the
+# worker IPC and terminal paths grew alongside it. Both are kept because both
+# have live readers, so the pair is stated once here rather than re-derived at
+# each producer - three near-copies of the mirroring rule previously disagreed,
+# and one of them could not repair a ``type``-only payload at all.
+#
+# This module is the canonical home because it is the only layer every party can
+# reach: ``api/``, ``streaming/``, and ``ipc/`` all import ``thread/``, while
+# ``thread/`` (a Layer 1 module) imports none of them. Siting the rule in
+# ``streaming/`` instead would invert that edge and make the import cycle
+# ``thread`` -> ``streaming`` -> ``streaming.subscribers`` -> ``thread.errors``.
+WIRE_EVENT_TYPE_KEYS: tuple[str, str] = ("type", "event_type")
+
+
+def wire_event_type(payload: Mapping[str, Any]) -> str:
+    """Return the event type a relayed payload names, under either key.
+
+    The single read side of the mirrored pair. A consumer that reads one key
+    directly classifies a payload written under only the other key as untyped;
+    reading through here cannot, whatever path produced the payload.
+    """
+    for key in WIRE_EVENT_TYPE_KEYS:
+        value = payload.get(key)
+        if isinstance(value, str) and value:
+            return value
+    return ""
+
+
+def normalize_wire_event_type(payload: Mapping[str, Any]) -> dict[str, Any]:
+    """Return *payload* with both wire event-type keys naming its event type.
+
+    The single write side of the mirrored pair, and the seam every producer
+    crosses. Mirroring is bidirectional: a payload carrying either key alone
+    leaves with both. A payload naming no type at all is returned unchanged
+    rather than stamped with an empty one.
+    """
+    normalized = dict(payload)
+    event_type = wire_event_type(normalized)
+    if not event_type:
+        return normalized
+    for key in WIRE_EVENT_TYPE_KEYS:
+        normalized[key] = event_type
+    return normalized
+
+
+# ---------------------------------------------------------------------------
 # Event classification predicates (extracted from control/event_handlers.py)
 # ---------------------------------------------------------------------------
 
@@ -106,14 +167,14 @@ _PROGRESS_EVENT_TYPES: frozenset[str] = frozenset(
 def is_terminal_event(payload: dict[str, Any]) -> bool:
     """Return True if the payload represents a thread-terminal event."""
     return (
-        payload.get("event_type") == "thread_terminal"
+        wire_event_type(payload) == "thread_terminal"
         and payload.get("status", "") in TERMINAL_STATUS_MAP
     )
 
 
 def is_permission_event(payload: dict[str, Any]) -> bool:
     """Return True if the payload is a permission request or resolution."""
-    return payload.get("type", "") in {
+    return wire_event_type(payload) in {
         "permission_request",
         "plan_approval_request",
         "document_approval_request",
@@ -123,7 +184,7 @@ def is_permission_event(payload: dict[str, Any]) -> bool:
 
 def is_progress_event(payload: dict[str, Any]) -> bool:
     """Return True if the payload represents post-resume worker progress."""
-    return payload.get("type", "") in _PROGRESS_EVENT_TYPES
+    return wire_event_type(payload) in _PROGRESS_EVENT_TYPES
 
 
 def classify_permission_pause_reason(tool_call: str | None) -> str:

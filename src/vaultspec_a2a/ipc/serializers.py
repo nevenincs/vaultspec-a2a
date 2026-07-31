@@ -17,6 +17,7 @@ from ..graph.events import (
     ToolCallStart,
     ToolCallUpdate,
 )
+from ..thread.snapshots import normalize_wire_event_type
 
 if TYPE_CHECKING:
     from ..streaming.aggregator import SequencedEvent
@@ -56,6 +57,6 @@ def sequenced_to_dict(sequenced: SequencedEvent) -> dict:
     d = asdict(sequenced.event)
     if event_type := _event_type(sequenced.event):
         d["type"] = event_type
-        d["event_type"] = event_type
+        d = normalize_wire_event_type(d)
     d["sequence"] = sequenced.sequence
     return d

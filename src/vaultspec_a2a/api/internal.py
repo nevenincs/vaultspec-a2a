@@ -33,23 +33,12 @@ from ..control.event_handlers import (
     _handle_execution_state_event,
     relay_event,
 )
+from ..thread.snapshots import normalize_wire_event_type
 from ..utils import BearerVerdict, verify_internal_bearer
 
 __all__ = ["internal_router"]
 
 logger = logging.getLogger(__name__)
-
-
-def _normalize_worker_payload(payload: dict[str, Any]) -> dict[str, Any]:
-    """Mirror ``type``/``event_type`` keys so both legacy and new paths work."""
-    normalized = dict(payload)
-    payload_type = normalized.get("type")
-    event_type = normalized.get("event_type")
-    if isinstance(event_type, str) and event_type and not payload_type:
-        normalized["type"] = event_type
-    if isinstance(payload_type, str) and payload_type and not event_type:
-        normalized["event_type"] = payload_type
-    return normalized
 
 
 def _validate_event_envelope(
@@ -113,7 +102,7 @@ async def _relay_single_event(
     it travels to the terminal handler, which releases the run from it, exactly
     as *agg* and *session_factory* travel to their handlers.
     """
-    payload = _normalize_worker_payload(payload)
+    payload = normalize_wire_event_type(payload)
     if payload.get("type") == "execution_state_projection":
         await _handle_execution_state_event(
             thread_id, payload, session_factory=session_factory

@@ -39,6 +39,11 @@ from typing import Final, TypeGuard
 # and tests keep importing it from here.
 from ..graph.enums import research_adr_semantic_phase as semantic_phase_for_node
 
+# The wire event-type key pair is owned by ``thread.snapshots`` - the one layer
+# every producer and consumer of a relayed payload can import. Reading the frame
+# type through it keeps this catalog and the relay predicates on one rule.
+from ..thread.snapshots import wire_event_type
+
 __all__ = [
     "MAX_PROGRESS_CONTENT_CHARS",
     "MAX_SSE_FRAME_BYTES",
@@ -346,11 +351,11 @@ def enforce_progress_allowlist(
     encode boundary applies it to every outgoing frame, and the upstream relay
     projection calls this same function, so the two layers cannot disagree.
     """
-    frame_type = payload.get("type") or payload.get("event_type")
+    frame_type = wire_event_type(payload)
     projected: dict[str, object] = {
         key: value for key, value in payload.items() if key in _ALWAYS_SAFE_KEYS
     }
-    fields = _PROGRESS_CATALOG.get(frame_type) if isinstance(frame_type, str) else None
+    fields = _PROGRESS_CATALOG.get(frame_type)
     if fields is not None:
         projected.update(_project_fields(payload, fields))
     return projected

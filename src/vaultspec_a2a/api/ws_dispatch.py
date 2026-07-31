@@ -18,6 +18,7 @@ from ..control.message_service import send_followup_message
 from ..domain_config import domain_config
 from ..thread.dispatch_policy import FailureType
 from ..thread.enums import ThreadStatus
+from ..thread.snapshots import normalize_wire_event_type
 from ._utils import trace_headers
 from .schemas.enums import AgentControlAction
 from .websocket import WebSocketCommandRejectedError
@@ -76,12 +77,17 @@ async def _ws_mark_failed_and_broadcast(
     the WS broadcast stays in the API layer.
     """
     await mark_thread_failed(thread_id, session_factory, aggregator=aggregator)
-    terminal_payload = {
-        "event_type": "thread_terminal",
-        "thread_id": thread_id,
-        "status": ThreadStatus.FAILED,
-        "error_detail": error_detail,
-    }
+    # This broadcast reaches subscriber queues directly, without passing the relay
+    # seam that normalises worker events, so the wire-key pair is mirrored here at
+    # the point of construction rather than being left to the receiving side.
+    terminal_payload = normalize_wire_event_type(
+        {
+            "event_type": "thread_terminal",
+            "thread_id": thread_id,
+            "status": ThreadStatus.FAILED,
+            "error_detail": error_detail,
+        }
+    )
     try:
         await connection_manager.broadcast_to_thread(thread_id, terminal_payload)
     except Exception:

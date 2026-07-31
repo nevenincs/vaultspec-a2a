@@ -19,6 +19,7 @@ from ...streaming.aggregator import EventAggregator, SequencedEvent
 from ...streaming.sse_frames import encode_sse_frame
 from ...thread.enums import TERMINAL_STATUSES
 from ...thread.errors import EventAggregatorError
+from ...thread.snapshots import normalize_wire_event_type
 from ..dependencies import get_aggregator
 from ..event_adapter import sequenced_to_positive_payload
 from ..schemas.events import HeartbeatEvent
@@ -31,20 +32,6 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
-
-
-def _normalize_payload(payload: dict[str, object]) -> dict[str, object]:
-    """Normalize non-schema relay payloads onto the SSE event surface."""
-    if "type" in payload:
-        return payload
-
-    raw_type = payload.get("event_type")
-    if isinstance(raw_type, str) and raw_type:
-        normalized = dict(payload)
-        normalized["type"] = raw_type
-        return normalized
-
-    return payload
 
 
 async def _stream_thread_events(
@@ -135,7 +122,7 @@ async def _stream_thread_events(
                 # to both, so a forbidden body cannot cross by either path.
                 payload = sequenced_to_positive_payload(item)
             else:
-                payload = _normalize_payload(item)
+                payload = normalize_wire_event_type(item)
 
             event_type = payload.get("type")
             yield encode_sse_frame(

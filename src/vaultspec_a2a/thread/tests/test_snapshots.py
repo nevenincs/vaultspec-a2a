@@ -8,8 +8,10 @@ from datetime import UTC, datetime
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
 from ...graph.enums import AgentLifecycleState, Model, Provider
+from ..enums import RepairStatus
 from ..models import PlanEntry
 from ..snapshots import (
+    CHECKPOINT_ERROR_REPAIR_MAP,
     PLAN_APPROVAL_PAUSE_CAUSES,
     TERMINAL_STATUS_MAP,
     AgentData,
@@ -221,8 +223,37 @@ def test_finalize_gap_detected() -> None:
     )
     assert snap.replay_status == "gap_detected"
     assert "checkpoint_missing" in snap.degraded_reasons
-    assert snap.repair_status == "checkpoint_unavailable"
-    assert snap.execution_readiness == "checkpoint_unavailable"
+    # A detected replay gap classifies as a replay gap. The probe succeeded and
+    # found no checkpoint, so the missing history is established rather than
+    # unknown - reporting it as checkpoint-unavailable claimed the opposite, and
+    # left RepairStatus.REPLAY_GAP with no producer anywhere in the codebase.
+    assert snap.repair_status == RepairStatus.REPLAY_GAP.value
+    assert snap.execution_readiness == RepairStatus.REPLAY_GAP.value
+
+
+def test_replay_gap_is_distinct_from_checkpoint_unavailable() -> None:
+    """The two checkpoint conditions do not collapse onto one repair status.
+
+    An unavailable checkpoint means the probe failed and the contents are
+    unknown; a missing one means the probe succeeded and the history is provably
+    absent. They are different operator situations and must classify differently.
+    """
+    assert (
+        CHECKPOINT_ERROR_REPAIR_MAP["checkpoint_missing"]
+        != CHECKPOINT_ERROR_REPAIR_MAP["checkpoint_unavailable"]
+    )
+    assert CHECKPOINT_ERROR_REPAIR_MAP["checkpoint_missing"] is RepairStatus.REPLAY_GAP
+
+
+def test_every_repair_status_has_a_producer() -> None:
+    """No RepairStatus member is unreachable from the code that assigns them.
+
+    REPLAY_GAP was a contract value no code path could emit: the one condition
+    that meant it was classified as something else. This asserts the enum and the
+    checkpoint classification map cannot drift apart again silently.
+    """
+    classified = set(CHECKPOINT_ERROR_REPAIR_MAP.values())
+    assert RepairStatus.REPLAY_GAP in classified
 
 
 # ---------------------------------------------------------------------------

@@ -35,7 +35,7 @@ async def _post_shutdown(headers: dict[str, str]) -> httpx.Response:
     async with httpx.AsyncClient(
         transport=transport, base_url="http://desktop.test"
     ) as client:
-        return await client.post("/api/admin/shutdown", headers=headers)
+        return await client.post("/admin/shutdown", headers=headers)
 
 
 @pytest.mark.asyncio
@@ -65,3 +65,29 @@ async def test_shutdown_rejects_wrong_lifecycle_capability() -> None:
         }
     )
     assert response.status_code == 403
+
+
+def test_the_stop_verb_addresses_the_path_the_gateway_actually_serves() -> None:
+    """The CLI's stop path and the served route must be the same string.
+
+    This binding is not pedantry. The two drifted: the CLI posted to
+    ``/admin/shutdown`` while the gateway served the route only under the
+    product prefix, so the authenticated drain answered 404 on every stop and
+    the verb silently fell through to felling the process tree. The failure was
+    invisible because a non-202 is indistinguishable from a refusal there.
+
+    Asserting the CLI's own source rather than a copied constant is deliberate:
+    a constant shared by both sides would move together and prove nothing.
+    """
+    import inspect
+    import re
+
+    from ...cli import service as service_verbs
+
+    source = inspect.getsource(service_verbs.stop_service)
+    posted = re.search(r'f"\{base_url\}(/[^"]*shutdown)"', source)
+    assert posted is not None, "stop_service no longer posts a shutdown path"
+
+    app = _make_app()
+    served = {path for path in app.openapi()["paths"] if path.endswith("shutdown")}
+    assert posted.group(1) in served, (posted.group(1), served)

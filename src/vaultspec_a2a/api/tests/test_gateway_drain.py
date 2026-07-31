@@ -105,7 +105,7 @@ async def test_admin_stop_closes_admission_and_refuses_new_runs(
 ) -> None:
     """The administrative stop path engages the drain gate.
 
-    An authenticated, receipt-owned ``/api/admin/shutdown`` closes run admission
+    An authenticated, receipt-owned ``/admin/shutdown`` closes run admission
     before it initiates the (deferred) process stop, so a run-start issued after
     it is refused 503 while the gateway is still up. Driven in-process over ASGI:
     the deferred self-SIGINT is scheduled on the test loop and discarded when the
@@ -125,7 +125,7 @@ async def test_admin_stop_closes_admission_and_refuses_new_runs(
 
         # Receipt-owned administrative stop closes admission.
         stop = await client.post(
-            "/api/admin/shutdown",
+            "/admin/shutdown",
             headers={LIFECYCLE_CAPABILITY_HEADER: capability},
         )
         assert stop.status_code == 202, stop.text

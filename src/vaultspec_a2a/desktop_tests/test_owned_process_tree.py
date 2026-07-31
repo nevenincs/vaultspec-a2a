@@ -311,7 +311,7 @@ def test_desktop_worker_tree_contained_and_reaped_on_graceful_shutdown(
             httpx.Client(base_url=base, timeout=10.0) as client,
         ):
             resp = client.post(
-                "/api/admin/shutdown",
+                "/admin/shutdown",
                 headers={**auth, "X-Vaultspec-Lifecycle-Capability": _OWNERSHIP},
             )
             assert resp.status_code == 202, resp.text

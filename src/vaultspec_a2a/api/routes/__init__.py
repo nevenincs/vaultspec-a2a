@@ -43,11 +43,17 @@ def register_routes(app: FastAPI) -> None:
         cancel_router,
         teams_router,
         permissions_router,
-        admin_router,
     ):
         app.include_router(
             sub_router, prefix="/api", dependencies=[Depends(require_attach)]
         )
+
+    # Administrative shutdown is a lifecycle operation on the process, not a
+    # product capability, so it is mounted at the root rather than inside either
+    # product surface. Its own double gate - attach plus the receipt-bound
+    # lifecycle capability - is declared on the route and is what actually
+    # protects it, so mounting it outside the prefix loosens nothing.
+    app.include_router(admin_router)
 
     # The v1 gateway is the versioned engine edge.
     app.include_router(gateway_router)

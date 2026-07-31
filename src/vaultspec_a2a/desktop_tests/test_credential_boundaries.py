@@ -136,12 +136,12 @@ def test_credential_planes_are_isolated_and_secret_free(tmp_path: Path) -> None:
 
             # --- Lifecycle plane: admin shutdown needs the ownership capability ---
             attach_only = client.post(
-                "/api/admin/shutdown",
+                "/admin/shutdown",
                 headers={"Authorization": f"Bearer {_ATTACH}"},
             )
             assert attach_only.status_code == 403
             wrong_cap = client.post(
-                "/api/admin/shutdown",
+                "/admin/shutdown",
                 headers={
                     "Authorization": f"Bearer {_ATTACH}",
                     _LIFECYCLE_HEADER: "not-the-capability",

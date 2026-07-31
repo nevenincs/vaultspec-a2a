@@ -270,11 +270,12 @@ LINT = Verb(
     summary="Run gating static analysis; a finding fails the build.",
     note=(
         "'all' chains only the dimensions that hold the line today. complexity, "
-        "nesting, size, type-strict and duplication are REAL GATES at industry "
-        "thresholds whose burndown is unfinished in this tree - run each by name, "
-        "or see 'just dev health report' for the ranked backlog. Chaining a "
-        "permanently-red gate would hide every dimension behind it and teach "
-        "people to ignore red."
+        "cyclomatic, shape, limits, nesting, size and type-strict are REAL GATES at "
+        "industry thresholds whose burndown is unfinished - run each by name, or "
+        "'just health' for the ranked backlog. Chaining a permanently-red gate "
+        "would hide every dimension behind it and teach people to ignore red. A "
+        "dimension graduates into 'all' when it reaches zero and can hold it; "
+        "'imports' is the first to have done so."
     ),
     targets=(
         Target(
@@ -353,22 +354,23 @@ LINT = Verb(
         Target(
             "all",
             "Every gate that holds the line today.",
-            # `imports` is absent for the reason stated in the verb note: 413
-            # absolute intra-package imports predate the gate, so chaining it
-            # here would make `lint all` permanently red and hide everything
-            # after it. It is a real gate, run by name, until that is burned
-            # down.
+            # `imports` GRADUATED into this chain on 2026-07-31: its burndown
+            # reached zero (413 -> 0) and the gate can hold that line, which is
+            # the promotion rule every dimension here follows. It is the first
+            # to finish. A dimension chained before it reaches zero would make
+            # `lint all` permanently red and hide everything after it.
             #
-            # `type` IS chained despite being red today. The distinction is not
-            # arbitrary: its 12 findings are not a threshold backlog, they are a
-            # live production break - `mcp` 2.0.0 removed `mcp.server.fastmcp`,
-            # which `protocols/mcp/server.py` still imports. A gate going red on
-            # a genuine break is the gate working.
+            # `type` is green again as of the mcp 2.0 migration. It was chained
+            # while red on purpose before that: its findings were not a
+            # threshold backlog but a live production break - `mcp` 2.0.0 had
+            # removed `mcp.server.fastmcp`, which the server still imported - and
+            # a gate going red on a genuine break is the gate working.
             tuple(
                 Ref(name)
                 for name in (
                     "python",
                     "type",
+                    "imports",
                     "dependencies",
                     "toml",
                     "workflow",

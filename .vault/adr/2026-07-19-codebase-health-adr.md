@@ -262,6 +262,53 @@ Before authentication, connection and global limits protect remaining public
 probes. After authentication, per-principal limits also apply. The progress
 stream requires authentication when this decision is implemented.
 
+
+The supported surface takes a SIXTH versioned verb: answering a permission request,
+scoped to the run that raised it. The outbound half of that exchange is already versioned -
+the request is an enumerated frame on the versioned progress stream - and a surface that
+can pose a question but cannot accept its answer is incomplete. No existing verb can carry
+it honestly: a run-start retry is fingerprint-compared replay, so an answer-bearing retry
+is a different fingerprint and is refused by design; cancel is destructive; the rest are
+reads. Overloading one of them to preserve a count would corrupt a certified contract for
+arithmetic. The verb adds no new state machine - it is a versioned projection of the
+existing answer path - and it carries no new credential, inheriting the same gate and
+bounded-body limits as its siblings.
+
+Answering is at-most-once. The same answer arriving twice replays the stored outcome rather
+than acting again; any answer arriving after the request was applied reports the duplicate
+and never re-dispatches; a superseded, expired, or already-terminal request is refused with
+a journaled rejection that replays identically. An answer naming a run other than the one
+that raised the request is not found, so a guessed request identifier cannot reach across
+runs.
+
+The legacy surface carries more that the versioned one lacks, and the deprecation cannot
+end until each is answered rather than assumed. Beyond the permission answer these are: a
+follow-up message into an existing thread, which run-start cannot express because a repeat
+identifier is a replay rather than a new turn; agent control; thread DELETION, whose
+five-outcome contract this record specifies while it exists only on the legacy route;
+history reads including terminal threads, metadata, and archive, where the versioned list
+is active-only; team status; and the multiplexed socket that serves many threads over one
+connection where the versioned surface serves one each. The administrative shutdown
+entrypoint is not a product route at all and must be relocated or reclassified rather than
+removed with the mount it happens to sit under.
+
+Gating the legacy surface is therefore separable from removing it. Gating - refusing it
+without a configured credential, and withdrawing it from discovery - rests on this
+repository's own evidence, provided the permission verb lands first, since retiring the
+only answering channel would otherwise strand every paused run. REMOVAL keeps the
+joint-certification condition, and that certification must run the composite scenario with
+the legacy routes disabled and the socket refused, proving no request reaches them, and
+must answer each gap above as consumed or unconsumed. A retirement that closes one gap and
+misses the rest is worse than not starting.
+
+On per-principal limits, one gloss: this edge authenticates a single shared credential per
+gateway generation, so every authenticated caller is the same principal and a per-principal
+quota degenerates into the global one. A limit keyed on something a caller can vary at will
+defends nothing, and the only honest per-principal key - a per-consumer credential or a
+claim inside the presented one - is minted outside this service. Until a second credential
+plane exists, the requirement is satisfied by global limits together with per-connection
+limits, the connection being the only unit this edge can authenticate for itself.
+
 ### Provider and resource failure containment
 
 Configuration admission rejects duplicate server identities. Every provider

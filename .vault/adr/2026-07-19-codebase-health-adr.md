@@ -3,7 +3,7 @@ tags:
   - '#adr'
   - '#codebase-health'
 date: '2026-07-19'
-modified: '2026-07-30'
+modified: '2026-07-31'
 related:
   - "[[2026-07-19-codebase-health-research]]"
   - "[[2026-07-18-desktop-product-profile-adr]]"
@@ -169,6 +169,17 @@ knows whether the work is still wanted, which is the caller, not the transport b
 them. This boundary would move if the resumable pass became a poll that does not advance
 the ledger against an unchanged cause, or if the answer carried a server-computed pacing
 hint - either would make a single bounded client retry defensible.
+
+
+A concurrent replay that loses the finalize race answers with the clean no-content
+success even when the winning pass finalized over abandoned state. The saga row carrying
+the manifest and ledger is removed in the winner's finalize commit, so at the moment the
+loser returns, the abandoned kinds are readable nowhere outside the winner's process and
+the server log, and only the finalizing pass can report them. Reporting abandonment on
+every concurrent replay would require a durable tombstone outliving the saga, which this
+design deliberately does not keep. The window is narrow - the loser must find the thread
+row present and then lose the claim after the winner's finalize commits - and a sequential
+retry after finalize answers not-found rather than the bare success.
 
 ### Authenticated and positive edge contracts
 

@@ -58,7 +58,7 @@ from ....database.models import (
 from ....streaming.aggregator import EventAggregator
 from ....thread.enums import CleanupKind
 from .. import _http as mcp_http
-from .._http import _reset_client, _reset_known_presets
+from .._http import _reset_client
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Iterator
@@ -74,7 +74,6 @@ from ..tools.thread_lifecycle import (
     archive_thread,
     cancel_thread,
     delete_thread,
-    start_thread,
 )
 from ..tools.thread_query import (
     get_thread_status,
@@ -96,12 +95,10 @@ def _reset_shared_state():
     original_gateway_token = settings.gateway_service_token
     settings.gateway_service_token = _GATEWAY_TOKEN
     _reset_client()
-    _reset_known_presets()
     try:
         yield
     finally:
         _reset_client()
-        _reset_known_presets()
         settings.gateway_service_token = original_gateway_token
 
 
@@ -237,157 +234,6 @@ def _make_test_client(
         headers={"Authorization": f"Bearer {_GATEWAY_TOKEN}"},
         raise_server_exceptions=True,
     )
-
-
-# ---------------------------------------------------------------------------
-# Error-path tests (no HTTP server needed)
-# ---------------------------------------------------------------------------
-
-
-@pytest.mark.asyncio
-async def test_start_thread_unknown_preset_raises() -> None:
-    """start_thread with an unknown preset raises (connection or preset error).
-
-    When the gateway is unreachable, preset discovery returns an empty set
-    and validation is deferred to the gateway — which also fails with a
-    connection error.  Either way a ToolError is raised.
-    """
-    with pytest.raises(ToolError):
-        await start_thread(
-            initial_message="do something", team_preset="nonexistent-preset"
-        )
-
-
-@pytest.mark.asyncio
-async def test_start_thread_default_preset_not_unknown() -> None:
-    """start_thread with team_preset=None uses 'vaultspec-solo-coder'
-    -- not unknown.
-    """
-    # With no server running this hits a connection error -- but must NOT raise
-    # an "Unknown preset" error.
-    with pytest.raises(ToolError) as exc_info:
-        await start_thread(initial_message="test", team_preset=None)
-    assert "Unknown preset" not in str(exc_info.value)
-
-
-@pytest.mark.asyncio
-async def test_start_thread_no_preset_defaults_to_solo_coder_live(
-    session_factory, checkpointer
-) -> None:
-    """No-arg start_thread resolves the default preset to solo-coder end-to-end.
-
-    Drives the real MCP start_thread tool against the in-process FastAPI app
-    (real routes, real DB, real versioned presets fetch) with team_preset=None.
-
-    The default preset arms the engine authoring bridge, so the versioned
-    run-start verb refuses a bundle-less start before creating durable state.
-    That refusal is the observable proof the default resolved: the gateway names
-    ``vaultspec-solo-coder`` and the exact role whose engine-minted actor token
-    is missing, so the request reached the real eligibility policy under the
-    retained default preset rather than stopping at client-side validation.
-    """
-    with _make_test_client(session_factory, checkpointer) as client:
-        original_gateway_url = settings.gateway_url
-        original_client = mcp_http._shared_client
-        _reset_known_presets()
-        try:
-            settings.gateway_url = "http://testserver"
-            mcp_http._shared_client = httpx.AsyncClient(
-                transport=ASGITransport(app=client.app),
-                base_url="http://testserver",
-            )
-            with pytest.raises(ToolError) as exc_info:
-                await start_thread(initial_message="ship it", team_preset=None)
-        finally:
-            if mcp_http._shared_client is not None:
-                await mcp_http._shared_client.aclose()
-            mcp_http._shared_client = original_client
-            _reset_known_presets()
-            settings.gateway_url = original_gateway_url
-
-    message = str(exc_info.value)
-    assert "vaultspec-solo-coder" in message
-    assert "vaultspec-coder" in message
-    assert "actor token" in message
-
-
-@pytest.mark.asyncio
-async def test_start_thread_dispatches_through_the_versioned_run_verb(
-    session_factory, checkpointer
-) -> None:
-    """start_thread creates a durable run through POST /v1/runs, end to end.
-
-    Uses a preset that carries no per-role token requirement, so the whole
-    repointed path is exercised for real: the versioned presets fetch that
-    validates the preset id, the ``message`` field name the versioned request
-    model requires, and the ``run_id`` the versioned response returns. The
-    returned id is then read back through the versioned run-status verb, which
-    proves the tool reported the identity of a run that actually exists rather
-    than echoing its own payload.
-    """
-    with _make_test_client(session_factory, checkpointer) as client:
-        original_gateway_url = settings.gateway_url
-        original_client = mcp_http._shared_client
-        _reset_known_presets()
-        try:
-            settings.gateway_url = "http://testserver"
-            mcp_http._shared_client = httpx.AsyncClient(
-                transport=ASGITransport(app=client.app),
-                base_url="http://testserver",
-            )
-            output = await start_thread(
-                initial_message="ship it",
-                team_preset="mock-success-single",
-            )
-        finally:
-            if mcp_http._shared_client is not None:
-                await mcp_http._shared_client.aclose()
-            mcp_http._shared_client = original_client
-            _reset_known_presets()
-            settings.gateway_url = original_gateway_url
-
-        assert "Preset: mock-success-single" in output
-        run_id = output.splitlines()[0].removeprefix("Thread started: ").strip()
-        assert run_id
-
-        status = client.get(f"/v1/runs/{run_id}")
-        assert status.status_code == 200
-        assert status.json()["run_id"] == run_id
-
-
-@pytest.mark.asyncio
-async def test_start_thread_reports_the_missing_feature_tag_refusal(
-    session_factory, checkpointer
-) -> None:
-    """A document-authoring preset without a feature tag is refused actionably.
-
-    The versioned verb refuses before any durable state exists, and the refusal
-    detail is the only thing that tells the caller what to supply. The tool must
-    surface it rather than collapsing it into a bare status code.
-    """
-    with _make_test_client(session_factory, checkpointer) as client:
-        original_gateway_url = settings.gateway_url
-        original_client = mcp_http._shared_client
-        _reset_known_presets()
-        try:
-            settings.gateway_url = "http://testserver"
-            mcp_http._shared_client = httpx.AsyncClient(
-                transport=ASGITransport(app=client.app),
-                base_url="http://testserver",
-            )
-            with pytest.raises(ToolError) as exc_info:
-                await start_thread(
-                    initial_message="write the record",
-                    team_preset="vaultspec-adr-research",
-                )
-        finally:
-            if mcp_http._shared_client is not None:
-                await mcp_http._shared_client.aclose()
-            mcp_http._shared_client = original_client
-            _reset_known_presets()
-            settings.gateway_url = original_gateway_url
-
-    assert "requires a target feature tag" in str(exc_info.value)
 
 
 # ---------------------------------------------------------------------------
@@ -612,32 +458,6 @@ def unreachable_gateway() -> "Iterator[None]":
     finally:
         settings.gateway_url = original_url
         _reset_client()
-
-
-@pytest.mark.asyncio
-async def test_start_thread_raises_when_server_unavailable(
-    unreachable_gateway: None,
-) -> None:
-    """start_thread with a valid preset raises when the server is not running.
-
-    Verifies the tool raises an exception (MCPServer signals
-    is_error=true) rather than returning a silent error string.
-    """
-    with pytest.raises(ToolError) as exc_info:
-        await start_thread(
-            initial_message="do something",
-            team_preset="vaultspec-solo-coder",
-        )
-    msg = str(exc_info.value).lower()
-    _expected_keywords = (
-        "error",
-        "connection",
-        "connected",
-        "network",
-        "timeout",
-        "gateway",
-    )
-    assert any(kw in msg for kw in _expected_keywords)
 
 
 @pytest.mark.asyncio
@@ -1832,35 +1652,3 @@ class TestDeleteThreadSuccessOutcomes:
         assert "delete_thread again" in message
         # A genuine fault reading would send the caller the other way.
         assert "Server error" not in message
-
-
-class TestKnownPresetsCache:
-    """_known_presets_cache is populated on first call and cleared by
-    _reset_known_presets.
-    """
-
-    @pytest.mark.asyncio(loop_scope="function")
-    async def test_reset_known_presets_clears_cache_after_population(self) -> None:
-        """_reset_known_presets() sets _known_presets_cache back to None
-        after it was set.
-        """
-        import sys
-
-        from .._http import _get_known_presets
-
-        # Locate the already-imported _http module via sys.modules
-        srv_mod = next(
-            m for k, m in sys.modules.items() if k.endswith("protocols.mcp._http")
-        )
-
-        # After autouse fixture, cache is already None
-        assert srv_mod._known_presets_cache is None
-
-        # Trigger population — gateway unreachable results in empty frozenset
-        result = await _get_known_presets()
-        assert isinstance(result, frozenset)
-        assert srv_mod._known_presets_cache is not None
-
-        # Reset clears it
-        _reset_known_presets()
-        assert srv_mod._known_presets_cache is None

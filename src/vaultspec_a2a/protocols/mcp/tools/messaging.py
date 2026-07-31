@@ -24,11 +24,7 @@ async def send_message(
     thread_id: Annotated[
         str,
         Field(
-            description=(
-                "The UUID of the target thread."
-                " Obtain from start_thread"
-                " or list_threads."
-            ),
+            description=("The UUID of the target thread. Obtain from list_threads."),
         ),
     ],
     message: Annotated[
@@ -45,9 +41,8 @@ async def send_message(
     """Send a follow-up message into an existing thread.
 
     Use this tool to continue a conversation with an already-running or
-    paused thread.  Do NOT use this to start a new workflow — use
-    ``start_thread`` instead.  Call ``list_threads`` first if you need to
-    find the thread_id.
+    paused thread.  Call ``list_threads`` first if you need to find the
+    thread_id.
 
     This tool is asynchronous: it hands the message to the worker and returns
     immediately without waiting for the agents to process it.  Acceptance is
@@ -60,8 +55,8 @@ async def send_message(
     action status and, when the gateway assigned one, the action id.
 
     Args:
-        thread_id: The UUID of the target thread. Obtain from ``start_thread``
-                   or ``list_threads``, e.g.
+        thread_id: The UUID of the target thread. Obtain from
+                   ``list_threads``, e.g.
                    '550e8400-e29b-41d4-a716-446655440000'.
         message:   The message content to deliver to the agent team, e.g.
                    'Please also add unit tests for the new module'.

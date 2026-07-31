@@ -4,14 +4,19 @@ Exposes the LangGraph orchestrator as standard MCP tools so external IDEs
 (Cursor, Windsurf) can trigger agent workflows without custom plugins.
 
 The MCP server must:
-- Expose stable, synchronous-looking tools (start_thread, get_thread_status,
+- Expose stable, synchronous-looking tools (list_threads, get_thread_status,
   send_message)
-- Return immediately with a task ID and progress URL rather than blocking
-  the MCP connection for the full execution duration
+- Return immediately rather than blocking the MCP connection for the full
+  execution duration
 - Not leak LangGraph-specific internals (node IDs, graph state) over the wire
 
+These tools OBSERVE and STEER work that already exists; they do not start it.
+Every non-mock preset requires a per-role actor token, the engine is the sole
+minter of those tokens, and this server holds only its own gateway bearer, so a
+start tool here could reach nothing but acceptance scaffolding. Runs are started
+by the engine.
+
 Available tools:
-- ``start_thread``:              Start a new agent team workflow (non-blocking)
 - ``list_threads``:              List existing orchestration threads
 - ``get_thread_status``:         Query the status of a specific thread
 - ``send_message``:              Send a follow-up message into an existing thread
@@ -37,22 +42,20 @@ mcp = MCPServer(
     # distribution so the wire value cannot drift from the built package.
     version=package_version(),
     instructions=(
-        "Vaultspec A2A Orchestrator — tools for launching and managing multi-agent "
-        "coding workflows.\n\n"
-        "Autonomous workflow (no human approval needed):\n"
-        "  1. start_thread(initial_message, autonomous=True) → get thread_id\n"
+        "Vaultspec A2A Orchestrator — tools for observing and steering "
+        "multi-agent coding workflows. Runs are started by the engine, not from "
+        "here.\n\n"
+        "Start from the listing, which is the only source of thread IDs:\n"
+        "  1. list_threads() → find the thread and its thread_id\n"
         "  2. get_thread_status(thread_id) → poll until "
-        "status is 'completed' or 'failed'\n"
+        "status is 'completed' or 'failed'; inspect repair status and "
+        "execution readiness before assuming a pause is actionable\n"
         "  3. send_message(thread_id, ...) → inject follow-up input\n\n"
-        "Supervised workflow (human approves tool calls):\n"
-        "  1. start_thread(initial_message, autonomous=False) → get thread_id\n"
-        "  2. get_thread_status(thread_id) → poll; inspect repair status and "
-        "execution readiness before assuming the pause is actionable\n"
-        "  3. if pending permissions are listed, call get_pending_permissions() "
-        "to list request IDs and option IDs\n"
-        "  4. respond_to_permission(permission_request_id,"
+        "When a thread pauses for approval:\n"
+        "  1. get_pending_permissions() → list request IDs, thread IDs "
+        "and option IDs\n"
+        "  2. respond_to_permission(thread_id, permission_request_id,"
         " option_id) → unblock thread\n\n"
-        "Discovery: list_threads() to find existing threads. "
         "get_team_status() for overall agent health and active thread count."
     ),
 )

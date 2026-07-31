@@ -21,11 +21,8 @@ if TYPE_CHECKING:
 
 from ....control.config import settings
 from ....protocols.mcp import _http as mcp_http
-from ....protocols.mcp._http import (
-    _get_known_presets,
-    _mcp_request,
-    _reset_known_presets,
-)
+from ....protocols.mcp._http import _mcp_request
+from ....protocols.mcp.tools.discovery import list_team_presets
 
 _TOKEN = "configured-service-token-1234567890abcdef"
 _GATEWAY_URL = "http://127.0.0.1:18000"
@@ -69,7 +66,6 @@ async def _adapter_client(app: FastAPI, *, token: str | None) -> AsyncIterator[F
         "desktop_app_home": settings.desktop_app_home,
     }
     original_client = mcp_http._shared_client
-    _reset_known_presets()
     settings.gateway_url = _GATEWAY_URL
     settings.gateway_service_token = token
     settings.desktop_app_home = None
@@ -84,7 +80,6 @@ async def _adapter_client(app: FastAPI, *, token: str | None) -> AsyncIterator[F
         mcp_http._shared_client = original_client
         for name, value in originals.items():
             setattr(settings, name, value)
-        _reset_known_presets()
         if client is not None:
             await client.aclose()
 
@@ -101,11 +96,16 @@ async def test_tool_request_sends_the_attach_bearer() -> None:
 
 @pytest.mark.asyncio
 async def test_preset_fetch_authenticates_against_the_gated_gateway() -> None:
-    """Preset discovery reaches the gated gateway with the bearer and succeeds."""
+    """Preset discovery reaches the gated gateway with the bearer and succeeds.
+
+    Driven through the surviving preset tool rather than the retired client-side
+    cache: the subject is the credential this adapter presents, and the tool is
+    now the only path that fetches the catalog.
+    """
     app = _gated_gateway()
     async with _adapter_client(app, token=_TOKEN):
-        presets = await _get_known_presets()
-        assert "vaultspec-solo-coder" in presets
+        listing = await list_team_presets()
+        assert "vaultspec-solo-coder" in listing
         assert app.state.seen["authorization"] == f"Bearer {_TOKEN}"
 
 

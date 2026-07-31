@@ -21,18 +21,15 @@ async def get_thread_status(
     thread_id: Annotated[
         str,
         Field(
-            description=(
-                "The UUID of the thread to query. Obtain from start_thread "
-                "or list_threads."
-            ),
+            description=("The UUID of the thread to query. Obtain from list_threads."),
         ),
     ],
 ) -> str:
     """Get detailed status of a single thread including agents, plan, and last message.
 
-    Use this tool to check progress on a specific thread after calling
-    ``start_thread`` or finding it via ``list_threads``.  Do NOT use this for
-    a global overview of all threads — use ``get_team_status`` instead.  Do NOT
+    Use this tool to check progress on a specific thread after finding it via
+    ``list_threads``.  Do NOT use this for a global overview of all threads —
+    use ``get_team_status`` instead.  Do NOT
     poll this tool rapidly; once every 10-30 seconds is sufficient.  For
     real-time updates, read the progress stream URL included in the response.
 
@@ -55,8 +52,7 @@ async def get_thread_status(
 
     Args:
         thread_id: The UUID of the thread to query. Obtain this from
-                   ``start_thread`` (returned on creation) or ``list_threads``
-                   (in the thread listing), e.g.
+                   ``list_threads``, e.g.
                    '550e8400-e29b-41d4-a716-446655440000'.
     """
     payload = await _mcp_request(
@@ -141,11 +137,10 @@ async def list_threads(
 ) -> str:
     """List existing orchestration threads to discover resumable or monitorable work.
 
-    Use this tool before calling ``start_thread`` to check whether a thread
-    for the same task already exists.  Use ``send_message`` to continue an
-    existing thread rather than starting a duplicate.  Do NOT use this tool
-    to get detailed status of a single thread — use ``get_thread_status``
-    with the specific thread ID instead.
+    This is the entry point to every other thread tool: it is the only source
+    of the thread IDs they take.  Use ``send_message`` to continue an existing
+    thread.  Do NOT use this tool to get detailed status of a single thread —
+    use ``get_thread_status`` with the specific thread ID instead.
 
     Results are paginated and cover every thread, including terminal and
     archived ones.  The response includes a total count so you can request

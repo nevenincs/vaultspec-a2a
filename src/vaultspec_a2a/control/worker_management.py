@@ -764,9 +764,9 @@ async def _shutdown_worker_process(
 class LazyWorkerSpawner:
     """Defer worker spawn to first dispatch instead of gateway startup.
 
-    Read-only endpoints (list_threads, get_thread_status, list_team_presets,
-    etc.) only need the gateway + database.  The worker is spawned lazily
-    on the first write-path call (start_thread, send_message, etc.).
+    Read-only verbs (run listing, run status, preset listing, etc.) only need
+    the gateway + database.  The worker is spawned lazily on the first
+    write-path call (run start, follow-up message, etc.).
 
     Thread-safe: an ``asyncio.Lock`` prevents double-spawn when multiple
     dispatches arrive concurrently.

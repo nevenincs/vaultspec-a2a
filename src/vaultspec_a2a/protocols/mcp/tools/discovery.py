@@ -236,11 +236,11 @@ async def respond_to_permission(
 
 @mcp.tool()
 async def list_team_presets() -> str:
-    """List all available team configuration presets usable with ``start_thread``.
+    """List the team configuration presets this gateway has discovered.
 
-    Use this tool to discover valid ``team_preset`` values before calling
-    ``start_thread``.  Do NOT use this to check which preset a running thread
-    is using — use ``get_thread_status`` or ``list_threads`` instead.
+    Use this tool to see which presets exist and whether each is runnable.  Do
+    NOT use this to check which preset a running thread is using — use
+    ``get_thread_status`` or ``list_threads`` instead.
 
     Presets are defined as TOML files on the server.  The built-in presets
     are always available; custom presets may also be present depending on
@@ -253,7 +253,7 @@ async def list_team_presets() -> str:
     engine-provisioned actor token per role.
 
     Returns a plain-text listing with one block per preset containing:
-    - Preset ID (pass this as ``team_preset`` to ``start_thread``)
+    - Preset ID
     - Display name and human-readable description
     - Topology type (star, pipeline, etc.) and worker count
     - Required roles, and whether the preset is loadable

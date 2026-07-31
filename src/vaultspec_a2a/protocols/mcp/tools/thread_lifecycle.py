@@ -1,7 +1,11 @@
 """MCP tools for thread lifecycle management.
 
-Handlers: ``start_thread``, ``cancel_thread``, ``delete_thread``,
-``archive_thread``.
+Handlers: ``cancel_thread``, ``delete_thread``, ``archive_thread``.
+
+Starting a run is deliberately absent. Every non-mock preset requires a per-role
+actor token, those tokens are minted by the engine, and this server holds no
+engine credential - only its own gateway bearer. A start tool here could reach
+nothing but acceptance scaffolding.
 """
 
 import contextlib
@@ -15,189 +19,10 @@ from ....thread.enums import ThreadStatus
 from .._http import (
     _HTTP_CONFLICT,
     _HTTP_SERVICE_UNAVAILABLE,
-    _HTTP_UNPROCESSABLE,
     HTTPStatusError,
-    _get_known_presets,
     _mcp_request,
-    _response_detail,
 )
 from ..server import mcp
-
-# Default team preset when the caller omits one. Solo-coder is the retained
-# single-role coding preset after the multi-role coder presets were retired.
-_DEFAULT_TEAM_PRESET = "vaultspec-solo-coder"
-
-
-@mcp.tool()
-async def start_thread(
-    initial_message: Annotated[
-        str,
-        Field(
-            description=(
-                "The coding task description for the"
-                " agent team. Maximum 32,000 characters."
-            )
-        ),
-    ],
-    team_preset: Annotated[
-        str | None,
-        Field(
-            description=(
-                "Team configuration preset ID."
-                " Use list_team_presets to discover"
-                " all available presets."
-                " Defaults to"
-                " 'vaultspec-solo-coder'."
-            )
-        ),
-    ] = None,
-    autonomous: Annotated[
-        bool,
-        Field(
-            description=(
-                "If True (default), agents auto-approve"
-                " all tool calls. Set to False to"
-                " require manual approval via"
-                " get_pending_permissions and"
-                " respond_to_permission."
-            )
-        ),
-    ] = True,
-    workspace_root: Annotated[
-        str | None,
-        Field(
-            description=(
-                "Absolute path to the project directory,"
-                " e.g. 'C:/projects/myapp'. Enables"
-                " .vault/ context injection and scopes"
-                " file operations to this directory."
-            )
-        ),
-    ] = None,
-    feature_tag: Annotated[
-        str | None,
-        Field(
-            description=(
-                "Target feature tag (kebab-case) the run"
-                " authors documents for. Required by"
-                " document-authoring presets; ignored by"
-                " coding presets."
-            )
-        ),
-    ] = None,
-) -> str:
-    """Start a new multi-agent coding workflow and return a run ID for tracking.
-
-    Use this tool when the user wants to delegate a coding task to a team of
-    AI agents.  Do NOT use this if there is already an active run for the
-    same task — call ``list_threads`` first to check, then use ``send_message``
-    to continue an existing run instead.
-
-    The workflow runs asynchronously: this tool returns immediately with a
-    run ID and a progress-stream URL.  It does NOT wait for agents to finish.
-    Poll progress with ``get_thread_status``, or read the run's progress stream
-    at the returned URL.  The initial_message is capped at 32,000 characters;
-    longer messages are rejected.
-
-    Presets differ in what they require before a run may dispatch.  A preset
-    that arms the engine authoring bridge, and every document-authoring preset,
-    needs one engine-minted actor token per role; a document-authoring preset
-    additionally needs ``feature_tag``.  Those requirements are refused up front
-    rather than mid-run, and this tool reports the refusal verbatim.
-
-    Returns a plain-text block containing:
-    - Run ID (e.g. '550e8400e29b41d4a716446655440000')
-    - Team preset name used
-    - Progress stream URL
-    - Status query URL
-
-    Args:
-        initial_message: The coding task description for the agent team, e.g.
-                         'Refactor the auth module to use JWT tokens'. Maximum
-                         32,000 characters.
-        team_preset:     Team configuration preset ID. Built-in presets:
-                         'vaultspec-solo-coder', 'vaultspec-adr-research'.
-                         Use ``list_team_presets``
-                         to discover all available presets at runtime.
-                         If omitted, defaults to 'vaultspec-solo-coder'.
-        autonomous:      If True (default), agents auto-approve all tool calls
-                         without human review. Set to False to require manual
-                         approval — you will then need ``get_pending_permissions``
-                         and ``respond_to_permission`` to unblock the workflow.
-        workspace_root:  Absolute path to the project directory, e.g.
-                         'C:/projects/myapp' or '/home/user/myapp'. Enables
-                         automatic .vault/ context injection and scopes agent
-                         file operations to this directory. If omitted, agents
-                         run without project context.
-        feature_tag:     Target feature tag for a document-authoring preset,
-                         e.g. 'editor-demo'. Coding presets ignore it.
-    """
-    # reject oversized payloads before making any HTTP call.
-    if len(initial_message) > settings.mcp_max_initial_message_chars:
-        raise ToolError(
-            f"initial_message too long ({len(initial_message)} chars). "
-            f"Maximum allowed: {settings.mcp_max_initial_message_chars} chars."
-        )
-    preset = team_preset or _DEFAULT_TEAM_PRESET
-    known = await _get_known_presets()
-    if known and preset not in known:
-        raise ToolError(f"Unknown preset {preset!r}. Valid: {', '.join(sorted(known))}")
-    payload: dict[str, object] = {
-        "title": initial_message[:80],
-        "message": initial_message,
-        "team_preset": preset,
-        "autonomous": autonomous,
-    }
-    if workspace_root is not None:
-        payload["metadata"] = {"workspace_root": workspace_root}
-    if feature_tag is not None:
-        payload["feature_tag"] = feature_tag
-    try:
-        data = await _mcp_request(
-            "POST",
-            "/v1/runs",
-            json=payload,
-            timeout=settings.mcp_create_timeout_seconds,
-        )
-    except HTTPStatusError as exc:
-        raise _start_refusal(preset, exc) from exc
-    run_id = data["run_id"]
-    return (
-        f"Thread started: {run_id}\n"
-        f"Preset: {preset}\n"
-        f"Stream: GET {settings.gateway_url}/v1/runs/{run_id}/stream\n"
-        f"Status: GET {settings.gateway_url}/v1/runs/{run_id}"
-    )
-
-
-def _start_refusal(preset: str, exc: HTTPStatusError) -> ToolError:
-    """Translate a run-start rejection into an actionable tool error.
-
-    Run-start refuses an ineligible request BEFORE creating durable state, and
-    the refusal detail is the only thing that tells the caller what to change —
-    which roles lack an engine-minted actor token, or that a document-authoring
-    preset was given no target feature. Collapsing that into a bare status code
-    would leave the caller retrying an unstartable request forever, so the
-    detail is surfaced verbatim.
-    """
-    status = exc.response.status_code
-    detail = _response_detail(exc.response)
-    if status == _HTTP_UNPROCESSABLE:
-        return ToolError(
-            f"Run start refused for preset {preset!r}: "
-            f"{detail or 'the request is not eligible to dispatch'}."
-        )
-    if status == _HTTP_CONFLICT:
-        return ToolError(
-            f"Run start conflicted for preset {preset!r}: "
-            f"{detail or 'a run with this identity already exists'}."
-        )
-    if status == _HTTP_SERVICE_UNAVAILABLE:
-        return ToolError(
-            f"Run start is temporarily unavailable for preset {preset!r}: "
-            f"{detail or 'the gateway is at capacity or draining'}. Retry later."
-        )
-    return ToolError(f"Server error: HTTP {status}")
 
 
 @mcp.tool()
@@ -205,11 +30,7 @@ async def cancel_thread(
     thread_id: Annotated[
         str,
         Field(
-            description=(
-                "The UUID of the thread to cancel."
-                " Obtain from start_thread"
-                " or list_threads."
-            ),
+            description=("The UUID of the thread to cancel. Obtain from list_threads."),
         ),
     ],
 ) -> str:
@@ -231,7 +52,7 @@ async def cancel_thread(
 
     Args:
         thread_id: The UUID of the thread to cancel. Obtain from
-                   ``start_thread`` or ``list_threads``, e.g.
+                   ``list_threads``, e.g.
                    '550e8400-e29b-41d4-a716-446655440000'.
     """
     data = await _mcp_request(

@@ -1,13 +1,10 @@
 """Shared HTTP helpers for the MCP tool surface.
 
-Centralises the httpx client lifecycle, gateway preset cache, and the
-``_mcp_request`` coroutine so that individual tool modules contain zero
-direct ``httpx`` imports.
+Centralises the httpx client lifecycle and the ``_mcp_request`` coroutine so
+that individual tool modules contain zero direct ``httpx`` imports.
 
 All gateway communication errors are mapped to ``ToolError`` with
-credential-stripped URLs.  ``_get_known_presets`` is deliberately kept
-outside ``_mcp_request`` — it has catch-all error semantics that differ
-from the strict exception mapping used by tool handlers.
+credential-stripped URLs.
 """
 
 import contextlib
@@ -73,7 +70,6 @@ def _reset_client() -> None:
 _HTTP_OK = 200
 _HTTP_NOT_FOUND = 404
 _HTTP_CONFLICT = 409
-_HTTP_UNPROCESSABLE = 422
 _HTTP_SERVICE_UNAVAILABLE = 503
 
 
@@ -113,7 +109,6 @@ def _strip_credentials(url: str) -> str:
     """Return *url* with any userinfo (user:password@) stripped from the netloc.
 
     Used in error messages to prevent credential leakage in MCP tool output.
-    Reuses the same approach as ``_ws_url_from_api_base``.
     """
     parsed = urlparse(url)
     netloc_no_creds = parsed.hostname or ""
@@ -122,63 +117,8 @@ def _strip_credentials(url: str) -> str:
     return f"{parsed.scheme}://{netloc_no_creds}{parsed.path}"
 
 
-# ---------------------------------------------------------------------------
-# Preset cache
-# ---------------------------------------------------------------------------
-
-# Known presets — lazily fetched from the gateway via HTTP on first
-# use.  This replaces the former import of discover_team_preset_ids() so the
-# MCP server has zero coupling to the core team_config module.  The cache is
-# populated once per process lifetime; restart the MCP server to pick up new
-# presets.
-_known_presets_cache: frozenset[str] | None = None
-
-# The versioned presets-list verb. Shared with ``discovery.list_team_presets`` so
-# the cache and the tool can never drift onto different catalogs.
+# The versioned presets-list verb, read by ``discovery.list_team_presets``.
 _PRESETS_PATH = "/v1/presets"
-
-
-async def _get_known_presets() -> frozenset[str]:
-    """Fetch known team preset IDs from the gateway, with caching.
-
-    On first call, issues GET /v1/presets to the gateway and caches
-    the result.  Subsequent calls return the cached value immediately.
-    If the gateway is unreachable, returns an empty frozenset (allowing
-    the gateway itself to reject unknown presets at create time).
-    """
-    global _known_presets_cache
-    if _known_presets_cache is not None:
-        return _known_presets_cache
-
-    api_base = settings.gateway_url
-    try:
-        client = _get_client()
-        resp = await client.get(
-            f"{api_base}{_PRESETS_PATH}",
-            headers=gateway_auth_headers(api_base),
-            timeout=settings.mcp_query_timeout_seconds,
-        )
-        resp.raise_for_status()
-        data = resp.json()
-        presets = data.get("presets", [])
-        _known_presets_cache = frozenset(
-            p.get("id", "") for p in presets if p.get("id")
-        )
-    except Exception:
-        logger.warning(
-            "Could not fetch team presets from %s%s",
-            api_base,
-            _PRESETS_PATH,
-            exc_info=True,
-        )
-        _known_presets_cache = frozenset()
-    return _known_presets_cache
-
-
-def _reset_known_presets() -> None:
-    """Clear the preset cache.  Used by test fixtures."""
-    global _known_presets_cache
-    _known_presets_cache = None
 
 
 # ---------------------------------------------------------------------------

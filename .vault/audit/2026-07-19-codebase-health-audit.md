@@ -2703,3 +2703,53 @@ The honest reading is therefore: green on every gate that can be measured withou
 contention, with four known contention artifacts named rather than rounded away, and the
 four proven green the moment they are given the machine to themselves. A whole-package run
 on a shared box is not the authority here; the isolated runs are.
+
+
+### Truthfulness tranche (2026-07-31)
+
+Six findings closed by `91967894`, taken together because they are one family: code
+asserting slightly more than it holds. That pattern recurred four separate times across
+this campaign's reviews and once more in a test, which is reason enough to treat it as a
+class rather than as isolated wording slips.
+
+`replay-constant-time-claim-overstated` - CLOSED. The docstring promised a constant-time
+comparison while the marker parse and the unrecognised-marker refusal both return before
+any digest is compared. It now states which half is constant-time AND why the other need
+not be: the marker is a public, non-secret label naming which rule computed a stored value,
+carrying nothing an attacker could learn by timing. Stating the guarantee at its true
+strength is worth more than stating it at its most impressive.
+
+`digest-absent-for-server-minted-ids` - CLOSED as documentation, deliberately not as
+behaviour. The comment blamed only pre-existing runs; the second cause is that a digest is
+stored solely for a caller-supplied id, so a client can read a server-minted id off a
+response, present it later as its own, and be compared on the frozen profile alone.
+Persisting the digest anyway would NOT fix it - the run id is itself a digested field, so
+the original request that carried none could never match a later one that does, and every
+such replay would be refused instead. The narrower comparison is the deliberate trade, and
+the code now says so rather than leaving the next reader to rediscover the trap.
+
+`graph-registered-absent-without-a-note` - CLOSED. The catalog claimed closure over every
+emitted type while one frame type travels the relay uncatalogued. Its loss is
+intended-equivalent - consumed server-side before projection, resurfacing through
+catalogued fields, read by no consumer - so the repair is the record, not an entry. The
+comment now names it as a judgement and gives the condition that would reverse it.
+
+`gate-acquisition-asymmetry` - CLOSED. The two follow-up release sites asserted
+contradictory rationales for one operation, one seating the gate and one arguing that
+seating is wrong. Both now read without seating, which was the correct rationale: a gate
+that was never created has admitted nothing, so there is nothing to release from it.
+
+`engine-bearer-guard-partial` - CLOSED from the schema side. The existing guard catches a
+credential moving OUT of the bundle but not a second one added BESIDE it - the direction
+that would fold a credential value back into the fingerprint with every other assertion
+still green. Rather than guess at future field names, the whole top-level field set is now
+pinned, so ANY added field fails and must be answered for: describing the work means
+joining the fingerprint, identifying or authorizing the request means joining an exclusion
+set, and the latter means minting a new rule rather than editing an old one.
+
+`detached-store-premise-unasserted` - CLOSED. The abandonment tests inferred their premise
+from the refusal sequence they observed. The helper now asserts the detached store really
+refuses, and that it refuses because the connection is gone rather than because the thread
+is unknown. If a library change ever made that store usable again, those tests would have
+quietly asserted the wrong outcome for a plausible-looking reason; they now fail at the
+cause with a message saying so.

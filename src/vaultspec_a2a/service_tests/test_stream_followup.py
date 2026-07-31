@@ -129,7 +129,7 @@ def test_sse_stream_and_followup_message(service_stack: ServiceStack) -> None:
         team_preset="mock-human-in-loop",
         title="service stream follow-up",
     )
-    thread_id = created["thread_id"]
+    thread_id = created["run_id"]
 
     paused = _wait_for_pending_permission(service_stack, thread_id)
     service_stack.record(f"sse-paused:{thread_id}", paused)
@@ -142,6 +142,7 @@ def test_sse_stream_and_followup_message(service_stack: ServiceStack) -> None:
         try:
             initial_result["response"] = service_stack.respond_permission(
                 request["request_id"],
+                thread_id=thread_id,
                 option_id=_select_option_id(request, label="approve"),
             )
         except BaseException as exc:  # pragma: no cover - background thread
@@ -149,7 +150,7 @@ def test_sse_stream_and_followup_message(service_stack: ServiceStack) -> None:
 
     with (
         service_stack.gateway_client(timeout=None) as client,
-        client.stream("GET", f"/api/threads/{thread_id}/stream") as stream,
+        client.stream("GET", f"/v1/runs/{thread_id}/stream") as stream,
     ):
         trigger = _trigger_after(0.5, _approve)
         initial_events = _read_sse_frames(
@@ -185,7 +186,7 @@ def test_sse_stream_and_followup_message(service_stack: ServiceStack) -> None:
 
     with (
         service_stack.gateway_client(timeout=None) as client,
-        client.stream("GET", f"/api/threads/{thread_id}/stream") as stream,
+        client.stream("GET", f"/v1/runs/{thread_id}/stream") as stream,
     ):
         follow_up_events = _read_sse_frames(
             stream,
@@ -208,7 +209,7 @@ def test_sse_stream_and_followup_message(service_stack: ServiceStack) -> None:
 
     with service_stack.gateway_client(timeout=15.0) as client:
         rejected = client.post(
-            f"/api/threads/{thread_id}/messages",
+            f"/v1/runs/{thread_id}/messages",
             json={"content": "Continue the same thread with a follow-up request."},
         )
 

@@ -602,7 +602,7 @@ class ServiceStack:
         metadata: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         body: dict[str, Any] = {
-            "initial_message": initial_message,
+            "message": initial_message,
             "team_preset": team_preset,
         }
         if title is not None:
@@ -612,30 +612,43 @@ class ServiceStack:
         if metadata is not None:
             body["metadata"] = metadata
         with self._client(timeout=30.0) as client:
-            resp = client.post("/api/threads", json=body)
+            resp = client.post("/v1/runs", json=body)
             resp.raise_for_status()
             payload = resp.json()
             self.record("last-create-thread", payload)
             return payload
 
     def list_threads(self, *, status: str | None = None) -> dict[str, Any]:
-        params: dict[str, Any] = {}
+        """List every run, including terminal ones, via the history reading.
+
+        The list verb's default reading is capped active-run discovery, which
+        omits terminal runs; a harness that asserts on a completed run has to
+        ask for the history reading explicitly.
+        """
+        params: dict[str, Any] = {"state": "all"}
         if status is not None:
             params["status"] = status
         with self._client(timeout=15.0) as client:
-            resp = client.get("/api/threads", params=params)
+            resp = client.get("/v1/runs", params=params)
             resp.raise_for_status()
             payload = resp.json()
             self.record("last-thread-list", payload)
             return payload
 
     def get_thread_state(self, thread_id: str) -> dict[str, Any]:
+        """Return the run's state snapshot from the versioned history verb.
+
+        The history response embeds the snapshot under ``state`` alongside the
+        run's metadata. This returns the snapshot itself, which is what the
+        method has always promised and what every caller asserts against; the
+        full envelope is what gets recorded for post-mortem.
+        """
         with self._client(timeout=15.0) as client:
-            resp = client.get(f"/api/threads/{thread_id}/state")
+            resp = client.get(f"/v1/runs/{thread_id}/history")
             resp.raise_for_status()
             payload = resp.json()
             self.record(f"thread-state:{thread_id}", payload)
-            return payload
+            return payload["state"]
 
     def send_message(
         self,
@@ -653,7 +666,7 @@ class ServiceStack:
             headers["Idempotency-Key"] = idempotency_key
         with self._client(timeout=30.0) as client:
             resp = client.post(
-                f"/api/threads/{thread_id}/messages",
+                f"/v1/runs/{thread_id}/messages",
                 json=body,
                 headers=headers or None,
             )
@@ -666,6 +679,7 @@ class ServiceStack:
         self,
         request_id: str,
         *,
+        thread_id: str,
         option_id: str,
         kind: str | None = None,
         idempotency_key: str | None = None,
@@ -679,7 +693,7 @@ class ServiceStack:
             headers["Idempotency-Key"] = idempotency_key
         with self._client(timeout=30.0) as client:
             resp = client.post(
-                f"/api/permissions/{request_id}/respond",
+                f"/v1/runs/{thread_id}/permissions/{request_id}/respond",
                 json=body,
                 headers=headers or None,
             )
@@ -695,7 +709,7 @@ class ServiceStack:
 
     def cancel_thread(self, thread_id: str) -> dict[str, Any]:
         with self._client(timeout=15.0) as client:
-            resp = client.post(f"/api/threads/{thread_id}/cancel")
+            resp = client.post(f"/v1/runs/{thread_id}/cancel")
             resp.raise_for_status()
             payload = resp.json()
             self.record(f"cancel-thread:{thread_id}", payload)

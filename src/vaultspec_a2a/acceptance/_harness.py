@@ -185,17 +185,17 @@ class CertifiedGateway:
         with self.client(timeout=30.0) as client:
             return client.post(f"/v1/runs/{run_id}/cancel", headers=headers)
 
-    # -- attach-gated dashboard product surface -------------------------------
+    # -- versioned run history and deletion ------------------------------------
 
     def thread_state(self, run_id: str) -> httpx.Response:
-        """Read the dashboard product-surface state for a run."""
+        """Read a run whole through the versioned history verb."""
         with self.client(timeout=30.0) as client:
-            return client.get(f"/api/threads/{run_id}/state")
+            return client.get(f"/v1/runs/{run_id}/history")
 
     def delete_run(self, run_id: str) -> httpx.Response:
         """Delete *run_id* through the durable cross-store deletion saga."""
         with self.client(timeout=60.0) as client:
-            return client.delete(f"/api/threads/{run_id}")
+            return client.delete(f"/v1/runs/{run_id}")
 
 
 @contextmanager

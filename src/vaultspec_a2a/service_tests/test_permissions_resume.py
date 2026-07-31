@@ -110,7 +110,7 @@ def test_permission_request_can_be_resumed_via_public_api(
         team_preset="mock-human-in-loop",
         title="service permission resume",
     )
-    thread_id = created["thread_id"]
+    thread_id = created["run_id"]
 
     paused = _wait_for_pending_permission(service_stack, thread_id)
     service_stack.record(f"permission-paused:{thread_id}", paused)
@@ -118,6 +118,7 @@ def test_permission_request_can_be_resumed_via_public_api(
     request = paused["pending_permissions"][0]
     response = service_stack.respond_permission(
         request["request_id"],
+        thread_id=thread_id,
         option_id=_select_option_id(request, label="approve"),
     )
     assert response["accepted"] is True
@@ -154,13 +155,14 @@ def test_invalid_permission_option_is_rejected_without_resuming(
         team_preset="mock-human-in-loop",
         title="service permission invalid option",
     )
-    thread_id = created["thread_id"]
+    thread_id = created["run_id"]
 
     paused = _wait_for_pending_permission(service_stack, thread_id)
     request = paused["pending_permissions"][0]
 
     rejected = service_stack.respond_permission(
         request["request_id"],
+        thread_id=thread_id,
         option_id="hostile-option",
         expected_status=409,
     )
@@ -184,7 +186,7 @@ def test_stale_second_permission_response_is_rejected_after_resume(
         team_preset="mock-human-in-loop",
         title="service permission stale response",
     )
-    thread_id = created["thread_id"]
+    thread_id = created["run_id"]
 
     paused = _wait_for_pending_permission(service_stack, thread_id)
     request = paused["pending_permissions"][0]
@@ -192,12 +194,14 @@ def test_stale_second_permission_response_is_rejected_after_resume(
     approved_option_id = _select_option_id(request, label="approve")
     accepted = service_stack.respond_permission(
         request["request_id"],
+        thread_id=thread_id,
         option_id=approved_option_id,
     )
     assert accepted["accepted"] is True
 
     stale = service_stack.respond_permission(
         request["request_id"],
+        thread_id=thread_id,
         option_id=approved_option_id,
         idempotency_key="stale-second-response",
         expected_status=409,
@@ -229,14 +233,14 @@ def test_invalid_permission_option_keeps_thread_paused_and_recoverable(
         team_preset="mock-human-in-loop",
         title="service invalid permission option",
     )
-    thread_id = created["thread_id"]
+    thread_id = created["run_id"]
 
     paused = _wait_for_pending_permission(service_stack, thread_id)
     request = paused["pending_permissions"][0]
 
     with service_stack.gateway_client(timeout=30.0) as client:
         invalid = client.post(
-            f"/api/permissions/{request['request_id']}/respond",
+            f"/v1/runs/{thread_id}/permissions/{request['request_id']}/respond",
             json={"option_id": "hostile-option"},
         )
     assert invalid.status_code == 409
@@ -250,6 +254,7 @@ def test_invalid_permission_option_keeps_thread_paused_and_recoverable(
 
     resumed = service_stack.respond_permission(
         request["request_id"],
+        thread_id=thread_id,
         option_id=_select_option_id(request, label="approve"),
     )
     assert resumed["accepted"] is True
@@ -280,13 +285,14 @@ def test_permission_denial_completes_with_denied_outcome(
         team_preset="mock-human-in-loop",
         title="service permission deny",
     )
-    thread_id = created["thread_id"]
+    thread_id = created["run_id"]
 
     paused = _wait_for_pending_permission(service_stack, thread_id)
     request = paused["pending_permissions"][0]
 
     denied = service_stack.respond_permission(
         request["request_id"],
+        thread_id=thread_id,
         option_id=_select_option_id(request, label="deny"),
     )
     assert denied["accepted"] is True
@@ -328,7 +334,7 @@ def test_supervisor_plan_approval_pause_can_resume_through_real_stack(
             "feature_tag": "audit-five",
         },
     )
-    thread_id = created["thread_id"]
+    thread_id = created["run_id"]
 
     plan_paused = _wait_for_pending_permission_matching(
         service_stack,
@@ -353,6 +359,7 @@ def test_supervisor_plan_approval_pause_can_resume_through_real_stack(
     }
     plan_response = service_stack.respond_permission(
         plan_request["request_id"],
+        thread_id=thread_id,
         option_id=_select_option_id(plan_request, label="approve"),
     )
     assert plan_response["accepted"] is True
@@ -381,6 +388,7 @@ def test_supervisor_plan_approval_pause_can_resume_through_real_stack(
     }
     worker_response = service_stack.respond_permission(
         worker_request["request_id"],
+        thread_id=thread_id,
         option_id=_select_option_id(worker_request, label="approve"),
     )
     assert worker_response["accepted"] is True
@@ -427,7 +435,7 @@ def test_supervisor_plan_rejection_requires_revision_before_reapproval(
             "feature_tag": feature_tag,
         },
     )
-    thread_id = created["thread_id"]
+    thread_id = created["run_id"]
 
     first_plan_pause = _wait_for_pending_permission_matching(
         service_stack,
@@ -441,6 +449,7 @@ def test_supervisor_plan_rejection_requires_revision_before_reapproval(
     )
     rejected = service_stack.respond_permission(
         first_request["request_id"],
+        thread_id=thread_id,
         option_id=_select_option_id(first_request, label="reject"),
     )
     assert rejected["accepted"] is True

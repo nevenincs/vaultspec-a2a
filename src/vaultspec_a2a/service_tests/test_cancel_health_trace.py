@@ -34,7 +34,7 @@ def test_cancel_transitions_to_terminal_cancelled(service_stack: ServiceStack) -
         team_preset="mock-looping",
         title="service cancel",
     )
-    thread_id = created["thread_id"]
+    thread_id = created["run_id"]
 
     active = _wait_for_state(
         service_stack,
@@ -84,7 +84,7 @@ def test_health_and_trace_surface_are_observable(
         team_preset="mock-success-single",
         title="service trace probe",
     )
-    thread_id = created["thread_id"]
+    thread_id = created["run_id"]
     traced_thread = _wait_for_state(
         service_stack,
         thread_id,

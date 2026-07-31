@@ -34,7 +34,7 @@ def test_thread_lifecycle_reaches_completion(service_stack: ServiceStack) -> Non
         team_preset="mock-success-single",
         title="service lifecycle",
     )
-    thread_id = created["thread_id"]
+    thread_id = created["run_id"]
 
     terminal = _wait_for_thread_state(
         service_stack,
@@ -44,6 +44,6 @@ def test_thread_lifecycle_reaches_completion(service_stack: ServiceStack) -> Non
     service_stack.record(f"lifecycle-state:{thread_id}", terminal)
 
     listed = service_stack.list_threads(status="completed")
-    assert any(t["thread_id"] == thread_id for t in listed["threads"])
+    assert any(run["run_id"] == thread_id for run in listed["runs"])
     assert terminal["status"] == "completed"
     assert terminal["messages"], "completed lifecycle should leave replayable messages"

@@ -1236,7 +1236,8 @@ class AcceptanceHarness:
         """POST a permission response (best-effort; retried on the next poll)."""
         with contextlib.suppress(httpx.HTTPError):
             await hc.post(
-                f"{self.gateway_url}/api/permissions/{request_id}/respond",
+                f"{self.gateway_url}/v1/runs/{self.run_id}"
+                f"/permissions/{request_id}/respond",
                 json={"option_id": option_id},
                 timeout=30.0,
             )
@@ -1253,13 +1254,15 @@ class AcceptanceHarness:
         """
         try:
             resp = await hc.get(
-                f"{self.gateway_url}/api/threads/{self.run_id}/state", timeout=10.0
+                f"{self.gateway_url}/v1/runs/{self.run_id}/history", timeout=10.0
             )
         except httpx.HTTPError:
             return
         if resp.status_code != 200:
             return
-        for perm in resp.json().get("pending_permissions", []):
+        # The history verb embeds the state snapshot rather than restating it.
+        snapshot = resp.json().get("state") or {}
+        for perm in snapshot.get("pending_permissions", []):
             request_id = perm.get("request_id")
             if not isinstance(request_id, str):
                 continue

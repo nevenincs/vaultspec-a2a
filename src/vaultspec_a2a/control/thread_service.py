@@ -637,11 +637,6 @@ class DeleteResult:
     cleanup_incomplete: bool = False
     abandoned_kinds: tuple[CleanupKind, ...] = ()
 
-    @property
-    def cleanup_abandoned(self) -> bool:
-        """Return whether the delete finalized over unremovable cleanup state."""
-        return bool(self.abandoned_kinds)
-
 
 async def delete_thread_service(
     db: AsyncSession,

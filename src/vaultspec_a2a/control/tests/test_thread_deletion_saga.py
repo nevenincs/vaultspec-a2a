@@ -259,8 +259,9 @@ async def test_a_permanently_failing_item_stops_wedging_the_thread(
     assert [outcome.deleted for outcome in outcomes] == [False, False, True]
     assert [outcome.cleanup_incomplete for outcome in outcomes] == [True, True, False]
     # The delete completed over an item that could not be cleaned, and says so -
-    # naming the kind of state left behind, not merely that some was.
-    assert outcomes[-1].cleanup_abandoned is True
+    # naming the kind of state left behind, not merely that some was. Asserted on
+    # the kinds themselves because that is what the route branches on; a boolean
+    # derived from them would prove less and be one more thing to keep true.
     assert outcomes[-1].abandoned_kinds == (CleanupKind.ARTIFACT_FILE,)
     # The passes that had work left report nothing abandoned at all.
     assert [outcome.abandoned_kinds for outcome in outcomes[:-1]] == [(), ()]

@@ -5,7 +5,7 @@ tags:
 date: '2026-07-31'
 modified: '2026-07-31'
 body_schema: 'body-v1'
-body_hash: 'sha256:1d4ee864d54736b3a5a959d92e94638a8e20caaf17de6c2d676deb0ab85406af'
+body_hash: 'sha256:b33122a65d0194abd665318c89aa690761f20b8f316ee78d13496f2d5658db3c'
 related:
   - "[[2026-07-19-codebase-health-audit]]"
   - "[[2026-07-19-codebase-health-plan]]"
@@ -164,6 +164,13 @@ path designed as the guaranteed recovery from a hang can itself hang, with
 nothing bounding it. POSIX is not exposed: both implementations bound every wait
 on that branch and escalate correctly.
 
+The restart verb inherits it too, since it composes stop and start and the stop
+half falls through to the same unbounded call. Worth contrasting with a
+neighbour that gets this right: the ACP terminal handlers, which sit in the same
+code region, reap exclusively through the shared bounded async escalation and
+carry no hand-written kill path of their own. The correct pattern is already
+present in the tree; the synchronous path simply never adopted it.
+
 ### provider-eligibility-admission-gate-ignores-credentials | high | The execution-ready fact is computed from command resolution alone while a credential-aware resolver exists beside it
 
 "Is a provider available to run a request right now" is answered by two
@@ -219,6 +226,95 @@ denied tool call is reported to a dashboard reader as applied. This finding and
 the plan-approval finding above share one root: the rejection semantics of a
 permission response are recomputed independently at each settlement site rather
 than derived once.
+
+The scope is wider than the backstop, and the evidence for that is in the
+repository's own fixtures. The canonical set is matched against the response
+option identifier, not against the option kind, and those are different fields
+carrying different vocabularies. The Kimi permission fixture - written for that
+provider's real enforcement path - pins an option whose identifier is the bare
+literal `reject` while only its kind is `reject_once`. A second fixture
+exercises a `deny_once` identifier. Provider option identifiers are therefore
+free-form strings independent of `PermissionOptionKind`, confirmed in-repo
+rather than assumed.
+
+It follows that the primary settlement path, not merely the backstop, fails to
+recognise a genuine rejection for at least one shipped provider. A human denying
+a Kimi tool prompt submits the raw identifier, which is validated against the
+offered list and accepted, persisted verbatim, and then tested for membership in
+a set that cannot contain it. The durable status records applied for a call the
+user denied.
+
+The precise blast radius is worth stating, because it differs from the plan
+case. The tool itself is still correctly denied: the ACP handler enforces the
+denial at the wire level using its own permissive substring predicate, which -
+architecturally inconsistent though it is - happens to be more correct for the
+identifiers it actually receives than the canonical set would be. So for tool
+permissions this is a durable reporting and audit defect rather than an
+execution defect. For plan approvals, as recorded above, it is an execution
+defect. One incomplete vocabulary produces both.
+
+### process-containment-handle-leaks-when-the-spawn-call-itself-raises | medium | Three spawn sites release the OS containment on every failure except the spawn call raising
+
+Three sites hand-implement the same protocol - create an operating-system
+containment, then spawn a process into it - and all three release the
+containment correctly when the spawned process dies or never becomes ready. None
+releases it when the underlying spawn call itself throws.
+
+On Windows the containment eagerly opens a job-object kernel handle at creation;
+on POSIX it allocates nothing until assignment, which never runs on this path,
+so the defect is Windows-only by construction. In `providers/_subprocess.py` the
+spawn is wrapped in a handler that logs and re-raises without closing the
+containment, whose handle then goes out of scope with no remaining reference and
+no finalizer. In `control/worker_management.py` the containment is created by
+the caller before the spawn, and every other failure mode is handled correctly -
+the exited-early path closes it explicitly, the never-ready path terminates
+through it - but the raw process construction is wrapped in no handler at all,
+so a bad command path or a resource-exhaustion error propagates out with the
+reference neither closed nor cleared. The caller's own comment asserts that a
+failed spawn has already released its containment, which is true for both
+return paths and false for a raised one. In `providers/_acp_rpc_handlers.py` the
+terminal-create handler has an outer handler that converts the exception into a
+well-formed RPC error, but never touches the containment on the way out.
+
+Each occurrence leaks one job-object handle, reclaimed only when the owning
+gateway or worker process exits - not per request, run, or retry. The worker
+path sits behind automatic respawn, so a persistent misconfiguration or a
+resource-exhaustion condition that makes the spawn call fail leaks one more
+handle per retry in a long-lived process, compounding the exhaustion that
+triggered it. Rated medium rather than high because the trigger is narrower than
+the crash and timeout paths, which are all handled correctly; the accumulation
+claim under retry is inferred from the surrounding backoff structure rather than
+from reading the watchdog loop line by line.
+
+### queue-tool-permission-kinship-overstated | medium | A docstring claims a dispatch equivalence that does not hold, and a co-occurring tool call is dropped
+
+The queue-tool dispatcher in `graph/nodes/worker.py` states in its own docstring
+that it dispatches the queue tool the same way the permission gate handles the
+ACP permission request. Checked against the gate it names, the claim fails in
+three provable ways. The dispatcher invokes a real bound tool and requires a
+routing command result, raising otherwise; the gate invokes no tool object at
+all, calling a plain async function that raises the interrupt and then
+hand-builds a single tool message, with no routing command anywhere on its path.
+The dispatcher collects every matching call and merges all their state patches
+before one follow-up turn; the gate processes the first matching call and
+immediately returns a fresh model response. And the two return different shapes,
+one carrying a state patch and one not.
+
+The consequence follows from the second divergence and the order of execution:
+the gate runs first, and its return value is what the dispatcher subsequently
+inspects. If a single model turn emits both a permission request and a
+queue-tool call, the gate answers the permission, abandons the sibling call
+without ever answering it with a tool message, and returns a brand-new response
+that replaces the original - so the queue-tool call is never dispatched, never
+durably marked complete, and its identifier is discarded. This is plausible
+precisely on the deterministic mock provider the gate exists to serve.
+
+It is neither proven to fire nor proven safe: the two call types are exercised
+in entirely separate test classes and no test drives a single turn emitting
+both. Recorded in this audit because it is the same family as the rejection
+findings - code asserting a shared convention with a sibling it does not
+actually implement equivalently - and it was found by checking a docstring's
+claim rather than trusting it.
 
 ### approval-interrupt-gate-protocol-duplicated | medium | Two live human-approval gate factories share a declared lineage and no conventions
 
@@ -352,17 +448,28 @@ failure mode, if they diverge, is silent and hard to attribute.
 ## Recommendations
 
 The rejection-semantics family is the urgent one and should be taken as a single
-repair rather than three. Derive the rejection verdict once, in a predicate that
-accepts both vocabularies explicitly, and have every settlement site call it -
-the submission path, the resolution path, and the progress backstop. The
-narrower fix of adding the missing literal to one predicate would leave the
-family intact and the next site free to diverge again. The repair must land with
-tests: `thread/permission_fsm.py` currently has no test file at all, which is
-why two live defects in it went unobserved, and a rejection payload driven
-through the real resolution handler is the assertion that was missing. A fourth
-denial-shaped predicate exists in the ACP RPC handlers and a fifth in the
-streaming option-kind mapper; neither feeds the buggy path, but both belong in
-the inventory when the canonical predicate is chosen.
+repair rather than three, and the repair is larger than it first appeared. The
+canonical set is tested against the response option identifier while carrying
+the vocabulary of the option kind, and the repository's own fixtures prove those
+are different fields with different spellings - a shipped provider offers the
+identifier `reject` with kind `reject_once`. So the fix is not to add a missing
+literal to one predicate. It is to decide which field carries the rejection
+verdict, derive that verdict once, and have every settlement site call it: the
+submission path, the resolution path, and the progress backstop.
+
+Deriving from the option kind rather than the identifier is the more promising
+direction, because the kind is the field with a closed vocabulary while the
+identifier is provider-defined and free-form; that choice should be recorded,
+since it changes what the durable record means. The repair must land with tests:
+`thread/permission_fsm.py` has no test file at all, which is why two live
+defects in it went unobserved, and the missing assertions are a rejection
+payload driven through the real resolution handler and a provider whose
+identifier is not its kind. Two further denial-shaped predicates exist, in the
+ACP RPC handlers and the streaming option-kind mapper. Neither is a defect where
+it sits - the ACP one is, by accident, closer to correct for the identifiers it
+actually receives than the canonical set is - but both belong in the inventory
+when the canonical predicate is chosen, because they are evidence that the
+current canonical set does not serve every consumer.
 
 The provider-eligibility gate should answer its question with the resolver that
 already exists. The credential-aware probe is the more complete implementation
@@ -408,11 +515,20 @@ layer rather than a second implementation. Those adjudications are the reason
 the findings above can be trusted, and they are recorded so the same ground is
 not swept again.
 
-Coverage was not complete and the gaps are known. Not reached: the `ipc/`
-package on the lifecycle axis; the database repository row mappings and the
-`team/` preset translation on the mapping axis; the documented-versus-code
-contradictions in the environment example and Compose files on the policy axis;
-and the authoring-bridge token construction and desktop credential boundary on
-the resolution axis. The ACP terminal lifecycle handlers are the highest-value
-unswept target, because they sit directly between two confirmed findings in the
-same neighbourhood and were never opened.
+Coverage was not complete, and the gaps are known and named rather than papered
+over. Closed during follow-up passes: the `ipc/` package holds no process,
+connection, or resource lifecycle code at all, only schemas, so there was
+nothing on that axis to find; the ACP terminal handlers were opened and cleared,
+delegating correctly through the shared bounded escalation; and the operational
+tuning defaults in the environment example were spot-checked against their
+declaring fields and matched exactly.
+
+Still unreached: the database repository row mappings and the `team/` preset
+translation on the mapping axis; the authoring-bridge token construction and the
+desktop credential boundary on the resolution axis; the remaining environment
+variable families beyond the operational tuning block; and the watchdog restart
+loop, which the containment-leak finding's accumulation claim infers from
+surrounding structure rather than direct reading. Whether a shipped mock fixture
+actually drives a single turn emitting both a permission request and a
+queue-tool call is the one open question that would move a finding between
+proven-reachable and theoretical.

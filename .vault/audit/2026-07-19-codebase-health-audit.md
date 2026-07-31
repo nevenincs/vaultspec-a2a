@@ -3,7 +3,7 @@ tags:
   - '#audit'
   - '#codebase-health'
 date: '2026-07-19'
-modified: '2026-07-30'
+modified: '2026-07-31'
 related:
   - "[[2026-07-14-a2a-edge-conformance-adr]]"
   - "[[2026-07-18-desktop-product-profile-plan]]"
@@ -2541,3 +2541,63 @@ so they are load-sensitive; the shorter deselect runs passed by luck rather than
 removing a cause. Either the deadline should be generous or the wait should be
 signal-driven. Recorded because a lane correctly declining to blame its own change is the
 same discipline as declining to claim a green.
+
+
+### Final adjudication and closure (2026-07-31)
+
+Three implementations were adjudicated together after their individual reviews were
+interrupted. All three PASS, one confirming an earlier pass-with-findings.
+
+The drain-gate release PASSES. The liveness-not-bookkeeping argument holds under scrutiny:
+the release sits after the terminal-payload validation, so it fires only for validated
+terminal events, and a failed status write is bookkeeping - withholding release there would
+strand exactly the runs a drain must count. The fourth release site the implementer found
+is real; without it the websocket follow-up path leaks an admission, because its failure
+broadcast reaches clients without ever passing the relay. The plain set is confirmed
+correct over a reference count, which would underflow on the designed
+terminal-event-plus-cancel double fire.
+
+The progress catalog PASSES, verified by EXECUTING the projection rather than reading it.
+Every consumer-critical field survives, nested list items are rebuilt with unknown keys
+dropped, no frame type name changed, the event-name-only terminal emitters still resolve
+through the fallback, free-form metadata is stripped on every shape tried, and a typeless
+payload projects to identity keys. An emitter census confirmed the catalog covers what the
+tree emits, with one documented exception below.
+
+The delete outcomes PASS with the earlier findings confirmed rather than overturned.
+
+#### `bare-204-on-the-already-final-race` (medium, closed - documented limit)
+
+Adjudicated NOT a defect. At the moment the losing caller returns, the information is
+genuinely unrecoverable: the winning pass's finalize removes the saga row - the only
+durable carrier of the manifest and ledger - in the same committed transaction as the
+thread row. The abandoned kinds then exist nowhere but the winner's in-memory outcome and
+the server log, and there is no tombstone table. No read can repair the answer. Reporting
+abandonment on every concurrent replay would require a durable record outliving the saga,
+which this design deliberately does not keep. The window is narrow and no product driver
+issues concurrent duplicate deletes; a sequential retry after finalize answers not-found
+rather than the bare success. Recorded in the decision record rather than papered over,
+because a caller CAN in principle observe it.
+
+#### `gate-acquisition-asymmetry` (low, open)
+
+The follow-up release paths disagree in rationale: one get-or-creates the gate while the
+other deliberately reads only, with a comment arguing that seating a gate is wrong.
+Harmless today, since discarding from a freshly seated gate is a no-op, but two sites
+asserting contradictory reasons for the same operation is the drift this campaign removes.
+
+#### `graph-registered-absent-without-a-note` (low, open)
+
+One emitted frame type is not in the closed catalog and therefore degrades to identity
+keys. That loss is intended-equivalent - the aggregator consumes it server-side before
+projection and its content resurfaces through catalogued fields, and the consumption
+inventory shows no consumer reads it - so there is no product break. But the catalog's own
+comment claims closure over every emitted type, so the absence should be documented as
+deliberate rather than left looking like an oversight. Another instance of a module
+asserting slightly more than it holds.
+
+#### `delete-result-abandoned-property-test-only` (low, open)
+
+The derived boolean retained for compatibility now has no production reader - the route
+branches on the kinds tuple, and only a test asserts the property. Either use it or drop
+it.

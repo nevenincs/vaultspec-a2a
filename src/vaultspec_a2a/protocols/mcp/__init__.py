@@ -23,7 +23,7 @@ def __getattr__(name: str) -> object:
 
     Importing a lightweight submodule of this package (e.g. the per-run
     ``authoring_stdio`` bridge) must NOT eagerly pull ``.server`` and its
-    FastMCP + thread-lifecycle + langgraph/langchain chain, which dominates the
+    MCPServer + thread-lifecycle + langgraph/langchain chain, which dominates the
     bridge's spawn-to-serving latency and pushes it past the CLI's MCP-ready
     window. The public ``mcp`` attribute is preserved for consumers that read it
     off the package, resolved only when actually accessed.

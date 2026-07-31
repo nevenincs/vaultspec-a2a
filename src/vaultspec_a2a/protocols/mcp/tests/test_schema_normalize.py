@@ -273,7 +273,7 @@ async def test_served_tools_carry_json_schema_object_over_real_mcp() -> None:
     # Real seam: through the live MCP server the spawned CLI connects to, every
     # advertised tool's inputSchema is a JSON Schema object (type:object), so the
     # CLI keeps them instead of silently dropping the DSL shapes.
-    from mcp.shared.memory import create_connected_server_and_client_session
+    from mcp.client import Client
 
     snapshot = parse_catalog(_CATALOG)
 
@@ -281,11 +281,11 @@ async def test_served_tools_carry_json_schema_object_over_real_mcp() -> None:
         return {"tool": name, "arguments": arguments, "disposition": "dispatched"}
 
     server = build_authoring_mcp_server(snapshot, _dispatch)
-    async with create_connected_server_and_client_session(server) as client:
+    async with Client(server) as client:
         listed = await client.list_tools()
         assert listed.tools, "the bridge advertises tools"
         for tool in listed.tools:
-            assert tool.inputSchema.get("type") == "object", tool.name
+            assert tool.input_schema.get("type") == "object", tool.name
 
 
 class TestSchemaShapeTranslators:

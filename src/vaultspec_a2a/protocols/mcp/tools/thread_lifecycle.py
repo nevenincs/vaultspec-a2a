@@ -7,13 +7,14 @@ Handlers: ``start_thread``, ``cancel_thread``, ``delete_thread``,
 import contextlib
 from typing import Annotated
 
-from mcp.server.fastmcp.exceptions import ToolError
+from mcp.server.mcpserver.exceptions import ToolError
 from pydantic import Field
 
 from ....control.config import settings
 from ....thread.enums import ThreadStatus
 from .._http import (
     _HTTP_CONFLICT,
+    _HTTP_SERVICE_UNAVAILABLE,
     HTTPStatusError,
     _get_known_presets,
     _mcp_request,
@@ -210,6 +211,13 @@ async def delete_thread(
     Returns 404 if the thread_id does not match any known thread. Returns 409
     if the thread is still in a non-terminal state.
 
+    Deletion can also report that it is in progress: cleanup incomplete but
+    resumable.  That is not a failure and not a server fault — call this tool
+    again with the same thread_id and the same deletion resumes and makes
+    progress.  Space those attempts out rather than retrying immediately,
+    because each one drives real cleanup work; state that stays unremovable
+    across attempts is eventually reported as abandoned instead.
+
     A deletion is always durable once it reports success, but it can finalize
     over state that no cleanup pass could remove.  The returned text says which
     of the two happened: a clean deletion reports only that, while a deletion
@@ -236,6 +244,28 @@ async def delete_thread(
             raise ToolError(
                 f"Cannot delete thread {thread_id}: "
                 f"{detail or 'thread is not in a terminal state'}."
+            ) from exc
+        if exc.response.status_code == _HTTP_SERVICE_UNAVAILABLE:
+            # Not a fault.  This status means cleanup is genuinely incomplete
+            # but resumable, and repeating the call resumes the same saga and
+            # makes progress.  Reporting it as a server error would tell the
+            # caller the service is broken, so it would not retry — and the
+            # retry is the whole mechanism by which the deletion completes.
+            # The pacing is deliberately left to the caller: each attempt
+            # drives real cleanup passes and advances an attempt ledger whose
+            # ceiling abandons items permanently, so a tight loop here would
+            # exhaust that ceiling against an unchanged cause and strand state.
+            detail = ""
+            with contextlib.suppress(Exception):
+                detail = exc.response.json().get("detail", "")
+            raise ToolError(
+                f"Deletion of thread {thread_id} is in progress: cleanup is "
+                f"incomplete but resumable, and this is not a server fault. "
+                f"Call delete_thread again with the same thread_id — each "
+                f"attempt resumes the same deletion and makes progress. Space "
+                f"the attempts out rather than retrying immediately; if "
+                f"incompleteness persists, the remaining state is eventually "
+                f"reported as abandoned." + (f" Detail: {detail}" if detail else "")
             ) from exc
         raise ToolError(f"Server error: HTTP {exc.response.status_code}") from exc
     # A clean deletion answers with no body at all; a deletion that finalized

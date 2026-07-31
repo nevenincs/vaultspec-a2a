@@ -33,7 +33,7 @@ from fastapi import FastAPI, Request
 from fastapi.testclient import TestClient
 from httpx import ASGITransport
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
-from mcp.server.fastmcp.exceptions import ToolError
+from mcp.server.mcpserver.exceptions import ToolError
 from sqlalchemy.ext.asyncio import (
     AsyncSession,
     async_sessionmaker,
@@ -523,8 +523,8 @@ async def test_start_thread_raises_when_server_unavailable(
 ) -> None:
     """start_thread with a valid preset raises when the server is not running.
 
-    Verifies the tool raises an exception (FastMCP signals
-    isError=true) rather than returning a silent error string.
+    Verifies the tool raises an exception (MCPServer signals
+    is_error=true) rather than returning a silent error string.
     """
     with pytest.raises(ToolError) as exc_info:
         await start_thread(
@@ -1963,6 +1963,47 @@ class TestDeleteThreadSuccessOutcomes:
         # caller's to receive.
         assert workspace.as_posix() not in result
         assert "report.md" not in result
+
+    @pytest.mark.asyncio(loop_scope="function")
+    async def test_a_resumable_incomplete_cleanup_reads_as_retryable(
+        self, session_factory: async_sessionmaker[AsyncSession], tmp_path: Path
+    ) -> None:
+        """The in-progress outcome must invite the retry that completes it.
+
+        Reporting it as a server fault tells the caller the service is broken,
+        so it stops - and the retry is the only mechanism by which a resumable
+        deletion ever finishes.  The message therefore has to carry three
+        facts: that this is not a fault, that repeating the same call resumes
+        the same deletion, and that the attempts should be spaced, because each
+        one drives real cleanup work against a ledger that eventually abandons
+        what it cannot remove.
+        """
+        store = await _detached_checkpoint_store(tmp_path / "detached.db")
+        workspace = tmp_path / "workspace"
+        (workspace / "outputs").mkdir(parents=True)
+
+        with _make_test_client(session_factory, store) as client:
+            async with session_factory() as session:
+                await create_thread(
+                    session,
+                    thread_id="t-resumable-delete",
+                    status="completed",
+                    metadata=json.dumps({"workspace_root": workspace.as_posix()}),
+                )
+                await session.commit()
+
+            async with _tool_calls_reach(client.app):
+                with pytest.raises(ToolError) as exc_info:
+                    await delete_thread("t-resumable-delete")
+
+        message = str(exc_info.value)
+        # The three decision-relevant facts, and the thread it applies to.
+        assert "t-resumable-delete" in message
+        assert "resumable" in message
+        assert "not a server fault" in message
+        assert "delete_thread again" in message
+        # A genuine fault reading would send the caller the other way.
+        assert "Server error" not in message
 
 
 class TestKnownPresetsCache:

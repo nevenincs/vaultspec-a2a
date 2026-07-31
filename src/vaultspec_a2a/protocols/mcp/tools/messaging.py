@@ -6,7 +6,7 @@ Handler: ``send_message``.
 import contextlib
 from typing import Annotated
 
-from mcp.server.fastmcp.exceptions import ToolError
+from mcp.server.mcpserver.exceptions import ToolError
 from pydantic import Field
 
 from ....control.config import settings

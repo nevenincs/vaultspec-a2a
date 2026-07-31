@@ -17,9 +17,26 @@ Environment variables:
 import argparse
 import asyncio
 
+from mcp.server.transport_security import TransportSecuritySettings
+
 from ...control.config import settings
 from ...utils import configure_logging, reconfigure_console_utf8
 from .server import mcp
+
+__all__ = ["build_transport_security", "main"]
+
+
+def build_transport_security() -> TransportSecuritySettings:
+    """Build the streamable-http DNS-rebinding policy from configuration.
+
+    Separate from :func:`main` so the policy the entrypoint actually ships is
+    the same object a test can mount and drive, rather than a second copy that
+    could agree with the settings while the entrypoint diverged.
+    """
+    return TransportSecuritySettings(
+        allowed_hosts=settings.mcp_allowed_hosts,
+        allowed_origins=settings.mcp_allowed_origins,
+    )
 
 
 def main() -> None:
@@ -53,9 +70,19 @@ def main() -> None:
         # Streamable-HTTP is a network server, not a stdout protocol: the service
         # lane (JSON to stderr + rotating file) is correct; stdout is free.
         configure_logging("service", service_name="mcp")
-        mcp.settings.host = args.host or settings.mcp_host
-        mcp.settings.port = args.port or settings.mcp_port
-        asyncio.run(mcp.run_streamable_http_async())
+        # Bind address is a per-run transport argument, not server state: the
+        # server object no longer carries host/port settings.
+        #
+        # DNS-rebinding protection is passed explicitly. The SDK's middleware
+        # DISABLES the Host/Origin checks when handed no settings, so omitting
+        # this argument silently ships an unguarded network listener.
+        asyncio.run(
+            mcp.run_streamable_http_async(
+                host=args.host or settings.mcp_host,
+                port=args.port or settings.mcp_port,
+                transport_security=build_transport_security(),
+            )
+        )
 
 
 if __name__ == "__main__":

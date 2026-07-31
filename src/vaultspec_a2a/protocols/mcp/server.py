@@ -24,12 +24,18 @@ Available tools:
 - ``cancel_thread``:             Cancel a running thread
 """
 
-from mcp.server.fastmcp import FastMCP
+from mcp.server.mcpserver import MCPServer
+
+from ...utils import package_version
 
 __all__ = ["mcp"]
 
-mcp = FastMCP(
+mcp = MCPServer(
     name="vaultspec-orchestrator",
+    title="Vaultspec A2A Orchestrator",
+    # Served to every client as `serverInfo`. Read from the installed
+    # distribution so the wire value cannot drift from the built package.
+    version=package_version(),
     instructions=(
         "Vaultspec A2A Orchestrator — tools for launching and managing multi-agent "
         "coding workflows.\n\n"

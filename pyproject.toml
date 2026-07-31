@@ -15,7 +15,10 @@ dependencies = [
   "langchain-openai>=1.1.10",
   "langgraph>=0.2.16",
   "langgraph-checkpoint-sqlite>=2.0.0",
-  "mcp>=1.26.0",
+  # 2.x only: the server targets the `mcp.server.mcpserver` surface that replaced
+  # `mcp.server.fastmcp`, so a 1.x resolve fails at import. The upper bound keeps
+  # the next major from repeating that break on an unpinned install.
+  "mcp>=2,<3",
   "opentelemetry-sdk>=1.39.1",
   "opentelemetry-instrumentation-fastapi>=0.60b0",
   "pydantic>=2.12.5",

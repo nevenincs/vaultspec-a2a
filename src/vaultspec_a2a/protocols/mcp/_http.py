@@ -16,7 +16,7 @@ from urllib.parse import urlparse
 
 import httpx
 from httpx import HTTPStatusError as HTTPStatusError
-from mcp.server.fastmcp.exceptions import ToolError
+from mcp.server.mcpserver.exceptions import ToolError
 
 from ...control.config import settings
 from ...gateway_auth import gateway_auth_headers
@@ -73,6 +73,7 @@ def _reset_client() -> None:
 _HTTP_OK = 200
 _HTTP_NOT_FOUND = 404
 _HTTP_CONFLICT = 409
+_HTTP_SERVICE_UNAVAILABLE = 503
 
 
 # ---------------------------------------------------------------------------

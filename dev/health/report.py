@@ -7,7 +7,10 @@ for its metric rather than against this tree's current worst value:
 Dimension    Threshold Source of the threshold
 ============ ========= ==================================================
 cyclomatic   10        McCabe's own recommendation; the flake8, ruff, and
-                       SonarQube default. Rank B in radon's A-F scale.
+                       SonarQube default. REPORTED here, GATED by ruff's
+                       ``C901`` - radon scores strictly higher because it
+                       also counts boolean operators, ternaries, and
+                       comprehensions. See :data:`GATED`.
 maintain.    20        Radon's own A/B boundary for the Maintainability
                        Index; below 20 is documented as hard to maintain.
 module LOC   1000      Pylint's ``max-module-lines`` default, and this
@@ -204,7 +207,7 @@ def measure(root: Path = PACKAGE) -> list[Dimension]:
         Every dimension, offenders sorted worst-first.
     """
     cyclomatic = Dimension(
-        "cyclomatic", "Cyclomatic complexity", MAX_CYCLOMATIC, "paths"
+        "cyclomatic", "Cyclomatic complexity (radon)", MAX_CYCLOMATIC, "paths"
     )
     maintainability = Dimension(
         "maintainability",
@@ -357,13 +360,20 @@ def render_census(dimensions: Sequence[Dimension]) -> str:
 #: Dimensions that GATE when :mod:`dev.health` is run with ``--gate``.
 #:
 #: The gate and the report are the same measurement - the gate simply refuses
-#: to exit 0 - so the two can never disagree about a number. That is the whole
-#: reason this lives here rather than in a separate tool: ``xenon``, the usual
-#: CLI for the cyclomatic gate, reads ``pyproject.toml`` through ``configparser``
-#: and crashes on this repository's ``log_cli_format`` (a legitimate ``%``-style
-#: logging format string that configparser reads as broken interpolation), so it
-#: cannot run here at all.
-GATED = ("cyclomatic", "module-lines", "statements", "arguments", "nesting")
+#: to exit 0 - so the two can never disagree about a number.
+#:
+#: ``cyclomatic`` is deliberately ABSENT, though this module measures it. Ruff's
+#: ``C901`` already gates that dimension from ``just lint limits``, and the two
+#: tools do not agree: on
+#: ``control/permission_service.py::_authorize_permission_response`` radon
+#: scores 26 and ruff scores 15, because radon also counts boolean operators,
+#: ternaries, and comprehensions while ruff counts only ``if``/``elif``/loops.
+#: Both numbers are correct for their own definition, but two gates at one
+#: threshold claiming one name is worse than either alone - a burndown would not
+#: know which number it was driving to zero. Ruff owns the gate because the
+#: conventional ceiling of 10 is calibrated against its mccabe definition;
+#: radon's stricter reading stays here as a ranking signal.
+GATED = ("module-lines", "statements", "arguments", "nesting")
 
 
 def render_json(dimensions: Sequence[Dimension]) -> str:

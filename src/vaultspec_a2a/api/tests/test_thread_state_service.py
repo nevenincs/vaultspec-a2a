@@ -117,8 +117,12 @@ async def test_missing_checkpoint_degrades_snapshot_readiness(tmp_path: Path) ->
     assert snapshot is not None
     assert snapshot.snapshot_complete is False
     assert snapshot.replay_status == "gap_detected"
-    assert snapshot.repair_status == "checkpoint_unavailable"
-    assert snapshot.execution_readiness == "checkpoint_unavailable"
+    # The replay status and the repair classification must describe the same
+    # situation. A detected gap is a replay gap; it was previously reported as
+    # checkpoint-unavailable, which claims the checkpoint's contents are unknown
+    # when this path has established that there is no checkpoint at all.
+    assert snapshot.repair_status == "replay_gap"
+    assert snapshot.execution_readiness == "replay_gap"
     assert "checkpoint_missing" in snapshot.degraded_reasons
 
     await engine.dispose()
@@ -178,8 +182,10 @@ async def test_missing_checkpoint_hides_durable_pending_permission_state(
     assert snapshot.approval_status is None
     assert snapshot.approval_request_id is None
     assert snapshot.pause_cause is None
-    assert snapshot.repair_status == "checkpoint_unavailable"
-    assert snapshot.execution_readiness == "checkpoint_unavailable"
+    # Same missing-checkpoint path, same classification: the probe established
+    # there is no checkpoint, which is a replay gap rather than an unknown probe.
+    assert snapshot.repair_status == "replay_gap"
+    assert snapshot.execution_readiness == "replay_gap"
     assert "checkpoint_missing" in snapshot.degraded_reasons
     assert "pending_permission_without_checkpoint_truth" in snapshot.degraded_reasons
 

@@ -15,15 +15,14 @@ from typing import TYPE_CHECKING, Any
 
 from langchain_core.messages.utils import count_tokens_approximately
 
-from vaultspec_a2a.domain_config import domain_config
-from vaultspec_a2a.graph.enums import PipelinePhase
+from ...domain_config import domain_config
+from ...graph.enums import PipelinePhase
 
 if TYPE_CHECKING:
     from collections.abc import Callable
     from pathlib import Path
 
-    from vaultspec_a2a.thread.state import TeamState
-
+    from ...thread.state import TeamState
     from ..protocols import TaskQueuePort
 
 from ..tools.task_queue import render_queue_view

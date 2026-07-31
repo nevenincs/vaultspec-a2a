@@ -19,8 +19,8 @@ from typing import TYPE_CHECKING, Any, cast
 if TYPE_CHECKING:
     from collections.abc import Hashable
 
-    from vaultspec_a2a.authoring import FeedbackContextReader
-    from vaultspec_a2a.worker.authoring_binding import AuthoringBindingProvider
+    from ..authoring import FeedbackContextReader
+    from ..worker.authoring_binding import AuthoringBindingProvider
 
 from langchain_core.language_models import BaseChatModel
 from langgraph.checkpoint.base import BaseCheckpointSaver
@@ -29,14 +29,13 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.graph.state import CompiledStateGraph
 from langgraph.types import RetryPolicy
 
-from vaultspec_a2a.thread.errors import (
+from ..authoring.contract import DOCUMENT_AUTHORING_ROLES
+from ..thread.errors import (
     ConfigError,
     ProviderSessionError,
     WorkerExecutionError,
 )
-from vaultspec_a2a.thread.state import TeamState
-
-from ..authoring.contract import DOCUMENT_AUTHORING_ROLES
+from ..thread.state import TeamState
 from .enums import Model, PipelinePhase, Provider
 from .nodes.diverge import (
     ResearchFindingProducer,
@@ -380,7 +379,7 @@ def compile_team_graph(
                      or if topology configuration is invalid.
         ValueError:  If an unknown topology type is encountered.
     """
-    from vaultspec_a2a.team.team_config import TopologyType
+    from ..team.team_config import TopologyType
 
     builder = StateGraph(cast("Any", TeamState))
     topology = team_config.topology
@@ -1044,7 +1043,7 @@ def _make_research_producer(
     async def producer(state: TeamState, spec: dict[str, Any]) -> dict[str, Any]:
         from langchain_core.messages import SystemMessage
 
-        from vaultspec_a2a.context.rules import (
+        from ..context.rules import (
             DEFAULT_BUNDLED_RULES_DIR,
             RuleManager,
         )
@@ -1074,7 +1073,7 @@ def _make_research_producer(
         messages.extend(state.get("messages", []))
         effective_model = model
         if harness_mcp_servers:
-            from vaultspec_a2a.providers._acp_mcp import (
+            from ..providers._acp_mcp import (
                 compose_harness_mcp_servers,
                 harness_allowed_tool_names,
             )

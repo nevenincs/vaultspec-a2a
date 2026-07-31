@@ -10,23 +10,22 @@ from langchain_core.messages import AIMessage, BaseMessage, SystemMessage, ToolM
 from langgraph.errors import GraphBubbleUp
 from langgraph.types import Command, interrupt
 
-from vaultspec_a2a.authoring.contract import is_document_authoring_role
-from vaultspec_a2a.context.anchoring import build_anchoring_context
-from vaultspec_a2a.context.rules import DEFAULT_BUNDLED_RULES_DIR, RuleManager
-from vaultspec_a2a.context.token_budget import compact_context, should_compact
-from vaultspec_a2a.domain_config import domain_config
-from vaultspec_a2a.thread.errors import WorkerExecutionError
-from vaultspec_a2a.thread.state import TeamState
-
+from ...authoring.contract import is_document_authoring_role
+from ...context.anchoring import build_anchoring_context
+from ...context.rules import DEFAULT_BUNDLED_RULES_DIR, RuleManager
+from ...context.token_budget import compact_context, should_compact
+from ...domain_config import domain_config
+from ...thread.errors import WorkerExecutionError
+from ...thread.state import TeamState
 from ..protocols import TaskQueuePort
 from ..tools.task_queue import create_mark_task_complete_tool
 
 if TYPE_CHECKING:
     from langchain_core.tools import BaseTool
 
-    from vaultspec_a2a.authoring import FeedbackContextReader
-    from vaultspec_a2a.providers._acp_authoring import AuthoringToolBinding
-    from vaultspec_a2a.worker.authoring_binding import AuthoringBindingProvider
+    from ...authoring import FeedbackContextReader
+    from ...providers._acp_authoring import AuthoringToolBinding
+    from ...worker.authoring_binding import AuthoringBindingProvider
 
 _logger = logging.getLogger(__name__)
 
@@ -169,7 +168,7 @@ def _attach_authoring_tools(
     attach = getattr(model, "with_mcp_servers", None)
     if attach is None:
         return model
-    from vaultspec_a2a.providers._acp_authoring import (
+    from ...providers._acp_authoring import (
         authoring_allowed_tool_names,
         build_authoring_mcp_servers,
         build_authoring_stdio_mcp_servers,
@@ -579,7 +578,7 @@ def create_worker_node(
             effective_model, authoring_binding, autonomous=autonomous
         )
         if harness_mcp_servers:
-            from vaultspec_a2a.providers._acp_mcp import (
+            from ...providers._acp_mcp import (
                 compose_harness_mcp_servers,
                 harness_allowed_tool_names,
             )

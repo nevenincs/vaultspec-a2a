@@ -10,9 +10,9 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from vaultspec_a2a.thread.state import TeamState
+    from ..thread.state import TeamState
 
-from vaultspec_a2a.domain_config import domain_config
+from ..domain_config import domain_config
 
 __all__ = ["build_anchoring_context"]
 

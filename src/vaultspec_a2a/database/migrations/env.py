@@ -18,7 +18,11 @@ from sqlalchemy import pool
 from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import async_engine_from_config
 
-from vaultspec_a2a.database.models import (
+# Alembic loads this file by SCRIPT LOCATION rather than importing it as a
+# module, so at runtime it has no parent package and a relative import would
+# raise "attempted relative import with no known parent package". This is the
+# one intra-package import that must stay absolute.
+from vaultspec_a2a.database.models import (  # absolute-import-ok
     Base,
 )
 

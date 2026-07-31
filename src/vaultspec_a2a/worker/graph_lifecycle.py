@@ -145,9 +145,8 @@ class GraphLifecycleManager:
         token_store: RunTokenStore,
         catalog_store: RunCatalogStore,
     ) -> None:
-        from vaultspec_a2a.providers.factory import ProviderFactory
-
         from ..database.session import get_session_factory
+        from ..providers.factory import ProviderFactory
         from .task_queue_port import SqlTaskQueuePort
 
         self._checkpointer = checkpointer

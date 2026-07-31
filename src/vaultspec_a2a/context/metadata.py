@@ -11,7 +11,7 @@ from pathlib import Path
 
 from pydantic import BaseModel, Field, field_validator
 
-from vaultspec_a2a.domain_config import domain_config
+from ..domain_config import domain_config
 
 __all__ = [
     "ContextRef",

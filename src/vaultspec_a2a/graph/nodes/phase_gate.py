@@ -42,8 +42,7 @@ from typing import TYPE_CHECKING, Protocol
 from langgraph.types import Command, interrupt
 
 if TYPE_CHECKING:
-    from vaultspec_a2a.thread.state import TeamState
-
+    from ...thread.state import TeamState
     from .worker import WorkerNode
 
 __all__ = [

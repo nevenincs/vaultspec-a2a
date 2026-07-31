@@ -10,10 +10,9 @@ import logging
 from collections import defaultdict
 from collections.abc import Awaitable, Callable
 
-from vaultspec_a2a.thread.errors import EventAggregatorError
-
 from ..domain_config import domain_config
 from ..graph.protocols import NullTelemetryHook, TelemetryHook
+from ..thread.errors import EventAggregatorError
 from .fanout import deliver_bounded
 from .types import SequencedEvent, StreamableGraph
 

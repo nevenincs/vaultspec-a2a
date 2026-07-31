@@ -32,7 +32,7 @@ from typing import Annotated, Final, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from vaultspec_a2a.database.compatibility import supported_migration_head
+from ..database.compatibility import supported_migration_head
 
 __all__ = [
     "PRIMARY_SCHEMA_VERSION",

@@ -24,9 +24,9 @@ from pathlib import Path
 
 from pydantic import BaseModel, Field, model_validator
 
-from vaultspec_a2a.authoring.contract import is_document_authoring_topology
-from vaultspec_a2a.graph.enums import Model, Provider
-from vaultspec_a2a.thread.errors import (
+from ..authoring.contract import is_document_authoring_topology
+from ..graph.enums import Model, Provider
+from ..thread.errors import (
     AgentConfigNotFoundError,
     ConfigError,
     TeamConfigNotFoundError,

@@ -73,6 +73,35 @@ def test_resolve_resume_option_id_rejects_missing_option_id_in_dict() -> None:
         _resolve_resume_option_id({"approved": True}, options)
 
 
+def test_resolve_resume_option_id_accepts_snake_case_options() -> None:
+    """Options offered in snake_case validate a resume answering in kind.
+
+    The resume payload has always read ``option_id``; the interrupt's OPTIONS
+    were camelCase-only, so a snake_case options list validated nothing and this
+    legitimate answer failed closed with "no valid option ids".
+    """
+    options = [{"option_id": "approve"}, {"option_id": "reject_once"}]
+    assert (
+        _resolve_resume_option_id({"option_id": "reject_once"}, options)
+        == "reject_once"
+    )
+    assert _resolve_resume_option_id("approve", options) == "approve"
+
+
+def test_resolve_resume_option_id_still_rejects_an_unknown_snake_case_answer() -> None:
+    """Accepting the spelling must not weaken the membership check."""
+    options = [{"option_id": "approve"}]
+    with pytest.raises(RuntimeError, match="unknown option_id"):
+        _resolve_resume_option_id({"option_id": "hostile-option"}, options)
+
+
+def test_resolve_resume_option_id_ignores_an_option_carrying_no_id() -> None:
+    """A malformed option contributes no id, so it can never be resumed with."""
+    options = [{"optionId": "approve"}, {"label": "Nameless option"}]
+    with pytest.raises(RuntimeError, match="unknown option_id"):
+        _resolve_resume_option_id({"option_id": "Nameless option"}, options)
+
+
 def test_build_worker_messages_adds_rejection_revision_instruction() -> None:
     """Rejected supervisor plans should add a deterministic revision instruction."""
     state: TeamState = {

@@ -16,6 +16,7 @@ from typing import Any, cast
 from uuid import uuid4
 
 from ..domain_config import domain_config
+from ..graph.acp_options import option_id_of
 from ..graph.enums import (
     AgentLifecycleState,
     PermissionOptionKind,
@@ -576,18 +577,16 @@ async def emit_interrupt_events(
                 tool_name: str = payload.get("tool_name", "unknown")
                 acp_options: list[dict[str, Any]] = payload.get("options", [])
 
+                # The ACP wire spells the identity ``optionId``; our snake_case
+                # surfaces spell it ``option_id``. Resolving it once through the
+                # canonical predicate keeps this projection from re-deriving the
+                # rule — and from forwarding a null id when the key is present
+                # but carries no usable string.
                 options = [
                     {
-                        "option_id": opt.get(
-                            "optionId", opt.get("option_id", "allow_once")
-                        ),
-                        "name": opt.get(
-                            "label",
-                            opt.get("name", opt.get("optionId", "Allow")),
-                        ),
-                        "kind": map_acp_option_kind(
-                            opt.get("optionId", opt.get("option_id", ""))
-                        ),
+                        "option_id": (opt_id := option_id_of(opt)) or "allow_once",
+                        "name": opt.get("label", opt.get("name", opt_id or "Allow")),
+                        "kind": map_acp_option_kind(opt_id or ""),
                     }
                     for opt in acp_options
                 ]

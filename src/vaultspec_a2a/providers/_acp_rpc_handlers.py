@@ -17,6 +17,7 @@ from uuid import uuid4
 from langgraph.errors import GraphBubbleUp
 
 from ..control.config import settings
+from ..graph.acp_options import option_id_of, valid_option_ids
 from ..utils.process import ProcessContainment, ProcessContainmentError
 from ..workspace.environment import resolve_env_vars
 from ._acp_types import _AcpModelConfig, _AcpSessionContext
@@ -151,6 +152,53 @@ def _strip_mcp_prefix(tool_name: str) -> str:
     return tool_name
 
 
+def _option_id_at(options: list, index: int, *, default: str) -> str:
+    """Return the id of the option at ``index``, or ``default`` if it has none.
+
+    Positional, never scanning: these call sites pick an option by CONVENTION
+    (first is the least restrictive, last the most), so silently sliding to a
+    neighbour when the conventional entry is malformed would substitute an
+    option with the opposite meaning. Reading the id through the canonical
+    extractor instead of subscripting is what keeps a malformed entry from
+    raising ``KeyError`` on a path that exists to handle malformed input.
+    """
+    if not options:
+        return default
+    return option_id_of(options[index]) or default
+
+
+def _first_offered_option_id(options: list, *, default: str) -> str:
+    """Return the first option id actually offered, or ``default`` if none is.
+
+    Unlike :func:`_option_id_at` this scans, because its caller has already
+    established that SOME id is on offer and only needs a real one.
+    """
+    return next(
+        (option_id for option in options if (option_id := option_id_of(option))),
+        default,
+    )
+
+
+def _denial_option_id(options: list) -> str:
+    """Return the id of the most restrictive offered option.
+
+    Prefer the first option whose id names a denial; fall back to the last
+    option in the list (conventionally the most restrictive), then to the
+    literal ``"deny"``. The literal is the deliberate answer when the last
+    option is malformed: an id the agent does not recognise makes it decline
+    the tool call, whereas scanning back down the list for any usable id could
+    hand this fail-closed path an APPROVAL.
+    """
+    return next(
+        (
+            option_id
+            for option in options
+            if (option_id := option_id_of(option)) and "deny" in option_id.lower()
+        ),
+        _option_id_at(options, -1, default="deny"),
+    )
+
+
 def _kimi_autonomous_option_id(
     name: str, config: _AcpModelConfig, options: list
 ) -> str:
@@ -169,25 +217,27 @@ def _kimi_autonomous_option_id(
     if canonical in allowed:
         return next(
             (
-                o["optionId"]
-                for o in options
-                if isinstance(o, dict)
-                and o.get("kind") in ("allow_once", "allow_always")
+                option_id
+                for option in options
+                if isinstance(option, dict)
+                and option.get("kind") in ("allow_once", "allow_always")
+                and (option_id := option_id_of(option))
             ),
-            options[0]["optionId"] if options else "approve",
+            _option_id_at(options, 0, default="approve"),
         )
     return next(
         (
-            o["optionId"]
-            for o in options
-            if isinstance(o, dict)
+            option_id
+            for option in options
+            if isinstance(option, dict)
+            and (option_id := option_id_of(option))
             and (
-                o.get("kind") in ("reject_once", "reject_always")
-                or "reject" in o.get("optionId", "").lower()
-                or "deny" in o.get("optionId", "").lower()
+                option.get("kind") in ("reject_once", "reject_always")
+                or "reject" in option_id.lower()
+                or "deny" in option_id.lower()
             )
         ),
-        options[-1]["optionId"] if options else "reject",
+        _option_id_at(options, -1, default="reject"),
     )
 
 
@@ -210,7 +260,7 @@ async def on_request_permission(
     logger.info(
         "ACP permission requested (canUseTool rung): tool=%s options=%s",
         name,
-        [o.get("optionId") for o in options if isinstance(o, dict)],
+        sorted(valid_option_ids(options)),
     )
 
     if config.permission_callback:
@@ -224,14 +274,7 @@ async def on_request_permission(
                 logger.warning("Chunk queue full — dropping interrupt sentinel")
             # H9 fix: return a proper JSON-RPC denial response instead of
             # an empty dict `{}` which would produce a malformed frame.
-            deny_id = next(
-                (
-                    o["optionId"]
-                    for o in options
-                    if "deny" in o.get("optionId", "").lower()
-                ),
-                options[-1]["optionId"] if options else "deny",
-            )
+            deny_id = _denial_option_id(options)
             return {
                 "jsonrpc": "2.0",
                 "id": rpc_id,
@@ -243,16 +286,7 @@ async def on_request_permission(
             )
             # TOAD reference pattern: return a denial outcome (not a JSON-RPC
             # error) so the ACP subprocess can cleanly decline the tool call.
-            # Prefer the first option whose id contains "deny"; fall back to
-            # the last option in the list (conventionally the most restrictive).
-            deny_id = next(
-                (
-                    o["optionId"]
-                    for o in options
-                    if "deny" in o.get("optionId", "").lower()
-                ),
-                options[-1]["optionId"] if options else "deny",
-            )
+            deny_id = _denial_option_id(options)
             return {
                 "jsonrpc": "2.0",
                 "id": rpc_id,
@@ -266,16 +300,17 @@ async def on_request_permission(
         # NOT used - a read-only-only compose still leaves Kimi's native write
         # and shell tools reachable, so the enforcement is what the agent CAN do.
         option_id = _kimi_autonomous_option_id(name, config, options)
-    elif options and isinstance(options[0], dict) and "optionId" in options[0]:
-        # M14: guard against malformed option dicts lacking optionId
-        option_id = options[0]["optionId"]
     else:
-        option_id = "allow_once"
+        # M14: an option list whose leading entry carries no usable id falls back
+        # to the conventional allow-once id rather than subscripting it.
+        option_id = _option_id_at(options, 0, default="allow_once")
 
     # M17: validate that option_id is among the offered options before returning.
     # Reject a callback-supplied id that is not in the options list to prevent
-    # sending an invalid response to the ACP subprocess.
-    valid_ids = {o.get("optionId") for o in options if isinstance(o, dict)}
+    # sending an invalid response to the ACP subprocess. The valid set is built
+    # by the canonical predicate, so an option dict missing its id contributes
+    # nothing instead of admitting ``None`` as a "valid" answer.
+    valid_ids = valid_option_ids(options)
     if valid_ids and option_id not in valid_ids:
         logger.warning(
             "Permission callback returned option_id=%r not in valid options %r; "
@@ -283,7 +318,7 @@ async def on_request_permission(
             option_id,
             sorted(valid_ids),
         )
-        option_id = options[0]["optionId"]
+        option_id = _first_offered_option_id(options, default=option_id)
 
     logger.info("ACP permission decision: tool=%s option=%s", name, option_id)
     return {

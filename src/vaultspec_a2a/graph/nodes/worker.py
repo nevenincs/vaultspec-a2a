@@ -17,6 +17,7 @@ from ...context.token_budget import compact_context, should_compact
 from ...domain_config import domain_config
 from ...thread.errors import WorkerExecutionError
 from ...thread.state import TeamState
+from ..acp_options import valid_option_ids
 from ..protocols import TaskQueuePort
 from ..tools.task_queue import create_mark_task_complete_tool
 
@@ -397,20 +398,9 @@ def _finalize_worker_response(
     }
 
 
-def _valid_option_ids(options: list[dict[str, Any]]) -> set[str]:
-    """Return the valid ACP permission option ids for resume validation."""
-    return {
-        option_id
-        for option in options
-        if isinstance(option, dict)
-        and isinstance((option_id := option.get("optionId")), str)
-        and option_id
-    }
-
-
 def _require_valid_option_id(candidate: object, options: list[dict[str, Any]]) -> str:
     """Validate a resumed option id and fail closed on malformed input."""
-    valid_ids = _valid_option_ids(options)
+    valid_ids = valid_option_ids(options)
     if not valid_ids:
         raise RuntimeError("Permission resume received no valid option ids")
     if not isinstance(candidate, str) or not candidate:

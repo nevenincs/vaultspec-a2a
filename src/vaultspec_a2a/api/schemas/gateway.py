@@ -424,6 +424,37 @@ class RunCancelResponse(BaseModel):
     idempotency_key: str | None = None
 
 
+class RunMessageRequest(BaseModel):
+    """Send a follow-up turn into a run that already exists.
+
+    Run-start cannot express this: a repeat run identifier is a REPLAY, answered
+    with the original run, so there is no way to say "same run, new input"
+    through it. This is that verb.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    content: str = Field(min_length=1, max_length=65536)
+    agent_id: str | None = Field(default=None, max_length=128)
+
+
+class RunMessageResponse(BaseModel):
+    """Acknowledge a follow-up turn as accepted for dispatch.
+
+    Acceptance is not completion: the turn is handed to the worker and the run
+    continues asynchronously, so a caller reconciles progress from the stream or
+    run-status rather than from this body.
+    """
+
+    api_version: Literal["v1"] = _API_VERSION
+    run_id: str
+    accepted: bool = True
+    applied: bool = False
+    action_status: str
+    action_id: str | None = None
+    idempotency_key: str | None = None
+
+
 class RunPermissionRespondRequest(BaseModel):
     """Answer one permission request raised by a run.
 

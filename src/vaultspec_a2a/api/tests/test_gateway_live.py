@@ -63,6 +63,71 @@ async def _seed_permission(session_factory, *, thread_id: str, request_id: str) 
 
 
 @pytest.mark.asyncio(loop_scope="function")
+async def test_a_follow_up_turn_reaches_the_run_that_run_start_cannot_address(
+    session_factory, checkpointer
+) -> None:
+    """The versioned surface can now say something further to a live run.
+
+    This is the capability run-start structurally cannot provide, and the test
+    proves that rather than asserting it: re-posting to run-start with the same
+    run id returns the ORIGINAL run and dispatches nothing new, because a repeat
+    identifier there is a replay. The follow-up verb dispatches for real.
+    """
+    app, _agg, worker, _cp = make_app(session_factory, checkpointer)
+    async with (
+        _live_server(app) as base,
+        httpx.AsyncClient(base_url=base, timeout=10.0) as client,
+    ):
+        start = await client.post(
+            "/v1/runs",
+            json={
+                "team_preset": _PRESET,
+                "message": "first turn",
+                "autonomous": True,
+                "run_id": "r-followup",
+            },
+        )
+        assert start.status_code == 201
+        run_id = start.json()["run_id"]
+
+        # Run-start with the same id is a REPLAY: same run back, no new dispatch.
+        worker.dispatches.clear()
+        replay = await client.post(
+            "/v1/runs",
+            json={
+                "team_preset": _PRESET,
+                "message": "first turn",
+                "autonomous": True,
+                "run_id": "r-followup",
+            },
+        )
+        assert replay.status_code == 201
+        assert replay.json()["run_id"] == run_id
+        assert worker.dispatches == [], "a replay must not dispatch a new turn"
+
+        # The follow-up verb is how a second turn actually reaches the run.
+        follow = await client.post(
+            f"/v1/runs/{run_id}/messages",
+            json={"content": "second turn"},
+        )
+        assert follow.status_code == 202
+        body = follow.json()
+        assert body["api_version"] == "v1"
+        assert body["run_id"] == run_id
+        assert body["accepted"] is True
+        # Accepted is not applied: the turn is handed on, not completed here.
+        assert body["applied"] is False
+        assert len(worker.dispatches) == 1
+        assert worker.dispatches[-1]["content"] == "second turn"
+
+        # An unknown run is a not-found rather than a silent accept.
+        missing = await client.post(
+            "/v1/runs/no-such-run/messages", json={"content": "hello"}
+        )
+        assert missing.status_code == 404
+
+
+@pytest.mark.asyncio(loop_scope="function")
 async def test_the_versioned_verb_answers_a_permission_and_refuses_a_foreign_one(
     session_factory, checkpointer
 ) -> None:

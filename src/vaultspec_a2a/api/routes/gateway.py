@@ -38,6 +38,7 @@ from ...control.health import (
     build_full_health,
     probe_engine_discovery_freshness,
 )
+from ...control.message_service import send_followup_message
 from ...control.permission_service import respond_to_permission
 from ...control.run_discovery_service import discover_active_runs
 from ...control.run_start_policy import (
@@ -64,6 +65,7 @@ from ...database.permission_repository import get_permission_request
 from ...database.session import get_db
 from ...domain_config import domain_config
 from ...streaming.aggregator import EventAggregator
+from ...thread.constants import DEFAULT_SUPERVISOR_ID
 from ...thread.dispatch_policy import FailureType
 from ...thread.enums import TERMINAL_STATUSES, ThreadStatus
 from ...thread.errors import NicknameConflictError
@@ -94,6 +96,8 @@ from ..schemas.gateway import (
     RoleState,
     RunCancelResponse,
     RunCommitResponse,
+    RunMessageRequest,
+    RunMessageResponse,
     RunPermissionRespondRequest,
     RunPermissionRespondResponse,
     RunPrepareResponse,
@@ -1374,6 +1378,81 @@ async def run_cancel_endpoint(
         applied=result.applied,
         action_status=result.action_status,
         idempotency_key=result.idempotency_key,
+    )
+
+
+# ---------------------------------------------------------------------------
+# run-message
+# ---------------------------------------------------------------------------
+
+
+@router.post(
+    "/runs/{run_id}/messages",
+    status_code=202,
+    response_model=RunMessageResponse,
+)
+async def run_message_endpoint(
+    run_id: PathSafeRunId,
+    body: RunMessageRequest,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    worker_client: httpx.AsyncClient = Depends(get_worker_client),
+    circuit_breaker: Any = Depends(get_circuit_breaker),
+    worker_spawner: Any = Depends(get_worker_spawner),
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+) -> RunMessageResponse:
+    """Send a follow-up turn into an existing run.
+
+    Run-start cannot carry this. A repeat run identifier there is a REPLAY - it
+    answers with the original run and never adopts the new body - so without
+    this verb the versioned surface can start a run and watch it, but never say
+    anything further to it.
+
+    Accepted is not applied: the turn is handed to the worker and execution
+    continues asynchronously, so a caller reconciles from the stream or
+    run-status rather than from this response.
+    """
+    result = await send_followup_message(
+        db=db,
+        thread_id=run_id,
+        content=body.content,
+        agent_id=body.agent_id or DEFAULT_SUPERVISOR_ID,
+        idempotency_key=idempotency_key,
+        circuit_breaker=circuit_breaker,
+        worker_spawner=worker_spawner,
+        worker_client=worker_client,
+        recursion_limit=domain_config.graph_recursion_limit,
+        trace_headers=trace_headers(),
+    )
+
+    if result.failure_type == FailureType.NOT_FOUND:
+        raise HTTPException(status_code=404, detail="Run not found")
+    if result.failure_type in (FailureType.INPUT_REQUIRED, FailureType.TERMINAL):
+        raise HTTPException(status_code=409, detail=result.error_detail)
+
+    if result.dispatched:
+        mark_worker_connected(request)
+
+    if result.failure_type is not None:
+        # A follow-up the service resolved to FAILED settles the run terminally
+        # without a worker ever running it, so no terminal event will arrive to
+        # release its admission. Read the gate rather than seating one: a gate
+        # never created has admitted nothing.
+        if result.thread_status == ThreadStatus.FAILED.value:
+            drain_gate = getattr(request.app.state, "drain_gate", None)
+            if drain_gate is not None:
+                await drain_gate.release(result.thread_id)
+        if result.failure_type in (FailureType.CIRCUIT_OPEN, FailureType.AT_CAPACITY):
+            raise HTTPException(status_code=503, detail=result.error_detail)
+        raise HTTPException(status_code=502, detail=result.error_detail)
+
+    return RunMessageResponse(
+        run_id=result.thread_id,
+        action_status=(
+            "accepted_not_applied" if result.dispatched else result.thread_status
+        ),
+        action_id=result.action_id,
+        idempotency_key=idempotency_key,
     )
 
 

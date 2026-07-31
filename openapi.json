@@ -1220,6 +1220,91 @@
         }
       }
     },
+    "/v1/runs/{run_id}/messages": {
+      "post": {
+        "summary": "Run Message Endpoint",
+        "description": "Send a follow-up turn into an existing run.\n\nRun-start cannot carry this. A repeat run identifier there is a REPLAY - it\nanswers with the original run and never adopts the new body - so without\nthis verb the versioned surface can start a run and watch it, but never say\nanything further to it.\n\nAccepted is not applied: the turn is handed to the worker and execution\ncontinues asynchronously, so a caller reconciles from the stream or\nrun-status rather than from this response.",
+        "operationId": "run_message_endpoint_v1_runs__run_id__messages_post",
+        "parameters": [
+          {
+            "name": "run_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^[A-Za-z0-9_][A-Za-z0-9_-]{0,127}$",
+              "title": "Run Id"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
+            }
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RunMessageRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunMessageResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/runs/{run_id}/permissions/{request_id}/respond": {
       "post": {
         "summary": "Run Permission Respond Endpoint",
@@ -2957,6 +3042,92 @@
         ],
         "title": "RunCommitResponse",
         "description": "Acknowledge a run committed against a prepared reservation.\n\nReturned by the ``commit`` stage. The reservation is consumed and a stable\nrun is created and dispatched with the bound actor tokens. ``lease_id`` is the\nnon-secret, run-scoped lease identity the dashboard revokes at terminal\nsettlement; it is an identifier, never a bearer."
+      },
+      "RunMessageRequest": {
+        "properties": {
+          "content": {
+            "type": "string",
+            "maxLength": 65536,
+            "minLength": 1,
+            "title": "Content"
+          },
+          "agent_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 128
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Agent Id"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "content"
+        ],
+        "title": "RunMessageRequest",
+        "description": "Send a follow-up turn into a run that already exists.\n\nRun-start cannot express this: a repeat run identifier is a REPLAY, answered\nwith the original run, so there is no way to say \"same run, new input\"\nthrough it. This is that verb."
+      },
+      "RunMessageResponse": {
+        "properties": {
+          "api_version": {
+            "type": "string",
+            "const": "v1",
+            "title": "Api Version",
+            "default": "v1"
+          },
+          "run_id": {
+            "type": "string",
+            "title": "Run Id"
+          },
+          "accepted": {
+            "type": "boolean",
+            "title": "Accepted",
+            "default": true
+          },
+          "applied": {
+            "type": "boolean",
+            "title": "Applied",
+            "default": false
+          },
+          "action_status": {
+            "type": "string",
+            "title": "Action Status"
+          },
+          "action_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Action Id"
+          },
+          "idempotency_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Idempotency Key"
+          }
+        },
+        "type": "object",
+        "required": [
+          "run_id",
+          "action_status"
+        ],
+        "title": "RunMessageResponse",
+        "description": "Acknowledge a follow-up turn as accepted for dispatch.\n\nAcceptance is not completion: the turn is handed to the worker and the run\ncontinues asynchronously, so a caller reconciles progress from the stream or\nrun-status rather than from this body."
       },
       "RunPermissionRespondRequest": {
         "properties": {

@@ -17,14 +17,9 @@ real engine state:
 
 from __future__ import annotations
 
-import json
-import os
-import time
 import uuid
-from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
-import httpx
 import pytest
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
 
@@ -33,6 +28,7 @@ from ...worker.token_store import RunTokenStore
 
 if TYPE_CHECKING:
     from ...thread.state import TeamState
+    from ..discovery import EngineEndpoint
 from .. import (
     AuthoringClient,
     AuthoringResponse,
@@ -43,49 +39,8 @@ from .. import (
     mint_actor_token,
 )
 
-_STALE_MS = 120_000
 _RESEARCH_ROLE = "synthesist"
 _RESEARCH_WRITER = "synthesis"
-
-
-def _resolve_engine() -> tuple[str, str] | None:
-    now_ms = int(time.time() * 1000)
-    candidates: list[Path] = []
-    env_path = os.environ.get("VAULTSPEC_ENGINE_SERVICE_JSON")
-    if env_path:
-        candidates.append(Path(env_path))
-    candidates.append(Path.home() / ".vaultspec" / "service.json")
-    for path in candidates:
-        try:
-            info = json.loads(path.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
-            continue
-        heartbeat = info.get("last_heartbeat")
-        if isinstance(heartbeat, (int, float)) and now_ms - heartbeat > _STALE_MS:
-            continue
-        port = info.get("port")
-        token = info.get("service_token")
-        if not isinstance(port, int) or not isinstance(token, str):
-            continue
-        base_url = f"http://127.0.0.1:{port}"
-        try:
-            resp = httpx.get(f"{base_url}/health", timeout=3.0)
-        except httpx.HTTPError:
-            continue
-        if resp.status_code == 200:
-            return base_url, token
-    return None
-
-
-@pytest.fixture(scope="module")
-def engine() -> tuple[str, str]:
-    resolved = _resolve_engine()
-    if resolved is None:
-        pytest.skip(
-            "no reachable authoring engine; start `vaultspec serve` or set "
-            "VAULTSPEC_ENGINE_SERVICE_JSON"
-        )
-    return resolved
 
 
 async def _store_with_role_token(
@@ -133,8 +88,8 @@ def _state(thread_id: str, *bodies: str) -> TeamState:
 
 @pytest.mark.service
 @pytest.mark.asyncio
-async def test_submitter_produces_real_proposal(engine: tuple[str, str]) -> None:
-    base_url, bearer = engine
+async def test_submitter_produces_real_proposal(live_engine: EngineEndpoint) -> None:
+    base_url, bearer = live_engine.base_url, live_engine.bearer_token
     thread_id = f"p05s12-{uuid.uuid4().hex[:8]}"
     store = await _store_with_role_token(base_url, bearer, thread_id, _RESEARCH_ROLE)
     submitter = _submitter(base_url, store)
@@ -147,9 +102,11 @@ async def test_submitter_produces_real_proposal(engine: tuple[str, str]) -> None
 
 @pytest.mark.service
 @pytest.mark.asyncio
-async def test_replay_and_restart_return_same_proposal(engine: tuple[str, str]) -> None:
+async def test_replay_and_restart_return_same_proposal(
+    live_engine: EngineEndpoint,
+) -> None:
     """Replay and a simulated restart dedupe to the same proposal (no duplicate)."""
-    base_url, bearer = engine
+    base_url, bearer = live_engine.base_url, live_engine.bearer_token
     thread_id = f"p05s12-{uuid.uuid4().hex[:8]}"
     store = await _store_with_role_token(base_url, bearer, thread_id, _RESEARCH_ROLE)
     state = _state(thread_id, "# Research\n\nReplay-exact body.")
@@ -165,9 +122,9 @@ async def test_replay_and_restart_return_same_proposal(engine: tuple[str, str]) 
 
 @pytest.mark.service
 @pytest.mark.asyncio
-async def test_session_reused_across_calls(engine: tuple[str, str]) -> None:
+async def test_session_reused_across_calls(live_engine: EngineEndpoint) -> None:
     """The constant create_session key resumes ONE session across calls."""
-    base_url, bearer = engine
+    base_url, bearer = live_engine.base_url, live_engine.bearer_token
     thread_id = f"p05s12-{uuid.uuid4().hex[:8]}"
     store = await _store_with_role_token(base_url, bearer, thread_id, _RESEARCH_ROLE)
     actor_token = store.actor_token(thread_id, _RESEARCH_ROLE)
@@ -190,9 +147,11 @@ async def test_session_reused_across_calls(engine: tuple[str, str]) -> None:
 
 @pytest.mark.service
 @pytest.mark.asyncio
-async def test_revision_cycle_advances_to_new_proposal(engine: tuple[str, str]) -> None:
+async def test_revision_cycle_advances_to_new_proposal(
+    live_engine: EngineEndpoint,
+) -> None:
     """A request-changes revision (a second author pass) is a distinct proposal."""
-    base_url, bearer = engine
+    base_url, bearer = live_engine.base_url, live_engine.bearer_token
     thread_id = f"p05s12-{uuid.uuid4().hex[:8]}"
     store = await _store_with_role_token(base_url, bearer, thread_id, _RESEARCH_ROLE)
     submitter = _submitter(base_url, store)

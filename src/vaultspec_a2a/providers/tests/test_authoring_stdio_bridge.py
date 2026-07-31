@@ -13,13 +13,10 @@ Set ``VAULTSPEC_ENGINE_SERVICE_JSON`` to the engine's discovery file.
 
 from __future__ import annotations
 
-import json
 import os
 import sys
-import time
-from pathlib import Path
+from typing import TYPE_CHECKING
 
-import httpx
 import pytest
 import pytest_asyncio
 from mcp import ClientSession
@@ -37,55 +34,16 @@ from ...protocols.mcp.authoring_stdio import (
 )
 from .._acp_authoring import AUTHORING_MCP_SERVER_NAME
 
-_STALE_MS = 120_000
+if TYPE_CHECKING:
+    from ...authoring.discovery import EngineEndpoint
+
 _STDIO_MODULE = "vaultspec_a2a.protocols.mcp.authoring_stdio"
 
 
-def _resolve_engine() -> tuple[str, str] | None:
-    """Resolve a live engine (base_url, bearer) via the discovery contract."""
-    now_ms = int(time.time() * 1000)
-    candidates: list[Path] = []
-    env_path = os.environ.get("VAULTSPEC_ENGINE_SERVICE_JSON")
-    if env_path:
-        candidates.append(Path(env_path))
-    candidates.append(Path.home() / ".vaultspec" / "service.json")
-    for path in candidates:
-        try:
-            info = json.loads(path.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
-            continue
-        heartbeat = info.get("last_heartbeat")
-        if isinstance(heartbeat, (int, float)) and now_ms - heartbeat > _STALE_MS:
-            continue
-        port = info.get("port")
-        token = info.get("service_token")
-        if not isinstance(port, int) or not isinstance(token, str):
-            continue
-        base_url = f"http://127.0.0.1:{port}"
-        try:
-            resp = httpx.get(f"{base_url}/health", timeout=3.0)
-        except httpx.HTTPError:
-            continue
-        if resp.status_code == 200:
-            return base_url, token
-    return None
-
-
-@pytest.fixture(scope="module")
-def engine() -> tuple[str, str]:
-    resolved = _resolve_engine()
-    if resolved is None:
-        pytest.skip(
-            "no reachable authoring engine; start `vaultspec serve` per the "
-            "runbook or set VAULTSPEC_ENGINE_SERVICE_JSON"
-        )
-    return resolved
-
-
 @pytest_asyncio.fixture
-async def run_context(engine: tuple[str, str]):
+async def run_context(live_engine: EngineEndpoint):
     """Mint an actor token and open a real run, yielding the bridge env."""
-    base_url, bearer = engine
+    base_url, bearer = live_engine.base_url, live_engine.bearer_token
     async with AuthoringClient(base_url, bearer) as client:
         minted = await mint_actor_token(
             client, actor_id="agent:stdio-bridge-test", kind="agent"

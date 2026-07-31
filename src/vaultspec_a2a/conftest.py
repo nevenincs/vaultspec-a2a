@@ -18,6 +18,8 @@ import pytest
 if TYPE_CHECKING:
     from collections.abc import Callable
 
+    from .authoring.discovery import EngineEndpoint
+
 # Suppress OTel metric exporter noise during tests.  The trace SDK stays
 # active so span-creation tests work.  The metric reader's periodic export
 # would otherwise hit localhost:4317 and log UNAVAILABLE errors.
@@ -255,6 +257,28 @@ def external_prerequisite() -> ExternalPrerequisiteRule:
     Session-scoped so session-scoped stack fixtures can depend on it.
     """
     return ExternalPrerequisiteRule()
+
+
+@pytest.fixture(scope="session")
+def live_engine(external_prerequisite: ExternalPrerequisiteRule) -> EngineEndpoint:
+    """The reachable loopback engine, resolved by the production resolver.
+
+    Every live-proof suite attaches through the same code path the worker uses
+    (``authoring.discovery.resolve_engine``), so a record production would
+    refuse - stale, non-finite or unparseable heartbeat, malformed port,
+    secret-free versioned desktop shape - never licenses a test run either.
+    An absent engine reports through the one external-prerequisite rule above:
+    a skip naming the runbook line, or a failure when the caller guaranteed
+    ``loopback-stack`` is present.
+    """
+    from .authoring.discovery import resolve_engine
+
+    endpoint = resolve_engine()
+    if endpoint is None:
+        external_prerequisite.absent(
+            "loopback-stack", "no discovery record resolved to a healthy engine"
+        )
+    return endpoint
 
 
 def pytest_addoption(parser: pytest.Parser) -> None:

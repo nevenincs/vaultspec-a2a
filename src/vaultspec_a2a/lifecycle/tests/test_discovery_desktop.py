@@ -16,6 +16,7 @@ import threading
 import time
 from typing import TYPE_CHECKING
 
+from ...authoring.discovery import HEARTBEAT_STALE_MS
 from ...lifecycle.discovery import (
     DESKTOP_DISCOVERY_VERSION,
     DesktopDiscoveryState,
@@ -27,8 +28,6 @@ from ...lifecycle.discovery import (
 
 if TYPE_CHECKING:
     from pathlib import Path
-
-_STALE_MS = 120_000
 
 
 def test_round_trip_preserves_every_field(tmp_path: Path) -> None:
@@ -110,7 +109,7 @@ def test_classification_fresh_stale_absent_malformed(tmp_path: Path) -> None:
     assert state is DesktopDiscoveryState.FRESH
     assert record is not None and record.port == 8125
 
-    old = int(time.time() * 1000) - _STALE_MS - 5_000
+    old = int(time.time() * 1000) - HEARTBEAT_STALE_MS - 5_000
     write_desktop_discovery(path, generation="g", port=8125, owner="alice", now_ms=old)
     assert classify_desktop_discovery(path)[0] is DesktopDiscoveryState.STALE
 

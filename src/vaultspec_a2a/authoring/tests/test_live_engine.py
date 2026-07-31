@@ -17,14 +17,9 @@ key returns the same receipt.
 
 from __future__ import annotations
 
-import json
-import os
-import time
 import uuid
-from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-import httpx
 import pytest
 import pytest_asyncio
 
@@ -33,7 +28,9 @@ from .._envelope import AuthoringResponse
 from .._errors import AuthoringError, AuthoringTransportError
 from ..catalog import CATALOG_SCHEMA_VERSION, execute_agent_tool, fetch_catalog
 
-_STALE_MS = 120_000
+if TYPE_CHECKING:
+    from ..discovery import EngineEndpoint
+
 _EXPECTED_TOOL_NAMES = {
     "read_context",
     "search_graph",
@@ -45,55 +42,11 @@ _EXPECTED_TOOL_NAMES = {
 }
 
 
-def _service_json_candidates() -> list[Path]:
-    candidates: list[Path] = []
-    env_path = os.environ.get("VAULTSPEC_ENGINE_SERVICE_JSON")
-    if env_path:
-        candidates.append(Path(env_path))
-    candidates.append(Path.home() / ".vaultspec" / "service.json")
-    return candidates
-
-
-def _resolve_engine() -> tuple[str, str] | None:
-    """Resolve a live engine (base_url, bearer) via the discovery contract."""
-    now_ms = int(time.time() * 1000)
-    for path in _service_json_candidates():
-        try:
-            info = json.loads(path.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
-            continue
-        heartbeat = info.get("last_heartbeat")
-        if isinstance(heartbeat, (int, float)) and now_ms - heartbeat > _STALE_MS:
-            continue
-        port = info.get("port")
-        token = info.get("service_token")
-        if not isinstance(port, int) or not isinstance(token, str):
-            continue
-        base_url = f"http://127.0.0.1:{port}"
-        try:
-            resp = httpx.get(f"{base_url}/health", timeout=3.0)
-        except httpx.HTTPError:
-            continue
-        if resp.status_code == 200:
-            return base_url, token
-    return None
-
-
-@pytest.fixture(scope="module")
-def engine() -> tuple[str, str]:
-    resolved = _resolve_engine()
-    if resolved is None:
-        pytest.skip(
-            "no reachable authoring engine; start `vaultspec serve` per the "
-            "runbook or set VAULTSPEC_ENGINE_SERVICE_JSON"
-        )
-    return resolved
-
-
 @pytest_asyncio.fixture
-async def client(engine: tuple[str, str]):
-    base_url, bearer = engine
-    async with AuthoringClient(base_url, bearer) as authoring_client:
+async def client(live_engine: EngineEndpoint):
+    async with AuthoringClient(
+        live_engine.base_url, live_engine.bearer_token
+    ) as authoring_client:
         yield authoring_client
 
 

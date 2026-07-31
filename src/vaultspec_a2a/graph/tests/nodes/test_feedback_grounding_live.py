@@ -17,12 +17,8 @@ file.
 
 from __future__ import annotations
 
-import json
-import os
-import time
 import uuid
-from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import httpx
 import pytest
@@ -36,37 +32,10 @@ from ....graph.nodes.worker import create_worker_node
 from ....thread.actor_tokens import ActorTokenBundle
 from ....worker.token_store import RunTokenStore
 
-_STALE_MS = 120_000
+if TYPE_CHECKING:
+    from ....authoring.discovery import EngineEndpoint
+
 _SYNTHESIST = "vaultspec-synthesist"
-
-
-def _resolve_engine() -> tuple[str, str] | None:
-    """Resolve a live engine (base_url, bearer) via the discovery contract."""
-    now_ms = int(time.time() * 1000)
-    candidates: list[Path] = []
-    env_path = os.environ.get("VAULTSPEC_ENGINE_SERVICE_JSON")
-    if env_path:
-        candidates.append(Path(env_path))
-    candidates.append(Path.home() / ".vaultspec" / "service.json")
-    for path in candidates:
-        try:
-            info = json.loads(path.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
-            continue
-        heartbeat = info.get("last_heartbeat")
-        if isinstance(heartbeat, (int, float)) and now_ms - heartbeat > _STALE_MS:
-            continue
-        port, token = info.get("port"), info.get("service_token")
-        if not isinstance(port, int) or not isinstance(token, str):
-            continue
-        base_url = f"http://127.0.0.1:{port}"
-        try:
-            resp = httpx.get(f"{base_url}/health", timeout=3.0)
-        except httpx.HTTPError:
-            continue
-        if resp.status_code == 200:
-            return base_url, token
-    return None
 
 
 class _RecordingModel(BaseChatModel):
@@ -104,17 +73,6 @@ class _RecordingModel(BaseChatModel):
         )
 
 
-@pytest.fixture(scope="module")
-def engine() -> tuple[str, str]:
-    resolved = _resolve_engine()
-    if resolved is None:
-        pytest.skip(
-            "no reachable authoring engine; start `vaultspec serve` or set "
-            "VAULTSPEC_ENGINE_SERVICE_JSON"
-        )
-    return resolved
-
-
 def _post(base: str, path: str, bearer: str, actor: str | None, body: dict) -> dict:
     headers = {"Authorization": f"Bearer {bearer}", "content-type": "application/json"}
     if actor is not None:
@@ -127,9 +85,9 @@ def _post(base: str, path: str, bearer: str, actor: str | None, body: dict) -> d
 @pytest.mark.service
 @pytest.mark.asyncio
 async def test_synthesist_node_grounds_on_a_real_feedback_batch(
-    engine: tuple[str, str],
+    live_engine: EngineEndpoint,
 ) -> None:
-    base, bearer = engine
+    base, bearer = live_engine.base_url, live_engine.bearer_token
     run_id = f"s14-{uuid.uuid4().hex[:8]}"
 
     # Mint a real synthesist actor token and open a session.
@@ -229,10 +187,10 @@ async def test_synthesist_node_grounds_on_a_real_feedback_batch(
 @pytest.mark.service
 @pytest.mark.asyncio
 async def test_synthesist_node_ungrounded_without_a_batch(
-    engine: tuple[str, str],
+    live_engine: EngineEndpoint,
 ) -> None:
     """No feedback_batch_id in state -> no grounding block (zero behaviour change)."""
-    base, _bearer = engine
+    base = live_engine.base_url
     token_store = RunTokenStore()
     reader = FeedbackContextReader(
         engine_base_url=base, token_store=token_store, read_role=_SYNTHESIST

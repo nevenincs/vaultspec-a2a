@@ -12,13 +12,16 @@ import hashlib
 import json
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
-from ..graph.enums import PermissionType
+from ..graph.enums import AgentLifecycleState, Model, PermissionType, Provider
 from .enums import RepairStatus, ThreadStatus
 from .models import PlanEntry
+
+if TYPE_CHECKING:
+    from collections.abc import Mapping
 
 __all__ = [
     "CHECKPOINT_ERROR_REPAIR_MAP",
@@ -35,8 +38,11 @@ __all__ = [
     "ProjectedInterrupt",
     "ThreadStateData",
     "ToolCallData",
+    "build_agent_descriptor",
     "classify_message_role",
     "classify_permission_pause_reason",
+    "coerce_model",
+    "coerce_provider",
     "derive_message_id",
     "extract_message_timestamp",
     "finalize_snapshot_replay_status",
@@ -231,13 +237,20 @@ class PermissionData:
 
 @dataclass(slots=True)
 class AgentData:
-    """Layer 1 equivalent of ``_AgentSnapshot``."""
+    """Canonical agent descriptor.
+
+    Single declaration behind every agent-shaped surface: the REST team-status
+    entry, the ``team_status`` broadcast summary, and the thread snapshot all
+    project from this type rather than redeclaring the field set. ``state``,
+    ``provider``, and ``model`` carry the real enums so an unknown value cannot
+    survive as an arbitrary string all the way to the wire.
+    """
 
     agent_id: str
     node_name: str
-    state: str
-    provider: str | None = None
-    model: str | None = None
+    state: AgentLifecycleState
+    provider: Provider | None = None
+    model: Model | None = None
     role: str = ""
     display_name: str = ""
     description: str = ""
@@ -297,6 +310,54 @@ class ThreadStateData:
 # ---------------------------------------------------------------------------
 # Pure projection helpers
 # ---------------------------------------------------------------------------
+
+
+def coerce_provider(value: object) -> Provider | None:
+    """Coerce a node-metadata value to a :class:`Provider`, else ``None``.
+
+    Node metadata is a flat string map, so an agent whose provider was never
+    resolved arrives as an empty string or not at all.  Both that case and an
+    unrecognised value read as "unknown" rather than reaching the wire as a
+    fabricated enum member.
+    """
+    if isinstance(value, Provider):
+        return value
+    try:
+        return Provider(value)
+    except ValueError:
+        return None
+
+
+def coerce_model(value: object) -> Model | None:
+    """Coerce a node-metadata value to a :class:`Model` capability, else ``None``."""
+    if isinstance(value, Model):
+        return value
+    try:
+        return Model(value)
+    except ValueError:
+        return None
+
+
+def build_agent_descriptor(
+    summary: Mapping[str, str],
+    state: AgentLifecycleState,
+) -> AgentData:
+    """Project one aggregator node summary onto the canonical descriptor.
+
+    The single seam shared by every agent-listing surface, so a field carried on
+    :class:`AgentData` reaches the REST route, the thread snapshot, and the
+    broadcast together instead of being wired one caller at a time.
+    """
+    return AgentData(
+        agent_id=summary.get("agent_id") or summary.get("node_name", ""),
+        node_name=summary.get("node_name", ""),
+        state=state,
+        provider=coerce_provider(summary.get("provider")),
+        model=coerce_model(summary.get("model")),
+        role=summary.get("role", ""),
+        display_name=summary.get("display_name", ""),
+        description=summary.get("description", ""),
+    )
 
 
 def _parse_checkpoint_created_at(value: object) -> datetime | None:

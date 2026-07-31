@@ -16,6 +16,7 @@ from ..database import get_pending_permission_requests
 from ..database.models import ThreadModel
 from ..graph.enums import AgentLifecycleState
 from ..thread.enums import TERMINAL_STATUSES, RepairStatus
+from ..thread.snapshots import AgentData, build_agent_descriptor
 from .permission_options import extract_allowed_option_ids
 
 if TYPE_CHECKING:
@@ -32,18 +33,6 @@ def _has_valid_permission_options(raw_options_json: str | None) -> bool:
 
 
 @dataclass(frozen=True, slots=True)
-class AgentInfo:
-    """Protocol-agnostic agent summary."""
-
-    agent_id: str
-    node_name: str
-    state: AgentLifecycleState
-    role: str = ""
-    display_name: str = ""
-    description: str = ""
-
-
-@dataclass(frozen=True, slots=True)
 class PendingPermissionInfo:
     """Protocol-agnostic pending permission."""
 
@@ -57,7 +46,7 @@ class PendingPermissionInfo:
 class TeamStatus:
     """Assembled team status returned by :func:`build_team_status`."""
 
-    agents: list[AgentInfo] = field(default_factory=list)
+    agents: list[AgentData] = field(default_factory=list)
     active_threads: list[str] = field(default_factory=list)
     pending_permissions: list[PendingPermissionInfo] = field(default_factory=list)
 
@@ -128,13 +117,9 @@ async def build_team_status(
     agent_states = aggregator.get_agent_states()
 
     agents = [
-        AgentInfo(
-            agent_id=s["agent_id"],
-            node_name=s["node_name"],
-            state=agent_states.get(s["agent_id"], AgentLifecycleState.IDLE),
-            role=s.get("role", ""),
-            display_name=s.get("display_name", ""),
-            description=s.get("description", ""),
+        build_agent_descriptor(
+            s,
+            agent_states.get(s["agent_id"], AgentLifecycleState.IDLE),
         )
         for s in node_summaries
     ]

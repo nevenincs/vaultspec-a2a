@@ -517,6 +517,8 @@ class EventEmitters:
             data.setdefault("role", node_meta.get("role", ""))
             data.setdefault("display_name", node_meta.get("display_name", ""))
             data.setdefault("description", node_meta.get("description", ""))
+            data.setdefault("provider", node_meta.get("provider", ""))
+            data.setdefault("model", node_meta.get("model", ""))
             if hasattr(data.get("state"), "value"):
                 data["state"] = data["state"].value
             agent_summaries.append(
@@ -620,6 +622,8 @@ class EventEmitters:
                         "role": str(meta.get("role", "")),
                         "display_name": str(meta.get("display_name", "")),
                         "description": str(meta.get("description", "")),
+                        "provider": str(meta.get("provider", "")),
+                        "model": str(meta.get("model", "")),
                     }
                     for name, meta in nodes.items()
                     if isinstance(meta, dict)

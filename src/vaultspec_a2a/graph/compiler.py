@@ -125,12 +125,16 @@ def _resolve_model_for_worker(
     *,
     provider_factory: ProviderFactoryProtocol,
     frozen_assignment: dict[str, dict[str, Any]] | None = None,
-) -> BaseChatModel:
+) -> tuple[BaseChatModel, Provider, Model | None]:
     """Resolve provider + capability following the standard precedence.
 
     When a ``frozen_assignment`` names this worker, its provider/capability/
     fallback are used verbatim (model-profiles: restart reproduces the exact
     launched models, never a re-resolution against possibly-drifted config).
+
+    Returns the model together with the provider that actually produced it and
+    the requested capability, so callers can record the assignment without
+    re-deriving it.
     """
     factory = provider_factory
     primary_provider, capability, fallback_chain = _resolve_worker_model_preferences(
@@ -156,7 +160,13 @@ def _resolve_model_for_worker(
                 p.value,
                 capability.value if capability else "default",
             )
-            return model
+            # ``p``, not ``primary_provider``: when the primary is unavailable
+            # this loop falls through to a fallback, and everything downstream
+            # (node metadata, /team/status, the dashboard) must name the
+            # provider the run is actually using.  Reporting the configured
+            # primary would be worse than reporting nothing — a null reads as
+            # unknown, a confidently wrong provider reads as fact.
+            return model, p, capability
         except ValueError as exc:
             logger.warning(
                 "Provider %s unavailable for worker %s: %s",
@@ -235,8 +245,12 @@ def _resolve_supervisor_model(
     *,
     provider_factory: ProviderFactoryProtocol,
     supervisor_agent_config: Any | None = None,
-) -> BaseChatModel:
-    """Resolve the supervisor model from team config."""
+) -> tuple[BaseChatModel, Provider, Model]:
+    """Resolve the supervisor model from team config.
+
+    Returns the model with its provider and capability, matching
+    :func:`_resolve_model_for_worker` so both feed :func:`_agent_node_metadata`.
+    """
     factory = provider_factory
     provider: Provider = (
         team_config.supervisor.provider
@@ -244,12 +258,45 @@ def _resolve_supervisor_model(
         or Provider.CLAUDE
     )
     capability: Model = team_config.supervisor.capability or Model.MAX
-    return factory.create(
+    model = factory.create(
         provider,
         model=capability,
         agent_config=supervisor_agent_config,
         workspace_root=workspace_root,
     )
+    return model, provider, capability
+
+
+def _model_assignment_metadata(
+    provider: Provider,
+    capability: Model | None,
+) -> dict[str, str]:
+    """Render a resolved model assignment as node metadata.
+
+    The control surface reads node metadata to answer ``/team/status`` and the
+    ``team_status`` broadcast, so this is where a compiled agent's assignment
+    becomes observable.  An unset capability is rendered as the empty string —
+    the metadata map is flat strings, and consumers read empty as "unknown"
+    rather than inventing a default.
+    """
+    return {
+        "provider": provider.value,
+        "model": capability.value if capability is not None else "",
+    }
+
+
+def _agent_node_metadata(
+    agent_config: Any,
+    provider: Provider,
+    capability: Model | None,
+) -> dict[str, str]:
+    """Build the full node metadata for a compiled worker node."""
+    return {
+        "display_name": agent_config.display_name,
+        "role": agent_config.role,
+        "description": agent_config.description.strip(),
+        **_model_assignment_metadata(provider, capability),
+    }
 
 
 def _wire_diverge_stage(
@@ -495,12 +542,13 @@ def _compile_star(
     worker_ids: list[str] = [w.agent_id for w in team_config.workers]
     resolved_agents = [agent_configs[wid] for wid in worker_ids if wid in agent_configs]
 
-    supervisor_model = _resolve_supervisor_model(
+    supervisor_model, sv_provider, sv_capability = _resolve_supervisor_model(
         team_config,
         workspace_root,
         provider_factory=provider_factory,
         supervisor_agent_config=supervisor_agent_config,
     )
+    sv_assignment = _model_assignment_metadata(sv_provider, sv_capability)
 
     if supervisor_agent_config is not None:
         supervisor_prompt = _build_supervisor_prompt(
@@ -516,6 +564,7 @@ def _compile_star(
             "display_name": sv_display_name,
             "role": "supervisor",
             "description": supervisor_agent_config.description.strip(),
+            **sv_assignment,
         }
     else:
         _fallback_base = (
@@ -534,6 +583,7 @@ def _compile_star(
             "display_name": "Supervisor",
             "role": "supervisor",
             "description": "Routes tasks to the appropriate specialist.",
+            **sv_assignment,
         }
 
     # Derive worker_phase_map from agent roles for phase prerequisite gates.
@@ -565,7 +615,7 @@ def _compile_star(
                 f"Ensure the agent TOML exists and is loaded."
             )
         agent_cfg = agent_configs[worker_ref.agent_id]
-        model = _resolve_model_for_worker(
+        model, used_provider, capability = _resolve_model_for_worker(
             worker_ref,
             agent_cfg,
             team_config,
@@ -587,11 +637,7 @@ def _compile_star(
         builder.add_node(
             agent_cfg.id,
             worker_node,
-            metadata={
-                "display_name": agent_cfg.display_name,
-                "role": agent_cfg.role,
-                "description": agent_cfg.description.strip(),
-            },
+            metadata=_agent_node_metadata(agent_cfg, used_provider, capability),
             retry_policy=_NODE_RETRY_POLICY,
         )
         builder.add_edge(agent_cfg.id, "supervisor")
@@ -703,7 +749,7 @@ def _compile_pipeline(
                 f"Pipeline node {agent_id!r} has no matching WorkerRef in "
                 f"team {team_config.id!r}."
             )
-        model = _resolve_model_for_worker(
+        model, used_provider, capability = _resolve_model_for_worker(
             worker_ref,
             agent_cfg,
             team_config,
@@ -729,11 +775,7 @@ def _compile_pipeline(
         builder.add_node(
             agent_cfg.id,
             worker_node,
-            metadata={
-                "display_name": agent_cfg.display_name,
-                "role": agent_cfg.role,
-                "description": agent_cfg.description.strip(),
-            },
+            metadata=_agent_node_metadata(agent_cfg, used_provider, capability),
             retry_policy=_NODE_RETRY_POLICY,
         )
         builder.add_edge(mount_id, agent_cfg.id)
@@ -890,7 +932,7 @@ def _compile_pipeline_loop(
                 f"Pipeline-loop node {agent_id!r} has no matching WorkerRef in "
                 f"team {team_config.id!r}."
             )
-        model = _resolve_model_for_worker(
+        model, used_provider, capability = _resolve_model_for_worker(
             worker_ref,
             agent_cfg,
             team_config,
@@ -919,11 +961,7 @@ def _compile_pipeline_loop(
         builder.add_node(
             agent_cfg.id,
             worker_node,
-            metadata={
-                "display_name": agent_cfg.display_name,
-                "role": agent_cfg.role,
-                "description": agent_cfg.description.strip(),
-            },
+            metadata=_agent_node_metadata(agent_cfg, used_provider, capability),
             retry_policy=_NODE_RETRY_POLICY,
         )
         builder.add_edge(mount_id, agent_cfg.id)
@@ -1006,7 +1044,7 @@ def _resolve_research_adr_models(
 
     models: dict[str, BaseChatModel] = {}
     for role in DOCUMENT_AUTHORING_ROLES:
-        models[role] = _resolve_model_for_worker(
+        models[role], _provider, _capability = _resolve_model_for_worker(
             ref_by_role[role],
             cfg_by_role[role],
             team_config,

@@ -7,6 +7,7 @@ from datetime import UTC, datetime
 
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
+from ...graph.enums import AgentLifecycleState, Model, Provider
 from ..models import PlanEntry
 from ..snapshots import (
     PLAN_APPROVAL_PAUSE_CAUSES,
@@ -19,6 +20,7 @@ from ..snapshots import (
     PermissionOptionData,
     ThreadStateData,
     ToolCallData,
+    build_agent_descriptor,
     classify_message_role,
     classify_permission_pause_reason,
     derive_message_id,
@@ -358,11 +360,55 @@ def test_agent_data_round_trip() -> None:
     data = AgentData(
         agent_id="agent-1",
         node_name="supervisor",
-        state="idle",
+        state=AgentLifecycleState.IDLE,
+        provider=Provider.CLAUDE,
+        model=Model.HIGH,
         role="manager",
     )
     pydantic_obj = _AgentSnapshot.model_validate(asdict(data))
     assert pydantic_obj.agent_id == "agent-1"
+    # The descriptor is the wire model's only source, so an added field must
+    # survive the asdict projection rather than falling back to its default.
+    assert pydantic_obj.provider is Provider.CLAUDE
+    assert pydantic_obj.model is Model.HIGH
+
+
+def test_build_agent_descriptor_reads_provider_and_model_from_node_metadata() -> None:
+    """The shared projection seam carries the resolved model assignment."""
+    descriptor = build_agent_descriptor(
+        {
+            "agent_id": "coder",
+            "node_name": "coder",
+            "provider": "zai",
+            "model": "high",
+            "role": "implementer",
+            "display_name": "Coder",
+            "description": "Writes code.",
+        },
+        AgentLifecycleState.WORKING,
+    )
+    assert descriptor.provider is Provider.ZAI
+    assert descriptor.model is Model.HIGH
+    assert descriptor.state is AgentLifecycleState.WORKING
+
+
+def test_build_agent_descriptor_leaves_unresolved_assignment_unknown() -> None:
+    """An agent observed before its model resolves reports None, not a guess."""
+    descriptor = build_agent_descriptor(
+        {"agent_id": "planner", "node_name": "planner", "provider": "", "model": ""},
+        AgentLifecycleState.SUBMITTED,
+    )
+    assert descriptor.provider is None
+    assert descriptor.model is None
+
+
+def test_build_agent_descriptor_rejects_an_unrecognised_provider() -> None:
+    """Config drift must not smuggle an arbitrary string onto the wire enum."""
+    descriptor = build_agent_descriptor(
+        {"agent_id": "x", "node_name": "x", "provider": "not-a-provider"},
+        AgentLifecycleState.IDLE,
+    )
+    assert descriptor.provider is None
 
 
 def test_execution_task_data_round_trip() -> None:

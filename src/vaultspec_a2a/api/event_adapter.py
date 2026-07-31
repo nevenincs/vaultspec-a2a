@@ -26,6 +26,7 @@ from ..graph.events import (
     ToolCallUpdate,
 )
 from ..streaming.sse_frames import enforce_progress_allowlist
+from ..thread.snapshots import coerce_model, coerce_provider
 
 if TYPE_CHECKING:
     from ..streaming.aggregator import SequencedEvent
@@ -231,6 +232,8 @@ def domain_to_wire(event: DomainEvent, sequence: int) -> ServerEvent:
                     agent_id=a.get("agent_id", ""),
                     node_name=a.get("node_name", ""),
                     state=AgentLifecycleState(a.get("state", "idle")),
+                    provider=coerce_provider(a.get("provider")),
+                    model=coerce_model(a.get("model")),
                     role=a.get("role", ""),
                     display_name=a.get("display_name", ""),
                     description=a.get("description", ""),

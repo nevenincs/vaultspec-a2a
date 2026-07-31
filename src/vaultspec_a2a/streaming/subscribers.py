@@ -211,6 +211,8 @@ class SubscriberManager:
                     "role": str(meta.get("role", "")),
                     "display_name": str(meta.get("display_name", "")),
                     "description": str(meta.get("description", "")),
+                    "provider": str(meta.get("provider", "")),
+                    "model": str(meta.get("model", "")),
                 }
         logger.debug(
             "register_graph: cached metadata for %d nodes", len(self._node_metadata)

@@ -174,7 +174,10 @@ class ThreadListResponse(BaseModel):
 
 
 class AgentStatusEntry(BaseModel):
-    """Agent status within a team status response."""
+    """Wire projection of the canonical agent descriptor for ``/team/status``.
+
+    Mirrors ``thread.snapshots.AgentData``.
+    """
 
     agent_id: str
     node_name: str

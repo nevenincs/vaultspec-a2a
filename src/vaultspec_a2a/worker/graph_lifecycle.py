@@ -91,7 +91,11 @@ def assert_armed_lanes_authenticated(
         if agent_config is None:
             continue
         try:
-            model = _resolve_model_for_worker(
+            # The gate deliberately keeps reading the provider off the model
+            # instance below rather than taking the resolved one: it asks what
+            # the constructed model will actually talk to, and a model that
+            # exposes no provider is out of scope for the isolation lanes.
+            model, _resolved_provider, _capability = _resolve_model_for_worker(
                 worker_ref,
                 agent_config,
                 team_config,
@@ -276,6 +280,8 @@ class GraphLifecycleManager:
                     "role": str(meta.get("role", "")),
                     "display_name": str(meta.get("display_name", "")),
                     "description": str(meta.get("description", "")),
+                    "provider": str(meta.get("provider", "")),
+                    "model": str(meta.get("model", "")),
                 }
         if nodes:
             await self._bridge.send_event(

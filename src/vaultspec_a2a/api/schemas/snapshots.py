@@ -78,7 +78,10 @@ class _PermissionOptionSnapshot(BaseModel):
 
 
 class _AgentSnapshot(BaseModel):
-    """Agent state within a thread snapshot."""
+    """Wire projection of the canonical agent descriptor within a snapshot.
+
+    Mirrors ``thread.snapshots.AgentData``.
+    """
 
     agent_id: str
     node_name: str

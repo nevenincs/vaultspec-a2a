@@ -99,16 +99,18 @@ class PermissionOption(BaseModel):
 
 
 class AgentSummary(BaseModel):
-    """Lightweight agent descriptor for team status broadcasts."""
+    """Wire projection of the canonical agent descriptor for team broadcasts.
+
+    Mirrors ``thread.snapshots.AgentData``, which is the one place the field set
+    is decided; provider/model stay optional because an agent can be observed
+    before its model assignment resolves.
+    """
 
     agent_id: str
     node_name: str
     state: AgentLifecycleState
-    # provider/model may be unknown at early lifecycle states (e.g. SUBMITTED)
-    # — keep consistent with AgentStatusEntry in rest.py
     provider: Provider | None = None
     model: Model | None = None
-    # metadata extracted from compiled_graph.nodes[node_name].metadata
     role: str = ""
     display_name: str = ""
     description: str = ""

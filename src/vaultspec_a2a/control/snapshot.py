@@ -18,6 +18,7 @@ from ..thread.snapshots import (
     MessageData,
     ThreadStateData,
     ToolCallData,
+    build_agent_descriptor,
     classify_message_role,
     derive_message_id,
     extract_message_timestamp,
@@ -77,13 +78,9 @@ def enrich_snapshot_from_state(
         for node in node_summaries:
             agent_id = node.get("agent_id", node.get("node_name", ""))
             agent_data.append(
-                AgentData(
-                    agent_id=agent_id,
-                    node_name=node.get("node_name", ""),
-                    state=str(agent_states.get(agent_id, AgentLifecycleState.IDLE)),
-                    role=node.get("role", ""),
-                    display_name=node.get("display_name", ""),
-                    description=node.get("description", ""),
+                build_agent_descriptor(
+                    node,
+                    agent_states.get(agent_id, AgentLifecycleState.IDLE),
                 )
             )
 

@@ -35,10 +35,23 @@ async def get_team_status_endpoint(
     status = await build_team_status(
         db=db, aggregator=aggregator, heartbeat_threads=heartbeat_threads
     )
-    from dataclasses import asdict
-
+    # Field names are spelled out rather than splatted from ``asdict``: a splat
+    # silently drops any descriptor field the wire model does not share, which
+    # is how provider/model previously reached the client as unconditional null.
     return TeamStatusResponse(
-        agents=[AgentStatusEntry(**asdict(a)) for a in status.agents],
+        agents=[
+            AgentStatusEntry(
+                agent_id=a.agent_id,
+                node_name=a.node_name,
+                state=a.state,
+                provider=a.provider,
+                model=a.model,
+                role=a.role,
+                display_name=a.display_name,
+                description=a.description,
+            )
+            for a in status.agents
+        ],
         active_threads=status.active_threads,
         pending_permissions=[
             PendingPermission(

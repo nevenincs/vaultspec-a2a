@@ -238,16 +238,29 @@ _TOOL_CALL_FIELDS: dict[str, _FieldSpec] = {
 }
 
 
-# The closed per-event catalog: every frame type the product emits, with the
-# fields that survive projection and their bounds. A field absent from an entry
-# (an artifact body, a tool-call content block, the free-form ``metadata`` dict
-# every envelope carries) is dropped by omission, and a frame type absent from
-# the catalog keeps only the always-safe identity keys.
+# The closed per-event catalog: every frame type that carries content to a
+# subscriber, with the fields that survive projection and their bounds. A field
+# absent from an entry (an artifact body, a tool-call content block, the
+# free-form ``metadata`` dict every envelope carries) is dropped by omission,
+# and a frame type absent from the catalog keeps only the always-safe identity
+# keys.
 #
-# ``execution_state_projection`` is deliberately absent. It is consumed at the
-# relay seam and never reaches a subscriber queue, so enumerating it would grant
-# its fields transit they should not have; if one ever leaks, the closed default
-# degrading it to identity keys is the correct outcome.
+# Two emitted types are deliberately absent, and their absence is the design
+# rather than an oversight - the entry below is the record of that, since a
+# reader finding an emitted type missing would otherwise reasonably read it as a
+# gap:
+#
+# ``execution_state_projection`` is consumed at the relay seam and never reaches
+# a subscriber queue, so enumerating it would grant its fields transit they
+# should not have; if one ever leaks, the closed default degrading it to
+# identity keys is the correct outcome.
+#
+# ``graph_registered`` does travel the relay, and does degrade to identity keys.
+# Its payload is consumed server-side by the aggregator BEFORE projection and
+# resurfaces through catalogued team-status fields, and no consumer reads the
+# frame itself, so the loss is equivalent rather than a regression. It is left
+# uncatalogued rather than enumerated because nothing on the subscriber side
+# needs it; that judgement should be revisited if a consumer ever does.
 _PROGRESS_CATALOG: dict[str, dict[str, _FieldSpec]] = {
     "message_chunk": {
         "content": _Text(MAX_PROGRESS_CONTENT_CHARS),

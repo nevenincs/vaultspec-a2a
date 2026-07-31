@@ -151,6 +151,39 @@ def test_the_engine_bearer_alone_does_not_change_the_fingerprint() -> None:
     )
 
 
+def test_every_top_level_request_field_is_consciously_classified() -> None:
+    """A field ADDED to the request must be classified, not silently folded in.
+
+    The test above catches a credential moving OUT of the bundle, because the
+    helper that builds one would stop constructing. It cannot catch the opposite
+    refactor - a second, top-level credential field added BESIDE the nested one -
+    which would fold a credential value straight back into the fingerprint with
+    every other assertion still green.
+
+    This closes that direction from the schema side rather than by guessing at
+    names: the full top-level field set is pinned, so ANY new field fails here
+    and has to be answered for. A field that describes the work belongs in the
+    fingerprint; one that identifies or authorizes the request instance belongs
+    in an exclusion set, and adding it there means minting a new replay rule
+    rather than editing an existing one. Either way the choice is made by a
+    person, which is the discipline the exclusion sets themselves are named for.
+    """
+    assert set(RunStartRequest.model_fields) == {
+        "stage",
+        "reservation_id",
+        "team_preset",
+        "message",
+        "actor_tokens",
+        "metadata",
+        "autonomous",
+        "title",
+        "feature_tag",
+        "run_id",
+        "profile_id",
+        "feedback_batch_id",
+    }
+
+
 def test_the_commit_binding_stays_credential_sensitive() -> None:
     """The staged commit binding is deliberately stricter and is unchanged.
 

@@ -797,9 +797,19 @@ def _persist_request_digest(metadata_json: str | None, digest: str) -> str:
 def _persisted_request_digest(metadata_json: str | None) -> str | None:
     """Read the creating request's digest, or ``None`` for a pre-existing run.
 
-    ``None`` means the run predates digest persistence rather than that its
-    request was empty, so the caller must treat it as unknown and fall back to
-    the narrower comparison instead of refusing a legitimate replay.
+    ``None`` means the digest is UNKNOWN, never that the request was empty, so
+    the caller falls back to the narrower comparison instead of refusing a
+    legitimate replay. Two runs reach that state, and both are expected: a run
+    created before digests were persisted, and a run whose id this service
+    minted, since the digest is stored only for a caller-supplied id.
+
+    The second case has a consequence worth naming. A caller can read a
+    server-minted id off the response and later present it as its own, and that
+    request is then compared on the frozen profile alone rather than on the whole
+    body. Closing it is not merely a matter of persisting the digest anyway: the
+    run id is itself a digested field, so the original request - which carried
+    none - and the later one that carries it would never match, and every such
+    replay would be refused instead. Narrowing here is the deliberate trade.
     """
     if not metadata_json:
         return None
@@ -878,8 +888,10 @@ def _replay_identity_or_conflict(
     existing_profile = _persisted_profile_id(metadata_json)
     if existing_profile is not None:
         _refuse_profile_mismatch(run_id, existing_profile, body)
-    # ``None`` means the run predates digest persistence, not that its request
-    # was empty; refusing on it would break a legitimate replay of an older run.
+    # ``None`` means the digest is unknown - an older run, or one whose id this
+    # service minted - not that the request was empty; refusing on it would
+    # break a legitimate replay. Such a request is compared on the frozen
+    # profile alone, which is narrower rather than absent.
     persisted_digest = _persisted_request_digest(metadata_json)
     if persisted_digest is not None and not replay_digest_matches(
         persisted_digest, body

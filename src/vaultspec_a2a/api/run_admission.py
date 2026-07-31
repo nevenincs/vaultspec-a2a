@@ -213,9 +213,15 @@ def replay_digest_matches(stored: str, body: RunStartRequest) -> bool:
     one - is not comparable at all and reports no match, so the caller refuses
     rather than answering with a run whose identity it cannot verify.
 
-    The comparison is constant-time, matching the commit path's treatment of the
-    same class of value, and compares bytes so a stored value that is somehow
-    not ASCII compares unequal rather than raising.
+    The DIGEST comparison is constant-time, matching the commit path's treatment
+    of the same class of value, and compares bytes so a stored value that is
+    somehow not ASCII compares unequal rather than raising. The rule marker
+    ahead of it is not: parsing it, and refusing an unrecognised one, both
+    return before the digests are ever compared. That is deliberate and not a
+    leak - the marker is a public, non-secret label naming which rule computed
+    the stored value, and it carries no material an attacker could learn by
+    timing. Stating it that way keeps the guarantee checkable against the code
+    rather than one notch stronger than it.
     """
     marker, separator, hex_digest = stored.partition(_RULE_MARKER_SEPARATOR)
     if not separator:

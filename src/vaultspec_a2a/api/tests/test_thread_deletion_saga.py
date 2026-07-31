@@ -57,7 +57,29 @@ def _detached_checkpoint_store(db_file: pathlib.Path) -> AsyncSqliteSaver:
             await saver.setup()
             return saver
 
-    return asyncio.run(_build())
+    saver = asyncio.run(_build())
+
+    async def _confirm_detached() -> str:
+        # Assert the premise rather than inferring it from the refusal sequence
+        # the callers observe. If a library change ever made this store usable
+        # again, those callers would see a clean deletion and assert the wrong
+        # outcome for a plausible-looking reason; failing here instead points at
+        # the cause. The delete must fail, and it must fail because the
+        # connection is gone rather than because the thread is unknown.
+        try:
+            await saver.adelete_thread("premise-probe")
+        except Exception as exc:
+            # The message IS the assertion; the caller checks it names the
+            # connection rather than a missing thread.
+            return str(exc)
+        return ""
+
+    reason = asyncio.run(_confirm_detached())
+    assert "connection" in reason.lower(), (
+        f"the detached store still served a delete ({reason!r}); the abandonment "
+        f"tests below would then prove nothing"
+    )
+    return saver
 
 
 class TestDeletionSagaEndpoint:

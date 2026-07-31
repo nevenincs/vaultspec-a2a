@@ -5,7 +5,7 @@ tags:
 date: '2026-07-31'
 modified: '2026-07-31'
 body_schema: 'body-v1'
-body_hash: 'sha256:38191822483e5ddc0976105223311f7e1bdeac0d2be5b3769608d45b108f8907'
+body_hash: 'sha256:9bce8e75a8b10ee8afaa78f98bbe69462fa0843ad84bad1db4046dca7a132ded'
 related:
   - "[[2026-07-19-codebase-health-audit]]"
   - "[[2026-07-19-codebase-health-plan]]"
@@ -341,7 +341,32 @@ timeouts. The two neighbouring WebSocket knobs were traced and are clean,
 single-consumer, and correctly scoped, which is what makes this one an outlier
 rather than a section-wide labelling issue.
 
-### process-containment-handle-leaks-when-the-spawn-call-itself-raises | medium | Three spawn sites release the OS containment on every failure except the spawn call raising
+### watchdog-dies-permanently-on-a-raised-spawn | high | Any non-cancellation exception ends the watchdog task, silently and permanently disabling worker auto-recovery
+
+The watchdog's main loop guards itself with a single handler for cancellation
+and nothing else. Its restart routine calls the spawn function inside a
+bounded retry loop with no exception handling of any kind, and the spawn
+function's own raw process construction is likewise unguarded. A raised
+exception - a bad worker command path, or a resource error such as the
+system refusing a new process under handle or process-table pressure -
+therefore propagates out of the restart routine, out of the poll tick, and out
+of the loop, ending the background task.
+
+Nothing restarts it. The attempt cap and exponential backoff that bound the
+ordinary failure case do not apply, because they bound only the path where the
+spawn function returns nothing; an exception leaves the loop entirely rather
+than continuing it. From that moment the gateway has no worker auto-recovery at
+all, and there is no error surface saying so - the task is simply gone. The
+failure is silent, permanent for the process lifetime, and most likely to fire
+in exactly the degraded conditions where automatic recovery matters most.
+
+This was found while investigating whether the containment leak below
+accumulates under watchdog retry. It does not, because the retry mechanism
+destroys itself on the first occurrence - which is the more serious defect of
+the two and is recorded separately here rather than folded into that finding's
+severity.
+
+### process-containment-handle-leaks-when-the-spawn-call-itself-raises | high | Three spawn sites release the OS containment on every failure except the spawn call raising, and one leaks without bound
 
 Three sites hand-implement the same protocol - create an operating-system
 containment, then spawn a process into it - and all three release the
@@ -365,14 +390,24 @@ terminal-create handler has an outer handler that converts the exception into a
 well-formed RPC error, but never touches the containment on the way out.
 
 Each occurrence leaks one job-object handle, reclaimed only when the owning
-gateway or worker process exits - not per request, run, or retry. The worker
-path sits behind automatic respawn, so a persistent misconfiguration or a
-resource-exhaustion condition that makes the spawn call fail leaks one more
-handle per retry in a long-lived process, compounding the exhaustion that
-triggered it. Rated medium rather than high because the trigger is narrower than
-the crash and timeout paths, which are all handled correctly; the accumulation
-claim under retry is inferred from the surrounding backoff structure rather than
-from reading the watchdog loop line by line.
+gateway or worker process exits - not per request, run, or retry.
+
+The accumulation path was investigated specifically, and it is not the one first
+supposed. The watchdog's retry loop does not compound the leak, because a raised
+spawn ends the watchdog task outright, as recorded above; that trigger
+self-limits at one occurrence. The genuinely unbounded path is the lazy spawner,
+which is entered on dispatch rather than by the watchdog and sits behind no
+circuit breaker at all. It creates the containment, calls the spawn, and only
+afterwards sets the flag its own re-entry guard tests. A raised spawn skips that
+assignment, so the flag stays false, the guard never engages, and every
+subsequent dispatch re-enters, creates a fresh containment, and leaks again for
+as long as the underlying condition persists.
+
+That makes the leak unbounded and driven by request rate, with no cap of any
+kind, which is what raises this to high. The compounding is real in the way
+originally suspected but through a different door: the condition most likely to
+make process creation fail is handle or process-table exhaustion, and each
+failed attempt consumes one more handle.
 
 ### queue-tool-permission-kinship-overstated | medium | A docstring claims a dispatch equivalence that does not hold, and a co-occurring tool call is dropped
 
@@ -664,10 +699,21 @@ importing the enum - on the grounds that redundant literals which all agree are
 not an observed divergence. That judgement is recorded so a stricter reading can
 revisit it rather than rediscover it.
 
+Two further items were closed rather than left inferred. The watchdog restart
+loop was read end to end, which corrected the containment leak's accumulation
+claim onto the right call site and surfaced the separate watchdog-death finding
+above; nothing in that finding now rests on inference. The HTTP-transport half
+of the ACP authoring binding was read in full and cleared: it is a
+value-agnostic formatter over a binding assembled entirely upstream, with no
+independent source for the bearer, actor token, or server URL, so it inherits
+the authoring-bearer gap rather than duplicating or bypassing it. Worth
+recording alongside that: the transport selector always takes the stdio branch
+in production, because the field that would select HTTP has no production
+constructor at all - an absence of a path rather than a second path that could
+diverge.
+
 Still unreached: five modules in the database layer covering the authoring
 cursor, checkpoint schema and storage, compatibility, and migration, which
-should be treated as unproven rather than cleared; the HTTP-transport half of
-the ACP authoring binding, where only the stdio path was read end to end; and
-the watchdog restart loop, which the containment-leak finding's accumulation
-claim infers from surrounding structure rather than direct reading - that claim
-should be read as inferred until someone reads the loop.
+should be treated as unproven rather than cleared; and the pairing helpers
+behind the worker ownership verdict, together with the circuit-breaker class
+itself, neither of which was opened during the watchdog pass.

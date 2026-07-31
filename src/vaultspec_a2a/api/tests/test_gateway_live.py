@@ -39,6 +39,115 @@ if TYPE_CHECKING:
 _PRESET = "mock-success-single"
 
 
+async def _seed_permission(session_factory, *, thread_id: str, request_id: str) -> None:
+    """Record a real pending permission request against a real run."""
+    from ...database.permission_repository import record_permission_request
+
+    async with session_factory() as session:
+        await record_permission_request(
+            session,
+            request_id=request_id,
+            thread_id=thread_id,
+            pause_reason_type="bash",
+            description="Allow action?",
+            allowed_options=[
+                {
+                    "option_id": "allow_once",
+                    "name": "Allow once",
+                    "kind": "allow_once",
+                }
+            ],
+            tool_call="bash",
+        )
+        await session.commit()
+
+
+@pytest.mark.asyncio(loop_scope="function")
+async def test_the_versioned_verb_answers_a_permission_and_refuses_a_foreign_one(
+    session_factory, checkpointer
+) -> None:
+    """The versioned surface can now accept the answer to what it asks.
+
+    ``permission_request`` is already an enumerated frame on run-stream, so the
+    question is versioned while the answer used to exist only on the transition
+    surface. This drives the answer over a real socket and pins three things: it
+    works, it is at-most-once, and it is scoped to the run that raised it.
+
+    The scoping case is the one that matters most. A request id names a request,
+    not a run, so without the check a caller holding one run's id could answer
+    another run's question. The refusal must also leave the request untouched -
+    proven by answering it afterwards for real, which would be impossible had
+    the refused attempt consumed it.
+    """
+    app, _agg, worker, _cp = make_app(session_factory, checkpointer)
+    async with (
+        _live_server(app) as base,
+        httpx.AsyncClient(base_url=base, timeout=10.0) as client,
+    ):
+
+        async def _start(message: str) -> str:
+            resp = await client.post(
+                "/v1/runs",
+                json={"team_preset": _PRESET, "message": message, "autonomous": True},
+            )
+            assert resp.status_code == 201
+            return resp.json()["run_id"]
+
+        owner = await _start("owns the permission")
+        stranger = await _start("owns nothing")
+        request_id = f"{owner}:req-live"
+        await _seed_permission(session_factory, thread_id=owner, request_id=request_id)
+
+        # Scoped: the stranger cannot answer the owner's question, and the
+        # refusal is a not-found rather than a leak that the id exists.
+        foreign = await client.post(
+            f"/v1/runs/{stranger}/permissions/{request_id}/respond",
+            json={"option_id": "allow_once"},
+        )
+        assert foreign.status_code == 404
+
+        worker.dispatches.clear()
+        first = await client.post(
+            f"/v1/runs/{owner}/permissions/{request_id}/respond",
+            json={"option_id": "allow_once"},
+        )
+        assert first.status_code == 200
+        body = first.json()
+        assert body["api_version"] == "v1"
+        assert body["run_id"] == owner
+        assert body["request_id"] == request_id
+        assert body["accepted"] is True
+        # The refused attempt consumed nothing: this answer was still taken.
+        # ``applied`` is false because this run is not parked awaiting the
+        # decision - the answer is recorded and a resume dispatched, but there
+        # was no paused execution for it to release. Asserted as observed rather
+        # than as expected: the load-bearing claim here is that the answer was
+        # accepted and dispatched exactly once, not that it unblocked anything.
+        assert body["action_status"] == "accepted_not_applied"
+        assert body["idempotency_key"]
+        assert len(worker.dispatches) == 1
+
+        # At-most-once: the same answer again reports the stored outcome and
+        # does not resume the run a second time.
+        resumes_after_first = len(worker.dispatches)
+        second = await client.post(
+            f"/v1/runs/{owner}/permissions/{request_id}/respond",
+            json={"option_id": "allow_once"},
+        )
+        assert second.status_code == 200
+        # Not merely "a success": the SAME stored outcome, down to the derived
+        # idempotency key. A second answer that re-derived anything differs here.
+        assert second.json() == body
+        assert len(worker.dispatches) == resumes_after_first
+
+        # An unknown request on a real run is not found rather than a 500.
+        unknown = await client.post(
+            f"/v1/runs/{owner}/permissions/{owner}:nope/respond",
+            json={"option_id": "allow_once"},
+        )
+        assert unknown.status_code == 404
+
+
 def test_legacy_lease_only_metadata_remains_status_visible() -> None:
     """The additive status reader preserves the preceding persisted shape."""
     legacy = json.dumps({"run_lease": {"lease_id": "lease-legacy123"}})

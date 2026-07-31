@@ -38,6 +38,7 @@ from ...control.health import (
     build_full_health,
     probe_engine_discovery_freshness,
 )
+from ...control.permission_service import respond_to_permission
 from ...control.run_discovery_service import discover_active_runs
 from ...control.run_start_policy import (
     evaluate_execution_eligibility,
@@ -59,6 +60,7 @@ from ...control.thread_state_service import (
 )
 from ...database import get_thread
 from ...database.checkpoints import Checkpointer
+from ...database.permission_repository import get_permission_request
 from ...database.session import get_db
 from ...domain_config import domain_config
 from ...streaming.aggregator import EventAggregator
@@ -92,6 +94,8 @@ from ..schemas.gateway import (
     RoleState,
     RunCancelResponse,
     RunCommitResponse,
+    RunPermissionRespondRequest,
+    RunPermissionRespondResponse,
     RunPrepareResponse,
     RunReleaseResponse,
     RunStage,
@@ -1369,6 +1373,88 @@ async def run_cancel_endpoint(
         accepted=result.accepted,
         applied=result.applied,
         action_status=result.action_status,
+        idempotency_key=result.idempotency_key,
+    )
+
+
+# ---------------------------------------------------------------------------
+# permission-respond
+# ---------------------------------------------------------------------------
+
+
+@router.post(
+    "/runs/{run_id}/permissions/{request_id}/respond",
+    response_model=RunPermissionRespondResponse,
+)
+async def run_permission_respond_endpoint(
+    run_id: PathSafeRunId,
+    request_id: str,
+    body: RunPermissionRespondRequest,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    worker_client: httpx.AsyncClient = Depends(get_worker_client),
+    aggregator: EventAggregator = Depends(get_aggregator),
+    circuit_breaker: Any = Depends(get_circuit_breaker),
+    worker_spawner: Any = Depends(get_worker_spawner),
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+) -> RunPermissionRespondResponse:
+    """Answer a permission request the run raised on its progress stream.
+
+    The versioned surface already POSES this question - ``permission_request``
+    is an enumerated frame on run-stream - and this is where the answer returns.
+    Without it the only answering channel is the transition surface, so retiring
+    that surface would strand every paused run.
+
+    The verb adds no state machine of its own: it is a versioned projection of
+    the same answer path, so at-most-once behaviour comes from there. Answering
+    twice replays the stored outcome rather than acting again, an answer arriving
+    after the request was applied reports the duplicate without re-dispatching,
+    and a superseded or expired request is refused with a journaled rejection
+    that replays identically.
+
+    Scoping matters as much as the answer. The request is resolved and checked
+    against the run in the path BEFORE anything acts on it, so a guessed request
+    id cannot be used to answer another run's question - and because that check
+    precedes the service call, a mismatch has no effect at all rather than being
+    detected after the fact.
+    """
+    permission = await get_permission_request(db, request_id)
+    if permission is None or permission.thread_id != run_id:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Permission request {request_id!r} not found for run {run_id!r}",
+        )
+
+    result = await respond_to_permission(
+        db=db,
+        request_id=request_id,
+        option_id=body.option_id,
+        idempotency_key=idempotency_key,
+        aggregator=aggregator,
+        circuit_breaker=circuit_breaker,
+        worker_spawner=worker_spawner,
+        worker_client=worker_client,
+        recursion_limit=domain_config.graph_recursion_limit,
+        trace_headers=trace_headers(),
+    )
+
+    if result.dispatched:
+        mark_worker_connected(request)
+    if result.circuit_open:
+        raise HTTPException(status_code=503, detail=result.error_detail)
+    if result.error_detail:
+        raise HTTPException(
+            status_code=result.error_status_code or 500,
+            detail=result.error_detail,
+        )
+
+    return RunPermissionRespondResponse(
+        run_id=result.thread_id,
+        request_id=result.request_id,
+        accepted=result.accepted,
+        applied=result.applied,
+        action_status=result.action_status,
+        approval_status=result.approval_status,
         idempotency_key=result.idempotency_key,
     )
 

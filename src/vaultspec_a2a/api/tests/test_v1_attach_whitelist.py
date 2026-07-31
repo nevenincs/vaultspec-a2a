@@ -12,26 +12,36 @@ from ...api.app import create_app
 
 _TOKEN = "attach-credential-token-0123456789abcdef"
 
-# The versioned engine-facing surface: the five control verbs plus bounded
+# The versioned engine-facing surface: the six control verbs plus bounded
 # active-run discovery, plus the droppable run-stream companion. Every entry is
 # attach-gated; the set is fixed so an accidental new verb is caught.
+#
+# Permission-respond is the sixth verb and was added by an explicit decision
+# amendment, not by drift - which is exactly what this set exists to force. The
+# versioned stream already carries the permission REQUEST as an enumerated
+# frame, so the surface could pose the question while only the transition
+# surface could accept the answer; retiring that surface would have stranded
+# every paused run. Anything appearing here without a matching amendment is the
+# accident this guard is for.
 _EXPECTED_V1_ROUTES = {
     "POST /v1/runs",
     "GET /v1/runs",
     "GET /v1/runs/{run_id}",
     "POST /v1/runs/{run_id}/cancel",
+    "POST /v1/runs/{run_id}/permissions/{request_id}/respond",
     "GET /v1/runs/{run_id}/stream",
     "GET /v1/presets",
     "GET /v1/service",
 }
 
-# The six-member reviewed control whitelist that must reject an unauthenticated
-# caller (run-stream shares the gate but is the SSE companion, not a control verb).
+# The reviewed control whitelist that must reject an unauthenticated caller
+# (run-stream shares the gate but is the SSE companion, not a control verb).
 _WHITELIST_REQUESTS = (
     ("POST", "/v1/runs"),
     ("GET", "/v1/runs"),
     ("GET", "/v1/runs/some-run-id"),
     ("POST", "/v1/runs/some-run-id/cancel"),
+    ("POST", "/v1/runs/some-run-id/permissions/some-request-id/respond"),
     ("GET", "/v1/presets"),
     ("GET", "/v1/service"),
 )

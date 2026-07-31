@@ -424,6 +424,38 @@ class RunCancelResponse(BaseModel):
     idempotency_key: str | None = None
 
 
+class RunPermissionRespondRequest(BaseModel):
+    """Answer one permission request raised by a run.
+
+    Carries only the chosen option. The options themselves were advertised on
+    the versioned progress stream in the ``permission_request`` frame that
+    raised the question, so the answer names one rather than restating it.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    option_id: str = Field(min_length=1, max_length=64)
+
+
+class RunPermissionRespondResponse(BaseModel):
+    """Report what an answer did, including when it did nothing.
+
+    ``accepted`` says the answer was taken; ``applied`` says it was the one that
+    resumed the run. A duplicate answer reports accepted with ``applied`` false
+    rather than acting twice, so a caller that retries after a lost response
+    learns the outcome instead of re-answering.
+    """
+
+    api_version: Literal["v1"] = _API_VERSION
+    run_id: str
+    request_id: str
+    accepted: bool
+    applied: bool
+    action_status: str
+    approval_status: str | None = None
+    idempotency_key: str | None = None
+
+
 class RoleAssignmentSummary(BaseModel):
     """Effective per-role model assignment under a profile.
 

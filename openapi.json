@@ -1220,6 +1220,100 @@
         }
       }
     },
+    "/v1/runs/{run_id}/permissions/{request_id}/respond": {
+      "post": {
+        "summary": "Run Permission Respond Endpoint",
+        "description": "Answer a permission request the run raised on its progress stream.\n\nThe versioned surface already POSES this question - ``permission_request``\nis an enumerated frame on run-stream - and this is where the answer returns.\nWithout it the only answering channel is the transition surface, so retiring\nthat surface would strand every paused run.\n\nThe verb adds no state machine of its own: it is a versioned projection of\nthe same answer path, so at-most-once behaviour comes from there. Answering\ntwice replays the stored outcome rather than acting again, an answer arriving\nafter the request was applied reports the duplicate without re-dispatching,\nand a superseded or expired request is refused with a journaled rejection\nthat replays identically.\n\nScoping matters as much as the answer. The request is resolved and checked\nagainst the run in the path BEFORE anything acts on it, so a guessed request\nid cannot be used to answer another run's question - and because that check\nprecedes the service call, a mismatch has no effect at all rather than being\ndetected after the fact.",
+        "operationId": "run_permission_respond_endpoint_v1_runs__run_id__permissions__request_id__respond_post",
+        "parameters": [
+          {
+            "name": "run_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^[A-Za-z0-9_][A-Za-z0-9_-]{0,127}$",
+              "title": "Run Id"
+            }
+          },
+          {
+            "name": "request_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Request Id"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
+            }
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RunPermissionRespondRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunPermissionRespondResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/presets": {
       "get": {
         "summary": "Presets List Endpoint",
@@ -2863,6 +2957,85 @@
         ],
         "title": "RunCommitResponse",
         "description": "Acknowledge a run committed against a prepared reservation.\n\nReturned by the ``commit`` stage. The reservation is consumed and a stable\nrun is created and dispatched with the bound actor tokens. ``lease_id`` is the\nnon-secret, run-scoped lease identity the dashboard revokes at terminal\nsettlement; it is an identifier, never a bearer."
+      },
+      "RunPermissionRespondRequest": {
+        "properties": {
+          "option_id": {
+            "type": "string",
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Option Id"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "option_id"
+        ],
+        "title": "RunPermissionRespondRequest",
+        "description": "Answer one permission request raised by a run.\n\nCarries only the chosen option. The options themselves were advertised on\nthe versioned progress stream in the ``permission_request`` frame that\nraised the question, so the answer names one rather than restating it."
+      },
+      "RunPermissionRespondResponse": {
+        "properties": {
+          "api_version": {
+            "type": "string",
+            "const": "v1",
+            "title": "Api Version",
+            "default": "v1"
+          },
+          "run_id": {
+            "type": "string",
+            "title": "Run Id"
+          },
+          "request_id": {
+            "type": "string",
+            "title": "Request Id"
+          },
+          "accepted": {
+            "type": "boolean",
+            "title": "Accepted"
+          },
+          "applied": {
+            "type": "boolean",
+            "title": "Applied"
+          },
+          "action_status": {
+            "type": "string",
+            "title": "Action Status"
+          },
+          "approval_status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Approval Status"
+          },
+          "idempotency_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Idempotency Key"
+          }
+        },
+        "type": "object",
+        "required": [
+          "run_id",
+          "request_id",
+          "accepted",
+          "applied",
+          "action_status"
+        ],
+        "title": "RunPermissionRespondResponse",
+        "description": "Report what an answer did, including when it did nothing.\n\n``accepted`` says the answer was taken; ``applied`` says it was the one that\nresumed the run. A duplicate answer reports accepted with ``applied`` false\nrather than acting twice, so a caller that retries after a lost response\nlearns the outcome instead of re-answering."
       },
       "RunPrepareResponse": {
         "properties": {

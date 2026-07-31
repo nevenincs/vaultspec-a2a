@@ -5,7 +5,7 @@ tags:
 date: '2026-07-31'
 modified: '2026-07-31'
 body_schema: 'body-v1'
-body_hash: 'sha256:70ac29f30c2f88863cad570d5740de955247facd7df17265b0871c06e15f2c35'
+body_hash: 'sha256:38191822483e5ddc0976105223311f7e1bdeac0d2be5b3769608d45b108f8907'
 related:
   - "[[2026-07-19-codebase-health-audit]]"
   - "[[2026-07-19-codebase-health-plan]]"
@@ -291,6 +291,36 @@ rather than observed: the type, the docstring, and the unconstrained forwarding
 path all permit the shape, but whether current engine traffic ever sends it was
 not confirmed. Confirming that it does would make this high. The code and its own
 documentation disagree regardless of how often the input occurs.
+
+### team-preset-listing-workspace-blind-on-legacy-endpoint | medium | Two live preset-listing endpoints disagree on what exists, because only one passes a workspace
+
+Two mounted endpoints answer "list the team presets for the picker", both
+reading through the same discovery and load functions, and they disagree
+whenever a workspace defines a custom preset.
+
+The discovery function returns the union of the workspace preset directory and
+the bundled package presets, but globs the workspace directory only when a
+workspace root is passed; called with no argument it degrades silently to
+bundled-only. The newer endpoint accepts a workspace root as a query parameter
+and threads it through both discovery and the per-preset load, which is the
+complete call. The older endpoint calls both with no workspace at all, so it can
+never see a workspace-scoped preset regardless of which workspace the caller is
+operating in - not by configuration, but by construction.
+
+The older endpoint's own warning text, which reports a missing preset as a
+bundled one, encodes the assumption that only bundled presets exist. Both
+docstrings describe the same purpose, and the newer endpoint is materially
+richer - loadable status, per-preset unavailable reasons, origin
+classification, model-profile eligibility - so the older one reads as the stale
+sibling nobody retired when its replacement was built to do the same job
+correctly.
+
+The consequence for any client still calling the older route is that a user's
+own workspace preset never appears in the picker, with no error and no
+indication anything is missing. Which route the dashboard actually calls was not
+verified, since that client is outside this repository, so live user impact is
+unconfirmed; the divergence between the two implementations on this input is
+not.
 
 ### ws-heartbeat-interval-scoped-to-websocket-also-drives-sse | low | A knob documented under the WebSocket section also retunes the SSE stream heartbeat
 
@@ -623,9 +653,21 @@ the canned responses that drive the mock provider are not in this repository at
 all, so no audit of the mock path can settle a question about what a mock turn
 emits from this tree alone.
 
-Still unreached: the database repository row mappings and the `team/` preset
-translation on the mapping axis; the HTTP-transport half of the ACP authoring
-binding, where only the stdio path was read end to end; and the watchdog restart
-loop, which the containment-leak finding's accumulation claim infers from
-surrounding structure rather than direct reading - that claim should be read as
-inferred until someone reads the loop.
+The database repository row mappings were investigated and produced no finding
+that cleared the bar, which is recorded deliberately: the thread, task-queue,
+and reconciliation repositories each pair one write site with one read or
+projection site rather than carrying duplicate mappings, and the two pending
+permission schemas are correctly divergent public and internal projections of
+one shared domain read. One borderline case was surfaced and not promoted - a
+healthy-status default spelled as a matching literal in three places instead of
+importing the enum - on the grounds that redundant literals which all agree are
+not an observed divergence. That judgement is recorded so a stricter reading can
+revisit it rather than rediscover it.
+
+Still unreached: five modules in the database layer covering the authoring
+cursor, checkpoint schema and storage, compatibility, and migration, which
+should be treated as unproven rather than cleared; the HTTP-transport half of
+the ACP authoring binding, where only the stdio path was read end to end; and
+the watchdog restart loop, which the containment-leak finding's accumulation
+claim infers from surrounding structure rather than direct reading - that claim
+should be read as inferred until someone reads the loop.

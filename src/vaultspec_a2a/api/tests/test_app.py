@@ -146,11 +146,11 @@ def test_worker_watchdog_keeps_stderr_log_path_null_when_auto_spawn_disabled() -
 
 
 @pytest.mark.asyncio
-async def test_api_health_reports_worker_stderr_log_path(
+async def test_health_reports_worker_stderr_log_path(
     session_factory,
     checkpointer,
 ) -> None:
-    """GET /api/health should expose the diagnostic stderr log location."""
+    """GET /health should expose the diagnostic stderr log location."""
     app, _aggregator, _worker, _checkpointer = make_app(session_factory, checkpointer)
     ws = WorkerState(
         worker_status="up",
@@ -165,7 +165,7 @@ async def test_api_health_reports_worker_stderr_log_path(
         transport=ASGITransport(app=app),
         base_url="http://test",
     ) as client:
-        resp = await client.get("/api/health")
+        resp = await client.get("/health")
 
     assert resp.status_code == 200
     body = resp.json()
@@ -236,11 +236,11 @@ def test_build_sqlite_fallback_diagnostics_reports_wal_state(tmp_path: Path) -> 
 
 
 @pytest.mark.asyncio
-async def test_api_health_reports_sqlite_fallback_diagnostics(
+async def test_health_reports_sqlite_fallback_diagnostics(
     session_factory,
     checkpointer,
 ) -> None:
-    """GET /api/health should expose explicit SQLite fallback diagnostics."""
+    """GET /health should expose explicit SQLite fallback diagnostics."""
     app, _aggregator, _worker, _checkpointer = make_app(session_factory, checkpointer)
     app.state.worker_status = "up"
     app.state.sqlite_fallback_diagnostics = {
@@ -255,7 +255,7 @@ async def test_api_health_reports_sqlite_fallback_diagnostics(
         transport=ASGITransport(app=app),
         base_url="http://test",
     ) as client:
-        resp = await client.get("/api/health")
+        resp = await client.get("/health")
 
     assert resp.status_code == 200
     body = resp.json()
@@ -265,11 +265,11 @@ async def test_api_health_reports_sqlite_fallback_diagnostics(
 
 
 @pytest.mark.asyncio
-async def test_api_health_degrades_when_checkpointer_backend_is_unusable(
+async def test_health_degrades_when_checkpointer_backend_is_unusable(
     session_factory,
     tmp_path: Path,
 ) -> None:
-    """GET /api/health must fail closed when the checkpointer cannot be probed."""
+    """GET /health must fail closed when the checkpointer cannot be probed."""
     checkpoints_file = tmp_path / "closed-health-checkpoints.db"
     async with AsyncSqliteSaver.from_conn_string(str(checkpoints_file)) as saver:
         closed_checkpointer = saver
@@ -283,7 +283,7 @@ async def test_api_health_degrades_when_checkpointer_backend_is_unusable(
         transport=ASGITransport(app=app),
         base_url="http://test",
     ) as client:
-        resp = await client.get("/api/health")
+        resp = await client.get("/health")
 
     assert resp.status_code == 200
     body = resp.json()

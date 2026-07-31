@@ -310,7 +310,7 @@ def compose_integration_stack() -> Any:
             ) from error
         # Double-check gateway readiness via the public health endpoint.
         gateway_url = f"http://127.0.0.1:{gateway_port}"
-        _wait_for_url(f"{gateway_url}/api/health", timeout=60.0)
+        _wait_for_url(f"{gateway_url}/health", timeout=60.0)
         yield {
             "gateway_url": gateway_url,
             "jaeger_url": f"http://127.0.0.1:{jaeger_ui_port}",
@@ -335,7 +335,7 @@ def compose_integration_stack() -> Any:
 def test_compose_gateway_health_is_ok(compose_integration_stack: Any) -> None:
     """Gateway reports status=ok when the independently managed worker is healthy."""
     gateway_url = compose_integration_stack["gateway_url"]
-    resp = httpx.get(f"{gateway_url}/api/health", timeout=15.0)
+    resp = httpx.get(f"{gateway_url}/health", timeout=15.0)
     assert resp.status_code == 200, f"expected 200, got {resp.status_code}: {resp.text}"
     body = resp.json()
     assert body.get("status") == "ok", f"gateway health status not ok: {body}"
@@ -346,13 +346,13 @@ def test_compose_worker_is_connected(compose_integration_stack: Any) -> None:
     gateway_url = compose_integration_stack["gateway_url"]
     # Registration is heartbeat-driven and lags the container healthcheck, so
     # poll rather than sampling once; a worker that never connects still fails.
-    _wait_for_health_field(f"{gateway_url}/api/health", "worker_connected", True)
+    _wait_for_health_field(f"{gateway_url}/health", "worker_connected", True)
 
 
 def test_compose_gateway_did_not_spawn_worker(compose_integration_stack: Any) -> None:
     """Gateway health confirms it did not spawn the worker itself."""
     gateway_url = compose_integration_stack["gateway_url"]
-    resp = httpx.get(f"{gateway_url}/api/health", timeout=15.0)
+    resp = httpx.get(f"{gateway_url}/health", timeout=15.0)
     assert resp.status_code == 200
     body = resp.json()
     checks = body.get("checks", {})

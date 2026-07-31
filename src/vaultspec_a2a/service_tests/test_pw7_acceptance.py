@@ -1469,7 +1469,7 @@ def _reachable_stack() -> tuple[str, str, Path] | None:
     if endpoint is None:
         return None
     try:
-        health = httpx.get(f"{_GATEWAY_URL}/api/health", timeout=3.0)
+        health = httpx.get(f"{_GATEWAY_URL}/health", timeout=3.0)
     except httpx.HTTPError:
         return None
     if health.status_code != 200:

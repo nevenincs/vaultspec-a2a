@@ -1993,7 +1993,7 @@
     "/health": {
       "get": {
         "summary": "Health Endpoint",
-        "description": "Top-level liveness check for external probes.\n\nUnder the armed desktop profile the unauthenticated boundary discloses\nonly the minimal liveness fact - no process identity, product identity, or\nproduct state - while an attach-authenticated caller additionally receives\nthe readiness projection from the single readiness authority. The Compose\nand development profiles retain the legacy aggregate liveness body their\nprobes already consume; readiness there stays on `/api/health`.",
+        "description": "Top-level health check: the one probe surface for external callers.\n\nUnder the armed desktop profile the unauthenticated boundary discloses\nonly the minimal liveness fact - no process identity, product identity, or\nproduct state - while an attach-authenticated caller additionally receives\nthe readiness projection from the single readiness authority.\n\nThe Compose and development profiles get the full readiness aggregate:\nthe DB, checkpointer and worker are actively PROBED, not merely read off\napp state, because a healthcheck that only reports what the process\nbelieves about itself cannot notice a dependency that has gone away.",
         "operationId": "health_endpoint_health_get",
         "responses": {
           "200": {

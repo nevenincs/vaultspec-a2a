@@ -23,11 +23,12 @@ from typing import Any, cast
 
 import httpx
 import uvicorn
-from fastapi import FastAPI, Request
+from fastapi import Depends, FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from opentelemetry import metrics, trace
 from opentelemetry.sdk.metrics import MeterProvider as SdkMeterProvider
 from opentelemetry.sdk.trace import TracerProvider as SdkTracerProvider
+from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.websockets import WebSocket
 
 from ..authoring import resolve_engine
@@ -37,6 +38,7 @@ from ..control.dispatch import redispatch_reconciling_threads
 from ..control.health import (
     assemble_desktop_readiness,
     assemble_health_status,
+    build_full_health,
     build_sqlite_fallback_diagnostics,
 )
 from ..control.verdict_subscriber import VerdictSubscriber
@@ -50,6 +52,7 @@ from ..database.migrations import backfill_teamstate_sdd_fields
 from ..database.reconciliation import reconcile_threads_on_startup
 from ..database.session import (
     close_db,
+    get_db,
     get_session_factory,
     init_db,
 )
@@ -96,6 +99,51 @@ logger = logging.getLogger(__name__)
 # emitting nothing never releases itself; the teardown that follows cancels and
 # reaps what is left.
 _DRAIN_QUIESCENCE_TIMEOUT_SECONDS = 5.0
+
+# The health probe's database dependency, bound once at module scope. The
+# session is created lazily per request and opens no connection unless the
+# readiness probe actually queries, so the armed profile's liveness answer
+# still costs nothing.
+_HEALTH_DB: Any = Depends(get_db)
+
+# The runtime singletons the readiness probe needs in order to probe at all.
+_HEALTH_PROBE_SINGLETONS = ("worker_client", "circuit_breaker", "worker_spawner")
+
+
+async def _unarmed_health_aggregate(app: FastAPI, db: AsyncSession) -> dict[str, Any]:
+    """Return the probing readiness aggregate, or a degraded body if it cannot probe.
+
+    A health surface must keep answering precisely when the process is unwell.
+    The probe needs the worker client, circuit breaker and spawner, and any of
+    them can be absent - before the lifespan has seated them, or after a
+    lifespan that failed partway. Reaching for them unguarded would turn the one
+    endpoint an external prober relies on into a 500, which reads to that prober
+    as "unreachable" rather than "unhealthy" and hides the very condition it
+    exists to report. So a missing singleton degrades the body and names itself.
+    """
+    missing = [
+        name
+        for name in _HEALTH_PROBE_SINGLETONS
+        if getattr(app.state, name, None) is None
+    ]
+    if missing:
+        return {
+            "status": "degraded",
+            "checks": {
+                "gateway": {
+                    "status": "error",
+                    "detail": f"runtime not initialised: {', '.join(missing)}",
+                }
+            },
+            **assemble_health_status(app_state=app.state),
+        }
+    return await build_full_health(
+        db=db,
+        worker_client=app.state.worker_client,
+        circuit_breaker=app.state.circuit_breaker,
+        worker_spawner=app.state.worker_spawner,
+        app_state=app.state,
+    )
 
 
 async def _discovery_heartbeat(
@@ -667,42 +715,55 @@ def create_app(
     app.include_router(internal_router)
 
     @app.get("/health")
-    async def health_endpoint(request: Request) -> dict[str, object]:
-        """Top-level liveness check for external probes.
+    async def health_endpoint(
+        request: Request,
+        db: AsyncSession = _HEALTH_DB,
+    ) -> dict[str, object]:
+        """Top-level health check: the one probe surface for external callers.
 
         Under the armed desktop profile the unauthenticated boundary discloses
         only the minimal liveness fact - no process identity, product identity, or
         product state - while an attach-authenticated caller additionally receives
-        the readiness projection from the single readiness authority. The Compose
-        and development profiles retain the legacy aggregate liveness body their
-        probes already consume; readiness there stays on `/api/health`.
+        the readiness projection from the single readiness authority.
+
+        The Compose and development profiles get the full readiness aggregate:
+        the DB, checkpointer and worker are actively PROBED, not merely read off
+        app state, because a healthcheck that only reports what the process
+        believes about itself cannot notice a dependency that has gone away.
         """
         if settings.desktop_profile_armed:
             if _http_attach_authorized(request, app):
                 readiness = assemble_desktop_readiness(app_state=app.state)
                 return readiness.model_dump(mode="json")
             return LivenessResponse().model_dump(mode="json")
-        shared = assemble_health_status(app_state=app.state)
-        # The heartbeat-push freshness gate (worker_connected) is authoritative only
-        # for a worker this gateway OWNS (holds the process handle). An adopted /
-        # externally-managed worker (spawned but no owned pid) legitimately may not
-        # push heartbeats this gateway accepts; its liveness is the probe-driven
-        # worker_status, which the watchdog reconciles every tick. Gating readiness on
-        # worker_connected for it would report a healthy adopted worker as not-ready.
-        worker_owned = shared["worker_spawned"] and shared["worker_pid"] is not None
+        aggregate = await _unarmed_health_aggregate(app, db)
+        # ``ready`` answers a NARROWER question than the aggregate ``status``,
+        # and both are kept because they are not the same fact. The aggregate is
+        # the probe verdict across every dependency; ``ready`` is the local
+        # question "is this gateway's own worker attached and usable", which the
+        # probes cannot answer, because the heartbeat-push freshness gate
+        # (worker_connected) is authoritative only for a worker this gateway
+        # OWNS (holds the process handle). An adopted / externally-managed
+        # worker (spawned but no owned pid) legitimately may not push heartbeats
+        # this gateway accepts; its liveness is the probe-driven worker_status,
+        # which the watchdog reconciles every tick. Gating readiness on
+        # worker_connected for it would report a healthy adopted worker as
+        # not-ready.
+        worker_owned = (
+            aggregate["worker_spawned"] and aggregate["worker_pid"] is not None
+        )
         ready = not (
-            shared["circuit_breaker"] == "open"
-            or shared["worker_status"] in {"down", "restarting"}
-            or (worker_owned and not shared["worker_connected"])
+            aggregate["circuit_breaker"] == "open"
+            or aggregate["worker_status"] in {"down", "restarting"}
+            or (worker_owned and not aggregate["worker_connected"])
         )
         return {
-            "status": "ok",
             "service": "gateway",
+            **aggregate,
             "ready": ready,
             # The ungated health endpoint reports the live pid so a
             # lifecycle caller can confirm the discovery record's owner is alive.
             "pid": os.getpid(),
-            **shared,
             "production_certifying": (
                 settings.resolved_database_backend == "postgres"
                 and settings.resolved_checkpoint_backend == "postgres"

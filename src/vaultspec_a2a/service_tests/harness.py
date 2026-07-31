@@ -250,7 +250,7 @@ class ServiceStack:
 
     def _gateway_http_ready(self) -> bool:
         with self._client(timeout=5.0) as client:
-            resp = client.get("/api/health")
+            resp = client.get("/health")
             return resp.status_code == 200
 
     def start(self) -> None:
@@ -515,7 +515,7 @@ class ServiceStack:
 
     def health(self) -> dict[str, Any]:
         with self._client(timeout=15.0) as client:
-            resp = client.get("/api/health")
+            resp = client.get("/health")
             resp.raise_for_status()
             payload = resp.json()
             self.record("health", payload)

@@ -42,7 +42,7 @@ services:
           'CMD',
           'python',
           '-c',
-          "import json, sys, urllib.request; data = json.load(urllib.request.urlopen('http://localhost:18000/api/health')); sys.exit(0 if data.get('status') == 'ok' else 1)",
+          "import json, sys, urllib.request; data = json.load(urllib.request.urlopen('http://localhost:18000/health')); sys.exit(0 if data.get('status') == 'ok' else 1)",
         ]
       interval: 10s
       timeout: 5s

@@ -188,8 +188,22 @@ jobs:
           echo "--- setup (local only; provisions the home and runs bundled migrations)"
           "$bin" setup --app-home "$home"
 
+          # `--log` captures the SPAWNED gateway's own stdout/stderr. Without it a
+          # startup failure reports only the child's exit code, and the CLI's own
+          # error says so: "start with --log to capture output". An exit code with
+          # no output is not a diagnosis — it names that something failed without
+          # naming what, which is the failure class this gate exists to close.
+          gwlog="${RUNNER_TEMP}/gateway.log"
           echo "--- start (blocks until discoverably healthy, emits ServiceStatus)"
-          "$bin" start --app-home "$home" --host 127.0.0.1 --port "${SMOKE_PORT}" > start.json
+          if ! "$bin" start --app-home "$home" --host 127.0.0.1 --port "${SMOKE_PORT}" --log "$gwlog" > start.json; then
+            echo "::error::start failed; the spawned gateway's own output follows" >&2
+            echo "===== gateway log ($gwlog) ====="
+            cat "$gwlog" 2>/dev/null || echo "(no gateway log was produced)"
+            echo "===== end gateway log ====="
+            echo "===== app home after the failed start ====="
+            find "$home" -maxdepth 2 2>/dev/null | sed "s|^$home|<app-home>|" | sort || true
+            exit 1
+          fi
           cat start.json
           read -r state healthy pid base <<EOF
           $($PY -c 'import json;d=json.load(open("start.json"));print(d["state"],d["healthy"],d["pid"],d["base_url"])')

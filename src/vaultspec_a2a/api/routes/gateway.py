@@ -24,8 +24,17 @@ from pathlib import Path
 from typing import Any, Literal
 
 import httpx
-from fastapi import APIRouter, Depends, FastAPI, Header, HTTPException, Query, Request
-from fastapi.responses import StreamingResponse
+from fastapi import (
+    APIRouter,
+    Depends,
+    FastAPI,
+    Header,
+    HTTPException,
+    Query,
+    Request,
+    Response,
+)
+from fastapi.responses import JSONResponse, StreamingResponse
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -49,6 +58,7 @@ from ...control.run_start_policy import (
 from ...control.thread_service import (
     ThreadCreationRequest,
     create_and_dispatch_thread,
+    delete_thread_service,
     generate_thread_id,
     process_metadata,
 )
@@ -96,6 +106,7 @@ from ..schemas.gateway import (
     RoleState,
     RunCancelResponse,
     RunCommitResponse,
+    RunDeleteResponse,
     RunMessageRequest,
     RunMessageResponse,
     RunPermissionRespondRequest,
@@ -1379,6 +1390,67 @@ async def run_cancel_endpoint(
         action_status=result.action_status,
         idempotency_key=result.idempotency_key,
     )
+
+
+# ---------------------------------------------------------------------------
+# run-delete
+# ---------------------------------------------------------------------------
+
+
+@router.delete(
+    "/runs/{run_id}",
+    status_code=204,
+    response_model=None,
+    responses={
+        200: {
+            "model": RunDeleteResponse,
+            "description": (
+                "Deleted, but cleanup was abandoned over permanently "
+                "unremovable state; the body names the kinds left behind."
+            ),
+        },
+        204: {"description": "Deleted; every store was cleaned."},
+        404: {"description": "No such run."},
+        409: {"description": "The run's lifecycle state refuses deletion."},
+        503: {"description": "Cleanup is unfinished but resumable; retry."},
+    },
+)
+async def run_delete_endpoint(
+    run_id: PathSafeRunId,
+    db: AsyncSession = Depends(get_db),
+    aggregator: EventAggregator = Depends(get_aggregator),
+    checkpointer: Checkpointer = Depends(get_checkpointer),
+) -> Response:
+    """Delete a run through the durable cross-store deletion saga.
+
+    A replayed request resumes the same saga rather than starting a second
+    teardown, so repeated calls converge on one deletion.
+
+    Five outcomes, because the service distinguishes more states than two codes
+    can carry: a lifecycle refusal before the saga begins, a clean deletion, a
+    deletion that finalized over unremovable state, resumable incomplete
+    cleanup, and an already-absent run. The retryable code is reserved for the
+    genuinely resumable case - the abandoned case is terminal, and inviting a
+    retry there would send the caller to a not-found.
+    """
+    result = await delete_thread_service(db, run_id, checkpointer=checkpointer)
+    if result.not_found:
+        raise HTTPException(status_code=404, detail="Run not found")
+    if result.error_detail is not None:
+        raise HTTPException(status_code=409, detail=result.error_detail)
+    if result.cleanup_incomplete:
+        raise HTTPException(
+            status_code=503,
+            detail="Run deletion is in progress; retry to complete cleanup.",
+        )
+    aggregator.clear_thread_state(run_id)
+    if result.abandoned_kinds:
+        body = RunDeleteResponse(
+            run_id=run_id,
+            abandoned_kinds=list(result.abandoned_kinds),
+        )
+        return JSONResponse(status_code=200, content=body.model_dump(mode="json"))
+    return Response(status_code=204)
 
 
 # ---------------------------------------------------------------------------

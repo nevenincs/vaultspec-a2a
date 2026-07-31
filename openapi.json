@@ -1086,6 +1086,75 @@
             }
           }
         }
+      },
+      "delete": {
+        "summary": "Run Delete Endpoint",
+        "description": "Delete a run through the durable cross-store deletion saga.\n\nA replayed request resumes the same saga rather than starting a second\nteardown, so repeated calls converge on one deletion.\n\nFive outcomes, because the service distinguishes more states than two codes\ncan carry: a lifecycle refusal before the saga begins, a clean deletion, a\ndeletion that finalized over unremovable state, resumable incomplete\ncleanup, and an already-absent run. The retryable code is reserved for the\ngenuinely resumable case - the abandoned case is terminal, and inviting a\nretry there would send the caller to a not-found.",
+        "operationId": "run_delete_endpoint_v1_runs__run_id__delete",
+        "parameters": [
+          {
+            "name": "run_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^[A-Za-z0-9_][A-Za-z0-9_-]{0,127}$",
+              "title": "Run Id"
+            }
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Deleted; every store was cleaned."
+          },
+          "200": {
+            "description": "Deleted, but cleanup was abandoned over permanently unremovable state; the body names the kinds left behind.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunDeleteResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such run."
+          },
+          "409": {
+            "description": "The run's lifecycle state refuses deletion."
+          },
+          "503": {
+            "description": "Cleanup is unfinished but resumable; retry."
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
       }
     },
     "/v1/runs/{run_id}/stream": {
@@ -3042,6 +3111,47 @@
         ],
         "title": "RunCommitResponse",
         "description": "Acknowledge a run committed against a prepared reservation.\n\nReturned by the ``commit`` stage. The reservation is consumed and a stable\nrun is created and dispatched with the bound actor tokens. ``lease_id`` is the\nnon-secret, run-scoped lease identity the dashboard revokes at terminal\nsettlement; it is an identifier, never a bearer."
+      },
+      "RunDeleteResponse": {
+        "properties": {
+          "api_version": {
+            "type": "string",
+            "const": "v1",
+            "title": "Api Version",
+            "default": "v1"
+          },
+          "run_id": {
+            "type": "string",
+            "title": "Run Id"
+          },
+          "deleted": {
+            "type": "boolean",
+            "const": true,
+            "title": "Deleted",
+            "default": true
+          },
+          "cleanup_abandoned": {
+            "type": "boolean",
+            "const": true,
+            "title": "Cleanup Abandoned",
+            "default": true
+          },
+          "abandoned_kinds": {
+            "items": {
+              "$ref": "#/components/schemas/CleanupKind"
+            },
+            "type": "array",
+            "minItems": 1,
+            "title": "Abandoned Kinds"
+          }
+        },
+        "type": "object",
+        "required": [
+          "run_id",
+          "abandoned_kinds"
+        ],
+        "title": "RunDeleteResponse",
+        "description": "Report a deletion that finalized over state no pass could remove.\n\nCarried only on that one outcome. A clean deletion answers with no body at\nall, so the presence of this body IS the signal that external state was\nstranded. Names the KINDS of item left behind and nothing more: a concrete\ncheckpoint id or artifact path is control-plane state and never the\ncaller's to receive."
       },
       "RunMessageRequest": {
         "properties": {

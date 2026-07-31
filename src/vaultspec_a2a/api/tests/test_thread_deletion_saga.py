@@ -81,6 +81,118 @@ def _detached_checkpoint_store(db_file: pathlib.Path) -> AsyncSqliteSaver:
     return saver
 
 
+class TestVersionedDeletionVerb:
+    """DELETE /v1/runs/{id} carries the same five outcomes, run-scoped.
+
+    The contract was specified for this saga while it existed only on the
+    transition surface. These prove the versioned verb answers identically, so
+    the transition surface can be removed without taking the capability with it.
+    """
+
+    def test_a_clean_deletion_answers_no_content(
+        self, session_factory, checkpointer
+    ) -> None:
+        """Every store cleaned: no body at all, and the row really is gone."""
+        app, _agg, _worker, _cp = make_app(session_factory, checkpointer)
+
+        async def _seed() -> None:
+            await checkpointer.setup()
+            async with session_factory() as session:
+                await create_thread(session, thread_id="r-clean", status="completed")
+                await session.commit()
+
+        asyncio.run(_seed())
+
+        with TestClient(app, raise_server_exceptions=True) as client:
+            resp = client.delete("/v1/runs/r-clean")
+            gone = client.delete("/v1/runs/r-clean")
+
+        assert resp.status_code == 204
+        assert resp.content == b""
+        # Already absent is its own outcome, not a second success.
+        assert gone.status_code == 404
+
+    def test_a_lifecycle_refusal_is_a_conflict(
+        self, session_factory, checkpointer
+    ) -> None:
+        """A non-terminal run is refused before any teardown begins."""
+        app, _agg, _worker, _cp = make_app(session_factory, checkpointer)
+
+        async def _seed() -> None:
+            await checkpointer.setup()
+            async with session_factory() as session:
+                await create_thread(session, thread_id="r-running", status="running")
+                await session.commit()
+
+        async def _survives() -> tuple[bool, bool]:
+            async with session_factory() as session:
+                thread = await get_thread(session, "r-running")
+                saga = await session.get(ThreadDeletionSagaModel, "r-running")
+                return thread is not None, saga is None
+
+        asyncio.run(_seed())
+
+        with TestClient(app, raise_server_exceptions=True) as client:
+            resp = client.delete("/v1/runs/r-running")
+
+        assert resp.status_code == 409
+        # Not a saga state at all: nothing durable was written.
+        thread_present, no_saga = asyncio.run(_survives())
+        assert thread_present is True
+        assert no_saga is True
+
+    def test_an_abandoned_finalize_answers_success_with_the_kinds(
+        self, session_factory, tmp_path
+    ) -> None:
+        """Stranded state is reported, named by kind, and never by locator."""
+        store = _detached_checkpoint_store(tmp_path / "detached-v1.db")
+        workspace = tmp_path / "workspace"
+        (workspace / "outputs").mkdir(parents=True)
+        artifact_file = workspace / "outputs" / "report.md"
+        artifact_file.write_text("body", encoding="utf-8")
+
+        app, _agg, _worker, _cp = make_app(session_factory, store)
+
+        async def _seed() -> None:
+            async with session_factory() as session:
+                await create_thread(
+                    session,
+                    thread_id="r-strand",
+                    status="completed",
+                    metadata=json.dumps({"workspace_root": workspace.as_posix()}),
+                )
+                await create_artifact(
+                    session,
+                    thread_id="r-strand",
+                    artifact_type="file",
+                    path="outputs/report.md",
+                )
+                await session.commit()
+
+        asyncio.run(_seed())
+
+        with TestClient(app, raise_server_exceptions=True) as client:
+            # The item genuinely fails each pass; the attempt ceiling abandons it.
+            first = client.delete("/v1/runs/r-strand")
+            second = client.delete("/v1/runs/r-strand")
+            final = client.delete("/v1/runs/r-strand")
+
+        assert first.status_code == 503
+        assert second.status_code == 503
+        assert final.status_code == 200
+        body = final.json()
+        assert body["api_version"] == "v1"
+        assert body["run_id"] == "r-strand"
+        assert body["cleanup_abandoned"] is True
+        assert CleanupKind.CHECKPOINT.value in body["abandoned_kinds"]
+        # The removable artifact really went, so its kind is not named.
+        assert artifact_file.exists() is False
+        assert CleanupKind.ARTIFACT_FILE.value not in body["abandoned_kinds"]
+        # Kinds only - no locator reaches the caller.
+        assert workspace.as_posix() not in final.text
+        assert "report.md" not in final.text
+
+
 class TestDeletionSagaEndpoint:
     """DELETE /api/threads/{id} under replay and mid-flight resume."""
 

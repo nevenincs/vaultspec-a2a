@@ -29,7 +29,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 from ...context.metadata import ThreadMetadata
 from ...thread.actor_tokens import ActorTokenBundle
-from ...thread.enums import ThreadStatus
+from ...thread.enums import CleanupKind, ThreadStatus
 
 __all__ = [
     "ActiveRunRecord",
@@ -422,6 +422,23 @@ class RunCancelResponse(BaseModel):
     applied: bool = False
     action_status: str = "rejected_invalid_state"
     idempotency_key: str | None = None
+
+
+class RunDeleteResponse(BaseModel):
+    """Report a deletion that finalized over state no pass could remove.
+
+    Carried only on that one outcome. A clean deletion answers with no body at
+    all, so the presence of this body IS the signal that external state was
+    stranded. Names the KINDS of item left behind and nothing more: a concrete
+    checkpoint id or artifact path is control-plane state and never the
+    caller's to receive.
+    """
+
+    api_version: Literal["v1"] = _API_VERSION
+    run_id: str
+    deleted: Literal[True] = True
+    cleanup_abandoned: Literal[True] = True
+    abandoned_kinds: list[CleanupKind] = Field(min_length=1)
 
 
 class RunMessageRequest(BaseModel):

@@ -687,6 +687,72 @@ async def test_presets_list_discloses_workspace_profile_origin(
 
 
 @pytest.mark.asyncio(loop_scope="function")
+async def test_run_envelope_and_presets_list_agree_on_provider_readiness(
+    session_factory, checkpointer
+) -> None:
+    """One question, one answer: readiness cannot differ by which verb is asked.
+
+    ``RoleAssignmentSummary`` is constructed in exactly two places - the preset
+    listing, which probes readiness live, and the run envelope, which is
+    assembled from the frozen assignment. The run envelope set every field but
+    ``provider_ready`` and so inherited the model's ``False`` default: a run
+    started on a provider the listing had just advertised as ready came back
+    reporting it unready. A Pydantic default cannot fail, which is exactly why
+    nothing caught it.
+
+    The assertion is agreement between the two disclosures, with each side
+    independently anchored to the production probe so they cannot pass by being
+    wrong in the same way.
+    """
+    app, _agg, _worker, _cp = make_app(session_factory, checkpointer)
+    async with (
+        _live_server(app) as base,
+        httpx.AsyncClient(base_url=base, timeout=10.0) as client,
+    ):
+        presets = await client.get("/v1/presets")
+        assert presets.status_code == 200
+        preset = next(p for p in presets.json()["presets"] if p["id"] == _PRESET)
+        profile = next(
+            pr for pr in preset["profiles"] if pr["id"] == preset["default_profile_id"]
+        )
+        listed = {a["agent_id"]: a for a in profile["assignments"]}
+        assert listed, "the listing must disclose the default profile's assignments"
+
+        # Anchor the listing to the real probe first, so "the two agree" below
+        # cannot be satisfied by both sides sharing a single wrong answer.
+        for assignment in listed.values():
+            probed = probe_provider_readiness(Provider(assignment["provider_id"]))
+            assert assignment["provider_ready"] is probed.ready
+
+        start = await client.post(
+            "/v1/runs",
+            json={"team_preset": _PRESET, "message": "work", "autonomous": True},
+        )
+        assert start.status_code == 201
+        run_id = start.json()["run_id"]
+
+        status = await client.get(f"/v1/runs/{run_id}")
+        assert status.status_code == 200
+
+        # Both run-envelope disclosures - the start response and the polled
+        # status read, which rebuilds from persisted metadata - must answer for
+        # a role's provider exactly as the listing did.
+        for source, envelope in (
+            ("run-start", start.json()),
+            ("run-status", status.json()),
+        ):
+            disclosed = {a["agent_id"]: a for a in envelope["assignments"]}
+            assert set(disclosed) == set(listed), source
+            for agent_id, assignment in disclosed.items():
+                assert assignment["provider_id"] == listed[agent_id]["provider_id"], (
+                    source
+                )
+                assert (
+                    assignment["provider_ready"] is listed[agent_id]["provider_ready"]
+                ), source
+
+
+@pytest.mark.asyncio(loop_scope="function")
 async def test_run_start_threads_feedback_batch_id_to_worker(
     session_factory, checkpointer, tmp_path
 ) -> None:

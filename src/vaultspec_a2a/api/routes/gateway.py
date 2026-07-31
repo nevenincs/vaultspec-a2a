@@ -512,9 +512,7 @@ async def _run_direct_start(
         nickname=result.nickname,
         eligible=True,
         profile_id=result.profile_id,
-        assignments=_frozen_disclosure(result.frozen)
-        if result.frozen is not None
-        else [],
+        assignments=await _disclose_frozen(result.frozen),
     )
 
 
@@ -651,7 +649,7 @@ async def _run_commit_locked(
             lease_id=binding.lease_id,
             nickname=existing.nickname,
             profile_id=existing_profile,
-            assignments=_frozen_disclosure(existing_frozen),
+            assignments=await _disclose_frozen(existing_frozen),
         )
     # Evaluate worker and provider eligibility BEFORE consuming the reservation,
     # accepting the actor tokens, or creating a run (ADR: mint run credentials only
@@ -757,9 +755,7 @@ async def _run_commit_locked(
         lease_id=outcome.lease_id,
         nickname=result.nickname,
         profile_id=result.profile_id,
-        assignments=_frozen_disclosure(result.frozen)
-        if result.frozen is not None
-        else [],
+        assignments=await _disclose_frozen(result.frozen),
     )
 
 
@@ -1143,19 +1139,69 @@ def _persisted_profile_id(metadata_json: str | None) -> str | None:
 
 
 def _frozen_disclosure(frozen: Any) -> list[RoleAssignmentSummary]:
-    """Build the safe per-role disclosure from a frozen assignment record."""
-    return [
-        RoleAssignmentSummary(
-            role_id=str(role.get("role_id", "")),
-            agent_id=agent_id,
-            provider_id=str(role.get("provider", "")),
-            capability=role.get("capability"),
-            model_name=role.get("model_name") or None,
-            fallback_providers=list(role.get("fallback", [])),
-            source=str(role.get("source", "team_default")),
+    """Build the safe per-role disclosure from a frozen assignment record.
+
+    Every field but one is reproduced verbatim from the frozen record - what the
+    run DECIDED at start, deliberately immune to later config drift.
+    ``provider_ready`` is the exception: readiness is a live host fact that no
+    frozen record carries (``freeze_assignment`` does not persist it, and could
+    not without making the run's digest depend on the host). It is therefore
+    probed here, through the same production probe the preset listing uses, so
+    the two disclosures of one question cannot disagree. Leaving it to the
+    model's default instead published a confident ``False`` - asserting "not
+    ready" where the truth was "not evaluated".
+
+    The probe is memoized per call, so a run pays it once per distinct provider
+    rather than once per role. Callers are on the event loop and must offload
+    this (``asyncio.to_thread``), matching the preset listing: the probe reaches
+    the filesystem to resolve a subprocess provider's launch command.
+    """
+    from ...graph.enums import Provider
+    from ...providers.model_profiles import probe_provider_readiness
+
+    readiness: dict[str, bool] = {}
+
+    def _ready(provider_id: str) -> bool:
+        if provider_id not in readiness:
+            try:
+                provider = Provider(provider_id)
+            except ValueError:
+                # A run frozen under a provider this build no longer knows: the
+                # truthful verdict is "not ready", not a crash on a read path.
+                readiness[provider_id] = False
+            else:
+                readiness[provider_id] = probe_provider_readiness(provider).ready
+        return readiness[provider_id]
+
+    summaries: list[RoleAssignmentSummary] = []
+    for agent_id, role in frozen.roles.items():
+        provider_id = str(role.get("provider", ""))
+        summaries.append(
+            RoleAssignmentSummary(
+                role_id=str(role.get("role_id", "")),
+                agent_id=agent_id,
+                provider_id=provider_id,
+                capability=role.get("capability"),
+                model_name=role.get("model_name") or None,
+                fallback_providers=list(role.get("fallback", [])),
+                provider_ready=_ready(provider_id),
+                source=str(role.get("source", "team_default")),
+            )
         )
-        for agent_id, role in frozen.roles.items()
-    ]
+    return summaries
+
+
+async def _disclose_frozen(frozen: Any) -> list[RoleAssignmentSummary]:
+    """Disclose a frozen assignment (or nothing) without blocking the event loop.
+
+    The single entry point every run-envelope path uses, so the absent-frozen
+    case and the readiness offload are decided once rather than at four call
+    sites. The offload matches ``presets_list_endpoint``: readiness reaches the
+    filesystem, and ``/v1/runs/{run_id}`` is polled.
+    """
+    if frozen is None:
+        return []
+    return await asyncio.to_thread(_frozen_disclosure, frozen)
 
 
 def _raise_for_dispatch_failure(
@@ -1302,7 +1348,7 @@ async def run_status_endpoint(
         execution_readiness=snapshot.execution_readiness,
         degraded_reasons=snapshot.degraded_reasons,
         profile_id=frozen.profile_id if frozen is not None else None,
-        assignments=_frozen_disclosure(frozen) if frozen is not None else [],
+        assignments=await _disclose_frozen(frozen),
         lease_id=_persisted_lease_id(
             thread.thread_metadata if thread is not None else None
         ),

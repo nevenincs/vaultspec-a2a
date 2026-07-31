@@ -2639,3 +2639,33 @@ the overstated constant-time claim, the indirectly-proven detached-store premise
 load-sensitive live stream tests, the absent digest for server-minted identifiers, and the
 over-ceiling route module, whose repair is refactor-sized and should not be chased for its
 own sake.
+
+
+#### `mcp-503-reads-as-a-server-fault` (medium, closed)
+
+The tool surfaced the resumable-incomplete outcome through a generic branch as a server
+error, telling the calling model the service was broken - so it would not retry, defeating
+the resumability the saga exists to provide. The repair reports the condition explicitly:
+in progress, resumable, not a fault, repeating the same call resumes the same deletion and
+makes progress, and persistent incompleteness is eventually reported as abandoned. The
+tool's own description carries it too, since that description is what the calling model
+reads before deciding. Mutation-checked: disabling the branch fails the new assertion with
+the generic fault text.
+
+The shape was settled by an architecture ruling after the owner challenged an earlier
+call. The proposition tested was that automatic retry on a degrading service is the
+industry norm provided error conditions and retry state are declared loudly. That was
+ACCEPTED as a norm and bounded out of this case on evidence: each attempt drives real
+cleanup passes rather than a cheap idempotent poll, and the saga's own attempt ceiling
+assumes retries arrive as separate, widely spaced requests - so a client looping at
+seconds-scale would exhaust that ceiling against an unchanged cause and finalize over
+stranded state, converting the resumable outcome into the abandoned one invisibly inside a
+blocking call. One sub-case means another pass merely holds a minutes-long claim, making a
+fast loop pure spin. The declare-loudly half of the proposition was adopted in full and is
+the entire fix. The boundary and what would move it are recorded in the decision record.
+
+Provenance note, recorded because the same hazard was recorded against this session
+earlier: this repair was authored here but landed inside a concurrent session's commit,
+which swept the working-tree change in. Nothing was lost, and the mirror-image of the
+earlier incident is worth keeping visible - on a shared tree, uncommitted work belongs to
+whoever commits next, in either direction.

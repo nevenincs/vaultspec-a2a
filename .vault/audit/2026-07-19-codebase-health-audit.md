@@ -2669,3 +2669,37 @@ earlier: this repair was authored here but landed inside a concurrent session's 
 which swept the working-tree change in. Nothing was lost, and the mirror-image of the
 earlier incident is worth keeping visible - on a shared tree, uncommitted work belongs to
 whoever commits next, in either direction.
+
+
+### Closing verification (2026-07-31)
+
+Run at the end of the hardening pass, after the protocol package's dependency migration
+landed and the type baseline moved for the third time.
+
+Type gate: whole-tree, CLEAN - zero diagnostics. This is worth recording precisely because
+the number moved three times in one working session, from seventeen to twelve to zero, as
+an unrelated lane's dependency work resolved the imports that made up the whole of it.
+Every lane was told to measure against a figure that was already stale by the time it
+checked, which is why the instruction became report-grouped-by-file rather than report-a
+total: a bare count could not distinguish someone else's environment moving from a lane
+adding a diagnostic of its own.
+
+Lint and formatting: clean across every file touched.
+
+Tests: the whole package reports 2718 passed with 4 failures, ALL of them in the
+real-process desktop suite. Every one of the four passes in isolation - the admission file
+seven of seven, and the full desktop package forty-three of forty-three with no failures
+and no skips. The mechanism is visible in the timings: individual tests there take fifty
+seconds apiece when they own the machine, and the combined run took twenty-nine minutes
+while a concurrent session drove its own real gateways and workers through the same tree.
+That is the load-sensitivity finding already queued, confirmed rather than newly
+discovered, and it is also this document's own recorded working constraint - real-process
+suites are not safe to overlap, with or without an edit underneath them.
+
+Scoped suites, each run at least twice: interface plus control 595, interface plus
+streaming 529, interface plus control plus worker 677, protocol package 98.
+
+The honest reading is therefore: green on every gate that can be measured without
+contention, with four known contention artifacts named rather than rounded away, and the
+four proven green the moment they are given the machine to themselves. A whole-package run
+on a shared box is not the authority here; the isolated runs are.

@@ -73,7 +73,35 @@ def _reset_client() -> None:
 _HTTP_OK = 200
 _HTTP_NOT_FOUND = 404
 _HTTP_CONFLICT = 409
+_HTTP_UNPROCESSABLE = 422
 _HTTP_SERVICE_UNAVAILABLE = 503
+
+
+def _response_detail(response: httpx.Response) -> str:
+    """Return the human-readable ``detail`` an error response carries, if any.
+
+    The gateway answers a policy refusal with a string ``detail`` and a request
+    validation failure with a list of per-field errors. Both are safe to surface
+    to the tool caller: neither carries credentials, and the refusal reason is
+    the only thing that tells an operator agent what to change. Anything else
+    (or an unparseable body) yields the empty string, so callers can fall back
+    to their own wording without a second failure mode.
+    """
+    try:
+        payload = response.json()
+    except Exception:
+        return ""
+    detail = payload.get("detail") if isinstance(payload, dict) else None
+    if isinstance(detail, str):
+        return detail
+    if isinstance(detail, list):
+        parts = [
+            f"{'.'.join(str(p) for p in item.get('loc', []))}: {item.get('msg', '')}"
+            for item in detail
+            if isinstance(item, dict)
+        ]
+        return "; ".join(part for part in parts if part.strip(": "))
+    return ""
 
 
 # ---------------------------------------------------------------------------
@@ -105,11 +133,15 @@ def _strip_credentials(url: str) -> str:
 # presets.
 _known_presets_cache: frozenset[str] | None = None
 
+# The versioned presets-list verb. Shared with ``discovery.list_team_presets`` so
+# the cache and the tool can never drift onto different catalogs.
+_PRESETS_PATH = "/v1/presets"
+
 
 async def _get_known_presets() -> frozenset[str]:
     """Fetch known team preset IDs from the gateway, with caching.
 
-    On first call, issues GET /api/teams to the gateway and caches
+    On first call, issues GET /v1/presets to the gateway and caches
     the result.  Subsequent calls return the cached value immediately.
     If the gateway is unreachable, returns an empty frozenset (allowing
     the gateway itself to reject unknown presets at create time).
@@ -122,7 +154,7 @@ async def _get_known_presets() -> frozenset[str]:
     try:
         client = _get_client()
         resp = await client.get(
-            f"{api_base}/api/teams",
+            f"{api_base}{_PRESETS_PATH}",
             headers=gateway_auth_headers(api_base),
             timeout=settings.mcp_query_timeout_seconds,
         )
@@ -134,7 +166,10 @@ async def _get_known_presets() -> frozenset[str]:
         )
     except Exception:
         logger.warning(
-            "Could not fetch team presets from %s/api/teams", api_base, exc_info=True
+            "Could not fetch team presets from %s%s",
+            api_base,
+            _PRESETS_PATH,
+            exc_info=True,
         )
         _known_presets_cache = frozenset()
     return _known_presets_cache

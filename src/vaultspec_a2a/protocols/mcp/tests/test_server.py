@@ -279,9 +279,14 @@ async def test_start_thread_no_preset_defaults_to_solo_coder_live(
     """No-arg start_thread resolves the default preset to solo-coder end-to-end.
 
     Drives the real MCP start_thread tool against the in-process FastAPI app
-    (real routes, real DB, real known-presets fetch) with team_preset=None and
-    asserts the created thread is dispatched under vaultspec-solo-coder -- the
-    retained default after the adaptive-coder preset was retired.
+    (real routes, real DB, real versioned presets fetch) with team_preset=None.
+
+    The default preset arms the engine authoring bridge, so the versioned
+    run-start verb refuses a bundle-less start before creating durable state.
+    That refusal is the observable proof the default resolved: the gateway names
+    ``vaultspec-solo-coder`` and the exact role whose engine-minted actor token
+    is missing, so the request reached the real eligibility policy under the
+    retained default preset rather than stopping at client-side validation.
     """
     with _make_test_client(session_factory, checkpointer) as client:
         original_gateway_url = settings.gateway_url
@@ -293,7 +298,8 @@ async def test_start_thread_no_preset_defaults_to_solo_coder_live(
                 transport=ASGITransport(app=client.app),
                 base_url="http://testserver",
             )
-            output = await start_thread(initial_message="ship it", team_preset=None)
+            with pytest.raises(ToolError) as exc_info:
+                await start_thread(initial_message="ship it", team_preset=None)
         finally:
             if mcp_http._shared_client is not None:
                 await mcp_http._shared_client.aclose()
@@ -301,7 +307,89 @@ async def test_start_thread_no_preset_defaults_to_solo_coder_live(
             _reset_known_presets()
             settings.gateway_url = original_gateway_url
 
-    assert "Preset: vaultspec-solo-coder" in output
+    message = str(exc_info.value)
+    assert "vaultspec-solo-coder" in message
+    assert "vaultspec-coder" in message
+    assert "actor token" in message
+
+
+@pytest.mark.asyncio
+async def test_start_thread_dispatches_through_the_versioned_run_verb(
+    session_factory, checkpointer
+) -> None:
+    """start_thread creates a durable run through POST /v1/runs, end to end.
+
+    Uses a preset that carries no per-role token requirement, so the whole
+    repointed path is exercised for real: the versioned presets fetch that
+    validates the preset id, the ``message`` field name the versioned request
+    model requires, and the ``run_id`` the versioned response returns. The
+    returned id is then read back through the versioned run-status verb, which
+    proves the tool reported the identity of a run that actually exists rather
+    than echoing its own payload.
+    """
+    with _make_test_client(session_factory, checkpointer) as client:
+        original_gateway_url = settings.gateway_url
+        original_client = mcp_http._shared_client
+        _reset_known_presets()
+        try:
+            settings.gateway_url = "http://testserver"
+            mcp_http._shared_client = httpx.AsyncClient(
+                transport=ASGITransport(app=client.app),
+                base_url="http://testserver",
+            )
+            output = await start_thread(
+                initial_message="ship it",
+                team_preset="mock-success-single",
+            )
+        finally:
+            if mcp_http._shared_client is not None:
+                await mcp_http._shared_client.aclose()
+            mcp_http._shared_client = original_client
+            _reset_known_presets()
+            settings.gateway_url = original_gateway_url
+
+        assert "Preset: mock-success-single" in output
+        run_id = output.splitlines()[0].removeprefix("Thread started: ").strip()
+        assert run_id
+
+        status = client.get(f"/v1/runs/{run_id}")
+        assert status.status_code == 200
+        assert status.json()["run_id"] == run_id
+
+
+@pytest.mark.asyncio
+async def test_start_thread_reports_the_missing_feature_tag_refusal(
+    session_factory, checkpointer
+) -> None:
+    """A document-authoring preset without a feature tag is refused actionably.
+
+    The versioned verb refuses before any durable state exists, and the refusal
+    detail is the only thing that tells the caller what to supply. The tool must
+    surface it rather than collapsing it into a bare status code.
+    """
+    with _make_test_client(session_factory, checkpointer) as client:
+        original_gateway_url = settings.gateway_url
+        original_client = mcp_http._shared_client
+        _reset_known_presets()
+        try:
+            settings.gateway_url = "http://testserver"
+            mcp_http._shared_client = httpx.AsyncClient(
+                transport=ASGITransport(app=client.app),
+                base_url="http://testserver",
+            )
+            with pytest.raises(ToolError) as exc_info:
+                await start_thread(
+                    initial_message="write the record",
+                    team_preset="vaultspec-adr-research",
+                )
+        finally:
+            if mcp_http._shared_client is not None:
+                await mcp_http._shared_client.aclose()
+            mcp_http._shared_client = original_client
+            _reset_known_presets()
+            settings.gateway_url = original_gateway_url
+
+    assert "requires a target feature tag" in str(exc_info.value)
 
 
 # ---------------------------------------------------------------------------

@@ -32,7 +32,7 @@ _GATEWAY_URL = "http://127.0.0.1:18000"
 
 
 def _gated_gateway() -> FastAPI:
-    """A gateway whose /api surface requires the attach bearer."""
+    """A gateway whose versioned surface requires the attach bearer."""
     app = FastAPI()
     app.state.seen = {"authorization": None}
 
@@ -41,17 +41,17 @@ def _gated_gateway() -> FastAPI:
         if authorization != f"Bearer {_TOKEN}":
             raise HTTPException(status_code=401, detail="missing or invalid bearer")
 
-    @app.get("/api/teams")
+    @app.get("/v1/presets")
     async def _teams(authorization: str | None = Header(default=None)) -> dict:
         _require_bearer(authorization)
         return {"presets": [{"id": "vaultspec-solo-coder"}]}
 
-    @app.get("/api/threads/{thread_id}")
-    async def _thread(
-        thread_id: str, authorization: str | None = Header(default=None)
+    @app.get("/v1/runs/{run_id}")
+    async def _run(
+        run_id: str, authorization: str | None = Header(default=None)
     ) -> dict:
         _require_bearer(authorization)
-        return {"thread_id": thread_id, "status": "running"}
+        return {"run_id": run_id, "status": "running"}
 
     return app
 
@@ -94,8 +94,8 @@ async def test_tool_request_sends_the_attach_bearer() -> None:
     """A configured token reaches the gated gateway as an Authorization header."""
     app = _gated_gateway()
     async with _adapter_client(app, token=_TOKEN):
-        body = await _mcp_request("GET", "/api/threads/abc123", timeout=5.0)
-        assert body == {"thread_id": "abc123", "status": "running"}
+        body = await _mcp_request("GET", "/v1/runs/abc123", timeout=5.0)
+        assert body == {"run_id": "abc123", "status": "running"}
         assert app.state.seen["authorization"] == f"Bearer {_TOKEN}"
 
 
@@ -121,6 +121,6 @@ async def test_without_a_credential_the_gated_gateway_rejects() -> None:
     app = _gated_gateway()
     async with _adapter_client(app, token=None):
         with pytest.raises(httpx.HTTPStatusError) as excinfo:
-            await _mcp_request("GET", "/api/threads/abc123", timeout=5.0)
+            await _mcp_request("GET", "/v1/runs/abc123", timeout=5.0)
         assert excinfo.value.response.status_code == 401
         assert app.state.seen["authorization"] is None

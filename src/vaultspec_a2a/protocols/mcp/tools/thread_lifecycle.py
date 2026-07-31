@@ -15,9 +15,11 @@ from ....thread.enums import ThreadStatus
 from .._http import (
     _HTTP_CONFLICT,
     _HTTP_SERVICE_UNAVAILABLE,
+    _HTTP_UNPROCESSABLE,
     HTTPStatusError,
     _get_known_presets,
     _mcp_request,
+    _response_detail,
 )
 from ..server import mcp
 
@@ -72,25 +74,42 @@ async def start_thread(
             )
         ),
     ] = None,
+    feature_tag: Annotated[
+        str | None,
+        Field(
+            description=(
+                "Target feature tag (kebab-case) the run"
+                " authors documents for. Required by"
+                " document-authoring presets; ignored by"
+                " coding presets."
+            )
+        ),
+    ] = None,
 ) -> str:
-    """Start a new multi-agent coding workflow and return a thread ID for tracking.
+    """Start a new multi-agent coding workflow and return a run ID for tracking.
 
     Use this tool when the user wants to delegate a coding task to a team of
-    AI agents.  Do NOT use this if there is already an active thread for the
+    AI agents.  Do NOT use this if there is already an active run for the
     same task — call ``list_threads`` first to check, then use ``send_message``
-    to continue an existing thread instead.
+    to continue an existing run instead.
 
     The workflow runs asynchronously: this tool returns immediately with a
-    thread ID and monitoring URLs.  It does NOT wait for agents to finish.
-    Poll progress with ``get_thread_status`` or connect to the WebSocket URL
-    in the response for real-time streaming.  The initial_message is capped at
-    32,000 characters; longer messages are rejected.
+    run ID and a progress-stream URL.  It does NOT wait for agents to finish.
+    Poll progress with ``get_thread_status``, or read the run's progress stream
+    at the returned URL.  The initial_message is capped at 32,000 characters;
+    longer messages are rejected.
+
+    Presets differ in what they require before a run may dispatch.  A preset
+    that arms the engine authoring bridge, and every document-authoring preset,
+    needs one engine-minted actor token per role; a document-authoring preset
+    additionally needs ``feature_tag``.  Those requirements are refused up front
+    rather than mid-run, and this tool reports the refusal verbatim.
 
     Returns a plain-text block containing:
-    - Thread ID (UUID, e.g. '550e8400-e29b-41d4-a716-446655440000')
+    - Run ID (e.g. '550e8400e29b41d4a716446655440000')
     - Team preset name used
-    - REST monitoring URL
-    - State query URL
+    - Progress stream URL
+    - Status query URL
 
     Args:
         initial_message: The coding task description for the agent team, e.g.
@@ -110,6 +129,8 @@ async def start_thread(
                          automatic .vault/ context injection and scopes agent
                          file operations to this directory. If omitted, agents
                          run without project context.
+        feature_tag:     Target feature tag for a document-authoring preset,
+                         e.g. 'editor-demo'. Coding presets ignore it.
     """
     # reject oversized payloads before making any HTTP call.
     if len(initial_message) > settings.mcp_max_initial_message_chars:
@@ -123,25 +144,60 @@ async def start_thread(
         raise ToolError(f"Unknown preset {preset!r}. Valid: {', '.join(sorted(known))}")
     payload: dict[str, object] = {
         "title": initial_message[:80],
-        "initial_message": initial_message,
+        "message": initial_message,
         "team_preset": preset,
         "autonomous": autonomous,
     }
     if workspace_root is not None:
         payload["metadata"] = {"workspace_root": workspace_root}
-    data = await _mcp_request(
-        "POST",
-        "/api/threads",
-        json=payload,
-        timeout=settings.mcp_create_timeout_seconds,
-    )
-    thread_id = data["thread_id"]
+    if feature_tag is not None:
+        payload["feature_tag"] = feature_tag
+    try:
+        data = await _mcp_request(
+            "POST",
+            "/v1/runs",
+            json=payload,
+            timeout=settings.mcp_create_timeout_seconds,
+        )
+    except HTTPStatusError as exc:
+        raise _start_refusal(preset, exc) from exc
+    run_id = data["run_id"]
     return (
-        f"Thread started: {thread_id}\n"
+        f"Thread started: {run_id}\n"
         f"Preset: {preset}\n"
-        f"Monitor: {settings.gateway_url}/\n"
-        f"Status: GET {settings.gateway_url}/v1/runs/{thread_id}"
+        f"Stream: GET {settings.gateway_url}/v1/runs/{run_id}/stream\n"
+        f"Status: GET {settings.gateway_url}/v1/runs/{run_id}"
     )
+
+
+def _start_refusal(preset: str, exc: HTTPStatusError) -> ToolError:
+    """Translate a run-start rejection into an actionable tool error.
+
+    Run-start refuses an ineligible request BEFORE creating durable state, and
+    the refusal detail is the only thing that tells the caller what to change —
+    which roles lack an engine-minted actor token, or that a document-authoring
+    preset was given no target feature. Collapsing that into a bare status code
+    would leave the caller retrying an unstartable request forever, so the
+    detail is surfaced verbatim.
+    """
+    status = exc.response.status_code
+    detail = _response_detail(exc.response)
+    if status == _HTTP_UNPROCESSABLE:
+        return ToolError(
+            f"Run start refused for preset {preset!r}: "
+            f"{detail or 'the request is not eligible to dispatch'}."
+        )
+    if status == _HTTP_CONFLICT:
+        return ToolError(
+            f"Run start conflicted for preset {preset!r}: "
+            f"{detail or 'a run with this identity already exists'}."
+        )
+    if status == _HTTP_SERVICE_UNAVAILABLE:
+        return ToolError(
+            f"Run start is temporarily unavailable for preset {preset!r}: "
+            f"{detail or 'the gateway is at capacity or draining'}. Retry later."
+        )
+    return ToolError(f"Server error: HTTP {status}")
 
 
 @mcp.tool()

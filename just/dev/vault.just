@@ -2,7 +2,7 @@ set working-directory := "../.."
 set windows-shell := ["powershell.exe", "-NoLogo", "-NoProfile", "-Command"]
 
 core := "uv run --no-sync --frozen --no-default-groups --group tooling vaultspec-core"
-safe_enroll := "uv run --no-sync --frozen --no-default-groups --group tooling python scripts/vaultspec_core_enroll.py"
+safe_enroll := "uv run --no-sync --frozen --no-default-groups --group tooling python dev/vault/enroll.py"
 
 # Resolve locked tooling and enroll the workspace through Vaultspec Core.
 setup:

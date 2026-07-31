@@ -419,10 +419,10 @@ async def set_thread_approval_state(
     session: AsyncSession,
     thread_id: str,
     *,
-    approval_status: ApprovalStatus | str | None | _UnsetType = _UNSET,
-    approval_request_id: str | None | _UnsetType = _UNSET,
-    approval_reason: str | None | _UnsetType = _UNSET,
-    approval_response_action_id: str | None | _UnsetType = _UNSET,
+    approval_status: ApprovalStatus | str | _UnsetType | None = _UNSET,
+    approval_request_id: str | _UnsetType | None = _UNSET,
+    approval_reason: str | _UnsetType | None = _UNSET,
+    approval_response_action_id: str | _UnsetType | None = _UNSET,
     approval_updated_at: datetime | None = None,
 ) -> ThreadModel | None:
     """Persist durable plan-approval state on the thread row."""

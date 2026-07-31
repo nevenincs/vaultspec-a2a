@@ -356,7 +356,7 @@ def _classify_capsule_acp_command(
 def _classify_acp_command(
     backend: str,
     *,
-    capsule_assets_root: Path | None | _CapsuleAssetsRootOmitted = (
+    capsule_assets_root: Path | _CapsuleAssetsRootOmitted | None = (
         _CAPSULE_ASSETS_ROOT_OMITTED
     ),
 ) -> tuple[list[str], dict[str, str]]:

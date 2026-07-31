@@ -58,21 +58,52 @@ docs = [
 ]
 tooling = [
   "actionlint-py==1.7.12.24",
+  # Security posture over production code. Advisory: it reports this project's
+  # deliberate subprocess and dynamic-import design alongside anything real.
+  "bandit>=1.9.4",
+  # Strict-mode type checking, one tier above `ty`. `ty` is the fast gate that
+  # runs on every commit; basedpyright is the strict pass that catches what a
+  # fast checker deliberately does not (implicit overrides, uninitialized
+  # instance state, unnecessary ignores, private-import reach-through).
+  "basedpyright>=1.39",
+  # Cognitive complexity - how much state a reader must hold to follow a
+  # function, as distinct from the number of paths through it that radon and
+  # ruff's C90 measure. Implements the Sonar specification; configured from
+  # [tool.complexipy] below at that specification's own limit of 15.
+  "complexipy>=6.2",
   "deptry>=0.23.0",
   "identify>=2.0.0",
+  # Docstring coverage over the public surface. Advisory.
+  "interrogate>=1.7.0",
   "jsonschema>=4.26.0",
   "nodeenv>=1.0.0",
   "packaging>=25.0",
   "prek>=0.3.2",
+  # Module length and the class-shape design limits ruff has no rule for
+  # (C0302, R0902, R0904, R0916). Everything else pylint would report is
+  # already covered by ruff and stays disabled in [tool.pylint].
+  "pylint>=4.0",
   "pytest>=9.0.2",
   "pytest-asyncio>=1.3.0",
   "pytest-cov>=6.0.0",
   "pytest-timeout>=2.4.0",
+  # Cyclomatic complexity and the Maintainability Index, used as a LIBRARY by
+  # dev/health/report.py - the numbers are radon's own, with no command output
+  # parsed in between, so the gate and the health report cannot disagree.
+  #
+  # The usual CLI gate built on radon, `xenon`, is deliberately absent: it reads
+  # pyproject.toml through configparser, which reads this project's legitimate
+  # `log_cli_format` ("%(asctime)s ...") as broken interpolation and crashes
+  # before scanning anything. `dev.health --gate` enforces the same ceiling.
+  "radon>=6.0.1",
   "ruff>=0.15.2",
   "tenacity>=9.0.0",
   "tomlkit>=0.15.0",
   "ty>=0.0.15",
   "vaultspec-core>=0.1.48,<0.2",
+  # Dead-code detection. Advisory: it infers reachability it cannot always see,
+  # so a finding is a lead to confirm rather than a verdict.
+  "vulture>=2.16",
   "websockets>=16.0",
   "zstandard>=0.25.0",
 ]
@@ -215,8 +246,28 @@ unfixable = ["B"]
 "src/vaultspec_a2a/api/routes/*.py" = ["B008"]
 "src/vaultspec_a2a/api/internal.py" = ["B008"]
 "src/vaultspec_a2a/worker/app.py" = ["B008"]
-# MCP server defines mcp=FastMCP() then imports tool modules for side-effect registration
+# MCP server defines mcp=MCPServer() then imports tool modules for side-effect registration
 "src/vaultspec_a2a/protocols/mcp/server.py" = ["E402", "F401"]
+
+# INDUSTRY DEFAULTS, NOT CALIBRATED TO THIS TREE. The rules these two tables
+# configure are deliberately absent from `select` above, so they do not fire on
+# the everyday `just dev lint python` gate. They are selected explicitly by
+# `just dev lint limits` and `just dev lint nesting`, which are the burndown
+# dimensions: keeping them out of the base gate is what stops an unfinished
+# burndown from hiding a real style or correctness regression behind it.
+#
+# Every number below is the tool's own published default. Nothing here was
+# raised to accommodate the current worst offender - `just dev health` reports
+# the distance, and the number to move is the code.
+[tool.ruff.lint.mccabe]
+# McCabe's own recommendation, and the flake8, ruff, and SonarQube default.
+max-complexity = 10
+
+[tool.ruff.lint.pylint]
+max-args = 5       # PLR0913 default
+max-branches = 12  # PLR0912 default
+max-returns = 6    # PLR0911 default
+max-statements = 50 # PLR0915 default
 
 [tool.ruff.lint.isort]
 known-first-party = ["vaultspec_a2a"]
@@ -271,12 +322,17 @@ DEP002 = [
   # runtime — never imported directly.
   "langsmith",
 ]
-# DEP004: tests and documentation extensions import their owning development groups.
+# DEP004: tests, documentation extensions, and the dev/ tooling harness import
+# their owning development groups. The harness is not shipped - the wheel packs
+# only `src/vaultspec_a2a` - so a development-group import there is correct by
+# construction rather than an exception being carved out.
 DEP004 = [
   "jsonschema",
   "packaging",
   "pytest",
   "pytest_asyncio",
+  # dev/health/report.py uses radon's library API to measure this tree.
+  "radon",
   "sphinx",
   "tenacity",
   "tomlkit",
@@ -287,3 +343,99 @@ python-version = "3.13"
 root = [".", "src"]
 
 [tool.ty.src]
+
+# ── Strict type checking ─────────────────────────────────────────────────────
+# `ty` above is the FAST gate: it runs on every commit through prek and in
+# `just dev lint all`. basedpyright is the STRICT pass behind it, run by
+# `just dev lint type-strict`. Two checkers rather than one is deliberate -
+# a fast checker earns its place by being fast, which means it declines to
+# prove the expensive things, and those are exactly what the strict pass adds.
+[tool.basedpyright]
+include = ["src", "dev"]
+exclude = ["**/__pycache__", "**/node_modules", ".venv"]
+pythonVersion = "3.13"
+typeCheckingMode = "strict"
+
+# Individual rules enabled beyond `strict`, curated rather than a blanket
+# `typeCheckingMode = "all"`, which reports mostly noise on any real tree.
+# An override that drops `@override` loses its link to the base method
+# silently: rename the base method and the override becomes a dead sibling
+# instead of a type error.
+reportImplicitOverride = "error"
+reportPropertyTypeMismatch = "error"
+reportUninitializedInstanceVariable = "error"
+reportUnnecessaryTypeIgnoreComment = "error"
+reportIgnoreCommentWithoutRule = "error"
+# A symbol imported into a module but not re-exported is that module's private
+# implementation detail; a second module reaching past it is a trust-boundary
+# violation, and this is the non-underscore half of that boundary.
+reportPrivateLocalImportUsage = "error"
+
+# ── Cognitive complexity ─────────────────────────────────────────────────────
+# The Sonar cognitive-complexity specification's own limit. This measures how
+# much state a reader must hold to follow a function, which is a different
+# question from how many paths run through it (ruff's C90 and dev.health).
+[tool.complexipy]
+max-complexity = 15
+
+# ── Module length and class design ───────────────────────────────────────────
+# pylint runs ONLY for the four limits ruff has no rule for. Everything else it
+# would report is already covered by ruff, so enabling more would mean two
+# tools disagreeing about the same finding.
+[tool.pylint.main]
+py-version = "3.13"
+ignore-paths = ["^.*[\\\\/]tests[\\\\/].*$", "^.*[\\\\/]service_tests[\\\\/].*$"]
+
+[tool.pylint."messages control"]
+disable = ["all"]
+enable = [
+  "too-many-lines",           # C0302 - module length
+  "too-many-instance-attributes", # R0902
+  "too-many-public-methods",  # R0904
+  "too-many-boolean-expressions", # R0916
+]
+
+[tool.pylint.format]
+# pylint's own default, and this repository's stated module-size mandate.
+max-module-lines = 1000
+
+[tool.pylint.design]
+max-attributes = 7      # R0902 default
+max-public-methods = 20 # R0904 default
+max-bool-expr = 5       # R0916 default
+
+# ── Dead code ────────────────────────────────────────────────────────────────
+# Advisory. vulture infers reachability it cannot always see - a name reached
+# only through a registry, a plugin lookup, or a framework callback reads as
+# dead - so a finding here is a lead to confirm, never a verdict.
+[tool.vulture]
+paths = ["src/vaultspec_a2a"]
+exclude = ["*/tests/*", "*/service_tests/*"]
+# The tool's own default. Raising it to 80 would hide the whole class of
+# genuinely-unused imports and variables this scan exists to surface.
+min_confidence = 60
+sort_by_size = true
+
+# ── Security ─────────────────────────────────────────────────────────────────
+# Advisory. This project spawns provider CLIs and loads drivers by URL scheme
+# on purpose, so the scan reports that deliberate design alongside anything
+# real.
+[tool.bandit]
+exclude_dirs = ["src/vaultspec_a2a/tests", "src/vaultspec_a2a/service_tests"]
+skips = [
+  # B101: pytest and the internal invariant checks use `assert` by design.
+  "B101",
+]
+
+# ── Docstring coverage ───────────────────────────────────────────────────────
+# Advisory. 80% is the conventional floor for a public-surface docstring gate.
+[tool.interrogate]
+fail-under = 80
+ignore-init-method = true
+ignore-magic = true
+ignore-module = false
+ignore-nested-functions = true
+ignore-private = true
+ignore-property-decorators = true
+exclude = ["src/vaultspec_a2a/tests", "src/vaultspec_a2a/service_tests"]
+omit-covered-files = true

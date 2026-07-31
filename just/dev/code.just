@@ -1,34 +1,46 @@
 set working-directory := "../.."
-set windows-shell := ["powershell.exe", "-NoLogo", "-NoProfile", "-Command"]
+
+# PLATFORM AGNOSTIC BY CONSTRUCTION. Every recipe below is a single command with
+# no shell branching, no pipes, no conditionals, and no PowerShell-versus-sh
+# dialect - so this module needs no `set windows-shell` and there is no second
+# dialect of anything to maintain. All of the logic - target dispatch, step
+# chaining, tool-or-Docker fallback, advisory-versus-gating exit codes - lives
+# under `dev/`, whose dispatch core imports the standard library only.
+#
+# To change what a target runs, edit `dev/toolchain.py`. It is the single
+# declarative source of truth for the whole toolchain. Run any verb with the
+# target `help` for its full target list.
+
+dev := "uv run --no-sync --frozen --no-default-groups --group tooling python -m dev"
 
 # Show code validation and repair recipes.
 help:
     @just --list dev::code
 
-# Run every read-only code-quality check.
-check: lint format-check type dependencies workflows
+# Run gating static analysis; a finding fails the build.
+lint target='all':
+    {{ dev }} lint {{ target }}
 
-# Check Python lint rules without changing files.
-lint:
-    uv run --no-sync --frozen --no-default-groups --group tooling ruff check .
+# Apply every available formatter and automatic fix.
+fix target='all':
+    {{ dev }} fix {{ target }}
 
-# Check Python formatting without changing files.
-format-check:
-    uv run --no-sync --frozen --no-default-groups --group tooling ruff format --check .
+# Audit dependencies and code quality; only 'deps' gates.
+audit target='all':
+    {{ dev }} audit {{ target }}
 
-# Run the project type checker without changing files.
-type:
-    uv run --no-sync --frozen --no-default-groups --group tooling ty check
+# Rank the worst offenders across every code-health dimension; always exits 0.
+health target='report':
+    {{ dev }} health {{ target }}
 
-# Check declared dependencies against imports and explicit runtime loaders.
-dependencies:
-    uv run --no-sync --frozen --no-default-groups --group tooling deptry .
+# Run every read-only gate that holds the line today.
+check:
+    {{ dev }} lint all
 
-# Validate GitHub Actions workflows with the project-pinned authority.
-workflows:
-    uv run --no-sync --frozen --no-default-groups --group tooling actionlint
+# Run every gate including the unfinished burndowns; expected red.
+check-strict:
+    {{ dev }} lint strict
 
 # Apply configured lint fixes and formatting explicitly.
 repair:
-    uv run --no-sync --frozen --no-default-groups --group tooling ruff check --fix .
-    uv run --no-sync --frozen --no-default-groups --group tooling ruff format .
+    {{ dev }} fix python

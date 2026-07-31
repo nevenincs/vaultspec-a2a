@@ -172,7 +172,7 @@ Keep transition surfaces credential-gated and unadvertised while moving the dash
 
 - [ ] `W02.P07.S28` - Disable legacy product routes in Compose when no attach credential is configured after consuming certified desktop route authentication; `src/vaultspec_a2a/api/routes, service`.
 - [ ] `W02.P07.S29` - Remove the credential-gated legacy event WebSocket from dashboard discovery after consuming certified desktop WebSocket authentication; `src/vaultspec_a2a/lifecycle/discovery.py, src/vaultspec_a2a/api/app.py`.
-- [ ] `W02.P07.S183` - Answer a permission request through a run-scoped versioned verb; `src/vaultspec_a2a/api/routes/gateway.py, src/vaultspec_a2a/api/schemas/gateway.py`.
+- [x] `W02.P07.S183` - Answer a permission request through a run-scoped versioned verb; `src/vaultspec_a2a/api/routes/gateway.py, src/vaultspec_a2a/api/schemas/gateway.py`.
 
 ### Phase `W02.P08` - review and queue edge findings
 

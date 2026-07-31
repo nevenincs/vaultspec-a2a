@@ -2753,3 +2753,47 @@ refuses, and that it refuses because the connection is gone rather than because 
 is unknown. If a library change ever made that store usable again, those tests would have
 quietly asserted the wrong outcome for a plausible-looking reason; they now fail at the
 cause with a message saying so.
+
+
+#### `delete-result-abandoned-property-test-only` (low, closed by `be72890f`)
+
+The delete result kept a boolean derived from the abandoned-kinds tuple, retained for
+compatibility while that widening landed. Nothing in production read it - the route
+branches on the kinds - and the sole assertion against it was proving a property no caller
+used. Dropped, with the control test retargeted onto the kinds themselves, which is what
+the route actually consumes, so the test proves more rather than less. An unread derived
+field is one more thing that must stay true for no benefit.
+
+### Queue state after the hardening campaign (2026-07-31)
+
+What remains open remains so by decision, and each entry carries its reason rather than
+waiting for one:
+
+`commit-loser-strands-reservation` - twice adjudicated defensible. The durability
+classifier cannot distinguish another party's durable row from an own row with an
+unexpected binding, and the alternative risks duplicate admission authority. Recording IS
+the disposition; the retention is bounded by expiry and strictly better than the behaviour
+it replaced.
+
+`cancel-release-appears-unreachable` - dead code rather than a live defect. The cancel
+service's success path never returns a terminal status and the already-terminal case raises
+before the release line, confirmed empirically. Removing it is a separate judgement about
+whether the case its comment describes should be made reachable again.
+
+`sse-live-tests-are-load-sensitive` - a test-infrastructure improvement, not a product
+defect. Their fixed frame deadlines should be generous or signal-driven; until then the
+known mitigation is not to overlap real-process suites, which this document already records
+as a working constraint.
+
+`gateway-module-over-ceiling` - refactor-sized and should not be chased for its own sake.
+The shared-refusal extraction took the free progress available without pretending to close
+it.
+
+`tool-content-stripped-from-a-rendering-consumer` - cross-repository, and a paired decision
+rather than a code change on either side alone. Either the accepted contract is amended to
+admit bounded tool argument and result text with explicit caps, or the consumer stops
+rendering panes that structurally cannot fill. Source-derived and still unconfirmed against
+a running system, which is the first thing any repair should establish.
+
+`bare-204-on-the-already-final-race` - closed as a documented limit, since the information
+is genuinely unrecoverable at that point rather than merely unread.

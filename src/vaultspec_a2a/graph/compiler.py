@@ -30,6 +30,7 @@ from langgraph.graph.state import CompiledStateGraph
 from langgraph.types import RetryPolicy
 
 from ..authoring.contract import RESEARCH_ADR_ROLES
+from ..thread.clarification import ClarificationRequest
 from ..thread.errors import (
     ConfigError,
     ProviderSessionError,
@@ -391,7 +392,6 @@ def compile_team_graph(
     feature_tag: str | None = None,
     task_queue_port: TaskQueuePort | None = None,
     proposal_submitter: DocumentProposalSubmitter | None = None,
-    clarification_producer: ClarificationQuestionProducer | None = None,
     feedback_reader: "FeedbackContextReader | None" = None,
     authoring_binding_provider: "AuthoringBindingProvider | None" = None,
     model_assignment: dict[str, dict[str, Any]] | None = None,
@@ -425,13 +425,6 @@ def compile_team_graph(
         feature_tag:             Optional feature tag for task-queue scoping.
         task_queue_port:         Optional database-backed task-queue port
                                  injected into worker and mount nodes.
-        clarification_producer:  Optional producer of mid-run clarification
-                                 questions. When supplied, the ``research_adr``
-                                 grounding stage gains a checkpointed
-                                 question/answer interrupt ahead of the diverge
-                                 fan-out; when omitted the stage is not wired at
-                                 all, so a run that has nobody to ask keeps the
-                                 exact graph shape it had before.
         provider_factory:        Provider factory for model creation.
 
     Returns:
@@ -507,7 +500,6 @@ def compile_team_graph(
             workspace_root=workspace_root,
             autonomous=autonomous,
             proposal_submitter=proposal_submitter,
-            clarification_producer=clarification_producer,
             feedback_reader=feedback_reader,
             frozen_assignment=model_assignment,
         )
@@ -1020,6 +1012,47 @@ def _compile_pipeline_loop(
 # targets deterministically.
 _RA_CLARIFY_REQUEST = "clarification_request"
 _RA_CLARIFY_GATE = "clarification_gate"
+# Correlation handle for a parked questionnaire, derived from the run itself so
+# it is stable across a replay and distinct between concurrent runs. Bounded to
+# the request-id cap the wire enforces; the run id already uses a subset of the
+# permitted alphabet, so truncation cannot produce an invalid handle.
+_CLARIFICATION_ID_PREFIX = "clarify-"
+_CLARIFICATION_ID_MAX = 128
+
+
+def _clarification_request_id(thread_id: str) -> str:
+    """Return the request id a run's parked questionnaire is addressed by."""
+    if not thread_id:
+        return "clarification"
+    return f"{_CLARIFICATION_ID_PREFIX}{thread_id}"[:_CLARIFICATION_ID_MAX]
+
+
+def _declared_clarification_producer(
+    team_config: Any,
+) -> ClarificationQuestionProducer | None:
+    """Serve the preset's declared questions, or ``None`` when it declares none.
+
+    This is the whole production arming path, and it is deliberately incapable of
+    inference: it reads a question set the preset states outright and hands it
+    back unchanged. Nothing here sees the user's prompt, so no run can be asked a
+    question its preset did not declare - which is what keeps "does this run stop
+    to ask?" answerable from the preset alone.
+
+    Returns ``None`` for a preset with no declaration, which the caller reads as
+    "leave the grounding stage unwired", so such a preset compiles to the exact
+    graph it did before the capability existed.
+    """
+    if getattr(team_config, "clarification", None) is None:
+        return None
+
+    async def producer(state: TeamState) -> ClarificationRequest | None:
+        return team_config.clarification_request(
+            _clarification_request_id(state.get("thread_id") or "")
+        )
+
+    return producer
+
+
 _RA_DISPATCH = "research_dispatch"
 _RA_SYNTHESIS = "synthesis"
 _RA_RESEARCH_REVIEW = "research_review"
@@ -1195,7 +1228,6 @@ def _compile_research_adr(
     workspace_root: Path | None = None,
     autonomous: bool = False,
     proposal_submitter: DocumentProposalSubmitter | None,
-    clarification_producer: ClarificationQuestionProducer | None = None,
     feedback_reader: "FeedbackContextReader | None" = None,
     frozen_assignment: dict[str, dict[str, Any]] | None = None,
 ) -> None:
@@ -1234,11 +1266,13 @@ def _compile_research_adr(
     bar before each human gate.
 
     The bracketed clarification pair is the grounding-stage question primitive
-    and is wired only when a ``clarification_producer`` is injected: without a
-    producer there is nobody to ask, and an unconditional pass-through node would
-    add a superstep to every run to accomplish nothing. Wired, it sits ahead of
-    the fan-out so a researcher's brief can incorporate the human's answer rather
-    than a guess - which is the whole point of asking before diverging.
+    and is wired only when the PRESET declares a question set: without a
+    declaration there is nothing to ask, and an unconditional pass-through node
+    would add a superstep to every run to accomplish nothing. Declared, it sits
+    ahead of the fan-out so a researcher's brief can incorporate the human's
+    answer rather than a guess - which is the whole point of asking before
+    diverging. There is no programmatic override: the preset is the only way to
+    arm it, so whether a run can stop to ask is answerable from config alone.
     """
     if proposal_submitter is None:
         raise ConfigError(
@@ -1424,6 +1458,7 @@ def _compile_research_adr(
         ),
     )
 
+    clarification_producer = _declared_clarification_producer(team_config)
     if clarification_producer is None:
         builder.add_edge(START, _RA_DISPATCH)
     else:

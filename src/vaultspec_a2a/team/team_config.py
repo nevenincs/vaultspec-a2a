@@ -26,6 +26,11 @@ from pydantic import BaseModel, Field, model_validator
 
 from ..authoring.contract import is_document_authoring_topology
 from ..graph.enums import Model, Provider
+from ..thread.clarification import (
+    MAX_QUESTIONS_PER_REQUEST,
+    ClarificationQuestion,
+    ClarificationRequest,
+)
 from ..thread.errors import (
     AgentConfigNotFoundError,
     ConfigError,
@@ -477,6 +482,31 @@ class TeamGraphConfig(BaseModel):
     recursion_limit: int = Field(default=25, ge=1, le=500)
 
 
+# Stand-in id used only to force full request validation while reading a preset;
+# a real run supplies its own per-park id and this value never reaches the wire.
+_CLARIFICATION_PREFLIGHT_ID = "preflight"
+
+
+class TeamClarificationConfig(BaseModel):
+    """The question set this preset asks its human before the run diverges.
+
+    Declared, never inferred: nothing reads the user's prompt to decide what to
+    ask, so a preset that asks always asks the same bounded set and a preset
+    declaring no block never parks at all. That is what keeps the asking
+    accountable - a reader can tell from the preset alone whether a run can stop
+    for a question, and which one.
+
+    The entries are the wire's own :class:`ClarificationQuestion`, reused rather
+    than restated, so a preset cannot declare a questionnaire the contract would
+    refuse to serve: the caps, the id pattern, and the rule binding options to
+    ``choice`` are the same objects in both places.
+    """
+
+    questions: list[ClarificationQuestion] = Field(
+        min_length=1, max_length=MAX_QUESTIONS_PER_REQUEST
+    )
+
+
 class TeamConfig(BaseModel):
     """Full configuration for a team preset.
 
@@ -496,6 +526,41 @@ class TeamConfig(BaseModel):
     graph: TeamGraphConfig = Field(default_factory=TeamGraphConfig)
     profiles: dict[str, TeamProfileConfig] = Field(default_factory=dict)
     harness: TeamHarnessConfig | None = None
+    clarification: TeamClarificationConfig | None = None
+
+    @model_validator(mode="after")
+    def validate_clarification_questions(self) -> "TeamConfig":
+        """Refuse at load a questionnaire the wire would refuse at run time.
+
+        The projection below is the same object the run parks on, so building it
+        here surfaces a duplicate question id - the one rule the field bounds
+        cannot express - while the preset is being read rather than mid-run, when
+        the failure would strand a dispatched run instead of marking a preset
+        unloadable. Raised as ``ConfigError`` so it joins the other first-class
+        configuration failures rather than surfacing as a bare validation error.
+        """
+        if self.clarification is None:
+            return self
+        try:
+            self.clarification_request(_CLARIFICATION_PREFLIGHT_ID)
+        except ValueError as exc:
+            raise ConfigError(
+                f"team '{self.id}' declares an unusable [team.clarification]: {exc}"
+            ) from exc
+        return self
+
+    def clarification_request(self, request_id: str) -> ClarificationRequest | None:
+        """Project the declared questions into the request a run would park on.
+
+        ``None`` when the preset declares no block, which is the signal the graph
+        compiler reads to leave the grounding stage unwired entirely.
+        """
+        if self.clarification is None:
+            return None
+        return ClarificationRequest(
+            request_id=request_id,
+            questions=list(self.clarification.questions),
+        )
 
     @model_validator(mode="after")
     def validate_topology_order_subset(self) -> "TeamConfig":

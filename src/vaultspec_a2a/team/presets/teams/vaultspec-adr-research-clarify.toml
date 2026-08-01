@@ -1,0 +1,86 @@
+[team]
+id           = "vaultspec-adr-research-clarify"
+display_name = "Vaultspec ADR Research (asks first)"
+description  = """
+Deterministic variant of vaultspec-adr-research that asks its human a bounded
+questionnaire BEFORE the research fans out. Identical research_adr topology and
+the same five worker agent_ids as the mock variant (so actor-token bundle keys
+and submitter role keys are unchanged); the only difference is the declared
+[team.clarification] block.
+
+It exists as a separate preset rather than as a flag on an existing one because
+asking changes what a run does to the human: a preset that parks for an answer
+must be chosen deliberately, and no preset acquires that behaviour by being
+upgraded underneath its callers. Every other preset declares no block and is
+untouched.
+
+The questions are declared here and nowhere else. Nothing reads the user's
+prompt to decide what to ask, so a reader can tell from this file alone whether
+a run can stop for a question and exactly which one it will ask.
+"""
+
+[team.defaults]
+provider   = "mock"
+capability = "mid"
+
+[team.topology]
+type  = "research_adr"
+order = []
+
+# The declared questionnaire. Bounds are the contract, enforced by the same types
+# the wire carries: at most four questions, at most four options per choice, and
+# capped strings. A declaration that breaks one of them fails preset load rather
+# than being trimmed to fit.
+[team.clarification]
+questions = [
+  { id = "scope", kind = "choice", prompt = "Which surface should this cover?", options = [
+    "frontend",
+    "backend",
+    "both",
+  ], required = true },
+  { id = "constraints", kind = "text", prompt = "Any constraint the work must respect?", required = false },
+]
+
+[team.permissions]
+auto_approve = false
+
+[team.persona]
+directive = """
+# Vaultspec-ADR-Research Workflow (asks first)
+
+Same phase machine as vaultspec-adr-research (Ground -> Diverge -> Synthesize ->
+Gate 1 -> Decide -> Gate 2 -> Plan -> Gate 3), with one addition: the run parks
+on a declared questionnaire before the research fans out, and the human's
+answers are durable run state the later stages can read.
+
+- Vault documents only; no direct filesystem writes; all authoring goes through
+  engine proposals.
+- vaultspec-doc-reviewer returns "PASS" to advance a phase; "REVISION REQUIRED"
+  routes back to the writer.
+
+{{FEATURE_CONTEXT}}
+"""
+
+[team.graph]
+step_timeout_seconds = 600
+recursion_limit      = 50
+
+[[team.workers]]
+agent_id = "vaultspec-researcher"
+model    = { provider = "mock" }
+
+[[team.workers]]
+agent_id = "vaultspec-synthesist"
+model    = { provider = "mock" }
+
+[[team.workers]]
+agent_id = "vaultspec-adr-author"
+model    = { provider = "mock" }
+
+[[team.workers]]
+agent_id = "vaultspec-plan-author"
+model    = { provider = "mock" }
+
+[[team.workers]]
+agent_id = "vaultspec-doc-reviewer"
+model    = { provider = "mock" }

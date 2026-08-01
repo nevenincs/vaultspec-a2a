@@ -255,6 +255,30 @@ class TestGroundingReferenceResolution:
             == "2026-07-15-sse-reconnection-live-adr"
         )
 
+    def test_plan_dirs_still_admit_research_and_reference(self) -> None:
+        """Widening the plan phase to admit the ADR kept its original scope.
+
+        The plan phase's dirs are the ADR phase's plus ``adr``; asserting only
+        the added dir would leave a scope that had SWAPPED research/reference for
+        the ADR indistinguishable from one that added to them.
+        """
+        for child_key, expected in (
+            (
+                "research/sse-reconnection-live-research.md",
+                "2026-07-15-sse-reconnection-live-research",
+            ),
+            (
+                "reference/sse-reconnection-live-reference.md",
+                "2026-07-15-sse-reconnection-live-reference",
+            ),
+        ):
+            assert (
+                _grounding_dated_stem(
+                    child_key, self._MS, "sse-reconnection-live", self._PLAN_DIRS
+                )
+                == expected
+            )
+
     def test_dated_stem_skips_a_dir_no_phase_grounds_on(self) -> None:
         """A plan is nobody's grounding document - not the ADR's, not the plan's."""
         plan_child = "plan/sse-reconnection-live-plan.md"

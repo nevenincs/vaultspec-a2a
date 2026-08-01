@@ -28,6 +28,7 @@ import uvicorn
 
 from ...database import list_threads
 from ...graph.enums import Provider
+from ...providers.lane_admission import is_lane_admissible, lane_admission_reason
 from ...providers.model_profiles import probe_provider_readiness
 from ...streaming.aggregator import EventAggregator
 from ...team.team_config import load_team_config
@@ -591,7 +592,7 @@ async def test_presets_list_is_truthful_and_resilient(
         assert profiles["team-defaults"]["is_default"] is True
 
         # team-defaults effective assignments: safe operational fields only. All
-        # four document personas resolve to the Claude subscription tier (the
+        # five document personas resolve to the Claude subscription tier (the
         # doc-reviewer was repinned off the non-resolving zhipu fallback);
         # provider heterogeneity is instead disclosed by the codex/zai
         # provider-axis profiles asserted below.
@@ -667,6 +668,27 @@ async def test_presets_list_is_truthful_and_resilient(
                 zai_readiness.reason in entry
                 for entry in profiles["zai"]["unavailable_reasons"]
             )
+
+        # kimi is the other mixed lane, and the one that proves readiness is
+        # NECESSARY BUT NOT SUFFICIENT. It overlays its roles exactly as zai does
+        # and discloses its raw provider readiness the same way, but it has no
+        # completed-turn proof, so admission refuses it ahead of any credential
+        # question. Asserting the ADMISSION reason rather than the readiness
+        # reason is the load-bearing part: a host that later grows a Kimi
+        # credential must still see this lane refused, which a readiness-only
+        # assertion would stop detecting the moment the key appeared.
+        kimi_by_agent = {a["agent_id"]: a for a in profiles["kimi"]["assignments"]}
+        kimi_readiness = probe_provider_readiness(Provider.KIMI)
+        for agent_id in authoring_roles:
+            assert kimi_by_agent[agent_id]["provider_id"] == "kimi"
+            assert kimi_by_agent[agent_id]["source"] == "profile"
+            assert kimi_by_agent[agent_id]["provider_ready"] is kimi_readiness.ready
+        assert not is_lane_admissible(Provider.KIMI)
+        kimi_admission = lane_admission_reason(Provider.KIMI)
+        assert kimi_admission
+        assert any(
+            kimi_admission in entry for entry in profiles["kimi"]["unavailable_reasons"]
+        )
 
         # Eligibility is reported honestly: the production acceptance gate is open,
         # so every profile is unavailable with a safe reason (no secrets anywhere).

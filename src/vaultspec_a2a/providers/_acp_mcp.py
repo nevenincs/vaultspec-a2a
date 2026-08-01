@@ -187,6 +187,24 @@ _KNOWN_MCP_SERVERS: Mapping[str, Mapping[str, Any]] = _declare_registry(
             "runtime_acquisition": True,
             "desktop_available": False,
         },
+        # The researcher's real web tool. ``duckduckgo-mcp-server`` (PyPI,
+        # published by nickclyde) is credential-free - no API key, no runtime
+        # env - and exposes ``search`` (results as Markdown snippets) and
+        # ``fetch_content`` (extracts a result URL's page body).
+        "vaultspec-web-search": {
+            "name": "vaultspec-web-search",
+            "command": "uvx",
+            "args": ["duckduckgo-mcp-server"],
+            "tools": ("search", "fetch_content"),
+            # Both verbs read: one queries, one fetches. Neither writes locally.
+            "read_only": True,
+            # Reaches DuckDuckGo and then arbitrary result URLs on the agent's
+            # behalf. This is the registry's one egressing entry, and the axis
+            # exists to say so rather than to let read-only imply contained.
+            "network_egress": True,
+            "runtime_acquisition": True,
+            "desktop_available": False,
+        },
     }
 )
 
@@ -194,6 +212,9 @@ _DESKTOP_ACQUISITION_REASON = "runtime acquisition is disabled for the desktop p
 _DESKTOP_CAPABILITY_ACTIONS = {
     "vaultspec-rag": (
         "Install the separately packaged vaultspec-rag desktop capability, then retry."
+    ),
+    "vaultspec-web-search": (
+        "Install the separately packaged web-search desktop capability, then retry."
     ),
 }
 

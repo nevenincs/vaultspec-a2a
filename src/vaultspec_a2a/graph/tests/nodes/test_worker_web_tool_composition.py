@@ -20,6 +20,20 @@ edit the declaration, reach past the seam, or set an allowlist field directly.
 The names it supplies are not written out; they are read off the egress axis, so a
 built-in added to or removed from that declaration changes what this test demands
 of the payload instead of quietly falling outside it.
+
+The egress axis is enforced in TWO shapes and this module carries the native one,
+so the difference is worth stating rather than discovering. On the registry path
+the lane verdict lived inside the composition call, which REFUSED an outward-
+reaching server the lane had not earned - loudly, because a harness server is an
+explicit declaration a person put in a preset, and silently stripping it would
+advertise a capability and then withdraw it out of sight. On the native path the
+seam has no lane awareness at all: it refuses only a name that never declared its
+reach, and the lane verdict is derived by the caller and arrives as data, so an
+unearned lane contributes an empty tuple and composes NOTHING. That silence is the
+honest shape here, because a built-in is a property of the lane rather than an
+advertisement anybody wrote. The consequence for tests is concrete: the native
+counterpart of "refused on every lane shipped today" is "dark on every lane
+shipped today", and it is asserted below as darkness, not as a raised error.
 """
 
 from __future__ import annotations
@@ -41,6 +55,7 @@ from ....providers._acp_mcp import (
     compose_native_read_tools,
 )
 from ....providers.lane_admission import WebLaneProof, web_tool_names_for
+from ...enums import Provider
 from ...nodes.worker import create_worker_node
 
 if TYPE_CHECKING:
@@ -148,6 +163,25 @@ def test_the_supplied_proof_matches_the_shipped_declaration() -> None:
     assert WEB_TOOL_NAMES == DECIDED_WEB_TOOL_NAMES
     assert set(WEB_TOOL_NAMES) == set(NATIVE_WEB_TOOL_BOUNDS)
     assert not set(WEB_TOOL_NAMES) & set(NATIVE_READ_TOOL_NAMES)
+
+
+@pytest.mark.parametrize("lane", (*Provider, "not-a-lane", None))
+def test_no_lane_shipped_today_earns_a_web_builtin(lane: object) -> None:
+    """Deny is the default, and today it is the answer every lane gives.
+
+    The native counterpart of the registry path's "refused on every lane shipped
+    today", expressed as darkness because this path does not refuse. Every
+    ``Provider`` this tree ships is driven, not a chosen few, so a lane added later
+    is covered the day it is added rather than the day somebody remembers to extend
+    a list. The two non-members matter as much as the members: an unrecognised
+    string and a model that declared no lane must both land on deny rather than
+    fall through, since an unidentifiable lane is exactly a lane with no proof.
+
+    Lanes with completed-TURN proof are included deliberately. Turn proof and
+    retrieval proof are separate claims, and a lane that may be served must not
+    thereby be read as a lane that may reach outward.
+    """
+    assert web_tool_names_for(lane) == ()
 
 
 @pytest.mark.asyncio

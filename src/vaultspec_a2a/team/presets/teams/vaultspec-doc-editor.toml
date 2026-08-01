@@ -1,0 +1,84 @@
+[team]
+id           = "vaultspec-doc-editor"
+display_name = "Vaultspec Doc Editor"
+description  = """
+Single vaultspec-doc-editor worker, no supervisor. Applies a
+natural-language instruction to one target vault document as a single
+whole-document proposal through the engine authoring tools. No
+filesystem write of any kind (agent-flow D2/D7) — divergent from
+vaultspec-solo-coder, whose worker retains filesystem_write for
+ordinary paths.
+"""
+
+[team.defaults]
+provider   = "codex"
+capability = "high"
+
+[team.topology]
+type  = "pipeline"
+order = ["vaultspec-doc-editor"]
+
+[team.permissions]
+auto_approve = true
+
+[team.persona]
+directive = """
+# Vaultspec-Doc-Editor Workflow
+
+You are the Vaultspec-Orchestrator, overseeing a single, un-supervised
+document-editing agent.
+
+## Mandate
+
+- **Vault document only, whole-document only:** This team edits exactly
+  one target vault document per run, and every change it produces is a
+  single whole-document proposal through the engine authoring tools —
+  never a raw filesystem write, never a section-scoped patch.
+- **Hierarchy of Truth:** Ground every edit against the project's
+  Hierarchy of Truth: `<ADR>` > `<Research>` > Implementation, using
+  semantic search over the vault and codebase before applying the
+  instruction.
+- **Review lane, unchanged:** The human reviews and applies the
+  proposal through the existing three-verdict review lane. A
+  `request_changes` verdict loops back into a revision, not a fresh
+  run.
+
+{{FEATURE_CONTEXT}}
+"""
+
+[team.graph]
+step_timeout_seconds = 120
+recursion_limit      = 10
+
+# Arm the per-run engine authoring bridge: the doc-editor gets the engine's
+# propose/read tools surfaced through the isolated config home (S18 admission
+# channel), plus the read-only vaultspec-rag grounding server for corpus
+# context. No workspace authoring surfaces are required - authoring routes
+# through the engine, not the local .vault - so required_surfaces is empty.
+[team.harness]
+required_surfaces = []
+authoring_bridge  = true
+mcp_servers       = ["vaultspec-rag"]
+
+[[team.workers]]
+agent_id = "vaultspec-doc-editor"
+
+# Model profiles. `team-defaults` (implicit) resolves to codex via
+# [team.defaults]/[agent.model] above - a live-proven provider (agent-flow
+# D3). `zai` is the credential-gated Z.ai lane: the harness skips it loudly
+# (naming the missing token) when ZAI_AUTH_TOKEN is absent, and never fakes
+# it. Only codex and zai are declared - claude, kimi, gemini, openai, and
+# zhipu are withheld until their own live completed-turn tests pass
+# (agent-flow D8(a)); offering an unproven provider in a served profile is
+# the exact defect D3 exists to prevent.
+[team.profiles.zai]
+display_name = "Z.ai"
+description  = """
+Z.ai provider-axis lane: the doc-editor runs on the Z.ai provider instead
+of the team-default codex. Requires a configured Z.ai auth token; the
+harness skips this lane with a truthful reason when the credential is
+absent.
+"""
+
+[team.profiles.zai.roles.vaultspec-doc-editor]
+provider = "zai"

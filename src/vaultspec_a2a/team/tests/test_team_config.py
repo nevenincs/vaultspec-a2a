@@ -50,9 +50,11 @@ _ALL_AGENT_IDS = [
     "vaultspec-synthesist",
     "vaultspec-adr-author",
     "vaultspec-doc-reviewer",
+    "vaultspec-doc-editor",
 ]
 _ALL_TEAM_IDS = [
     "vaultspec-solo-coder",
+    "vaultspec-doc-editor",
 ]
 
 
@@ -328,6 +330,73 @@ class TestTeamConfigFromToml:
         for team_id in _ALL_TEAM_IDS:
             cfg = load_team_config(team_id)
             assert len(cfg.workers) > 0, f"{team_id} has no workers"
+
+    def test_doc_editor_single_worker(self) -> None:
+        """vaultspec-doc-editor has exactly one worker: the doc-editor."""
+        cfg = load_team_config("vaultspec-doc-editor")
+        assert len(cfg.workers) == 1
+        assert cfg.workers[0].agent_id == "vaultspec-doc-editor"
+
+    def test_doc_editor_diverges_from_solo_coder_only_on_filesystem_write(
+        self,
+    ) -> None:
+        """agent-flow D2: doc-editor clones solo-coder's shape but flips write off.
+
+        Both presets are pipeline topology, one worker, authoring_bridge=true; the
+        ONE deliberate divergence is the worker's filesystem_write capability.
+        """
+        coder_team = load_team_config("vaultspec-solo-coder")
+        editor_team = load_team_config("vaultspec-doc-editor")
+        assert coder_team.topology.type == editor_team.topology.type
+        assert len(coder_team.workers) == len(editor_team.workers) == 1
+        assert coder_team.harness is not None
+        assert editor_team.harness is not None
+        assert coder_team.harness.authoring_bridge is True
+        assert editor_team.harness.authoring_bridge is True
+
+        coder_agent = load_agent_config("vaultspec-coder")
+        editor_agent = load_agent_config("vaultspec-doc-editor")
+        assert coder_agent.capabilities.filesystem_write is True
+        assert editor_agent.capabilities.filesystem_write is False
+        assert coder_agent.capabilities.filesystem_read == (
+            editor_agent.capabilities.filesystem_read
+        )
+        assert coder_agent.capabilities.terminal == editor_agent.capabilities.terminal
+
+    def test_doc_editor_preset_arms_authoring_bridge(self) -> None:
+        cfg = load_team_config("vaultspec-doc-editor")
+        assert cfg.harness is not None
+        assert cfg.harness.authoring_bridge is True
+        assert cfg.is_document_authoring is False
+
+    def test_doc_editor_served_profiles_use_only_live_proven_providers(self) -> None:
+        """agent-flow D3: every served profile resolves to codex or zai, only.
+
+        `no-unproven-providers-in-served-profiles`: a profile may name a provider
+        only after a live completed-turn test exists — today that is codex and
+        zai. This checks every declared profile plus the implicit team-defaults
+        overlay for the doc-editor's one worker.
+        """
+        cfg = load_team_config("vaultspec-doc-editor")
+        agent_cfg = load_agent_config("vaultspec-doc-editor")
+        worker_ref = cfg.workers[0]
+        live_proven = {Provider.CODEX, Provider.ZAI}
+
+        for profile_id, profile in cfg.effective_profiles().items():
+            overlay = profile.roles.get(worker_ref.agent_id)
+            provider = None
+            if overlay is not None and overlay.provider is not None:
+                provider = overlay.provider
+            elif worker_ref.model.provider is not None:
+                provider = worker_ref.model.provider
+            elif agent_cfg.model.provider is not None:
+                provider = agent_cfg.model.provider
+            elif cfg.defaults.provider is not None:
+                provider = cfg.defaults.provider
+            assert provider in live_proven, (
+                f"profile {profile_id!r} resolves doc-editor to {provider!r}, "
+                f"not a live-proven provider {live_proven!r}"
+            )
 
 
 # ---------------------------------------------------------------------------

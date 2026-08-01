@@ -82,6 +82,7 @@ def _pipeline_team() -> TeamConfig:
 # (preset, topology, expected_worker_nodes, has_supervisor)
 _PRESET_CASES: list[tuple[str, str, set[str], bool]] = [
     ("vaultspec-solo-coder", "pipeline", {"vaultspec-coder"}, False),
+    ("vaultspec-doc-editor", "pipeline", {"vaultspec-doc-editor"}, False),
 ]
 
 

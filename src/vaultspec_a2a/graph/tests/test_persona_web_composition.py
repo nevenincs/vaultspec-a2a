@@ -21,11 +21,12 @@ Two depths, because neither alone would be honest. The DEEP half compiles the
 shipped ``vaultspec-adr-research`` preset through
 :func:`~..compiler.compile_team_graph` and drives it over a real checkpointer
 against real ACP subprocesses, asserting on the prompt text the CLI genuinely
-received. The SHALLOW half supplies the verdict as a parameter to the same
-production composer, because the declaration is empty by design and a test that
-waited for an entry could not exist until after the capability shipped - which is
-how a seam reaches production having never once run its other branch. What the
-tests never do is edit the declaration or reach past the seam.
+received - and it drives BOTH stances, on a lane the declaration has proven and a
+lane it has not, so neither branch ships having never run through production
+wiring. The SHALLOW half supplies the verdict as a parameter to the same
+production composer, which is what keeps the wording pinned should the
+declaration change under it. What the tests never do is edit the declaration or
+reach past the seam.
 """
 
 from __future__ import annotations
@@ -61,10 +62,13 @@ if TYPE_CHECKING:
 SIMULATOR_PATH = Path(__file__).parent / "acp_simulator.py"
 PYTHON_EXE = sys.executable
 
-#: The lane every model in the compiled run below declares. It carries
-#: completed-turn proof and no web proof, which is the pairing that matters: turn
-#: proof must not read as retrieval proof.
-DRIVEN_LANE = "claude"
+#: The lanes the compiled runs below declare, one per stance. Named rather than
+#: derived from the declaration so the run is reproducible, but every expectation
+#: is still read FROM the declaration - if these two ever stop straddling it, the
+#: guard immediately below says so instead of the suite quietly testing one branch
+#: twice. ``claude`` additionally pins that completed-TURN proof does not read as
+#: completed-RETRIEVAL proof: it has the former and not the latter.
+DRIVEN_LANES: tuple[str, ...] = ("claude", "codex")
 
 #: Tool names no persona may contain. Real built-ins, but lane-specific: the
 #: command-line lanes each expose their own pair and the hosted-API lanes expose
@@ -128,9 +132,10 @@ class _SimulatorProviderFactory:
     what the CLI actually received.
     """
 
-    def __init__(self, record_dir: Path, workspace_root: Path) -> None:
+    def __init__(self, record_dir: Path, workspace_root: Path, lane: str) -> None:
         self.record_dir = record_dir
         self.workspace_root = workspace_root
+        self.lane = lane
         self.prompt_files: dict[str, Path] = {}
 
     def create(
@@ -160,7 +165,7 @@ class _SimulatorProviderFactory:
             # config-home isolation does not engage.
             env_vars={"ANTHROPIC_AUTH_TOKEN": "env-auth-token"},
             workspace_root=str(self.workspace_root),
-            provider=DRIVEN_LANE,
+            provider=self.lane,
         )
 
 
@@ -233,11 +238,27 @@ def test_no_shipped_persona_names_a_per_lane_web_tool() -> None:
     )
 
 
+def test_the_driven_lanes_straddle_the_declaration() -> None:
+    """Fixture precondition: the two driven lanes really are one of each stance.
+
+    The compiled runs below are only a two-branch proof while these lanes differ in
+    what the declaration says about them. If a lane is proven or withdrawn and both
+    land on the same side, this fails here - loudly, once - rather than leaving the
+    runs to test one branch twice and report green.
+    """
+    stances = {lane: is_web_lane_proven(lane) for lane in DRIVEN_LANES}
+    assert set(stances.values()) == {True, False}, (
+        f"the driven lanes no longer straddle the declaration: {stances}. Pick a "
+        "lane on each side, or say deliberately why only one stance is reachable"
+    )
+
+
 @pytest.mark.asyncio
+@pytest.mark.parametrize("lane", DRIVEN_LANES)
 async def test_the_compiled_run_tells_each_role_what_its_lane_may_claim(
-    checkpointer: AsyncSqliteSaver, tmp_path: Path
+    checkpointer: AsyncSqliteSaver, tmp_path: Path, lane: str
 ) -> None:
-    """The real research machine, driven for real, on the lane it declared.
+    """The real research machine, driven for real, on each stance in turn.
 
     The research gate parks the run once the researcher, synthesist, and reviewer
     have each taken a turn, so their prompts are on disk by then. Four claims are
@@ -247,14 +268,16 @@ async def test_the_compiled_run_tells_each_role_what_its_lane_may_claim(
     - the one that would have been backwards before the universal-search ruling - no
     prompt tells an agent it has no online access.
 
-    One run serves all four deliberately. Each turn is a real subprocess, so a
-    second identical run would buy nothing but wall-clock time.
+    Parametrized over a proven and an unproven lane so the demonstrated stance
+    reaches a model through production wiring rather than only through a supplied
+    parameter. Within one lane a single run serves all four claims: each turn is a
+    real subprocess, so a second identical run would buy nothing but wall-clock.
     """
     record_dir = tmp_path / "records"
     record_dir.mkdir()
     workspace = tmp_path / "ws"
     workspace.mkdir()
-    factory = _SimulatorProviderFactory(record_dir, workspace)
+    factory = _SimulatorProviderFactory(record_dir, workspace, lane)
 
     team = load_team_config("vaultspec-adr-research")
     topology = team.topology.model_copy(
@@ -280,12 +303,25 @@ async def test_the_compiled_run_tells_each_role_what_its_lane_may_claim(
             "current_plan": [],
             "messages": [HumanMessage(content="Research the composition seam.")],
             "next": "",
-            "thread_id": "persona-web-thread",
+            "thread_id": f"persona-web-thread-{lane}",
             "token_usage": {},
         },
-        config={"configurable": {"thread_id": "persona-web-run"}},
+        config={"configurable": {"thread_id": f"persona-web-run-{lane}"}},
     )
-    assert "__interrupt__" in result, "the run must reach the research gate"
+    assert "__interrupt__" in result, (
+        "the run did not reach the research gate, so no conclusion about persona "
+        "composition can be drawn from it. Last messages: "
+        f"{[str(getattr(m, 'content', ''))[:80] for m in result.get('messages', [])]}"
+    )
+
+    # The roles that MUST have taken a turn to park the run here. Named rather
+    # than discovered, because a role whose record is simply absent would
+    # otherwise drop out of the loop silently and shrink this test to nothing.
+    for required in ("vaultspec-researcher", "vaultspec-synthesist"):
+        assert factory.prompt_files[required].exists(), (
+            f"{required!r} recorded no prompt, yet the run reached the research "
+            "gate - the composition it should have received was never exercised"
+        )
 
     checked = 0
     marked = 0
@@ -297,7 +333,7 @@ async def test_the_compiled_run_tells_each_role_what_its_lane_may_claim(
         persona = agent_configs[agent_id].persona.system_prompt
         role = agent_configs[agent_id].role
 
-        expected = _expected_persona(persona, DRIVEN_LANE, role)
+        expected = _expected_persona(persona, lane, role)
         assert _normalise(expected) in prompt, (
             f"{agent_id!r} did not receive the persona its lane composes"
         )
@@ -307,7 +343,7 @@ async def test_the_compiled_run_tells_each_role_what_its_lane_may_claim(
             # A marked persona is the one that proves resolution HAPPENED: the raw
             # preset and the composed one differ, so the assertion above is not
             # satisfiable by a compiler that passed the preset straight through.
-            assert _normalise(_expected_section(DRIVEN_LANE)) in prompt
+            assert _normalise(_expected_section(lane)) in prompt
             marked += 1
 
         for token in PER_LANE_TOOL_TOKENS:

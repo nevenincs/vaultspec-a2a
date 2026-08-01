@@ -23,9 +23,11 @@ from typing import TYPE_CHECKING, Any
 import pytest
 from pydantic import ValidationError
 
+from ...authoring import AgentTool, CatalogSnapshot
 from ...control.config import Settings
 from ...graph.enums import Provider
 from ...utils.enums import CodexWebSearchMode
+from .._acp_authoring import AuthoringToolBinding, attach_authoring_tools
 from .._acp_config_home import sweep_orphan_config_homes
 from .._acp_mcp import codex_mcp_server_specs
 from .._codex_config_home import (
@@ -452,6 +454,144 @@ def test_composition_seam_threads_harness_into_codex_config_toml(
         ]
     finally:
         cleanup_codex_config_home(home)
+
+
+def _authoring_binding(
+    *, engine_base_url: str = "http://127.0.0.1:8767", run_id: str = "run:codex-test"
+) -> AuthoringToolBinding:
+    """A real stdio-transport binding, as ``AuthoringBindingProvider`` builds it."""
+    snapshot = CatalogSnapshot(
+        schema_version="authoring.semantic_tools.v1",
+        tools=(
+            AgentTool(
+                name="read_context",
+                description="read",
+                input_schema={"type": "object"},
+                risk_tier="read_only",
+                permission_requirement="auto_permitted",
+                idempotency_required=False,
+                commands=("read_context",),
+            ),
+            AgentTool(
+                name="propose_changeset",
+                description="propose",
+                input_schema={"type": "object"},
+                risk_tier="mutating",
+                permission_requirement="human_approval_required",
+                idempotency_required=True,
+                commands=("create_proposal",),
+            ),
+        ),
+    )
+    return AuthoringToolBinding(
+        snapshot=snapshot,
+        bearer_token="machine-bearer-xyz",
+        actor_token="actor-token-abc",
+        engine_base_url=engine_base_url,
+        run_id=run_id,
+    )
+
+
+def test_authoring_bridge_composition_seam_threads_into_codex_config_toml(
+    tmp_path: Path,
+) -> None:
+    """KILLS THE authoring-bridge masking gap, the Codex counterpart of
+    ``test_composition_seam_threads_harness_into_codex_config_toml``.
+
+    Before the fix, ``attach_authoring_tools`` dispatched ONLY on
+    ``with_mcp_servers`` (the ACP lane), so a Codex model - which has no such
+    surface - was returned UNCHANGED: the codex agent connected to app-server
+    but its config.toml never carried the ``vaultspec-authoring`` block, so the
+    engine's propose/read tools silently never reached the model. Build the
+    model through the REAL production composition seam
+    (``attach_authoring_tools``), not by setting ``authoring_mcp_server``
+    directly, then assert the emitted config.toml carries the bridge with EVERY
+    catalog tool name (including the mutating ``propose_changeset`` - the
+    read-only-tools restriction that applies to the harness registry must NOT
+    apply here, since the engine gates mutation on its own approval flow).
+    """
+    from ..codex_chat_model import CodexChatModel
+
+    base = tmp_path / "base"
+    base.mkdir()
+    (base / "auth.json").write_text("{}", encoding="utf-8")
+    model = CodexChatModel(command=["codex", "app-server"], codex_home=str(base))
+    assert model.authoring_mcp_server is None  # not wired yet
+
+    binding = _authoring_binding()
+    composed = attach_authoring_tools(model, binding, autonomous=True)
+    assert isinstance(composed, CodexChatModel)
+    assert composed.authoring_mcp_server is not None
+    assert composed.authoring_mcp_server["name"] == "vaultspec-authoring"
+
+    home = composed._build_codex_config_home()
+    assert home is not None
+    try:
+        cfg = tomllib.loads((home / "config.toml").read_text(encoding="utf-8"))
+        bridge = cfg["mcp_servers"]["vaultspec-authoring"]
+        assert bridge["args"] == ["-m", "vaultspec_a2a.protocols.mcp.authoring_stdio"]
+        # ALL catalog tools are enabled, not just reads - unlike the harness
+        # registry's read-verb-only allowlist.
+        assert set(bridge["enabled_tools"]) == {"read_context", "propose_changeset"}
+        assert bridge["default_tools_approval_mode"] == "auto"
+        env = bridge["env"]
+        assert env["VAULTSPEC_AUTHORING_BASE_URL"] == "http://127.0.0.1:8767"
+        assert env["VAULTSPEC_AUTHORING_RUN_ID"] == "run:codex-test"
+        assert env["VAULTSPEC_AUTHORING_BEARER"] == "machine-bearer-xyz"
+    finally:
+        cleanup_codex_config_home(home)
+
+
+def test_authoring_bridge_unions_with_harness_servers_in_one_config_toml(
+    tmp_path: Path,
+) -> None:
+    """A doc-editor-shaped preset (authoring_bridge=true + mcp_servers=[rag])
+    gets BOTH surfaces in the same config.toml, ADD-only - the harness registry
+    is never dropped when the bridge is attached, and vice versa."""
+    from .._acp_mcp import compose_harness_mcp_servers
+    from ..codex_chat_model import CodexChatModel
+
+    base = tmp_path / "base"
+    base.mkdir()
+    model = CodexChatModel(command=["codex", "app-server"], codex_home=str(base))
+
+    composed = compose_harness_mcp_servers(model, ["vaultspec-rag"])
+    composed = attach_authoring_tools(composed, _authoring_binding(), autonomous=True)
+
+    home = composed._build_codex_config_home()
+    assert home is not None
+    try:
+        cfg = tomllib.loads((home / "config.toml").read_text(encoding="utf-8"))
+        assert set(cfg["mcp_servers"]) == {"vaultspec-rag", "vaultspec-authoring"}
+        # The harness registry keeps its read-only restriction...
+        assert cfg["mcp_servers"]["vaultspec-rag"]["enabled_tools"] == [
+            "search_vault",
+            "search_codebase",
+            "get_code_file",
+        ]
+        # ...while the bridge keeps its full catalog surface.
+        assert set(cfg["mcp_servers"]["vaultspec-authoring"]["enabled_tools"]) == {
+            "read_context",
+            "propose_changeset",
+        }
+    finally:
+        cleanup_codex_config_home(home)
+
+
+def test_attach_authoring_tools_refuses_a_provider_with_no_attachment_surface() -> None:
+    """A model with neither ``with_mcp_servers`` nor ``with_authoring_mcp_server``
+    must refuse loud, not silently return unchanged (the S20-class defect this
+    campaign closes: a harness-armed run starting an agent with no tools and
+    burning its step timeout finding out)."""
+    from langchain_core.language_models.fake_chat_models import FakeChatModel
+
+    from ...thread.errors import ConfigError
+
+    model = FakeChatModel(responses=["stub"])
+    assert getattr(model, "with_mcp_servers", None) is None
+    assert getattr(model, "with_authoring_mcp_server", None) is None
+    with pytest.raises(ConfigError, match="no surface to mount the bridge"):
+        attach_authoring_tools(model, _authoring_binding(), autonomous=True)
 
 
 def test_build_home_tolerates_absent_auth(tmp_path: Path) -> None:

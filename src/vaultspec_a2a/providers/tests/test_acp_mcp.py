@@ -20,6 +20,7 @@ from .._acp_mcp import (
     compose_native_read_tools,
     config_home_mcp_servers,
     harness_allowed_tool_names,
+    is_known_harness_server,
     resolve_harness_mcp_servers,
 )
 from ..acp_chat_model import AcpChatModel
@@ -346,11 +347,15 @@ def test_live_preset_harness_drives_read_only_rag_composition() -> None:
 
     The real ``vaultspec-adr-research`` preset's ``[team.harness]`` declaration
     flows through ``effective_harness`` into composition, so the opt-in makes RAG
-    and web-search grounding (agent-flow ADR D6) live for its document roles.
-    Walks the full chain preset harness -> effective_harness -> harness allowlist ->
-    compose, and asserts the composed session advertises both stdio servers while
-    exactly their READ tools join the autonomous allowlist - no write verb
-    anywhere, and no registry-only metadata leaking into the session payload.
+    grounding live for its document roles. Walks the full chain preset harness ->
+    effective_harness -> harness allowlist -> compose, and asserts the composed
+    session advertises exactly the declared stdio servers while exactly their READ
+    tools join the autonomous allowlist - no write verb anywhere, and no
+    registry-only metadata leaking into the session payload.
+
+    The declared names are READ from the preset rather than restated, so this
+    proves the chain rather than a copy of the preset. What IS stated literally is
+    the exclusion below, because that is the claim with a safety consequence.
     """
     from ...team.team_config import load_team_config
 
@@ -358,15 +363,20 @@ def test_live_preset_harness_drives_read_only_rag_composition() -> None:
     harness = cfg.effective_harness()
     assert harness is not None
     names = harness.mcp_servers
-    assert names == ["vaultspec-rag", "vaultspec-web-search"]
+
+    # The registry knows the web-search server, but a served preset may advertise
+    # a web capability only on a lane with a live test proving that capability
+    # completed real work - and no lane has one yet. So knowing the server and
+    # SERVING it are separate, and this preset must not serve it: the grounding
+    # this preset opts into stays local-only.
+    assert is_known_harness_server("vaultspec-web-search")
+    assert "vaultspec-web-search" not in names
 
     allow = harness_allowed_tool_names(names)
     assert allow == [
         "mcp__vaultspec-rag__search_vault",
         "mcp__vaultspec-rag__search_codebase",
         "mcp__vaultspec-rag__get_code_file",
-        "mcp__vaultspec-web-search__search",
-        "mcp__vaultspec-web-search__fetch_content",
     ]
     # Read-only boundary: no server's write verbs ever reach the allowlist.
     assert not any("reindex" in name for name in allow)
@@ -375,8 +385,8 @@ def test_live_preset_harness_drives_read_only_rag_composition() -> None:
     composed = compose_harness_mcp_servers(model, names, allowed_tools=allow)
     assert isinstance(composed, AcpChatModel)
     advertised = {s.get("name") for s in composed.mcp_servers}
-    assert advertised == {"vaultspec-rag", "vaultspec-web-search"}
-    for server_name in ("vaultspec-rag", "vaultspec-web-search"):
+    assert advertised == set(names)
+    for server_name in names:
         spec = next(s for s in composed.mcp_servers if s.get("name") == server_name)
         assert spec["command"] == "uvx"
         # Registry-only ``tools`` metadata is stripped from the session launch spec.

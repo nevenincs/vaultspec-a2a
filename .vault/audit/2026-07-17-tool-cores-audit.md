@@ -316,3 +316,45 @@ cross-reference dynamic lookups against definitions.
   Step's own surface: that Step composes web-capability text lane-conditionally
   behind the proven-lanes gate, and the correct repair is to replace an
   unconditional claim with a gated one rather than to delete a line.
+
+### The Claude lane live proof is blocked on infrastructure, not on code (2026-08-01)
+
+The Claude web-grounding proof is written, committed, and skips truthfully. Its
+Step cannot close, and the reason is worth recording precisely so the next
+attempt does not re-derive it.
+
+The suite reuses the standing acceptance harness rather than adding a second
+driver, and its reachability gate wants three things together: a resolvable
+engine, a gateway answering health, and a service record whose path locates the
+workspace vault. Each was probed directly.
+
+The gateway is not listening. Nothing answers on the port the harness defaults
+to, and this repository's development compose stack cannot supply one that
+satisfies the gate on its own, because that stack contains only the gateway and
+the worker - there is no engine service in it at all. The engine is the
+consuming project's binary and lives in a different repository.
+
+An engine IS running, from a debug build in that other project's worktree, and
+it is serving. But the gate does not resolve an engine by port; it resolves one
+through a service record, and derives the workspace vault from that record's own
+path. The machine-global record cannot serve: its path does not sit under a
+workspace vault, so the derivation yields a directory that is not one. The only
+record with the right shape belongs to another worktree, is fourteen minutes
+stale, and names a process that is no longer alive - and a stale record is
+refused by design rather than tolerated, which is correct and is the mechanism
+working.
+
+So the missing piece is specific: a freshly served workspace-local engine whose
+record lands under that workspace's vault, plus this branch's gateway and worker
+pointed at it. Not a code change, and not something this plan can close from
+inside one repository.
+
+Two things follow. The Step should stay open rather than be closed on partial
+evidence, because its acceptance is a real retrieval landing in checkpointed
+state AND disclosed in a proposed document body, and neither half is reachable
+without the stack. And the bounds Step that depends on this lane being proven is
+blocked behind it for the same reason, as is the third-lane proof.
+
+The Codex lane is unaffected and is proven: it needs no engine, because its
+retrieval happens inside the provider's own turn rather than through the
+authoring path.

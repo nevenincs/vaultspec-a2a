@@ -3,15 +3,14 @@ tags:
   - '#plan'
   - '#repository-tooling-hardening'
 date: '2026-07-19'
-modified: '2026-07-20'
-body_hash: 'sha256:96d2ae6e6e0d65f4b90a72dedb7aaa8637d64c45d655180c11beff1e23308d59'
+modified: '2026-08-01'
+body_hash: 'sha256:998ee0b2d5109e62ac43fdb906d3803dac3d1e717be4ec986514cb91e64e0a6a'
 tier: L3
 related:
   - '[[2026-07-19-repository-tooling-hardening-adr]]'
   - '[[2026-07-19-repository-tooling-hardening-research]]'
   - '[[2026-07-19-repository-tooling-hardening-reference]]'
 ---
-
 # `repository-tooling-hardening` plan
 
 Deliver one locked, modular, clone-reproducible development and governance
@@ -96,31 +95,127 @@ Run real-behavior acceptance, review the implementation, and queue every finding
 
 - [x] `W04.P08.S12` - Run clone-to-CI acceptance, formal review, finding classification, audit queue updates, and execution summaries; `.vault/audit, .vault/exec`.
 
+## Wave `W05` - strict-quality harness and visibility
+
+Establish the Sol-defined declarative strict-sentinel contract, repair scope correctness, and expose each result in hosted CI before any promotion is attempted.
+
+### Phase `W05.P09` - declarative target correctness
+
+Make every quality target executable over the correct A2A scope from one registry.
+
+- [ ] `W05.P09.S13` - Add the cross-platform Ty target over the canonical Python roots.; `dev/toolchain.py`.
+- [ ] `W05.P09.S14` - Correct the cognitive-complexity command scope so it measures only production sources on every supported host.; `dev/toolchain.py, pyproject.toml`.
+- [ ] `W05.P09.S15` - Delegate the root canonical CI recipe to the declarative CI owner.; `justfile`.
+
+### Phase `W05.P10` - hosted visibility and anti-drift
+
+Make every strict and advisory result independently visible in CI and prove the declarations cannot diverge.
+
+- [ ] `W05.P10.S16` - Schedule every deterministic strict sentinel as an independently visible hosted-CI result.; `.github/workflows/test.yml`.
+- [ ] `W05.P10.S17` - Schedule production JSCPD clone detection as a named advisory hosted-CI result.; `.github/workflows/test.yml`.
+- [ ] `W05.P10.S18` - Prove the root recipe, registry, and hosted workflow obey the Sol anti-drift contract.; `dev/tests/test_ci_contract.py`.
+
+## Wave `W06` - strict type and portability remediation
+
+Reduce Ty and Basedpyright debt in independent Terra-owned domains while preserving focused real-behavior regression evidence.
+
+### Phase `W06.P11` - Ty portability and strict test infrastructure
+
+Repair portable typing and shared test-helper contracts before fan-out consumers.
+
+- [ ] `W06.P11.S19` - Repair the Ty portability tranche for Windows-only ctypes and generic-length access.; `src/vaultspec_a2a/control/tests/test_spawn_containment_ownership.py, src/vaultspec_a2a/streaming/tests/test_sse_frames.py, src/vaultspec_a2a/utils/process.py`.
+- [ ] `W06.P11.S20` - Type the health-instrument boundary without suppressions and preserve its measured-result contract.; `dev/health/report.py`.
+- [ ] `W06.P11.S21` - Establish typed API test-fixture contracts before repairing dependent API tests.; `src/vaultspec_a2a/api/tests/conftest.py`.
+- [ ] `W06.P11.S22` - Repair the API endpoint test partition against the typed fixture contract.; `src/vaultspec_a2a/api/tests/test_endpoints.py`.
+- [ ] `W06.P11.S23` - Repair the API live-gateway and clarification test partitions without overlapping peer work.; `src/vaultspec_a2a/api/tests/test_gateway_live.py, src/vaultspec_a2a/api/tests/test_clarification_loop_live.py`.
+
+### Phase `W06.P12` - strict production-domain typing
+
+Repair production typing by bounded domain with no suppressions or compatibility shims.
+
+- [ ] `W06.P12.S24` - Repair strict types in the control and repository production domains.; `src/vaultspec_a2a/control, src/vaultspec_a2a/control/repositories`.
+- [ ] `W06.P12.S25` - Repair strict types in the provider and ACP production domains.; `src/vaultspec_a2a/providers`.
+- [ ] `W06.P12.S26` - Repair strict types in the provider and service test domains after production contracts stabilize.; `src/vaultspec_a2a/providers/tests, src/vaultspec_a2a/service_tests`.
+- [ ] `W06.P12.S27` - Repair strict types in lifecycle test helpers and their production contracts.; `src/vaultspec_a2a/lifecycle, src/vaultspec_a2a/lifecycle/tests`.
+- [ ] `W06.P12.S28` - Repair strict types in graph, authoring, worker, and streaming domains.; `src/vaultspec_a2a/graph, src/vaultspec_a2a/authoring, src/vaultspec_a2a/worker, src/vaultspec_a2a/streaming`.
+
+## Wave `W07` - structural complexity remediation
+
+Reduce production complexity, shape, nesting, and module-size debt at the accepted thresholds through behavior-preserving decomposition.
+
+### Phase `W07.P13` - high-risk structural domains
+
+Decompose provider, streaming, API, and control hotspots while preserving their real behavior.
+
+- [ ] `W07.P13.S29` - Decompose ProviderFactory construction paths below the configured complexity and shape thresholds.; `src/vaultspec_a2a/providers/factory.py`.
+- [ ] `W07.P13.S30` - Decompose ACP composition, protocol, RPC, and chat-model hotspots without changing provider behavior.; `src/vaultspec_a2a/providers/_acp_mcp.py, src/vaultspec_a2a/providers/_acp_protocol.py, src/vaultspec_a2a/providers/_acp_rpc_handlers.py, src/vaultspec_a2a/providers/acp_chat_model.py`.
+- [ ] `W07.P13.S31` - Decompose streaming transformation and interrupt emission hotspots with stream regression evidence.; `src/vaultspec_a2a/streaming/transformer.py, src/vaultspec_a2a/streaming/ingest.py`.
+- [ ] `W07.P13.S32` - Decompose API gateway and event-adapter hotspots while preserving authenticated edge behavior.; `src/vaultspec_a2a/api/routes/gateway.py, src/vaultspec_a2a/api/event_adapter.py`.
+- [ ] `W07.P13.S33` - Decompose control permission, dispatch, projection, snapshot, and worker-management hotspots.; `src/vaultspec_a2a/control`.
+
+### Phase `W07.P14` - remaining structural domains
+
+Finish graph, lifecycle, desktop, and utility structural debt at the configured thresholds.
+
+- [ ] `W07.P14.S34` - Decompose graph compiler and node hotspots while retaining compiled-topology evidence.; `src/vaultspec_a2a/graph/compiler.py, src/vaultspec_a2a/graph/nodes`.
+- [ ] `W07.P14.S35` - Decompose lifecycle discovery and singleton hotspots without weakening ownership checks.; `src/vaultspec_a2a/lifecycle`.
+- [ ] `W07.P14.S36` - Decompose desktop filesystem and process-utility hotspots with real-process regression evidence.; `src/vaultspec_a2a/desktop, src/vaultspec_a2a/utils/process.py`.
+
+## Wave `W08` - evidence-bound graduation and audit
+
+Promote only verified zero-debt sentinels atomically and complete the required review and audit trail.
+
+### Phase `W08.P15` - sentinel graduation
+
+Independently prove and atomically promote each deterministic strict sentinel.
+
+- [ ] `W08.P15.S37` - Prove cross-platform Ty is zero and atomically promote type-platforms into the blocking aggregate.; `dev/toolchain.py, .github/workflows/test.yml`.
+- [ ] `W08.P15.S38` - Prove Basedpyright strict is zero and atomically promote type-strict into the blocking aggregate.; `dev/toolchain.py, .github/workflows/test.yml`.
+- [ ] `W08.P15.S39` - Prove cognitive complexity is zero on the corrected production scope and atomically promote complexity.; `dev/toolchain.py, .github/workflows/test.yml`.
+- [ ] `W08.P15.S40` - Prove cyclomatic complexity is zero and atomically promote cyclomatic.; `dev/toolchain.py, .github/workflows/test.yml`.
+- [ ] `W08.P15.S41` - Prove module and function shape is zero and atomically promote shape.; `dev/toolchain.py, .github/workflows/test.yml`.
+- [ ] `W08.P15.S42` - Prove function limits are zero and atomically promote limits.; `dev/toolchain.py, .github/workflows/test.yml`.
+- [ ] `W08.P15.S43` - Prove nesting is zero and atomically promote nesting.; `dev/toolchain.py, .github/workflows/test.yml`.
+- [ ] `W08.P15.S44` - Prove size and design limits are zero and atomically promote size.; `dev/toolchain.py, .github/workflows/test.yml`.
+
+### Phase `W08.P16` - closure and audit
+
+Retain advisory clone evidence and complete the mandatory implementation review and finding queue.
+
+- [ ] `W08.P16.S45` - Review and classify each production JSCPD finding without changing the advisory policy.; `dev/toolchain.py, .github/workflows/test.yml`.
+- [ ] `W08.P16.S46` - Run formal code review, record every finding, and close the campaign only on full evidence.; `.vault/audit, .vault/exec`.
+
 ## Parallelization
 
-Waves execute in order. In W01, S01 precedes S02 and S03; S02 and S03 may then
-run in parallel. In W02, S04 precedes S05; S06 may run alongside the governance
-work, while S07 follows S06. In W03, S08 and S09 may begin together; S10 follows
-the final local CI contract. Documentation context gathering may begin after
-the public command surface freezes, but S11 lands after W03. S12 is terminal.
+W01 through W04 are complete historical work. W05 is sequential: P09 must
+finish before P10 because hosted CI may only name targets that the declarative
+registry owns. W06 begins after W05.P10. Within W06, P11 is serial through the
+shared API fixture and portability contracts; after those foundations land, its
+non-overlapping API partitions may proceed in parallel. P12 domain work may run
+in parallel only where source and test ownership do not overlap, and it follows
+the corresponding P11 contracts.
+
+W07 begins after W06 establishes the relevant typed contracts. P13 steps are
+independent only where their named provider, streaming, API, and control scopes
+do not overlap; P14 may run alongside the non-overlapping P13 work. W08 is
+strictly ordered after every remediation step. Its promotion Steps each require
+the same clean candidate commit and cannot be checked from a partial or
+concurrently changing tree. S45 and S46 are terminal.
 
 ## Verification
 
-- Every dependency profile resolves from `uv.lock`, and project-run Core and
-  RAG versions match the declared constraints.
-- Core install and sync converge twice without changing user-owned Git-ignore
-  entries; canonical and provider paths are trackable while runtime state stays
-  ignored.
-- Rule status, full sync preview, spec doctor, plan check, and vault check pass
-  without scope-introduced errors.
-- `just` formatting, listing, nested help, and representative dry-runs pass on
-  native PowerShell; no recipe directly spawns or force-kills a managed service.
-- Hooks and CI are read-only, GitHub workflows validate, and self-hosted issue
-  dispatch cannot reach secrets without trusted authorization.
-- Ruff lint and format, Ty, classified Deptry checks, truthful test collection,
-  all feasible real test suites, package build, Core doctor, and RAG status run
-  with their outcomes recorded.
-- Documentation command samples match executable help and pass technical,
-  zero-context editorial, link, and Sphinx review.
-- Formal code review classifies every finding and records each one in the audit
-  queue before every Step and summary is closed.
+- Root `just ci` delegates to the sole declarative CI owner, and the hosted
+  canonical job invokes that root command without restating tool commands.
+- Every deterministic sentinel has one independent hosted result, with advisory
+  visibility until its own evidence-bound graduation; JSCPD remains advisory.
+- `type-platforms` runs Ty for Linux, Darwin, and Windows over the canonical
+  Python roots; each platform result is retained separately.
+- Every Terra step passes its named focused real-behavior tests, scoped typing
+  check, format/lint check, and `git diff --check` before an execution record
+  is written.
+- A target joins `lint all` only with repeated clean evidence at the existing
+  threshold, a passing canonical CI run, and an applicable integration verdict
+  or precise out-of-scope explanation at the same commit.
+- The campaign ends only after formal review classifies every finding, the audit
+  queue owns all deferred work, and all plan steps are checked through the
+  owning CLI.

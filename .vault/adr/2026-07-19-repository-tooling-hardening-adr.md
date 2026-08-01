@@ -4,14 +4,16 @@ tags:
   - "#repository-tooling-hardening"
 date: '2026-07-19'
 related:
-  - "[[2026-07-19-repository-tooling-hardening-research]]"
-  - "[[2026-07-19-repository-tooling-hardening-reference]]"
+  - '[[2026-07-19-repository-tooling-hardening-research]]'
+  - '[[2026-07-19-repository-tooling-hardening-reference]]'
   - '[[2026-03-20-service-lifecycle-architecture-adr]]'
   - '[[2026-07-15-dev-process-registry-adr]]'
+  - '[[2026-08-01-repository-tooling-hardening-strict-quality-gates-research]]'
+  - '[[2026-08-01-repository-tooling-hardening-strict-quality-gates-reference]]'
 supersedes:
   - '2026-03-19-control-layer-cli-justfile-separation-adr'
 modified: '2026-08-01'
-body_hash: 'sha256:74d22b1ded5b8e80fc886490c2eca703f0ae6b042443f3bf262c53b3965a945c'
+body_hash: 'sha256:012049c81c40336904fc584d43fb254aed861f24251dd74e0b09ea3830508d63'
 ---
 # `repository-tooling-hardening` adr: `one modular, locked, and reproducible repository control surface` | (**status:** `accepted`)
 
@@ -183,3 +185,20 @@ Upstream, `vaultspec-core#300` and `vaultspec-rag#337` ask both servers for a
 `--read-only` launch mode on the same principle - consumers assert the served
 surface rather than pin a version. The launch specs are shaped so that adopting
 the flag is a one-line addition to `args`, not a rework.
+## Amendment (2026-08-01, staged strict-quality enforcement)
+
+The canonical validation contract is refined to distinguish three states for every quality dimension: visible advisory, blocking gate, and reviewed investigation lead. This refines the existing read-only CI contract, rather than creating an owner or superseding decision. Grounding: `2026-08-01-repository-tooling-hardening-strict-quality-gates-research` and `2026-08-01-repository-tooling-hardening-strict-quality-gates-reference`.
+
+`dev/toolchain.py` remains the sole owner of target names, commands, scan scope, composition, and failure behavior. `pyproject.toml` owns tool configuration and thresholds. The root `justfile` remains a facade that delegates canonical CI to the declarative harness. Hosted workflows own scheduling, platforms, and result presentation only: they invoke named harness targets and never restate commands, paths, exclusions, or thresholds.
+
+The deterministic sentinels are `type-strict`, `type-platforms`, `complexity`, `cyclomatic`, `shape`, `limits`, `nesting`, and `size`. Every one runs in its own hosted-CI step on every push and pull request, guarded by `if: ${{ !cancelled() }}`. A sentinel with standing debt remains locally strict but has a visible hosted result with `continue-on-error: true`. A graduated sentinel is simultaneously a member of `lint all` and a blocking hosted step; `lint strict` stays the local keep-going dashboard rather than the hosted result boundary.
+
+Promotion is atomic and evidence-bound. A deterministic sentinel may graduate only after its existing threshold and scope produce zero findings without new exclusions, suppressions, baselines, threshold increases, or duplicated code; that result is reproduced from the lock in a clean settled checkout at the candidate commit; canonical `just ci` passes there; affected integration, service, desktop, or acceptance obligations are green or precisely out of scope; and the one promotion change adds the target to `lint all` while removing its hosted `continue-on-error`. After graduation, a regression is repaired rather than hidden through demotion, scope narrowing, or threshold changes; any reversal requires a new grounded amendment.
+
+A2A adds `type-platforms` as a first-class Ty target over the committed Python roots under Python 3.13 for `linux`, `darwin`, and `win32`. It starts as advisory evidence and shares the same promotion invariant. A2A does not copy a Core or RAG exception without a local census and demonstrated white-box ownership need.
+
+Duplication remains a reviewed investigation lead. `audit duplication` continues production-only JSCPD scanning at 20 lines and 70 tokens, gains a named advisory hosted step, and never joins `lint all` solely because one run is zero. Any later blocking clone policy needs a separate decision defining adjudication, legitimate-copy categories, generated/migration treatment, exclusion ownership, and false-positive disposition.
+
+Static quality does not certify runtime behavior. Unit, service, desktop, Compose, provider-live, cross-repository, and acceptance lanes retain their distinct prerequisites. The static-quality job starts no service, uses no provider credential, dispatches no GPU work, and does not infer runtime certification from a type or complexity verdict.
+
+A real-code anti-drift guard is mandatory. It imports the declarative registry and inspects the tracked root `justfile` and hosted workflow without mocks, patches, or mirrored command logic. The guard proves root `just ci` delegates to the sole declarative CI owner; the hosted job invokes `just ci`; every strict sentinel has exactly one visible hosted step; blocking membership exactly matches `lint all`; advisory sentinels carry `continue-on-error`; hosted steps invoke named targets only; duplication remains advisory and outside `lint all`; and `type-platforms` covers exactly the three declared platforms over the canonical Python paths.

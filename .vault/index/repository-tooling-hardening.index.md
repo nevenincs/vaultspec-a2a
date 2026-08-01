@@ -3,9 +3,10 @@ generated: true
 tags:
   - '#index'
   - '#repository-tooling-hardening'
-date: '2026-07-22'
-modified: '2026-07-22'
-body_hash: 'sha256:048724f88b812608a356e39e99705d38c639cda4d9d6871e69b2eb2360a7818d'
+date: '2026-08-01'
+modified: '2026-08-01'
+body_schema: 'body-v1'
+body_hash: 'sha256:4d5bd6018b7cbfe82dc822934888b2d167e6a428d59fc51862e8b59d8fe1385f'
 related:
   - '[[2026-07-19-repository-tooling-hardening-W01-P01-S01]]'
   - '[[2026-07-19-repository-tooling-hardening-W01-P01-summary]]'
@@ -32,6 +33,8 @@ related:
   - '[[2026-07-19-repository-tooling-hardening-plan]]'
   - '[[2026-07-19-repository-tooling-hardening-reference]]'
   - '[[2026-07-19-repository-tooling-hardening-research]]'
+  - '[[2026-08-01-repository-tooling-hardening-strict-quality-gates-reference]]'
+  - '[[2026-08-01-repository-tooling-hardening-strict-quality-gates-research]]'
 ---
 
 # `repository-tooling-hardening` feature index
@@ -78,7 +81,9 @@ Auto-generated index of all documents tagged with `#repository-tooling-hardening
 ### reference
 
 - `2026-07-19-repository-tooling-hardening-reference` - `repository-tooling-hardening` reference: `Vaultspec tool provisioning and Git-ignore ownership`
+- `2026-08-01-repository-tooling-hardening-strict-quality-gates-reference` - `strict-quality-gates` reference: `Core and RAG quality-harness contracts`
 
 ### research
 
 - `2026-07-19-repository-tooling-hardening-research` - `repository-tooling-hardening` research: `Justfile, CI, GitHub, and Vaultspec rule reconciliation`
+- `2026-08-01-repository-tooling-hardening-strict-quality-gates-research` - `strict-quality-gates` research: `staged promotion of strict static gates`

@@ -501,6 +501,10 @@ async def test_plan_gate_request_changes_loops_a_revision(
     payload = revised["__interrupt__"][0].value
     assert payload["phase"] == "plan"
     assert payload["proposal_id"] == "prop-plan"
+    # The direct proof the revision re-invoked plan_author rather than
+    # re-observing the same interrupt: a second "plan" entry in the
+    # submitter's call log.
+    assert submitter.phases == ["research", "adr", "plan", "plan"]
 
 
 # ---------------------------------------------------------------------------

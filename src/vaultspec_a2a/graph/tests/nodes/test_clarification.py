@@ -100,6 +100,17 @@ class TestBoundClarificationQuestions:
         bounded = bound_clarification_questions(questions)
         assert [q["id"] for q in bounded] == ["good_id-1.2:3"]
 
+    def test_drops_ids_with_a_leading_hyphen(self) -> None:
+        """A leading hyphen is a distinct rejection from a mid-string one:
+        the engine's ``bounded_token_is_valid`` forbids only a LEADING ``-``
+        (elsewhere it is a valid grammar character, as ``good-id`` proves)."""
+        questions = [
+            {"id": "-foo", "prompt": "Bad id: leading hyphen"},
+            {"id": "good-id", "prompt": "Good id: hyphen mid-string"},
+        ]
+        bounded = bound_clarification_questions(questions)
+        assert [q["id"] for q in bounded] == ["good-id"]
+
     def test_drops_duplicate_ids(self) -> None:
         questions = [
             {"id": "q1", "prompt": "First"},

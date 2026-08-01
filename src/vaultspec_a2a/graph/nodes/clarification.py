@@ -67,12 +67,15 @@ CLARIFICATION_ANSWER_KINDS: frozenset[str] = frozenset({"choice", "text"})
 
 #: The token grammar the engine's `/v1/runs/{run_id}/clarifications/
 #: {request_id}/respond` boundary validates answer keys (question ids)
-#: against: alphanumeric plus ``_ - . :``, capped at 64 chars. Enforced HERE,
-#: at minting, so a question id this node ever advertises is always
-#: answerable through that boundary — a caller proposing e.g. a space or a
-#: unicode id degrades to having that question dropped rather than parking a
-#: run unanswerable through the dashboard.
-_QUESTION_ID_GRAMMAR = re.compile(r"^[A-Za-z0-9_.:-]{1,64}$")
+#: against: alphanumeric plus ``_ - . :``, capped at 64 chars, and — matching
+#: the engine's ``bounded_token_is_valid`` — never STARTING with a hyphen (a
+#: leading ``-`` elsewhere reads as a CLI flag marker in several downstream
+#: consumers). Enforced HERE, at minting, so a question id this node ever
+#: advertises is always answerable through that boundary — a caller proposing
+#: e.g. a space, a leading hyphen, or a unicode id degrades to having that
+#: question dropped rather than parking a run unanswerable through the
+#: dashboard.
+_QUESTION_ID_GRAMMAR = re.compile(r"^[A-Za-z0-9_.:][A-Za-z0-9_.:-]{0,63}$")
 
 
 def _single_line(text: str) -> str:

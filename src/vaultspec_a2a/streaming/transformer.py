@@ -32,7 +32,7 @@ from .types import (
     PASSTHROUGH_EVENTS,
     StreamableGraph,
     classify_tool_kind,
-    map_acp_option_kind,
+    resolve_acp_option_kind,
 )
 
 # Import GraphInterrupt for isinstance check vs string comparison.
@@ -582,14 +582,34 @@ async def emit_interrupt_events(
                 # canonical predicate keeps this projection from re-deriving the
                 # rule — and from forwarding a null id when the key is present
                 # but carries no usable string.
-                options = [
-                    {
-                        "option_id": (opt_id := option_id_of(opt)) or "allow_once",
-                        "name": opt.get("label", opt.get("name", opt_id or "Allow")),
-                        "kind": map_acp_option_kind(opt_id or ""),
-                    }
-                    for opt in acp_options
-                ]
+                #
+                # The kind is read from the agent's own declaration, not guessed
+                # from the id: this projection feeds the durable options column, so
+                # a denial the agent declared under an unguessable id must survive
+                # to every later reader of the record.
+                options = []
+                for opt in acp_options:
+                    opt_fields = opt if isinstance(opt, dict) else {}
+                    opt_id = option_id_of(opt)
+                    declared_kind = opt_fields.get("kind")
+                    kind = resolve_acp_option_kind(declared_kind, opt_id or "")
+                    if declared_kind and kind != declared_kind:
+                        logger.warning(
+                            "Permission option %r declared unrecognised kind %r; "
+                            "derived %s from the option id instead",
+                            opt_id,
+                            declared_kind,
+                            kind.value,
+                        )
+                    options.append(
+                        {
+                            "option_id": opt_id or "allow_once",
+                            "name": opt_fields.get(
+                                "label", opt_fields.get("name", opt_id or "Allow")
+                            ),
+                            "kind": kind,
+                        }
+                    )
                 if not options:
                     options = [
                         {

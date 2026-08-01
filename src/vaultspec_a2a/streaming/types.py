@@ -150,10 +150,20 @@ def classify_tool_kind(tool_name: str) -> ToolKind:
 
 
 def map_acp_option_kind(option_id: str) -> PermissionOptionKind:
-    """Map an ACP option ID string to a ``PermissionOptionKind`` enum value.
+    """Derive a ``PermissionOptionKind`` from an ACP option ID string.
 
     Heuristic matching: looks for ``always`` + ``deny``/``reject`` keywords to
     classify the option kind.  Defaults to ``ALLOW_ONCE`` for unrecognised ids.
+
+    The default is deliberately permissive and must stay that way: the keywords
+    only detect *rejecting* spellings, so every approving id this system mints --
+    ``"approve"``, ``"approve_for_session"``, ``"allow_once"`` -- carries no
+    keyword at all and reaches the default. Failing closed here would classify
+    every one of them as a denial.
+
+    This is the *derivation*, not the authority. Prefer
+    :func:`resolve_acp_option_kind`, which consults the kind the provider actually
+    declared and reaches for this only when there is none to consult.
 
     Args:
         option_id: The raw ACP option ID string (e.g. ``"allow_always"``).
@@ -169,6 +179,42 @@ def map_acp_option_kind(option_id: str) -> PermissionOptionKind:
     if "deny" in oid or "reject" in oid:
         return PermissionOptionKind.REJECT_ONCE
     return PermissionOptionKind.ALLOW_ONCE
+
+
+def resolve_acp_option_kind(
+    declared_kind: object,
+    option_id: str,
+) -> PermissionOptionKind:
+    """Resolve an ACP option's kind, preferring what the provider declared.
+
+    The ACP schema has the agent declare each option's ``kind`` alongside its id,
+    and that declaration is the only authority on whether the option denies. An id
+    is free-form and provider-defined, so deriving the kind from it discards the
+    one field that carries the answer: an agent offering a rejecting option under
+    an id spelling neither ``deny`` nor ``reject`` -- and nothing obliges it to use
+    either -- was persisted as an approval, with no way for any later reader to
+    recover the denial.
+
+    The declaration is validated rather than trusted: a value outside
+    :class:`PermissionOptionKind` is not written through to the durable column but
+    routed to :func:`map_acp_option_kind`, so a malformed or unknown kind degrades
+    to the id heuristic instead of poisoning the record with an unreadable status.
+
+    Args:
+        declared_kind: The option's ``kind`` field as the provider sent it. A
+                       ``PermissionOptionKind``, its bare string value, ``None``,
+                       or any other type -- only a schema-valid string is honoured.
+        option_id:     The option's resolved id, used for the fallback derivation.
+
+    Returns:
+        The declared kind when it is schema-valid, else the kind derived from the id.
+    """
+    if isinstance(declared_kind, str) and declared_kind:
+        try:
+            return PermissionOptionKind(declared_kind)
+        except ValueError:
+            pass
+    return map_acp_option_kind(option_id)
 
 
 def evict_oldest(d: dict, max_entries: int) -> None:

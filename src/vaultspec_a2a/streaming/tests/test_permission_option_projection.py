@@ -19,8 +19,10 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.types import interrupt
 from typing_extensions import TypedDict
 
+from ...graph.enums import PermissionOptionKind
 from ..aggregator import EventAggregator
 from ..transformer import emit_interrupt_events
+from ..types import resolve_acp_option_kind
 
 if TYPE_CHECKING:
     from ..types import StreamableGraph
@@ -110,3 +112,86 @@ async def test_an_options_list_the_agent_omits_falls_back_to_allow_and_deny() ->
     options = await _project("thread-empty", [])
 
     assert [opt["option_id"] for opt in options] == ["allow_once", "deny_once"]
+
+
+@pytest.mark.asyncio
+async def test_a_declared_denial_survives_an_id_that_does_not_spell_it() -> None:
+    """The agent's declared kind decides, not a guess made from its id.
+
+    This is the severe case. The id heuristic only recognises ``deny``/``reject``
+    spellings and defaults everything else to allow-once, and nothing obliges an
+    agent to use either word. An option the agent explicitly declared as rejecting
+    was therefore projected -- and persisted -- as an approval, and because the
+    re-derived kind carried no information the id did not, no later reader could
+    recover the denial.
+    """
+    options = await _project(
+        "thread-declared-denial",
+        [
+            {"optionId": "proceed", "label": "Go ahead", "kind": "allow_once"},
+            {"optionId": "decline", "label": "Do not", "kind": "reject_once"},
+        ],
+    )
+
+    assert [opt["option_id"] for opt in options] == ["proceed", "decline"]
+    assert [str(opt["kind"]) for opt in options] == ["allow_once", "reject_once"]
+
+
+@pytest.mark.asyncio
+async def test_a_declared_always_kind_is_not_flattened_to_once() -> None:
+    """Declaration wins for the scope of the grant, not only its polarity."""
+    options = await _project(
+        "thread-declared-always",
+        [{"optionId": "trust_this_tool", "label": "Trust", "kind": "allow_always"}],
+    )
+
+    assert [str(opt["kind"]) for opt in options] == ["allow_always"]
+
+
+@pytest.mark.asyncio
+async def test_an_unrecognised_declared_kind_degrades_to_the_id_derivation() -> None:
+    """A kind outside the schema is not written through to the durable column.
+
+    Trusting the raw string would put an unreadable status on the record -- and
+    would in fact fail loudly downstream, where the emitter re-validates every kind
+    through ``PermissionOptionKind``. Routing it to the id heuristic keeps the
+    projection total, and here the id still carries the denial.
+    """
+    options = await _project(
+        "thread-bogus-kind",
+        [{"optionId": "reject_once", "label": "Deny", "kind": "refuse"}],
+    )
+
+    assert [str(opt["kind"]) for opt in options] == ["reject_once"]
+
+
+@pytest.mark.asyncio
+async def test_an_agent_declaring_no_kind_still_derives_one_from_the_id() -> None:
+    """The derivation remains the fallback for agents that declare nothing."""
+    options = await _project(
+        "thread-no-kind",
+        [{"optionId": "allow_always"}, {"optionId": "reject_once"}],
+    )
+
+    assert [str(opt["kind"]) for opt in options] == ["allow_always", "reject_once"]
+
+
+def test_resolve_prefers_a_declared_kind_over_the_id_heuristic() -> None:
+    """The resolver's contract, exercised directly on every input shape."""
+    # A schema-valid declaration is honoured even when the id disagrees.
+    assert resolve_acp_option_kind("reject_once", "approve") is (
+        PermissionOptionKind.REJECT_ONCE
+    )
+    # A PermissionOptionKind member is as valid as its bare string value.
+    assert resolve_acp_option_kind(PermissionOptionKind.ALLOW_ALWAYS, "nope") is (
+        PermissionOptionKind.ALLOW_ALWAYS
+    )
+    # Absent, empty, non-string, and unrecognised declarations all fall back.
+    for declared in (None, "", "refuse", 7, {"kind": "reject_once"}):
+        assert resolve_acp_option_kind(declared, "deny_always") is (
+            PermissionOptionKind.REJECT_ALWAYS
+        )
+    # With nothing to go on at either end, the permissive default stands: the
+    # heuristic recognises only rejecting spellings, so flipping it would classify
+    # every approving id this system mints as a denial.
+    assert resolve_acp_option_kind(None, "approve") is PermissionOptionKind.ALLOW_ONCE

@@ -24,6 +24,7 @@ from ..telemetry import ws_span
 from ..thread.constants import DEFAULT_SUPERVISOR_ID
 from ..thread.errors import (
     AgentConfigNotFoundError,
+    ConfigError,
     IsolationRequiredError,
     TeamConfigNotFoundError,
 )
@@ -137,6 +138,71 @@ def assert_armed_lanes_authenticated(
             "config-home isolation its declared MCP surface requires: no provider "
             f"auth token for lane(s): {lanes}. Provide the lane token or select a "
             "preset with no harness/bridge."
+        )
+
+
+def assert_armed_authoring_attachable(
+    team_config: Any,
+    agent_configs: dict[str, AgentConfig],
+    ws_root: Path | None,
+    *,
+    harness: Any,
+    provider_factory: Any,
+    frozen_assignment: dict[str, dict[str, Any]] | None = None,
+) -> None:
+    """Refuse an authoring-bridge-armed preset a worker cannot mount the bridge onto.
+
+    ``providers._acp_authoring.attach_authoring_tools`` dispatches the run's
+    authoring binding onto the resolved model's own surface (``with_mcp_servers``
+    for the ACP lane, ``with_authoring_mcp_server`` for Codex) and, since the
+    codex-authoring-bridge-attachment fix, raises loud when a model exposes
+    neither — but that raise fires per-turn, inside the worker node, only once
+    the run has already started and begun burning its step timeout waiting on an
+    agent that will never see its tools. This gate asks the identical question
+    at COMPILE time, for every worker in an ``authoring_bridge``-armed preset,
+    so a provider with no attachment surface at all is refused with a served
+    compile-time reason before the run ever starts — never a live-run timeout.
+
+    A no-op when *harness* does not arm the authoring bridge (mirrors
+    :func:`assert_armed_lanes_authenticated`'s per-worker resolution shape, but
+    scoped to authoring_bridge specifically: the harness-mcp_servers-only case is
+    already proven to reach every known provider's own delivery mechanism -
+    ``with_mcp_servers`` or ``with_harness_mcp_servers`` - via
+    ``compose_harness_mcp_servers``, so it is out of scope here).
+    """
+    if harness is None or not harness.authoring_bridge:
+        return
+    unsupported: list[str] = []
+    for worker_ref in team_config.workers:
+        agent_config = agent_configs.get(worker_ref.agent_id)
+        if agent_config is None:
+            continue
+        try:
+            model, _resolved_provider, _capability = _resolve_model_for_worker(
+                worker_ref,
+                agent_config,
+                team_config,
+                ws_root,
+                provider_factory=provider_factory,
+                frozen_assignment=frozen_assignment,
+            )
+        except ValueError:
+            # Provider exhaustion is a distinct failure surfaced by compile.
+            continue
+        has_attach_surface = (
+            getattr(model, "with_mcp_servers", None) is not None
+            or getattr(model, "with_authoring_mcp_server", None) is not None
+        )
+        if not has_attach_surface:
+            unsupported.append(f"{worker_ref.agent_id!r} ({type(model).__name__})")
+    if unsupported:
+        raise ConfigError(
+            f"harness-armed preset {team_config.id!r} declares "
+            "[team.harness] authoring_bridge = true, but the following worker(s) "
+            f"resolved to a provider with no authoring attachment surface: "
+            f"{'; '.join(unsupported)}. The declared authoring tools cannot "
+            "mount onto this provider; refusing before the run starts rather "
+            "than spawning an agent whose tools silently never attach."
         )
 
 
@@ -387,6 +453,14 @@ class GraphLifecycleManager:
                 team_config,
                 agent_configs,
                 ws_root,
+                provider_factory=self._provider_factory,
+                frozen_assignment=req.model_assignment,
+            )
+            assert_armed_authoring_attachable(
+                team_config,
+                agent_configs,
+                ws_root,
+                harness=harness,
                 provider_factory=self._provider_factory,
                 frozen_assignment=req.model_assignment,
             )

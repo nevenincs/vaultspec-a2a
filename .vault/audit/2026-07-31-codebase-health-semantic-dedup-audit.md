@@ -5,7 +5,7 @@ tags:
 date: '2026-07-31'
 modified: '2026-08-01'
 body_schema: 'body-v1'
-body_hash: 'sha256:2773cd123e9ec626175bbcd9bff1759df3133b318cff10aac8241491f9bbc47d'
+body_hash: 'sha256:1e6d5c27405d6509e01e88baeac414ea0af1f93206692592e0d466788e2d4260'
 related:
   - "[[2026-07-19-codebase-health-audit]]"
   - "[[2026-07-19-codebase-health-plan]]"
@@ -218,6 +218,31 @@ which does refuse the run - so nothing executes uncredentialed. But a bounded
 admission reservation has already been granted and burned against a promise of
 execution-readiness, and the operator-facing readiness surface has already
 reported a fact that is wrong.
+
+### declared-permission-kind-discarded-and-re-derived-by-substring | medium | The provider's own denial declaration is thrown away and guessed back from the id, failing open
+
+Found while repairing the rejection-vocabulary family, and it sits upstream of
+that repair rather than inside it.
+
+When a tool permission request is projected for persistence,
+`streaming/transformer.py` builds each option's kind by calling the option-kind
+mapper on the option id, and never reads the `kind` the provider actually
+declared. That mapper is a substring heuristic - an id containing deny or reject
+maps to a rejecting kind - and everything else falls through to allow-once.
+
+The consequence is a fail-open loss of authority. A provider that declares a
+rejecting kind under an id spelled with neither substring has its declaration
+discarded and its option persisted as an approval. Because the id and the
+re-derived kind then carry exactly the same information, the durable record
+offers no independent evidence of the denial for any consumer to recover.
+
+This is why the rejection verdict repair prefers the declared kind but cannot
+rely on it alone: for plan and document approvals the kind is authored literally
+and is authoritative, while for tool permissions it is this lossy
+re-derivation. The repair's id fallback covers the spellings the system is known
+to mint or receive today, so no current provider is misclassified - but a future
+provider's denial can still be recorded as an approval, and the fix for that
+belongs here rather than at the settlement sites.
 
 ### progress-fallback-loses-tool-permission-rejection | medium | The lost-event backstop records every settled permission as applied, including denials
 

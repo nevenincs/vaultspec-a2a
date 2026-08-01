@@ -10,6 +10,12 @@ The checkpoint assertions matter as much as the routing ones: the whole point of
 committing the question set before parking is that an out-of-process reader can
 recover the questionnaire from the checkpoint while the run waits, so the tests
 read it back the same way the recovery snapshot does.
+
+The bounding tests cover the other half of the contract: what a model TURN
+proposes is untrusted, so the producer-side coercion degrades a bad proposal
+instead of failing the run. Those tests assert against the canonical bounds by
+name, never against a literal 4, so a change to the contract moves the test with
+it rather than leaving it asserting a stale number.
 """
 
 from __future__ import annotations
@@ -24,10 +30,16 @@ from langgraph.types import Command
 
 from ....graph.nodes.clarification import (
     ClarificationQuestionProducer,
+    bound_clarification_questions,
     create_clarification_gate_node,
     create_clarification_request_node,
 )
 from ....thread.clarification import (
+    MAX_IDENTIFIER_CHARS,
+    MAX_OPTION_CHARS,
+    MAX_OPTIONS_PER_QUESTION,
+    MAX_PROMPT_CHARS,
+    MAX_QUESTIONS_PER_REQUEST,
     ClarificationKind,
     ClarificationQuestion,
     ClarificationRequest,
@@ -388,3 +400,215 @@ async def test_second_questionnaire_does_not_erase_the_first_answers() -> None:
         "clarify-a": {"scope": "right"},
         "clarify-b": {"scope": "left"},
     }
+
+
+class TestBoundClarificationQuestions:
+    """Producer-side coercion of an untrusted proposed question list."""
+
+    def test_caps_the_question_count(self) -> None:
+        proposed = [
+            {"id": f"q{i}", "prompt": f"Question {i}?"}
+            for i in range(MAX_QUESTIONS_PER_REQUEST * 2 + 2)
+        ]
+        assert len(bound_clarification_questions(proposed)) == (
+            MAX_QUESTIONS_PER_REQUEST
+        )
+
+    def test_malformed_leading_entries_do_not_shrink_the_cap_window(self) -> None:
+        """Filter THEN cap - the regression this lane has already shipped once.
+
+        The cap bounds the VALID result, not the raw input window. Capping first
+        would let the two unusable leaders consume two of the four slots and
+        yield ``["q0", "q1"]``; filtering first yields all four valid questions.
+        The assertion is on the full id list rather than the length so that a
+        cap-then-filter implementation cannot satisfy it by coincidence.
+        """
+        proposed: list[Any] = [
+            {"id": "", "prompt": "unusable: no id"},
+            {"id": "blank_prompt", "prompt": ""},
+            *(
+                {"id": f"q{i}", "prompt": f"Question {i}?"}
+                for i in range(MAX_QUESTIONS_PER_REQUEST)
+            ),
+        ]
+        bounded = bound_clarification_questions(proposed)
+        assert [question["id"] for question in bounded] == [
+            f"q{i}" for i in range(MAX_QUESTIONS_PER_REQUEST)
+        ]
+
+    def test_valid_entries_after_the_cap_are_the_only_ones_dropped(self) -> None:
+        """The cap keeps the EARLIEST valid questions, in proposal order."""
+        proposed = [
+            {"id": f"q{i}", "prompt": f"Question {i}?"}
+            for i in range(MAX_QUESTIONS_PER_REQUEST + 3)
+        ]
+        bounded = bound_clarification_questions(proposed)
+        assert [question["id"] for question in bounded] == [
+            f"q{i}" for i in range(MAX_QUESTIONS_PER_REQUEST)
+        ]
+
+    def test_caps_the_option_count_of_a_choice(self) -> None:
+        bounded = bound_clarification_questions(
+            [
+                {
+                    "id": "provider",
+                    "prompt": "Which provider?",
+                    "kind": "choice",
+                    "options": [f"opt{i}" for i in range(MAX_OPTIONS_PER_QUESTION * 3)],
+                }
+            ]
+        )
+        assert bounded[0]["options"] == [
+            f"opt{i}" for i in range(MAX_OPTIONS_PER_QUESTION)
+        ]
+
+    def test_drops_entries_missing_an_id_or_a_prompt(self) -> None:
+        assert (
+            bound_clarification_questions(
+                [{"id": "", "prompt": "no id"}, {"id": "q1", "prompt": ""}]
+            )
+            == []
+        )
+
+    def test_drops_ids_outside_the_answer_key_grammar(self) -> None:
+        """An id the answer path could never key is dropped, not advertised.
+
+        Answers travel as JSON object keys and in a URL path, so the identifier
+        alphabet is the contract's, not the model's imagination. A question with
+        an unroutable id would park a run on something no client can answer.
+        """
+        proposed = [
+            {"id": "has space", "prompt": "unroutable"},
+            {"id": "emoji😀id", "prompt": "unroutable"},
+            {"id": "slash/id", "prompt": "unroutable"},
+            {"id": "colon:id", "prompt": "unroutable"},
+            {"id": "good_id-1.2", "prompt": "routable"},
+        ]
+        bounded = bound_clarification_questions(proposed)
+        assert [question["id"] for question in bounded] == ["good_id-1.2"]
+
+    def test_drops_an_id_with_a_leading_hyphen_but_not_a_mid_string_one(self) -> None:
+        """A leading hyphen is a distinct rejection from a mid-string one."""
+        proposed = [
+            {"id": "-leading", "prompt": "unroutable"},
+            {"id": "good-id", "prompt": "routable"},
+        ]
+        bounded = bound_clarification_questions(proposed)
+        assert [question["id"] for question in bounded] == ["good-id"]
+
+    def test_drops_a_duplicate_id_keeping_the_first(self) -> None:
+        bounded = bound_clarification_questions(
+            [
+                {"id": "q1", "prompt": "First"},
+                {"id": "q1", "prompt": "Second, same id"},
+            ]
+        )
+        assert [(q["id"], q["prompt"]) for q in bounded] == [("q1", "First")]
+
+    def test_an_unknown_kind_reads_as_text(self) -> None:
+        bounded = bound_clarification_questions(
+            [{"id": "q1", "prompt": "How?", "kind": "essay"}]
+        )
+        assert bounded[0]["kind"] == "text"
+        assert "options" not in bounded[0]
+
+    def test_a_text_question_carries_no_options_key(self) -> None:
+        bounded = bound_clarification_questions(
+            [{"id": "q1", "prompt": "How?", "kind": "text", "options": ["a", "b"]}]
+        )
+        assert bounded == [
+            {"id": "q1", "prompt": "How?", "kind": "text", "required": False}
+        ]
+
+    def test_strips_control_characters_from_a_prompt(self) -> None:
+        bounded = bound_clarification_questions(
+            [{"id": "q1", "prompt": "line one\nline two\ttabbed"}]
+        )
+        assert bounded[0]["prompt"] == "line oneline two\ttabbed"
+
+    def test_truncates_overlong_strings_to_the_canonical_bounds(self) -> None:
+        bounded = bound_clarification_questions(
+            [
+                {
+                    "id": "i" * (MAX_IDENTIFIER_CHARS + 20),
+                    "prompt": "p" * (MAX_PROMPT_CHARS + 20),
+                    "kind": "choice",
+                    "options": ["o" * (MAX_OPTION_CHARS + 20)],
+                }
+            ]
+        )
+        assert len(bounded[0]["id"]) == MAX_IDENTIFIER_CHARS
+        assert len(bounded[0]["prompt"]) == MAX_PROMPT_CHARS
+        assert len(bounded[0]["options"][0]) == MAX_OPTION_CHARS
+
+    def test_non_dict_entries_are_dropped(self) -> None:
+        assert bound_clarification_questions(["not-a-dict", 42, None, []]) == []
+
+    def test_choice_options_are_deduplicated_and_blanks_dropped(self) -> None:
+        bounded = bound_clarification_questions(
+            [
+                {
+                    "id": "q1",
+                    "prompt": "Pick",
+                    "kind": "choice",
+                    "options": ["a", "a", "", "b"],
+                }
+            ]
+        )
+        assert bounded[0]["options"] == ["a", "b"]
+
+    def test_a_choice_left_with_no_usable_option_is_dropped(self) -> None:
+        """A choice offering nothing to choose is not a renderable question."""
+        proposed = [
+            {"id": "empty", "prompt": "Pick", "kind": "choice", "options": []},
+            {"id": "blanks", "prompt": "Pick", "kind": "choice", "options": ["", ""]},
+            {"id": "wrong_type", "prompt": "Pick", "kind": "choice", "options": "a,b"},
+            {"id": "absent", "prompt": "Pick", "kind": "choice"},
+        ]
+        assert bound_clarification_questions(proposed) == []
+
+    def test_an_unstated_requirement_reads_as_optional(self) -> None:
+        bounded = bound_clarification_questions([{"id": "q1", "prompt": "How?"}])
+        assert bounded[0]["required"] is False
+
+    def test_bounded_output_is_admissible_to_the_wire_contract(self) -> None:
+        """The whole point of the coercion: what survives it always constructs.
+
+        The two layers are only complementary if the producer's output never
+        trips the wire's refusal. This drives a deliberately hostile proposal
+        through the coercion and then builds the real request from the result -
+        a bound the coercion failed to honour would raise here.
+        """
+        proposed: list[Any] = [
+            "not-a-dict",
+            {"id": "bad id", "prompt": "unroutable"},
+            {"id": "q1", "prompt": "p" * (MAX_PROMPT_CHARS + 50)},
+            {
+                "id": "q2",
+                "prompt": "Pick one",
+                "kind": "choice",
+                "options": [f"opt{i}" for i in range(MAX_OPTIONS_PER_QUESTION + 5)],
+                "required": True,
+            },
+            *(
+                {"id": f"extra{i}", "prompt": f"Extra {i}?"}
+                for i in range(MAX_QUESTIONS_PER_REQUEST)
+            ),
+        ]
+        bounded = bound_clarification_questions(proposed)
+
+        request = ClarificationRequest(
+            request_id="clarify-bounded",
+            questions=[ClarificationQuestion(**question) for question in bounded],
+        )
+
+        assert [question.id for question in request.questions] == [
+            "q1",
+            "q2",
+            "extra0",
+            "extra1",
+        ]
+        choice = request.question("q2")
+        assert choice is not None
+        assert choice.kind is ClarificationKind.CHOICE
+        assert len(choice.options or []) == MAX_OPTIONS_PER_QUESTION

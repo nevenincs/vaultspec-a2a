@@ -10,7 +10,6 @@ from langchain_core.language_models.fake_chat_models import FakeListChatModel
 from langchain_core.messages import HumanMessage
 from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.graph import END, START, StateGraph
-from langgraph.types import Command
 
 from ....thread.state import TeamState
 from ...nodes.ground import (
@@ -63,9 +62,7 @@ class TestParseGroundClarification:
         assert _parse_ground_clarification(content) == []
 
     def test_sentinel_respects_the_question_count_cap(self) -> None:
-        many = json.dumps(
-            [{"id": f"q{i}", "prompt": f"Q{i}?"} for i in range(10)]
-        )
+        many = json.dumps([{"id": f"q{i}", "prompt": f"Q{i}?"} for i in range(10)])
         content = f"{GROUND_CLARIFICATION_SENTINEL}\n{many}"
         assert len(_parse_ground_clarification(content)) == 4
 

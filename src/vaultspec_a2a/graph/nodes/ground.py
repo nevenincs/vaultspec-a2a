@@ -45,7 +45,16 @@ logger = logging.getLogger(__name__)
 GROUND_READY_SENTINEL = "GROUND READY"
 GROUND_CLARIFICATION_SENTINEL = "CLARIFICATION NEEDED"
 
-GROUND_SYSTEM_PROMPT = f"""You are the grounding gate for the vaultspec research-to-ADR-to-plan
+# The question-array schema the turn must emit, held apart from the prompt body
+# because it is one unbreakable line: rewrapping it would change the shape the
+# model is being shown, and a wrapped JSON example invites a wrapped answer.
+_QUESTION_ARRAY_SCHEMA = (
+    '[{"id": "<short-id>", "prompt": "<question text>", '
+    '"kind": "choice"|"text", "options": ["..."], "required": true|false}]'
+)
+
+GROUND_SYSTEM_PROMPT = f"""\
+You are the grounding gate for the vaultspec research-to-ADR-to-plan
 pipeline. Before any research begins, decide whether the user's request
 carries enough information to proceed, or whether you must ask the user a
 small number of clarifying questions first.
@@ -73,7 +82,7 @@ To ask clarifying questions, your entire response is the literal sentinel
 line followed by nothing but a JSON array of question objects:
 
 {GROUND_CLARIFICATION_SENTINEL}
-[{{"id": "<short-id>", "prompt": "<question text>", "kind": "choice"|"text", "options": ["..."], "required": true|false}}]
+{_QUESTION_ARRAY_SCHEMA}
 
 ``options`` is required only when ``kind`` is ``"choice"``. Do not add any
 narration, markdown fencing, or explanation before or after either form.

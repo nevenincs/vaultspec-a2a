@@ -334,7 +334,7 @@ _PROGRESS_CATALOG: dict[str, dict[str, _FieldSpec]] = {
     # attached them to the frame could not carry them across this boundary - the
     # catalog rebuilds by omission. A consumer correlates on the request id and
     # reads the questionnaire itself from run-status.
-    "clarification-pending": {"request_id": _Text(128)},
+    "clarification_pending": {"request_id": _Text(128)},
     # A plan entry's ``content`` is model-authored plan text - document-body
     # adjacent, and nothing consumes it - so only its classification survives.
     "plan_update": {"entries": _ObjectList(64, {"status": _ENUM, "priority": _ENUM})},

@@ -265,7 +265,7 @@ def test_the_catalog_strips_question_material_from_the_frame() -> None:
     projected = enforce_progress_allowlist(
         {
             "api_version": "v1",
-            "type": "clarification-pending",
+            "type": "clarification_pending",
             "thread_id": "catalog-thread",
             "request_id": _REQUEST_ID,
             "questions": [{"id": "dock_side", "prompt": _PROMPT, "options": _OPTIONS}],
@@ -273,7 +273,7 @@ def test_the_catalog_strips_question_material_from_the_frame() -> None:
         }
     )
 
-    assert projected["type"] == "clarification-pending"
+    assert projected["type"] == "clarification_pending"
     assert projected["thread_id"] == "catalog-thread"
     assert projected["request_id"] == _REQUEST_ID
     assert "questions" not in projected

@@ -192,7 +192,7 @@ async def test_the_nudge_arrives_on_the_sse_stream_carrying_no_questions(
             await asyncio.sleep(0.2)
             await _park_real_run(aggregator, cp, thread_id=run_id)
 
-            frame = await _read_event(lines, wanted="clarification-pending")
+            frame = await _read_event(lines, wanted="clarification_pending")
 
     assert frame["thread_id"] == run_id
     assert frame["request_id"] == _REQUEST_ID
@@ -231,7 +231,7 @@ async def test_the_questions_live_on_run_status_not_on_the_relay(
             lines = resp.aiter_lines()
             await asyncio.sleep(0.2)
             await _park_real_run(aggregator, cp, thread_id=run_id)
-            frame = await _read_event(lines, wanted="clarification-pending")
+            frame = await _read_event(lines, wanted="clarification_pending")
 
         # A client that never saw the frame recovers everything from here.
         status = await client.get(f"/v1/runs/{run_id}")

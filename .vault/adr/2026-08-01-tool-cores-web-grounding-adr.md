@@ -337,3 +337,59 @@ The proven-lane declaration keeps its purpose and loses its veto over
 capability. It records which lanes have DEMONSTRATED a completed retrieval, and
 it governs what a served preset and a persona may assert. It does not decide
 which lanes are built to search - after this amendment, all of them are.
+
+## Amendment - the rejection reasons corrected, and the owed removal recorded (2026-08-01, reconciliation review)
+
+The Considered options rejection and the tree it governs disagreed for most of
+a day, and the reasons the rejection gave do not all survive contact with the
+artifact that shipped. This amendment records the history, corrects the
+reasons, and keeps the decision - which now rests on the grounds that actually
+hold.
+
+**The history is concurrency, not stale reading.** The rejected mechanism
+shipped as the `vaultspec-web-search` registry entry on a concurrent line
+(`60d6ff0f`, 10:01) two and a half hours before this record was committed, but
+that commit was not an ancestor of this record's line, so the Considerations
+statement that the personas "currently disclaim online access, truthfully" was
+true where it was written. It became false when the lines merged later that
+day, badly; the entry was lost in that merge, restored (`d88c8b79`) under a
+lost-work reading a later review found wrong on the merits, and the third
+amendment's "is removed" was written sixteen minutes after that restore - a
+directive, not yet a description. As of this amendment the tree still carries
+the entry. The removal is owed work, deliberately sequenced behind the harness
+egress admission gate, which uses the entry as its only egressing exemplar
+while in flight; withdrawal retargets that mechanism's coverage onto an
+injected exemplar rather than deleting it, and the persona-claims guard fails
+loudly on a registry with no egressing entry precisely so the withdrawal is
+said out loud rather than slipping past as another merge accident.
+
+**Three of the four rejection reasons are corrected, per this record's own
+convention of recording withdrawn reasons rather than quietly dropping them.**
+"Adds a credential" is withdrawn as false of the artifact that shipped:
+`duckduckgo-mcp-server` (PyPI, MIT, nickclyde) requires no API key and no
+runtime env (verified 2026-08-01). "A billing/rate contract" is corrected:
+there is no billing and no contract of any kind - the package self-throttles
+(30 searches/min, 20 fetches/min) against a scraped public endpoint whose
+operator may block it without notice, and the absence of any contract is a
+sharper objection than the presence of one. "An unpinnable dependency" is
+withdrawn as non-discriminating: the accepted rag entry launches through the
+same seam, equally unpinned, under the same house rule, so pinnability
+distinguishes nothing in this registry - the discriminating property is
+ownership, and the third amendment's restatement ("a dependency nobody owns")
+is the form that survives. "Adds a vendor" stands, and doubled: the search
+operator and the package maintainer are both parties nobody here owns.
+
+**The decision is unchanged, which is why this is an amendment.** The
+rejection now rests on ownership and on the first-party-name fiction the third
+amendment named - sufficient grounds, correctly stated. This record's own
+practice is that sub-decision reversals and reason corrections amend in place
+with the original reasoning preserved; a superseding record is reserved for
+reversing the central choice. Re-admitting a web-search server as the delivery
+mechanism would be that reversal, and it is foreclosed by the third amendment
+regardless. One clarification against a foreseeable misreading: the harness
+egress admission gate proof-vetoes egressing registry entries, and that does
+not collide with the third amendment stripping proof's veto over web
+capability, because after the withdrawal web capability never rides the
+registry - it is first-party on command-line lanes and framework-bound on
+hosted-API lanes - and the gate guards only whatever future reviewed entry
+declares egress.

@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, cast
 
 import pytest
 import pytest_asyncio
+from langchain_core.language_models import BaseChatModel
 from langchain_core.language_models.fake_chat_models import FakeChatModel
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
@@ -16,11 +17,13 @@ if TYPE_CHECKING:
     from ...thread.state import TeamState
     from ..protocols import ProviderFactoryProtocol
 
+from ...providers.factory import ProviderFactory
 from ...team.team_config import (
     TeamConfig,
     TopologyConfig,
     TopologyType,
     WorkerRef,
+    discover_team_preset_ids,
     load_agent_config,
     load_team_config,
 )
@@ -29,6 +32,7 @@ from ..compiler import (
     _build_supervisor_prompt,
     _loop_route,
     _make_research_producer,
+    _resolve_model_for_worker,
     _resolve_worker_model_preferences,
     _route_from_supervisor,
     _worker_retry_on,
@@ -125,6 +129,29 @@ async def test_compile_graph_structure(
         assert "supervisor" not in node_keys
 
     assert list(graph.interrupt_before_nodes) == []
+
+
+@pytest.mark.parametrize("preset_id", sorted(discover_team_preset_ids()))
+def test_bundled_preset_workers_resolve_to_chat_models(
+    preset_id: str,
+) -> None:
+    """Every shipped worker resolves through the production factory as a chat model."""
+    team = load_team_config(preset_id)
+    factory = ProviderFactory()
+
+    for worker_ref in team.workers:
+        agent_config = load_agent_config(worker_ref.agent_id)
+        model, _provider, _capability = _resolve_model_for_worker(
+            worker_ref,
+            agent_config,
+            team,
+            provider_factory=factory,
+        )
+
+        assert isinstance(model, BaseChatModel), (
+            f"{preset_id}:{worker_ref.agent_id} resolved {type(model).__name__}, "
+            "not a BaseChatModel"
+        )
 
 
 # ---------------------------------------------------------------------------

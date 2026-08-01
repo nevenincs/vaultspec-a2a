@@ -1,32 +1,46 @@
-"""Tests for the compile-time authoring-attachment gate (codex-authoring-bridge fix).
+"""The armed authoring preset, and the two provider surfaces its attach accepts.
 
-Real config loading (the shipped ``vaultspec-solo-coder`` preset and its agent
-TOML), no mocks: only the provider factory is injected, exactly as the production
-compile seam injects it -- mirroring ``test_isolation_gate.py``'s pattern for the
-sibling ``assert_armed_lanes_authenticated`` gate.
+This module was written against ``assert_armed_authoring_attachable``, a
+COMPILE-TIME gate in ``worker.graph_lifecycle``. That symbol never existed in any
+committed version of the tree -- the file was committed against uncommitted work
+that never landed -- so every test here failed at IMPORT, and because pytest
+aborts a whole run on a collection error, no ``pytest src/vaultspec_a2a`` run
+could complete at all. Every suite-wide green reported against this tree was in
+fact a scoped subset that stepped around this module.
 
-Before this gate existed, a harness-armed preset whose resolved provider had no
-attachment surface (neither ``with_mcp_servers`` nor ``with_authoring_mcp_server``)
-started the run anyway: ``_acp_authoring.attach_authoring_tools`` returned the
-model UNCHANGED, and the agent burned its full step timeout with tools that never
-mounted. ``assert_armed_authoring_attachable`` asks the identical question at
-compile time, before any subprocess spawns, so the refusal is loud and immediate.
+The behaviour those tests wanted does exist; it is ATTACH-TIME rather than
+compile-time. ``_acp_authoring.attach_authoring_tools`` refuses a model with no
+mount surface instead of returning it unchanged, which is the same refusal one
+seam later -- before any turn runs, though not before the subprocess spawns.
+
+Repointed rather than deleted, intent by intent:
+
+* the armed-shape assertion never touched the missing symbol and stands as it was;
+* the two surface-acceptance cases are repointed at the real attach seam, keeping
+  the model fixtures that made them worth having -- they distinguish the ACP lane's
+  ``with_mcp_servers`` from the Codex lane's ``with_authoring_mcp_server``, which
+  the binding-shaped tests in ``providers/tests/test_acp_authoring.py`` do not;
+* the no-surface refusal is already covered there by
+  ``test_model_without_acp_surface_is_refused_rather_than_passed_through``;
+* the two no-op cases asked when the compile-time GATE applied. No such gate
+  exists, and the attach-time analogue -- an unarmed run attaching nothing even
+  to a surfaceless model -- is covered there by
+  ``test_absent_binding_returns_the_model_unchanged`` and
+  ``test_unarmed_run_is_a_noop_even_on_a_model_with_no_surface``.
+
+Real config loading throughout: the shipped ``vaultspec-solo-coder`` preset and
+its agent TOML, no mocks.
 """
 
 from __future__ import annotations
 
 from typing import Any
 
-import pytest
 from langchain_core.language_models.fake_chat_models import FakeChatModel
 
+from ...providers._acp_authoring import attach_authoring_tools
+from ...providers.tests.test_acp_authoring import _binding, _stdio_binding
 from ...team.team_config import load_agent_config, load_team_config
-from ...thread.errors import ConfigError
-from ...worker.graph_lifecycle import assert_armed_authoring_attachable
-
-
-class _NoSurfaceModel(FakeChatModel):
-    """A model with neither authoring attachment surface -- the refused shape."""
 
 
 class _AcpSurfaceModel(FakeChatModel):
@@ -34,33 +48,15 @@ class _AcpSurfaceModel(FakeChatModel):
 
     def with_mcp_servers(
         self, mcp_servers: Any, allowed_tools: Any = None
-    ) -> "_AcpSurfaceModel":
+    ) -> _AcpSurfaceModel:
         return self
 
 
 class _CodexSurfaceModel(FakeChatModel):
     """A model exposing the Codex lane's ``with_authoring_mcp_server`` surface."""
 
-    def with_authoring_mcp_server(self, spec: Any) -> "_CodexSurfaceModel":
+    def with_authoring_mcp_server(self, spec: Any) -> _CodexSurfaceModel:
         return self
-
-
-class _FixedFactory:
-    """Provider factory whose resolved models are always the same fixed instance."""
-
-    def __init__(self, model: FakeChatModel) -> None:
-        self._model = model
-
-    def create(
-        self,
-        provider: Any,
-        *,
-        model: Any | None = None,
-        agent_config: Any | None = None,
-        workspace_root: Any | None = None,
-        **kwargs: Any,
-    ) -> FakeChatModel:
-        return self._model
 
 
 def _solo_coder() -> tuple[Any, dict[str, Any]]:
@@ -70,67 +66,35 @@ def _solo_coder() -> tuple[Any, dict[str, Any]]:
 
 
 def test_solo_coder_is_armed_via_authoring_bridge() -> None:
-    # Same armed shape test_isolation_gate.py pins: authoring_bridge=true, no
-    # declared harness mcp_servers -- the case a harness-mcp-only predicate
-    # would miss, and exactly the S20-class gap this gate closes.
+    """The armed shape is authoring_bridge=true with NO declared harness servers.
+
+    A predicate keyed on ``mcp_servers`` alone would read this preset as unarmed
+    and skip every attachment check, which is the class of gap this file exists
+    to hold shut.
+    """
     team, _ = _solo_coder()
     harness = team.effective_harness()
     assert harness is not None
     assert harness.authoring_bridge is True
+    assert not harness.mcp_servers
 
 
-def test_provider_with_no_attach_surface_is_refused_at_compile_time() -> None:
-    team, agent_configs = _solo_coder()
-    harness = team.effective_harness()
-    factory = _FixedFactory(_NoSurfaceModel(responses=["stub"]))
-    with pytest.raises(ConfigError, match="no authoring attachment surface"):
-        assert_armed_authoring_attachable(
-            team, agent_configs, None, harness=harness, provider_factory=factory
-        )
+def test_acp_lane_surface_is_accepted_by_the_attach_seam() -> None:
+    """A model exposing ``with_mcp_servers`` mounts rather than being refused."""
+    model = _AcpSurfaceModel(responses=["stub"])
+    assert attach_authoring_tools(model, _binding(), autonomous=True) is model
 
 
-def test_acp_lane_provider_is_allowed() -> None:
-    team, agent_configs = _solo_coder()
-    harness = team.effective_harness()
-    factory = _FixedFactory(_AcpSurfaceModel(responses=["stub"]))
-    assert_armed_authoring_attachable(
-        team, agent_configs, None, harness=harness, provider_factory=factory
-    )
+def test_codex_lane_surface_is_accepted_by_the_attach_seam() -> None:
+    """The Codex lane mounts through its OWN surface, and only over stdio.
 
-
-def test_codex_lane_provider_is_allowed() -> None:
-    team, agent_configs = _solo_coder()
-    harness = team.effective_harness()
-    factory = _FixedFactory(_CodexSurfaceModel(responses=["stub"]))
-    assert_armed_authoring_attachable(
-        team, agent_configs, None, harness=harness, provider_factory=factory
-    )
-
-
-def test_unarmed_preset_is_a_noop_regardless_of_provider_surface() -> None:
-    # harness=None (the no-[team.harness]-block shape): the gate must not even
-    # look at the provider, so a no-surface model is fine.
-    team, agent_configs = _solo_coder()
-    factory = _FixedFactory(_NoSurfaceModel(responses=["stub"]))
-    assert_armed_authoring_attachable(
-        team, agent_configs, None, harness=None, provider_factory=factory
-    )
-
-
-def test_harness_without_authoring_bridge_is_a_noop() -> None:
-    # A harness declared but with authoring_bridge=False (e.g. an mcp_servers-only
-    # preset): out of scope for this gate by design (see the function's own
-    # docstring -- the harness-mcp_servers-only case is proven to reach every
-    # known provider's own delivery mechanism elsewhere).
-    team, agent_configs = _solo_coder()
-    harness = team.effective_harness()
-    assert harness is not None
-    unarmed_harness = harness.model_copy(update={"authoring_bridge": False})
-    factory = _FixedFactory(_NoSurfaceModel(responses=["stub"]))
-    assert_armed_authoring_attachable(
-        team,
-        agent_configs,
-        None,
-        harness=unarmed_harness,
-        provider_factory=factory,
-    )
+    Held separately from the ACP case for two reasons the seam actually
+    enforces. The lanes reach the same capability by different method names, so
+    a seam knowing only ``with_mcp_servers`` would refuse a perfectly attachable
+    Codex run. And the transport is not interchangeable: handed the HTTP binding
+    this path raises, because the Codex bridge rides the per-run config home and
+    needs ``engine_base_url`` + ``run_id``. Passing the HTTP binding here is what
+    the first draft of this test did, and the refusal is what corrected it.
+    """
+    model = _CodexSurfaceModel(responses=["stub"])
+    assert attach_authoring_tools(model, _stdio_binding(), autonomous=True) is model

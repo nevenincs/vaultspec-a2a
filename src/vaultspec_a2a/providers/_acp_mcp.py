@@ -32,6 +32,7 @@ if TYPE_CHECKING:
 
 __all__ = [
     "NATIVE_READ_TOOL_NAMES",
+    "NATIVE_TOOL_EGRESS",
     "RAG_MCP_REQUIREMENT",
     "HarnessMcpCapabilityUnavailable",
     "HarnessMcpResolution",
@@ -100,29 +101,68 @@ class HarnessMcpResolution:
 # also the LOAD-BEARING contract: the declared names are what a run advertises and
 # auto-permits, so a server that does not serve them is refused at the spawn seam
 # rather than handed to an agent whose grounding tools would silently be absent.
-# ``read_only`` is the registry's trust-root marker: only an entry explicitly
-# flagged read-only may ever be written into the surfacing config home. It is
-# asserted fail-loud at :func:`config_home_mcp_servers` build time so a future
-# drifted or write-capable entry cannot be silently surfaced. The default is
-# unsafe-by-omission (a missing/false flag fails), never silently permissive.
+# The registry's trust root is TWO independent axes, not one marker. ``read_only``
+# asserts an entry does not WRITE LOCALLY; ``network_egress`` asserts whether it
+# REACHES OUTWARD. Neither implies the other: a fetch/search tool satisfies
+# read-only completely while still able to carry workspace content outward in a
+# URL, so a server that egresses can never ride a read-only-only assertion. Both
+# are asserted fail-loud at every surfacing seam - :func:`config_home_mcp_servers`
+# for the Claude home and :func:`codex_mcp_server_specs` for the Codex
+# ``config.toml`` - and again at registry construction (:func:`_declare_registry`),
+# so an entry that never declared its reach cannot exist to be composed. Both
+# default unsafe-by-omission (a missing declaration fails), never silently
+# permissive.
 # WARNING: the config home is written with user-scope env expansion, so a literal
 # ``${...}`` placed in a future registry ``env`` value would be expanded by the
 # CLI from its process environment at parse time (the same mechanism the
 # authoring bridge relies on) — registry env values must be literals, never
 # accidental ``${...}`` strings.
 _LAUNCH_SPEC_KEYS = ("name", "command", "args", "env")
+_TRUST_AXES = ("read_only", "network_egress")
 RAG_MCP_REQUIREMENT = "vaultspec-rag[mcp]"
-_KNOWN_MCP_SERVERS: dict[str, dict[str, Any]] = {
-    "vaultspec-rag": {
-        "name": "vaultspec-rag",
-        "command": "uvx",
-        "args": ["--from", RAG_MCP_REQUIREMENT, "vaultspec-search-mcp"],
-        "tools": ("search_vault", "search_codebase", "get_code_file"),
-        "read_only": True,
-        "runtime_acquisition": True,
-        "desktop_available": False,
-    },
-}
+
+
+def _declare_registry(entries: dict[str, dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    """Return *entries* once every one declares both trust axes explicitly.
+
+    The registry's single construction seam, so the declaration obligation is
+    discharged where entries are written rather than only where they are read.
+    Local write and network reach are independent properties and each is declared
+    per entry; an omitted or non-boolean axis is refused here, which makes an
+    undeclared entry unconstructible rather than merely unsurfaceable.
+
+    Raises:
+        ConfigError: If an entry omits either trust axis or declares it
+            non-boolean.
+    """
+    for name, entry in entries.items():
+        for axis in _TRUST_AXES:
+            if not isinstance(entry.get(axis), bool):
+                raise ConfigError(
+                    f"harness registry entry {name!r} does not declare {axis!r}; "
+                    "both trust axes (local write, network egress) must be declared "
+                    "explicitly per entry - neither is inferred from the other, and "
+                    "omission is never read as permission"
+                )
+    return entries
+
+
+_KNOWN_MCP_SERVERS: dict[str, dict[str, Any]] = _declare_registry(
+    {
+        "vaultspec-rag": {
+            "name": "vaultspec-rag",
+            "command": "uvx",
+            "args": ["--from", RAG_MCP_REQUIREMENT, "vaultspec-search-mcp"],
+            "tools": ("search_vault", "search_codebase", "get_code_file"),
+            "read_only": True,
+            # Indexes and serves the local vault/codebase over stdio; no outbound
+            # request leaves the agent host on its behalf.
+            "network_egress": False,
+            "runtime_acquisition": True,
+            "desktop_available": False,
+        },
+    }
+)
 
 _DESKTOP_ACQUISITION_REASON = "runtime acquisition is disabled for the desktop profile"
 _DESKTOP_CAPABILITY_ACTIONS = {
@@ -309,7 +349,7 @@ def config_home_mcp_servers(
         name = spec.get("name")
         if name not in available:
             continue
-        _require_read_only(name)
+        _require_trust_root(name)
         entry: dict[str, Any] = {"type": "stdio", "command": spec["command"]}
         if spec.get("args"):
             entry["args"] = list(spec["args"])
@@ -378,15 +418,45 @@ def reject_duplicate_identities(mcp_servers: Sequence[dict[str, Any]]) -> None:
 def _require_read_only(name: str) -> None:
     """Fail loud unless the registry entry is explicitly marked read-only.
 
-    The single trust-root guard shared by both delivery shapes (Claude config
-    home and Codex config.toml): registry drift toward a write-capable entry can
-    never be silently composed into a surfacing config, on either transport.
+    The local-write axis of the trust root: registry drift toward a write-capable
+    entry can never be silently composed into a surfacing config.
     """
     if not _KNOWN_MCP_SERVERS[name].get("read_only"):
         raise ConfigError(
             f"refusing to compose non-read-only harness server {name!r} into a "
             "surfacing config; only read-only servers may be composed"
         )
+
+
+def _require_declared_egress(name: str) -> None:
+    """Fail loud unless the registry entry declares its network-egress axis.
+
+    The network-reach axis of the trust root, independent of the local-write one:
+    an entry that writes nothing locally may still carry workspace content
+    outward, so satisfying :func:`_require_read_only` says nothing about reach.
+    An undeclared axis is refused rather than defaulted, so composing a server
+    whose outbound behaviour was never stated is impossible on either transport.
+    """
+    if not isinstance(_KNOWN_MCP_SERVERS[name].get("network_egress"), bool):
+        raise ConfigError(
+            f"refusing to compose harness server {name!r} with no declared network "
+            "egress axis into a surfacing config; local write and network reach are "
+            "independent properties and the read-only marker expresses only the "
+            "first, so the egress axis must be declared explicitly - omission is "
+            "never read as no-egress"
+        )
+
+
+def _require_trust_root(name: str) -> None:
+    """Fail loud unless the registry entry declares BOTH trust axes.
+
+    The single trust-root guard shared by both delivery shapes (Claude config
+    home and Codex config.toml), holding the local-write and network-egress
+    assertions together so neither transport can surface an entry that satisfies
+    one axis while leaving the other unstated.
+    """
+    _require_read_only(name)
+    _require_declared_egress(name)
 
 
 def codex_mcp_server_specs(
@@ -400,16 +470,17 @@ def codex_mcp_server_specs(
     Claude ACP session): returns, per declared server, the fields the Codex
     ``[mcp_servers.<name>]`` block needs - ``name``, ``command``, ``args``,
     ``env``, and the read ``tools`` (for the ``enabled_tools`` allowlist). Applies
-    the same fail-loud guards as the ACP path: an unknown name and a non-read-only
-    entry both raise :class:`ConfigError`, so one registry stays the single trust
-    root across both transports.
+    the same fail-loud guards as the ACP path: an unknown name, a non-read-only
+    entry, and an entry with no declared network-egress axis all raise
+    :class:`ConfigError`, so one registry stays the single trust root across both
+    transports.
     """
     reject_duplicate_names(names)
     resolution = resolve_harness_mcp_capabilities(names, profile=profile)
     specs: list[dict[str, Any]] = []
     for name in resolution.available_servers:
         entry = _KNOWN_MCP_SERVERS[name]
-        _require_read_only(name)
+        _require_trust_root(name)
         specs.append(
             {
                 "name": name,
@@ -604,37 +675,89 @@ def _project_composition_onto_model(
 # every write/exec built-in stays gated (the .vault deny remains write-only).
 NATIVE_READ_TOOL_NAMES: tuple[str, ...] = ("Read", "Grep", "Glob")
 
+# The native built-ins' network-egress axis, the same axis the harness registry
+# declares per entry and for the same reason: the built-ins are NOT uniformly
+# local. Read/Grep/Glob touch only the workspace fs, but the CLI's web built-ins
+# reach outward while writing nothing locally, so a native tool set is no safer to
+# compose undeclared than a registry entry is. Membership IS the declaration: a
+# name absent from this mapping has never stated its reach and is refused at
+# :func:`compose_native_read_tools` rather than defaulted to no-egress.
+NATIVE_TOOL_EGRESS: dict[str, bool] = {
+    "Read": False,
+    "Grep": False,
+    "Glob": False,
+}
+
+
+def _require_declared_native_egress(names: Sequence[str]) -> None:
+    """Fail loud unless every native tool being composed declares its egress axis.
+
+    The native-built-in counterpart of :func:`_require_declared_egress`, applied
+    to the tool set rather than a registry entry. Checked before the autonomy and
+    role gates so a tool set whose reach was never stated is refused uniformly,
+    rather than only on the runs where composition happens to apply - the same
+    validate-first discipline :func:`_resolve_harness_composition` applies to
+    declared server names.
+
+    Raises:
+        ConfigError: If any name has no entry in :data:`NATIVE_TOOL_EGRESS`.
+    """
+    undeclared = [name for name in names if name not in NATIVE_TOOL_EGRESS]
+    if undeclared:
+        raise ConfigError(
+            "refusing to compose native built-in tool(s) with no declared network "
+            f"egress axis: {', '.join(undeclared)}. Every native tool joining the "
+            "autonomous allowlist must state whether it reaches outward; the axis "
+            "is independent of local write and omission is never read as no-egress"
+        )
+
+
+# The floor discharges the same declaration obligation at construction that
+# :func:`_declare_registry` imposes on registry entries, so a name added to the
+# floor without an egress declaration fails at import rather than at the first
+# autonomous document run.
+_require_declared_native_egress(NATIVE_READ_TOOL_NAMES)
+
 
 def compose_native_read_tools(
     model: BaseChatModel,
     *,
     autonomous: bool,
     role: str | None,
+    extra_tool_names: Sequence[str] | None = None,
 ) -> BaseChatModel:
-    """Permit the native read built-ins for autonomous document-authoring roles.
+    """Permit the native built-ins for autonomous document-authoring roles.
 
     In autonomous (headless) mode ONLY, and for a document-authoring role ONLY,
-    union the CLI's native Read/Grep/Glob into the session's exact-name
-    ``allowedTools`` so the floor grounding is invocable without a local prompt.
-    The existing allowlist (e.g. the bridged authoring tools) and the advertised
-    MCP servers are preserved unchanged; the read names are added by exact name,
-    never a wildcard, and never for human-in-loop runs, which keep their prompts.
-    Models with no ACP allowlist surface (mock, hosted APIs) are returned
-    unchanged.
+    union the CLI's native Read/Grep/Glob - plus any *extra_tool_names* the caller
+    composes on top of that floor - into the session's exact-name ``allowedTools``
+    so the floor grounding is invocable without a local prompt. The existing
+    allowlist (e.g. the bridged authoring tools) and the advertised MCP servers are
+    preserved unchanged; the names are added by exact name, never a wildcard, and
+    never for human-in-loop runs, which keep their prompts. Models with no ACP
+    allowlist surface (mock, hosted APIs) are returned unchanged.
+
+    Every composed name must declare its network-egress axis in
+    :data:`NATIVE_TOOL_EGRESS`; an undeclared one raises :class:`ConfigError`
+    before any gate or projection, so an outward-reaching built-in cannot join the
+    allowlist on the strength of the local-read floor's assumptions.
 
     The native-built-in counterpart of :func:`compose_harness_mcp_servers`: both
     mutate only the ACP session's advertised surface and allowlist, so they live
     together rather than in the graph node that sequences them.
     """
+    composed_names = list(NATIVE_READ_TOOL_NAMES)
+    composed_names += [
+        name for name in (extra_tool_names or ()) if name not in composed_names
+    ]
+    _require_declared_native_egress(composed_names)
     if not autonomous or not is_document_authoring_role(role):
         return model
     attach = getattr(model, "with_mcp_servers", None)
     if attach is None:
         return model
     existing = list(getattr(model, "allowed_tools", []) or [])
-    combined = existing + [
-        name for name in NATIVE_READ_TOOL_NAMES if name not in existing
-    ]
+    combined = existing + [name for name in composed_names if name not in existing]
     if combined == existing:
         return model
     return attach(list(getattr(model, "mcp_servers", []) or []), combined)

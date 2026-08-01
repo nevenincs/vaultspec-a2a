@@ -284,6 +284,10 @@ class TestTeamStateStructure:
             "gate_phase",
             "gate_verdict",
             "gate_pending_proposal_id",
+            # mid-run clarification
+            "clarification_request",
+            "clarification_request_id",
+            "clarification_answers",
             # workspace root path
             "workspace_root",
             "feedback_batch_id",

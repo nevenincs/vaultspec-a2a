@@ -15,6 +15,24 @@ database modules consume the thread API but aren't imported by it.
 from .actor_tokens import (
     ActorTokenBundle as ActorTokenBundle,
 )
+from .clarification import (
+    ClarificationAnswers as ClarificationAnswers,
+)
+from .clarification import (
+    ClarificationKind as ClarificationKind,
+)
+from .clarification import (
+    ClarificationQuestion as ClarificationQuestion,
+)
+from .clarification import (
+    ClarificationRequest as ClarificationRequest,
+)
+from .clarification import (
+    pending_clarification as pending_clarification,
+)
+from .clarification import (
+    validate_clarification_answers as validate_clarification_answers,
+)
 from .constants import (
     DEFAULT_SUPERVISOR_ID as DEFAULT_SUPERVISOR_ID,
 )
@@ -143,6 +161,10 @@ __all__ = [
     "ApprovalStatus",
     "ArtifactRef",
     "CheckpointProjection",
+    "ClarificationAnswers",
+    "ClarificationKind",
+    "ClarificationQuestion",
+    "ClarificationRequest",
     "ConfigError",
     "ContextOverflowError",
     "ControlActionResultStatus",
@@ -175,5 +197,7 @@ __all__ = [
     "finalize_snapshot_replay_status",
     "normalize_artifacts",
     "normalize_plan_entries",
+    "pending_clarification",
     "project_checkpoint_tuple",
+    "validate_clarification_answers",
 ]

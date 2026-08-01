@@ -23,6 +23,14 @@ _TOKEN = "attach-credential-token-0123456789abcdef"
 # surface could accept the answer; retiring that surface would have stranded
 # every paused run. Anything appearing here without a matching amendment is the
 # accident this guard is for.
+#
+# Clarification-respond is the seventh, and arrived the same way. A run that asks
+# the human a structured question mid-flight parks on a checkpointed interrupt,
+# and the question is disclosed on run-status; without a typed verb to carry the
+# answer back, the only channel would be the follow-up messages verb, which
+# starts a FRESH TURN rather than resuming - the answers would re-enter as prose
+# and the question would stay pending forever. It is deliberately the only new
+# member: the question payload rides run-status, not a new read verb.
 _EXPECTED_V1_ROUTES = {
     "POST /v1/runs",
     "GET /v1/runs",
@@ -33,6 +41,7 @@ _EXPECTED_V1_ROUTES = {
     "GET /v1/runs/{run_id}/history",
     "POST /v1/runs/{run_id}/messages",
     "POST /v1/runs/{run_id}/permissions/{request_id}/respond",
+    "POST /v1/runs/{run_id}/clarifications/{request_id}/respond",
     "GET /v1/runs/{run_id}/stream",
     "GET /v1/presets",
     "GET /v1/service",
@@ -50,6 +59,7 @@ _WHITELIST_REQUESTS = (
     ("GET", "/v1/runs/some-run-id/history"),
     ("POST", "/v1/runs/some-run-id/messages"),
     ("POST", "/v1/runs/some-run-id/permissions/some-request-id/respond"),
+    ("POST", "/v1/runs/some-run-id/clarifications/some-request-id/respond"),
     ("POST", "/v1/runs/some-run-id/archive"),
     ("GET", "/v1/presets"),
     ("GET", "/v1/service"),

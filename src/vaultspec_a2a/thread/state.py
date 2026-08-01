@@ -102,6 +102,23 @@ def _merge_unique_strs(
     return merged
 
 
+def _merge_clarification_answers(
+    existing: dict[str, dict[str, str]],
+    new: dict[str, dict[str, str]],
+) -> dict[str, dict[str, str]]:
+    """Merge answered clarifications, keyed by the request they answered.
+
+    Keyed rather than last-write-wins because a run may ask more than once, and
+    the answers to an earlier question stay relevant to every later stage. A
+    repeat of the same request id overwrites, which is the correct reading of a
+    re-answered questionnaire.
+    """
+    merged = {k: dict(v) for k, v in existing.items()}
+    for request_id, answers in new.items():
+        merged[request_id] = dict(answers)
+    return merged
+
+
 def _append_research_findings(
     existing: list[dict[str, Any]],
     new: list[dict[str, Any]],
@@ -211,6 +228,20 @@ class TeamState(TypedDict):
     # ``approval_request_id`` pair the plan-approval gate uses; last-write-wins.
     gate_phase: NotRequired[str | None]
     gate_verdict: NotRequired[str | None]
+    # --- mid-run clarification ---
+    # clarification_request: the bounded question set the clarification request
+    # node committed BEFORE the run parks, held as its JSON payload so it
+    # survives a checkpoint round trip. Its presence in the checkpoint is what
+    # lets the recovery snapshot re-render a parked questionnaire authoritatively;
+    # the gate node clears it once answered. Last-write-wins.
+    clarification_request: NotRequired[dict[str, Any] | None]
+    clarification_request_id: NotRequired[str | None]
+    # clarification_answers: every answered questionnaire, keyed by the request id
+    # it answered, so a later stage can read what the human said at an earlier one.
+    clarification_answers: NotRequired[
+        Annotated[dict[str, dict[str, str]], _merge_clarification_answers]
+    ]
+
     # gate_pending_proposal_id: the proposal id the phase-submit node committed
     # for the currently parked gate, carried to the (pure) gate node for its
     # interrupt payload. Last-write-wins; a fresh submit overwrites it each phase.

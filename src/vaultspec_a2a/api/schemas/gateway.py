@@ -29,6 +29,12 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 from ...context.metadata import ThreadMetadata
 from ...thread.actor_tokens import ActorTokenBundle
+from ...thread.clarification import (
+    MAX_QUESTIONS_PER_REQUEST,
+    AnswerText,
+    ClarificationRequest,
+    QuestionId,
+)
 from ...thread.enums import CleanupKind, ThreadStatus
 from .snapshots import ThreadStateSnapshot
 
@@ -50,6 +56,8 @@ __all__ = [
     "RoleState",
     "RunAdmission",
     "RunCancelResponse",
+    "RunClarificationRespondRequest",
+    "RunClarificationRespondResponse",
     "RunCommitResponse",
     "RunPrepareResponse",
     "RunReleaseResponse",
@@ -483,6 +491,12 @@ class RunStatusResponse(BaseModel):
     # The persisted prepare reservation paired with ``lease_id``. This lets a
     # dashboard reconcile only the exact local reservation after a lost reply.
     reservation_id: ReservationId | None = None
+    # The bounded questionnaire this run is currently parked on, read from the
+    # run's own checkpoint. This is the AUTHORITATIVE disclosure of a pending
+    # question: a client that reloaded, or that never saw the progress frame
+    # announcing it, re-renders the questionnaire from here. ``None`` whenever the
+    # run is not waiting on one, which is the overwhelmingly common case.
+    pending_clarification: ClarificationRequest | None = None
 
 
 class RunCancelResponse(BaseModel):
@@ -640,6 +654,50 @@ class RunPermissionRespondResponse(BaseModel):
     action_status: str
     approval_status: str | None = None
     idempotency_key: str | None = None
+
+
+class RunClarificationRespondRequest(BaseModel):
+    """Answer the bounded questionnaire a run is parked on.
+
+    Carries only the answers, keyed by question id. The questions themselves were
+    disclosed authoritatively by ``run-status`` (and the run id and request id
+    address the questionnaire from the path), so the answer names what it answers
+    rather than restating what was asked.
+
+    The bounds here are the same ones the question set was built under - they are
+    imported from the one module that owns them rather than restated - so an
+    over-long answer or an over-full answer sheet is refused at the wire, before
+    any run state is touched. The checks that need the parked questions in hand
+    (an id nobody asked about, a required question left blank, a choice outside
+    its declared options) are applied by the route against the checkpoint.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    answers: dict[QuestionId, AnswerText] = Field(max_length=MAX_QUESTIONS_PER_REQUEST)
+
+
+class RunClarificationRespondResponse(BaseModel):
+    """Report that a questionnaire's answers were taken and the run resumed.
+
+    ``accepted`` says the answers were admitted and the resume dispatched;
+    ``applied`` is false on the accepting call, because the graph resumes
+    asynchronously and this response is assembled before it has advanced. A
+    caller reconciles the outcome from ``run-status``, exactly as it does for a
+    permission answer.
+
+    There is no duplicate-replay reading here, and deliberately so: the parked
+    interrupt in the run's checkpoint IS the at-most-once guard. Once the run
+    resumes, the questionnaire is no longer pending, so a second answer finds
+    nothing to answer and is refused as not-found rather than re-dispatched.
+    """
+
+    api_version: Literal["v1"] = _API_VERSION
+    run_id: str
+    request_id: str
+    accepted: bool
+    applied: bool = False
+    action_status: str
 
 
 class RoleAssignmentSummary(BaseModel):

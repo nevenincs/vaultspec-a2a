@@ -43,6 +43,7 @@ from ...context.metadata import ThreadMetadata
 from ...control.admission import AdmissionBroker, AdmissionReadiness
 from ...control.cancel_service import cancel_thread, raise_for_cancel_failure
 from ...control.config import settings
+from ...control.dispatch import safe_dispatch
 from ...control.drain import DrainGate
 from ...control.health import (
     assemble_desktop_readiness,
@@ -79,11 +80,18 @@ from ...database.checkpoints import Checkpointer
 from ...database.permission_repository import get_permission_request
 from ...database.session import get_db
 from ...domain_config import domain_config
+from ...ipc.schemas import DispatchRequest, to_dispatch_action
 from ...streaming.aggregator import EventAggregator
+from ...thread.clarification import (
+    ClarificationAnswers,
+    pending_clarification,
+    validate_clarification_answers,
+)
 from ...thread.constants import DEFAULT_SUPERVISOR_ID
-from ...thread.dispatch_policy import FailureType
+from ...thread.dispatch_policy import FailureType, evaluate_dispatch_failure
 from ...thread.enums import (
     TERMINAL_STATUSES,
+    ControlActionType,
     PermissionRequestStatus,
     ThreadStatus,
 )
@@ -116,6 +124,8 @@ from ..schemas.gateway import (
     RunAgentSummary,
     RunArchiveResponse,
     RunCancelResponse,
+    RunClarificationRespondRequest,
+    RunClarificationRespondResponse,
     RunCommitResponse,
     RunDeleteResponse,
     RunHistoryResponse,
@@ -1439,6 +1449,13 @@ async def run_status_endpoint(
             is not None
             else None
         ),
+        # Read from the SAME single checkpoint read as every other field above, so
+        # a questionnaire cannot be reported against a position the run has since
+        # left. This is the authoritative disclosure a reloaded client recovers
+        # from; the progress relay only ever nudges it to look here.
+        pending_clarification=pending_clarification(
+            checkpoint_snapshot, thread_id=run_id
+        ),
     )
 
 
@@ -1885,6 +1902,126 @@ async def run_permission_respond_endpoint(
         action_status=result.action_status,
         approval_status=result.approval_status,
         idempotency_key=result.idempotency_key,
+    )
+
+
+# ---------------------------------------------------------------------------
+# clarification-respond
+# ---------------------------------------------------------------------------
+
+
+def _persisted_workspace_root(metadata_json: str | None) -> str | None:
+    """Read the workspace root a run was launched against from its metadata.
+
+    A resume must be compiled against the same workspace the run started in, so
+    the value is recovered from the durable record rather than taken from the
+    caller - an answer cannot relocate a run.
+    """
+    if not metadata_json:
+        return None
+    try:
+        data = json.loads(metadata_json)
+    except (TypeError, json.JSONDecodeError):
+        return None
+    root = data.get("workspace_root") if isinstance(data, dict) else None
+    return root if isinstance(root, str) and root else None
+
+
+@router.post(
+    "/runs/{run_id}/clarifications/{request_id}/respond",
+    response_model=RunClarificationRespondResponse,
+)
+async def run_clarification_respond_endpoint(
+    run_id: PathSafeRunId,
+    request_id: str,
+    body: RunClarificationRespondRequest,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    worker_client: httpx.AsyncClient = Depends(get_worker_client),
+    circuit_breaker: Any = Depends(get_circuit_breaker),
+    worker_spawner: Any = Depends(get_worker_spawner),
+    checkpointer: Checkpointer = Depends(get_checkpointer),
+) -> RunClarificationRespondResponse:
+    """Answer the questionnaire a run is parked on, and resume it.
+
+    The typed counterpart to the questionnaire ``run-status`` discloses. It is
+    deliberately NOT the follow-up ``messages`` verb: that verb starts a fresh
+    turn, so answers would re-enter as prose and the pending question would stay
+    pending. This verb instead maps the answers onto the parked node's
+    ``Command(resume=...)``, which is the only pause/resume mechanism the graph
+    has.
+
+    Authority is the checkpoint, not a side table. The run's own parked interrupt
+    is resolved first and its request id checked against the path, so a guessed
+    request id cannot answer another run's question and - because the check
+    precedes everything else - a mismatch has no effect at all rather than being
+    detected after acting. That same read is the at-most-once guard: once the run
+    resumes, nothing is pending, so a replayed answer is refused rather than
+    dispatched a second time.
+
+    Validation is layered to match. The wire model bounds the answer sheet's size
+    and each answer's length before any run state is read; the checks that need
+    the parked questions - an unknown question id, a required question left
+    blank, a choice outside its declared options - run here against the
+    checkpoint and are reported together, so a rejected sheet is fixable in one
+    correction.
+    """
+    checkpoint_snapshot = await read_run_snapshot(checkpointer, run_id)
+    parked = pending_clarification(checkpoint_snapshot, thread_id=run_id)
+    if parked is None or parked.request_id != request_id:
+        raise HTTPException(
+            status_code=404,
+            detail=(
+                f"Clarification request {request_id!r} is not pending for run "
+                f"{run_id!r}"
+            ),
+        )
+
+    violations = validate_clarification_answers(parked, body.answers)
+    if violations:
+        raise HTTPException(status_code=422, detail="; ".join(violations))
+
+    thread = await get_thread(db, run_id)
+    if thread is None:
+        raise HTTPException(status_code=404, detail="Run not found")
+
+    resume_value = ClarificationAnswers(
+        request_id=request_id, answers=dict(body.answers)
+    ).as_resume_value()
+
+    dispatch = DispatchRequest(
+        action=to_dispatch_action(ControlActionType.RESUME),
+        thread_id=run_id,
+        option_id=resume_value,
+        team_preset=thread.team_preset,
+        workspace_root=_persisted_workspace_root(thread.thread_metadata),
+        recursion_limit=domain_config.graph_recursion_limit,
+    )
+    outcome = await safe_dispatch(
+        worker_client,
+        dispatch,
+        circuit_breaker,
+        worker_spawner,
+        trace_headers=trace_headers(),
+    )
+
+    if not outcome.success:
+        # Classified through the shared dispatch policy every other resume caller
+        # uses, so a circuit-open answer here reads 503 exactly as it does on the
+        # permission path instead of this route inventing its own mapping.
+        policy, _typed = evaluate_dispatch_failure(outcome.failure_type)
+        raise HTTPException(
+            status_code=503 if policy.is_circuit_open else 502,
+            detail=outcome.detail or "Worker dispatch failed",
+        )
+
+    mark_worker_connected(request)
+    return RunClarificationRespondResponse(
+        run_id=run_id,
+        request_id=request_id,
+        accepted=True,
+        applied=False,
+        action_status="accepted_not_applied",
     )
 
 

@@ -889,6 +889,84 @@
         }
       }
     },
+    "/v1/runs/{run_id}/clarifications/{request_id}/respond": {
+      "post": {
+        "summary": "Run Clarification Respond Endpoint",
+        "description": "Answer the questionnaire a run is parked on, and resume it.\n\nThe typed counterpart to the questionnaire ``run-status`` discloses. It is\ndeliberately NOT the follow-up ``messages`` verb: that verb starts a fresh\nturn, so answers would re-enter as prose and the pending question would stay\npending. This verb instead maps the answers onto the parked node's\n``Command(resume=...)``, which is the only pause/resume mechanism the graph\nhas.\n\nAuthority is the checkpoint, not a side table. The run's own parked interrupt\nis resolved first and its request id checked against the path, so a guessed\nrequest id cannot answer another run's question and - because the check\nprecedes everything else - a mismatch has no effect at all rather than being\ndetected after acting. That same read is the at-most-once guard: once the run\nresumes, nothing is pending, so a replayed answer is refused rather than\ndispatched a second time.\n\nValidation is layered to match. The wire model bounds the answer sheet's size\nand each answer's length before any run state is read; the checks that need\nthe parked questions - an unknown question id, a required question left\nblank, a choice outside its declared options - run here against the\ncheckpoint and are reported together, so a rejected sheet is fixable in one\ncorrection.",
+        "operationId": "run_clarification_respond_endpoint_v1_runs__run_id__clarifications__request_id__respond_post",
+        "parameters": [
+          {
+            "name": "run_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^[A-Za-z0-9_][A-Za-z0-9_-]{0,127}$",
+              "title": "Run Id"
+            }
+          },
+          {
+            "name": "request_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Request Id"
+            }
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RunClarificationRespondRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunClarificationRespondResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/presets": {
       "get": {
         "summary": "Presets List Endpoint",
@@ -1387,6 +1465,100 @@
         ],
         "title": "ArtifactSnapshot",
         "description": "Fully materialized file artifact."
+      },
+      "ClarificationKind": {
+        "type": "string",
+        "enum": [
+          "choice",
+          "text"
+        ],
+        "title": "ClarificationKind",
+        "description": "How one question is answered.\n\n``choice`` offers a bounded set of declared options and admits exactly one of\nthem verbatim as its answer; ``text`` admits free prose up to\n:data:`MAX_ANSWER_CHARS`. The two exhaust the vocabulary: a kind the renderer\ndoes not know is a question it cannot render, so the set is closed."
+      },
+      "ClarificationQuestion": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "maxLength": 64,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9_][A-Za-z0-9_.\\-]*$",
+            "title": "Id"
+          },
+          "prompt": {
+            "type": "string",
+            "maxLength": 512,
+            "minLength": 1,
+            "title": "Prompt"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/ClarificationKind"
+          },
+          "options": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string",
+                  "maxLength": 128,
+                  "minLength": 1
+                },
+                "type": "array",
+                "maxItems": 4
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Options"
+          },
+          "required": {
+            "type": "boolean",
+            "title": "Required",
+            "default": true
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "prompt",
+          "kind"
+        ],
+        "title": "ClarificationQuestion",
+        "description": "One bounded question inside a clarification request.\n\n``options`` belongs to ``choice`` and only to ``choice``: a text question\ncarrying options would advertise a constraint the answer path does not\nenforce, and a choice without options would offer nothing to choose. Both are\nrefused at construction rather than tolerated and interpreted downstream."
+      },
+      "ClarificationRequest": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "clarification_request",
+            "title": "Type",
+            "default": "clarification_request"
+          },
+          "request_id": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9_][A-Za-z0-9_.\\-]*$",
+            "title": "Request Id"
+          },
+          "questions": {
+            "items": {
+              "$ref": "#/components/schemas/ClarificationQuestion"
+            },
+            "type": "array",
+            "maxItems": 4,
+            "minItems": 1,
+            "title": "Questions"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "request_id",
+          "questions"
+        ],
+        "title": "ClarificationRequest",
+        "description": "The bounded question set a parked run is waiting on.\n\nThis is the interrupt payload verbatim: what the node raises, what the\ncheckpoint holds while the run is parked, and what the recovery snapshot\ndiscloses. ``type`` is carried rather than implied because the checkpoint\nholds interrupts of several kinds side by side and the discriminator is how a\nreader tells a clarification from an approval."
       },
       "CleanupKind": {
         "type": "string",
@@ -2119,6 +2291,72 @@
         ],
         "title": "RunCancelResponse",
         "description": "Acknowledge an (idempotent) run-cancel request."
+      },
+      "RunClarificationRespondRequest": {
+        "properties": {
+          "answers": {
+            "patternProperties": {
+              "^[A-Za-z0-9_][A-Za-z0-9_.\\-]*$": {
+                "type": "string",
+                "maxLength": 2048
+              }
+            },
+            "propertyNames": {
+              "maxLength": 64,
+              "minLength": 1
+            },
+            "type": "object",
+            "maxProperties": 4,
+            "title": "Answers"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "answers"
+        ],
+        "title": "RunClarificationRespondRequest",
+        "description": "Answer the bounded questionnaire a run is parked on.\n\nCarries only the answers, keyed by question id. The questions themselves were\ndisclosed authoritatively by ``run-status`` (and the run id and request id\naddress the questionnaire from the path), so the answer names what it answers\nrather than restating what was asked.\n\nThe bounds here are the same ones the question set was built under - they are\nimported from the one module that owns them rather than restated - so an\nover-long answer or an over-full answer sheet is refused at the wire, before\nany run state is touched. The checks that need the parked questions in hand\n(an id nobody asked about, a required question left blank, a choice outside\nits declared options) are applied by the route against the checkpoint."
+      },
+      "RunClarificationRespondResponse": {
+        "properties": {
+          "api_version": {
+            "type": "string",
+            "const": "v1",
+            "title": "Api Version",
+            "default": "v1"
+          },
+          "run_id": {
+            "type": "string",
+            "title": "Run Id"
+          },
+          "request_id": {
+            "type": "string",
+            "title": "Request Id"
+          },
+          "accepted": {
+            "type": "boolean",
+            "title": "Accepted"
+          },
+          "applied": {
+            "type": "boolean",
+            "title": "Applied",
+            "default": false
+          },
+          "action_status": {
+            "type": "string",
+            "title": "Action Status"
+          }
+        },
+        "type": "object",
+        "required": [
+          "run_id",
+          "request_id",
+          "accepted",
+          "action_status"
+        ],
+        "title": "RunClarificationRespondResponse",
+        "description": "Report that a questionnaire's answers were taken and the run resumed.\n\n``accepted`` says the answers were admitted and the resume dispatched;\n``applied`` is false on the accepting call, because the graph resumes\nasynchronously and this response is assembled before it has advanced. A\ncaller reconciles the outcome from ``run-status``, exactly as it does for a\npermission answer.\n\nThere is no duplicate-replay reading here, and deliberately so: the parked\ninterrupt in the run's checkpoint IS the at-most-once guard. Once the run\nresumes, the questionnaire is no longer pending, so a second answer finds\nnothing to answer and is refused as not-found rather than re-dispatched."
       },
       "RunCommitResponse": {
         "properties": {
@@ -2948,6 +3186,16 @@
               }
             ],
             "title": "Reservation Id"
+          },
+          "pending_clarification": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ClarificationRequest"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "type": "object",

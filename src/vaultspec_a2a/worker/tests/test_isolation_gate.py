@@ -70,6 +70,27 @@ def test_solo_coder_is_armed_via_authoring_bridge() -> None:
     assert not harness.mcp_servers
 
 
+def test_adr_research_arms_the_isolation_gate_without_arming_the_bridge() -> None:
+    """The two arming predicates diverge, and only this shipped preset shows it.
+
+    The compile seam runs two independent decisions off the same harness block: the
+    isolation gate arms on ``authoring_bridge or mcp_servers``, while the authoring
+    binding provider is built on ``authoring_bridge`` ALONE. Solo-coder and
+    doc-editor set both true, so they cannot tell the predicates apart.
+    ``vaultspec-adr-research`` declares harness ``mcp_servers`` with no bridge — it
+    is a document-authoring topology, which the team-config validator forbids from
+    arming the bridge at all — so it is the only shipped shape that pins the
+    narrower predicate as narrower. Widening the binding predicate to match the
+    isolation one would arm a bridge this preset must never carry.
+    """
+    team = load_team_config("vaultspec-adr-research")
+    harness = team.effective_harness()
+    assert harness is not None
+    assert harness.mcp_servers
+    assert harness.authoring_bridge is False
+    assert team.is_document_authoring is True
+
+
 def _doc_editor() -> tuple[Any, dict[str, Any]]:
     team = load_team_config("vaultspec-doc-editor")
     agent_configs = {w.agent_id: load_agent_config(w.agent_id) for w in team.workers}

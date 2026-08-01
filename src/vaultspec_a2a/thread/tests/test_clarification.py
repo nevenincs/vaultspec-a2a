@@ -84,6 +84,7 @@ def test_question_ids_must_be_unique() -> None:
 
 
 def test_prompt_option_and_answer_strings_are_capped() -> None:
+    """One character past the cap is refused on all three strings."""
     with pytest.raises(ValidationError):
         _choice(prompt="x" * (MAX_PROMPT_CHARS + 1))
     with pytest.raises(ValidationError):
@@ -92,6 +93,31 @@ def test_prompt_option_and_answer_strings_are_capped() -> None:
         ClarificationAnswers(
             request_id="clarify-1", answers={"scope": "x" * (MAX_ANSWER_CHARS + 1)}
         )
+
+
+def test_a_string_of_exactly_the_cap_is_admitted() -> None:
+    """The cap is inclusive, and the refusal test above cannot show that.
+
+    A cap is two behaviours, and asserting only the refusal leaves the boundary
+    itself untested: a bound that was one character too strict would refuse the
+    longest legal string and every ``MAX + 1`` assertion above would still pass.
+
+    Not symmetry for its own sake. The producer truncates an over-long proposal
+    to exactly the cap (``strip_control_characters(text)[:max_chars]``), so a
+    model that over-writes a prompt yields a string of precisely this length. If
+    the cap were exclusive, that truncated question would be refused at
+    construction and silently dropped - every over-long proposal lost, and lost
+    quietly, because the producer degrades rather than raises.
+    """
+    assert len(_choice(prompt="x" * MAX_PROMPT_CHARS).prompt) == MAX_PROMPT_CHARS
+
+    options = _choice(options=["x" * MAX_OPTION_CHARS]).options or []
+    assert len(options[0]) == MAX_OPTION_CHARS
+
+    answers = ClarificationAnswers(
+        request_id="clarify-1", answers={"scope": "x" * MAX_ANSWER_CHARS}
+    )
+    assert len(answers.answers["scope"]) == MAX_ANSWER_CHARS
 
 
 @pytest.mark.parametrize(

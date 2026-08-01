@@ -494,3 +494,22 @@ class TestAttachAuthoringTools:
         model = ChatOpenAI(api_key="test-key", model="gpt-4o")
         with pytest.raises(ConfigError, match="no surface to mount the bridge"):
             attach_authoring_tools(model, _binding(), autonomous=True)
+
+    def test_unarmed_run_is_a_noop_even_on_a_model_with_no_surface(self) -> None:
+        """The refusal above is gated on ARMING, not on the provider's shape.
+
+        Same no-surface hosted model as the refusal test, minus the binding: an
+        unarmed run — one whose preset declares no authoring bridge, so the worker
+        builds no binding provider and passes ``None`` here — must be returned
+        UNCHANGED rather than refused. Hoisting the surface check above the
+        ``binding is None`` guard would break every unarmed run on a hosted lane,
+        which is the regression this pins; the surfaced-model case alone cannot
+        catch it, since a model that has a surface never reaches the raise.
+        """
+        from langchain_openai import ChatOpenAI
+
+        model = ChatOpenAI(api_key="test-key", model="gpt-4o")
+        assert getattr(model, "with_mcp_servers", None) is None
+        assert getattr(model, "with_authoring_mcp_server", None) is None
+        assert attach_authoring_tools(model, None, autonomous=True) is model
+        assert attach_authoring_tools(model, None, autonomous=False) is model

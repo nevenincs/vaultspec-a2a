@@ -222,17 +222,18 @@ def test_non_desktop_profile_preserves_live_preset_resolution() -> None:
         profile=HarnessMcpRuntimeProfile.NON_DESKTOP,
     )
 
-    assert resolution.available_servers == (RAG_SERVER, "vaultspec-web-search")
+    # "Preserves" is the claim, so it is asserted against what the preset actually
+    # declares rather than against a restated list. A hardcoded copy tests the copy:
+    # this assertion went red when the preset's server set changed under it, which
+    # is the failure mode the derivation removes.
+    assert resolution.available_servers == tuple(harness.mcp_servers)
     assert resolution.unavailable == ()
     assert specs[0]["command"] == "uvx"
     assert config_home_mcp_servers(specs)[RAG_SERVER]["command"] == "uvx"
-    assert config_home_mcp_servers(specs)["vaultspec-web-search"]["command"] == "uvx"
     for spec in codex_mcp_server_specs(harness.mcp_servers):
         assert spec["command"] == "uvx"
     assert harness_allowed_tool_names(harness.mcp_servers) == [
         "mcp__vaultspec-rag__search_vault",
         "mcp__vaultspec-rag__search_codebase",
         "mcp__vaultspec-rag__get_code_file",
-        "mcp__vaultspec-web-search__search",
-        "mcp__vaultspec-web-search__fetch_content",
     ]

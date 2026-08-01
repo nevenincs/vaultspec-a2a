@@ -2,6 +2,15 @@
 
 Real objects only, no mocks: composition runs against production
 ``AcpChatModel``, ``CodexChatModel``, and ``ChatOpenAI`` instances.
+
+No outward-reaching server is exercised here, and the absence is the point rather
+than a gap. The registry is closed and every entry it now carries declares no egress,
+so there is nothing here that reaching outward would even describe. The cases that
+used to exercise it were written against a first-party web-search server that does
+not exist, and they went with it: a test proving a fiction resolves, renders a
+launch spec, and gets advertised is worse than no test, because it passes. Should
+a real egressing entry ever be declared, its coverage belongs here and must be
+written against that entry, never against a placeholder.
 """
 
 from __future__ import annotations
@@ -138,62 +147,6 @@ def test_resolve_unknown_server_raises_naming_it_and_the_known_set() -> None:
 
 def test_resolve_empty_is_empty() -> None:
     assert resolve_harness_mcp_servers([]) == []
-
-
-# ---------------------------------------------------------------------------
-# vaultspec-web-search (agent-flow ADR D6 - the researcher's real web tool)
-# ---------------------------------------------------------------------------
-
-
-def test_resolve_web_search_server_returns_stdio_spec() -> None:
-    specs = resolve_harness_mcp_servers(["vaultspec-web-search"])
-    assert len(specs) == 1
-    spec = specs[0]
-    assert spec["name"] == "vaultspec-web-search"
-    assert spec["command"] == "uvx"
-    assert spec["args"] == ["duckduckgo-mcp-server"]
-
-
-def test_web_search_launch_spec_excludes_registry_only_tools_metadata() -> None:
-    spec = resolve_harness_mcp_servers(["vaultspec-web-search"])[0]
-    assert "tools" not in spec
-    assert set(spec) <= {"name", "command", "args", "env"}
-
-
-def test_web_search_allowed_tool_names_expands_to_flat_allowlist() -> None:
-    names = harness_allowed_tool_names(["vaultspec-web-search"])
-    assert names == [
-        "mcp__vaultspec-web-search__search",
-        "mcp__vaultspec-web-search__fetch_content",
-    ]
-
-
-def test_resolve_both_researcher_servers_together() -> None:
-    """rag and web-search compose without name collision (the researcher
-    harness declares both)."""
-    specs = resolve_harness_mcp_servers(["vaultspec-rag", "vaultspec-web-search"])
-    assert [s["name"] for s in specs] == ["vaultspec-rag", "vaultspec-web-search"]
-
-    names = harness_allowed_tool_names(["vaultspec-rag", "vaultspec-web-search"])
-    assert names == [
-        "mcp__vaultspec-rag__search_vault",
-        "mcp__vaultspec-rag__search_codebase",
-        "mcp__vaultspec-rag__get_code_file",
-        "mcp__vaultspec-web-search__search",
-        "mcp__vaultspec-web-search__fetch_content",
-    ]
-
-
-def test_compose_advertises_web_search_alongside_existing_servers() -> None:
-    model = AcpChatModel(command=["echo"], env_vars={})
-    composed = compose_harness_mcp_servers(
-        model, ["vaultspec-rag", "vaultspec-web-search"]
-    )
-    assert isinstance(composed, AcpChatModel)
-    assert [s["name"] for s in composed.mcp_servers] == [
-        "vaultspec-rag",
-        "vaultspec-web-search",
-    ]
 
 
 def test_compose_empty_names_is_a_noop() -> None:
@@ -364,13 +317,10 @@ def test_live_preset_harness_drives_read_only_rag_composition() -> None:
     assert harness is not None
     names = harness.mcp_servers
 
-    # The registry knows the web-search server, but a served preset may advertise
-    # a web capability only on a lane with a live test proving that capability
-    # completed real work - and no lane has one yet. So knowing the server and
-    # SERVING it are separate, and this preset must not serve it: the grounding
-    # this preset opts into stays local-only.
-    assert is_known_harness_server("vaultspec-web-search")
-    assert "vaultspec-web-search" not in names
+    # Every declared name is one the closed registry knows; an unknown one would
+    # refuse below rather than surface, but naming the claim here says which of
+    # the two failures a red line means.
+    assert all(is_known_harness_server(name) for name in names)
 
     allow = harness_allowed_tool_names(names)
     assert allow == [

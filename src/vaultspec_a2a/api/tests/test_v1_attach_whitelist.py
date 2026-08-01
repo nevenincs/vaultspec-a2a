@@ -23,6 +23,10 @@ _TOKEN = "attach-credential-token-0123456789abcdef"
 # surface could accept the answer; retiring that surface would have stranded
 # every paused run. Anything appearing here without a matching amendment is the
 # accident this guard is for.
+#
+# Clarification-respond (agent-flow ADR D5(c)) is the next such amendment: the
+# structural sibling of permission-respond, added under the same reviewed-
+# contract-event discipline for the mid-run clarification interrupt.
 _EXPECTED_V1_ROUTES = {
     "POST /v1/runs",
     "GET /v1/runs",
@@ -33,6 +37,7 @@ _EXPECTED_V1_ROUTES = {
     "GET /v1/runs/{run_id}/history",
     "POST /v1/runs/{run_id}/messages",
     "POST /v1/runs/{run_id}/permissions/{request_id}/respond",
+    "POST /v1/runs/{run_id}/clarifications/{request_id}/respond",
     "GET /v1/runs/{run_id}/stream",
     "GET /v1/presets",
     "GET /v1/service",
@@ -50,6 +55,7 @@ _WHITELIST_REQUESTS = (
     ("GET", "/v1/runs/some-run-id/history"),
     ("POST", "/v1/runs/some-run-id/messages"),
     ("POST", "/v1/runs/some-run-id/permissions/some-request-id/respond"),
+    ("POST", "/v1/runs/some-run-id/clarifications/some-request-id/respond"),
     ("POST", "/v1/runs/some-run-id/archive"),
     ("GET", "/v1/presets"),
     ("GET", "/v1/service"),

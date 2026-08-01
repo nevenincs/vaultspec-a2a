@@ -50,6 +50,7 @@ from ...control.health import (
     probe_engine_discovery_freshness,
 )
 from ...control.message_service import send_followup_message
+from ...control.clarification_service import respond_to_clarification
 from ...control.permission_service import respond_to_permission
 from ...control.run_discovery_service import discover_active_runs
 from ...control.run_start_policy import (
@@ -107,6 +108,7 @@ from ..run_admission import (
 from ..schemas.gateway import (
     ActiveRunRecord,
     ActiveRunsResponse,
+    PathSafeClarificationRequestId,
     PathSafeRunId,
     PresetsListResponse,
     PresetSummary,
@@ -116,6 +118,8 @@ from ..schemas.gateway import (
     RunAgentSummary,
     RunArchiveResponse,
     RunCancelResponse,
+    RunClarificationRespondRequest,
+    RunClarificationRespondResponse,
     RunCommitResponse,
     RunDeleteResponse,
     RunHistoryResponse,
@@ -136,7 +140,7 @@ from ..schemas.gateway import (
     TeamStatusV1Response,
     TopologyPosition,
 )
-from ..schemas.snapshots import ThreadStateSnapshot
+from ..schemas.snapshots import _ClarificationRequestSnapshot, ThreadStateSnapshot
 from ..thread_stream import build_thread_stream_response
 
 router = APIRouter(
@@ -1419,6 +1423,13 @@ async def run_status_endpoint(
         changeset_ids=changeset_ids,
         approval_status=snapshot.approval_status,
         approval_request_id=snapshot.approval_request_id,
+        pending_clarification=(
+            _ClarificationRequestSnapshot.model_validate(
+                asdict(snapshot.pending_clarification)
+            )
+            if snapshot.pending_clarification is not None
+            else None
+        ),
         checkpoint_id=snapshot.checkpoint_id,
         last_sequence=snapshot.last_sequence,
         repair_status=snapshot.repair_status,
@@ -1884,6 +1895,72 @@ async def run_permission_respond_endpoint(
         applied=result.applied,
         action_status=result.action_status,
         approval_status=result.approval_status,
+        idempotency_key=result.idempotency_key,
+    )
+
+
+# ---------------------------------------------------------------------------
+# clarification-respond (agent-flow ADR D5(c))
+# ---------------------------------------------------------------------------
+
+
+@router.post(
+    "/runs/{run_id}/clarifications/{request_id}/respond",
+    response_model=RunClarificationRespondResponse,
+)
+async def run_clarification_respond_endpoint(
+    run_id: PathSafeRunId,
+    request_id: PathSafeClarificationRequestId,
+    body: RunClarificationRespondRequest,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    checkpointer: Checkpointer = Depends(get_checkpointer),
+    worker_client: httpx.AsyncClient = Depends(get_worker_client),
+    circuit_breaker: Any = Depends(get_circuit_breaker),
+    worker_spawner: Any = Depends(get_worker_spawner),
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+) -> RunClarificationRespondResponse:
+    """Answer a mid-run clarification question the run raised (agent-flow D5(c)).
+
+    The exact structural sibling of ``permissions/{request_id}/respond``, but
+    self-contained: a clarification's authority is the run's checkpoint
+    itself, the SAME source ``run-status``'s ``pending_clarification`` reads,
+    so the two can never disagree about what is currently pending. The engine
+    forwards the ``answers`` envelope verbatim and validates only its own
+    bounds; option-id existence, per-question satisfaction, and required-
+    question completeness are validated here, against the live checkpoint,
+    before anything is dispatched.
+    """
+    result = await respond_to_clarification(
+        db=db,
+        run_id=run_id,
+        request_id=request_id,
+        answers=body.answers,
+        idempotency_key=idempotency_key,
+        checkpointer=checkpointer,
+        circuit_breaker=circuit_breaker,
+        worker_spawner=worker_spawner,
+        worker_client=worker_client,
+        recursion_limit=domain_config.graph_recursion_limit,
+        trace_headers=trace_headers(),
+    )
+
+    if result.dispatched:
+        mark_worker_connected(request)
+    if result.circuit_open:
+        raise HTTPException(status_code=503, detail=result.error_detail)
+    if result.error_detail:
+        raise HTTPException(
+            status_code=result.error_status_code or 500,
+            detail=result.error_detail,
+        )
+
+    return RunClarificationRespondResponse(
+        run_id=result.thread_id,
+        request_id=result.request_id,
+        accepted=result.accepted,
+        applied=result.applied,
+        action_status=result.action_status,
         idempotency_key=result.idempotency_key,
     )
 

@@ -216,6 +216,17 @@ class TeamState(TypedDict):
     # interrupt payload. Last-write-wins; a fresh submit overwrites it each phase.
     gate_pending_proposal_id: NotRequired[str | None]
 
+    # --- mid-run clarification (agent-flow ADR D5) ---
+    # clarification_questions: the bounded question set a Ground/Diverge-stage
+    # node proposes; the clarification node reads this, bounds it again to the
+    # D5 caps, and raises interrupt() when non-empty. Last-write-wins — a
+    # caller sets it fresh each time it wants to ask.
+    clarification_questions: NotRequired[list[dict[str, Any]]]
+    # clarification_answers: the flat {question_id: answer} map the
+    # clarification node records on resume. Last-write-wins; a fresh
+    # clarification round overwrites the prior answer set.
+    clarification_answers: NotRequired[dict[str, str]]
+
     # --- routing error: set by supervisor on parse failure ---
     routing_error: NotRequired[str | None]
 

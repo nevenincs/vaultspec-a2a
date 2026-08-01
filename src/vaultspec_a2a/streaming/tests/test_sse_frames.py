@@ -101,6 +101,45 @@ def test_an_uncatalogued_frame_keeps_only_its_identity_keys() -> None:
 
 
 # ---------------------------------------------------------------------------
+# clarification-pending (agent-flow ADR D5(b))
+# ---------------------------------------------------------------------------
+
+
+def test_clarification_pending_carries_only_the_request_id() -> None:
+    """The nudge frame is minimal: request_id only, never the questions."""
+    frame = encode_sse_frame(
+        {
+            "type": "clarification-pending",
+            "thread_id": "run-1",
+            "request_id": "abc123",
+            "questions": [{"id": "provider", "prompt": "Which provider?"}],
+        },
+        event="clarification-pending",
+        thread_id="run-1",
+    )
+    payload = _data_payload(frame)
+    assert payload["type"] == "clarification-pending"
+    assert payload["request_id"] == "abc123"
+    # The questions themselves never cross the relay - a nudge to re-read
+    # run-status, never the source of the questions (D5(b)).
+    assert "questions" not in payload
+
+
+def test_clarification_pending_request_id_truncates_over_cap() -> None:
+    frame = encode_sse_frame(
+        {
+            "type": "clarification-pending",
+            "thread_id": "run-1",
+            "request_id": "x" * 200,
+        },
+        event="clarification-pending",
+        thread_id="run-1",
+    )
+    payload = _data_payload(frame)
+    assert len(payload["request_id"]) == 128
+
+
+# ---------------------------------------------------------------------------
 # Semantic phase stamping
 # ---------------------------------------------------------------------------
 

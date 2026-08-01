@@ -12,17 +12,22 @@ from ..enums import RepairStatus
 from ..models import PlanEntry
 from ..snapshots import (
     CHECKPOINT_ERROR_REPAIR_MAP,
+    CLARIFICATION_REQUEST_INTERRUPT_TYPE,
     PLAN_APPROVAL_PAUSE_CAUSES,
     TERMINAL_STATUS_MAP,
     AgentData,
     ArtifactData,
+    ClarificationQuestionData,
+    ClarificationRequestData,
     ExecutionTaskData,
     MessageData,
     PermissionData,
     PermissionOptionData,
+    ProjectedInterrupt,
     ThreadStateData,
     ToolCallData,
     build_agent_descriptor,
+    clarification_data_from_interrupt,
     classify_message_role,
     classify_permission_pause_reason,
     derive_message_id,
@@ -305,6 +310,103 @@ def test_classify_permission_pause_reason_none() -> None:
 
 
 # ---------------------------------------------------------------------------
+# clarification_data_from_interrupt (agent-flow ADR D5)
+# ---------------------------------------------------------------------------
+
+
+def _clarify_interrupt(payload: dict) -> ProjectedInterrupt:
+    return ProjectedInterrupt(
+        interrupt_id="interrupt-clarify-1",
+        interrupt_type=payload.get("type", ""),
+        payload=payload,
+    )
+
+
+def test_clarification_data_from_interrupt_projects_bounded_questions() -> None:
+    interrupt = _clarify_interrupt(
+        {
+            "type": CLARIFICATION_REQUEST_INTERRUPT_TYPE,
+            "questions": [
+                {
+                    "id": "provider",
+                    "prompt": "Which provider?",
+                    "kind": "choice",
+                    "required": True,
+                    "options": ["codex", "zai"],
+                },
+                {"id": "scope", "prompt": "Which module?", "kind": "text"},
+            ],
+        }
+    )
+    data = clarification_data_from_interrupt(interrupt)
+    assert data is not None
+    assert data.request_id == "interrupt-clarify-1"
+    assert len(data.questions) == 2
+    assert data.questions[0] == ClarificationQuestionData(
+        id="provider",
+        prompt="Which provider?",
+        kind="choice",
+        required=True,
+        options=["codex", "zai"],
+    )
+    assert data.questions[1] == ClarificationQuestionData(
+        id="scope", prompt="Which module?", kind="text", required=False, options=[]
+    )
+
+
+def test_clarification_data_from_interrupt_ignores_other_interrupt_types() -> None:
+    interrupt = _clarify_interrupt(
+        {"type": "document_approval_request", "phase": "research"}
+    )
+    assert clarification_data_from_interrupt(interrupt) is None
+
+
+def test_clarification_data_from_interrupt_none_when_questions_not_a_list() -> None:
+    interrupt = _clarify_interrupt(
+        {"type": CLARIFICATION_REQUEST_INTERRUPT_TYPE, "questions": "not-a-list"}
+    )
+    assert clarification_data_from_interrupt(interrupt) is None
+
+
+def test_clarification_data_from_interrupt_none_when_no_readable_question() -> None:
+    interrupt = _clarify_interrupt(
+        {
+            "type": CLARIFICATION_REQUEST_INTERRUPT_TYPE,
+            "questions": [{"id": "", "prompt": "missing id"}, "not-a-dict"],
+        }
+    )
+    assert clarification_data_from_interrupt(interrupt) is None
+
+
+def test_clarification_data_from_interrupt_drops_malformed_entries_keeps_rest() -> None:
+    interrupt = _clarify_interrupt(
+        {
+            "type": CLARIFICATION_REQUEST_INTERRUPT_TYPE,
+            "questions": [
+                {"id": "good", "prompt": "Fine?"},
+                {"id": "", "prompt": "no id"},
+                "not-a-dict",
+            ],
+        }
+    )
+    data = clarification_data_from_interrupt(interrupt)
+    assert data is not None
+    assert [q.id for q in data.questions] == ["good"]
+
+
+def test_clarification_data_from_interrupt_unknown_kind_falls_back_to_text() -> None:
+    interrupt = _clarify_interrupt(
+        {
+            "type": CLARIFICATION_REQUEST_INTERRUPT_TYPE,
+            "questions": [{"id": "q1", "prompt": "?", "kind": "essay"}],
+        }
+    )
+    data = clarification_data_from_interrupt(interrupt)
+    assert data is not None
+    assert data.questions[0].kind == "text"
+
+
+# ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
 
@@ -383,6 +485,27 @@ def test_permission_data_round_trip() -> None:
     assert pydantic_obj.request_id == "r1"
     assert len(pydantic_obj.options) == 1
     assert pydantic_obj.tool_kind == "execute"
+
+
+def test_clarification_request_data_round_trip() -> None:
+    from ...api.schemas.snapshots import _ClarificationRequestSnapshot
+
+    data = ClarificationRequestData(
+        request_id="clarify-1",
+        questions=[
+            ClarificationQuestionData(
+                id="provider",
+                prompt="Which provider?",
+                kind="choice",
+                required=True,
+                options=["codex", "zai"],
+            )
+        ],
+    )
+    pydantic_obj = _ClarificationRequestSnapshot.model_validate(asdict(data))
+    assert pydantic_obj.request_id == "clarify-1"
+    assert len(pydantic_obj.questions) == 1
+    assert pydantic_obj.questions[0].options == ["codex", "zai"]
 
 
 def test_agent_data_round_trip() -> None:

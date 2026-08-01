@@ -43,6 +43,8 @@ _MIRRORS: tuple[tuple[type[DataclassInstance], type[BaseModel]], ...] = (
     (domain.ArtifactData, wire.ArtifactSnapshot),
     (domain.PermissionOptionData, wire._PermissionOptionSnapshot),
     (domain.PermissionData, wire._PermissionSnapshot),
+    (domain.ClarificationQuestionData, wire._ClarificationQuestionSnapshot),
+    (domain.ClarificationRequestData, wire._ClarificationRequestSnapshot),
     (domain.AgentData, wire._AgentSnapshot),
     (domain.ExecutionTaskData, wire.ExecutionTaskSnapshot),
     (domain.ThreadStateData, wire.ThreadStateSnapshot),
@@ -165,6 +167,18 @@ def _populated_thread_state() -> domain.ThreadStateData:
                 tool_kind="execute",
             )
         ],
+        pending_clarification=domain.ClarificationRequestData(
+            request_id="clarify-1",
+            questions=[
+                domain.ClarificationQuestionData(
+                    id="scope",
+                    prompt="Which module?",
+                    kind="choice",
+                    required=True,
+                    options=["a", "b"],
+                )
+            ],
+        ),
         artifacts=[
             domain.ArtifactData(
                 artifact_id="a-1", filename="out.txt", content="body", complete=True
@@ -212,6 +226,8 @@ def test_production_seam_carries_every_domain_field_to_the_wire() -> None:
     assert emitted["execution_tasks"][0]["task_id"] == "task-1"
     assert emitted["pending_permissions"][0]["options"][0]["option_id"] == "allow_once"
     assert emitted["messages"][0]["agent_id"] == "supervisor"
+    assert emitted["pending_clarification"]["request_id"] == "clarify-1"
+    assert emitted["pending_clarification"]["questions"][0]["options"] == ["a", "b"]
 
 
 def test_execution_task_payload_crosses_the_ipc_seam_intact() -> None:

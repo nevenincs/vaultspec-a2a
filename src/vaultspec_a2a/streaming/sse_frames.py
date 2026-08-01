@@ -328,6 +328,13 @@ _PROGRESS_CATALOG: dict[str, dict[str, _FieldSpec]] = {
             16, {"option_id": _Text(64), "name": _Text(128), "kind": _ENUM}
         ),
     },
+    # agent-flow ADR D5(b): a bounded nudge only — the request id, nothing
+    # else. Never the question payload itself; a client re-reads run-status's
+    # authoritative `pending_clarification` for that (the same discipline
+    # `document_approval_request`/`plan_approval_request` hold by staying out
+    # of this catalog entirely - clarification-pending differs only in that
+    # its id is worth a dedicated nudge frame per the ADR's own decision).
+    "clarification-pending": {"request_id": _Text(128)},
     # A plan entry's ``content`` is model-authored plan text - document-body
     # adjacent, and nothing consumes it - so only its classification survives.
     "plan_update": {"entries": _ObjectList(64, {"status": _ENUM, "priority": _ENUM})},

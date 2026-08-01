@@ -25,12 +25,15 @@ if TYPE_CHECKING:
 
 __all__ = [
     "CHECKPOINT_ERROR_REPAIR_MAP",
+    "CLARIFICATION_REQUEST_INTERRUPT_TYPE",
     "PLAN_APPROVAL_PAUSE_CAUSES",
     "TERMINAL_STATUS_MAP",
     "WIRE_EVENT_TYPE_KEYS",
     "AgentData",
     "ArtifactData",
     "CheckpointProjection",
+    "ClarificationQuestionData",
+    "ClarificationRequestData",
     "ExecutionStateProjection",
     "ExecutionTaskData",
     "MessageData",
@@ -40,6 +43,7 @@ __all__ = [
     "ThreadStateData",
     "ToolCallData",
     "build_agent_descriptor",
+    "clarification_data_from_interrupt",
     "classify_message_role",
     "classify_permission_pause_reason",
     "coerce_model",
@@ -56,6 +60,11 @@ __all__ = [
     "project_checkpoint_tuple",
     "wire_event_type",
 ]
+
+# The interrupt payload's ``type`` discriminator for a mid-run clarification
+# question (agent-flow ADR D5). Named once here so the projection below and
+# any future producer/consumer read the same literal.
+CLARIFICATION_REQUEST_INTERRUPT_TYPE = "clarification_request"
 
 # Shared constant — previously duplicated in control/projection.py and
 # control/event_handlers.py.
@@ -194,6 +203,58 @@ def classify_permission_pause_reason(tool_call: str | None) -> str:
     return str(tool_call or "permission_request")
 
 
+def clarification_data_from_interrupt(
+    interrupt: ProjectedInterrupt,
+) -> ClarificationRequestData | None:
+    """Project a checkpoint-sourced clarification interrupt to its wire shape.
+
+    Returns ``None`` for any interrupt whose type is not
+    :data:`CLARIFICATION_REQUEST_INTERRUPT_TYPE`, or whose ``questions`` list
+    contains no readable entry — this is checkpoint-truth disclosure (agent-
+    flow ADR D5(a)): the pending clarification survives a reload from
+    ``run-status`` alone because it is read from ``ProjectedInterrupt``
+    (:func:`project_checkpoint_tuple`), never from in-memory state.
+
+    Malformed questions are dropped rather than failing the projection —
+    consistent with the node's own bound-by-truncation discipline — so a
+    drifted producer degrades the disclosed set instead of hiding the whole
+    request.
+    """
+    if interrupt.interrupt_type != CLARIFICATION_REQUEST_INTERRUPT_TYPE:
+        return None
+    raw_questions = interrupt.payload.get("questions", [])
+    if not isinstance(raw_questions, list):
+        return None
+    questions: list[ClarificationQuestionData] = []
+    for raw in raw_questions:
+        if not isinstance(raw, dict):
+            continue
+        qid = raw.get("id")
+        prompt = raw.get("prompt")
+        if not isinstance(qid, str) or not qid or not isinstance(prompt, str) or not prompt:
+            continue
+        kind = raw.get("kind")
+        kind = kind if kind in ("choice", "text") else "text"
+        options = raw.get("options", [])
+        questions.append(
+            ClarificationQuestionData(
+                id=qid,
+                prompt=prompt,
+                kind=kind,
+                required=bool(raw.get("required", False)),
+                options=[o for o in options if isinstance(o, str)]
+                if isinstance(options, list)
+                else [],
+            )
+        )
+    if not questions:
+        return None
+    return ClarificationRequestData(
+        request_id=interrupt.interrupt_id,
+        questions=questions,
+    )
+
+
 @dataclass(slots=True)
 class ProjectedInterrupt:
     """Normalized persisted interrupt extracted from a checkpoint tuple."""
@@ -297,6 +358,35 @@ class PermissionData:
 
 
 @dataclass(slots=True)
+class ClarificationQuestionData:
+    """Layer 1 equivalent of ``_ClarificationQuestionSnapshot``.
+
+    One bounded question within a pending clarification request.
+    """
+
+    id: str
+    prompt: str
+    kind: str
+    required: bool = False
+    options: list[str] = field(default_factory=list)
+
+
+@dataclass(slots=True)
+class ClarificationRequestData:
+    """Layer 1 equivalent of ``_ClarificationRequestSnapshot``.
+
+    A pending mid-run clarification request (agent-flow ADR D5). ``request_id``
+    is the same checkpoint-derived interrupt id every other interrupt
+    projection uses (:class:`ProjectedInterrupt`), so the respond route's
+    ``{run_id}/clarifications/{request_id}/respond`` path segment is exactly
+    the id disclosed here.
+    """
+
+    request_id: str
+    questions: list[ClarificationQuestionData] = field(default_factory=list)
+
+
+@dataclass(slots=True)
 class AgentData:
     """Canonical agent descriptor.
 
@@ -342,6 +432,7 @@ class ThreadStateData:
     messages: list[MessageData] = field(default_factory=list)
     tool_calls: list[ToolCallData] = field(default_factory=list)
     pending_permissions: list[PermissionData] = field(default_factory=list)
+    pending_clarification: ClarificationRequestData | None = None
     artifacts: list[ArtifactData] = field(default_factory=list)
     plan: list[PlanEntry] = field(default_factory=list)
     agents: list[AgentData] = field(default_factory=list)

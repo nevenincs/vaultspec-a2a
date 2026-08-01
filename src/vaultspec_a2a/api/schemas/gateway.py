@@ -30,7 +30,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 from ...context.metadata import ThreadMetadata
 from ...thread.actor_tokens import ActorTokenBundle
 from ...thread.enums import CleanupKind, ThreadStatus
-from .snapshots import ThreadStateSnapshot
+from .snapshots import _ClarificationRequestSnapshot, ThreadStateSnapshot
 
 __all__ = [
     "ActiveRunRecord",
@@ -70,6 +70,14 @@ _PATH_SAFE_RUN_ID = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9_-]{0,127}$")
 PathSafeRunId = Annotated[
     str,
     Field(min_length=1, max_length=128, pattern=_PATH_SAFE_RUN_ID.pattern),
+]
+# agent-flow ADR D5(c): the clarification respond route's request_id and
+# question ids are path-safe and capped at 64 chars (tighter than the run id
+# cap — these are interrupt/question ids, never a caller-chosen slug).
+_PATH_SAFE_CLARIFICATION_ID = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9_-]{0,63}$")
+PathSafeClarificationRequestId = Annotated[
+    str,
+    Field(min_length=1, max_length=64, pattern=_PATH_SAFE_CLARIFICATION_ID.pattern),
 ]
 # A reservation identity is a server-minted opaque handle for a prepared
 # admission slot; a lease identity is the non-secret, run-scoped handle the
@@ -457,6 +465,11 @@ class RunStatusResponse(BaseModel):
     changeset_ids: list[str] = Field(default_factory=list)
     approval_status: str | None = None
     approval_request_id: str | None = None
+    # agent-flow ADR D5(a): a pending mid-run clarification, disclosed here so
+    # a reload re-renders the questionnaire from this authoritative read
+    # alone — never from the non-authoritative clarification-pending relay
+    # frame, which is only a nudge to re-fetch this response.
+    pending_clarification: _ClarificationRequestSnapshot | None = None
     checkpoint_id: str | None = None
     last_sequence: int = 0
     repair_status: str | None = None
@@ -630,6 +643,63 @@ class RunPermissionRespondResponse(BaseModel):
     applied: bool
     action_status: str
     approval_status: str | None = None
+    idempotency_key: str | None = None
+
+
+class RunClarificationRespondRequest(BaseModel):
+    """Answer a pending mid-run clarification (agent-flow ADR D5(c)).
+
+    Carries only the answer map, keyed by question id — the questions
+    themselves were disclosed on ``run-status``'s ``pending_clarification``
+    (never on this route). The engine forwards this envelope verbatim and
+    validates only its own bounds (entry count, path-safe-shaped keys are not
+    enforced here — a question id is validated as a KNOWN question by the
+    respond service, not by this schema); option-id existence, per-question
+    satisfaction, and required-question completeness are a2a's authority.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    answers: dict[
+        Annotated[str, Field(min_length=1, max_length=64)],
+        Annotated[str, Field(max_length=4096)],
+    ] = Field(min_length=1, max_length=4)
+
+    @field_validator("answers")
+    @classmethod
+    def _reject_multiline_answers(
+        cls, value: dict[str, str]
+    ) -> dict[str, str]:
+        """Refuse a control-character-bearing answer (the engine rejects too).
+
+        Mirrors the engine's own bound (D5(c) contract lock: "values capped
+        at 4096 and SINGLE-LINE — control characters rejected") so a
+        malformed answer never reaches the parked node's validation only to
+        be refused a step later.
+        """
+        for question_id, answer in value.items():
+            if any(ch != "\t" and ch < " " for ch in answer):
+                raise ValueError(
+                    f"answer for question {question_id!r} contains a control "
+                    "character; answers must be single-line"
+                )
+        return value
+
+
+class RunClarificationRespondResponse(BaseModel):
+    """Report what an answer did, including when it did nothing.
+
+    Mirrors :class:`RunPermissionRespondResponse`'s reporting contract: a
+    first accepted answer returns ``applied`` false with ``accepted_not_
+    applied``; a duplicate replays the stored outcome.
+    """
+
+    api_version: Literal["v1"] = _API_VERSION
+    run_id: str
+    request_id: str
+    accepted: bool
+    applied: bool
+    action_status: str
     idempotency_key: str | None = None
 
 

@@ -32,6 +32,7 @@ from ..thread.snapshots import (
     ProjectedInterrupt,
     ThreadStateData,
     _load_json_list,
+    clarification_data_from_interrupt,
 )
 
 _PLAN_APPROVAL_PAUSE_CAUSES = PLAN_APPROVAL_PAUSE_CAUSES
@@ -87,9 +88,13 @@ def clear_permissions_without_checkpoint_truth(
 ) -> ThreadStateData:
     """Fail closed when pending approval state has no checkpoint authority."""
     had_actionable_permission_state = bool(snapshot.pending_permissions) or bool(
-        snapshot.approval_status or snapshot.approval_request_id or snapshot.pause_cause
+        snapshot.approval_status
+        or snapshot.approval_request_id
+        or snapshot.pause_cause
+        or snapshot.pending_clarification
     )
     snapshot.pending_permissions = []
+    snapshot.pending_clarification = None
     snapshot.approval_status = None
     snapshot.approval_request_id = None
     _clear_non_actionable_pause_state(snapshot)
@@ -265,6 +270,17 @@ def apply_checkpoint_projection(
         snapshot.pending_permissions.append(permission)
         existing.add(permission.request_id)
 
+    # Mid-run clarification (agent-flow ADR D5(a)): checkpoint-truth
+    # disclosure only — no durable-row cross-check, unlike pending_permissions
+    # above. A parked clarification survives a reload because it is read from
+    # this same checkpoint projection every time, never cached in memory.
+    if snapshot.pending_clarification is None:
+        for interrupt in projection.pending_interrupts:
+            clarification = clarification_data_from_interrupt(interrupt)
+            if clarification is not None:
+                snapshot.pending_clarification = clarification
+                break
+
     for reason in projection.degraded_reasons:
         if reason not in snapshot.degraded_reasons:
             snapshot.degraded_reasons.append(reason)
@@ -418,6 +434,7 @@ async def enrich_snapshot_from_durable_state(
         if durable_permissions or snapshot.approval_status == ApprovalStatus.PENDING:
             _mark_terminal_permission_residue(snapshot)
         snapshot.pending_permissions = []
+        snapshot.pending_clarification = None
         snapshot.approval_status = None
         snapshot.approval_request_id = None
         return snapshot

@@ -284,6 +284,9 @@ class TestTeamStateStructure:
             "gate_phase",
             "gate_verdict",
             "gate_pending_proposal_id",
+            # mid-run clarification (agent-flow ADR D5)
+            "clarification_questions",
+            "clarification_answers",
             # workspace root path
             "workspace_root",
             "feedback_batch_id",

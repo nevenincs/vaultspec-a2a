@@ -207,3 +207,14 @@ last being required by its own Step's acceptance condition rather than drift.
   already declares an accounted temporary-home root for exactly this class of
   reason; pointing the Codex home at that root would likely silence it. Belongs
   to whoever owns the config-home layout rather than to this feature.
+
+- `codex-web-search-is-invisible-to-prompt-input` (informational, closed by
+  recording) - the tool's debug prompt-input output is byte-identical across all
+  four web-search modes, established by running the real binary rather than
+  inferred. Web search is a server-side tool and never appears in the
+  model-visible prompt input, so no prompt-input assertion can prove that search
+  surfaced or was invoked on that lane. Recorded because it removes the cheapest
+  activation probe available and would otherwise have been rediscovered by
+  whoever takes the live-proof Step, which has been amended to say so. The
+  general lesson generalizes past this lane: for a server-side provider tool,
+  absence from the prompt is not evidence of absence from the turn.

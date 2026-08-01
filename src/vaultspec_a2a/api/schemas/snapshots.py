@@ -167,3 +167,11 @@ class ThreadStateSnapshot(BaseModel):
     pause_cause: str | None = None
     approval_status: str | None = None
     approval_request_id: str | None = None
+    # The capped, single-line reason this run last failed, sourced from the
+    # durable column rather than a live frame so a reloaded panel recovers the
+    # same reason a connected client already saw. Declared here because the
+    # projection seam is a ``model_validate`` over the domain dataclass, which
+    # DROPS a field this model does not name - silently, and without failing.
+    # Persisting the reason and never carrying it to the wire left no client
+    # able to say why a run failed.
+    failure_reason: str | None = None

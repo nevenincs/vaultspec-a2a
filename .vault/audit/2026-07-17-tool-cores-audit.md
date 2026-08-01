@@ -289,3 +289,30 @@ static gates cannot see is worth as much as a hit, and without it the honest
 position would have been that the merge's blast radius was unknown rather than
 bounded. The method is reusable and is the point: load the presets, and
 cross-reference dynamic lookups against definitions.
+
+- `researcher-persona-advertises-an-undeclared-server` (high, open) - the
+  researcher persona instructs the agent, by exact tool name and five times over,
+  to query and fetch through a web-search MCP server that no shipped preset
+  declares. Only two presets declare harness servers at all and both declare the
+  semantic-search server alone, so the advertised tools cannot be present in any
+  run. The agent is told to reach for something the harness never mounts.
+
+  This is the capability-claim-without-proof defect the project's own served-
+  profile rule exists to prevent, one layer in: the rule governs what a preset
+  may advertise about a provider lane, and the same standard plainly applies to
+  what a persona advertises about its tools. A persona is a claim about what the
+  agent can do, and an unbacked claim degrades the run silently - the model
+  attempts a tool call that cannot resolve, and recovers by improvising rather
+  than by reporting that its grounding is absent.
+
+  The registry entry itself is sound and is NOT the defect: it is keyless,
+  declares both trust axes correctly including the network reach that makes it
+  the registry's one egressing member, and sitting undeclared in a closed
+  registry is a legitimate resting state. The defect is the persona text, which
+  crossed from the branch that added the entry without the preset declaration
+  that would have made it true.
+
+  Recorded here rather than fixed in place because the persona is the delivery
+  Step's own surface: that Step composes web-capability text lane-conditionally
+  behind the proven-lanes gate, and the correct repair is to replace an
+  unconditional claim with a gated one rather than to delete a line.

@@ -294,3 +294,46 @@ Where enforcement now ends is stated plainly so it is not rediscovered as a gap:
 non-research documents are machine-unchecked for web evidence. D2's reviewer
 obligation and the mandatory human gate before any document applies are the only
 backstops there, and they are unchanged.
+
+## Amendment - web search is universal, and there is no first-party search server (2026-08-01, owner directive)
+
+Two corrections by owner directive, and the first overrides any narrowing this
+record or its earlier amendments carry.
+
+**Every provider lane must be able to search the web. This is not negotiable and
+is not conditional on lane, role, preset, or proof.** Where earlier text scoped
+the capability - to document-authoring roles, to proven lanes, to autonomous
+runs - that scoping governs what a persona may CLAIM and when a tool activates,
+never whether a lane is capable at all. A lane that cannot search is not an
+acceptable resting state. Grounding on material that postdates the model is a
+baseline faculty of an authoring agent, not a feature some lanes earn.
+
+**There is no vaultspec-owned web-search MCP server, and there will not be one.**
+A registry entry naming one arrived on a feature branch and is removed. It was a
+fiction: it declared a first-party server that does not exist, wrapping a
+third-party package under a first-party name. The closed registry stays closed,
+exactly as this record already decided, and the reasoning that decided it stands
+unchanged - a server would buy a capability the lanes already have while adding a
+dependency nobody owns.
+
+Delivery therefore splits by what a lane already is, not by what it has earned:
+
+- **Command-line lanes** - Claude, Codex, Gemini, Kimi, and the Z.ai lane that
+  shares Claude's transport - carry first-party web tools already, licensed under
+  the subscription that authenticates the run. They are enabled through the
+  allowlist and configuration seams this record already describes.
+- **Hosted-API lanes** - those reached as model endpoints rather than as
+  subprocesses - have no built-in equivalent, so the framework must bind a web
+  search tool to the model directly. That is the framework's job and its
+  established mechanism; it is not a reason to introduce a server.
+
+The persona consequence is immediate and is the live defect this amendment also
+closes: a persona currently instructs agents to call the fictional server's tools
+by exact name, five times over, on a server no preset declares and none ever
+could. That text is replaced, not gated, because gating a claim about something
+that does not exist would preserve the falsehood behind a condition.
+
+The proven-lane declaration keeps its purpose and loses its veto over
+capability. It records which lanes have DEMONSTRATED a completed retrieval, and
+it governs what a served preset and a persona may assert. It does not decide
+which lanes are built to search - after this amendment, all of them are.

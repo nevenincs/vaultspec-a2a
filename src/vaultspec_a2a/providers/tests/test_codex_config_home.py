@@ -269,10 +269,17 @@ def test_a_caller_that_never_decided_the_posture_cannot_build_a_home(
     """
     base = tmp_path / "base"
     base.mkdir()
+    # The suppressions are the point, not a concession: the type checker refusing
+    # these calls IS the first half of the guarantee, and the raise proves the
+    # second half holds at runtime for a caller the checker never saw.
     with pytest.raises(TypeError):
-        build_codex_config_home(codex_mcp_server_specs(["vaultspec-rag"]), base)  # type: ignore[call-arg]
+        build_codex_config_home(  # ty: ignore[missing-argument]
+            codex_mcp_server_specs(["vaultspec-rag"]), base
+        )
     with pytest.raises(TypeError):
-        render_codex_config_toml(codex_mcp_server_specs(["vaultspec-rag"]))  # type: ignore[call-arg]
+        render_codex_config_toml(  # ty: ignore[missing-argument]
+            codex_mcp_server_specs(["vaultspec-rag"])
+        )
 
 
 class TestWebPostureThroughTheProductionModelSeam:

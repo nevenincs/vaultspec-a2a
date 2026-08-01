@@ -719,4 +719,4 @@ async def test_research_producer_injects_scoped_conventions(tmp_path) -> None:
     texts = "\n".join(str(m.content) for m in captured["messages"])
     assert "RESEARCHER SYSTEM PROMPT" in texts
     # A stable heading from the bundled document-authoring conventions.
-    assert "Tag taxonomy" in texts
+    assert "Emission mechanics" in texts

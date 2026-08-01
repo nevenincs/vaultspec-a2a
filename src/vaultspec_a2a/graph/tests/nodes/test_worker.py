@@ -227,7 +227,7 @@ def test_build_worker_messages_scopes_document_role_not_coder(tmp_path) -> None:
     # Document role: scoped to the bundled document-authoring conventions; the
     # untagged coder rule is NOT included.
     doc = _rules_text("researcher")
-    assert "Tag taxonomy" in doc  # a stable heading from the bundled conventions
+    assert "Emission mechanics" in doc  # a stable heading from the bundled conventions
     assert "CODER ONLY GUIDANCE" not in doc
 
     # Coder role: whole WORKSPACE corpus (role=None), so the untagged coder rule
@@ -237,4 +237,4 @@ def test_build_worker_messages_scopes_document_role_not_coder(tmp_path) -> None:
     # ...and the bundled document-authoring conventions do NOT leak into a coder
     # turn (the bundled dir is gated on document roles). A
     # one-sided "coder rules present" assertion would pass the leak green.
-    assert "Tag taxonomy" not in coder
+    assert "Emission mechanics" not in coder

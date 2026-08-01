@@ -47,7 +47,7 @@ if TYPE_CHECKING:
 # a compiled rule string in its own "Project Coding Rules & Guidelines" system
 # message. Asserting the taxonomy heading proves the BUNDLED conventions (not just
 # any rule text) reached the boundary.
-_CONVENTIONS_MARKER = "Tag taxonomy"
+_CONVENTIONS_MARKER = "Emission mechanics"
 _WORKER_RULES_HEADER = "Project Coding Rules & Guidelines"
 
 # A unique marker planted in a workspace-local rule file, used to prove the

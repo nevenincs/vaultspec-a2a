@@ -531,7 +531,8 @@ class TestBundledDefaults:
         rm = RuleManager(tmp_path, bundled_rules_dir=DEFAULT_BUNDLED_RULES_DIR)
         out = rm.compile("researcher")
         assert out is not None
-        assert "Tag taxonomy" in out  # a stable heading from the shipped bundled file
+        # A stable heading from the shipped bundled file.
+        assert "Emission mechanics" in out
         # Every document-authoring role (from the single contract) receives it...
         for role in DOCUMENT_AUTHORING_ROLES:
             assert rm.compile(role) is not None

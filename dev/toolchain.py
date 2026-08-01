@@ -660,7 +660,8 @@ CI = Verb(
     targets=(
         Target(
             "all",
-            "Lint, dependency audit, vault checks, and the unit gate.",
+            "Locked environment, Node runtime, lint, dependency, vault, and "
+            "unit gates.",
             (
                 Cmd(
                     (
@@ -674,6 +675,7 @@ CI = Verb(
                         "all",
                     )
                 ),
+                _verb("deps", "node"),
                 _verb("lint", "all"),
                 _verb("audit", "deps"),
                 uv_run("vaultspec-core", "vault", "check", "all"),

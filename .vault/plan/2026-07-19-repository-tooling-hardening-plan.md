@@ -4,7 +4,7 @@ tags:
   - '#repository-tooling-hardening'
 date: '2026-07-19'
 modified: '2026-08-01'
-body_hash: 'sha256:db69910d10415763ca8afed1c92bf15eb60c27475ee51caa6f409c12351dd42f'
+body_hash: 'sha256:154d130262a8bac2e616ccaf444b67c8dd8b8473602a6f6fc27cf31fb12c28be'
 tier: L3
 related:
   - '[[2026-07-19-repository-tooling-hardening-adr]]'
@@ -106,7 +106,7 @@ Make every quality target executable over the correct A2A scope from one registr
 
 - [x] `W05.P09.S13` - Add the cross-platform Ty target over the canonical Python roots.; `dev/toolchain.py`.
 - [x] `W05.P09.S14` - Correct the cognitive-complexity command scope so it measures only production sources on every supported host.; `dev/toolchain.py, pyproject.toml`.
-- [ ] `W05.P09.S15` - Reconcile the complete canonical CI sequence in the declarative registry before reducing the root recipe to delegation.; `dev/toolchain.py, justfile`.
+- [x] `W05.P09.S15` - Reconcile the complete canonical CI sequence in the declarative registry before reducing the root recipe to delegation.; `dev/toolchain.py, justfile`.
 
 ### Phase `W05.P10` - hosted visibility and anti-drift
 

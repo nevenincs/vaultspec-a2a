@@ -61,11 +61,7 @@ health target='report':
 
 # Run the current read-only local validation baseline.
 ci:
-    uv sync --locked --no-default-groups --extra server --group all
-    just dev deps node
-    just lint all
-    just audit deps
-    just test unit
+    uv run --isolated --no-project python -m dev ci all
 
 # Diagnose required tools and optional Docker support.
 doctor:

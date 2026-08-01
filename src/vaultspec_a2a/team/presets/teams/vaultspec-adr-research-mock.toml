@@ -3,13 +3,13 @@ id           = "vaultspec-adr-research-mock"
 display_name = "Vaultspec ADR Research (deterministic)"
 description  = """
 Deterministic variant of vaultspec-adr-research for the P04.S10 headless
-acceptance harness. Identical research_adr topology and the SAME four worker
+acceptance harness. Identical research_adr topology and the SAME five worker
 agent_ids (so the actor-token bundle keys and the submitter role keys are
 unchanged); only the provider is overridden to the in-process deterministic
-mock provider per worker, so the full Research -> ADR contract runs without
-Docker or real provider credentials. Not a product preset: it exists to certify
-the loop reproducibly. Real-provider collaboration is proven by running the same
-harness against the vaultspec-adr-research preset.
+mock provider per worker, so the full Research -> ADR -> Plan contract runs
+without Docker or real provider credentials. Not a product preset: it exists to
+certify the loop reproducibly. Real-provider collaboration is proven by running
+the same harness against the vaultspec-adr-research preset.
 """
 
 [team.defaults]
@@ -54,6 +54,10 @@ model    = { provider = "mock" }
 
 [[team.workers]]
 agent_id = "vaultspec-adr-author"
+model    = { provider = "mock" }
+
+[[team.workers]]
+agent_id = "vaultspec-planner"
 model    = { provider = "mock" }
 
 [[team.workers]]

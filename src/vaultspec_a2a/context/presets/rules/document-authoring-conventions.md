@@ -4,6 +4,7 @@ roles:
   - researcher
   - synthesist
   - adr-author
+  - planner
   - doc-reviewer
 ---
 
@@ -11,8 +12,9 @@ roles:
 
 Body-prose conventions for vaultspec document authoring — the taxonomy, frontmatter,
 linking, and template rules the engine does NOT validate server-side. These bind the
-research_adr document roles (researcher, synthesist, adr-author, doc-reviewer). A
-workspace file of the same name overrides this bundled default entirely.
+research_adr document roles (researcher, synthesist, adr-author, planner,
+doc-reviewer). A workspace file of the same name overrides this bundled default
+entirely.
 
 ## Tag taxonomy
 
@@ -49,9 +51,11 @@ workspace file of the same name overrides this bundled default entirely.
 
 ## Document boundary — each fact has one home
 
-- The research grounds; the ADR decides. Cite a research finding by stem rather than
-  restating its evidence; a restated fact forks context and goes stale silently.
-- Decision language lives only in the ADR.
+- The research grounds; the ADR decides; the plan sequences the ADR's decision into
+  executable steps. Cite a research finding by stem rather than restating its
+  evidence; a restated fact forks context and goes stale silently.
+- Decision language lives only in the ADR. Sequencing and step-assignment language
+  lives only in the plan; do not re-litigate the decision there.
 
 ## Doc-type structure
 
@@ -62,6 +66,9 @@ workspace file of the same name overrides this bundled default entirely.
   kept/rejected rationale), Implementation, Rationale, Consequences. The status rides
   the H1 token — `# <feature> adr: <title> | (**status:** accepted)` — never a
   separate `## Status` section.
+- Plan: ordered phases, each with concrete steps naming files/modules and an
+  executing sub-agent; every step cites the governing ADR by stem, never restates
+  its rationale.
 
 ## Quality bar
 

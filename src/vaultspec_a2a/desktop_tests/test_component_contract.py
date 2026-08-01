@@ -45,15 +45,15 @@ _RELEASE_FIXTURE: Final = (
 _PRODUCTION_PRESET_INVENTORY: Final = frozenset(
     {
         "vaultspec_a2a/team/presets/agents/vaultspec-adr-author.toml",
-        "vaultspec_a2a/team/presets/agents/vaultspec-analyst.toml",
         "vaultspec_a2a/team/presets/agents/vaultspec-coder.toml",
+        "vaultspec_a2a/team/presets/agents/vaultspec-doc-editor.toml",
         "vaultspec_a2a/team/presets/agents/vaultspec-doc-reviewer.toml",
         "vaultspec_a2a/team/presets/agents/vaultspec-planner.toml",
         "vaultspec_a2a/team/presets/agents/vaultspec-researcher.toml",
-        "vaultspec_a2a/team/presets/agents/vaultspec-reviewer.toml",
         "vaultspec_a2a/team/presets/agents/vaultspec-supervisor.toml",
         "vaultspec_a2a/team/presets/agents/vaultspec-synthesist.toml",
         "vaultspec_a2a/team/presets/teams/vaultspec-adr-research.toml",
+        "vaultspec_a2a/team/presets/teams/vaultspec-doc-editor.toml",
         "vaultspec_a2a/team/presets/teams/vaultspec-solo-coder.toml",
     }
 )

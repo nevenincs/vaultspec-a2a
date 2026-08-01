@@ -44,6 +44,7 @@ __all__ = ["DeterministicResearchAdrChatModel"]
 _ROLE_RESEARCHER = "researcher"
 _ROLE_SYNTHESIST = "synthesist"
 _ROLE_ADR_AUTHOR = "adr-author"
+_ROLE_PLANNER = "planner"
 _ROLE_DOC_REVIEWER = "doc-reviewer"
 
 # The role dispatch keys as an introspectable collection, ordered so a namespaced
@@ -53,6 +54,7 @@ _ROLE_DISPATCH_KEYS: tuple[str, ...] = (
     _ROLE_ADR_AUTHOR,
     _ROLE_DOC_REVIEWER,
     _ROLE_SYNTHESIST,
+    _ROLE_PLANNER,
     _ROLE_RESEARCHER,
 )
 
@@ -99,6 +101,22 @@ def _adr_document(feature: str, topic: str) -> str:
     )
 
 
+def _plan_document(feature: str, topic: str) -> str:
+    """Return a valid Plan document body for the planner to propose."""
+    return (
+        "---\n"
+        "tags:\n"
+        "  - '#plan'\n"
+        f"  - '#{feature}'\n"
+        "---\n\n"
+        f"# `{feature}` plan: `{topic}`\n\n"
+        "### Phase `P01` - Prove the contract\n\n"
+        f"Sequence the accepted `{feature}` decision into executable steps.\n\n"
+        f"- [ ] `P01.S01` - Prove the Research -> ADR -> Plan contract for "
+        f"`{topic}` end to end; deterministic acceptance harness.\n"
+    )
+
+
 def _role_of(agent_id: str | None) -> str | None:
     """Resolve the research_adr role from a (possibly namespaced) agent id."""
     if not agent_id:
@@ -140,6 +158,8 @@ class DeterministicResearchAdrChatModel(BaseChatModel):
             return _REVIEW_PASS
         if role == _ROLE_ADR_AUTHOR:
             return _adr_document(self.feature_tag, self.topic)
+        if role == _ROLE_PLANNER:
+            return _plan_document(self.feature_tag, self.topic)
         if role == _ROLE_SYNTHESIST:
             return _research_document(self.feature_tag, self.topic)
         if role == _ROLE_RESEARCHER:

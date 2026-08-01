@@ -25,13 +25,22 @@ __all__ = [
 ]
 
 # Ordered: the graph compiler consumes this order (research diverge -> synthesis
-# -> adr-author -> doc-reviewer). Matches the bundled
+# -> adr-author -> planner -> doc-reviewer). Matches the bundled
 # ``document-authoring-conventions`` rule file's ``roles:`` tags exactly - a
 # data-sync test asserts the two never drift (code is the source of truth).
+#
+# ``planner`` (agent-flow ADR D4, the Plan phase) reuses the persona role name
+# already carried by ``vaultspec-planner.toml`` rather than a fresh
+# ``plan-author`` slug: the deterministic acceptance provider and every
+# document-authoring team preset resolve a role by suffix-matching the worker
+# ``agent_id`` against this tuple (``vaultspec-{role}``), so keeping the
+# existing agent id/role pair avoids renaming a persona that several
+# generic-topology test fixtures already depend on.
 DOCUMENT_AUTHORING_ROLES: tuple[str, ...] = (
     "researcher",
     "synthesist",
     "adr-author",
+    "planner",
     "doc-reviewer",
 )
 

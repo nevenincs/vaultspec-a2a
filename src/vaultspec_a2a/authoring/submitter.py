@@ -197,6 +197,11 @@ class PhaseAuthoringSpec:
 #: The `.vault/` sub-directories whose applied documents ground an ADR.
 _GROUNDING_DIRS: tuple[str, ...] = ("research", "reference")
 
+#: The `.vault/` sub-directories whose applied documents ground a Plan: the same
+#: research/reference grounding an ADR cites, plus the ADR itself (the plan
+#: sequences the ADR's decision, so it must be able to cite it).
+_PLAN_GROUNDING_DIRS: tuple[str, ...] = (*_GROUNDING_DIRS, "adr")
+
 
 def _grounding_child_key(item: dict[str, Any]) -> str | None:
     """Read an applied proposal's materialized child path from a recovery item.
@@ -214,19 +219,24 @@ def _grounding_child_key(item: dict[str, Any]) -> str | None:
 
 
 def _grounding_dated_stem(
-    child_key: str, created_at_ms: Any, feature: str
+    child_key: str,
+    created_at_ms: Any,
+    feature: str,
+    allowed_dirs: tuple[str, ...] = _GROUNDING_DIRS,
 ) -> str | None:
     """Derive an applied grounding doc's canonical DATED stem from its child key.
 
     ``child_key`` is ``<doc_type>/<feature>-<doc_type>.md`` (undated). The engine
     materializes it at ``<yyyy-mm-dd>-<feature>-<doc_type>.md`` where the date is the
     proposal's ``created_at_ms`` under the engine's UTC ``ms_to_date_key`` (verified
-    against live materialization). Returns the dated stem for a ``research``/
-    ``reference`` child of THIS feature, else ``None`` (a foreign feature, a non-
-    grounding doc type, or an unusable timestamp is skipped).
+    against live materialization). Returns the dated stem for an ``allowed_dirs``
+    child of THIS feature (``research``/``reference`` by default; the Plan phase
+    passes :data:`_PLAN_GROUNDING_DIRS` to additionally accept the ADR), else
+    ``None`` (a foreign feature, a non-grounding doc type, or an unusable
+    timestamp is skipped).
     """
     doc_dir, sep, filename = child_key.partition("/")
-    if not sep or doc_dir not in _GROUNDING_DIRS or not filename.endswith(".md"):
+    if not sep or doc_dir not in allowed_dirs or not filename.endswith(".md"):
         return None
     base = filename[: -len(".md")]
     if not base.startswith(f"{feature}-"):
@@ -518,6 +528,18 @@ class DocumentProposalSubmitter:
                         "phase must materialize before the ADR can cite it"
                     ]
                 )
+            if phase == PipelinePhase.PLAN and not related:
+                # Mirrors the ADR guard above: the plan must cite the ADR it
+                # sequences (plus any research/reference), and the phase machine
+                # only reaches plan_author after Gate 2 approves the ADR, so in the
+                # normal flow the ADR has already applied and this never fires.
+                raise DocumentConformanceError(
+                    [
+                        "Plan has no grounding reference: no applied ADR, research, "
+                        "or reference document exists for this feature yet; the ADR "
+                        "phase must materialize before the plan can cite it"
+                    ]
+                )
 
             changeset_id = session.new_changeset_id(f"{phase}-r{revision_cycle}")
             created = await session.create_proposal(
@@ -586,19 +608,26 @@ class DocumentProposalSubmitter:
     ) -> list[str]:
         """Resolve the feature's applied grounding docs as ``[[stem]]`` wiki-links.
 
-        Only the ADR phase is grounded (research/reference documents precede it). The
-        engine's recovery snapshot is the ground truth: every APPLIED proposal whose
-        child document is a ``research/`` or ``reference/`` doc for this feature yields
-        its canonical DATED stem ``<yyyy-mm-dd>-<feature>-<doc_type>`` — the date the
-        engine assigned at materialization, recovered from the proposal's
-        ``created_at_ms`` under the engine's UTC ``ms_to_date_key`` convention (the
-        child_key itself is undated, and the authoring API exposes no dated stem). The
-        result is sorted and deduplicated so the op is deterministic and replay-exact.
-        A phase with no grounding, or an unreadable snapshot, yields an empty list
-        (the submit-node conformance guard is the backstop that refuses an ungrounded
-        ADR).
+        Only the ADR and Plan phases are grounded (Research is the first phase and
+        has nothing to cite). The ADR cites research/reference; the Plan cites
+        research/reference AND the ADR it sequences (agent-flow ADR D4). The
+        engine's recovery snapshot is the ground truth: every APPLIED proposal
+        whose child document is one of the phase's allowed directories for this
+        feature yields its canonical DATED stem
+        ``<yyyy-mm-dd>-<feature>-<doc_type>`` — the date the engine assigned at
+        materialization, recovered from the proposal's ``created_at_ms`` under the
+        engine's UTC ``ms_to_date_key`` convention (the child_key itself is
+        undated, and the authoring API exposes no dated stem). The result is
+        sorted and deduplicated so the op is deterministic and replay-exact. A
+        phase with no grounding, or an unreadable snapshot, yields an empty list
+        (the submit-node conformance guard is the backstop that refuses an
+        ungrounded ADR or Plan).
         """
-        if phase != PipelinePhase.ADR:
+        if phase == PipelinePhase.ADR:
+            allowed_dirs = _GROUNDING_DIRS
+        elif phase == PipelinePhase.PLAN:
+            allowed_dirs = _PLAN_GROUNDING_DIRS
+        else:
             return []
         try:
             snapshot = await client.recovery_snapshot(last_seq=0)
@@ -617,7 +646,9 @@ class DocumentProposalSubmitter:
             child_key = _grounding_child_key(item)
             if child_key is None:
                 continue
-            stem = _grounding_dated_stem(child_key, item.get("created_at_ms"), feature)
+            stem = _grounding_dated_stem(
+                child_key, item.get("created_at_ms"), feature, allowed_dirs
+            )
             if stem is not None:
                 stems.add(f"[[{stem}]]")
         return sorted(stems)

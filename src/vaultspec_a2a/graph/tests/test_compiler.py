@@ -72,7 +72,7 @@ def _make_team(
 
 def _pipeline_team() -> TeamConfig:
     """A standard three-role pipeline team (planner -> coder -> reviewer)."""
-    roles = ["vaultspec-planner", "vaultspec-coder", "vaultspec-reviewer"]
+    roles = ["vaultspec-planner", "vaultspec-coder", "vaultspec-doc-reviewer"]
     return _make_team(
         topology=TopologyConfig(type=TopologyType.PIPELINE, order=roles),
         worker_ids=roles,
@@ -141,7 +141,7 @@ async def test_compile_team_graph_accepts_workspace_root(
     """compile_team_graph accepts workspace_root and produces a valid graph."""
     team = _make_team(
         topology=TopologyConfig(type=TopologyType.STAR),
-        worker_ids=["vaultspec-planner", "vaultspec-coder", "vaultspec-reviewer"],
+        worker_ids=["vaultspec-planner", "vaultspec-coder", "vaultspec-doc-reviewer"],
     )
     agent_configs = {w.agent_id: load_agent_config(w.agent_id) for w in team.workers}
     supervisor_cfg = load_agent_config("vaultspec-supervisor")
@@ -159,12 +159,12 @@ async def test_compile_team_graph_accepts_workspace_root(
     assert {
         "vaultspec-planner",
         "vaultspec-coder",
-        "vaultspec-reviewer",
+        "vaultspec-doc-reviewer",
         "supervisor",
         "plan_approval",
         "mount_vaultspec-planner",
         "mount_vaultspec-coder",
-        "mount_vaultspec-reviewer",
+        "mount_vaultspec-doc-reviewer",
     } == node_keys
 
 
@@ -198,7 +198,7 @@ async def test_compile_interrupt_before_always_empty(
 
     assert list(graph.interrupt_before_nodes) == []
     node_keys = {k for k in graph.nodes if not k.startswith("__")}
-    worker_ids = {"vaultspec-planner", "vaultspec-coder", "vaultspec-reviewer"}
+    worker_ids = {"vaultspec-planner", "vaultspec-coder", "vaultspec-doc-reviewer"}
     mount_ids = {f"mount_{wid}" for wid in worker_ids}
     assert worker_ids | mount_ids == node_keys
 
@@ -242,11 +242,11 @@ async def test_compile_pipeline_loop_structure(
     team = _make_team(
         topology=TopologyConfig(
             type=TopologyType.PIPELINE_LOOP,
-            order=["vaultspec-planner", "vaultspec-coder", "vaultspec-reviewer"],
-            loop_node="vaultspec-reviewer",
+            order=["vaultspec-planner", "vaultspec-coder", "vaultspec-doc-reviewer"],
+            loop_node="vaultspec-doc-reviewer",
             max_loops=3,
         ),
-        worker_ids=["vaultspec-planner", "vaultspec-coder", "vaultspec-reviewer"],
+        worker_ids=["vaultspec-planner", "vaultspec-coder", "vaultspec-doc-reviewer"],
     )
     agent_configs = {w.agent_id: load_agent_config(w.agent_id) for w in team.workers}
 
@@ -259,7 +259,7 @@ async def test_compile_pipeline_loop_structure(
 
     node_keys = {k for k in graph.nodes if not k.startswith("__")}
     assert "supervisor" not in node_keys
-    assert {"vaultspec-planner", "vaultspec-coder", "vaultspec-reviewer"} <= node_keys
+    assert {"vaultspec-planner", "vaultspec-coder", "vaultspec-doc-reviewer"} <= node_keys
     assert list(graph.interrupt_before_nodes) == []
 
 
@@ -271,12 +271,12 @@ async def test_compile_pipeline_loop_single_agent_raises(
     """pipeline_loop with only the loop_node raises ConfigError."""
     bad_topology = TopologyConfig(
         type=TopologyType.PIPELINE_LOOP,
-        order=["vaultspec-reviewer"],
-        loop_node="vaultspec-reviewer",
+        order=["vaultspec-doc-reviewer"],
+        loop_node="vaultspec-doc-reviewer",
         max_loops=3,
     )
-    bad_team = _make_team(topology=bad_topology, worker_ids=["vaultspec-reviewer"])
-    agent_configs = {"vaultspec-reviewer": load_agent_config("vaultspec-reviewer")}
+    bad_team = _make_team(topology=bad_topology, worker_ids=["vaultspec-doc-reviewer"])
+    agent_configs = {"vaultspec-doc-reviewer": load_agent_config("vaultspec-doc-reviewer")}
     with pytest.raises(ConfigError, match="degenerate self-loop"):
         compile_team_graph(
             team_config=bad_team,

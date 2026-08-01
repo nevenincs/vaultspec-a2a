@@ -244,6 +244,9 @@ RESEARCH_ADR_NODE_PHASE: dict[str, str] = {
     "adr_author": "writing_adr",
     "adr_review": "reviewing_adr",
     "adr_gate": "awaiting_adr_decision",
+    "plan_author": "writing_plan",
+    "plan_review": "reviewing_plan",
+    "plan_gate": "awaiting_plan_decision",
 }
 
 

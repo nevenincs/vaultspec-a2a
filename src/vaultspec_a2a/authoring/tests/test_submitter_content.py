@@ -15,6 +15,7 @@ import pytest
 from langchain_core.messages import AIMessage, HumanMessage
 
 from ..submitter import (
+    _PLAN_GROUNDING_DIRS,
     DocumentConformanceError,
     DocumentUnavailableError,
     _conformance_notes,
@@ -227,6 +228,59 @@ class TestGroundingReferenceResolution:
         assert (
             _grounding_dated_stem(
                 "plan/sse-reconnection-live-plan.md", self._MS, "sse-reconnection-live"
+            )
+            is None
+        )
+
+    def test_dated_stem_default_dirs_skip_adr(self) -> None:
+        # ADR grounding (the default allowed_dirs) never accepts an ADR sibling -
+        # only research/reference documents ground an ADR.
+        assert (
+            _grounding_dated_stem(
+                "adr/sse-reconnection-live-adr.md", self._MS, "sse-reconnection-live"
+            )
+            is None
+        )
+
+    def test_plan_grounding_dirs_accept_adr(self) -> None:
+        # Plan grounding (agent-flow ADR D4) additionally accepts the ADR the plan
+        # sequences, passed explicitly via the allowed_dirs parameter.
+        stem = _grounding_dated_stem(
+            "adr/sse-reconnection-live-adr.md",
+            self._MS,
+            "sse-reconnection-live",
+            _PLAN_GROUNDING_DIRS,
+        )
+        assert stem == "2026-07-15-sse-reconnection-live-adr"
+
+    def test_plan_grounding_dirs_still_accept_research_and_reference(self) -> None:
+        assert (
+            _grounding_dated_stem(
+                "research/sse-reconnection-live-research.md",
+                self._MS,
+                "sse-reconnection-live",
+                _PLAN_GROUNDING_DIRS,
+            )
+            == "2026-07-15-sse-reconnection-live-research"
+        )
+        assert (
+            _grounding_dated_stem(
+                "reference/sse-reconnection-live-reference.md",
+                self._MS,
+                "sse-reconnection-live",
+                _PLAN_GROUNDING_DIRS,
+            )
+            == "2026-07-15-sse-reconnection-live-reference"
+        )
+
+    def test_plan_grounding_dirs_still_skip_plan_siblings(self) -> None:
+        # A plan does not ground itself.
+        assert (
+            _grounding_dated_stem(
+                "plan/sse-reconnection-live-plan.md",
+                self._MS,
+                "sse-reconnection-live",
+                _PLAN_GROUNDING_DIRS,
             )
             is None
         )

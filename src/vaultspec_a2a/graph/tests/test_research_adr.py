@@ -15,6 +15,7 @@ import pytest
 import pytest_asyncio
 from langchain_core.messages import HumanMessage
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
+from langgraph.types import Command
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator
@@ -147,6 +148,9 @@ async def test_research_adr_compiles_expected_node_set(
         "adr_author",
         "adr_review",
         "adr_gate",
+        "plan_author",
+        "plan_review",
+        "plan_gate",
     } <= node_keys
     assert list(graph.interrupt_before_nodes) == []
 
@@ -177,6 +181,25 @@ async def test_research_adr_missing_role_raises(
     trimmed = [w for w in team.workers if w.agent_id != "vaultspec-adr-author"]
     team = team.model_copy(update={"workers": trimmed})
     with pytest.raises(ConfigError, match="adr-author"):
+        compile_team_graph(
+            team_config=team,
+            agent_configs=_agent_configs(team),
+            checkpointer=checkpointer,
+            provider_factory=pf,
+            proposal_submitter=_FakeSubmitter(),
+        )
+
+
+@pytest.mark.asyncio
+async def test_research_adr_missing_planner_role_raises(
+    checkpointer: AsyncSqliteSaver,
+    pf: ProviderFactoryProtocol,
+) -> None:
+    """agent-flow ADR D4: the Plan phase's planner role is required, like adr-author."""
+    team = _research_adr_team()
+    trimmed = [w for w in team.workers if w.agent_id != "vaultspec-planner"]
+    team = team.model_copy(update={"workers": trimmed})
+    with pytest.raises(ConfigError, match="planner"):
         compile_team_graph(
             team_config=team,
             agent_configs=_agent_configs(team),
@@ -305,3 +328,170 @@ async def test_research_gate_submit_sees_run_state_and_synthesis_body(
     )
     # The parked state still carries the run id verbatim.
     assert result["thread_id"] == run_thread_id
+
+
+# ---------------------------------------------------------------------------
+# P02.S06 -- the Plan third phase (agent-flow ADR D4)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_three_phase_run_parks_at_gate_three_with_a_plan_proposal(
+    checkpointer: AsyncSqliteSaver,
+    pf: ProviderFactoryProtocol,
+) -> None:
+    """The full run walks Gate 1 -> Gate 2 -> Gate 3, proposing all three phases.
+
+    Approving Gate 1 (research) advances to the ADR phase; approving Gate 2 (adr)
+    advances to the Plan phase (D4's new wiring: adr_gate's approved_target is
+    plan_author, not END); the run then parks at Gate 3 with a plan proposal.
+    """
+    submitter = _FakeSubmitter()
+    team = _research_adr_team([ResearchThreadSpec(thread_id="primary")])
+    graph = compile_team_graph(
+        team_config=team,
+        agent_configs=_agent_configs(team),
+        checkpointer=checkpointer,
+        provider_factory=pf,
+        proposal_submitter=submitter,
+    )
+
+    thread_id = "three-phase-run"
+    config = {"configurable": {"thread_id": thread_id}}
+    state: dict[str, Any] = {
+        "active_agent": "research_dispatch",
+        "artifacts": [],
+        "current_plan": [],
+        "messages": [HumanMessage(content="Research, decide, and plan the feature.")],
+        "next": "",
+        "thread_id": thread_id,
+        "active_feature": "adr-authoring-orchestration",
+        "token_usage": {},
+    }
+
+    at_gate_one = await graph.ainvoke(state, config=config)
+    assert at_gate_one["__interrupt__"][0].value["phase"] == "research"
+
+    at_gate_two = await graph.ainvoke(
+        Command(resume={"verdict": "approved", "notes": None}), config=config
+    )
+    assert at_gate_two["__interrupt__"][0].value["phase"] == "adr"
+
+    at_gate_three = await graph.ainvoke(
+        Command(resume={"verdict": "approved", "notes": None}), config=config
+    )
+    payload = at_gate_three["__interrupt__"][0].value
+    assert payload["type"] == "document_approval_request"
+    assert payload["phase"] == "plan"
+    assert payload["proposal_id"] == "prop-plan"
+    assert submitter.phases == ["research", "adr", "plan"]
+
+
+@pytest.mark.asyncio
+async def test_plan_gate_approve_completes_the_run(
+    checkpointer: AsyncSqliteSaver,
+    pf: ProviderFactoryProtocol,
+) -> None:
+    """Approving Gate 3 finishes the run (plan_gate's approved_target is END)."""
+    submitter = _FakeSubmitter()
+    team = _research_adr_team([ResearchThreadSpec(thread_id="primary")])
+    graph = compile_team_graph(
+        team_config=team,
+        agent_configs=_agent_configs(team),
+        checkpointer=checkpointer,
+        provider_factory=pf,
+        proposal_submitter=submitter,
+    )
+
+    thread_id = "plan-gate-approve-run"
+    config = {"configurable": {"thread_id": thread_id}}
+    state: dict[str, Any] = {
+        "active_agent": "research_dispatch",
+        "artifacts": [],
+        "current_plan": [],
+        "messages": [HumanMessage(content="Research, decide, and plan the feature.")],
+        "next": "",
+        "thread_id": thread_id,
+        "active_feature": "adr-authoring-orchestration",
+        "token_usage": {},
+    }
+
+    await graph.ainvoke(state, config=config)  # -> parks at Gate 1 (research)
+    await graph.ainvoke(  # approve Gate 1 -> parks at Gate 2 (adr)
+        Command(resume={"verdict": "approved", "notes": None}), config=config
+    )
+    await graph.ainvoke(  # approve Gate 2 -> parks at Gate 3 (plan)
+        Command(resume={"verdict": "approved", "notes": None}), config=config
+    )
+    final = await graph.ainvoke(  # approve Gate 3 -> END
+        Command(resume={"verdict": "approved", "notes": None}), config=config
+    )
+
+    assert "__interrupt__" not in final
+    assert final["gate_phase"] == "plan"
+    assert final["gate_verdict"] == "approved"
+    assert submitter.phases == ["research", "adr", "plan"]
+
+
+@pytest.mark.asyncio
+async def test_plan_gate_request_changes_loops_a_revision(
+    checkpointer: AsyncSqliteSaver,
+    pf: ProviderFactoryProtocol,
+) -> None:
+    """A request_changes verdict at Gate 3 routes back to plan_author and reproposes.
+
+    Mirrors the proven research/adr phase-gate revision loop
+    (``graph/tests/nodes/test_phase_gate.py``): the writer revises, the inner
+    doc-review loop advances again (the stub model never emits REVISION
+    REQUIRED), and the plan is resubmitted as a fresh proposal that parks the
+    run at Gate 3 a second time.
+    """
+    submitter = _FakeSubmitter()
+    team = _research_adr_team([ResearchThreadSpec(thread_id="primary")])
+    graph = compile_team_graph(
+        team_config=team,
+        agent_configs=_agent_configs(team),
+        checkpointer=checkpointer,
+        provider_factory=pf,
+        proposal_submitter=submitter,
+    )
+
+    thread_id = "plan-gate-revision-run"
+    config = {"configurable": {"thread_id": thread_id}}
+    state: dict[str, Any] = {
+        "active_agent": "research_dispatch",
+        "artifacts": [],
+        "current_plan": [],
+        "messages": [HumanMessage(content="Research, decide, and plan the feature.")],
+        "next": "",
+        "thread_id": thread_id,
+        "active_feature": "adr-authoring-orchestration",
+        "token_usage": {},
+    }
+
+    await graph.ainvoke(state, config=config)
+    await graph.ainvoke(
+        Command(resume={"verdict": "approved", "notes": None}), config=config
+    )
+    at_gate_three = await graph.ainvoke(
+        Command(resume={"verdict": "approved", "notes": None}), config=config
+    )
+    assert at_gate_three["__interrupt__"][0].value["phase"] == "plan"
+    assert submitter.phases == ["research", "adr", "plan"]
+
+    revised = await graph.ainvoke(
+        Command(
+            resume={
+                "verdict": "request_changes",
+                "notes": "Sequence the migration before the cutover.",
+            }
+        ),
+        config=config,
+    )
+
+    # The revision loop re-ran the plan author and resubmitted: a second "plan"
+    # proposal, and the run parks at Gate 3 again with the fresh proposal id.
+    payload = revised["__interrupt__"][0].value
+    assert payload["phase"] == "plan"
+    assert payload["proposal_id"] == "prop-plan"
+    assert submitter.phases == ["research", "adr", "plan", "plan"]

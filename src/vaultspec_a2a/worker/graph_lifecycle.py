@@ -417,11 +417,14 @@ class GraphLifecycleManager:
         resolved per run from the store and graph state, so the cached graph is
         reused safely across runs. The phase specs map each document phase to the
         graph writer node whose ``AIMessage.name`` carries the document
-        (``synthesis``/``adr_author``, the ``_RA_*`` node names in the compiler)
-        and to the role whose actor token authors it. The role key is the worker
-        ``agent_id`` (``vaultspec-synthesist``/``vaultspec-adr-author``), matching
-        the actor-token bundle keying the run-start eligibility policy
-        enforces — not the short persona role.
+        (``synthesis``/``adr_author``/``plan_author``, the ``_RA_*`` node names in
+        the compiler) and to the role whose actor token authors it. The role key
+        is the worker ``agent_id``
+        (``vaultspec-synthesist``/``vaultspec-adr-author``/``vaultspec-planner``),
+        matching the actor-token bundle keying the run-start eligibility policy
+        enforces — not the short persona role. The Plan phase (agent-flow ADR D4)
+        runs only after Gate 2 approves the ADR, so its grounding is required to
+        cite an applied ADR (see ``DocumentProposalSubmitter._resolve_grounding_related``).
         """
         from ..authoring import (
             DocumentProposalSubmitter,
@@ -457,6 +460,12 @@ class GraphLifecycleManager:
                     writer_message_name="adr_author",
                     doc_type="adr",
                     completion_sentinel="ADR READY",
+                ),
+                "plan": PhaseAuthoringSpec(
+                    document_role="vaultspec-planner",
+                    writer_message_name="plan_author",
+                    doc_type="plan",
+                    completion_sentinel="PLAN READY",
                 ),
             },
         )

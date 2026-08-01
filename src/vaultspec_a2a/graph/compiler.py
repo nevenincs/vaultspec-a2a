@@ -1010,6 +1010,10 @@ _RA_ADR_AUTHOR = "adr_author"
 _RA_ADR_REVIEW = "adr_review"
 _RA_ADR_SUBMIT = "adr_submit"
 _RA_ADR_GATE = "adr_gate"
+_RA_PLAN_AUTHOR = "plan_author"
+_RA_PLAN_REVIEW = "plan_review"
+_RA_PLAN_SUBMIT = "plan_submit"
+_RA_PLAN_GATE = "plan_gate"
 
 
 def _resolve_research_adr_models(
@@ -1184,12 +1188,19 @@ def _compile_research_adr(
                                                          -> [revise]   synthesis
               -> [REVISION] synthesis
         adr_author -> adr_review
-              -> [PASS] adr_submit -> adr_gate -> [approved] END
+              -> [PASS] adr_submit -> adr_gate -> [approved] plan_author
                                                -> [revise]   adr_author
               -> [REVISION] adr_author
+        plan_author -> plan_review
+              -> [PASS] plan_submit -> plan_gate -> [approved] END
+                                                 -> [revise]   plan_author
+              -> [REVISION] plan_author
 
     Each gate is a submit node (commits the proposal id before parking) plus a
-    pure gate node (interrupt + verdict routing).
+    pure gate node (interrupt + verdict routing). The Plan phase (agent-flow ADR
+    D4) reuses the same doc-reviewer inner loop and phase-gate machinery as
+    Research and ADR: it runs only after Gate 2 approves the ADR, so the plan is
+    always grounded in an already-decided architecture.
 
     The diverge stage fans out to one researcher branch per configured
     thread spec; each document phase is guarded by the generalized phase gate
@@ -1295,6 +1306,35 @@ def _compile_research_adr(
         ),
         retry_policy=_NODE_RETRY_POLICY,
     )
+    builder.add_node(
+        _RA_PLAN_AUTHOR,
+        create_worker_node(
+            models["planner"],
+            _agent_system_prompt(team_config, agent_configs, "planner"),
+            name=_RA_PLAN_AUTHOR,
+            autonomous=autonomous,
+            workspace_root=workspace_root,
+            role="planner",
+            harness_mcp_servers=harness_mcp_servers,
+            # Feedback-loop grounding: the plan writer revises against the
+            # reviewer's batch when a revision run carries a feedback_batch_id.
+            feedback_reader=feedback_reader,
+        ),
+        retry_policy=_NODE_RETRY_POLICY,
+    )
+    builder.add_node(
+        _RA_PLAN_REVIEW,
+        create_worker_node(
+            models["doc-reviewer"],
+            _agent_system_prompt(team_config, agent_configs, "doc-reviewer"),
+            name=_RA_PLAN_REVIEW,
+            autonomous=autonomous,
+            workspace_root=workspace_root,
+            role="doc-reviewer",
+            harness_mcp_servers=harness_mcp_servers,
+        ),
+        retry_policy=_NODE_RETRY_POLICY,
+    )
     # Each gate is split into a submit node (commits the proposal id to the
     # checkpoint) and a pure gate node (interrupt + verdict routing), so the
     # out-of-run verdict subscriber can correlate a verdict to the parked run via
@@ -1330,8 +1370,25 @@ def _compile_research_adr(
         _RA_ADR_GATE,
         create_phase_gate_node(
             PipelinePhase.ADR,
-            approved_target=END,
+            approved_target=_RA_PLAN_AUTHOR,
             revision_target=_RA_ADR_AUTHOR,
+        ),
+    )
+    builder.add_node(
+        _RA_PLAN_SUBMIT,
+        create_phase_submit_node(
+            PipelinePhase.PLAN,
+            proposal_submitter,
+            gate_target=_RA_PLAN_GATE,
+            revision_target=_RA_PLAN_AUTHOR,
+        ),
+    )
+    builder.add_node(
+        _RA_PLAN_GATE,
+        create_phase_gate_node(
+            PipelinePhase.PLAN,
+            approved_target=END,
+            revision_target=_RA_PLAN_AUTHOR,
         ),
     )
 
@@ -1354,6 +1411,15 @@ def _compile_research_adr(
         cast(
             "dict[Hashable, str]",
             {_RA_ADR_AUTHOR: _RA_ADR_AUTHOR, _RA_ADR_SUBMIT: _RA_ADR_SUBMIT},
+        ),
+    )
+    builder.add_edge(_RA_PLAN_AUTHOR, _RA_PLAN_REVIEW)
+    builder.add_conditional_edges(
+        _RA_PLAN_REVIEW,
+        _doc_review_router(writer_target=_RA_PLAN_AUTHOR, gate_target=_RA_PLAN_SUBMIT),
+        cast(
+            "dict[Hashable, str]",
+            {_RA_PLAN_AUTHOR: _RA_PLAN_AUTHOR, _RA_PLAN_SUBMIT: _RA_PLAN_SUBMIT},
         ),
     )
 

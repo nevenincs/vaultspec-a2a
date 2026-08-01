@@ -23,6 +23,7 @@ _AUTHORING_ROLES = (
     "vaultspec-researcher",
     "vaultspec-synthesist",
     "vaultspec-adr-author",
+    "vaultspec-planner",
     "vaultspec-doc-reviewer",
 )
 

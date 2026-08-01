@@ -574,6 +574,7 @@ async def test_presets_list_is_truthful_and_resilient(
         assert authoring["supported_capabilities"] == [
             "research_document",
             "architecture_decision",
+            "plan_document",
         ]
         assert authoring["default_profile_id"] == "team-defaults"
         profiles = {p["id"]: p for p in authoring["profiles"]}
@@ -589,7 +590,7 @@ async def test_presets_list_is_truthful_and_resilient(
         assert profiles["team-defaults"]["is_default"] is True
 
         # team-defaults effective assignments: safe operational fields only. All
-        # four document personas resolve to the Claude subscription tier (the
+        # five document personas resolve to the Claude subscription tier (the
         # doc-reviewer was repinned off the non-resolving zhipu fallback);
         # provider heterogeneity is instead disclosed by the codex/zai
         # provider-axis profiles asserted below.
@@ -619,6 +620,7 @@ async def test_presets_list_is_truthful_and_resilient(
             "vaultspec-researcher",
             "vaultspec-synthesist",
             "vaultspec-adr-author",
+            "vaultspec-planner",
         )
         codex_by_agent = {a["agent_id"]: a for a in profiles["codex"]["assignments"]}
         for agent_id in authoring_roles:

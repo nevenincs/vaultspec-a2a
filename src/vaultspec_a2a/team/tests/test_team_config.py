@@ -10,6 +10,7 @@ from typing import cast
 import pytest
 from pydantic import ValidationError
 
+from ...authoring.contract import DOCUMENT_AUTHORING_ROLES, RESEARCH_ADR_ROLES
 from ...graph.enums import Model, Provider
 from ...thread.errors import (
     AgentConfigNotFoundError,
@@ -42,17 +43,18 @@ _TEAMS_DIR = _PRESETS_DIR / "teams"
 
 _ALL_AGENT_IDS = [
     "vaultspec-supervisor",
-    "vaultspec-planner",
+    "vaultspec-plan-author",
     "vaultspec-coder",
-    "vaultspec-reviewer",
     "vaultspec-analyst",
     "vaultspec-researcher",
     "vaultspec-synthesist",
     "vaultspec-adr-author",
+    "vaultspec-doc-editor",
     "vaultspec-doc-reviewer",
 ]
 _ALL_TEAM_IDS = [
     "vaultspec-solo-coder",
+    "vaultspec-doc-editor",
 ]
 
 
@@ -77,21 +79,16 @@ class TestAgentConfigFromToml:
         assert cfg.role == "supervisor"
         assert cfg.persona.system_prompt
 
-    def test_planner_has_correct_fields(self) -> None:
-        """Planner preset has expected role and persona."""
-        cfg = load_agent_config("vaultspec-planner")
-        assert cfg.role == "planner"
+    def test_plan_author_has_correct_fields(self) -> None:
+        """Plan-author preset carries the contract's plan-author persona role."""
+        cfg = load_agent_config("vaultspec-plan-author")
+        assert cfg.role == "plan-author"
         assert cfg.persona.system_prompt
 
     def test_coder_requires_approval(self) -> None:
         """Coder preset declares at least one require_approval_for entry."""
         cfg = load_agent_config("vaultspec-coder")
         assert cfg.permissions.require_approval_for  # non-empty list
-
-    def test_reviewer_has_filesystem_read(self) -> None:
-        """Reviewer preset enables filesystem_read capability."""
-        cfg = load_agent_config("vaultspec-reviewer")
-        assert cfg.capabilities.filesystem_read is True
 
     def test_analyst_capabilities(self) -> None:
         """Analyst preset enables filesystem_read and filesystem_write."""
@@ -116,11 +113,6 @@ class TestAgentModelConfig:
         """Coder is configured at HIGH capability."""
         cfg = load_agent_config("vaultspec-coder")
         assert cfg.model.capability == Model.HIGH
-
-    def test_reviewer_uses_zhipu_provider(self) -> None:
-        """Reviewer is assigned the ZHIPU provider."""
-        cfg = load_agent_config("vaultspec-reviewer")
-        assert cfg.model.provider == Provider.ZHIPU
 
     def test_agent_model_config_all_optional(self) -> None:
         """AgentModelConfig fields are all optional (None by default)."""
@@ -202,14 +194,14 @@ class TestLoadAgentConfigDiscovery:
 
     def test_finds_bundled_preset(self) -> None:
         """load_agent_config returns a config when only the preset exists."""
-        cfg = load_agent_config("vaultspec-planner")
-        assert cfg.id == "vaultspec-planner"
+        cfg = load_agent_config("vaultspec-plan-author")
+        assert cfg.id == "vaultspec-plan-author"
 
     def test_workspace_override_takes_precedence(self, tmp_path: Path) -> None:
         """A workspace .vaultspec/agents/{id}.toml overrides the bundled preset."""
         override_dir = tmp_path / ".vaultspec" / "agents"
         override_dir.mkdir(parents=True)
-        override_path = override_dir / "vaultspec-planner.toml"
+        override_path = override_dir / "vaultspec-plan-author.toml"
         override_path.write_bytes(
             b"""
 [agent]
@@ -222,7 +214,7 @@ description = "Workspace override."
 system_prompt = "Custom system prompt."
 """
         )
-        cfg = load_agent_config("vaultspec-planner", workspace_root=tmp_path)
+        cfg = load_agent_config("vaultspec-plan-author", workspace_root=tmp_path)
         assert cfg.display_name == "Custom Planner"
 
     def test_missing_agent_raises_not_found(self) -> None:
@@ -238,8 +230,8 @@ system_prompt = "Custom system prompt."
 
     def test_workspace_root_none_uses_only_preset(self) -> None:
         """Passing workspace_root=None still finds bundled presets."""
-        cfg = load_agent_config("vaultspec-reviewer", workspace_root=None)
-        assert cfg.id == "vaultspec-reviewer"
+        cfg = load_agent_config("vaultspec-doc-reviewer", workspace_root=None)
+        assert cfg.id == "vaultspec-doc-reviewer"
 
 
 # ---------------------------------------------------------------------------
@@ -706,21 +698,19 @@ agent_id = "coder"
 
 
 class TestDocumentAuthoringPersonas:
-    """Verify the four document-authoring persona TOMLs load and have correct fields."""
+    """Verify the document-authoring persona TOMLs load and have correct fields."""
 
-    @pytest.mark.parametrize(
-        "agent_id",
-        [
-            "vaultspec-researcher",
-            "vaultspec-synthesist",
-            "vaultspec-adr-author",
-            "vaultspec-doc-reviewer",
-        ],
-    )
-    def test_loads_document_authoring_persona(self, agent_id: str) -> None:
-        """Each document-authoring persona TOML produces a valid AgentConfig."""
-        cfg = AgentConfig.from_toml(_AGENTS_DIR / f"{agent_id}.toml")
-        assert cfg.id == agent_id
+    @pytest.mark.parametrize("role", DOCUMENT_AUTHORING_ROLES)
+    def test_loads_document_authoring_persona(self, role: str) -> None:
+        """Every contract role has a bundled persona whose declared role matches.
+
+        Parameterized off the authoring contract, so a role added there without a
+        persona TOML - or with a TOML whose ``role`` field drifted - fails here
+        rather than at graph-compile time.
+        """
+        cfg = AgentConfig.from_toml(_AGENTS_DIR / f"vaultspec-{role}.toml")
+        assert cfg.id == f"vaultspec-{role}"
+        assert cfg.role == role
 
     def test_researcher_has_filesystem_read_no_write(self) -> None:
         """Researcher enables filesystem_read and disables filesystem_write."""
@@ -843,19 +833,21 @@ class TestAdrResearchTeamPreset:
         assert (_TEAMS_DIR / "vaultspec-adr-research.toml").is_file()
 
     def test_adr_research_workers_declared(self) -> None:
-        """The preset TOML declares all four document-authoring workers."""
+        """The preset declares exactly one worker per research_adr role.
+
+        The expectation is DERIVED from the authoring contract rather than
+        restated, so a role added to the phase machine without a worker in the
+        preset fails here instead of at graph-compile time on a live run.
+        """
         import tomllib
+
+        from ...authoring.contract import RESEARCH_ADR_ROLES
 
         path = _TEAMS_DIR / "vaultspec-adr-research.toml"
         with path.open("rb") as f:
             data = tomllib.load(f)
         worker_ids = {w["agent_id"] for w in data["team"]["workers"]}
-        expected = {
-            "vaultspec-researcher",
-            "vaultspec-synthesist",
-            "vaultspec-adr-author",
-            "vaultspec-doc-reviewer",
-        }
+        expected = {f"vaultspec-{role}" for role in RESEARCH_ADR_ROLES}
         assert expected == worker_ids
 
     def test_adr_research_topology_type_in_toml(self) -> None:
@@ -891,7 +883,7 @@ class TestAdrResearchTeamPreset:
             )
         assert cfg.id == "vaultspec-adr-research"
         assert cfg.topology.type == TopologyType.RESEARCH_ADR
-        assert len(cfg.workers) == 4
+        assert len(cfg.workers) == len(RESEARCH_ADR_ROLES)
 
     def test_adr_research_harness_opts_into_vaultspec_rag(self) -> None:
         """The live preset's effective harness declares the vaultspec-rag server.
@@ -931,14 +923,15 @@ class TestModelProfiles:
         assert "vaultspec-adr-author" not in fast.roles
 
     def test_bundled_adr_research_exposes_kimi_profile(self) -> None:
-        """The `kimi` provider-axis profile routes the three authoring roles to Kimi.
+        """The `kimi` provider-axis profile routes the four authoring roles to Kimi.
 
         Mirrors the `zai` precedent (P04.S14): the overlay sets only the per-role
-        provider for the researcher fan-out, synthesist, and ADR author; the inner
-        doc-reviewer is absent and keeps the team default (claude). The skip-loudly
-        credential gate is enforced at run-start eligibility on ``KIMI_API_KEY``
-        readiness, not in the profile TOML. That the TOML ``provider = "kimi"``
-        resolves to ``Provider.KIMI`` also confirms the P01 enum member is present.
+        provider for the researcher fan-out, synthesist, ADR author, and plan
+        author; the inner doc-reviewer is absent and keeps the team default
+        (claude). The skip-loudly credential gate is enforced at run-start
+        eligibility on ``KIMI_API_KEY`` readiness, not in the profile TOML. That the
+        TOML ``provider = "kimi"`` resolves to ``Provider.KIMI`` also confirms the
+        P01 enum member is present.
         """
         cfg = load_team_config("vaultspec-adr-research")
         assert "kimi" in cfg.profiles
@@ -948,6 +941,7 @@ class TestModelProfiles:
             "vaultspec-researcher",
             "vaultspec-synthesist",
             "vaultspec-adr-author",
+            "vaultspec-plan-author",
         }
         for role in kimi.roles.values():
             assert role.provider == Provider.KIMI

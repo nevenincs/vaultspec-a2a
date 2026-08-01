@@ -31,8 +31,8 @@ class TestTokenUsageEntry:
     def test_from_dict_round_trip(self) -> None:
         """from_dict -> to_dict produces the original dict."""
         original = {"input": 200, "output": 80, "total": 280}
-        entry = TokenUsageEntry.from_dict("vaultspec-planner", original)
-        assert entry.agent_id == "vaultspec-planner"
+        entry = TokenUsageEntry.from_dict("vaultspec-plan-author", original)
+        assert entry.agent_id == "vaultspec-plan-author"
         assert entry.to_dict() == original
 
     def test_from_dict_missing_keys_default_to_zero(self) -> None:

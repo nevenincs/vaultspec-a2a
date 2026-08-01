@@ -5,14 +5,14 @@
 content with no live model spend and no external service. Unlike ``MockChatModel``
 (which proxies to the VidaiMock HTTP tape server), this provider runs entirely
 in-process, so the standing acceptance harness can drive the full
-Research -> ADR contract without Docker or provider credentials.
+Research -> ADR -> Plan contract without Docker or provider credentials.
 
 The content is keyed by the worker ``AgentConfig.id`` so each research_adr role
-(researcher, synthesist, adr-author, doc-reviewer) receives role-appropriate
-output: the writers emit a valid vault-shaped markdown document the submitter can
-propose, and the reviewer emits the ``PASS`` sentinel that advances the inner
-review loop. The feature tag and topic are configurable so a parameterized
-harness can assert the materialized document stems.
+(researcher, synthesist, adr-author, plan-author, doc-reviewer) receives
+role-appropriate output: the writers emit a valid vault-shaped markdown document
+the submitter can propose, and the reviewer emits the ``PASS`` sentinel that
+advances the inner review loop. The feature tag and topic are configurable so a
+parameterized harness can assert the materialized document stems.
 """
 
 import logging
@@ -35,15 +35,16 @@ logger = logging.getLogger(__name__)
 __all__ = ["DeterministicResearchAdrChatModel"]
 
 # Canonical research_adr worker roles (the authoring contract's
-# DOCUMENT_AUTHORING_ROLES), matched as a suffix of the AgentConfig id so both bare
+# RESEARCH_ADR_ROLES), matched as a suffix of the AgentConfig id so both bare
 # ("researcher") and namespaced ("vaultspec-researcher") agent ids resolve to the
 # same role content. Kept as individual per-role content-dispatch keys here rather
 # than importing the contract tuple (the leaf provider stays free of a graph/team
 # runtime edge); a contract-sync test asserts these never diverge from
-# DOCUMENT_AUTHORING_ROLE_SET (authoring-contract ADR binding (b)).
+# RESEARCH_ADR_ROLES (authoring-contract ADR binding (b)).
 _ROLE_RESEARCHER = "researcher"
 _ROLE_SYNTHESIST = "synthesist"
 _ROLE_ADR_AUTHOR = "adr-author"
+_ROLE_PLAN_AUTHOR = "plan-author"
 _ROLE_DOC_REVIEWER = "doc-reviewer"
 
 # The role dispatch keys as an introspectable collection, ordered so a namespaced
@@ -51,6 +52,7 @@ _ROLE_DOC_REVIEWER = "doc-reviewer"
 # source for the resolver loop and the contract-sync guard.
 _ROLE_DISPATCH_KEYS: tuple[str, ...] = (
     _ROLE_ADR_AUTHOR,
+    _ROLE_PLAN_AUTHOR,
     _ROLE_DOC_REVIEWER,
     _ROLE_SYNTHESIST,
     _ROLE_RESEARCHER,
@@ -99,6 +101,34 @@ def _adr_document(feature: str, topic: str) -> str:
     )
 
 
+def _plan_document(feature: str, topic: str) -> str:
+    """Return a valid plan document body for the plan-author to propose."""
+    return (
+        "---\n"
+        "tags:\n"
+        "  - '#plan'\n"
+        f"  - '#{feature}'\n"
+        "tier: 'L1'\n"
+        "---\n\n"
+        f"# `{feature}` plan\n\n"
+        "## Description\n\n"
+        f"Sequence the work the in-run ADR decided for `{topic}`, produced by the "
+        "in-process acceptance provider. The plan re-argues nothing; it names the "
+        "ordered Steps that carry the decision into the codebase.\n\n"
+        "## Steps\n\n"
+        "- [ ] `S01` - wire the plan phase behind the ADR gate; "
+        "`src/vaultspec_a2a/graph/compiler.py`.\n"
+        "- [ ] `S02` - extend the served capability declaration; "
+        "`src/vaultspec_a2a/team/team_config.py`.\n\n"
+        "## Parallelization\n\n"
+        "Both Steps touch one topology definition and carry hard ordering; run them "
+        "in sequence.\n\n"
+        "## Verification\n\n"
+        "The compiled graph parks on the plan gate after the ADR gate returns an "
+        "approved verdict, and the served capability list names the plan document.\n"
+    )
+
+
 def _role_of(agent_id: str | None) -> str | None:
     """Resolve the research_adr role from a (possibly namespaced) agent id."""
     if not agent_id:
@@ -140,6 +170,8 @@ class DeterministicResearchAdrChatModel(BaseChatModel):
             return _REVIEW_PASS
         if role == _ROLE_ADR_AUTHOR:
             return _adr_document(self.feature_tag, self.topic)
+        if role == _ROLE_PLAN_AUTHOR:
+            return _plan_document(self.feature_tag, self.topic)
         if role == _ROLE_SYNTHESIST:
             return _research_document(self.feature_tag, self.topic)
         if role == _ROLE_RESEARCHER:

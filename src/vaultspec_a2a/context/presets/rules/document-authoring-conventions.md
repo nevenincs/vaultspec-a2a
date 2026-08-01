@@ -4,15 +4,19 @@ roles:
   - researcher
   - synthesist
   - adr-author
+  - plan-author
   - doc-reviewer
+  - doc-editor
 ---
 
-# Document-authoring conventions (research_adr)
+# Document-authoring conventions
 
 Body-prose conventions for vaultspec document authoring — the taxonomy, frontmatter,
 linking, and template rules the engine does NOT validate server-side. These bind the
-research_adr document roles (researcher, synthesist, adr-author, doc-reviewer). A
-workspace file of the same name overrides this bundled default entirely.
+vault-document roles: the research_adr writers (researcher, synthesist,
+adr-author, plan-author, doc-reviewer) and the solo doc-editor, which revises an
+existing document and must satisfy the same conventions. A workspace file of the
+same name overrides this bundled default entirely.
 
 ## Tag taxonomy
 
@@ -49,9 +53,11 @@ workspace file of the same name overrides this bundled default entirely.
 
 ## Document boundary — each fact has one home
 
-- The research grounds; the ADR decides. Cite a research finding by stem rather than
-  restating its evidence; a restated fact forks context and goes stale silently.
-- Decision language lives only in the ADR.
+- The research grounds; the ADR decides; the plan sequences. Cite a research finding
+  or a decision by stem rather than restating it; a restated fact forks context and
+  goes stale silently.
+- Decision language lives only in the ADR. A plan carries no rationale of its own — it
+  cites the ADR that already argued it.
 
 ## Doc-type structure
 
@@ -62,6 +68,10 @@ workspace file of the same name overrides this bundled default entirely.
   kept/rejected rationale), Implementation, Rationale, Consequences. The status rides
   the H1 token — `# <feature> adr: <title> | (**status:** accepted)` — never a
   separate `## Status` section.
+- Plan: a `tier` (`L1`-`L4`) declared in frontmatter, a Goal stating what the plan
+  delivers, and a Steps section of leaf rows. Every Step names one action, its scoped
+  files, and a verifiable success criterion; a Step whose completion cannot be checked
+  is not a Step. Cite the governing ADR by stem in `related:`, never re-argue it.
 
 ## Quality bar
 

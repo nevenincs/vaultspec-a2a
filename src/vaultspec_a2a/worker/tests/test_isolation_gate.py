@@ -70,6 +70,39 @@ def test_solo_coder_is_armed_via_authoring_bridge() -> None:
     assert not harness.mcp_servers
 
 
+def _doc_editor() -> tuple[Any, dict[str, Any]]:
+    team = load_team_config("vaultspec-doc-editor")
+    agent_configs = {w.agent_id: load_agent_config(w.agent_id) for w in team.workers}
+    return team, agent_configs
+
+
+def test_doc_editor_reaches_the_bridge_through_the_armed_lane_gate() -> None:
+    """The solo doc-editor is armed, so its run must clear the isolation gate.
+
+    The bridge is the preset's ONLY authoring path - its worker declares no
+    filesystem write - so the arming predicate the production compile seam uses
+    must recognise it, and an unauthenticated lane must be refused rather than
+    spawned unisolated. Driven through the real ``assert_armed_lanes_authenticated``
+    against the shipped preset, not a hand-built config.
+    """
+    team, agent_configs = _doc_editor()
+    harness = team.effective_harness()
+    assert harness is not None
+    assert harness.authoring_bridge is True
+    assert agent_configs["vaultspec-doc-editor"].capabilities.filesystem_write is False
+
+    unauthenticated = _LaneFactory(provider="claude", auth_mode="none_detected")
+    with pytest.raises(IsolationRequiredError, match="CLAUDE_CODE_OAUTH_TOKEN"):
+        assert_armed_lanes_authenticated(
+            team, agent_configs, None, provider_factory=unauthenticated
+        )
+
+    authenticated = _LaneFactory(provider="claude", auth_mode="oauth_token")
+    assert_armed_lanes_authenticated(
+        team, agent_configs, None, provider_factory=authenticated
+    )
+
+
 def test_armed_bridge_preset_refused_without_lane_token() -> None:
     team, agent_configs = _solo_coder()
     factory = _LaneFactory(provider="claude", auth_mode="none_detected")

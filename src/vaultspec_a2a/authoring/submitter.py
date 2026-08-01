@@ -179,10 +179,10 @@ class PhaseAuthoringSpec:
         document body to submit.
     doc_type:
         The engine document type for the proposal target (e.g. ``research``,
-        ``adr``).
+        ``adr``, ``plan``).
     completion_sentinel:
         The machine-checkable stage-completion line the writer persona ends its
-        turn with (``RESEARCH READY`` / ``ADR READY``). The graph-
+        turn with (``RESEARCH READY`` / ``ADR READY`` / ``PLAN READY``). The graph-
         submitter mechanism submits the writer's message body verbatim,
         so this trailing marker MUST be stripped before submit or it lands in the
         materialized document. ``None`` disables stripping.
@@ -194,8 +194,25 @@ class PhaseAuthoringSpec:
     completion_sentinel: str | None = None
 
 
-#: The `.vault/` sub-directories whose applied documents ground an ADR.
-_GROUNDING_DIRS: tuple[str, ...] = ("research", "reference")
+#: The `.vault/` sub-directories whose applied documents ground each authored
+#: phase, keyed by the phase being authored. The vault's dependency graph is the
+#: rule: an ADR grounds on the research and reference records that preceded it; a
+#: plan grounds on the ADR it executes (and the research behind it), because a plan
+#: that cites no decision is a plan nobody authorized. A phase absent from this map
+#: has no grounding obligation and submits with an empty ``related:``.
+_PHASE_GROUNDING_DIRS: dict[str, tuple[str, ...]] = {
+    PipelinePhase.ADR: ("research", "reference"),
+    PipelinePhase.PLAN: ("adr", "research", "reference"),
+}
+
+#: The applied doc types a phase REQUIRES among its grounding before it may be
+#: proposed at all (any one of them satisfies the requirement). Absent them, the
+#: submit refuses into the revision loop rather than materializing an ungrounded
+#: document ``vault check`` would reject.
+_PHASE_REQUIRED_GROUNDING: dict[str, tuple[str, ...]] = {
+    PipelinePhase.ADR: ("research", "reference"),
+    PipelinePhase.PLAN: ("adr",),
+}
 
 
 def _grounding_child_key(item: dict[str, Any]) -> str | None:
@@ -214,19 +231,20 @@ def _grounding_child_key(item: dict[str, Any]) -> str | None:
 
 
 def _grounding_dated_stem(
-    child_key: str, created_at_ms: Any, feature: str
+    child_key: str, created_at_ms: Any, feature: str, grounding_dirs: tuple[str, ...]
 ) -> str | None:
     """Derive an applied grounding doc's canonical DATED stem from its child key.
 
     ``child_key`` is ``<doc_type>/<feature>-<doc_type>.md`` (undated). The engine
     materializes it at ``<yyyy-mm-dd>-<feature>-<doc_type>.md`` where the date is the
     proposal's ``created_at_ms`` under the engine's UTC ``ms_to_date_key`` (verified
-    against live materialization). Returns the dated stem for a ``research``/
-    ``reference`` child of THIS feature, else ``None`` (a foreign feature, a non-
-    grounding doc type, or an unusable timestamp is skipped).
+    against live materialization). Returns the dated stem for a child of THIS feature
+    whose doc type is one of *grounding_dirs* (the phase's grounding scope), else
+    ``None`` (a foreign feature, an out-of-scope doc type, or an unusable timestamp
+    is skipped).
     """
     doc_dir, sep, filename = child_key.partition("/")
-    if not sep or doc_dir not in _GROUNDING_DIRS or not filename.endswith(".md"):
+    if not sep or doc_dir not in grounding_dirs or not filename.endswith(".md"):
         return None
     base = filename[: -len(".md")]
     if not base.startswith(f"{feature}-"):
@@ -237,6 +255,36 @@ def _grounding_dated_stem(
         created_at_ms / 1000, tz=datetime.UTC
     ).strftime("%Y-%m-%d")
     return f"{date}-{base}"
+
+
+def _refuse_ungrounded(phase: str, related: list[str]) -> None:
+    """Refuse a grounded phase whose required upstream document has not materialized.
+
+    The vault schema requires an ADR to cite its research and a plan to cite its ADR;
+    the grounding links are resolved from APPLIED proposals only, so an empty (or
+    wrong-type) grounding set means the upstream phase has not landed on disk yet.
+    Raising :class:`DocumentConformanceError` routes the run into the phase's revision
+    loop rather than failing it - the writer cannot fix this, but the guard keeps a
+    document ``vault check`` would reject off disk. In the normal flow each phase
+    applies before the next is authored and this never fires.
+    """
+    required = _PHASE_REQUIRED_GROUNDING.get(phase)
+    if not required:
+        return
+    if any(
+        stem.rstrip("]").endswith(f"-{doc_type}")
+        for stem in related
+        for doc_type in required
+    ):
+        return
+    expected = " or ".join(required)
+    raise DocumentConformanceError(
+        [
+            f"{phase} document has no grounding reference: no applied {expected} "
+            f"document exists for this feature yet; the {expected} phase must "
+            f"materialize before the {phase} can cite it"
+        ]
+    )
 
 
 def _strip_completion_sentinel(body: str, sentinel: str | None) -> str:
@@ -494,30 +542,17 @@ class DocumentProposalSubmitter:
             )
             self._reject_denial("create_session", created_session)
 
-            # Grounding references: the ADR must cite the feature's applied
-            # research/reference docs in its `related:` frontmatter, but the two-step
+            # Grounding references: a grounded phase must cite the feature's applied
+            # upstream docs in its `related:` frontmatter (the ADR cites research and
+            # reference; the plan cites the ADR it executes), but the two-step
             # create+set-body apply replaces the body while the scaffold's frontmatter
             # wins, so the author cannot self-author the link. Resolve the grounding
             # docs' canonical dated stems from the engine's recovery snapshot (ground
             # truth: only APPLIED docs count) and thread them into the create target,
-            # where the engine flows them to `vault add --related`. ADR phase only;
-            # replay-exact because the applied grounding docs are terminal.
+            # where the engine flows them to `vault add --related`. Replay-exact
+            # because the applied grounding docs are terminal.
             related = await self._resolve_grounding_related(client, feature, phase)
-            if phase == PipelinePhase.ADR and not related:
-                # The ADR schema requires a grounding reference; if the engine holds
-                # no applied research/reference doc for the feature there is nothing
-                # to ground against, so refuse before proposing an ungrounded ADR that
-                # `vault check` would reject. Routes to the revision loop rather than
-                # failing the run (the writer cannot fix this, but the guard keeps a
-                # non-conformant ADR off disk; in the normal flow research applies
-                # first and this never fires).
-                raise DocumentConformanceError(
-                    [
-                        "ADR has no grounding reference: no applied research or "
-                        "reference document exists for this feature yet; the research "
-                        "phase must materialize before the ADR can cite it"
-                    ]
-                )
+            _refuse_ungrounded(phase, related)
 
             changeset_id = session.new_changeset_id(f"{phase}-r{revision_cycle}")
             created = await session.create_proposal(
@@ -586,19 +621,23 @@ class DocumentProposalSubmitter:
     ) -> list[str]:
         """Resolve the feature's applied grounding docs as ``[[stem]]`` wiki-links.
 
-        Only the ADR phase is grounded (research/reference documents precede it). The
-        engine's recovery snapshot is the ground truth: every APPLIED proposal whose
-        child document is a ``research/`` or ``reference/`` doc for this feature yields
-        its canonical DATED stem ``<yyyy-mm-dd>-<feature>-<doc_type>`` — the date the
-        engine assigned at materialization, recovered from the proposal's
+        The grounded phases and their scopes are declared in
+        :data:`_PHASE_GROUNDING_DIRS`: the ADR cites the research/reference records
+        that precede it, and the plan cites the ADR it executes (plus that ADR's own
+        grounding), so one run's research -> ADR -> plan provenance chain is written
+        into the documents themselves. The engine's recovery snapshot is the ground
+        truth: every APPLIED proposal whose child document is an in-scope doc for this
+        feature yields its canonical DATED stem ``<yyyy-mm-dd>-<feature>-<doc_type>`` —
+        the date the engine assigned at materialization, recovered from the proposal's
         ``created_at_ms`` under the engine's UTC ``ms_to_date_key`` convention (the
         child_key itself is undated, and the authoring API exposes no dated stem). The
         result is sorted and deduplicated so the op is deterministic and replay-exact.
-        A phase with no grounding, or an unreadable snapshot, yields an empty list
-        (the submit-node conformance guard is the backstop that refuses an ungrounded
-        ADR).
+        A phase with no grounding scope, or an unreadable snapshot, yields an empty
+        list (:func:`_refuse_ungrounded` is the backstop that refuses to propose a
+        document whose required grounding is absent).
         """
-        if phase != PipelinePhase.ADR:
+        grounding_dirs = _PHASE_GROUNDING_DIRS.get(phase)
+        if not grounding_dirs:
             return []
         try:
             snapshot = await client.recovery_snapshot(last_seq=0)
@@ -617,7 +656,9 @@ class DocumentProposalSubmitter:
             child_key = _grounding_child_key(item)
             if child_key is None:
                 continue
-            stem = _grounding_dated_stem(child_key, item.get("created_at_ms"), feature)
+            stem = _grounding_dated_stem(
+                child_key, item.get("created_at_ms"), feature, grounding_dirs
+            )
             if stem is not None:
                 stems.add(f"[[{stem}]]")
         return sorted(stems)

@@ -12,6 +12,7 @@ from ...team.team_config import (
     authoring_capability,
     discover_team_preset_ids,
     is_mock_preset,
+    supported_capabilities,
 )
 
 if TYPE_CHECKING:
@@ -51,3 +52,24 @@ def test_authoring_capability_maps_topology() -> None:
     assert authoring_capability(TopologyType.RESEARCH_ADR) == "document_authoring"
     assert authoring_capability(TopologyType.STAR) == "coding"
     assert authoring_capability(TopologyType.PIPELINE) == "coding"
+
+
+def test_research_adr_declares_all_three_document_outputs() -> None:
+    """The served capability declaration names every document the topology gates.
+
+    The declaration is the truth the dashboard renders, so it must list the plan
+    document the third phase authors - a topology that gates three documents while
+    declaring two would advertise a lie. Order is the pipeline order.
+    """
+    assert supported_capabilities(TopologyType.RESEARCH_ADR) == [
+        "research_document",
+        "architecture_decision",
+        "plan_document",
+    ]
+
+
+def test_coder_topologies_declare_no_document_output() -> None:
+    """Coder topologies author no vault document under this mission surface."""
+    assert supported_capabilities(TopologyType.PIPELINE) == []
+    assert supported_capabilities(TopologyType.STAR) == []
+    assert supported_capabilities(TopologyType.PIPELINE_LOOP) == []

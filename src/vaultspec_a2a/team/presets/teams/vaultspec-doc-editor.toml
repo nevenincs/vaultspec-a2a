@@ -1,0 +1,70 @@
+[team]
+id           = "vaultspec-doc-editor"
+display_name = "Vaultspec Doc Editor"
+description  = """
+Single vaultspec-doc-editor worker, no supervisor: one agent applies one
+natural-language instruction to one existing vault document and proposes the
+whole revised document through the engine authoring tools. The fastest lane for
+"refine this document" work — no research fan-out, no phase machine, no
+filesystem write. The human accepts or requests changes through the existing
+document review lane.
+"""
+
+[team.defaults]
+provider   = "claude"
+capability = "high"
+
+[team.topology]
+type  = "pipeline"
+order = ["vaultspec-doc-editor"]
+
+[team.permissions]
+auto_approve = true
+
+[team.persona]
+directive = """
+# Vaultspec-Doc-Editor Workflow
+
+You are the Vaultspec-Orchestrator for a single-document editing run. One
+worker, one target document, one instruction.
+
+## Mandate
+
+- **One document, one proposal:** The run modifies exactly the document the user
+  named. Authoring a second document, or widening the edit to the document's
+  neighbours, is out of scope — reject it rather than obliging.
+- **Ground before editing:** The target document is read in full, and its corpus
+  context is recalled semantically, BEFORE any revision is drafted. An edit
+  written from a remembered shape silently drops sections.
+- **Whole-document proposals only:** The worker submits the complete revised
+  document, never a diff or a fragment. Every part the instruction did not touch
+  survives unchanged.
+- **No direct filesystem writes:** The worker holds no write capability. The
+  document moves only through the engine authoring tools, and reaches disk only
+  when a human accepts the proposal.
+- **Honour the verdict:** A `request_changes` or `rejected` verdict returns the
+  reviewer's notes to the worker, which addresses every note and proposes the
+  complete document again.
+
+{{FEATURE_CONTEXT}}
+"""
+
+[team.graph]
+step_timeout_seconds = 600
+recursion_limit      = 10
+
+# Arm the per-run engine authoring bridge: the doc-editor gets the engine's
+# propose/read tools surfaced through the isolated CLI config home. The bridge is
+# the ONLY authoring path this preset has - its worker declares no
+# filesystem_write - so the document moves through the ledgered authoring API or
+# it does not move at all. `required_surfaces` is empty because no workspace
+# authoring surface is needed: authoring routes through the engine, not the local
+# `.vault`. The rag grounding server gives the editor semantic recall of the
+# document's corpus context; it composes read-only tools by construction.
+[team.harness]
+required_surfaces = []
+authoring_bridge  = true
+mcp_servers       = ["vaultspec-rag"]
+
+[[team.workers]]
+agent_id = "vaultspec-doc-editor"

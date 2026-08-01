@@ -15,9 +15,12 @@ import pytest
 import pytest_asyncio
 from langchain_core.messages import HumanMessage
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
+from langgraph.types import Command
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator
+
+    from langchain_core.runnables import RunnableConfig
 
     from ..protocols import ProviderFactoryProtocol
 
@@ -147,6 +150,9 @@ async def test_research_adr_compiles_expected_node_set(
         "adr_author",
         "adr_review",
         "adr_gate",
+        "plan_author",
+        "plan_review",
+        "plan_gate",
     } <= node_keys
     assert list(graph.interrupt_before_nodes) == []
 
@@ -305,3 +311,124 @@ async def test_research_gate_submit_sees_run_state_and_synthesis_body(
     )
     # The parked state still carries the run id verbatim.
     assert result["thread_id"] == run_thread_id
+
+
+@pytest.mark.asyncio
+async def test_plan_phase_runs_after_gate_two_and_parks_on_gate_three(
+    checkpointer: AsyncSqliteSaver,
+    pf: ProviderFactoryProtocol,
+) -> None:
+    """Approving both document gates advances into Plan and parks on gate three.
+
+    Drives the REAL compiled topology over a real ``AsyncSqliteSaver``, resuming
+    each interrupt by ``Command`` exactly as the verdict subscriber does. Nothing
+    about the phase machine is simulated: the run fans out, synthesizes, passes the
+    inner review, parks at gate one; an approved verdict advances it to the ADR
+    writer, which parks at gate two; a second approved verdict must advance it into
+    the PLAN writer and park it at gate three. The submitter's recorded phase
+    sequence is the proof that the plan phase is a real third stage behind gate
+    two, not an alias of the ADR stage.
+    """
+    submitter = _FakeSubmitter()
+    team = _research_adr_team([ResearchThreadSpec(thread_id="codebase")])
+    graph = compile_team_graph(
+        team_config=team,
+        agent_configs=_agent_configs(team),
+        checkpointer=checkpointer,
+        provider_factory=pf,
+        proposal_submitter=submitter,
+    )
+
+    run_thread_id = "ra-plan-run"
+    config: RunnableConfig = {"configurable": {"thread_id": run_thread_id}}
+    state: dict[str, Any] = {
+        "active_agent": "research_dispatch",
+        "artifacts": [],
+        "current_plan": [],
+        "messages": [HumanMessage(content="Research and plan the phase machine.")],
+        "next": "",
+        "thread_id": run_thread_id,
+        "active_feature": "adr-authoring-orchestration",
+        "token_usage": {},
+    }
+
+    parked_at_research = await graph.ainvoke(state, config=config)
+    assert parked_at_research["__interrupt__"][0].value["phase"] == "research"
+
+    approve = Command(resume={"verdict": "approved", "notes": None})
+    parked_at_adr = await graph.ainvoke(approve, config=config)
+    assert parked_at_adr["__interrupt__"][0].value["phase"] == "adr"
+
+    parked_at_plan = await graph.ainvoke(approve, config=config)
+    plan_payload = parked_at_plan["__interrupt__"][0].value
+    assert plan_payload["type"] == "document_approval_request"
+    assert plan_payload["phase"] == "plan"
+    assert plan_payload["proposal_id"] == "prop-plan"
+
+    # Three phases submitted, in the ADR-mandated order, each exactly once.
+    assert submitter.phases == ["research", "adr", "plan"]
+    # The plan writer actually ran: its node-named message is in the parked state.
+    message_names = [getattr(m, "name", None) for m in parked_at_plan["messages"]]
+    assert "plan_author" in message_names
+    # The gate three park is durable state on the run's own thread.
+    assert parked_at_plan["gate_phase"] == "plan"
+    assert parked_at_plan["thread_id"] == run_thread_id
+
+
+@pytest.mark.asyncio
+async def test_plan_gate_request_changes_loops_the_plan_writer(
+    checkpointer: AsyncSqliteSaver,
+    pf: ProviderFactoryProtocol,
+) -> None:
+    """A ``request_changes`` verdict at gate three revises the plan, not the ADR.
+
+    The third gate must route its revision back to the PLAN writer: a gate that
+    fell back to the ADR writer would silently re-open a decision the human already
+    accepted. Proven over the real graph by resuming gate three with
+    ``request_changes`` and asserting the run re-parks on the plan gate with a
+    second plan submission and a second plan-author pass.
+    """
+    submitter = _FakeSubmitter()
+    team = _research_adr_team([ResearchThreadSpec(thread_id="codebase")])
+    graph = compile_team_graph(
+        team_config=team,
+        agent_configs=_agent_configs(team),
+        checkpointer=checkpointer,
+        provider_factory=pf,
+        proposal_submitter=submitter,
+    )
+
+    run_thread_id = "ra-plan-revision-run"
+    config: RunnableConfig = {"configurable": {"thread_id": run_thread_id}}
+    state: dict[str, Any] = {
+        "active_agent": "research_dispatch",
+        "artifacts": [],
+        "current_plan": [],
+        "messages": [HumanMessage(content="Research and plan the phase machine.")],
+        "next": "",
+        "thread_id": run_thread_id,
+        "active_feature": "adr-authoring-orchestration",
+        "token_usage": {},
+    }
+
+    approve = Command(resume={"verdict": "approved", "notes": None})
+    await graph.ainvoke(state, config=config)
+    await graph.ainvoke(approve, config=config)
+    await graph.ainvoke(approve, config=config)
+    assert submitter.phases == ["research", "adr", "plan"]
+
+    revise = Command(
+        resume={"verdict": "request_changes", "notes": "Step S02 has no success check."}
+    )
+    reparked = await graph.ainvoke(revise, config=config)
+
+    assert reparked["__interrupt__"][0].value["phase"] == "plan"
+    # The revision looped the PLAN writer, not the ADR writer: exactly one more
+    # plan submission, and no fourth ADR one.
+    assert submitter.phases == ["research", "adr", "plan", "plan"]
+    plan_passes = [
+        m for m in reparked["messages"] if getattr(m, "name", None) == "plan_author"
+    ]
+    assert len(plan_passes) == 2
+    # The reviewer's note reached the writer as a concrete revise signal.
+    assert "Step S02 has no success check." in reparked["validation_errors"]

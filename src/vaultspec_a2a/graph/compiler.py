@@ -29,7 +29,7 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.graph.state import CompiledStateGraph
 from langgraph.types import RetryPolicy
 
-from ..authoring.contract import DOCUMENT_AUTHORING_ROLES
+from ..authoring.contract import RESEARCH_ADR_ROLES
 from ..thread.errors import (
     ConfigError,
     ProviderSessionError,
@@ -66,7 +66,9 @@ __all__ = ["build_initial_vault_index", "compile_team_graph"]
 _ROLE_TO_PHASE: dict[str, str] = {
     "researcher": PipelinePhase.RESEARCH,
     "analyst": PipelinePhase.ADR,
+    "adr-author": PipelinePhase.ADR,
     "planner": PipelinePhase.PLAN,
+    "plan-author": PipelinePhase.PLAN,
     "coder": PipelinePhase.EXEC,
     "reviewer": PipelinePhase.AUDIT,
 }
@@ -396,7 +398,8 @@ def compile_team_graph(
     - ``pipeline``:      Fixed sequential chain (no supervisor).
     - ``pipeline_loop``: Sequential chain with conditional back-edge.
     - ``research_adr``:  Document phase machine (diverge, synthesize, gate,
-                         decide, gate); requires ``proposal_submitter``.
+                         decide, gate, plan, gate); requires
+                         ``proposal_submitter``.
 
     Args:
         team_config:             Validated team preset (loaded from TOML).
@@ -1010,6 +1013,10 @@ _RA_ADR_AUTHOR = "adr_author"
 _RA_ADR_REVIEW = "adr_review"
 _RA_ADR_SUBMIT = "adr_submit"
 _RA_ADR_GATE = "adr_gate"
+_RA_PLAN_AUTHOR = "plan_author"
+_RA_PLAN_REVIEW = "plan_review"
+_RA_PLAN_SUBMIT = "plan_submit"
+_RA_PLAN_GATE = "plan_gate"
 
 
 def _resolve_research_adr_models(
@@ -1034,16 +1041,16 @@ def _resolve_research_adr_models(
         cfg_by_role.setdefault(cfg.role, cfg)
         ref_by_role.setdefault(cfg.role, worker_ref)
 
-    missing = [role for role in DOCUMENT_AUTHORING_ROLES if role not in cfg_by_role]
+    missing = [role for role in RESEARCH_ADR_ROLES if role not in cfg_by_role]
     if missing:
         raise ConfigError(
             f"research_adr topology for team {team_config.id!r} is missing a "
             f"worker for role(s) {missing}; required roles are "
-            f"{list(DOCUMENT_AUTHORING_ROLES)}."
+            f"{list(RESEARCH_ADR_ROLES)}."
         )
 
     models: dict[str, BaseChatModel] = {}
-    for role in DOCUMENT_AUTHORING_ROLES:
+    for role in RESEARCH_ADR_ROLES:
         models[role], _provider, _capability = _resolve_model_for_worker(
             ref_by_role[role],
             cfg_by_role[role],
@@ -1184,12 +1191,23 @@ def _compile_research_adr(
                                                          -> [revise]   synthesis
               -> [REVISION] synthesis
         adr_author -> adr_review
-              -> [PASS] adr_submit -> adr_gate -> [approved] END
+              -> [PASS] adr_submit -> adr_gate -> [approved] plan_author
                                                -> [revise]   adr_author
               -> [REVISION] adr_author
+        plan_author -> plan_review
+              -> [PASS] plan_submit -> plan_gate -> [approved] END
+                                                 -> [revise]   plan_author
+              -> [REVISION] plan_author
 
     Each gate is a submit node (commits the proposal id before parking) plus a
     pure gate node (interrupt + verdict routing).
+
+    The Plan phase is the third and terminal document stage: it is a structural
+    sibling of the ADR phase, not a new mechanism, so it reuses the same writer ->
+    inner-review -> submit -> gate shape. It sits BEHIND gate two by construction,
+    which is the point - the plan is drafted against the research and the ADR this
+    same run produced, keeping one run's provenance chain intact rather than
+    grounding a plan on whatever happens to be on disk.
 
     The diverge stage fans out to one researcher branch per configured
     thread spec; each document phase is guarded by the generalized phase gate
@@ -1295,6 +1313,35 @@ def _compile_research_adr(
         ),
         retry_policy=_NODE_RETRY_POLICY,
     )
+    builder.add_node(
+        _RA_PLAN_AUTHOR,
+        create_worker_node(
+            models["plan-author"],
+            _agent_system_prompt(team_config, agent_configs, "plan-author"),
+            name=_RA_PLAN_AUTHOR,
+            autonomous=autonomous,
+            workspace_root=workspace_root,
+            role="plan-author",
+            harness_mcp_servers=harness_mcp_servers,
+            # Feedback-loop grounding: the plan writer revises against the
+            # reviewer's batch when a revision run carries a feedback_batch_id.
+            feedback_reader=feedback_reader,
+        ),
+        retry_policy=_NODE_RETRY_POLICY,
+    )
+    builder.add_node(
+        _RA_PLAN_REVIEW,
+        create_worker_node(
+            models["doc-reviewer"],
+            _agent_system_prompt(team_config, agent_configs, "doc-reviewer"),
+            name=_RA_PLAN_REVIEW,
+            autonomous=autonomous,
+            workspace_root=workspace_root,
+            role="doc-reviewer",
+            harness_mcp_servers=harness_mcp_servers,
+        ),
+        retry_policy=_NODE_RETRY_POLICY,
+    )
     # Each gate is split into a submit node (commits the proposal id to the
     # checkpoint) and a pure gate node (interrupt + verdict routing), so the
     # out-of-run verdict subscriber can correlate a verdict to the parked run via
@@ -1330,8 +1377,25 @@ def _compile_research_adr(
         _RA_ADR_GATE,
         create_phase_gate_node(
             PipelinePhase.ADR,
-            approved_target=END,
+            approved_target=_RA_PLAN_AUTHOR,
             revision_target=_RA_ADR_AUTHOR,
+        ),
+    )
+    builder.add_node(
+        _RA_PLAN_SUBMIT,
+        create_phase_submit_node(
+            PipelinePhase.PLAN,
+            proposal_submitter,
+            gate_target=_RA_PLAN_GATE,
+            revision_target=_RA_PLAN_AUTHOR,
+        ),
+    )
+    builder.add_node(
+        _RA_PLAN_GATE,
+        create_phase_gate_node(
+            PipelinePhase.PLAN,
+            approved_target=END,
+            revision_target=_RA_PLAN_AUTHOR,
         ),
     )
 
@@ -1354,6 +1418,15 @@ def _compile_research_adr(
         cast(
             "dict[Hashable, str]",
             {_RA_ADR_AUTHOR: _RA_ADR_AUTHOR, _RA_ADR_SUBMIT: _RA_ADR_SUBMIT},
+        ),
+    )
+    builder.add_edge(_RA_PLAN_AUTHOR, _RA_PLAN_REVIEW)
+    builder.add_conditional_edges(
+        _RA_PLAN_REVIEW,
+        _doc_review_router(writer_target=_RA_PLAN_AUTHOR, gate_target=_RA_PLAN_SUBMIT),
+        cast(
+            "dict[Hashable, str]",
+            {_RA_PLAN_AUTHOR: _RA_PLAN_AUTHOR, _RA_PLAN_SUBMIT: _RA_PLAN_SUBMIT},
         ),
     )
 

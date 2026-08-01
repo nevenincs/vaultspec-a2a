@@ -16,21 +16,19 @@ NEW role being added to an existing preset - which is the failure mode this
 guard exists to catch. Add a plan-author role to a document preset tomorrow and
 these assertions pick it up with no edit here.
 
-*"Panel-exposed" is spelled as document-authoring.* The product has no
-"panel-exposed" flag yet, so the narrowest defensible stand-in is the existing
-production predicate ``is_document_authoring_topology`` - today the
-``research_adr`` topology. This is deliberately narrow: coder-lane presets
-(``vaultspec-solo-coder``) and the mock certification fixtures are NOT
-document-authoring, keep their write capability legitimately, and are therefore
-outside this guard. ``test_coder_lane_is_outside_the_guard`` pins that exemption
-so it stays a decision rather than an accident. When a document preset that is
-not ``research_adr`` ships, widening belongs in the predicate, not here.
-
-Known limitation, stated rather than papered over: a solo document-editing
-preset built on the ``pipeline`` topology with its own non-document role is
-write-sensitive but matches neither signal, so it is NOT covered here. Closing
-that needs a real panel-exposure marker in the preset schema; naming the preset
-in this file would reintroduce exactly the hardcoded roster this guard avoids.
+*"Panel-exposed" is spelled as document-touching.* The product has no
+"panel-exposed" flag yet, so the guard uses the two production predicates that
+follow the CONTENT: ``is_document_authoring_topology`` (the ``research_adr``
+phase machine) and ``is_document_authoring_role`` (every persona role that puts
+vault-document content into the world, phase machine or solo editing lane). A
+solo document-editing preset on the ``pipeline`` topology is therefore covered by
+the ROLE signal - the blind spot this file previously named is closed in the
+predicate, not by naming a preset here, so the guard still cannot be defeated by
+adding a preset. Coder-lane presets (``vaultspec-solo-coder``) and the mock
+certification fixtures match neither signal, keep their write capability
+legitimately, and are outside this guard;
+``test_coder_lane_is_outside_the_guard`` pins that exemption so it stays a
+decision rather than an accident.
 """
 
 from __future__ import annotations
@@ -62,12 +60,12 @@ def _document_preset_roles(
     A preset qualifies two independent ways, and either is enough:
 
     * its topology is document-authoring, or
-    * any of its roles declares a document-authoring persona role.
+    * any of its roles declares a vault-document persona role.
 
-    The second signal is defence in depth. Topology alone would miss a
-    document-authoring role smuggled into a preset of some other topology - a
-    plan-author dropped into a pipeline, say - which would write documents with
-    the guard looking the other way.
+    The second signal is what covers the solo lanes. Topology alone would miss a
+    document role in a preset of some other topology - the pipeline-topology
+    doc-editor, or a plan-author dropped into a pipeline - which would move
+    document bytes with the guard looking the other way.
     """
     roles: dict[str, list[str]] = {}
     for preset_id in sorted(discover_team_preset_ids(workspace_root)):
@@ -144,9 +142,9 @@ def test_guard_detects_a_write_enabled_role(tmp_path: Path) -> None:
     roles = _document_preset_roles()
     preset_id, role_ids = min(roles.items())
     victim = role_ids[0]
-    assert (
-        load_agent_config(victim).capabilities.filesystem_write is False
-    ), f"Precondition: {victim!r} is expected to be write-denied on the real tree."
+    assert load_agent_config(victim).capabilities.filesystem_write is False, (
+        f"Precondition: {victim!r} is expected to be write-denied on the real tree."
+    )
 
     agents_dir = tmp_path / ".vaultspec" / "agents"
     agents_dir.mkdir(parents=True)
@@ -191,3 +189,22 @@ def test_coder_lane_is_outside_the_guard() -> None:
         load_agent_config(worker.agent_id).capabilities.filesystem_write
         for worker in coder_team.workers
     ), "Coder lane is expected to retain write capability; exemption is meaningful."
+
+
+def test_solo_document_editing_lane_is_inside_the_guard() -> None:
+    """The pipeline-topology doc-editor is covered by the ROLE signal.
+
+    Its topology is ``pipeline`` (so the topology signal is silent) and it is
+    nonetheless a document lane whose only sanctioned write path is the authoring
+    bridge. Asserting membership here pins that the widened role predicate is what
+    admits it, and that widening it back would be caught rather than silent.
+    """
+    editor = load_team_config("vaultspec-doc-editor")
+
+    assert not is_document_authoring_topology(editor.topology.type)
+    assert any(
+        is_document_authoring_role(load_agent_config(worker.agent_id).role)
+        for worker in editor.workers
+    )
+    assert "vaultspec-doc-editor" in _document_preset_roles()
+    assert "vaultspec-doc-editor" not in _write_enabled_roles()

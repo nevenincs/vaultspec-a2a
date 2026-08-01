@@ -20,20 +20,33 @@ __all__ = [
     "DOCUMENT_AUTHORING_ROLES",
     "DOCUMENT_AUTHORING_ROLE_SET",
     "DOCUMENT_AUTHORING_TOPOLOGIES",
+    "RESEARCH_ADR_ROLES",
     "is_document_authoring_role",
     "is_document_authoring_topology",
 ]
 
-# Ordered: the graph compiler consumes this order (research diverge -> synthesis
-# -> adr-author -> doc-reviewer). Matches the bundled
-# ``document-authoring-conventions`` rule file's ``roles:`` tags exactly - a
-# data-sync test asserts the two never drift (code is the source of truth).
-DOCUMENT_AUTHORING_ROLES: tuple[str, ...] = (
+# The research_adr phase machine's REQUIRED roles, in pipeline order (research
+# diverge -> synthesis -> adr-author -> plan-author -> doc-reviewer). The graph
+# compiler consumes this order and refuses to compile a research_adr preset that
+# does not declare a worker for every one of them, so this tuple is narrower than
+# the document-role predicate below by design: a solo document lane must NOT drag
+# the whole phase machine's roster in behind it.
+RESEARCH_ADR_ROLES: tuple[str, ...] = (
     "researcher",
     "synthesist",
     "adr-author",
+    "plan-author",
     "doc-reviewer",
 )
+
+# Every persona role that puts vault-document CONTENT into the world, whether
+# through the phase machine or the solo editing lane. This is the predicate that
+# governs role-scoped delivery of the document-authoring conventions, the native
+# read-tool floor, and the write-denial guard - all three of which follow the
+# content, not the topology. It matches the bundled
+# ``document-authoring-conventions`` rule file's ``roles:`` tags exactly; a
+# data-sync test asserts the two never drift (code is the source of truth).
+DOCUMENT_AUTHORING_ROLES: tuple[str, ...] = (*RESEARCH_ADR_ROLES, "doc-editor")
 
 DOCUMENT_AUTHORING_ROLE_SET: frozenset[str] = frozenset(DOCUMENT_AUTHORING_ROLES)
 

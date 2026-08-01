@@ -350,22 +350,22 @@ def test_plan_approval_interrupt_fires_for_non_approved_status() -> None:
 
 def test_plan_rejection_prefers_plan_phase_worker_for_revision() -> None:
     worker = _select_revision_worker(
-        ["vaultspec-reviewer", "vaultspec-planner", "vaultspec-coder"],
+        ["vaultspec-doc-reviewer", "vaultspec-plan-author", "vaultspec-coder"],
         {
-            "vaultspec-reviewer": "audit",
-            "vaultspec-planner": "plan",
+            "vaultspec-doc-reviewer": "audit",
+            "vaultspec-plan-author": "plan",
             "vaultspec-coder": "exec",
         },
     )
-    assert worker == "vaultspec-planner"
+    assert worker == "vaultspec-plan-author"
 
 
 def test_plan_rejection_falls_back_to_first_worker_without_plan_phase_map() -> None:
     worker = _select_revision_worker(
-        ["vaultspec-analyst", "vaultspec-reviewer", "vaultspec-coder"],
+        ["vaultspec-analyst", "vaultspec-doc-reviewer", "vaultspec-coder"],
         {
             "vaultspec-analyst": "research",
-            "vaultspec-reviewer": "audit",
+            "vaultspec-doc-reviewer": "audit",
             "vaultspec-coder": "exec",
         },
     )
@@ -374,8 +374,8 @@ def test_plan_rejection_falls_back_to_first_worker_without_plan_phase_map() -> N
 
 def test_supervisor_prefers_worker_phase_over_vault_inference() -> None:
     result = _decision(
-        "vaultspec-planner",
-        workers=["vaultspec-planner", "vaultspec-coder"],
+        "vaultspec-plan-author",
+        workers=["vaultspec-plan-author", "vaultspec-coder"],
         state=_make_state_for_phase_gate(
             vault_index={
                 "plan": [".vault/plan/feature-plan.md"],
@@ -383,18 +383,18 @@ def test_supervisor_prefers_worker_phase_over_vault_inference() -> None:
             },
             active_feature=None,
         ),
-        worker_phase_map={"vaultspec-planner": "plan", "vaultspec-coder": "exec"},
+        worker_phase_map={"vaultspec-plan-author": "plan", "vaultspec-coder": "exec"},
         autonomous=True,
     )
-    assert result.next_route == "vaultspec-planner"
+    assert result.next_route == "vaultspec-plan-author"
     assert result.inferred_phase == "plan"
 
 
 def test_revision_phase_prefers_revision_worker_phase() -> None:
     phase = _phase_for_route(
-        "vaultspec-planner",
+        "vaultspec-plan-author",
         fallback_phase="exec",
-        worker_phase_map={"vaultspec-planner": "plan", "vaultspec-coder": "exec"},
+        worker_phase_map={"vaultspec-plan-author": "plan", "vaultspec-coder": "exec"},
     )
     assert phase == "plan"
 
@@ -528,15 +528,15 @@ async def test_supervisor_rejection_clears_consumed_approval_request_id() -> Non
     node = create_supervisor_node(
         model=model,
         system_prompt="You are a supervisor.",
-        workers=["vaultspec-planner", "vaultspec-coder"],
-        worker_phase_map={"vaultspec-planner": "plan", "vaultspec-coder": "exec"},
+        workers=["vaultspec-plan-author", "vaultspec-coder"],
+        worker_phase_map={"vaultspec-plan-author": "plan", "vaultspec-coder": "exec"},
         autonomous=False,
     )
 
     graph = _build_approval_graph(
         node,
-        ["vaultspec-planner", "vaultspec-coder"],
-        {"vaultspec-planner": "plan", "vaultspec-coder": "exec"},
+        ["vaultspec-plan-author", "vaultspec-coder"],
+        {"vaultspec-plan-author": "plan", "vaultspec-coder": "exec"},
     )
     config: RunnableConfig = {"configurable": {"thread_id": "test-supervisor-reject"}}
 
@@ -549,7 +549,7 @@ async def test_supervisor_rejection_clears_consumed_approval_request_id() -> Non
     assert "__interrupt__" in first
 
     resumed = await graph.ainvoke(Command(resume={"approved": False}), config=config)
-    assert resumed["next"] == "vaultspec-planner"
+    assert resumed["next"] == "vaultspec-plan-author"
     assert resumed["approval_status"] == "rejected"
     assert "approval_request_id" in resumed
     assert resumed["approval_request_id"] is None
@@ -585,15 +585,15 @@ async def test_supervisor_rejection_replaces_stale_current_plan() -> None:
     node = create_supervisor_node(
         model=model,
         system_prompt="You are a supervisor.",
-        workers=["vaultspec-planner", "vaultspec-coder"],
-        worker_phase_map={"vaultspec-planner": "plan", "vaultspec-coder": "exec"},
+        workers=["vaultspec-plan-author", "vaultspec-coder"],
+        worker_phase_map={"vaultspec-plan-author": "plan", "vaultspec-coder": "exec"},
         autonomous=False,
     )
 
     graph = _build_approval_graph(
         node,
-        ["vaultspec-planner", "vaultspec-coder"],
-        {"vaultspec-planner": "plan", "vaultspec-coder": "exec"},
+        ["vaultspec-plan-author", "vaultspec-coder"],
+        {"vaultspec-plan-author": "plan", "vaultspec-coder": "exec"},
     )
     config: RunnableConfig = {"configurable": {"thread_id": "test-supervisor-reject"}}
 
@@ -608,9 +608,9 @@ async def test_supervisor_rejection_replaces_stale_current_plan() -> None:
     assert "__interrupt__" in first
 
     resumed = await graph.ainvoke(Command(resume={"approved": False}), config=config)
-    assert resumed["next"] == "vaultspec-planner"
-    assert resumed["active_agent"] == "vaultspec-planner"
+    assert resumed["next"] == "vaultspec-plan-author"
+    assert resumed["active_agent"] == "vaultspec-plan-author"
     assert resumed["current_plan"] == [
-        {"content": "Route to vaultspec-planner", "status": "in_progress"}
+        {"content": "Route to vaultspec-plan-author", "status": "in_progress"}
     ]
     assert resumed["approval_status"] == "rejected"

@@ -574,6 +574,7 @@ async def test_presets_list_is_truthful_and_resilient(
         assert authoring["supported_capabilities"] == [
             "research_document",
             "architecture_decision",
+            "plan_document",
         ]
         assert authoring["default_profile_id"] == "team-defaults"
         profiles = {p["id"]: p for p in authoring["profiles"]}

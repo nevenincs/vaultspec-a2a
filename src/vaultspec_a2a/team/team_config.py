@@ -163,13 +163,15 @@ def authoring_capability(topology_type: TopologyType) -> str:
 def supported_capabilities(topology_type: TopologyType) -> list[str]:
     """Return the concrete document outputs a topology can produce.
 
-    The research_adr phase machine authors a research document and an
-    architecture decision; coder topologies produce no vault-document capability
-    under this mission surface. Diagnostic truth for the Rust backend, not
-    product curation text.
+    The research_adr phase machine authors a research document, an architecture
+    decision, and the implementation plan that sequences it - three gated phases,
+    three capabilities. Coder topologies produce no vault-document capability under
+    this mission surface. Diagnostic truth for the Rust backend, not product
+    curation text: the declaration is the served truth the dashboard renders, so it
+    extends in lockstep with the topology rather than trailing it.
     """
     if topology_type == TopologyType.RESEARCH_ADR:
-        return ["research_document", "architecture_decision"]
+        return ["research_document", "architecture_decision", "plan_document"]
     return []
 
 

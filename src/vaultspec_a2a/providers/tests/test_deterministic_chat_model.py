@@ -6,7 +6,7 @@ import pytest
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import AIMessage, HumanMessage
 
-from ...authoring.contract import DOCUMENT_AUTHORING_ROLE_SET, DOCUMENT_AUTHORING_ROLES
+from ...authoring.contract import RESEARCH_ADR_ROLES
 from ...graph.enums import MODEL_MAP, PROVIDER_DEFAULT_MODELS, Provider
 from ...team.team_config import AgentConfig, AgentPersonaConfig
 from ..deterministic_chat_model import (
@@ -125,12 +125,14 @@ def test_role_dispatch_keys_match_authoring_contract() -> None:
 
     Guards authoring-contract ADR binding (b): the deterministic provider keeps a
     private copy of the role names, so this asserts it never diverges from the
-    code-truth DOCUMENT_AUTHORING_ROLE_SET.
+    code-truth research_adr roster it exists to drive. The solo doc-editor is
+    deliberately absent - it is not a research_adr role, and this provider serves
+    only that phase machine.
     """
-    assert frozenset(_ROLE_DISPATCH_KEYS) == DOCUMENT_AUTHORING_ROLE_SET
+    assert frozenset(_ROLE_DISPATCH_KEYS) == frozenset(RESEARCH_ADR_ROLES)
 
 
 def test_role_of_resolves_every_contract_role() -> None:
-    """Every contract role resolves from its namespaced agent id via _role_of."""
-    for role in DOCUMENT_AUTHORING_ROLES:
+    """Every research_adr role resolves from its namespaced agent id via _role_of."""
+    for role in RESEARCH_ADR_ROLES:
         assert _role_of(f"vaultspec-{role}") == role

@@ -14,13 +14,16 @@ from typing import TYPE_CHECKING, cast
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage
 
+from ...graph.enums import PipelinePhase
 from ..submitter import (
+    _PHASE_GROUNDING_DIRS,
     DocumentConformanceError,
     DocumentUnavailableError,
     _conformance_notes,
     _grounding_child_key,
     _grounding_dated_stem,
     _latest_document,
+    _refuse_ungrounded,
     _strip_completion_sentinel,
 )
 
@@ -198,11 +201,17 @@ class TestGroundingReferenceResolution:
         assert _grounding_child_key({"rollback": {}}) is None
         assert _grounding_child_key({"rollback": {"child_key": ""}}) is None
 
+    #: The ADR phase's grounding scope, as declared for the submitter.
+    _ADR_DIRS = _PHASE_GROUNDING_DIRS[PipelinePhase.ADR]
+    #: The plan phase's grounding scope, which additionally admits the ADR.
+    _PLAN_DIRS = _PHASE_GROUNDING_DIRS[PipelinePhase.PLAN]
+
     def test_dated_stem_prepends_utc_date_for_research(self) -> None:
         stem = _grounding_dated_stem(
             "research/sse-reconnection-live-research.md",
             self._MS,
             "sse-reconnection-live",
+            self._ADR_DIRS,
         )
         assert stem == "2026-07-15-sse-reconnection-live-research"
 
@@ -211,25 +220,51 @@ class TestGroundingReferenceResolution:
             "reference/sse-reconnection-live-reference.md",
             self._MS,
             "sse-reconnection-live",
+            self._ADR_DIRS,
         )
         assert stem == "2026-07-15-sse-reconnection-live-reference"
 
     def test_dated_stem_skips_foreign_feature(self) -> None:
         assert (
             _grounding_dated_stem(
-                "research/other-feature-research.md", self._MS, "sse-reconnection-live"
+                "research/other-feature-research.md",
+                self._MS,
+                "sse-reconnection-live",
+                self._ADR_DIRS,
             )
             is None
         )
 
-    def test_dated_stem_skips_non_grounding_dir(self) -> None:
-        # A plan/adr sibling is not a grounding doc for an ADR.
+    def test_dated_stem_skips_dir_outside_the_phase_scope(self) -> None:
+        """An ADR sibling grounds a PLAN but never an ADR.
+
+        The scope is per-phase, so the same child key resolves under the plan
+        phase's dirs and is skipped under the ADR phase's.
+        """
+        adr_child = "adr/sse-reconnection-live-adr.md"
         assert (
             _grounding_dated_stem(
-                "plan/sse-reconnection-live-plan.md", self._MS, "sse-reconnection-live"
+                adr_child, self._MS, "sse-reconnection-live", self._ADR_DIRS
             )
             is None
         )
+        assert (
+            _grounding_dated_stem(
+                adr_child, self._MS, "sse-reconnection-live", self._PLAN_DIRS
+            )
+            == "2026-07-15-sse-reconnection-live-adr"
+        )
+
+    def test_dated_stem_skips_a_dir_no_phase_grounds_on(self) -> None:
+        """A plan is nobody's grounding document - not the ADR's, not the plan's."""
+        plan_child = "plan/sse-reconnection-live-plan.md"
+        for dirs in (self._ADR_DIRS, self._PLAN_DIRS):
+            assert (
+                _grounding_dated_stem(
+                    plan_child, self._MS, "sse-reconnection-live", dirs
+                )
+                is None
+            )
 
     def test_dated_stem_skips_unusable_timestamp(self) -> None:
         assert (
@@ -237,6 +272,7 @@ class TestGroundingReferenceResolution:
                 "research/sse-reconnection-live-research.md",
                 None,
                 "sse-reconnection-live",
+                self._ADR_DIRS,
             )
             is None
         )
@@ -245,9 +281,41 @@ class TestGroundingReferenceResolution:
                 "research/sse-reconnection-live-research.md",
                 True,
                 "sse-reconnection-live",
+                self._ADR_DIRS,
             )
             is None
         )
+
+
+class TestRequiredGroundingRefusal:
+    """A grounded phase refuses to propose before its upstream document exists."""
+
+    def test_adr_refuses_without_research_or_reference(self) -> None:
+        with pytest.raises(DocumentConformanceError) as exc:
+            _refuse_ungrounded(PipelinePhase.ADR, [])
+        assert "no grounding reference" in str(exc.value)
+
+    def test_adr_accepts_a_research_stem(self) -> None:
+        _refuse_ungrounded(PipelinePhase.ADR, ["[[2026-07-15-feature-research]]"])
+
+    def test_adr_accepts_a_reference_stem(self) -> None:
+        _refuse_ungrounded(PipelinePhase.ADR, ["[[2026-07-15-feature-reference]]"])
+
+    def test_plan_refuses_when_only_research_grounded(self) -> None:
+        """Research alone does not authorize a plan - the ADR does."""
+        with pytest.raises(DocumentConformanceError) as exc:
+            _refuse_ungrounded(PipelinePhase.PLAN, ["[[2026-07-15-feature-research]]"])
+        assert "no applied adr document" in str(exc.value)
+
+    def test_plan_accepts_an_adr_stem(self) -> None:
+        _refuse_ungrounded(
+            PipelinePhase.PLAN,
+            ["[[2026-07-15-feature-adr]]", "[[2026-07-15-feature-research]]"],
+        )
+
+    def test_ungrounded_phase_is_never_refused(self) -> None:
+        """The research phase has no upstream document, so it always passes."""
+        _refuse_ungrounded(PipelinePhase.RESEARCH, [])
 
 
 class TestAdrStatusConformance:

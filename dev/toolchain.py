@@ -65,15 +65,27 @@ UTF8 = {"PYTHONIOENCODING": "utf-8"}
 #: because most test code lives in per-package `*/tests/` directories.
 TEST_TIERS = ("tests", "service_tests", "desktop_tests", "acceptance")
 
-#: Test tiers held out of the cognitive-complexity scan.
-#:
-#: A guard test that walks the AST of every module to prove a structural
-#: invariant scores badly on every complexity dimension, because branching over
-#: a syntax tree is what such a test IS. Gating them at a production threshold
-#: would price the guard out rather than simplify it.
-COMPLEXIPY_EXCLUDES = tuple(
-    part for tier in TEST_TIERS for part in ("--exclude", f"**/{tier}/**")
+#: Complexipy exclusion patterns scoped to the production-only ``lint complexity``
+#: target. Patterns are relative to :data:`PACKAGE`; direct and nested forms cover
+#: each test tier and cache directory without changing the test-focused audit target.
+COMPLEXIPY_EXCLUDE_PATTERNS = (
+    "tests/**",
+    "**/tests/**",
+    "service_tests/**",
+    "**/service_tests/**",
+    "desktop_tests/**",
+    "**/desktop_tests/**",
+    "acceptance/**",
+    "**/acceptance/**",
+    "__pycache__/**",
+    "**/__pycache__/**",
+    ".pytest_cache/**",
+    "**/.pytest_cache/**",
 )
+
+#: Complexipy parses repeated ``--exclude`` flags independently, so retain all
+#: target-local patterns in the CLI's documented comma-separated form.
+COMPLEXIPY_EXCLUDES = ("--exclude", ",".join(COMPLEXIPY_EXCLUDE_PATTERNS))
 
 #: Test tiers held out of the security scan, as bandit's own comma-joined form.
 #:

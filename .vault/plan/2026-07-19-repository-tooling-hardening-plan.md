@@ -4,7 +4,7 @@ tags:
   - '#repository-tooling-hardening'
 date: '2026-07-19'
 modified: '2026-08-01'
-body_hash: 'sha256:33f11566a9a206bba3972af8103a5ccaf10a1baf4a769e21bae076ab35f1255c'
+body_hash: 'sha256:db69910d10415763ca8afed1c92bf15eb60c27475ee51caa6f409c12351dd42f'
 tier: L3
 related:
   - '[[2026-07-19-repository-tooling-hardening-adr]]'
@@ -105,7 +105,7 @@ Establish the Sol-defined declarative strict-sentinel contract, repair scope cor
 Make every quality target executable over the correct A2A scope from one registry.
 
 - [x] `W05.P09.S13` - Add the cross-platform Ty target over the canonical Python roots.; `dev/toolchain.py`.
-- [ ] `W05.P09.S14` - Correct the cognitive-complexity command scope so it measures only production sources on every supported host.; `dev/toolchain.py, pyproject.toml`.
+- [x] `W05.P09.S14` - Correct the cognitive-complexity command scope so it measures only production sources on every supported host.; `dev/toolchain.py, pyproject.toml`.
 - [ ] `W05.P09.S15` - Reconcile the complete canonical CI sequence in the declarative registry before reducing the root recipe to delegation.; `dev/toolchain.py, justfile`.
 
 ### Phase `W05.P10` - hosted visibility and anti-drift

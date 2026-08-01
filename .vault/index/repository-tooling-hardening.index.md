@@ -6,7 +6,7 @@ tags:
 date: '2026-08-01'
 modified: '2026-08-01'
 body_schema: 'body-v1'
-body_hash: 'sha256:03da0f04d4412bc96694cc01bf15077e97c2c22eba797dcc24de534045bb11ee'
+body_hash: 'sha256:dbd7bef11e00b8a1a29776c94c9fcad8e5d3b014dfd26c63e83baed002d030bc'
 related:
   - '[[2026-07-19-repository-tooling-hardening-W01-P01-S01]]'
   - '[[2026-07-19-repository-tooling-hardening-W01-P01-summary]]'
@@ -29,6 +29,7 @@ related:
   - '[[2026-07-19-repository-tooling-hardening-W04-P08-S12]]'
   - '[[2026-07-19-repository-tooling-hardening-W04-P08-summary]]'
   - '[[2026-07-19-repository-tooling-hardening-W05-P09-S13]]'
+  - '[[2026-07-19-repository-tooling-hardening-W05-P09-S14]]'
   - '[[2026-07-19-repository-tooling-hardening-adr]]'
   - '[[2026-07-19-repository-tooling-hardening-audit]]'
   - '[[2026-07-19-repository-tooling-hardening-plan]]'
@@ -37,6 +38,7 @@ related:
   - '[[2026-08-01-repository-tooling-hardening-strict-quality-gates-reference]]'
   - '[[2026-08-01-repository-tooling-hardening-strict-quality-gates-research]]'
   - '[[2026-08-01-repository-tooling-hardening-strict-s13-audit]]'
+  - '[[2026-08-01-repository-tooling-hardening-strict-s14-audit]]'
 ---
 
 # `repository-tooling-hardening` feature index
@@ -53,6 +55,7 @@ Auto-generated index of all documents tagged with `#repository-tooling-hardening
 
 - `2026-07-19-repository-tooling-hardening-audit` - `repository-tooling-hardening` audit: `rolling implementation review`
 - `2026-08-01-repository-tooling-hardening-strict-s13-audit` - `repository-tooling-hardening` audit: `strict S13 cross-platform Ty target`
+- `2026-08-01-repository-tooling-hardening-strict-s14-audit` - `repository-tooling-hardening` audit: `cognitive scope review`
 
 ### exec
 
@@ -77,6 +80,7 @@ Auto-generated index of all documents tagged with `#repository-tooling-hardening
 - `2026-07-19-repository-tooling-hardening-W04-P08-S12` - Run clone-to-CI acceptance, formal review, finding classification, audit queue updates, and execution summaries
 - `2026-07-19-repository-tooling-hardening-W04-P08-summary` - `repository-tooling-hardening` `W04.P08` summary
 - `2026-07-19-repository-tooling-hardening-W05-P09-S13` - Add the cross-platform Ty target over the canonical Python roots.
+- `2026-07-19-repository-tooling-hardening-W05-P09-S14` - Correct the cognitive-complexity command scope so it measures only production sources on every supported host.
 
 ### plan
 

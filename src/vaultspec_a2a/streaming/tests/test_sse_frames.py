@@ -247,7 +247,13 @@ def test_clarification_pending_request_id_truncates_over_cap() -> None:
         thread_id="run-1",
     )
     payload = _data_payload(frame)
-    assert len(payload["request_id"]) == 128
+    request_id = payload["request_id"]
+    # Narrowed rather than cast: the frame carries JSON, so the decoded value is
+    # object until something proves otherwise. Asserting the type here also pins
+    # that the cap produces a STRING - a truncation that yielded bytes or a list
+    # of 128 things would satisfy a bare length check.
+    assert isinstance(request_id, str)
+    assert len(request_id) == 128
 
 
 # ---------------------------------------------------------------------------

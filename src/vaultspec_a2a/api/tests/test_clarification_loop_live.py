@@ -25,7 +25,7 @@ recorded stub call.
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any
 
 import anyio
 import httpx
@@ -121,7 +121,7 @@ async def test_respond_resumes_through_a_real_worker_and_executor(
         executor = Executor(checkpointer=checkpointer, bridge=_bridge_stub())
         executor._graph_cache[_CACHE_KEY] = graph
         executor._thread_to_cache_key[thread_id] = _CACHE_KEY
-        executor.aggregator.register_graph(cast("Any", graph))
+        executor.aggregator.register_graph(graph)
 
         worker_app = create_worker_app(lifespan=_worker_test_lifespan)
         worker_app.state.executor = executor

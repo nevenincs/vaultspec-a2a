@@ -6,7 +6,7 @@ tags:
 date: '2026-08-01'
 modified: '2026-08-01'
 body_schema: 'body-v1'
-body_hash: 'sha256:fe8eadd7bead764c83e453ada8e533244c69526caaf8ebd390a74f988b1ba143'
+body_hash: 'sha256:5856e9fd6d04b779cc6b0f2a7340b8b159d62a399abd82697454a11434f296e1'
 related:
   - '[[2026-07-19-repository-tooling-hardening-W01-P01-S01]]'
   - '[[2026-07-19-repository-tooling-hardening-W01-P01-summary]]'
@@ -37,6 +37,7 @@ related:
   - '[[2026-07-19-repository-tooling-hardening-W06-P11-S19]]'
   - '[[2026-07-19-repository-tooling-hardening-W06-P11-S20]]'
   - '[[2026-07-19-repository-tooling-hardening-W06-P11-S21]]'
+  - '[[2026-07-19-repository-tooling-hardening-W06-P11-S22]]'
   - '[[2026-07-19-repository-tooling-hardening-adr]]'
   - '[[2026-07-19-repository-tooling-hardening-audit]]'
   - '[[2026-07-19-repository-tooling-hardening-plan]]'
@@ -54,6 +55,7 @@ related:
   - '[[2026-08-01-repository-tooling-hardening-strict-s19-audit]]'
   - '[[2026-08-01-repository-tooling-hardening-strict-s20-audit]]'
   - '[[2026-08-01-repository-tooling-hardening-strict-s21-audit]]'
+  - '[[2026-08-01-repository-tooling-hardening-strict-s22-audit]]'
 ---
 
 # `repository-tooling-hardening` feature index
@@ -78,6 +80,7 @@ Auto-generated index of all documents tagged with `#repository-tooling-hardening
 - `2026-08-01-repository-tooling-hardening-strict-s19-audit` - `repository-tooling-hardening` audit: `Ty portability review`
 - `2026-08-01-repository-tooling-hardening-strict-s20-audit` - `repository-tooling-hardening` audit: `Typed Radon boundary review`
 - `2026-08-01-repository-tooling-hardening-strict-s21-audit` - `repository-tooling-hardening` audit: `Typed API fixture contract review`
+- `2026-08-01-repository-tooling-hardening-strict-s22-audit` - `repository-tooling-hardening` audit: `Typed API endpoint partition review`
 
 ### exec
 
@@ -110,6 +113,7 @@ Auto-generated index of all documents tagged with `#repository-tooling-hardening
 - `2026-07-19-repository-tooling-hardening-W06-P11-S19` - Repair the Ty portability tranche for Windows-only ctypes and generic-length access.
 - `2026-07-19-repository-tooling-hardening-W06-P11-S20` - Type the health-instrument boundary without suppressions and preserve its measured-result contract.
 - `2026-07-19-repository-tooling-hardening-W06-P11-S21` - Establish typed API test-fixture contracts before repairing dependent API tests.
+- `2026-07-19-repository-tooling-hardening-W06-P11-S22` - Repair the API endpoint test partition against the typed fixture contract.
 
 ### plan
 

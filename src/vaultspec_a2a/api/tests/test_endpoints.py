@@ -16,12 +16,17 @@ helper in `conftest.py` so tests never touch the production `vaultspec.db`.
 import asyncio
 import hashlib
 import logging
+from pathlib import Path
+from typing import cast
 
 import httpx
+import pytest
 from fastapi.testclient import TestClient
+from langchain_core.runnables import RunnableConfig
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from langgraph.types import Interrupt
 from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from ...control.config import settings
 from ...database import (
@@ -40,6 +45,20 @@ from ...streaming.aggregator import EventAggregator
 from ...thread.enums import ControlActionResultStatus, ControlActionType
 from .conftest import make_app
 
+type SessionFactory = async_sessionmaker[AsyncSession]
+type JsonValue = str | int | float | bool | list[JsonValue] | JsonObject | None
+type JsonObject = dict[str, JsonValue]
+
+
+def _checkpoint_config(
+    thread_id: str, checkpoint_ns: str | None = None
+) -> RunnableConfig:
+    configurable = {"thread_id": thread_id}
+    if checkpoint_ns is not None:
+        configurable["checkpoint_ns"] = checkpoint_ns
+    return {"configurable": configurable}
+
+
 # ---------------------------------------------------------------------------
 # POST /threads
 # ---------------------------------------------------------------------------
@@ -54,7 +73,9 @@ _BUNDLE_FREE_PRESET = "mock-success-single"
 class TestCreateThread:
     """Tests for POST /v1/runs."""
 
-    def test_creates_thread_without_preset(self, session_factory, checkpointer) -> None:
+    def test_creates_thread_without_preset(
+        self, session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
+    ) -> None:
         """Creating a thread without team_preset returns 201 with thread_id."""
         app, _agg, _worker, _cp = make_app(session_factory, checkpointer)
 
@@ -73,7 +94,7 @@ class TestCreateThread:
         assert data["status"] == "running"
 
     def test_creates_thread_with_preset_dispatches_to_worker(
-        self, session_factory, checkpointer
+        self, session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
     ) -> None:
         """Creating a thread with a valid preset dispatches ingest to worker."""
         app, _agg, worker, _cp = make_app(session_factory, checkpointer)
@@ -98,7 +119,7 @@ class TestCreateThread:
         assert dispatch["content"] == "Hello"
 
     def test_dispatch_includes_internal_token_when_configured(
-        self, session_factory, checkpointer
+        self, session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
     ) -> None:
         """Gateway dispatch should keep working when worker auth is enabled."""
         original_token = settings.internal_token
@@ -119,7 +140,9 @@ class TestCreateThread:
         finally:
             settings.internal_token = original_token
 
-    def test_initial_message_length_limit(self, session_factory, checkpointer) -> None:
+    def test_initial_message_length_limit(
+        self, session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
+    ) -> None:
         """initial_message exceeding 64KB is rejected with validation error."""
         app, _agg, _worker, _cp = make_app(session_factory, checkpointer)
         oversized = "x" * (65536 + 1)
@@ -137,7 +160,9 @@ class TestCreateThread:
 # ---------------------------------------------------------------------------
 
 
-def _list_summaries(session_factory, checkpointer) -> tuple[dict[str, dict], int]:
+def _list_summaries(
+    session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
+) -> tuple[dict[str, JsonObject], int]:
     """Return the history reading of the run listing, keyed by run id.
 
     Drives the real route. The projection these cases are about - the service's
@@ -151,20 +176,35 @@ def _list_summaries(session_factory, checkpointer) -> tuple[dict[str, dict], int
     with TestClient(app, raise_server_exceptions=True) as client:
         resp = client.get("/v1/runs", params={"state": "all"})
     assert resp.status_code == 200, resp.text
-    body = resp.json()
-    return {run["run_id"]: run for run in body["runs"]}, body["total"]
+    body = cast("JsonObject", resp.json())
+    runs = body["runs"]
+    total = body["total"]
+    assert isinstance(runs, list)
+    assert isinstance(total, int)
+
+    summaries: dict[str, JsonObject] = {}
+    for run in runs:
+        assert isinstance(run, dict)
+        run_id = run.get("run_id")
+        assert isinstance(run_id, str)
+        summaries[run_id] = run
+    return summaries, total
 
 
 class TestListThreads:
     """Tests for the run listing projection assembled by ``list_threads_service``."""
 
-    def test_empty_list(self, session_factory, checkpointer) -> None:
+    def test_empty_list(
+        self, session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
+    ) -> None:
         """Returns an empty listing when no runs exist."""
         summaries, total = _list_summaries(session_factory, checkpointer)
         assert summaries == {}
         assert total == 0
 
-    def test_lists_created_threads(self, session_factory, checkpointer) -> None:
+    def test_lists_created_threads(
+        self, session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
+    ) -> None:
         """Runs started through the versioned verb appear in the listing."""
         app, _agg, _worker, _cp = make_app(session_factory, checkpointer)
 
@@ -183,13 +223,18 @@ class TestListThreads:
         summaries, total = _list_summaries(session_factory, checkpointer)
         assert total == 2
         assert len(summaries) == 2
-        assert {summary["title"] for summary in summaries.values()} == {
+        titles: set[str] = set()
+        for summary in summaries.values():
+            title = summary["title"]
+            assert isinstance(title, str)
+            titles.add(title)
+        assert titles == {
             "Thread A",
             "Thread B",
         }
 
     def test_list_threads_hides_unreadable_plan_approval_metadata(
-        self, session_factory, checkpointer
+        self, session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
     ) -> None:
         """Thread summaries must not expose corrupt plan-approval state."""
 
@@ -229,7 +274,7 @@ class TestListThreads:
         assert thread["approval_request_id"] is None
 
     def test_list_threads_hides_optionless_plan_approval_metadata(
-        self, session_factory, checkpointer
+        self, session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
     ) -> None:
         """Thread summaries must not expose optionless plan-approval state."""
 
@@ -263,7 +308,7 @@ class TestListThreads:
         assert thread["approval_request_id"] is None
 
     def test_list_threads_clears_stale_missing_plan_approval_pointer(
-        self, session_factory, checkpointer
+        self, session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
     ) -> None:
         """Thread summaries must not expose a missing pending plan approval."""
 
@@ -288,7 +333,7 @@ class TestListThreads:
         assert thread["approval_request_id"] is None
 
     def test_list_threads_prefers_live_plan_approval_over_stale_thread_pointer(
-        self, session_factory, checkpointer
+        self, session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
     ) -> None:
         """Thread summaries must resolve pending approval from live durable rows."""
 
@@ -322,7 +367,7 @@ class TestListThreads:
         assert thread["approval_request_id"] == "perm-list-live-plan"
 
     def test_list_threads_prefers_live_plan_approval_over_stale_rejected_status(
-        self, session_factory, checkpointer
+        self, session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
     ) -> None:
         """Thread summaries must not let stale rejected state hide live approval."""
 
@@ -356,7 +401,7 @@ class TestListThreads:
         assert thread["approval_request_id"] == "perm-list-live-after-reject"
 
     def test_list_threads_clears_stale_rejected_plan_approval_residue(
-        self, session_factory, checkpointer
+        self, session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
     ) -> None:
         """Thread summaries must not expose non-actionable rejected approval residue."""
 
@@ -381,7 +426,7 @@ class TestListThreads:
         assert thread["approval_request_id"] is None
 
     def test_list_threads_clears_terminal_thread_pending_approval(
-        self, session_factory, checkpointer
+        self, session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
     ) -> None:
         """Thread summaries must not keep pending approval on terminal threads."""
 
@@ -415,7 +460,7 @@ class TestListThreads:
         assert thread["approval_request_id"] is None
 
     def test_list_threads_hides_answered_pending_apply_plan_approval(
-        self, session_factory, checkpointer
+        self, session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
     ) -> None:
         """List summaries must not expose already-answered approvals as pending."""
 
@@ -455,7 +500,7 @@ class TestListThreads:
         assert thread["approval_request_id"] is None
 
     def test_list_threads_degrades_stale_execution_state_lineage(
-        self, session_factory, checkpointer
+        self, session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
     ) -> None:
         """Thread summaries must not keep healthy readiness on stale lineage."""
 
@@ -493,7 +538,7 @@ class TestListThreads:
         assert thread["execution_readiness"] == "needs_reconciliation"
 
     def test_list_threads_degrades_checkpoint_mismatched_execution_state(
-        self, session_factory, checkpointer
+        self, session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
     ) -> None:
         """Thread summaries must not stay healthy when checkpoint ids drift."""
 
@@ -504,12 +549,7 @@ class TestListThreads:
             checkpoint = empty_checkpoint()
             checkpoint["id"] = "cp-list-current"
             await checkpointer.aput(
-                {
-                    "configurable": {
-                        "thread_id": "thread-list-checkpoint-drift",
-                        "checkpoint_ns": "",
-                    }
-                },
+                _checkpoint_config("thread-list-checkpoint-drift", ""),
                 checkpoint,
                 {"source": "loop", "step": 1, "parents": {}},
                 {},
@@ -546,7 +586,7 @@ class TestListThreads:
         assert thread["execution_readiness"] == "needs_reconciliation"
 
     def test_list_threads_degrades_when_checkpoint_probe_is_unverified(
-        self, session_factory, tmp_path
+        self, session_factory: SessionFactory, tmp_path: Path
     ) -> None:
         """Thread summaries must fail closed when checkpoint probing fails."""
         checkpoints_file = tmp_path / "closed-list-threads-checkpoints.db"
@@ -577,7 +617,7 @@ class TestListThreads:
         assert thread["execution_readiness"] == "checkpoint_unavailable"
 
     def test_list_threads_hides_pending_approval_when_checkpoint_probe_is_unverified(
-        self, session_factory, tmp_path
+        self, session_factory: SessionFactory, tmp_path: Path
     ) -> None:
         """Unverified checkpoint probes must not expose resumable approvals."""
         checkpoints_file = tmp_path / "closed-list-threads-plan-approval.db"
@@ -625,7 +665,7 @@ class TestHealth:
     """Tests for GET /health."""
 
     def test_reports_sqlite_fallback_diagnostics(
-        self, session_factory, checkpointer
+        self, session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
     ) -> None:
         """Public health should expose explicit SQLite fallback diagnostics."""
         app, _agg, _worker, _cp = make_app(session_factory, checkpointer)
@@ -654,7 +694,9 @@ class TestHealth:
 class TestThreadState:
     """Tests for GET /v1/runs/{id}/history."""
 
-    def test_404_for_unknown_thread(self, session_factory, checkpointer) -> None:
+    def test_404_for_unknown_thread(
+        self, session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
+    ) -> None:
         """Returns 404 for a thread that does not exist."""
         app, _agg, _worker, _cp = make_app(session_factory, checkpointer)
 
@@ -663,7 +705,7 @@ class TestThreadState:
         assert resp.status_code == 404
 
     def test_returns_snapshot_for_existing_thread(
-        self, session_factory, checkpointer
+        self, session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
     ) -> None:
         """Returns a ThreadStateSnapshot for a known thread."""
         app, _agg, _worker, _cp = make_app(session_factory, checkpointer)
@@ -697,7 +739,7 @@ class TestThreadState:
         assert data["execution_tasks"] == []
 
     def test_state_handles_unreadable_durable_permission_rows(
-        self, session_factory, checkpointer
+        self, session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
     ) -> None:
         """Corrupted durable permission rows must not crash the state endpoint."""
         app, _agg, _worker, _cp = make_app(session_factory, checkpointer)
@@ -709,12 +751,7 @@ class TestThreadState:
             checkpoint = empty_checkpoint()
             checkpoint["id"] = "cp-corrupt-permission-state"
             await checkpointer.aput(
-                {
-                    "configurable": {
-                        "thread_id": "thread-corrupt-permission-state",
-                        "checkpoint_ns": "",
-                    }
-                },
+                _checkpoint_config("thread-corrupt-permission-state", ""),
                 checkpoint,
                 {"source": "loop", "step": 1, "parents": {}},
                 {},
@@ -758,7 +795,7 @@ class TestThreadState:
         assert data["execution_readiness"] == "operator_intervention_required"
 
     def test_state_degrades_stale_execution_state_lineage(
-        self, session_factory, checkpointer
+        self, session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
     ) -> None:
         """Stale durable execution-state rows must not leave `/state` healthy."""
         app, _agg, _worker, _cp = make_app(session_factory, checkpointer)
@@ -770,12 +807,7 @@ class TestThreadState:
             checkpoint = empty_checkpoint()
             checkpoint["id"] = "cp-fresh-state-endpoint"
             await checkpointer.aput(
-                {
-                    "configurable": {
-                        "thread_id": "thread-stale-state-endpoint",
-                        "checkpoint_ns": "",
-                    }
-                },
+                _checkpoint_config("thread-stale-state-endpoint", ""),
                 checkpoint,
                 {"source": "loop", "step": 1, "parents": {}},
                 {},
@@ -824,7 +856,7 @@ class TestThreadState:
         assert data["execution_tasks"] == []
 
     def test_state_preserves_plan_approval_without_tool_call(
-        self, session_factory, checkpointer
+        self, session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
     ) -> None:
         """A durable plan approval remains visible even if tool_call is null."""
         app, _agg, _worker, _cp = make_app(session_factory, checkpointer)
@@ -836,12 +868,7 @@ class TestThreadState:
             checkpoint = empty_checkpoint()
             checkpoint["id"] = "cp-plan-no-tool-call-endpoint"
             await checkpointer.aput(
-                {
-                    "configurable": {
-                        "thread_id": "thread-plan-no-tool-call-endpoint",
-                        "checkpoint_ns": "",
-                    }
-                },
+                _checkpoint_config("thread-plan-no-tool-call-endpoint", ""),
                 checkpoint,
                 {"source": "loop", "step": 1, "parents": {}},
                 {},
@@ -880,25 +907,18 @@ class TestThreadState:
         assert data["pending_permissions"][0]["tool_call"] == "plan_approval"
 
     def test_state_excludes_aggregator_only_pending_permission(
-        self, session_factory, checkpointer
+        self, session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
     ) -> None:
         """Thread state must not expose permissions without durable backing."""
-        import time
-
-        from ...graph.events import PermissionRequest
-
         agg = EventAggregator()
-        event = PermissionRequest(
-            thread_id="thread-state-aggregator-only",
-            agent_id="vaultspec-coder",
-            timestamp=time.time(),
-            request_id="thread-state-aggregator-only:perm-1",
-            description="Allow file write?",
-            options=[],
-        )
-        agg._emitters._pending_permissions["thread-state-aggregator-only:perm-1"] = (
-            event,
-            0.0,
+        asyncio.run(
+            agg.emit_permission_request(
+                thread_id="thread-state-aggregator-only",
+                agent_id="vaultspec-coder",
+                request_id="thread-state-aggregator-only:perm-1",
+                description="Allow file write?",
+                options=[],
+            )
         )
 
         app, _agg, _worker, _cp = make_app(
@@ -914,12 +934,7 @@ class TestThreadState:
             checkpoint = empty_checkpoint()
             checkpoint["id"] = "cp-thread-state-aggregator-only"
             await checkpointer.aput(
-                {
-                    "configurable": {
-                        "thread_id": "thread-state-aggregator-only",
-                        "checkpoint_ns": "",
-                    }
-                },
+                _checkpoint_config("thread-state-aggregator-only", ""),
                 checkpoint,
                 {"source": "loop", "step": 1, "parents": {}},
                 {},
@@ -947,7 +962,7 @@ class TestThreadState:
         assert data["pause_cause"] is None
 
     def test_state_hides_pending_approval_when_checkpoint_is_unavailable(
-        self, session_factory, tmp_path
+        self, session_factory: SessionFactory, tmp_path: Path
     ) -> None:
         """Thread state must not expose approvals without checkpoint access."""
         checkpoints_file = tmp_path / "missing-thread-state-permission-checkpoints.db"
@@ -1006,7 +1021,7 @@ class TestThreadState:
         assert "pending_permission_without_checkpoint_truth" in data["degraded_reasons"]
 
     def test_state_clears_submitted_stale_pending_approval_without_checkpoint(
-        self, session_factory, checkpointer
+        self, session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
     ) -> None:
         """Submitted threads must not expose approval residue.
 
@@ -1055,7 +1070,7 @@ class TestThreadState:
         assert "pending_permission_without_checkpoint_truth" in data["degraded_reasons"]
 
     def test_state_excludes_terminal_thread_pending_permission_residue(
-        self, session_factory, checkpointer
+        self, session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
     ) -> None:
         """Thread state must not expose stale pending approvals on terminal threads."""
         app, _agg, _worker, _cp = make_app(session_factory, checkpointer)
@@ -1067,12 +1082,7 @@ class TestThreadState:
             checkpoint = empty_checkpoint()
             checkpoint["id"] = "cp-thread-state-terminal-permission-residue"
             await checkpointer.aput(
-                {
-                    "configurable": {
-                        "thread_id": "thread-state-terminal-permission-residue",
-                        "checkpoint_ns": "",
-                    }
-                },
+                _checkpoint_config("thread-state-terminal-permission-residue", ""),
                 checkpoint,
                 {"source": "loop", "step": 1, "parents": {}},
                 {},
@@ -1117,7 +1127,7 @@ class TestThreadState:
         assert data["execution_readiness"] == "needs_reconciliation"
 
     def test_state_excludes_answered_pending_apply_permission(
-        self, session_factory, checkpointer
+        self, session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
     ) -> None:
         """Thread state must not expose already-answered permissions as pending."""
         app, _agg, _worker, _cp = make_app(session_factory, checkpointer)
@@ -1129,12 +1139,7 @@ class TestThreadState:
             checkpoint = empty_checkpoint()
             checkpoint["id"] = "cp-thread-state-answered-pending-apply"
             await checkpointer.aput(
-                {
-                    "configurable": {
-                        "thread_id": "thread-state-answered-pending-apply",
-                        "checkpoint_ns": "",
-                    }
-                },
+                _checkpoint_config("thread-state-answered-pending-apply", ""),
                 checkpoint,
                 {"source": "loop", "step": 1, "parents": {}},
                 {},
@@ -1179,7 +1184,7 @@ class TestThreadState:
         assert data["pause_cause"] is None
 
     def test_state_excludes_checkpoint_only_pending_permission(
-        self, session_factory, checkpointer
+        self, session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
     ) -> None:
         """Thread state must not expose checkpoint-only actionable permissions."""
         app, _agg, _worker, _cp = make_app(session_factory, checkpointer)
@@ -1191,12 +1196,7 @@ class TestThreadState:
             checkpoint = empty_checkpoint()
             checkpoint["id"] = "cp-thread-state-checkpoint-only"
             config = await checkpointer.aput(
-                {
-                    "configurable": {
-                        "thread_id": "thread-state-checkpoint-only",
-                        "checkpoint_ns": "",
-                    }
-                },
+                _checkpoint_config("thread-state-checkpoint-only", ""),
                 checkpoint,
                 {"source": "loop", "step": 1, "parents": {}},
                 {},
@@ -1258,7 +1258,9 @@ class TestThreadState:
 class TestSendMessage:
     """Tests for POST /v1/runs/{run_id}/messages."""
 
-    def test_404_for_unknown_thread(self, session_factory, checkpointer) -> None:
+    def test_404_for_unknown_thread(
+        self, session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
+    ) -> None:
         """Returns 404 when the thread does not exist."""
         app, _agg, _worker, _cp = make_app(session_factory, checkpointer)
 
@@ -1270,7 +1272,7 @@ class TestSendMessage:
         assert resp.status_code == 404
 
     def test_202_accepted_dispatches_to_worker(
-        self, session_factory, checkpointer
+        self, session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
     ) -> None:
         """Returns 202 and dispatches ingest to worker."""
         app, _agg, worker, _cp = make_app(session_factory, checkpointer)
@@ -1302,7 +1304,7 @@ class TestSendMessage:
         assert dispatch["agent_id"] == "vaultspec-supervisor"
 
     def test_followup_dispatch_marks_message_followup_as_applied(
-        self, session_factory, checkpointer
+        self, session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
     ) -> None:
         """Successful follow-up dispatch must stamp the applied action correctly."""
         app, _agg, worker, _cp = make_app(session_factory, checkpointer)
@@ -1341,7 +1343,9 @@ class TestSendMessage:
 
         asyncio.run(_assert_state())
 
-    def test_dispatch_includes_team_preset(self, session_factory, checkpointer) -> None:
+    def test_dispatch_includes_team_preset(
+        self, session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
+    ) -> None:
         """Ingest DispatchRequest includes team_preset from DB for lazy recompile."""
         app, _agg, worker, _cp = make_app(session_factory, checkpointer)
 
@@ -1368,7 +1372,9 @@ class TestSendMessage:
         assert dispatch["action"] == "ingest"
         assert dispatch["team_preset"] == _BUNDLE_FREE_PRESET
 
-    def test_content_length_limit(self, session_factory, checkpointer) -> None:
+    def test_content_length_limit(
+        self, session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
+    ) -> None:
         """content exceeding 64KB is rejected with 422."""
         app, _agg, _worker, _cp = make_app(session_factory, checkpointer)
         oversized = "x" * (65536 + 1)
@@ -1386,7 +1392,7 @@ class TestSendMessage:
         assert resp.status_code == 422
 
     def test_rejects_followup_while_thread_requires_repair(
-        self, session_factory, checkpointer
+        self, session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
     ) -> None:
         """Follow-ups must not bypass repair-needed lifecycle state."""
         app, _agg, _worker, _cp = make_app(session_factory, checkpointer)
@@ -1417,7 +1423,7 @@ class TestSendMessage:
         )
 
     def test_rejects_followup_while_thread_is_reconciling(
-        self, session_factory, checkpointer
+        self, session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
     ) -> None:
         """Follow-ups must not race reconciliation redispatch."""
         app, _agg, _worker, _cp = make_app(session_factory, checkpointer)
@@ -1456,7 +1462,9 @@ class TestSendMessage:
 class TestListTeamPresets:
     """Tests for GET /v1/presets."""
 
-    def test_returns_bundled_presets(self, session_factory, checkpointer) -> None:
+    def test_returns_bundled_presets(
+        self, session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
+    ) -> None:
         """Returns all bundled team presets."""
         app, _agg, _worker, _cp = make_app(session_factory, checkpointer)
 
@@ -1470,7 +1478,9 @@ class TestListTeamPresets:
         # At minimum the bundled pipeline preset should be present
         assert "vaultspec-solo-coder" in preset_ids
 
-    def test_preset_has_required_fields(self, session_factory, checkpointer) -> None:
+    def test_preset_has_required_fields(
+        self, session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
+    ) -> None:
         """A listed preset describes itself, or says why it cannot.
 
         Key PRESENCE is guaranteed by the response model - every declared field
@@ -1512,7 +1522,9 @@ class TestListTeamPresets:
 class TestTeamStatus:
     """Tests for GET /v1/team/status."""
 
-    def test_returns_team_status(self, session_factory, checkpointer) -> None:
+    def test_returns_team_status(
+        self, session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
+    ) -> None:
         """The versioned team projection names agents, active runs and pendings."""
         app, _agg, _worker, _cp = make_app(session_factory, checkpointer)
 
@@ -1526,7 +1538,7 @@ class TestTeamStatus:
         assert "pending_permissions" in data
 
     def test_team_status_excludes_answered_pending_apply_permission(
-        self, session_factory, checkpointer
+        self, session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
     ) -> None:
         """Team status must not advertise answered permissions as pending."""
         app, _agg, _worker, _cp = make_app(session_factory, checkpointer)
@@ -1570,7 +1582,7 @@ class TestTeamStatus:
         assert isinstance(data["pending_permissions"], list)
 
     def test_returns_empty_lists_when_no_activity(
-        self, session_factory, checkpointer
+        self, session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
     ) -> None:
         """All lists are empty when no agents registered and no threads active."""
         app, _agg, _worker, _cp = make_app(session_factory, checkpointer)
@@ -1585,26 +1597,18 @@ class TestTeamStatus:
         assert data["pending_permissions"] == []
 
     def test_pending_permissions_do_not_surface_from_aggregator_without_durable_row(
-        self, session_factory, checkpointer
+        self, session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
     ) -> None:
         """Aggregator-only pending permissions must not appear in team status."""
-        import time
-
-        from ...graph.events import PermissionRequest
-
         agg = EventAggregator()
-        # Inject a pending permission via the emitters sub-component
-        event = PermissionRequest(
-            thread_id="thread-abc",
-            agent_id="vaultspec-coder",
-            timestamp=time.time(),
-            request_id="thread-abc:perm-001",
-            description="Allow file write?",
-            options=[],
-        )
-        agg._emitters._pending_permissions["thread-abc:perm-001"] = (
-            event,
-            0.0,
+        asyncio.run(
+            agg.emit_permission_request(
+                thread_id="thread-abc",
+                agent_id="vaultspec-coder",
+                request_id="thread-abc:perm-001",
+                description="Allow file write?",
+                options=[],
+            )
         )
 
         app, _agg, _worker, _cp = make_app(
@@ -1619,7 +1623,7 @@ class TestTeamStatus:
         assert data["pending_permissions"] == []
 
     def test_pending_permissions_hide_malformed_durable_rows(
-        self, session_factory, checkpointer
+        self, session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
     ) -> None:
         """Team status must not advertise durable rows the respond path rejects."""
         app, _agg, _worker, _cp = make_app(session_factory, checkpointer)
@@ -1661,7 +1665,7 @@ class TestTeamStatus:
         assert data["pending_permissions"] == []
 
     def test_team_status_excludes_orphaned_durable_permission_rows(
-        self, session_factory, checkpointer
+        self, session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
     ) -> None:
         """Orphaned durable permissions must not create ghost active work."""
         app, _agg, _worker, _cp = make_app(session_factory, checkpointer)
@@ -1690,7 +1694,7 @@ class TestTeamStatus:
         assert data["pending_permissions"] == []
 
     def test_team_status_hides_pending_permissions_without_checkpoint_truth(
-        self, session_factory, checkpointer
+        self, session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
     ) -> None:
         """Checkpoint-unavailable threads must not advertise pending approvals."""
         app, _agg, _worker, _cp = make_app(session_factory, checkpointer)
@@ -1726,18 +1730,22 @@ class TestTeamStatus:
         assert data["pending_permissions"] == []
 
     def test_node_summaries_surface_as_agents(
-        self, session_factory, checkpointer
+        self, session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
     ) -> None:
         """Agents registered via aggregator node metadata appear in response."""
         agg = EventAggregator()
-        agg._subscribers_mgr.set_node_metadata(
+        agg.sync_worker_event(
+            "team-status-node-metadata",
             {
-                "vaultspec-coder": {
-                    "role": "coder",
-                    "display_name": "Coder Agent",
-                    "description": "Writes code",
+                "type": "graph_registered",
+                "nodes": {
+                    "vaultspec-coder": {
+                        "role": "coder",
+                        "display_name": "Coder Agent",
+                        "description": "Writes code",
+                    },
                 },
-            }
+            },
         )
 
         app, _agg, _worker, _cp = make_app(
@@ -1770,7 +1778,11 @@ class TestPermissionRespond:
 
     @staticmethod
     def _seed_permission(
-        session_factory, *, thread_id: str, request_id: str, tool_call: str = "bash"
+        session_factory: SessionFactory,
+        *,
+        thread_id: str,
+        request_id: str,
+        tool_call: str = "bash",
     ) -> None:
         async def _run() -> None:
             async with session_factory() as session:
@@ -1794,7 +1806,10 @@ class TestPermissionRespond:
         asyncio.run(_run())
 
     def test_responds_dispatches_resume_to_worker(
-        self, session_factory, checkpointer, caplog
+        self,
+        session_factory: SessionFactory,
+        checkpointer: AsyncSqliteSaver,
+        caplog: pytest.LogCaptureFixture,
     ) -> None:
         """Dispatches a resume to the worker and returns accepted=True."""
         app, _agg, worker, _cp = make_app(session_factory, checkpointer)
@@ -1843,14 +1858,24 @@ class TestPermissionRespond:
             for rec in caplog.records
             if "Dispatching resume dispatch_id=" in rec.message
         )
-        assert record.thread_id == thread_id
-        assert record.request_id == request_id
-        assert record.dispatch_id == dispatch["dispatch_id"]
-        assert record.action == "resume"
-        assert record.option_id == "allow_once"
+        record_thread_id = getattr(record, "thread_id", None)
+        record_request_id = getattr(record, "request_id", None)
+        record_dispatch_id = getattr(record, "dispatch_id", None)
+        record_action = getattr(record, "action", None)
+        record_option_id = getattr(record, "option_id", None)
+        assert isinstance(record_thread_id, str)
+        assert isinstance(record_request_id, str)
+        assert isinstance(record_dispatch_id, str)
+        assert isinstance(record_action, str)
+        assert isinstance(record_option_id, str)
+        assert record_thread_id == thread_id
+        assert record_request_id == request_id
+        assert record_dispatch_id == dispatch["dispatch_id"]
+        assert record_action == "resume"
+        assert record_option_id == "allow_once"
 
     def test_respond_success_marks_permission_response_submitted_as_applied(
-        self, session_factory, checkpointer
+        self, session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
     ) -> None:
         """Successful resume dispatch must stamp the repair row as applied."""
         app, _agg, worker, _cp = make_app(session_factory, checkpointer)
@@ -1894,7 +1919,7 @@ class TestPermissionRespond:
         asyncio.run(_assert_state())
 
     def test_resume_dispatch_includes_team_preset(
-        self, session_factory, checkpointer
+        self, session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
     ) -> None:
         """Resume DispatchRequest includes team_preset from DB for lazy recompile."""
         app, _agg, worker, _cp = make_app(session_factory, checkpointer)
@@ -1932,7 +1957,7 @@ class TestPermissionRespond:
         assert dispatch["team_preset"] == _BUNDLE_FREE_PRESET
 
     def test_responds_to_an_unknown_request_returns_not_found(
-        self, session_factory, checkpointer
+        self, session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
     ) -> None:
         """A request id that names no durable request is refused, not accepted.
 
@@ -1964,7 +1989,7 @@ class TestPermissionRespond:
         assert resp.status_code == 404
 
     def test_rejects_unknown_option_id_without_dispatching(
-        self, session_factory, checkpointer
+        self, session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
     ) -> None:
         """Hostile option ids must be rejected before they reach the worker."""
         app, _agg, worker, _cp = make_app(session_factory, checkpointer)
@@ -2004,7 +2029,7 @@ class TestPermissionRespond:
         asyncio.run(_assert_state())
 
     def test_replays_rejected_invalid_option_as_conflict(
-        self, session_factory, checkpointer
+        self, session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
     ) -> None:
         """Idempotent retries of rejected responses must preserve the conflict."""
         app, _agg, worker, _cp = make_app(session_factory, checkpointer)
@@ -2040,7 +2065,7 @@ class TestPermissionRespond:
         assert worker.dispatches == []
 
     def test_replays_rejected_invalid_option_with_malformed_stored_payload(
-        self, session_factory, checkpointer
+        self, session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
     ) -> None:
         """Malformed stored rejection payloads must fall back to durable state."""
         app, _agg, worker, _cp = make_app(session_factory, checkpointer)
@@ -2100,7 +2125,7 @@ class TestPermissionRespond:
         assert worker.dispatches == []
 
     def test_replays_rejected_invalid_option_after_valid_response(
-        self, session_factory, checkpointer
+        self, session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
     ) -> None:
         """Rejected idempotent replays must preserve the original conflict reason."""
         app, _agg, worker, _cp = make_app(session_factory, checkpointer)
@@ -2161,7 +2186,7 @@ class TestPermissionRespond:
         assert len(worker.dispatches) == 1
 
     def test_rejects_stale_permission_request_when_newer_interrupt_exists(
-        self, session_factory, checkpointer
+        self, session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
     ) -> None:
         """Only the active pending interrupt for a thread may be resumed."""
         app, _agg, worker, _cp = make_app(session_factory, checkpointer)
@@ -2228,7 +2253,7 @@ class TestPermissionRespond:
         assert worker.dispatches[0]["option_id"] == "allow_once"
 
     def test_plan_approval_uses_live_pending_request_over_stale_thread_pointer(
-        self, session_factory, checkpointer
+        self, session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
     ) -> None:
         """Plan approval should not trust a stale thread approval_request_id."""
         app, _agg, worker, _cp = make_app(session_factory, checkpointer)
@@ -2289,7 +2314,7 @@ class TestPermissionRespond:
         }
 
     def test_respond_notes_field_survives_into_verdict_resume_payload(
-        self, session_factory, checkpointer
+        self, session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
     ) -> None:
         """A reviewer comment on a locally-respondable verdict pause reaches the
         resumed run's verdict payload untouched — the shape D6 unifies on.
@@ -2351,7 +2376,7 @@ class TestDeleteThread:
     """Tests for DELETE /v1/runs/{thread_id}."""
 
     def test_rejects_input_required_thread_with_pending_permission(
-        self, session_factory, checkpointer
+        self, session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
     ) -> None:
         """Hard delete must not destroy paused, resumable work."""
         app, _agg, _worker, _cp = make_app(session_factory, checkpointer)
@@ -2363,12 +2388,7 @@ class TestDeleteThread:
             checkpoint = empty_checkpoint()
             checkpoint["id"] = "cp-delete-input-required"
             await checkpointer.aput(
-                {
-                    "configurable": {
-                        "thread_id": "thread-delete-input-required",
-                        "checkpoint_ns": "",
-                    }
-                },
+                _checkpoint_config("thread-delete-input-required", ""),
                 checkpoint,
                 {"source": "loop", "step": 1, "parents": {}},
                 {},
@@ -2401,7 +2421,7 @@ class TestDeleteThread:
         assert resp.json()["detail"] == "Cannot delete thread in 'input_required' state"
 
     def test_deletes_checkpoint_state_for_terminal_thread(
-        self, session_factory, checkpointer
+        self, session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
     ) -> None:
         """Hard delete must remove all persisted checkpoint state for the thread."""
         app, _agg, _worker, _cp = make_app(session_factory, checkpointer)
@@ -2413,12 +2433,7 @@ class TestDeleteThread:
             checkpoint = empty_checkpoint()
             checkpoint["id"] = "cp-delete-terminal-thread-root"
             await checkpointer.aput(
-                {
-                    "configurable": {
-                        "thread_id": "thread-delete-terminal",
-                        "checkpoint_ns": "",
-                    }
-                },
+                _checkpoint_config("thread-delete-terminal", ""),
                 checkpoint,
                 {"source": "loop", "step": 1, "parents": {}},
                 {},
@@ -2426,12 +2441,7 @@ class TestDeleteThread:
             child_checkpoint = empty_checkpoint()
             child_checkpoint["id"] = "cp-delete-terminal-thread-child"
             await checkpointer.aput(
-                {
-                    "configurable": {
-                        "thread_id": "thread-delete-terminal",
-                        "checkpoint_ns": "worker:child",
-                    }
-                },
+                _checkpoint_config("thread-delete-terminal", "worker:child"),
                 child_checkpoint,
                 {"source": "loop", "step": 2, "parents": {}},
                 {},
@@ -2445,25 +2455,15 @@ class TestDeleteThread:
                 await session.commit()
 
         async def _checkpoint_exists() -> bool:
-            config = {
-                "configurable": {
-                    "thread_id": "thread-delete-terminal",
-                    "checkpoint_ns": "",
-                }
-            }
+            config = _checkpoint_config("thread-delete-terminal", "")
             return await checkpointer.aget_tuple(config) is not None
 
         async def _child_checkpoint_exists() -> bool:
-            config = {
-                "configurable": {
-                    "thread_id": "thread-delete-terminal",
-                    "checkpoint_ns": "worker:child",
-                }
-            }
+            config = _checkpoint_config("thread-delete-terminal", "worker:child")
             return await checkpointer.aget_tuple(config) is not None
 
         async def _checkpoint_history_count() -> int:
-            config = {"configurable": {"thread_id": "thread-delete-terminal"}}
+            config = _checkpoint_config("thread-delete-terminal")
             return len([item async for item in checkpointer.alist(config, limit=10)])
 
         asyncio.run(_seed_thread())
@@ -2480,7 +2480,10 @@ class TestDeleteThread:
         assert asyncio.run(_checkpoint_history_count()) == 0
 
     def test_deletes_workspace_artifact_files_for_terminal_thread(
-        self, session_factory, checkpointer, tmp_path
+        self,
+        session_factory: SessionFactory,
+        checkpointer: AsyncSqliteSaver,
+        tmp_path: Path,
     ) -> None:
         """Hard delete must remove sandboxed artifact files owned by the thread."""
         app, _agg, _worker, _cp = make_app(session_factory, checkpointer)
@@ -2520,7 +2523,7 @@ class TestDeleteThread:
         assert artifact_path.exists() is False
 
     def test_plan_approval_response_succeeds_after_real_event_relay(
-        self, session_factory, checkpointer
+        self, session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
     ) -> None:
         """Supervisor plan approvals must be respondable after internal relay."""
         app, _agg, worker, _cp = make_app(session_factory, checkpointer)
@@ -2580,7 +2583,7 @@ class TestDeleteThread:
         assert dispatch["option_id"] == {"verdict": "approved", "notes": None}
 
     def test_rejects_stale_second_response_after_submission(
-        self, session_factory, checkpointer
+        self, session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
     ) -> None:
         """A second non-idempotent response must fail once the request is answered."""
         app, _agg, worker, _cp = make_app(session_factory, checkpointer)
@@ -2637,7 +2640,7 @@ class TestDeleteThread:
         assert worker.dispatches[0]["option_id"] == "allow_once"
 
     def test_failed_resume_dispatch_restores_permission_to_pending(
-        self, session_factory, checkpointer
+        self, session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
     ) -> None:
         """Failed resume dispatch must leave the durable permission re-actionable."""
         app, _agg, worker, _cp = make_app(session_factory, checkpointer)
@@ -2729,7 +2732,7 @@ class TestDeleteThread:
         assert worker.dispatches[0]["option_id"] == "allow_once"
 
     def test_rejects_permission_request_without_valid_durable_options(
-        self, session_factory, checkpointer
+        self, session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
     ) -> None:
         """A malformed durable permission row must fail closed."""
         app, _agg, worker, _cp = make_app(session_factory, checkpointer)
@@ -2768,7 +2771,7 @@ class TestDeleteThread:
         assert worker.dispatches == []
 
     def test_rejects_permission_request_with_malformed_durable_option_json(
-        self, session_factory, checkpointer
+        self, session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
     ) -> None:
         """Corrupted durable option payloads must also fail closed."""
         app, _agg, worker, _cp = make_app(session_factory, checkpointer)
@@ -2827,7 +2830,7 @@ class TestCreateThreadAutonomous:
     """Tests for the autonomous field on POST /v1/runs."""
 
     def test_create_thread_autonomous_defaults_false(
-        self, session_factory, checkpointer
+        self, session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
     ) -> None:
         """Creating a thread without autonomous field defaults to False (supervised)."""
         app, _agg, _worker, _cp = make_app(session_factory, checkpointer)
@@ -2846,7 +2849,7 @@ class TestCreateThreadAutonomous:
         # No crash = autonomous=False default accepted correctly
 
     def test_create_thread_autonomous_true_accepted(
-        self, session_factory, checkpointer
+        self, session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
     ) -> None:
         """Creating a thread with autonomous=True returns 201 successfully."""
         app, _agg, _worker, _cp = make_app(session_factory, checkpointer)
@@ -2866,7 +2869,7 @@ class TestCreateThreadAutonomous:
         assert data["status"] == "running"
 
     def test_create_thread_with_preset_autonomous_dispatches(
-        self, session_factory, checkpointer
+        self, session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
     ) -> None:
         """Creating a thread with a preset and autonomous=True dispatches to worker."""
         app, _agg, worker, _cp = make_app(session_factory, checkpointer)
@@ -2890,7 +2893,7 @@ class TestCreateThreadAutonomous:
         assert dispatch["autonomous"] is True
 
     def test_create_thread_autonomous_inherits_team_auto_approve(
-        self, session_factory, checkpointer
+        self, session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
     ) -> None:
         """When autonomous is not set, team auto_approve=True
         makes dispatch autonomous.
@@ -2922,7 +2925,7 @@ class TestCancelThread:
     """Tests for POST /v1/runs/{thread_id}/cancel."""
 
     def test_failed_cancel_dispatch_restores_repair_state(
-        self, session_factory, checkpointer
+        self, session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
     ) -> None:
         """A failed cancel dispatch must not leave a ghost cancel_pending state."""
         app, _agg, _worker, _cp = make_app(session_factory, checkpointer)

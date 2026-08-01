@@ -50,4 +50,3 @@ The decision is between immediate hard failure, staged promotion with named CI v
 - `Y:/code/vaultspec-core-worktrees/main/.github/workflows/ci.yml:116`
 - `Y:/code/vaultspec-rag-worktrees/main/justfile:113`
 - `Y:/code/vaultspec-rag-worktrees/main/.github/workflows/ci.yml:78`
-

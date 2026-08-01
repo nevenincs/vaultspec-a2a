@@ -33,4 +33,3 @@ RAG's minimal pull-request gate, GPU dispatch, and self-hosted resource controls
 ### Required future verification
 
 Before a target joins A2A `lint all`, prove a fresh zero-finding run at its existing threshold, repeat it on a settled checkout, run the canonical CI aggregate, and preserve an execution record. A direct test must also prove the root CI command and its `dev` equivalent invoke the same static target set so workflow drift cannot silently remove a promoted sentinel.
-

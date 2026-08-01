@@ -4,13 +4,14 @@ tags:
   - '#repository-tooling-hardening'
 date: '2026-07-19'
 modified: '2026-08-01'
-body_hash: 'sha256:998ee0b2d5109e62ac43fdb906d3803dac3d1e717be4ec986514cb91e64e0a6a'
+body_hash: 'sha256:33f11566a9a206bba3972af8103a5ccaf10a1baf4a769e21bae076ab35f1255c'
 tier: L3
 related:
   - '[[2026-07-19-repository-tooling-hardening-adr]]'
   - '[[2026-07-19-repository-tooling-hardening-research]]'
   - '[[2026-07-19-repository-tooling-hardening-reference]]'
 ---
+
 # `repository-tooling-hardening` plan
 
 Deliver one locked, modular, clone-reproducible development and governance
@@ -103,17 +104,17 @@ Establish the Sol-defined declarative strict-sentinel contract, repair scope cor
 
 Make every quality target executable over the correct A2A scope from one registry.
 
-- [ ] `W05.P09.S13` - Add the cross-platform Ty target over the canonical Python roots.; `dev/toolchain.py`.
+- [x] `W05.P09.S13` - Add the cross-platform Ty target over the canonical Python roots.; `dev/toolchain.py`.
 - [ ] `W05.P09.S14` - Correct the cognitive-complexity command scope so it measures only production sources on every supported host.; `dev/toolchain.py, pyproject.toml`.
-- [ ] `W05.P09.S15` - Delegate the root canonical CI recipe to the declarative CI owner.; `justfile`.
+- [ ] `W05.P09.S15` - Reconcile the complete canonical CI sequence in the declarative registry before reducing the root recipe to delegation.; `dev/toolchain.py, justfile`.
 
 ### Phase `W05.P10` - hosted visibility and anti-drift
 
 Make every strict and advisory result independently visible in CI and prove the declarations cannot diverge.
 
-- [ ] `W05.P10.S16` - Schedule every deterministic strict sentinel as an independently visible hosted-CI result.; `.github/workflows/test.yml`.
+- [ ] `W05.P10.S16` - Schedule one named hosted step per deterministic sentinel on every push and pull request, guarded by !cancelled and advisory until promotion.; `.github/workflows/test.yml`.
 - [ ] `W05.P10.S17` - Schedule production JSCPD clone detection as a named advisory hosted-CI result.; `.github/workflows/test.yml`.
-- [ ] `W05.P10.S18` - Prove the root recipe, registry, and hosted workflow obey the Sol anti-drift contract.; `dev/tests/test_ci_contract.py`.
+- [ ] `W05.P10.S18` - Prove exact root, workflow, sentinel, platform, advisory, blocking, and duplication anti-drift invariants from the real registry.; `dev/tests/test_ci_contract.py`.
 
 ## Wave `W06` - strict type and portability remediation
 
@@ -138,6 +139,7 @@ Repair production typing by bounded domain with no suppressions or compatibility
 - [ ] `W06.P12.S26` - Repair strict types in the provider and service test domains after production contracts stabilize.; `src/vaultspec_a2a/providers/tests, src/vaultspec_a2a/service_tests`.
 - [ ] `W06.P12.S27` - Repair strict types in lifecycle test helpers and their production contracts.; `src/vaultspec_a2a/lifecycle, src/vaultspec_a2a/lifecycle/tests`.
 - [ ] `W06.P12.S28` - Repair strict types in graph, authoring, worker, and streaming domains.; `src/vaultspec_a2a/graph, src/vaultspec_a2a/authoring, src/vaultspec_a2a/worker, src/vaultspec_a2a/streaming`.
+- [ ] `W06.P12.S47` - Resolve every residual Ty and Basedpyright diagnostic across the canonical Python roots before any strict-type graduation.; `src, dev, docs, scripts, packaging`.
 
 ## Wave `W07` - structural complexity remediation
 
@@ -160,6 +162,7 @@ Finish graph, lifecycle, desktop, and utility structural debt at the configured 
 - [ ] `W07.P14.S34` - Decompose graph compiler and node hotspots while retaining compiled-topology evidence.; `src/vaultspec_a2a/graph/compiler.py, src/vaultspec_a2a/graph/nodes`.
 - [ ] `W07.P14.S35` - Decompose lifecycle discovery and singleton hotspots without weakening ownership checks.; `src/vaultspec_a2a/lifecycle`.
 - [ ] `W07.P14.S36` - Decompose desktop filesystem and process-utility hotspots with real-process regression evidence.; `src/vaultspec_a2a/desktop, src/vaultspec_a2a/utils/process.py`.
+- [ ] `W07.P14.S48` - Resolve every residual production complexity, shape, nesting, and size finding before any structural-sentinel graduation.; `src/vaultspec_a2a`.
 
 ## Wave `W08` - evidence-bound graduation and audit
 
@@ -167,8 +170,9 @@ Promote only verified zero-debt sentinels atomically and complete the required r
 
 ### Phase `W08.P15` - sentinel graduation
 
-Independently prove and atomically promote each deterministic strict sentinel.
+Independently prove and atomically promote each deterministic strict sentinel only after two clean locked runs at unchanged scope and threshold on one clean candidate commit, no new exclusion, suppression, baseline, or duplication, a passing just ci, applicable runtime evidence, and a passing anti-drift guard.
 
+- [ ] `W08.P15.S49` - Review and classify production JSCPD findings before promotion to prove no deterministic sentinel reaches zero through duplicated code.; `.vault/audit, .vault/exec`.
 - [ ] `W08.P15.S37` - Prove cross-platform Ty is zero and atomically promote type-platforms into the blocking aggregate.; `dev/toolchain.py, .github/workflows/test.yml`.
 - [ ] `W08.P15.S38` - Prove Basedpyright strict is zero and atomically promote type-strict into the blocking aggregate.; `dev/toolchain.py, .github/workflows/test.yml`.
 - [ ] `W08.P15.S39` - Prove cognitive complexity is zero on the corrected production scope and atomically promote complexity.; `dev/toolchain.py, .github/workflows/test.yml`.
@@ -180,9 +184,9 @@ Independently prove and atomically promote each deterministic strict sentinel.
 
 ### Phase `W08.P16` - closure and audit
 
-Retain advisory clone evidence and complete the mandatory implementation review and finding queue.
+Retain terminal advisory clone evidence and complete the mandatory implementation review and finding queue.
 
-- [ ] `W08.P16.S45` - Review and classify each production JSCPD finding without changing the advisory policy.; `dev/toolchain.py, .github/workflows/test.yml`.
+- [ ] `W08.P16.S45` - Recheck and classify production JSCPD findings after graduation without changing the advisory policy.; `.vault/audit, .vault/exec`.
 - [ ] `W08.P16.S46` - Run formal code review, record every finding, and close the campaign only on full evidence.; `.vault/audit, .vault/exec`.
 
 ## Parallelization

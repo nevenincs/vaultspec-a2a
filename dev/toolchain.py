@@ -270,7 +270,8 @@ LINT = Verb(
     summary="Run gating static analysis; a finding fails the build.",
     note=(
         "'all' chains only the dimensions that hold the line today. complexity, "
-        "cyclomatic, shape, limits, nesting, size and type-strict are REAL GATES at "
+        "cyclomatic, shape, limits, nesting, size, type-strict, and type-platforms are "
+        "REAL GATES at "
         "industry thresholds whose burndown is unfinished - run each by name, or "
         "'just health' for the ranked backlog. Chaining a permanently-red gate "
         "would hide every dimension behind it and teach people to ignore red. A "
@@ -287,6 +288,23 @@ LINT = Verb(
             "type",
             "Ty type checking.",
             (uv_run("ty", "check", *PYTHON_PATHS),),
+        ),
+        Target(
+            "type-platforms",
+            "Ty type checking against every target platform.",
+            tuple(
+                uv_run(
+                    "python",
+                    "-m",
+                    "ty",
+                    "check",
+                    "--python-platform",
+                    platform,
+                    *PYTHON_PATHS,
+                )
+                for platform in ("linux", "darwin", "win32")
+            ),
+            keep_going=True,
         ),
         Target(
             "type-strict",
@@ -385,6 +403,7 @@ LINT = Verb(
                 for name in (
                     "python",
                     "type",
+                    "type-platforms",
                     "type-strict",
                     "complexity",
                     "cyclomatic",

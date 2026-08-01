@@ -9,12 +9,23 @@ survives, and nothing ever collects it.  This service accumulated exactly that:
 an orphaned temporary sitting beside a discovery record for six days, left by a
 publication that never completed.
 
-Three separate implementations of this pattern existed here, none of which
-removed its temporary file on failure, and only one of which rode out the
-transient Windows sharing violation that a concurrent reader can cause.  This
-module is the single audited version: it always fsyncs before the rename so the
-bytes are durable, always retries the rename over a bounded contention window,
-and always removes the temporary file when the publication does not complete.
+This module is the audited version and the only copy of the pattern in this
+package: it always fsyncs before the rename so the bytes are durable, always
+retries the rename over a bounded contention window, and always removes the
+temporary file when the publication does not complete - including when the
+interruption is a ``KeyboardInterrupt`` or a ``SystemExit`` rather than an error.
+Service discovery, the process registry, and the runtime singleton all publish
+through it.
+
+Two credential-plane writers elsewhere in the tree keep their own copy of the
+loop rather than calling this, each for a reason recorded at the site: the
+desktop worker interprocess-communication mint has to apply an owner-restricting
+access-control list to the temporary file *between* the fsync and the rename,
+which this deliberately offers no seam for, and the Gemini OAuth refresh cannot
+import this package without dragging the process registry and control
+configuration into a latency-sensitive provider leaf.  Both close the same
+failure path this does.  They are the documented exceptions, not drift - and any
+third copy without a reason of its own belongs here instead.
 """
 
 from __future__ import annotations

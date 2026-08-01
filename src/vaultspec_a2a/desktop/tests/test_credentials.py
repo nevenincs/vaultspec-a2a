@@ -187,3 +187,43 @@ def test_create_worker_ipc_credential_is_per_boot(tmp_path: Path) -> None:
     assert first != second
     worker_path = credential_paths(credentials_dir).worker_ipc_path
     assert worker_path.read_text(encoding="utf-8") == second
+
+
+def test_a_failed_mint_leaves_no_temporary_secret_behind(tmp_path: Path) -> None:
+    """A mint that cannot publish must not strand a live secret in a temporary.
+
+    The cleanup used to cover only the harden-and-rename step, so a write or
+    fsync failure left a readable secret sitting beside the credential file, and
+    an interruption that was not an ``OSError`` leaked one from the rename step
+    too. A directory standing where the credential belongs makes the rename fail
+    for real; nothing may survive in the credentials directory afterwards.
+    """
+    credentials_dir = tmp_path / "credentials"
+    credentials_dir.mkdir()
+    occupied = credential_paths(credentials_dir).worker_ipc_path
+    occupied.mkdir()
+
+    with pytest.raises(OSError):
+        create_worker_ipc_credential(credentials_dir)
+
+    assert occupied.is_dir()
+    assert sorted(credentials_dir.glob("*.tmp")) == []
+
+
+def test_the_mint_temporary_is_named_for_the_writing_process(tmp_path: Path) -> None:
+    """Two gateways booting against one home must not collide on the temporary.
+
+    Occupying the expected temporary name with a directory makes the mint fail,
+    which proves it targets exactly that per-process name rather than asserting
+    on an implementation detail from the outside.
+    """
+    credentials_dir = tmp_path / "credentials"
+    credentials_dir.mkdir()
+    expected = credentials_dir / f".{WORKER_IPC_CREDENTIAL_NAME}.{os.getpid()}.tmp"
+    expected.mkdir()
+
+    with pytest.raises(OSError):
+        create_worker_ipc_credential(credentials_dir)
+
+    assert expected.is_dir()
+    assert not credential_paths(credentials_dir).worker_ipc_path.exists()

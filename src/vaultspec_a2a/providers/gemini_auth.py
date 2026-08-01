@@ -34,6 +34,7 @@ References:
 """
 
 import asyncio
+import contextlib
 import json
 import logging
 import os
@@ -62,6 +63,12 @@ _CREDS_FILE_NAME = "oauth_creds.json"
 
 # HTTP status code for success.
 _HTTP_OK = 200
+
+# How long to ride out a transient Windows sharing violation when renaming the
+# refreshed credentials over the live file: the Gemini command-line interface
+# may hold it open while this publishes.
+_REPLACE_RETRY_SECONDS = 2.0
+_REPLACE_RETRY_INTERVAL = 0.01
 
 # Serialises concurrent refresh attempts so two graph executions that both
 # detect expired credentials do not race on the credentials file.
@@ -98,18 +105,62 @@ def _is_expired(creds: dict) -> bool:
     return time.time() >= (expiry_ms / 1000.0) - settings.oauth_expiry_buffer_seconds
 
 
-def _fsync_file(path: Path) -> None:
-    """Open a file and fsync it to flush OS write-back cache.
+def _publish_credentials(path: Path, payload: str) -> None:
+    """Write *payload* to a temporary file and rename it over *path*.
 
-    On Windows ``os.fsync()`` requires a writable file descriptor —
-    ``O_RDONLY`` raises ``OSError: [Errno 9] Bad file descriptor``.
-    We use ``O_RDWR`` which works on both POSIX and Windows.
+    Blocking: the caller offloads this to a worker thread.
+
+    Three properties this needs and the plain write-then-rename it replaced did
+    not have. The temporary carries the writing process id, so two processes
+    refreshing the same credentials home cannot collide on the temporary itself
+    and rename each other's half-written bytes over the target. The fsync is
+    taken on the descriptor the bytes were written through rather than on a
+    second one opened by path, so nothing can be substituted underneath it
+    between the write and the flush. And the temporary is removed whenever the
+    publication does not complete, so a failed refresh leaves the credentials
+    directory as it found it instead of accumulating residue beside the file the
+    Gemini command-line interface reads.
+
+    This deliberately does not call the lifecycle package's audited writer:
+    importing it here would execute ``vaultspec_a2a.lifecycle``, dragging the
+    process registry, service discovery, and control configuration into a
+    provider leaf whose import latency sits on the coding-agent command-line
+    interface's tool-discovery window. The permission bits are left to the
+    process umask, matching what this wrote before - tightening them is a
+    decision about a file the Gemini command-line interface also owns, not a
+    consequence of fixing the failure path.
     """
-    fd = os.open(str(path), os.O_RDWR)
+    tmp = path.with_name(f"{path.name}.{os.getpid()}.tmp")
     try:
-        os.fsync(fd)
-    finally:
-        os.close(fd)
+        with open(tmp, "w", encoding="utf-8") as handle:
+            handle.write(payload)
+            handle.flush()
+            os.fsync(handle.fileno())
+        _replace_with_retry(tmp, path)
+    except BaseException:
+        # Includes KeyboardInterrupt and SystemExit: an interrupted refresh must
+        # not be the one case that leaves a temporary credential file behind.
+        with contextlib.suppress(OSError):
+            tmp.unlink(missing_ok=True)
+        raise
+
+
+def _replace_with_retry(tmp: Path, path: Path) -> None:
+    """Rename *tmp* over *path*, riding out a transient sharing violation.
+
+    ``os.replace`` is atomic, but on Windows a concurrent reader holding the
+    target open can briefly deny it; retrying over a short bounded window turns a
+    spurious failure into a successful publication.
+    """
+    deadline = time.monotonic() + _REPLACE_RETRY_SECONDS
+    while True:
+        try:
+            os.replace(tmp, path)
+            return
+        except PermissionError:
+            if time.monotonic() >= deadline:
+                raise
+            time.sleep(_REPLACE_RETRY_INTERVAL)
 
 
 async def refresh_gemini_token(
@@ -206,16 +257,12 @@ async def refresh_gemini_token(
         if "refresh_token" in token_data:
             creds["refresh_token"] = token_data["refresh_token"]
 
-        # Atomic write: write to .tmp, fsync, then rename to avoid partial reads.
-        tmp = creds_path.with_suffix(".json.tmp")
-        # Offload blocking write_text via to_thread
+        # One offload for the whole publication: the write, the fsync that makes
+        # it durable before the rename, and the rename itself are all blocking
+        # filesystem work that must not run on the event loop.
         await asyncio.to_thread(
-            tmp.write_text, json.dumps(creds, indent=2), encoding="utf-8"
+            _publish_credentials, creds_path, json.dumps(creds, indent=2)
         )
-        # fsync via to_thread so blocking syscall doesn't stall event loop.
-        # M16: fsync before rename so data is durable even on power failure.
-        await asyncio.to_thread(_fsync_file, tmp)
-        await asyncio.to_thread(tmp.replace, creds_path)
 
         logger.info(
             "Gemini OAuth token refreshed; new expiry in %ds.",

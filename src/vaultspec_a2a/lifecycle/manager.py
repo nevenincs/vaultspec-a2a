@@ -77,6 +77,7 @@ __all__ = [
 _OWNER_ENV = "VAULTSPEC_PROCS_OWNER"
 _KILL_POLL_INTERVAL = 0.1
 _KILL_ESCALATION_WAIT = 5.0
+_TASKKILL_REAP_WAIT = 1.0
 
 # A spawned process's redirect file is a raw append-mode file, not a Python
 # logging handler, so it cannot rotate on its own — a long-lived dev instance
@@ -143,6 +144,33 @@ def _confirm_terminated(pid: int, *, timeout: float = 10.0) -> bool:
     return not _is_pid_alive(pid)
 
 
+def _win_taskkill_tree(pid: int, *, deadline: float) -> None:
+    """Fell *pid*'s tree with ``taskkill /T /F``, bounded by *deadline*.
+
+    ``taskkill /F`` is authoritative and normally returns in well under a
+    second, but it can wedge - and a wedged one must never hang the caller.
+    Every synchronous teardown verb reaches this, and one of them (``serve_up``)
+    holds port reservations whose release runs in a ``finally`` a hung call never
+    reaches. So the wait draws from the caller's own kill budget and the killer
+    itself is felled when that budget runs out, leaving the liveness poll to
+    report the real outcome.
+    """
+    try:
+        killer = subprocess.Popen(
+            ["taskkill", "/T", "/F", "/PID", str(pid)],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+    except OSError:
+        return
+    try:
+        killer.wait(timeout=max(deadline - time.monotonic(), 0.0))
+    except subprocess.TimeoutExpired:
+        killer.kill()
+        with contextlib.suppress(subprocess.TimeoutExpired):
+            killer.wait(timeout=_TASKKILL_REAP_WAIT)
+
+
 def tree_kill(pid: int, *, timeout: float = 10.0) -> bool:
     """Kill *pid* and its whole process tree, returning ``True`` once it is dead.
 
@@ -150,20 +178,20 @@ def tree_kill(pid: int, *, timeout: float = 10.0) -> bool:
     on Windows). POSIX has no whole-tree signal, so it snapshots the descendants
     before signalling anything - killing the root first would sever the parent
     links the walk needs - and escalates ``SIGTERM`` then ``SIGKILL`` across the
-    root and that snapshot. A pid that is already dead is a success. The call
-    blocks up to *timeout* seconds for the tree to disappear before reporting.
+    root and that snapshot. A pid that is already dead is a success.
+
+    *timeout* bounds the whole Windows path, not just the confirmation: the
+    ``taskkill`` wait and the liveness poll that follows it share one deadline,
+    so a wedged killer spends the caller's budget rather than blocking forever.
+    POSIX signalling does not block, so there *timeout* bounds the poll and a
+    further :data:`_KILL_ESCALATION_WAIT` covers the ``SIGKILL`` escalation.
     """
     if pid <= 0 or not _is_pid_alive(pid):
         return True
     targets = [pid]
+    deadline = time.monotonic() + timeout
     if sys.platform == "win32":
-        with contextlib.suppress(OSError):
-            subprocess.run(
-                ["taskkill", "/T", "/F", "/PID", str(pid)],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                check=False,
-            )
+        _win_taskkill_tree(pid, deadline=deadline)
     else:
         import signal
 
@@ -171,7 +199,6 @@ def tree_kill(pid: int, *, timeout: float = 10.0) -> bool:
 
         targets = [pid, *posix_descendant_pids(pid)]
         _signal_all(targets, signal.SIGTERM)
-    deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         if not _any_pid_alive(targets):
             return True

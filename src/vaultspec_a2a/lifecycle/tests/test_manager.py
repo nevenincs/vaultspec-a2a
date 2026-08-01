@@ -1037,3 +1037,37 @@ def test_confirm_terminated_detects_a_live_and_a_dead_pid() -> None:
         tree_kill(child.pid)
     # Once felled, it confirms terminated.
     assert _confirm_terminated(child.pid, timeout=10.0) is True
+
+
+@pytest.mark.skipif(
+    sys.platform != "win32",
+    reason="only the Windows path shells out to taskkill; POSIX signals with "
+    "os.kill, which does not block, so it has no wait to bound",
+)
+def test_the_taskkill_wait_is_bounded_by_the_callers_kill_budget() -> None:
+    """A killer that outlives the budget is felled rather than waited on.
+
+    ``taskkill`` normally returns in well under a second, but nothing here
+    guaranteed that: the call carried no timeout at all, so a wedged one hung
+    whichever synchronous teardown verb reached it - and ``serve_up`` releases
+    its held port reservations in a ``finally`` that a hung call never reaches.
+
+    Handing the seam a budget that is already spent drives the timeout branch
+    against a real ``taskkill`` process rather than a stand-in. The assertion is
+    the property the fix is for: the call comes back on its own budget instead of
+    waiting on the killer. It does not fabricate a wedged ``taskkill`` - that
+    would take a purpose-built executable, since Windows resolves a bare command
+    name to ``.exe`` only - so what is proven is that the bound is applied and
+    the killer reaped, not the pathological case in the wild.
+    """
+    from ..manager import _TASKKILL_REAP_WAIT, _win_taskkill_tree
+
+    child = _sleeper()
+    try:
+        spent = time.monotonic()
+        _win_taskkill_tree(child.pid, deadline=spent)
+        elapsed = time.monotonic() - spent
+        assert elapsed <= _TASKKILL_REAP_WAIT + 2.0
+    finally:
+        tree_kill(child.pid)
+        assert wait_pid_dead(child.pid)

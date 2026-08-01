@@ -22,9 +22,11 @@ exception argument.
 
 from __future__ import annotations
 
+import contextlib
 import os
 import secrets
 import stat
+import time
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
@@ -62,6 +64,24 @@ _ALLOWED_CHARS = frozenset(
 )
 # The gateway mints a 256-bit worker IPC secret; 32 bytes rendered as hex.
 _WORKER_IPC_ENTROPY_BYTES = 32
+
+# How long to ride out a transient Windows sharing violation on the rename that
+# publishes the minted secret. ``os.replace`` is atomic, but on Windows a reader
+# holding the target open can briefly deny it, and this file is read by the
+# gateway-worker pair while a later boot may be publishing over it.
+#
+# This mirrors, rather than calls, the lifecycle package's audited writer. That
+# writer takes text and optional permission bits and renames immediately after
+# the fsync; this mint has to apply the owner-restricting access-control list to
+# the temporary file *between* the fsync and the rename, so the secret is never
+# reachable by another local principal - not even for the width of the rename -
+# and on Windows those bits are a discretionary access-control list rather than
+# mode bits the shared writer could pass through. It also opens the temporary
+# with ``O_NOFOLLOW``, which that writer does not. Adding a pre-rename callback
+# to the shared writer for this single caller would trade one duplicated loop
+# for a general-purpose seam nothing else wants.
+_REPLACE_RETRY_SECONDS = 2.0
+_REPLACE_RETRY_INTERVAL = 0.01
 
 
 class CredentialError(ValueError):
@@ -205,7 +225,8 @@ def create_worker_ipc_credential(credentials_dir: Path) -> str:
     beneath *credentials_dir*, hardens the file to owner-only access, and returns
     the secret. An existing file is replaced so a boot always owns its own IPC
     secret. The directory is created owner-restricted if absent. The secret is
-    never logged.
+    never logged, and a mint that does not complete removes its temporary file
+    rather than stranding a live secret beside the credential.
     """
     directory = Path(credentials_dir)
     directory.mkdir(parents=True, exist_ok=True)
@@ -230,16 +251,33 @@ def create_worker_ipc_credential(credentials_dir: Path) -> str:
         | getattr(os, "O_NOFOLLOW", 0)
         | getattr(os, "O_BINARY", 0)
     )
-    descriptor = os.open(tmp, flags, 0o600)
     try:
-        os.write(descriptor, secret.encode("utf-8"))
-        os.fsync(descriptor)
-    finally:
-        os.close(descriptor)
-    try:
+        descriptor = os.open(tmp, flags, 0o600)
+        try:
+            os.write(descriptor, secret.encode("utf-8"))
+            os.fsync(descriptor)
+        finally:
+            os.close(descriptor)
         harden_credential_file(tmp)
-        os.replace(tmp, target)
-    except OSError:
-        tmp.unlink(missing_ok=True)
+        _replace_with_retry(tmp, target)
+    except BaseException:
+        # Every failure path, ``KeyboardInterrupt`` and ``SystemExit`` included:
+        # an interrupted mint must never be the one case that leaves a live
+        # secret sitting in a temporary file nothing collects.
+        with contextlib.suppress(OSError):
+            tmp.unlink(missing_ok=True)
         raise
     return secret
+
+
+def _replace_with_retry(tmp: Path, target: Path) -> None:
+    """Rename *tmp* over *target*, riding out a transient sharing violation."""
+    deadline = time.monotonic() + _REPLACE_RETRY_SECONDS
+    while True:
+        try:
+            os.replace(tmp, target)
+            return
+        except PermissionError:
+            if time.monotonic() >= deadline:
+                raise
+            time.sleep(_REPLACE_RETRY_INTERVAL)

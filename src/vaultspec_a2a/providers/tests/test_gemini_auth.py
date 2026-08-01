@@ -5,6 +5,7 @@ are marked @pytest.mark.live.
 """
 
 import json
+import os
 import time
 from pathlib import Path
 
@@ -14,6 +15,7 @@ from ...control.config import settings
 from ..gemini_auth import (
     _default_creds_path,
     _is_expired,
+    _publish_credentials,
     gemini_uses_env_auth,
     refresh_gemini_token,
 )
@@ -202,3 +204,78 @@ class TestRefreshGeminiTokenOffline:
 
 
 # ---------------------------------------------------------------------------
+
+
+# ---------------------------------------------------------------------------
+# _publish_credentials — the write-and-rename that lands a refreshed token
+# ---------------------------------------------------------------------------
+
+
+class TestPublishCredentials:
+    """The refreshed credentials must land whole or not at all.
+
+    Real files only: every failure below is produced by genuinely unwritable
+    filesystem state or by content that cannot be encoded, never by a stand-in.
+    """
+
+    def test_the_payload_lands_and_no_temporary_survives(self, tmp_path: Path) -> None:
+        """The ordinary case publishes the bytes and cleans up after itself."""
+        target = tmp_path / "oauth_creds.json"
+
+        _publish_credentials(target, json.dumps({"access_token": "fresh"}))
+
+        assert json.loads(target.read_text(encoding="utf-8"))["access_token"] == "fresh"
+        assert sorted(tmp_path.glob("*.tmp")) == []
+
+    def test_a_denied_rename_leaves_no_temporary_behind(self, tmp_path: Path) -> None:
+        """A rename that stays denied past the retry window must not leak residue.
+
+        A directory standing where the credentials file belongs makes
+        ``os.replace`` fail on every platform. The previous implementation left
+        its temporary - holding a live refresh token - beside it.
+        """
+        target = tmp_path / "oauth_creds.json"
+        target.mkdir()
+
+        with pytest.raises(OSError):
+            _publish_credentials(target, json.dumps({"refresh_token": "secret"}))
+
+        assert target.is_dir()
+        assert sorted(tmp_path.glob("*.tmp")) == []
+
+    def test_a_non_os_failure_mid_write_still_removes_the_temporary(
+        self, tmp_path: Path
+    ) -> None:
+        """A failure that is not an ``OSError`` must clean up too.
+
+        An unpaired surrogate cannot be encoded as UTF-8, so the write raises a
+        ``UnicodeEncodeError`` after the temporary already exists. Catching only
+        ``OSError`` would leak residue here.
+        """
+        target = tmp_path / "oauth_creds.json"
+
+        with pytest.raises(UnicodeEncodeError):
+            _publish_credentials(target, "\ud800")
+
+        assert not target.exists()
+        assert sorted(tmp_path.glob("*.tmp")) == []
+
+    def test_the_temporary_is_named_for_the_writing_process(
+        self, tmp_path: Path
+    ) -> None:
+        """Two processes refreshing one credentials home must not collide.
+
+        The temporary used to be a fixed ``oauth_creds.json.tmp``, so two
+        refreshes of the same home wrote the same temporary and could rename
+        each other's half-written bytes over the live file. Occupying the
+        per-process name with a directory proves the name now carries the pid.
+        """
+        target = tmp_path / "oauth_creds.json"
+        expected = tmp_path / f"oauth_creds.json.{os.getpid()}.tmp"
+        expected.mkdir()
+
+        with pytest.raises(OSError):
+            _publish_credentials(target, json.dumps({"access_token": "blocked"}))
+
+        assert expected.is_dir()
+        assert not target.exists()

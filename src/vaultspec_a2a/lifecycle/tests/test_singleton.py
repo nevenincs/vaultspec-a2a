@@ -9,7 +9,9 @@ used; child processes are always torn down in a ``finally``.
 
 from __future__ import annotations
 
+import json
 import os
+import stat
 import subprocess
 import sys
 import time
@@ -18,8 +20,10 @@ from typing import TYPE_CHECKING
 import pytest
 
 from ...lifecycle.singleton import (
+    SINGLETON_RECORD_VERSION,
     SingletonConflictError,
     SingletonHeldError,
+    SingletonRecord,
     SingletonState,
     acquire_singleton,
     classify_app_home,
@@ -193,3 +197,52 @@ def test_malformed_record_reads_malformed(tmp_path: Path) -> None:
     record_path.parent.mkdir(parents=True, exist_ok=True)
     record_path.write_text("{ not json", encoding="utf-8")
     assert classify_app_home(app_home)[0] is SingletonState.MALFORMED
+
+
+def test_a_failed_owner_record_publication_leaves_no_temporary(tmp_path: Path) -> None:
+    """A publication that cannot complete must not leave residue behind.
+
+    The owner record used to be published by a private copy of write-fsync-
+    rename that removed nothing when the rename failed, so every failed
+    publication left a temporary sitting beside the record for good. It now
+    routes through the package's audited writer; a directory standing where the
+    record belongs makes the rename fail for real, and the assertion is that the
+    runtime directory holds no residue afterwards.
+    """
+    from ..singleton import _write_record, current_process_fingerprint
+
+    record_path = singleton_record_path(tmp_path / "app")
+    record_path.parent.mkdir(parents=True, exist_ok=True)
+    record_path.mkdir()
+    record = SingletonRecord(
+        version=SINGLETON_RECORD_VERSION,
+        pid=os.getpid(),
+        owner=default_owner(),
+        start_fingerprint=current_process_fingerprint(),
+        acquired_at_ms=int(time.time() * 1000),
+    )
+
+    with pytest.raises(OSError):
+        _write_record(record_path, record)
+
+    assert record_path.is_dir()
+    assert sorted(record_path.parent.glob("*.tmp")) == []
+
+
+def test_the_owner_record_is_written_owner_only(tmp_path: Path) -> None:
+    """Adopting the shared writer must keep the record's owner-only permissions.
+
+    The private copy opened its own descriptor to get ``0o600``; the shared
+    writer takes the same bits through its ``mode`` argument, and this proves
+    the bits actually reached the published file rather than the temporary.
+    """
+    app_home = tmp_path / "app"
+    singleton = acquire_singleton(app_home, owner="alice")
+    try:
+        published = singleton_record_path(app_home)
+        assert published.is_file()
+        if os.name == "posix":
+            assert stat.S_IMODE(published.stat().st_mode) == 0o600
+        assert json.loads(published.read_text(encoding="utf-8"))["owner"] == "alice"
+    finally:
+        singleton.release()

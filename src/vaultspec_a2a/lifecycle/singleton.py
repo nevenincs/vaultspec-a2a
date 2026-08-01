@@ -39,6 +39,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
 
+from .atomic_write import atomic_write_text
 from .discovery import is_pid_alive
 
 __all__ = [
@@ -315,16 +316,15 @@ def recorded_process_is_live(record: SingletonRecord) -> bool:
 
 
 def _write_record(path: Path, record: SingletonRecord) -> None:
-    """Atomically publish an owner record (temp write + fsync + rename)."""
+    """Publish an owner record through the audited atomic writer.
+
+    Owner-only permission bits are asked for explicitly: the record carries the
+    holder's process identity, and this once opened its own descriptor to get
+    them. It no longer does - the shared writer takes the same bits and is the
+    only copy of this package's write-fsync-rename discipline.
+    """
     path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_name(f"{path.name}.{os.getpid()}.tmp")
-    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-    try:
-        os.write(fd, json.dumps(record.to_dict(), indent=2).encode("utf-8"))
-        os.fsync(fd)
-    finally:
-        os.close(fd)
-    os.replace(tmp, path)
+    atomic_write_text(path, json.dumps(record.to_dict(), indent=2), mode=0o600)
 
 
 def classify_app_home(

@@ -253,10 +253,11 @@ class TeamState(TypedDict):
     # D5 caps, and raises interrupt() when non-empty. Last-write-wins — a
     # caller sets it fresh each time it wants to ask.
     clarification_questions: NotRequired[list[dict[str, Any]]]
-    # clarification_answers: the flat {question_id: answer} map the
-    # clarification node records on resume. Last-write-wins; a fresh
-    # clarification round overwrites the prior answer set.
-    clarification_answers: NotRequired[dict[str, str]]
+    # clarification_answers is declared ONCE, above, keyed by request id and
+    # carrying its merge reducer. A second declaration lived here describing a
+    # flat {question_id: answer} map with last-write-wins, and being later it
+    # won: the resolved annotation lost the reducer entirely, and its type
+    # contradicted what the gate node actually writes.
 
     # --- routing error: set by supervisor on parse failure ---
     routing_error: NotRequired[str | None]

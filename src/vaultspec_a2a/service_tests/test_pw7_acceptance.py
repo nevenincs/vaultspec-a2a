@@ -192,6 +192,7 @@ _PRESET_LIVE = "vaultspec-adr-research"
 # app-server provider (doc-reviewer stays claude); `zai` routes them to Z.ai. The
 # Z.ai lane is credential-gated - the env var the harness skips on when absent.
 _PROFILE_CODEX = "codex"
+_PROFILE_CODEX_ALL = "codex-all"
 _PROFILE_ZAI = "zai"
 _ZAI_CREDENTIAL_ENV = "ZAI_AUTH_TOKEN"
 
@@ -330,6 +331,19 @@ CASE_CODEX = _research_adr_case(
     preset=_PRESET_LIVE,
     profile_id=_PROFILE_CODEX,
 )
+# P10 (S43 amendment evidence): the single-provider Codex lane - every role,
+# doc-reviewer included, routes to codex, so the run consumes no other
+# provider's credential. The structural sibling of kimi-all: no claude
+# fallback anywhere in the run, so this is witnessable with ZERO credential
+# handling (codex's file-based local session is enough), unlike codex/
+# live-mixed/live-auto, which all fall back to claude for at least one role.
+CASE_CODEX_ALL = _research_adr_case(
+    "codex-all",
+    "pw7-acceptance-codex-all",
+    {"research": POLICY_AUTO, "adr": POLICY_HUMAN},
+    preset=_PRESET_LIVE,
+    profile_id=_PROFILE_CODEX_ALL,
+)
 CASE_ZAI = _research_adr_case(
     "zai",
     "pw7-acceptance-zai",
@@ -381,6 +395,7 @@ _ALL_CASES = (
     CASE_LIVE_MIXED,
     CASE_LIVE_AUTO,
     CASE_CODEX,
+    CASE_CODEX_ALL,
     CASE_ZAI,
     CASE_KIMI,
     CASE_GEMINI,

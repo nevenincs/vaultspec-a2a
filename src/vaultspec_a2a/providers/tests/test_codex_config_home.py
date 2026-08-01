@@ -18,7 +18,7 @@ import time
 import tomllib
 from contextlib import contextmanager
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import pytest
 
@@ -26,15 +26,18 @@ from ...control.config import Settings
 from .._acp_config_home import sweep_orphan_config_homes
 from .._acp_mcp import codex_mcp_server_specs
 from .._codex_config_home import (
+    SERVED_WEB_SEARCH_MODE,
+    CodexWebSearchMode,
     build_codex_config_home,
     cleanup_codex_config_home,
     render_codex_config_toml,
+    resolve_codex_web_search_mode,
     sweep_orphan_codex_homes,
 )
 from .._config_home_roots import ORPHAN_HOME_MIN_AGE_SECONDS, temp_home_root
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
+    from collections.abc import Iterator, Sequence
 
 
 @contextmanager
@@ -128,8 +131,114 @@ def test_render_emits_env_subtable_when_present() -> None:
     assert parsed["mcp_servers"]["x-srv"]["env"] == {"K": "V"}
 
 
-def test_render_empty_specs_is_empty() -> None:
-    assert render_codex_config_toml([]) == ""
+def test_render_with_no_specs_still_declares_the_web_posture() -> None:
+    # Previously this asserted the empty string. It cannot any more, and the
+    # reason is the whole point of the web-posture work: Codex enables web search
+    # when the key is absent, so an empty document is not "no capability", it is
+    # "whatever the CLI defaults to". A server-less home must still say off.
+    parsed = tomllib.loads(render_codex_config_toml([]))
+    assert parsed == {"web_search": "disabled"}
+
+
+# --- web-grounding posture on the Codex lane -------------------------------
+
+
+def _built_config(
+    specs: Sequence[dict[str, Any]],
+    base: Path,
+    **kwargs: CodexWebSearchMode,
+) -> dict[str, Any]:
+    """Return the parsed config.toml the production builder actually wrote.
+
+    Every posture assertion below goes through this rather than through the
+    renderer's return value: the acceptance for this capability is the file on
+    disk that Codex will read, not a string the test helped build.
+    """
+    home = build_codex_config_home(specs, base, **kwargs)
+    try:
+        return tomllib.loads((home / "config.toml").read_text(encoding="utf-8"))
+    finally:
+        cleanup_codex_config_home(home)
+
+
+def test_web_posture_is_top_level_and_never_absorbed_by_a_server_table() -> None:
+    # tomllib IS the ordering proof: TOML binds a bare key to the table above it,
+    # so had `web_search` been emitted after `[mcp_servers.vaultspec-rag]` it would
+    # parse as an option OF that server and the top-level lookup would raise. The
+    # two assertions together pin the key to the document, not to a server.
+    parsed = tomllib.loads(
+        render_codex_config_toml(
+            codex_mcp_server_specs(["vaultspec-rag"]),
+            web_search=CodexWebSearchMode.LIVE,
+        )
+    )
+    assert parsed["web_search"] == "live"
+    assert "web_search" not in parsed["mcp_servers"]["vaultspec-rag"]
+
+
+def test_proven_lane_serves_live_retrieval(tmp_path: Path) -> None:
+    # The served posture: a lane carrying web proof reads the live web, so its
+    # findings differ from a sibling lane's by evidence rather than by index age.
+    base = tmp_path / "base"
+    base.mkdir()
+    mode = resolve_codex_web_search_mode(web_proven=True)
+    assert mode is SERVED_WEB_SEARCH_MODE
+    cfg = _built_config(
+        codex_mcp_server_specs(["vaultspec-rag"]), base, web_search=mode
+    )
+    assert cfg["web_search"] == "live"
+
+
+def test_unproven_lane_gets_no_reach_even_when_configured_for_it(
+    tmp_path: Path,
+) -> None:
+    # The gate is absolute, and this is the assertion that says so: a deployment
+    # explicitly asking for live on a lane with no web proof still gets disabled.
+    # Without that precedence a config key would be a way to talk a lane past a
+    # proof it never earned.
+    base = tmp_path / "base"
+    base.mkdir()
+    mode = resolve_codex_web_search_mode(
+        web_proven=False, configured=CodexWebSearchMode.LIVE
+    )
+    assert mode is CodexWebSearchMode.DISABLED
+    cfg = _built_config(
+        codex_mcp_server_specs(["vaultspec-rag"]), base, web_search=mode
+    )
+    assert cfg["web_search"] == "disabled"
+    # The gate closes the web posture only; the declared harness servers are a
+    # separate axis and must still be surfaced.
+    assert set(cfg["mcp_servers"]) == {"vaultspec-rag"}
+
+
+def test_cached_posture_stays_selectable_for_a_zero_egress_deployment(
+    tmp_path: Path,
+) -> None:
+    # Cached is genuine search against a provider-maintained index with no
+    # outbound request from the agent host. Live is what a proven lane serves by
+    # default, but an install that wants zero egress must still be able to take
+    # cached without a further decision record, so this asserts the configured
+    # preference wins ABOVE the gate.
+    base = tmp_path / "base"
+    base.mkdir()
+    mode = resolve_codex_web_search_mode(
+        web_proven=True, configured=CodexWebSearchMode.CACHED
+    )
+    cfg = _built_config(
+        codex_mcp_server_specs(["vaultspec-rag"]), base, web_search=mode
+    )
+    assert cfg["web_search"] == "cached"
+
+
+def test_builder_default_ships_no_outward_reach(tmp_path: Path) -> None:
+    # A caller that never mentions web search must not ship one. This is not
+    # belt-and-braces: omitting the key entirely would leave Codex on its own
+    # default, which is NOT off, so the builder's silence has to be an explicit
+    # "disabled" in the file.
+    base = tmp_path / "base"
+    base.mkdir()
+    cfg = _built_config(codex_mcp_server_specs(["vaultspec-rag"]), base)
+    assert cfg["web_search"] == "disabled"
 
 
 def test_build_home_writes_config_and_copies_auth(tmp_path: Path) -> None:
@@ -334,6 +443,82 @@ class TestCodexEntrypointAcceptsEmittedMcpConfig:
             assert "vaultspec-search-mcp" in proc.stdout
         finally:
             cleanup_codex_config_home(home)
+
+    @pytest.mark.skipif(
+        shutil.which("codex") is None, reason="codex CLI is not installed"
+    )
+    def test_codex_accepts_the_served_live_web_posture(self, tmp_path: Path) -> None:
+        """The real CLI accepts the live posture this lane serves.
+
+        ``web_search`` is not a name this project chose; it is the CLI's own
+        top-level key, and the house no-pinning rule means nothing stops upstream
+        from renaming it or dropping a variant under us. Exit 0 here is the
+        detection mechanism, and the control below is what makes it mean
+        something.
+        """
+        codex = shutil.which("codex")
+        assert codex is not None
+        home = build_codex_config_home(
+            codex_mcp_server_specs(["vaultspec-rag"]),
+            tmp_path / "base",
+            web_search=CodexWebSearchMode.LIVE,
+        )
+        try:
+            written = (home / "config.toml").read_text(encoding="utf-8")
+            assert tomllib.loads(written)["web_search"] == "live"
+            proc = subprocess.run(
+                [codex, "mcp", "list"],
+                env={**os.environ, "CODEX_HOME": str(home)},
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=120,
+            )
+            assert proc.returncode == 0, proc.stderr
+        finally:
+            cleanup_codex_config_home(home)
+
+    @pytest.mark.skipif(
+        shutil.which("codex") is None, reason="codex CLI is not installed"
+    )
+    def test_codex_would_have_rejected_an_unrecognised_mode(
+        self, tmp_path: Path
+    ) -> None:
+        """The control for the test above: the CLI really does validate this key.
+
+        Exit 0 on our generated config proves nothing unless a wrong value fails.
+        This takes the SAME production-rendered document and substitutes only the
+        mode token with one the enum cannot produce; if the CLI still exited 0,
+        the acceptance above would be vacuous - the key inert text Codex ignores
+        rather than the web posture it reads.
+        """
+        codex = shutil.which("codex")
+        assert codex is not None
+        rendered = render_codex_config_toml(
+            codex_mcp_server_specs(["vaultspec-rag"]),
+            web_search=CodexWebSearchMode.LIVE,
+        )
+        home = tmp_path / "tampered-home"
+        home.mkdir()
+        (home / "config.toml").write_text(
+            rendered.replace('web_search = "live"', 'web_search = "no-such-mode"', 1),
+            encoding="utf-8",
+        )
+        proc = subprocess.run(
+            [codex, "mcp", "list"],
+            env={**os.environ, "CODEX_HOME": str(home)},
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=120,
+        )
+        assert proc.returncode != 0
+        combined = proc.stdout + proc.stderr
+        assert "web_search" in combined
+        # The CLI names the variants it will accept; every value this module can
+        # emit must be among them, which is the served-contract assertion.
+        for mode in CodexWebSearchMode:
+            assert f"`{mode.value}`" in combined
 
 
 # --- desktop-state escape defect (codex-config-home-escapes-desktop-state) ---

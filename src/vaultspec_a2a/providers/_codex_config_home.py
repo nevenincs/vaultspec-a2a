@@ -21,6 +21,15 @@ armed desktop install the Codex home is created inside the same accounted
 application-state root as the Claude home, and a crashed run's home is
 reclaimed by the same age-gated sweep, scoped to this module's own prefix so it
 never collects a Claude home (or vice versa).
+
+The same ``config.toml`` also carries the run's web-grounding posture. Codex
+does not expose web search as an allowlistable tool name the way the Claude
+lane's built-ins are named; it is a configuration mode, so this file is the
+whole delivery seam for the capability on this lane. The mode is ALWAYS written
+explicitly - omitting it is not a safe default, because Codex enables web search
+by default (its own deprecation notice for the superseded ``[features]`` keys
+says so in as many words), so a home that stayed silent would ship an outward
+reach nothing admitted.
 """
 
 from __future__ import annotations
@@ -31,6 +40,7 @@ import re
 import shutil
 import tempfile
 from contextlib import suppress
+from enum import StrEnum
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -40,9 +50,12 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
 
 __all__ = [
+    "SERVED_WEB_SEARCH_MODE",
+    "CodexWebSearchMode",
     "build_codex_config_home",
     "cleanup_codex_config_home",
     "render_codex_config_toml",
+    "resolve_codex_web_search_mode",
     "sweep_orphan_codex_homes",
 ]
 
@@ -76,6 +89,60 @@ def _table_key(name: str) -> str:
     return name if _BARE_KEY.match(name) else _toml_str(name)
 
 
+class CodexWebSearchMode(StrEnum):
+    """The four values Codex's top-level ``web_search`` key accepts.
+
+    Not a local vocabulary: these are the CLI's own variants, and it validates
+    them itself - an unrecognised value is refused at config load with
+    ``unknown variant ... expected one of `disabled`, `cached`, `indexed`,
+    `live` in `web_search```. The names are therefore a served contract, asserted
+    against the installed CLI rather than pinned by a version constraint (the
+    house no-pinning rule); the entrypoint test in this module's suite is what
+    detects upstream drift.
+
+    ``CACHED`` reaches a provider-maintained index and makes NO outbound request
+    from the agent host; ``INDEXED`` permits external access only through
+    index-gated results; ``LIVE`` is unrestricted retrieval; ``DISABLED`` is off.
+    """
+
+    DISABLED = "disabled"
+    CACHED = "cached"
+    INDEXED = "indexed"
+    LIVE = "live"
+
+
+# The served posture for a lane that carries web proof. Cached is the safer mode
+# and costs no egress, but a lane answering from a provider-maintained index
+# while its siblings read the live web makes a multi-provider graph's findings
+# differ by provider rather than by evidence. Parity of reach is the property
+# this capability exists to establish, so live is what a proven lane serves.
+SERVED_WEB_SEARCH_MODE = CodexWebSearchMode.LIVE
+
+
+def resolve_codex_web_search_mode(
+    *, web_proven: bool, configured: CodexWebSearchMode | None = None
+) -> CodexWebSearchMode:
+    """Return the ``web_search`` mode a run may emit.
+
+    Two inputs, deliberately asymmetric. *web_proven* is the lane-admission
+    verdict - whether a live test has proven a completed retrieval on the Codex
+    lane - and it is ABSOLUTE: an unproven lane resolves to
+    :attr:`~CodexWebSearchMode.DISABLED` no matter what a deployment configured,
+    so no configuration can talk a lane past a proof it does not have.
+    *configured* is the deployment's preference and applies only above that gate,
+    which is what keeps :attr:`~CodexWebSearchMode.CACHED` selectable for an
+    install that wants search with zero egress; left unset, a proven lane serves
+    :data:`SERVED_WEB_SEARCH_MODE`.
+
+    The verdict arrives as a parameter rather than being read here on purpose:
+    lane admission is one declaration owned by one module, and a second reader
+    that could disagree with it is the failure this argument shape prevents.
+    """
+    if not web_proven:
+        return CodexWebSearchMode.DISABLED
+    return configured if configured is not None else SERVED_WEB_SEARCH_MODE
+
+
 def _restrict(path: Path) -> None:
     """Best-effort owner-only permissions on a path; never raises.
 
@@ -86,19 +153,33 @@ def _restrict(path: Path) -> None:
         path.chmod(0o700 if path.is_dir() else 0o600)
 
 
-def render_codex_config_toml(specs: Sequence[dict[str, Any]]) -> str:
+def render_codex_config_toml(
+    specs: Sequence[dict[str, Any]],
+    *,
+    web_search: CodexWebSearchMode = CodexWebSearchMode.DISABLED,
+) -> str:
     """Render the ``config.toml`` body for the declared read-only servers.
 
     Emits one ``[mcp_servers.<name>]`` block per spec with ``command`` and
     ``args``, plus an ``[mcp_servers.<name>.env]`` sub-table when the spec carries
-    env. The read-verb constraint (P04.S19) names the server's read ``tools`` in
+    env. The read-verb constraint names the server's read ``tools`` in
     ``enabled_tools`` (an exact allowlist, so no write verb the server also exposes
     can be invoked) and sets ``default_tools_approval_mode = "auto"`` so those
     reads run without a prompt under the headless ``approval_policy = "never"``
     plus ``sandbox = "read-only"`` composition. Deterministic and stdlib-
     ``tomllib``-parseable.
+
+    *web_search* is written unconditionally, and FIRST. Unconditionally because
+    Codex enables web search when the key is absent, so silence is a posture, not
+    an abstention; first because TOML binds a bare key to the table above it - the
+    same line emitted after ``[mcp_servers.<name>]`` would become an unrecognised
+    option of that server rather than the run's web posture. The default is
+    :attr:`~CodexWebSearchMode.DISABLED`, so a caller that has not consulted lane
+    admission cannot accidentally ship outward reach.
     """
-    blocks: list[str] = []
+    # Kept ahead of every table header; see the docstring for why this is a
+    # correctness constraint rather than a layout preference.
+    blocks: list[str] = [f"web_search = {_toml_str(web_search.value)}"]
     for spec in specs:
         key = _table_key(spec["name"])
         lines = [f"[mcp_servers.{key}]", f"command = {_toml_str(spec['command'])}"]
@@ -113,11 +194,14 @@ def render_codex_config_toml(specs: Sequence[dict[str, Any]]) -> str:
             env_lines += [f"{_table_key(k)} = {_toml_str(v)}" for k, v in env.items()]
             block = block + "\n\n" + "\n".join(env_lines)
         blocks.append(block)
-    return "\n\n".join(blocks) + "\n" if blocks else ""
+    return "\n\n".join(blocks) + "\n"
 
 
 def build_codex_config_home(
-    specs: Sequence[dict[str, Any]], base_home: Path | None
+    specs: Sequence[dict[str, Any]],
+    base_home: Path | None,
+    *,
+    web_search: CodexWebSearchMode = CodexWebSearchMode.DISABLED,
 ) -> Path:
     """Create a per-run ``CODEX_HOME`` carrying only the declared servers.
 
@@ -130,6 +214,10 @@ def build_codex_config_home(
     declared (else the system temp directory), mirroring the Claude isolated
     config home so an uninstall can account for it and a system-wide temp sweep
     cannot delete it out from under a live run.
+
+    *web_search* is the run's web posture, normally the output of
+    :func:`resolve_codex_web_search_mode`; it defaults to disabled so a caller
+    that never asked for the capability never gets it.
     """
     # mkdtemp creates an owner-only (0700) directory, so the copied credential is
     # traversal-protected by the dir even before the file's own mode is set.
@@ -151,7 +239,7 @@ def build_codex_config_home(
                 # the temp tree is already user-scoped).
                 _restrict(dest)
         (home / "config.toml").write_text(
-            render_codex_config_toml(specs), encoding="utf-8"
+            render_codex_config_toml(specs, web_search=web_search), encoding="utf-8"
         )
     except BaseException:
         # A mid-build failure (e.g. copy error) must not leak the dir with a
@@ -159,7 +247,10 @@ def build_codex_config_home(
         cleanup_codex_config_home(home)
         raise
     logger.debug(
-        "Codex isolated config home created at %s (%d server(s))", home, len(specs)
+        "Codex isolated config home created at %s (%d server(s), web_search=%s)",
+        home,
+        len(specs),
+        web_search.value,
     )
     return home
 

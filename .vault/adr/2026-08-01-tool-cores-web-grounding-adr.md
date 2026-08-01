@@ -260,3 +260,37 @@ that risk - the remaining bounds are the fetch tool's URL-origin restriction, th
 use and token caps, provenance-marked evidence, reviewer citation validation, and
 the human gate. The staleness-visibility note attached to cached mode no longer
 applies to the served posture.
+
+## Amendment - disclosure scoped to research documents (2026-08-01, P01 review)
+
+D2 states the disclosure obligation unconditionally: a proposed document must
+disclose every distinct web-locator URL its run retrieved. As implemented the
+refusal fires for research documents only, and the record is amended to say so
+rather than leaving code and decision in disagreement.
+
+The reason is the vault's own document boundary. Each fact has one home: the
+research document grounds, and every later document cites it by stem without
+restating its evidence. A URL is evidence, so its home is the research document,
+and a later document discharges the obligation by citing the stem that holds it.
+The research template is correspondingly the only one in the tree carrying a
+sources section.
+
+One reason originally offered for this scoping is withdrawn as false, and is
+recorded here rather than quietly dropped. It was argued that a later document
+had nowhere sanctioned to put a URL and therefore could not comply. Review
+disproved that: a bare URL in prose is refused by nothing, because the
+markdown-link conformance check deliberately exempts web targets. A non-research
+document could have complied. The scoping is a convention about where evidence
+lives, not a necessity, and it should be defended on that ground alone.
+
+The narrowing is currently without practical effect, because the only topology
+using the researcher fan-out accumulates every finding before its research gate,
+so a URL in state has already been forced into the research document or the run
+was refused. That will stop being true if a later topology grounds a
+non-research phase on the web, at which point this scoping is the thing to
+revisit first.
+
+Where enforcement now ends is stated plainly so it is not rediscovered as a gap:
+non-research documents are machine-unchecked for web evidence. D2's reviewer
+obligation and the mandatory human gate before any document applies are the only
+backstops there, and they are unchanged.

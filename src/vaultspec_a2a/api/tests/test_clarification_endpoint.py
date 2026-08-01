@@ -13,25 +13,15 @@ ASGI app. No mocks: the worker is a real FastAPI app served over
 from __future__ import annotations
 
 import asyncio
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING
 
 import pytest
 from fastapi.testclient import TestClient
-from langchain_core.messages import HumanMessage
-from langgraph.graph import END, START, StateGraph
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from ...graph.nodes.clarification import (
-    create_clarification_gate_node,
-    create_clarification_request_node,
-)
 from ...streaming.aggregator import EventAggregator
-from ...thread.clarification import (
-    MAX_ANSWER_CHARS,
-    ClarificationKind,
-    ClarificationQuestion,
-    ClarificationRequest,
-)
-from ...thread.state import TeamState
+from ...thread.clarification import MAX_ANSWER_CHARS
+from .clarification_harness import park_clarification
 from .conftest import make_app
 
 if TYPE_CHECKING:
@@ -39,83 +29,15 @@ if TYPE_CHECKING:
 
 _BUNDLE_FREE_PRESET = "mock-success-single"
 
-
-async def _produce_questions(state: TeamState) -> ClarificationRequest:
-    """Provide the concrete questionnaire for this real graph exercise.
-
-    The parameter is named ``state`` rather than discarded because the producer
-    Protocol declares it as a keyword-capable name, so a differently-named
-    parameter does not satisfy the seam it is being passed into.
-    """
-    return ClarificationRequest(
-        request_id="clarification-endpoint-request",
-        questions=[
-            ClarificationQuestion(
-                id="provider",
-                prompt="Which provider should author the plan?",
-                kind=ClarificationKind.CHOICE,
-                options=["codex", "zai"],
-            ),
-            ClarificationQuestion(
-                id="scope",
-                prompt="Which module should this target?",
-                kind=ClarificationKind.TEXT,
-                required=False,
-            ),
-        ],
-    )
-
-
-def _clarification_graph(checkpointer: AsyncSqliteSaver) -> Any:
-    """Compile a real, minimal graph around the clarification node pair."""
-    builder: StateGraph = StateGraph(cast("Any", TeamState))
-    builder.add_node(
-        "clarification_request",
-        create_clarification_request_node(
-            _produce_questions,
-            gate_target="clarification_gate",
-            proceed_target="complete",
-        ),
-    )
-    builder.add_node(
-        "clarification_gate",
-        create_clarification_gate_node(proceed_target="complete"),
-    )
-    builder.add_node("complete", lambda state: {})
-    builder.add_edge(START, "clarification_request")
-    builder.add_edge("complete", END)
-    return builder.compile(checkpointer=checkpointer)
-
-
-async def _park_clarification(
-    checkpointer: AsyncSqliteSaver, *, thread_id: str
-) -> dict[str, Any]:
-    """Run the real clarification graph to a park under *thread_id*.
-
-    Returns the interrupt payload (with the generated ``request_id``).
-    """
-    graph = _clarification_graph(checkpointer)
-    state: dict[str, Any] = {
-        "active_agent": "clarification",
-        "artifacts": [],
-        "current_plan": [],
-        "messages": [HumanMessage(content="Ground the feature.")],
-        "next": "",
-        "thread_id": thread_id,
-        "active_feature": "agent-panel",
-        "token_usage": {},
-    }
-    result = await graph.ainvoke(
-        state, config={"configurable": {"thread_id": thread_id}}
-    )
-    assert "__interrupt__" in result, "clarification graph did not park"
-    return result["__interrupt__"][0].value
+type SessionFactory = async_sessionmaker[AsyncSession]
 
 
 class TestClarificationRoundTrip:
     """Park -> disclose -> respond -> resume, over the real graph."""
 
-    def test_park_disclose_respond_resume(self, session_factory, checkpointer) -> None:
+    def test_park_disclose_respond_resume(
+        self, session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
+    ) -> None:
         app, _agg, worker, _cp = make_app(session_factory, checkpointer)
 
         with TestClient(app, raise_server_exceptions=True) as client:
@@ -127,10 +49,8 @@ class TestClarificationRoundTrip:
             thread_id = create_resp.json()["run_id"]
             worker.dispatches.clear()
 
-            payload = asyncio.run(
-                _park_clarification(checkpointer, thread_id=thread_id)
-            )
-            request_id = payload["request_id"]
+            parked = asyncio.run(park_clarification(checkpointer, thread_id=thread_id))
+            request_id = parked.request.request_id
 
             # Disclosure: run-status discloses the pending clarification with
             # exactly the request id and question set the park produced.
@@ -165,7 +85,7 @@ class TestClarificationRoundTrip:
         }
 
     def test_reload_recovery_from_status_disclosure_alone(
-        self, session_factory, checkpointer
+        self, session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
     ) -> None:
         """A second, independent app instance discloses the same pending question.
 
@@ -182,8 +102,8 @@ class TestClarificationRoundTrip:
             )
             thread_id = create_resp.json()["run_id"]
 
-        payload = asyncio.run(_park_clarification(checkpointer, thread_id=thread_id))
-        request_id = payload["request_id"]
+        parked = asyncio.run(park_clarification(checkpointer, thread_id=thread_id))
+        request_id = parked.request.request_id
 
         # A second, independent app — its own EventAggregator, its own
         # TestClient lifecycle — reading the SAME durable session_factory and
@@ -201,7 +121,7 @@ class TestClarificationRoundTrip:
         assert disclosed["questions"][0]["options"] == ["codex", "zai"]
 
     def test_respond_rejects_missing_required_answer(
-        self, session_factory, checkpointer
+        self, session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
     ) -> None:
         app, _agg, worker, _cp = make_app(session_factory, checkpointer)
 
@@ -213,10 +133,8 @@ class TestClarificationRoundTrip:
             thread_id = create_resp.json()["run_id"]
             worker.dispatches.clear()
 
-            payload = asyncio.run(
-                _park_clarification(checkpointer, thread_id=thread_id)
-            )
-            request_id = payload["request_id"]
+            parked = asyncio.run(park_clarification(checkpointer, thread_id=thread_id))
+            request_id = parked.request.request_id
 
             # The required "provider" question is left unanswered.
             resp = client.post(
@@ -229,7 +147,7 @@ class TestClarificationRoundTrip:
         assert worker.dispatches == []
 
     def test_respond_rejects_unknown_choice_option(
-        self, session_factory, checkpointer
+        self, session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
     ) -> None:
         app, _agg, worker, _cp = make_app(session_factory, checkpointer)
 
@@ -241,10 +159,8 @@ class TestClarificationRoundTrip:
             thread_id = create_resp.json()["run_id"]
             worker.dispatches.clear()
 
-            payload = asyncio.run(
-                _park_clarification(checkpointer, thread_id=thread_id)
-            )
-            request_id = payload["request_id"]
+            parked = asyncio.run(park_clarification(checkpointer, thread_id=thread_id))
+            request_id = parked.request.request_id
 
             resp = client.post(
                 f"/v1/runs/{thread_id}/clarifications/{request_id}/respond",
@@ -255,7 +171,7 @@ class TestClarificationRoundTrip:
         assert worker.dispatches == []
 
     def test_respond_to_unknown_request_id_is_not_found_or_conflict(
-        self, session_factory, checkpointer
+        self, session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
     ) -> None:
         """A guessed/stale request id must not silently succeed."""
         app, _agg, worker, _cp = make_app(session_factory, checkpointer)
@@ -277,7 +193,7 @@ class TestClarificationRoundTrip:
         assert worker.dispatches == []
 
     def test_respond_refuses_a_newline_in_a_free_text_answer(
-        self, session_factory, checkpointer
+        self, session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
     ) -> None:
         """A ``text`` answer is free prose, but it is single-line free prose.
 
@@ -297,10 +213,8 @@ class TestClarificationRoundTrip:
             thread_id = create_resp.json()["run_id"]
             worker.dispatches.clear()
 
-            payload = asyncio.run(
-                _park_clarification(checkpointer, thread_id=thread_id)
-            )
-            request_id = payload["request_id"]
+            parked = asyncio.run(park_clarification(checkpointer, thread_id=thread_id))
+            request_id = parked.request.request_id
 
             resp = client.post(
                 f"/v1/runs/{thread_id}/clarifications/{request_id}/respond",
@@ -318,7 +232,7 @@ class TestClarificationRoundTrip:
         assert worker.dispatches == []
 
     def test_respond_refuses_a_tab_in_an_answer(
-        self, session_factory, checkpointer
+        self, session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
     ) -> None:
         """Tab is a control character here, exactly as it is at the edge.
 
@@ -337,10 +251,8 @@ class TestClarificationRoundTrip:
             thread_id = create_resp.json()["run_id"]
             worker.dispatches.clear()
 
-            payload = asyncio.run(
-                _park_clarification(checkpointer, thread_id=thread_id)
-            )
-            request_id = payload["request_id"]
+            parked = asyncio.run(park_clarification(checkpointer, thread_id=thread_id))
+            request_id = parked.request.request_id
 
             resp = client.post(
                 f"/v1/runs/{thread_id}/clarifications/{request_id}/respond",
@@ -351,7 +263,7 @@ class TestClarificationRoundTrip:
         assert worker.dispatches == []
 
     def test_respond_refuses_a_mixture_and_takes_the_clean_equivalent(
-        self, session_factory, checkpointer
+        self, session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
     ) -> None:
         """The same sheet fails dirty and succeeds clean.
 
@@ -370,10 +282,8 @@ class TestClarificationRoundTrip:
             thread_id = create_resp.json()["run_id"]
             worker.dispatches.clear()
 
-            payload = asyncio.run(
-                _park_clarification(checkpointer, thread_id=thread_id)
-            )
-            request_id = payload["request_id"]
+            parked = asyncio.run(park_clarification(checkpointer, thread_id=thread_id))
+            request_id = parked.request.request_id
 
             dirty = client.post(
                 f"/v1/runs/{thread_id}/clarifications/{request_id}/respond",
@@ -405,7 +315,7 @@ class TestClarificationRoundTrip:
         }
 
     def test_respond_counts_the_answer_cap_in_characters_not_bytes(
-        self, session_factory, checkpointer
+        self, session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
     ) -> None:
         """A multibyte answer sitting exactly on the cap is accepted.
 
@@ -429,10 +339,8 @@ class TestClarificationRoundTrip:
             thread_id = create_resp.json()["run_id"]
             worker.dispatches.clear()
 
-            payload = asyncio.run(
-                _park_clarification(checkpointer, thread_id=thread_id)
-            )
-            request_id = payload["request_id"]
+            parked = asyncio.run(park_clarification(checkpointer, thread_id=thread_id))
+            request_id = parked.request.request_id
 
             resp = client.post(
                 f"/v1/runs/{thread_id}/clarifications/{request_id}/respond",
@@ -443,7 +351,7 @@ class TestClarificationRoundTrip:
         assert worker.dispatches[0]["option_id"]["answers"]["scope"] == at_the_cap
 
     def test_respond_refuses_one_character_over_the_cap(
-        self, session_factory, checkpointer
+        self, session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
     ) -> None:
         """The other half of the cap: a ceiling that never refuses is not one."""
         app, _agg, worker, _cp = make_app(session_factory, checkpointer)
@@ -456,10 +364,8 @@ class TestClarificationRoundTrip:
             thread_id = create_resp.json()["run_id"]
             worker.dispatches.clear()
 
-            payload = asyncio.run(
-                _park_clarification(checkpointer, thread_id=thread_id)
-            )
-            request_id = payload["request_id"]
+            parked = asyncio.run(park_clarification(checkpointer, thread_id=thread_id))
+            request_id = parked.request.request_id
 
             resp = client.post(
                 f"/v1/runs/{thread_id}/clarifications/{request_id}/respond",
@@ -475,7 +381,7 @@ class TestClarificationRoundTrip:
         assert worker.dispatches == []
 
     def test_respond_extra_answer_field_is_forbidden_by_the_wire_schema(
-        self, session_factory, checkpointer
+        self, session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
     ) -> None:
         """extra='forbid' — a field the schema does not declare 422s."""
         app, _agg, worker, _cp = make_app(session_factory, checkpointer)
@@ -499,7 +405,10 @@ class TestClarificationRoundTrip:
         "answer", ["codex\nand a second line", "codex\tand a tab", "codex\x7fdel"]
     )
     def test_respond_refuses_a_control_bearing_answer_at_the_wire(
-        self, session_factory, checkpointer, answer: str
+        self,
+        session_factory: SessionFactory,
+        checkpointer: AsyncSqliteSaver,
+        answer: str,
     ) -> None:
         """A control character in an answer 422s before any run state is read.
 
@@ -529,7 +438,7 @@ class TestClarificationRoundTrip:
         assert worker.dispatches == []
 
     def test_respond_takes_an_ordinary_answer_over_the_same_route(
-        self, session_factory, checkpointer
+        self, session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
     ) -> None:
         """The bound refuses control characters and nothing more.
 
@@ -548,10 +457,8 @@ class TestClarificationRoundTrip:
             thread_id = create_resp.json()["run_id"]
             worker.dispatches.clear()
 
-            payload = asyncio.run(
-                _park_clarification(checkpointer, thread_id=thread_id)
-            )
-            request_id = payload["request_id"]
+            parked = asyncio.run(park_clarification(checkpointer, thread_id=thread_id))
+            request_id = parked.request.request_id
 
             resp = client.post(
                 f"/v1/runs/{thread_id}/clarifications/{request_id}/respond",

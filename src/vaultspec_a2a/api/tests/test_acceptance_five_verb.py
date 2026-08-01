@@ -28,20 +28,22 @@ from fastapi.responses import JSONResponse
 from httpx import ASGITransport
 from langchain_core.messages import AIMessage
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
-from langgraph.graph import END, START, StateGraph
 
 from ...database.thread_repository import create_thread
 from ...ipc.schemas import DispatchRequest
 from ...thread.actor_tokens import ActorTokenBundle
 from ...thread.enums import ThreadStatus
-from ...thread.state import TeamState
 from ...worker.executor import Executor
 from ...worker.ipc import WorkerBridge
+from .clarification_harness import new_state_graph
 from .conftest import make_app
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
     from pathlib import Path
+
+    from ...thread.state import TeamState
+    from ...worker.graph_lifecycle import RegisteredCompiledGraph
 
 _CODER_TOKEN = "secret-coder-acceptance"
 _REVIEWER_TOKEN = "secret-reviewer-acceptance"
@@ -105,18 +107,18 @@ def _install_multirole_graph(executor: Executor, thread_id: str) -> None:
             "next": "FINISH",
         }
 
-    builder = StateGraph(cast("Any", TeamState))
+    builder = new_state_graph()
     builder.add_node("coder", coder)
     builder.add_node("reviewer", reviewer)
-    builder.add_edge(START, "coder")
+    builder.add_edge("__start__", "coder")
     builder.add_edge("coder", "reviewer")
-    builder.add_edge("reviewer", END)
-    graph = builder.compile(checkpointer=executor._checkpointer)
+    builder.add_edge("reviewer", "__end__")
+    graph: RegisteredCompiledGraph = builder.compile(
+        checkpointer=executor._checkpointer
+    )
 
     cache_key = (_PRESET, None, False)
-    executor._graph_cache[cache_key] = graph
-    executor._thread_to_cache_key[thread_id] = cache_key
-    executor.aggregator.register_graph(cast("Any", graph))
+    executor.register_compiled_graph(thread_id, cache_key, graph)
 
 
 def _vault_write_events(vault_root: Path) -> list[str]:

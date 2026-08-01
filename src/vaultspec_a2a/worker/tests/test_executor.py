@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import logging
 import os
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 
 import httpx
 import pytest
@@ -21,19 +21,25 @@ from fastapi.responses import Response
 from httpx import ASGITransport
 from langchain_core.messages import AIMessage
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
-from langgraph.graph import END, START, StateGraph
 from langgraph.types import interrupt
 from opentelemetry.sdk.resources import Resource
 from opentelemetry.sdk.trace import ReadableSpan, Span, TracerProvider
 from pydantic import ValidationError
 
+from ...api.tests.clarification_harness import new_state_graph
 from ...ipc.schemas import DispatchRequest
 from ...thread.actor_tokens import ActorTokenBundle
 from ...thread.enums import ThreadStatus
-from ...thread.state import TeamState
 from ..executor import _INGEST_GUARDS, _RESUME_GUARDS, Executor
-from ..graph_lifecycle import GraphCompilationError, GraphLifecycleManager
+from ..graph_lifecycle import (
+    GraphCompilationError,
+    GraphLifecycleManager,
+    RegisteredCompiledGraph,
+)
 from ..ipc import WorkerBridge
+
+if TYPE_CHECKING:
+    from ...thread.state import TeamState
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -71,12 +77,23 @@ def _make_bridge(
 _TEST_CACHE_KEY = ("test-preset", None, False)
 
 
-def _inject_graph(executor: Executor, thread_id: str, *, cache_key=_TEST_CACHE_KEY):
-    """Insert a sentinel graph into the executor's LRU cache for *thread_id*."""
-    sentinel = object()
-    if cache_key not in executor._graph_cache:
-        executor._graph_cache[cache_key] = sentinel
-    executor._thread_to_cache_key[thread_id] = cache_key
+def _inject_graph(
+    executor: Executor, thread_id: str, *, cache_key=_TEST_CACHE_KEY
+) -> None:
+    """Register a real terminal graph through the public executor seam."""
+
+    def finish_node(state: TeamState) -> dict[str, object]:
+        del state
+        return {}
+
+    builder = new_state_graph()
+    builder.add_node("finish", finish_node)
+    builder.add_edge("__start__", "finish")
+    builder.add_edge("finish", "__end__")
+    graph: RegisteredCompiledGraph = builder.compile(
+        checkpointer=executor._checkpointer
+    )
+    executor.register_compiled_graph(thread_id, cache_key, graph)
 
 
 # ---------------------------------------------------------------------------
@@ -598,17 +615,16 @@ class TestLazyRecompilation:
     """Verify graph cache and thread mapping behaviour (T17)."""
 
     @pytest.mark.asyncio(loop_scope="function")
-    async def test_preset_cached_after_ingest(self) -> None:
-        """After a successful ingest compile, _thread_to_cache_key holds the mapping."""
+    async def test_compiled_graph_registration_tracks_the_thread(self) -> None:
+        """Registration atomically makes a graph available for one thread."""
         async with AsyncSqliteSaver.from_conn_string(":memory:") as cp:
             await cp.setup()
             bridge = _make_bridge()
             try:
                 executor = Executor(checkpointer=cp, bridge=bridge)
                 cache_key = ("vaultspec-solo-coder", None, False)
-                executor._graph_cache[cache_key] = object()
-                executor._thread_to_cache_key["t-cache"] = cache_key
-                assert executor._thread_to_cache_key["t-cache"] == cache_key
+                _inject_graph(executor, "t-cache", cache_key=cache_key)
+                assert executor.graph_count == 1
             finally:
                 await bridge.close()
 
@@ -647,42 +663,32 @@ class TestLazyRecompilation:
                 await bridge.close()
 
     @pytest.mark.asyncio(loop_scope="function")
-    async def test_ingest_stores_cache_key_mapping(self) -> None:
-        """_get_or_compile_graph stores thread_id -> cache_key in _thread_to_cache_key
-        when the graph is already in cache (hit path)."""
+    async def test_registration_keeps_one_cached_graph(self) -> None:
+        """The public registration seam avoids exposing cache dictionaries."""
         async with AsyncSqliteSaver.from_conn_string(":memory:") as cp:
             await cp.setup()
             bridge = _make_bridge()
             try:
                 executor = Executor(checkpointer=cp, bridge=bridge)
                 cache_key = ("vaultspec-solo-coder", "/some/path", False)
-                executor._graph_cache[cache_key] = object()
-                executor._thread_to_cache_key["t-preset"] = cache_key
-
-                # Verify the mapping is correctly stored (tests _thread_to_cache_key
-                # state directly without needing to run the aggregator).
-                assert executor._thread_to_cache_key["t-preset"] == cache_key
-                assert "t-preset" in executor._thread_to_cache_key
+                _inject_graph(executor, "t-preset", cache_key=cache_key)
+                assert executor.graph_count == 1
             finally:
                 await bridge.close()
 
     @pytest.mark.asyncio(loop_scope="function")
-    async def test_shutdown_clears_thread_to_cache_key(self) -> None:
-        """shutdown() clears _thread_to_cache_key alongside _graph_cache."""
+    async def test_shutdown_clears_registered_graph(self) -> None:
+        """Shutdown removes a graph that entered through the public seam."""
         async with AsyncSqliteSaver.from_conn_string(":memory:") as cp:
             await cp.setup()
             bridge = _make_bridge()
             try:
                 executor = Executor(checkpointer=cp, bridge=bridge)
-                executor._thread_to_cache_key["t-1"] = (
-                    "vaultspec-solo-coder",
-                    None,
-                    False,
-                )
-                assert executor._thread_to_cache_key
+                _inject_graph(executor, "t-1")
+                assert executor.graph_count == 1
 
                 await executor.shutdown()
-                assert not executor._thread_to_cache_key
+                assert executor.graph_count == 0
             finally:
                 await bridge.close()
 
@@ -946,16 +952,16 @@ def _install_completing_graph(executor: Executor, thread_id: str) -> None:
     async def worker_node(state: Any) -> dict[str, Any]:
         return {"messages": [AIMessage(content="done")], "next": "FINISH"}
 
-    builder = StateGraph(cast("Any", TeamState))
+    builder = new_state_graph()
     builder.add_node("worker", worker_node)
-    builder.add_edge(START, "worker")
-    builder.add_edge("worker", END)
-    graph = builder.compile(checkpointer=executor._checkpointer)
+    builder.add_edge("__start__", "worker")
+    builder.add_edge("worker", "__end__")
+    graph: RegisteredCompiledGraph = builder.compile(
+        checkpointer=executor._checkpointer
+    )
 
     cache_key = ("settle-preset", None, False)
-    executor._graph_cache[cache_key] = graph
-    executor._thread_to_cache_key[thread_id] = cache_key
-    executor.aggregator.register_graph(cast("Any", graph))
+    executor.register_compiled_graph(thread_id, cache_key, graph)
 
 
 def _install_gated_graph(executor: Executor, thread_id: str) -> None:
@@ -968,16 +974,16 @@ def _install_gated_graph(executor: Executor, thread_id: str) -> None:
             "next": "FINISH",
         }
 
-    builder = StateGraph(cast("Any", TeamState))
+    builder = new_state_graph()
     builder.add_node("gate", gate_node)
-    builder.add_edge(START, "gate")
-    builder.add_edge("gate", END)
-    graph = builder.compile(checkpointer=executor._checkpointer)
+    builder.add_edge("__start__", "gate")
+    builder.add_edge("gate", "__end__")
+    graph: RegisteredCompiledGraph = builder.compile(
+        checkpointer=executor._checkpointer
+    )
 
     cache_key = ("settle-gated-preset", None, False)
-    executor._graph_cache[cache_key] = graph
-    executor._thread_to_cache_key[thread_id] = cache_key
-    executor.aggregator.register_graph(cast("Any", graph))
+    executor.register_compiled_graph(thread_id, cache_key, graph)
 
 
 class TestSettleOrdering:

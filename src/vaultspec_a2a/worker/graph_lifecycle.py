@@ -11,14 +11,14 @@ import asyncio
 import logging
 from collections import OrderedDict
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any, Protocol, cast, override
 
 from langchain_core.messages import HumanMessage, SystemMessage
 
 from ..domain_config import domain_config
 from ..graph.compiler import _resolve_model_for_worker, compile_team_graph
 from ..graph.enums import Provider
-from ..streaming import node_metadata_from_graph
+from ..streaming import StreamableGraph, node_metadata_from_graph
 from ..team.team_config import AgentConfig, load_agent_config, load_team_config
 from ..telemetry import ws_span
 from ..thread.constants import DEFAULT_SUPERVISOR_ID
@@ -30,18 +30,27 @@ from ..thread.errors import (
 )
 
 if TYPE_CHECKING:
-    from langgraph.graph.state import CompiledStateGraph
+    from collections.abc import Mapping
+
+    from langchain_core.runnables import RunnableConfig
+    from langgraph.types import Command
 
     from ..authoring import DocumentProposalSubmitter, FeedbackContextReader
     from ..database.checkpoints import Checkpointer
     from ..ipc.schemas import DispatchRequest
-    from ..streaming.aggregator import EventAggregator, StreamableGraph
+    from ..streaming.aggregator import EventAggregator
     from .authoring_binding import AuthoringBindingProvider
     from .catalog_store import RunCatalogStore
     from .ipc import WorkerBridge
     from .token_store import RunTokenStore
 
-__all__ = ["GraphCompilationError", "GraphLifecycleManager"]
+__all__ = [
+    "GraphCacheKey",
+    "GraphCompilationError",
+    "GraphLifecycleManager",
+    "GraphStateSnapshot",
+    "RegisteredCompiledGraph",
+]
 
 
 class GraphCompilationError(RuntimeError):
@@ -50,8 +59,36 @@ class GraphCompilationError(RuntimeError):
 
 logger = logging.getLogger(__name__)
 
-# Type alias for the graph cache key.
-_CacheKey = tuple[str, str | None, bool]
+# Public type for the graph cache key.  The explicit registration seam lets
+# real-behavior tests install a pre-compiled graph without reaching mutable
+# cache dictionaries.
+type GraphCacheKey = tuple[str, str | None, bool]
+
+
+class GraphStateSnapshot(Protocol):
+    """State projection required by the worker's graph registration seam."""
+
+    @property
+    def values(self) -> Mapping[str, object]: ...
+
+    @property
+    def next(self) -> tuple[str, ...]: ...
+
+
+class RegisteredCompiledGraph(StreamableGraph, Protocol):
+    """Executable and state-observable graph eligible for worker registration."""
+
+    @override
+    async def aget_state(
+        self, config: Mapping[str, object] | RunnableConfig
+    ) -> GraphStateSnapshot: ...
+
+    async def ainvoke(
+        self,
+        graph_input: Mapping[str, object] | Command[str],
+        config: RunnableConfig,
+    ) -> object: ...
+
 
 # Provider families whose per-run isolation IS the CLAUDE_CONFIG_DIR config home
 # (Claude and Z.ai share the claude-agent-acp wrapper), mapped to the env
@@ -244,10 +281,12 @@ class GraphLifecycleManager:
         # The worker reaches the app database (task_queue_entries) via
         # the shared session factory; migrations are owned by the gateway.
         self._task_queue_port = SqlTaskQueuePort(get_session_factory())
-        self._graph_cache: OrderedDict[_CacheKey, CompiledStateGraph] = OrderedDict()
+        self._graph_cache: OrderedDict[GraphCacheKey, RegisteredCompiledGraph] = (
+            OrderedDict()
+        )
         # Maps thread_id -> cache key so resume can find the graph
         # and recompile if evicted.
-        self._thread_to_cache_key: dict[str, _CacheKey] = {}
+        self._thread_to_cache_key: dict[str, GraphCacheKey] = {}
 
     # ------------------------------------------------------------------
     # Public accessors
@@ -258,20 +297,40 @@ class GraphLifecycleManager:
         """Number of compiled graphs currently held."""
         return len(self._graph_cache)
 
-    @property
-    def thread_to_cache_key(self) -> dict[str, _CacheKey]:
-        """Read-only access to thread->cache-key mapping."""
-        return self._thread_to_cache_key
+    def has_thread(self, thread_id: str) -> bool:
+        """Return whether this worker has a cache-key record for *thread_id*."""
+        return thread_id in self._thread_to_cache_key
 
-    @property
-    def graph_cache(self) -> OrderedDict[_CacheKey, CompiledStateGraph]:
-        """Read-only access to the graph cache (for test injection)."""
-        return self._graph_cache
+    def cache_key_for_thread(self, thread_id: str) -> GraphCacheKey | None:
+        """Return the cache key known for *thread_id*, if the worker has one."""
+        return self._thread_to_cache_key.get(thread_id)
 
     def clear(self) -> None:
         """Clear all cached graphs and thread mappings."""
         self._graph_cache.clear()
         self._thread_to_cache_key.clear()
+
+    def register_compiled_graph(
+        self,
+        thread_id: str,
+        cache_key: GraphCacheKey,
+        graph: RegisteredCompiledGraph,
+    ) -> None:
+        """Atomically install a compiled graph for a known thread.
+
+        This is the only public graph-injection seam.  It maintains the same
+        cache and thread mapping invariant as normal compilation, then makes
+        the graph available to event aggregation before dispatch can resume it.
+        """
+        while (
+            cache_key not in self._graph_cache
+            and len(self._graph_cache) >= domain_config.max_cached_graphs
+        ):
+            self._graph_cache.popitem(last=False)
+        self._graph_cache[cache_key] = graph
+        self._graph_cache.move_to_end(cache_key)
+        self._thread_to_cache_key[thread_id] = cache_key
+        self._aggregator.register_graph(graph)
 
     # ------------------------------------------------------------------
     # Graph cache lookup and compilation
@@ -280,7 +339,7 @@ class GraphLifecycleManager:
     async def get_or_compile_graph(
         self,
         req: DispatchRequest,
-    ) -> CompiledStateGraph | None:
+    ) -> RegisteredCompiledGraph | None:
         """Return a compiled graph for *req*, using the LRU cache.
 
         If the thread already maps to a cached graph, return it (LRU touch).
@@ -305,7 +364,7 @@ class GraphLifecycleManager:
         if not team_preset:
             return None
 
-        new_key: _CacheKey = (team_preset, workspace_root, autonomous)
+        new_key: GraphCacheKey = (team_preset, workspace_root, autonomous)
 
         # Check if another thread already compiled for this key.
         if new_key in self._graph_cache:
@@ -335,14 +394,14 @@ class GraphLifecycleManager:
 
         self._graph_cache[new_key] = graph
         self._thread_to_cache_key[req.thread_id] = new_key
-        self._aggregator.register_graph(cast("StreamableGraph", graph))
+        self._aggregator.register_graph(graph)
         # Relay node metadata to the control-surface aggregator so
         # REST /team-status and WS team_status events include role/display_name.
         await self._send_graph_registered(req.thread_id, graph)
         return graph
 
     async def _send_graph_registered(
-        self, thread_id: str, graph: CompiledStateGraph
+        self, thread_id: str, graph: RegisteredCompiledGraph
     ) -> None:
         """Send a ``graph_registered`` event with node metadata via the bridge.
 
@@ -361,7 +420,7 @@ class GraphLifecycleManager:
     # Graph compilation
     # ------------------------------------------------------------------
 
-    async def _compile_graph(self, req: DispatchRequest) -> CompiledStateGraph:
+    async def _compile_graph(self, req: DispatchRequest) -> RegisteredCompiledGraph:
         """Load team/agent configs and compile a LangGraph ``StateGraph``.
 
         Uses the same two-level config discovery order as the monolith:
@@ -465,25 +524,28 @@ class GraphLifecycleManager:
                 frozen_assignment=req.model_assignment,
             )
 
-        return compile_team_graph(
-            team_config=team_config,
-            agent_configs=agent_configs,
-            checkpointer=self._checkpointer,
-            supervisor_agent_config=supervisor_config,
-            workspace_root=ws_root,
-            autonomous=req.autonomous,
-            # Let compile_team_graph use team_config.graph.step_timeout_seconds
-            step_timeout=None,
-            # Thread feature_tag so vault indexing works in worker
-            feature_tag=req.active_feature,
-            task_queue_port=self._task_queue_port,
-            provider_factory=self._provider_factory,
-            proposal_submitter=proposal_submitter,
-            feedback_reader=feedback_reader,
-            authoring_binding_provider=authoring_binding_provider,
-            # Compile against the run's frozen effective assignment so a
-            # restart reproduces the exact launched models.
-            model_assignment=req.model_assignment,
+        return cast(
+            "RegisteredCompiledGraph",
+            compile_team_graph(
+                team_config=team_config,
+                agent_configs=agent_configs,
+                checkpointer=self._checkpointer,
+                supervisor_agent_config=supervisor_config,
+                workspace_root=ws_root,
+                autonomous=req.autonomous,
+                # Let compile_team_graph use team_config.graph.step_timeout_seconds
+                step_timeout=None,
+                # Thread feature_tag so vault indexing works in worker
+                feature_tag=req.active_feature,
+                task_queue_port=self._task_queue_port,
+                provider_factory=self._provider_factory,
+                proposal_submitter=proposal_submitter,
+                feedback_reader=feedback_reader,
+                authoring_binding_provider=authoring_binding_provider,
+                # Compile against the run's frozen effective assignment so a
+                # restart reproduces the exact launched models.
+                model_assignment=req.model_assignment,
+            ),
         )
 
     async def _build_proposal_submitter(self) -> DocumentProposalSubmitter:

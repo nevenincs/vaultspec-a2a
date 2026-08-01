@@ -39,7 +39,7 @@ from __future__ import annotations
 
 import uuid
 from contextlib import asynccontextmanager
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any
 
 import anyio
 import httpx
@@ -50,13 +50,13 @@ from fastapi.responses import Response
 from httpx import ASGITransport
 from langchain_core.messages import AIMessage
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
-from langgraph.graph import END, START, StateGraph
 from sqlalchemy.ext.asyncio import (
     AsyncSession,
     async_sessionmaker,
     create_async_engine,
 )
 
+from ...api.tests.clarification_harness import new_state_graph
 from ...authoring import (
     AuthoringClient,
     AuthoringResponse,
@@ -77,7 +77,6 @@ from ...graph.nodes.phase_gate import create_phase_gate_node
 from ...ipc.schemas import DispatchRequest
 from ...thread.actor_tokens import ActorTokenBundle
 from ...thread.enums import PermissionRequestStatus, ThreadStatus
-from ...thread.state import TeamState
 from ...worker.app import create_worker_app
 from ...worker.executor import Executor
 from ...worker.ipc import WorkerBridge
@@ -85,6 +84,12 @@ from ..circuit_breaker import WorkerCircuitBreaker
 from ..verdict_subscriber import VerdictSubscriber
 from ..worker_management import LazyWorkerSpawner
 from .test_verdict_subscriber_live import _decide, _submit_proposal
+
+if TYPE_CHECKING:
+    from langchain_core.runnables import RunnableConfig
+
+    from ...thread.state import TeamState
+    from ...worker.graph_lifecycle import RegisteredCompiledGraph
 
 _CACHE_KEY = ("verdict-loop-live", None, False)
 
@@ -128,7 +133,7 @@ def _bridge_stub() -> WorkerBridge:
 
 def _install_verdict_loop_graph(
     executor: Executor, thread_id: str, proposal_id: str
-) -> Any:
+) -> RegisteredCompiledGraph:
     """Compile+cache a real, minimal seed -> phase-gate -> finish graph.
 
     ``seed`` commits ``gate_pending_proposal_id`` (the REAL proposal id
@@ -154,18 +159,18 @@ def _install_verdict_loop_graph(
             "messages": [AIMessage(content=f"resumed:{state.get('gate_verdict')}")],
         }
 
-    builder = StateGraph(cast("Any", TeamState))
+    builder = new_state_graph()
     builder.add_node("seed", seed_node)
     builder.add_node("gate", gate_node)
     builder.add_node("finish", finish_node)
-    builder.add_edge(START, "seed")
+    builder.add_edge("__start__", "seed")
     builder.add_edge("seed", "gate")
-    builder.add_edge("finish", END)
-    graph = builder.compile(checkpointer=executor._checkpointer)
+    builder.add_edge("finish", "__end__")
+    graph: RegisteredCompiledGraph = builder.compile(
+        checkpointer=executor._checkpointer
+    )
 
-    executor._graph_cache[_CACHE_KEY] = graph
-    executor._thread_to_cache_key[thread_id] = _CACHE_KEY
-    executor.aggregator.register_graph(cast("Any", graph))
+    executor.register_compiled_graph(thread_id, _CACHE_KEY, graph)
     return graph
 
 
@@ -267,7 +272,7 @@ async def test_live_engine_verdict_resumes_a_real_graph_through_the_real_worker(
             # Fire-and-forget: poll the REAL graph's own state (not a
             # recording stub) until the seed node has landed and the run is
             # parked at the interrupt.
-            config = {"configurable": {"thread_id": thread_id}}
+            config: RunnableConfig = {"configurable": {"thread_id": thread_id}}
             with anyio.fail_after(15.0):
                 while True:
                     snap = await graph.aget_state(config)
@@ -342,6 +347,7 @@ async def test_live_engine_verdict_resumes_a_real_graph_through_the_real_worker(
 
             assert snap.values["gate_verdict"] == "approved"
             messages = snap.values["messages"]
+            assert isinstance(messages, list)
             assert any(
                 getattr(m, "content", "") == "resumed:approved" for m in messages
             ), "the finish node never observed the real resume"

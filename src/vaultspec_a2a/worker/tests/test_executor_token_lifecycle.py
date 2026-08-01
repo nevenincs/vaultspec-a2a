@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any
 
 import httpx
 import pytest
@@ -27,14 +27,17 @@ from fastapi.responses import Response
 from httpx import ASGITransport
 from langchain_core.messages import AIMessage
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
-from langgraph.graph import END, START, StateGraph
 from langgraph.types import interrupt
 
+from ...api.tests.clarification_harness import new_state_graph
 from ...ipc.schemas import DispatchRequest
 from ...thread.actor_tokens import ActorTokenBundle
-from ...thread.state import TeamState
 from ..executor import Executor
 from ..ipc import WorkerBridge
+
+if TYPE_CHECKING:
+    from ...thread.state import TeamState
+    from ..graph_lifecycle import RegisteredCompiledGraph
 
 _CODER_TOKEN = "secret-coder-token"
 _REVIEWER_TOKEN = "secret-reviewer-token"
@@ -76,16 +79,16 @@ def _install_probe_graph(
         observed["held_during_run"] = store.has(thread_id)
         return {"messages": [AIMessage(content="done")], "next": "FINISH"}
 
-    builder = StateGraph(cast("Any", TeamState))
+    builder = new_state_graph()
     builder.add_node("coder", coder_node)
-    builder.add_edge(START, "coder")
-    builder.add_edge("coder", END)
-    graph = builder.compile(checkpointer=executor._checkpointer)
+    builder.add_edge("__start__", "coder")
+    builder.add_edge("coder", "__end__")
+    graph: RegisteredCompiledGraph = builder.compile(
+        checkpointer=executor._checkpointer
+    )
 
     cache_key = ("token-preset", None, False)
-    executor._graph_cache[cache_key] = graph
-    executor._thread_to_cache_key[thread_id] = cache_key
-    executor.aggregator.register_graph(cast("Any", graph))
+    executor.register_compiled_graph(thread_id, cache_key, graph)
 
 
 @pytest.mark.asyncio(loop_scope="function")
@@ -145,16 +148,16 @@ def _install_interrupting_graph(
             "next": "FINISH",
         }
 
-    builder = StateGraph(cast("Any", TeamState))
+    builder = new_state_graph()
     builder.add_node("gate", gate_node)
-    builder.add_edge(START, "gate")
-    builder.add_edge("gate", END)
-    graph = builder.compile(checkpointer=executor._checkpointer)
+    builder.add_edge("__start__", "gate")
+    builder.add_edge("gate", "__end__")
+    graph: RegisteredCompiledGraph = builder.compile(
+        checkpointer=executor._checkpointer
+    )
 
     cache_key = ("gate-preset", None, False)
-    executor._graph_cache[cache_key] = graph
-    executor._thread_to_cache_key[thread_id] = cache_key
-    executor.aggregator.register_graph(cast("Any", graph))
+    executor.register_compiled_graph(thread_id, cache_key, graph)
 
 
 def _bundle() -> ActorTokenBundle:

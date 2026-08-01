@@ -17,10 +17,10 @@ that records dispatches over real HTTP.
 from __future__ import annotations
 
 import asyncio
-import contextlib
 import json
 import logging
-from typing import TYPE_CHECKING
+from contextlib import asynccontextmanager
+from typing import TYPE_CHECKING, Protocol, cast, runtime_checkable
 
 import httpx
 import pytest
@@ -32,16 +32,35 @@ from ...providers.lane_admission import is_lane_admissible, lane_admission_reaso
 from ...providers.model_profiles import probe_provider_readiness
 from ...streaming.aggregator import EventAggregator
 from ...team.team_config import load_team_config
-from ..routes.gateway import _persisted_lease_id, admission_gate
+from ..routes.gateway import admission_gate
 from .conftest import make_app
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator, Callable
+    from collections.abc import AsyncGenerator, AsyncIterator, Callable
+    from pathlib import Path
+
+    from fastapi import FastAPI
+    from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
+    from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
+
+type SessionFactory = async_sessionmaker[AsyncSession]
+type JsonValue = bool | int | float | str | list[JsonValue] | JsonObject | None
+type JsonObject = dict[str, JsonValue]
+
+
+@runtime_checkable
+class _CheckedOutPool(Protocol):
+    """The SQLAlchemy pool operation needed to prove the real insert race."""
+
+    def checkedout(self) -> int: ...
+
 
 _PRESET = "mock-success-single"
 
 
-async def _seed_permission(session_factory, *, thread_id: str, request_id: str) -> None:
+async def _seed_permission(
+    session_factory: SessionFactory, *, thread_id: str, request_id: str
+) -> None:
     """Record a real pending permission request against a real run."""
     from ...database.permission_repository import record_permission_request
 
@@ -66,7 +85,7 @@ async def _seed_permission(session_factory, *, thread_id: str, request_id: str) 
 
 @pytest.mark.asyncio(loop_scope="function")
 async def test_run_history_is_the_wide_read_that_run_status_deliberately_is_not(
-    session_factory, checkpointer
+    session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
 ) -> None:
     """History carries the record; run-status stays the bounded authority read.
 
@@ -116,7 +135,7 @@ async def test_run_history_is_the_wide_read_that_run_status_deliberately_is_not(
 
 @pytest.mark.asyncio(loop_scope="function")
 async def test_archive_and_team_status_are_reachable_on_the_versioned_surface(
-    session_factory, checkpointer
+    session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
 ) -> None:
     """Two reads-and-a-transition the transition surface used to hold alone.
 
@@ -166,7 +185,7 @@ async def test_archive_and_team_status_are_reachable_on_the_versioned_surface(
 
 @pytest.mark.asyncio(loop_scope="function")
 async def test_a_follow_up_turn_reaches_the_run_that_run_start_cannot_address(
-    session_factory, checkpointer
+    session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
 ) -> None:
     """The versioned surface can now say something further to a live run.
 
@@ -231,7 +250,7 @@ async def test_a_follow_up_turn_reaches_the_run_that_run_start_cannot_address(
 
 @pytest.mark.asyncio(loop_scope="function")
 async def test_the_versioned_verb_answers_a_permission_and_refuses_a_foreign_one(
-    session_factory, checkpointer
+    session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
 ) -> None:
     """The versioned surface can now accept the answer to what it asks.
 
@@ -315,15 +334,47 @@ async def test_the_versioned_verb_answers_a_permission_and_refuses_a_foreign_one
         assert unknown.status_code == 404
 
 
-def test_legacy_lease_only_metadata_remains_status_visible() -> None:
-    """The additive status reader preserves the preceding persisted shape."""
-    legacy = json.dumps({"run_lease": {"lease_id": "lease-legacy123"}})
-    assert _persisted_lease_id(legacy) == "lease-legacy123"
-    assert _persisted_lease_id('{"run_lease":{"lease_id":"not/addressable"}}') is None
+@pytest.mark.asyncio(loop_scope="function")
+async def test_legacy_lease_only_metadata_remains_status_visible(
+    session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
+) -> None:
+    """run-status carries a valid legacy lease and rejects an invalid one."""
+    from ...database.thread_repository import create_thread
+    from ...thread.enums import ThreadStatus
+
+    valid_metadata: JsonObject = {"run_lease": {"lease_id": "lease-legacy123"}}
+    invalid_metadata: JsonObject = {"run_lease": {"lease_id": "not/addressable"}}
+    async with session_factory() as session:
+        valid = await create_thread(
+            session,
+            status=ThreadStatus.RUNNING,
+            title="legacy valid lease",
+            metadata=json.dumps(valid_metadata),
+        )
+        invalid = await create_thread(
+            session,
+            status=ThreadStatus.RUNNING,
+            title="legacy invalid lease",
+            metadata=json.dumps(invalid_metadata),
+        )
+        await session.commit()
+
+    app, _agg, _worker, _cp = make_app(session_factory, checkpointer)
+    async with (
+        _live_server(app) as base,
+        httpx.AsyncClient(base_url=base, timeout=10.0) as client,
+    ):
+        valid_status = await client.get(f"/v1/runs/{valid.id}")
+        invalid_status = await client.get(f"/v1/runs/{invalid.id}")
+
+    assert valid_status.status_code == 200, valid_status.text
+    assert valid_status.json()["lease_id"] == "lease-legacy123"
+    assert invalid_status.status_code == 200, invalid_status.text
+    assert invalid_status.json()["lease_id"] is None
 
 
-@contextlib.asynccontextmanager
-async def _live_server(app) -> AsyncIterator[str]:
+@asynccontextmanager
+async def _live_server(app: FastAPI) -> AsyncGenerator[str]:
     """Serve *app* on an ephemeral port and yield its base URL."""
     config = uvicorn.Config(
         app, host="127.0.0.1", port=0, log_level="warning", lifespan="on"
@@ -340,8 +391,7 @@ async def _live_server(app) -> AsyncIterator[str]:
         yield f"http://127.0.0.1:{port}"
     finally:
         server.should_exit = True
-        with contextlib.suppress(asyncio.TimeoutError):
-            await asyncio.wait_for(task, timeout=5.0)
+        await asyncio.wait_for(task, timeout=5.0)
 
 
 async def _wait_until(
@@ -358,7 +408,9 @@ async def _wait_until(
 
 
 @pytest.mark.asyncio(loop_scope="function")
-async def test_five_verbs_over_live_socket(session_factory, checkpointer) -> None:
+async def test_five_verbs_over_live_socket(
+    session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
+) -> None:
     app, _agg, worker, _cp = make_app(session_factory, checkpointer)
     async with (
         _live_server(app) as base,
@@ -433,7 +485,7 @@ async def test_five_verbs_over_live_socket(session_factory, checkpointer) -> Non
 
 @pytest.mark.asyncio(loop_scope="function")
 async def test_service_state_degrades_when_circuit_breaker_opens(
-    session_factory, checkpointer
+    session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
 ) -> None:
     """A real dependency failure (open circuit) degrades service-state.
 
@@ -461,7 +513,7 @@ async def test_service_state_degrades_when_circuit_breaker_opens(
 
 @pytest.mark.asyncio(loop_scope="function")
 async def test_run_status_carries_reconnect_cursor(
-    session_factory, checkpointer
+    session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
 ) -> None:
     """run-status carries the monotonic last_sequence reconnect cursor.
 
@@ -493,7 +545,7 @@ async def test_run_status_carries_reconnect_cursor(
 
 @pytest.mark.asyncio(loop_scope="function")
 async def test_service_state_is_probe_backed_and_distinguishes_readiness(
-    session_factory, checkpointer
+    session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
 ) -> None:
     """service-state reports truthful probe-derived readiness fields."""
     app, _agg, _worker, _cp = make_app(session_factory, checkpointer)
@@ -529,7 +581,9 @@ async def test_service_state_is_probe_backed_and_distinguishes_readiness(
 
 @pytest.mark.asyncio(loop_scope="function")
 async def test_presets_list_is_truthful_and_resilient(
-    session_factory, checkpointer, tmp_path
+    session_factory: SessionFactory,
+    checkpointer: AsyncSqliteSaver,
+    tmp_path: Path,
 ) -> None:
     """presets-list marks loadable/unloadable and survives one bad preset."""
     teams_dir = tmp_path / ".vaultspec" / "teams"
@@ -721,7 +775,9 @@ async def test_presets_list_is_truthful_and_resilient(
 
 @pytest.mark.asyncio(loop_scope="function")
 async def test_presets_list_discloses_workspace_profile_origin(
-    session_factory, checkpointer, tmp_path
+    session_factory: SessionFactory,
+    checkpointer: AsyncSqliteSaver,
+    tmp_path: Path,
 ) -> None:
     """A workspace-local preset with a profile is served with origin=workspace."""
     teams_dir = tmp_path / ".vaultspec" / "teams"
@@ -769,7 +825,7 @@ async def test_presets_list_discloses_workspace_profile_origin(
 
 @pytest.mark.asyncio(loop_scope="function")
 async def test_run_envelope_and_presets_list_agree_on_provider_readiness(
-    session_factory, checkpointer
+    session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
 ) -> None:
     """One question, one answer: readiness cannot differ by which verb is asked.
 
@@ -835,7 +891,9 @@ async def test_run_envelope_and_presets_list_agree_on_provider_readiness(
 
 @pytest.mark.asyncio(loop_scope="function")
 async def test_run_start_threads_feedback_batch_id_to_worker(
-    session_factory, checkpointer, tmp_path
+    session_factory: SessionFactory,
+    checkpointer: AsyncSqliteSaver,
+    tmp_path: Path,
 ) -> None:
     """The opaque feedback_batch_id threads run-start -> metadata -> worker dispatch.
 
@@ -869,7 +927,9 @@ async def test_run_start_threads_feedback_batch_id_to_worker(
 
 @pytest.mark.asyncio(loop_scope="function")
 async def test_run_start_without_feedback_batch_id_dispatches_none(
-    session_factory, checkpointer, tmp_path
+    session_factory: SessionFactory,
+    checkpointer: AsyncSqliteSaver,
+    tmp_path: Path,
 ) -> None:
     """A run with no feedback batch dispatches a null id (non-feedback run)."""
     app, _agg, worker, _cp = make_app(session_factory, checkpointer)
@@ -893,7 +953,7 @@ async def test_run_start_without_feedback_batch_id_dispatches_none(
 
 @pytest.mark.asyncio(loop_scope="function")
 async def test_run_start_refusals_over_live_socket(
-    session_factory, checkpointer
+    session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
 ) -> None:
     """The v1 run-start refuses invalid requests before dispatch."""
     app, _agg, worker, _cp = make_app(session_factory, checkpointer)
@@ -981,7 +1041,7 @@ async def test_run_start_refusals_over_live_socket(
 
 @pytest.mark.asyncio(loop_scope="function")
 async def test_run_start_client_id_is_dispatch_exactly_once(
-    session_factory, checkpointer
+    session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
 ) -> None:
     """A retry with the same client run id returns the same run, dispatched once."""
     app, _agg, worker, _cp = make_app(session_factory, checkpointer)
@@ -1009,7 +1069,7 @@ async def test_run_start_client_id_is_dispatch_exactly_once(
 
 @pytest.mark.asyncio(loop_scope="function")
 async def test_run_id_reservation_is_visible_before_dispatch_ack(
-    session_factory, checkpointer
+    session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
 ) -> None:
     """A concurrent retry observes one durable reservation and one dispatch."""
     app, _agg, worker, _cp = make_app(session_factory, checkpointer)
@@ -1045,7 +1105,7 @@ async def test_run_id_reservation_is_visible_before_dispatch_ack(
 
 @pytest.mark.asyncio(loop_scope="function")
 async def test_sse_stream_delivers_versioned_event_mid_stream(
-    session_factory, checkpointer
+    session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
 ) -> None:
     from ...database.thread_repository import create_thread
     from ...thread.enums import ThreadStatus
@@ -1111,7 +1171,7 @@ async def test_sse_stream_delivers_versioned_event_mid_stream(
 
 @pytest.mark.asyncio(loop_scope="function")
 async def test_sse_carries_semantic_phase_and_bounds_document_bodies(
-    session_factory, checkpointer
+    session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
 ) -> None:
     """Progress frames carry the semantic phase; oversized bodies bound.
 
@@ -1211,7 +1271,7 @@ async def test_sse_carries_semantic_phase_and_bounds_document_bodies(
 
 @pytest.mark.asyncio(loop_scope="function")
 async def test_run_stream_verb_reserves_versioned_frames(
-    session_factory, checkpointer
+    session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
 ) -> None:
     """GET /v1/runs/{run_id}/stream re-serves the bounded, versioned v1 frames.
 
@@ -1277,7 +1337,9 @@ async def test_run_stream_verb_reserves_versioned_frames(
 
 
 @pytest.mark.asyncio(loop_scope="function")
-async def test_run_stream_unknown_run_is_404(session_factory, checkpointer) -> None:
+async def test_run_stream_unknown_run_is_404(
+    session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
+) -> None:
     """Streaming an unknown run id is a clean 404 in run vocabulary."""
     app, _agg, _worker, _cp = make_app(session_factory, checkpointer)
     async with (
@@ -1291,14 +1353,14 @@ async def test_run_stream_unknown_run_is_404(session_factory, checkpointer) -> N
 
 async def _read_event(
     lines: AsyncIterator[str], *, wanted: str, timeout: float = 5.0
-) -> dict:
+) -> JsonObject:
     """Read SSE ``data:`` frames from *lines* until one whose ``type`` matches.
 
     Heartbeat frames (emitted on idle) are skipped. Raises on timeout so a
     broken stream fails the test instead of hanging it.
     """
 
-    async def _scan() -> dict:
+    async def _scan() -> JsonObject:
         buffer: list[str] = []
         async for raw in lines:
             line = raw.rstrip("\r")
@@ -1306,7 +1368,7 @@ async def _read_event(
                 buffer.append(line.removeprefix("data: "))
                 continue
             if line == "" and buffer:
-                payload = json.loads("".join(buffer))
+                payload = cast("JsonObject", json.loads("".join(buffer)))
                 buffer = []
                 if payload.get("type") == wanted:
                     return payload
@@ -1317,7 +1379,7 @@ async def _read_event(
 
 @pytest.mark.asyncio(loop_scope="function")
 async def test_run_start_freezes_and_discloses_profile(
-    session_factory, checkpointer
+    session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
 ) -> None:
     """run-start freezes the default profile, threads it to dispatch, discloses it."""
     app, _agg, worker, _cp = make_app(session_factory, checkpointer)
@@ -1352,7 +1414,9 @@ async def test_run_start_freezes_and_discloses_profile(
 
 
 @pytest.mark.asyncio(loop_scope="function")
-async def test_run_start_rejects_unknown_profile(session_factory, checkpointer) -> None:
+async def test_run_start_rejects_unknown_profile(
+    session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
+) -> None:
     """An unknown profile is refused with a 422 and never dispatched."""
     app, _agg, worker, _cp = make_app(session_factory, checkpointer)
     async with (
@@ -1370,7 +1434,7 @@ async def test_run_start_rejects_unknown_profile(session_factory, checkpointer) 
 
 @pytest.mark.asyncio(loop_scope="function")
 async def test_run_start_conflicts_on_profile_change_retry(
-    session_factory, checkpointer
+    session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
 ) -> None:
     """A retry that changes the frozen profile is a 409, never a silent replay."""
     app, _agg, _worker, _cp = make_app(session_factory, checkpointer)
@@ -1402,7 +1466,7 @@ async def test_run_start_conflicts_on_profile_change_retry(
 
 @pytest.mark.asyncio(loop_scope="function")
 async def test_run_start_replays_a_rotated_bundle_and_conflicts_on_a_changed_body(
-    session_factory, checkpointer
+    session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
 ) -> None:
     """Where the fingerprint draws the line between a retry and a new intention.
 
@@ -1484,7 +1548,7 @@ async def test_run_start_replays_a_rotated_bundle_and_conflicts_on_a_changed_bod
 
 @pytest.mark.asyncio(loop_scope="function")
 async def test_run_start_idempotency_is_race_safe(
-    session_factory, checkpointer
+    session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
 ) -> None:
     """Concurrent same-run_id retries never 500: insert-or-return is atomic."""
     app, _agg, worker, _cp = make_app(session_factory, checkpointer)
@@ -1508,7 +1572,10 @@ async def test_run_start_idempotency_is_race_safe(
 
 @pytest.mark.asyncio(loop_scope="function")
 async def test_concurrent_same_run_id_different_bodies_conflicts(
-    engine, session_factory, checkpointer, caplog: pytest.LogCaptureFixture
+    engine: AsyncEngine,
+    session_factory: SessionFactory,
+    checkpointer: AsyncSqliteSaver,
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
     """The loser of a real insert race is refused when its body differs.
 
@@ -1537,7 +1604,9 @@ async def test_concurrent_same_run_id_different_bodies_conflicts(
     }
     first_body = {**shared, "message": "first intention"}
     second_body = {**shared, "message": "second intention"}
-    checked_out = engine.sync_engine.pool.checkedout
+    pool = engine.sync_engine.pool
+    assert isinstance(pool, _CheckedOutPool)
+    checked_out = pool.checkedout
 
     with caplog.at_level(logging.INFO, logger="vaultspec_a2a.api.routes.gateway"):
         async with (
@@ -1612,7 +1681,7 @@ async def test_concurrent_same_run_id_different_bodies_conflicts(
 
 @pytest.mark.asyncio(loop_scope="function")
 async def test_pairing_identity_is_authenticated_surface_only(
-    session_factory, checkpointer
+    session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
 ) -> None:
     """The gateway's lifetime identity never reaches an ungated health body.
 

@@ -11,7 +11,7 @@ import asyncio
 import logging
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any
 
 from langgraph.types import Command
 
@@ -23,7 +23,12 @@ from ..telemetry import ws_span
 from ..thread.constants import DEFAULT_SUPERVISOR_ID
 from ..thread.enums import TERMINAL_STATUSES, ControlActionType, ThreadStatus
 from .catalog_store import RunCatalogStore
-from .graph_lifecycle import GraphCompilationError, GraphLifecycleManager
+from .graph_lifecycle import (
+    GraphCacheKey,
+    GraphCompilationError,
+    GraphLifecycleManager,
+    RegisteredCompiledGraph,
+)
 from .state_projection import StateProjector
 from .token_store import RunTokenStore
 
@@ -169,14 +174,14 @@ class Executor:
         cap = domain_config.max_concurrent_threads
         return len(self._active_ingests) >= cap
 
-    # Internal state access (used by tests for graph injection).
-    @property
-    def _graph_cache(self) -> Any:
-        return self._graph_lifecycle.graph_cache
-
-    @property
-    def _thread_to_cache_key(self) -> dict[str, Any]:
-        return self._graph_lifecycle.thread_to_cache_key
+    def register_compiled_graph(
+        self,
+        thread_id: str,
+        cache_key: GraphCacheKey,
+        graph: RegisteredCompiledGraph,
+    ) -> None:
+        """Register a pre-compiled graph through the lifecycle's atomic seam."""
+        self._graph_lifecycle.register_compiled_graph(thread_id, cache_key, graph)
 
     def _log_extra(self, **fields: Any) -> dict[str, Any]:
         """Build bounded structured log fields for executor-owned events."""
@@ -485,9 +490,7 @@ class Executor:
                 is_first_ingest,
             ) = await self._state_projector.pre_flight_checkpoint(
                 req.thread_id,
-                thread_known=(
-                    req.thread_id in self._graph_lifecycle.thread_to_cache_key
-                ),
+                thread_known=self._graph_lifecycle.has_thread(req.thread_id),
             )
             if pre_flight_outcome == ThreadStatus.COMPLETED:
                 logger.info(
@@ -572,7 +575,7 @@ class Executor:
                 outcome = await self._aggregator.ingest(
                     req.thread_id,
                     agent_id,
-                    cast("StreamableGraph", graph),
+                    graph,
                     graph_input,
                     config,
                 )
@@ -590,9 +593,7 @@ class Executor:
                 )
                 span.record_exception(Exception("Graph execution failed"))
             finally:
-                await self._settle_run(
-                    req, cast("StreamableGraph", graph), config, outcome
-                )
+                await self._settle_run(req, graph, config, outcome)
 
     async def _handle_resume(self, req: DispatchRequest) -> None:
         """Resume a graph from a LangGraph interrupt via ``Command(resume=...)``."""
@@ -619,7 +620,7 @@ class Executor:
             self._token_store.register(req.thread_id, req.actor_tokens)
 
             # Resolve recursion_limit: explicit request > team TOML > global default.
-            cache_key = self._graph_lifecycle.thread_to_cache_key.get(req.thread_id)
+            cache_key = self._graph_lifecycle.cache_key_for_thread(req.thread_id)
             team_preset = cache_key[0] if cache_key else req.team_preset
 
             # Resolve workspace_root from cache or request.
@@ -659,7 +660,7 @@ class Executor:
                 outcome = await self._aggregator.ingest(
                     req.thread_id,
                     agent_id,
-                    cast("StreamableGraph", graph),
+                    graph,
                     Command(resume=req.option_id),
                     config,
                 )
@@ -677,9 +678,7 @@ class Executor:
                 )
                 span.record_exception(Exception("Graph resume failed"))
             finally:
-                await self._settle_run(
-                    req, cast("StreamableGraph", graph), config, outcome
-                )
+                await self._settle_run(req, graph, config, outcome)
 
     async def shutdown(self) -> None:
         """Release held resources (aggregator debounce tasks, etc.)."""

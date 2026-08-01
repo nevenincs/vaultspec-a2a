@@ -25,56 +25,36 @@ recorded stub call.
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 import anyio
 import httpx
 import pytest
-from fastapi import FastAPI, Request
-from fastapi.responses import Response
 from httpx import ASGITransport
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from ...worker.app import create_worker_app
 from ...worker.executor import Executor
-from ...worker.ipc import WorkerBridge
+from .clarification_harness import loopback_callback_bridge, park_clarification
 from .conftest import make_app
-from .test_clarification_endpoint import _clarification_graph, _park_clarification
 
 if TYPE_CHECKING:
+    from collections.abc import AsyncGenerator
+
+    from fastapi import FastAPI
+    from langchain_core.runnables import RunnableConfig
     from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
+    from ...worker.graph_lifecycle import GraphCacheKey
+
 _BUNDLE_FREE_PRESET = "mock-success-single"
-_CACHE_KEY = ("clarification-loop-live", None, False)
+_CACHE_KEY: GraphCacheKey = ("clarification-loop-live", None, False)
 
-
-def _bridge_stub() -> WorkerBridge:
-    """Real ASGI-backed bridge whose gateway callback target just accepts.
-
-    What is under test is gateway-respond -> real worker -> real graph
-    resume, not the worker -> gateway event relay (proven elsewhere), so the
-    callback target only needs to be real and accept the calls.
-    """
-    app = FastAPI()
-
-    @app.post("/internal/events/batch")
-    async def _batch(request: Request) -> Response:
-        return Response(content='{"status":"ok"}', media_type="application/json")
-
-    @app.post("/internal/heartbeat")
-    async def _heartbeat(request: Request) -> Response:
-        return Response(content='{"status":"ok"}', media_type="application/json")
-
-    bridge = WorkerBridge(
-        api_url="http://control:8000", worker_id="clarification-loop-worker"
-    )
-    bridge._client = httpx.AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://control:8000"
-    )
-    return bridge
+type SessionFactory = async_sessionmaker[AsyncSession]
 
 
 @asynccontextmanager
-async def _worker_test_lifespan(app: FastAPI):
+async def _worker_test_lifespan(_app: FastAPI) -> AsyncGenerator[None]:
     """No-op: ``httpx.ASGITransport`` never runs FastAPI's real lifespan
     protocol, so state/task-group wiring is done explicitly by the caller."""
     yield
@@ -82,14 +62,13 @@ async def _worker_test_lifespan(app: FastAPI):
 
 @pytest.mark.asyncio
 async def test_respond_resumes_through_a_real_worker_and_executor(
-    session_factory: Any, checkpointer: AsyncSqliteSaver
+    session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
 ) -> None:
     """POST .../respond drives a real Command(resume=...) through a real worker.
 
-    Reuses the real gateway app and the real parked-graph helper from
-    ``test_clarification_endpoint.py`` verbatim; the only substitution is the
+    Reuses the shared real graph/parking harness.  The only substitution is the
     worker behind ``app.state.worker_client`` — a real one instead of the
-    recording stub — so the resumed graph's own state is the proof, not a
+    recording receiver — so the resumed graph's own state is the proof, not a
     recorded dispatch body.
     """
     app, _agg, _stub_worker, _cp = make_app(session_factory, checkpointer)
@@ -104,8 +83,8 @@ async def test_respond_resumes_through_a_real_worker_and_executor(
         assert create_resp.status_code == 201
         thread_id = create_resp.json()["run_id"]
 
-        payload = await _park_clarification(checkpointer, thread_id=thread_id)
-        request_id = payload["request_id"]
+        parked = await park_clarification(checkpointer, thread_id=thread_id)
+        request_id = parked.request.request_id
 
         # Disclosure still works normally (unaffected by the worker swap below).
         status_resp = await gateway_client.get(f"/v1/runs/{thread_id}")
@@ -114,58 +93,58 @@ async def test_respond_resumes_through_a_real_worker_and_executor(
         assert disclosed is not None
         assert disclosed["request_id"] == request_id
 
-        # --- swap the stub worker for a real Executor + real worker app,
-        # wired to the SAME parked graph via the executor's sanctioned test
-        # injection seam (worker/tests/test_executor.py's own precedent). ---
-        graph = _clarification_graph(checkpointer)
-        executor = Executor(checkpointer=checkpointer, bridge=_bridge_stub())
-        executor._graph_cache[_CACHE_KEY] = graph
-        executor._thread_to_cache_key[thread_id] = _CACHE_KEY
-        executor.aggregator.register_graph(graph)
+        # --- swap the recording receiver for a real Executor + real worker app,
+        # wired to the SAME parked graph through the public atomic registration
+        # seam and a real ephemeral loopback callback server. ---
+        async with loopback_callback_bridge() as bridge:
+            executor = Executor(checkpointer=checkpointer, bridge=bridge)
+            executor.register_compiled_graph(thread_id, _CACHE_KEY, parked.graph)
 
-        worker_app = create_worker_app(lifespan=_worker_test_lifespan)
-        worker_app.state.executor = executor
+            worker_app = create_worker_app(lifespan=_worker_test_lifespan)
+            worker_app.state.executor = executor
 
-        async with (
-            httpx.AsyncClient(
-                transport=ASGITransport(app=worker_app), base_url="http://worker"
-            ) as worker_client,
-            anyio.create_task_group() as tg,
-        ):
-            # ASGITransport never runs FastAPI's lifespan protocol, so the
-            # dispatch route's fire-and-forget scheduling needs its task
-            # group wired explicitly, matching the real worker's lifespan.
-            worker_app.state.task_group = tg
-            app.state.worker_client = worker_client
+            async with (
+                httpx.AsyncClient(
+                    transport=ASGITransport(app=worker_app), base_url="http://worker"
+                ) as worker_client,
+                anyio.create_task_group() as tg,
+            ):
+                # ASGITransport never runs FastAPI's lifespan protocol, so the
+                # dispatch route's fire-and-forget scheduling needs its task
+                # group wired explicitly, matching the real worker's lifespan.
+                worker_app.state.task_group = tg
+                app.state.worker_client = worker_client
 
-            respond_resp = await gateway_client.post(
-                f"/v1/runs/{thread_id}/clarifications/{request_id}/respond",
-                json={"answers": {"provider": "codex"}},
-            )
-            assert respond_resp.status_code == 200
-            body = respond_resp.json()
-            assert body["accepted"] is True
+                respond_resp = await gateway_client.post(
+                    f"/v1/runs/{thread_id}/clarifications/{request_id}/respond",
+                    json={"answers": {"provider": "codex"}},
+                )
+                assert respond_resp.status_code == 200
+                body = respond_resp.json()
+                assert body["accepted"] is True
 
-            # The dispatch is fire-and-forget inside the worker; poll the
-            # REAL graph's own state (not a recorded stub call) until the
-            # real clarification node observes the resume.
-            config = {"configurable": {"thread_id": thread_id}}
-            with anyio.fail_after(15.0):
-                while True:
-                    snap = await graph.aget_state(config)
-                    if snap.values.get("clarification_answers"):
-                        break
-                    await anyio.sleep(0.05)
+                # The dispatch is fire-and-forget inside the worker; poll the
+                # REAL graph's own state (not a recorded receiver call) until
+                # the real clarification node observes the resume.
+                config: RunnableConfig = {"configurable": {"thread_id": thread_id}}
+                with anyio.fail_after(15.0):
+                    while True:
+                        snap = await parked.graph.aget_state(config)
+                        if snap.values.get("clarification_answers"):
+                            break
+                        await anyio.sleep(0.05)
 
-            assert snap.values["clarification_answers"] == {
-                request_id: {"provider": "codex"}
-            }
-            assert snap.next == (), "the graph did not reach its terminal state"
+                assert snap.values["clarification_answers"] == {
+                    request_id: {"provider": "codex"}
+                }
+                assert snap.next == (), "the graph did not reach its terminal state"
+
+            await executor.shutdown()
 
 
 @pytest.mark.asyncio
 async def test_reject_short_circuits_before_touching_the_real_worker(
-    session_factory: Any, checkpointer: AsyncSqliteSaver
+    session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
 ) -> None:
     """A rejected respond (missing required answer) never reaches the worker.
 
@@ -187,8 +166,8 @@ async def test_reject_short_circuits_before_touching_the_real_worker(
         thread_id = create_resp.json()["run_id"]
         worker.dispatches.clear()
 
-        payload = await _park_clarification(checkpointer, thread_id=thread_id)
-        request_id = payload["request_id"]
+        parked = await park_clarification(checkpointer, thread_id=thread_id)
+        request_id = parked.request.request_id
 
         resp = await gateway_client.post(
             f"/v1/runs/{thread_id}/clarifications/{request_id}/respond",

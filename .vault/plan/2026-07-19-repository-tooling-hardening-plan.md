@@ -4,7 +4,7 @@ tags:
   - '#repository-tooling-hardening'
 date: '2026-07-19'
 modified: '2026-08-01'
-body_hash: 'sha256:92a8d2f603e241f5d06dc4acd9da344b1575509af73d69d677cda963a766a9a5'
+body_hash: 'sha256:94f0c894bcf6b8f4869c5ca6c9aac2e09e7494babb6811e200542fff56991da6'
 tier: L3
 related:
   - '[[2026-07-19-repository-tooling-hardening-adr]]'
@@ -128,7 +128,7 @@ Repair portable typing and shared test-helper contracts before fan-out consumers
 - [x] `W06.P11.S20` - Type the health-instrument boundary without suppressions and preserve its measured-result contract.; `dev/health/report.py`.
 - [x] `W06.P11.S21` - Establish typed API test-fixture contracts before repairing dependent API tests.; `src/vaultspec_a2a/api/tests/conftest.py`.
 - [x] `W06.P11.S22` - Repair the API endpoint test partition against the typed fixture contract.; `src/vaultspec_a2a/api/tests/test_endpoints.py`.
-- [ ] `W06.P11.S23` - Repair the API live-gateway and clarification test partitions without overlapping peer work.; `src/vaultspec_a2a/api/tests/test_gateway_live.py, src/vaultspec_a2a/api/tests/test_clarification_loop_live.py`.
+- [x] `W06.P11.S23` - Repair the API live-gateway and clarification test partitions without overlapping peer work.; `src/vaultspec_a2a/api/tests/test_gateway_live.py, src/vaultspec_a2a/api/tests/test_clarification_loop_live.py, src/vaultspec_a2a/api/tests/test_clarification_endpoint.py, src/vaultspec_a2a/api/tests/test_acceptance_five_verb.py, src/vaultspec_a2a/api/tests/clarification_harness.py, src/vaultspec_a2a/control/tests/test_verdict_loop_live.py, src/vaultspec_a2a/worker/executor.py, src/vaultspec_a2a/worker/graph_lifecycle.py, src/vaultspec_a2a/worker/tests/test_executor.py, src/vaultspec_a2a/worker/tests/test_executor_token_lifecycle.py`.
 
 ### Phase `W06.P12` - strict production-domain typing
 

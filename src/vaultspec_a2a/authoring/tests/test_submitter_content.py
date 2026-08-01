@@ -293,7 +293,8 @@ class TestRequiredGroundingRefusal:
     def test_adr_refuses_without_research_or_reference(self) -> None:
         with pytest.raises(DocumentConformanceError) as exc:
             _refuse_ungrounded(PipelinePhase.ADR, [])
-        assert "no grounding reference" in str(exc.value)
+        assert "missing required grounding" in str(exc.value)
+        assert "research or reference" in str(exc.value)
 
     def test_adr_accepts_a_research_stem(self) -> None:
         _refuse_ungrounded(PipelinePhase.ADR, ["[[2026-07-15-feature-research]]"])
@@ -307,10 +308,43 @@ class TestRequiredGroundingRefusal:
             _refuse_ungrounded(PipelinePhase.PLAN, ["[[2026-07-15-feature-research]]"])
         assert "no applied adr document" in str(exc.value)
 
-    def test_plan_accepts_an_adr_stem(self) -> None:
+    def test_plan_refuses_when_only_the_adr_is_grounded(self) -> None:
+        """A decision alone does not authorize a plan; the investigation counts too.
+
+        Transitivity is not accepted as the argument. An ADR cannot land without
+        its own research, so this case is rare - but a plan is what a human
+        executes from, and it states its own provenance rather than inheriting
+        the ADR's.
+        """
+        with pytest.raises(DocumentConformanceError) as exc:
+            _refuse_ungrounded(PipelinePhase.PLAN, ["[[2026-07-15-feature-adr]]"])
+        assert "research or reference" in str(exc.value)
+        # The satisfied group is not reported as missing.
+        assert "adr" not in str(exc.value).split("missing required grounding")[1]
+
+    def test_plan_names_every_unmet_group_at_once(self) -> None:
+        """One refusal per submit, not one per missing document.
+
+        A writer told only about the ADR would satisfy it and be refused again for
+        the research, costing a revision round trip per missing upstream.
+        """
+        with pytest.raises(DocumentConformanceError) as exc:
+            _refuse_ungrounded(PipelinePhase.PLAN, [])
+        message = str(exc.value)
+        assert "adr" in message
+        assert "research or reference" in message
+
+    def test_plan_accepts_an_adr_with_its_research(self) -> None:
         _refuse_ungrounded(
             PipelinePhase.PLAN,
             ["[[2026-07-15-feature-adr]]", "[[2026-07-15-feature-research]]"],
+        )
+
+    def test_plan_accepts_an_adr_with_a_reference(self) -> None:
+        """Reference is a parallel entry point to research, satisfying the group."""
+        _refuse_ungrounded(
+            PipelinePhase.PLAN,
+            ["[[2026-07-15-feature-adr]]", "[[2026-07-15-feature-reference]]"],
         )
 
     def test_ungrounded_phase_is_never_refused(self) -> None:

@@ -24,8 +24,18 @@ def _provision(
     rules: bool = True,
     templates: tuple[str, ...] = DEFAULT_REQUIRED_TEMPLATES,
     skills: tuple[str, ...] = (),
+    agents: bool = True,
+    mcps: bool = True,
+    empty_agents: bool = False,
+    empty_mcps: bool = False,
 ) -> None:
-    """Write a minimal but real ``.vaultspec/`` corpus into *root*."""
+    """Write a minimal but real ``.vaultspec/`` corpus into *root*.
+
+    ``agents``/``mcps`` lay the corpora a real ``vaultspec-core install``
+    produces; ``empty_*`` creates the directory without content, which is what a
+    partial install leaves and what mere existence checks cannot tell apart from
+    a complete one.
+    """
     if rules:
         rules_dir = root / ".vaultspec" / "rules"
         rules_dir.mkdir(parents=True, exist_ok=True)
@@ -38,6 +48,18 @@ def _provision(
         skill_dir = root / ".vaultspec" / "skills" / name
         skill_dir.mkdir(parents=True, exist_ok=True)
         (skill_dir / "SKILL.md").write_text(f"# {name}\n", encoding="utf-8")
+    if agents or empty_agents:
+        agents_dir = root / ".vaultspec" / "agents"
+        agents_dir.mkdir(parents=True, exist_ok=True)
+        if not empty_agents:
+            (agents_dir / "vaultspec-adr-author.md").write_text(
+                "# adr author\n", encoding="utf-8"
+            )
+    if mcps or empty_mcps:
+        mcps_dir = root / ".vaultspec" / "mcps"
+        mcps_dir.mkdir(parents=True, exist_ok=True)
+        if not empty_mcps:
+            (mcps_dir / "vaultspec-core.json").write_text("{}\n", encoding="utf-8")
 
 
 def test_fully_provisioned_workspace_is_ready(tmp_path: Path) -> None:
@@ -45,6 +67,48 @@ def test_fully_provisioned_workspace_is_ready(tmp_path: Path) -> None:
     verdict = verify_harness(tmp_path)
     assert verdict.ready is True
     assert verdict.reasons == []
+
+
+def test_missing_agents_corpus_is_a_reason(tmp_path: Path) -> None:
+    """The framework's own agent definitions are part of the harness, not extras.
+
+    An agent reaches the document rules - which record grounds a decision, which
+    grounds a plan - through core's corpus rather than through prose restated in
+    a persona. A workspace without it dispatches an agent working from
+    definitions that are simply absent, with nothing anywhere reporting it.
+    """
+    _provision(tmp_path, agents=False)
+
+    verdict = verify_harness(tmp_path)
+
+    assert verdict.ready is False
+    assert any("agents" in reason for reason in verdict.reasons)
+
+
+def test_missing_mcps_corpus_is_a_reason(tmp_path: Path) -> None:
+    """Same for the MCP servers core installs: declared, expected, unverified."""
+    _provision(tmp_path, mcps=False)
+
+    verdict = verify_harness(tmp_path)
+
+    assert verdict.ready is False
+    assert any("mcps" in reason for reason in verdict.reasons)
+
+
+def test_an_empty_corpus_directory_is_not_provisioned(tmp_path: Path) -> None:
+    """Presence is not the check; content is.
+
+    A bare ``mkdir`` is what an interrupted install leaves behind, and it reads
+    as provisioned to anything that only asks whether the path exists - which is
+    exactly how a surface degrades silently.
+    """
+    _provision(tmp_path, agents=False, mcps=False, empty_agents=True, empty_mcps=True)
+
+    verdict = verify_harness(tmp_path)
+
+    assert verdict.ready is False
+    assert any("agents" in reason for reason in verdict.reasons)
+    assert any("mcps" in reason for reason in verdict.reasons)
 
 
 def test_workspace_without_rules_corpus_is_satisfied_by_bundled_defaults(

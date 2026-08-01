@@ -58,6 +58,15 @@ WEB_TOOL_NAMES: tuple[str, ...] = tuple(
     sorted(name for name, reaches in NATIVE_TOOL_EGRESS.items() if reaches)
 )
 
+# The same names written out, and the reason both forms exist. Deriving alone is
+# what a test SHOULD do - it tracks the declaration instead of drifting from it -
+# but it is also how a test quietly stops testing: withdraw the declaration and the
+# derived tuple empties, the proof offers nothing, and every assertion below holds
+# vacuously against a payload that is merely the read floor. Each test that depends
+# on the offer being real therefore asserts this equality first, so the darkening of
+# the capability can never read as the darkness the tests were written to allow.
+DECIDED_WEB_TOOL_NAMES: tuple[str, ...] = ("WebFetch", "WebSearch")
+
 # Roles that author no vault-document content. The read floor withholds itself
 # from them, and outward reach rides that same predicate, so these must come back
 # from the spawn with nothing at all.
@@ -136,7 +145,7 @@ def test_the_supplied_proof_matches_the_shipped_declaration() -> None:
     tree recognises, which is the failure mode a hand-written tool list invites.
     """
     assert PROVEN_LANE.tool_names == WEB_TOOL_NAMES
-    assert set(WEB_TOOL_NAMES) == {"WebSearch", "WebFetch"}
+    assert WEB_TOOL_NAMES == DECIDED_WEB_TOOL_NAMES
     assert set(WEB_TOOL_NAMES) == set(NATIVE_WEB_TOOL_BOUNDS)
     assert not set(WEB_TOOL_NAMES) & set(NATIVE_READ_TOOL_NAMES)
 
@@ -152,6 +161,7 @@ async def test_a_proven_lane_permits_the_web_builtins_for_every_document_role(
     role predicate rather than the two discovery roles, so a synthesist or a
     reviewer can verify the material a researcher grounded on.
     """
+    assert WEB_TOOL_NAMES == DECIDED_WEB_TOOL_NAMES, "the offer under test is real"
     record_file = tmp_path / "session_new.json"
     composed = compose_native_read_tools(
         _model(tmp_path, session_new=record_file),
@@ -178,6 +188,7 @@ async def test_the_permitted_names_carry_the_decided_domain_posture(
     entry scoped as ``WebFetch(domain:...)`` would permit exactly that domain and
     silently invert the decision to the stricter allowlist posture held in reserve.
     """
+    assert WEB_TOOL_NAMES == DECIDED_WEB_TOOL_NAMES, "the offer under test is real"
     record_file = tmp_path / "session_new.json"
     composed = compose_native_read_tools(
         _model(tmp_path, session_new=record_file),
@@ -210,6 +221,7 @@ async def test_a_non_document_role_receives_no_web_builtin(
     failure here can only mean the predicate stopped governing outward reach. The
     coder lanes are the exclusion the decision named and never withdrew.
     """
+    assert WEB_TOOL_NAMES == DECIDED_WEB_TOOL_NAMES, "the offer under test is real"
     record_file = tmp_path / "session_new.json"
     composed = compose_native_read_tools(
         _model(tmp_path, session_new=record_file),
@@ -232,6 +244,7 @@ async def test_a_supervised_run_receives_no_web_builtin(tmp_path: Path) -> None:
     The interrupt is the gate there, and it only gates what was never auto-
     permitted, so a name reaching this payload would bypass the human entirely.
     """
+    assert WEB_TOOL_NAMES == DECIDED_WEB_TOOL_NAMES, "the offer under test is real"
     record_file = tmp_path / "session_new.json"
     composed = compose_native_read_tools(
         _model(tmp_path, session_new=record_file),
@@ -264,7 +277,12 @@ async def test_the_production_derivation_still_yields_nothing_today(
     exactly as the graph does. It is what keeps the lit assertions from reading as
     a claim that the capability is on: the seam admits a proven lane's names, and
     no lane is proven, so the shipped payload is the read floor alone.
+
+    The equality guard distinguishes the two ways this could pass. Darkness because
+    no lane has earned the names is the state under test; darkness because the
+    names were withdrawn from the tree is a different fact wearing its clothes.
     """
+    assert WEB_TOOL_NAMES == DECIDED_WEB_TOOL_NAMES
     record_file = tmp_path / "session_new.json"
 
     allowed = await _allowed_tools_at_spawn(

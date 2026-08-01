@@ -31,6 +31,14 @@ __all__ = [
 # does not declare a worker for every one of them, so this tuple is narrower than
 # the document-role predicate below by design: a solo document lane must NOT drag
 # the whole phase machine's roster in behind it.
+#
+# Declared here and NOT derived from any preset, deliberately, and the direction
+# is the whole point: this states what the topology requires and presets must
+# satisfy it. Reading it off a preset instead would invert that - the preset
+# would define its own obligations, every preset would trivially conform, and the
+# compiler's refusal would have nothing left to refuse. Distinct too in
+# vocabulary: these are ROLE names, while a preset declares worker agent ids, and
+# the roles a run must mint TOKENS for come from the preset (required_role_ids).
 RESEARCH_ADR_ROLES: tuple[str, ...] = (
     "researcher",
     "synthesist",

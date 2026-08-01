@@ -673,6 +673,14 @@ def _project_composition_onto_model(
 # code, discover files. They are added by exact name — never a wildcard — so a
 # document role in autonomous mode can invoke them without a local prompt while
 # every write/exec built-in stays gated (the .vault deny remains write-only).
+# Named here because there is nothing to ask. Every other tool surface in this
+# system is enumerated by its provider - the engine serves its authoring catalog,
+# the harness registry declares its servers - and is consumed rather than
+# restated. These are the CLI's own compiled-in built-ins: they are exposed
+# through no listing, no capability response, and no registration handshake, so
+# an exact-name allowlist is the only expression available. Treat this as the
+# documented exception to "ask, do not hardcode", not an instance of it, and
+# re-open it only if a provider starts advertising its built-ins.
 NATIVE_READ_TOOL_NAMES: tuple[str, ...] = ("Read", "Grep", "Glob")
 
 # The native built-ins' network-egress axis, the same axis the harness registry

@@ -24,10 +24,31 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 
+# The home-directory variables ``Path.home()`` resolves through. Discovery's
+# candidate list always ends with the machine-global record under the user's home,
+# so overriding only the env var leaves that fallback live: a test that points the
+# override at a missing file would still resolve a REAL resident engine and prove
+# nothing it claims. Redirecting home is genuine environment control - the same
+# lever an operator has - rather than patching the resolver's internals.
+_HOME_VARS = ("USERPROFILE", "HOME", "HOMEDRIVE", "HOMEPATH")
+
+
 @pytest.fixture
-def set_service_json() -> Iterator[Callable[[Path], None]]:
-    """Yield a setter for the discovery override; restore the prior value after."""
-    previous = os.environ.get(SERVICE_JSON_ENV)
+def set_service_json(tmp_path: Path) -> Iterator[Callable[[Path], None]]:
+    """Yield a setter for the discovery override, with the machine record isolated.
+
+    Restores every variable it touched, so a test that runs on a developer box
+    with a resident engine sees exactly what one on a bare box sees.
+    """
+    previous_service = os.environ.get(SERVICE_JSON_ENV)
+    previous_home = {name: os.environ.get(name) for name in _HOME_VARS}
+
+    isolated_home = tmp_path / "isolated-home"
+    isolated_home.mkdir()
+    os.environ["USERPROFILE"] = str(isolated_home)
+    os.environ["HOME"] = str(isolated_home)
+    os.environ.pop("HOMEDRIVE", None)
+    os.environ.pop("HOMEPATH", None)
 
     def _set(path: Path) -> None:
         os.environ[SERVICE_JSON_ENV] = str(path)
@@ -35,10 +56,15 @@ def set_service_json() -> Iterator[Callable[[Path], None]]:
     try:
         yield _set
     finally:
-        if previous is None:
+        if previous_service is None:
             os.environ.pop(SERVICE_JSON_ENV, None)
         else:
-            os.environ[SERVICE_JSON_ENV] = previous
+            os.environ[SERVICE_JSON_ENV] = previous_service
+        for name, value in previous_home.items():
+            if value is None:
+                os.environ.pop(name, None)
+            else:
+                os.environ[name] = value
 
 
 def test_malformed_candidate_is_skipped_without_raising(

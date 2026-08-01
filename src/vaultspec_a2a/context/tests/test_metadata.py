@@ -222,22 +222,44 @@ class TestDiscoverContextRefs:
 
 
 class TestGenerateNickname:
-    """Tests for nickname generation utility."""
+    """Tests for nickname generation utility.
+
+    ``short_hash`` is a sha256 digest of the FULL thread_id, not a positional
+    slice (P10 finding: a positional slice collides identically for every
+    caller whose id scheme shares a fixed literal prefix, e.g. the
+    dashboard's "run-<hex>" run_id convention - see generate_nickname's own
+    docstring/comment). Expected values below are the genuine
+    ``hashlib.sha256(thread_id.encode()).hexdigest()[:4]`` outputs, not
+    positional slices of the input.
+    """
 
     def test_with_feature_tag(self) -> None:
         """Feature tag produces {tag}-{topology}-{hash} format."""
         nick = generate_nickname("auth-flow", "star", "a3f2bcde")
-        assert nick == "auth-flow-star-a3f2"
+        assert nick == "auth-flow-star-e9a2"
 
     def test_without_feature_tag(self) -> None:
         """Empty feature tag falls back to 'thread-{topology}-{hash}'."""
         nick = generate_nickname("", "pipeline", "b7c1ffee")
-        assert nick == "thread-pipeline-b7c1"
+        assert nick == "thread-pipeline-027f"
 
-    def test_short_thread_id(self) -> None:
-        """Thread IDs shorter than 4 chars use what is available."""
+    def test_short_thread_id_still_yields_a_full_four_char_slug(self) -> None:
+        """A thread_id shorter than 4 chars still yields a full 4-hex-char
+        suffix (the hash is fixed-length regardless of input length) - H2's
+        original short-input special case no longer applies."""
         nick = generate_nickname("feat", "star", "ab")
-        assert nick == "feat-star-ab"
+        assert nick == "feat-star-fb8e"
+
+    def test_different_thread_ids_never_collide_on_a_shared_prefix(self) -> None:
+        """The exact P10 regression: two ids sharing the dashboard's literal
+        'run-' prefix must still produce distinct nicknames."""
+        nick1 = generate_nickname(
+            "", "pipeline", "run-a286fe1cd9dd4417aac4a836a581c270"
+        )
+        nick2 = generate_nickname(
+            "", "pipeline", "run-b197ff2ea1cc3306bbc1b927ba492181"
+        )
+        assert nick1 != nick2
 
     def test_different_topologies(self) -> None:
         """Topology name is embedded in the nickname."""
@@ -254,13 +276,13 @@ class TestGenerateNickname:
         """Uppercase feature_tag is lowercased so the slug is valid (M1)."""
         nick = generate_nickname("AUTH-FLOW", "star", "a3f2bcde")
         # Must be all lowercase to satisfy _NICKNAME_PATTERN
-        assert nick == "auth-flow-star-a3f2"
+        assert nick == "auth-flow-star-e9a2"
 
     def test_feature_tag_with_special_chars_stripped(self) -> None:
         """Non-alphanumeric/hyphen chars in feature_tag are stripped (M1)."""
         nick = generate_nickname("auth_flow!@#", "star", "a3f2bcde")
         # underscores and special chars removed, leaving "authflow"
-        assert nick == "authflow-star-a3f2"
+        assert nick == "authflow-star-e9a2"
 
     def test_feature_tag_all_special_chars_fallback(self) -> None:
         """feature_tag empty after sanitisation falls back to 'thread-' (M1)."""
@@ -270,17 +292,17 @@ class TestGenerateNickname:
     def test_feature_tag_empty_string(self) -> None:
         """Empty feature_tag falls back to 'thread-{topology}-{hash}'."""
         nick = generate_nickname("", "star", "a3f2bcde")
-        assert nick == "thread-star-a3f2"
+        assert nick == "thread-star-e9a2"
 
     def test_feature_tag_with_consecutive_hyphens_collapsed(self) -> None:
         """Consecutive hyphens in feature_tag are collapsed to single hyphen (M1)."""
         nick = generate_nickname("auth--flow", "star", "a3f2bcde")
-        assert nick == "auth-flow-star-a3f2"
+        assert nick == "auth-flow-star-e9a2"
 
     def test_feature_tag_with_leading_trailing_hyphens_stripped(self) -> None:
         """Leading and trailing hyphens in feature_tag are stripped (M1)."""
         nick = generate_nickname("-auth-flow-", "star", "a3f2bcde")
-        assert nick == "auth-flow-star-a3f2"
+        assert nick == "auth-flow-star-e9a2"
 
     def test_empty_thread_id_uses_zero_padding(self) -> None:
         """Empty thread_id falls back to '0000' suffix."""

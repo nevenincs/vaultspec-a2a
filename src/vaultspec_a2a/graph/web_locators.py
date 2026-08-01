@@ -138,9 +138,11 @@ def extract_web_locators(prose: str, *, retrieved_at: str) -> list[dict[str, Any
                 "url": url,
                 "retrieved_at": retrieved_at,
             }
-            excerpt = _excerpt_for(line)
-            if excerpt:
-                locator["excerpt"] = excerpt
+            # Unconditional: the line yielded a URL, so it collapses to a
+            # non-empty excerpt by construction. A guard here would be one that
+            # nothing can trigger, which is documentation wearing a check's
+            # clothes.
+            locator["excerpt"] = _excerpt_for(line)
             locators.append(locator)
             if len(locators) == MAX_WEB_LOCATORS_PER_FINDING:
                 return locators

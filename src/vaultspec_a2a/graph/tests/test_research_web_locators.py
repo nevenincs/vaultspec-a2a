@@ -23,6 +23,7 @@ from typing import TYPE_CHECKING, Any, cast
 
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage
+from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from langgraph.graph import END, START, StateGraph
 
@@ -397,3 +398,77 @@ async def test_control_over_cap_locator_count_is_refused_by_the_branch() -> None
                 for index in range(MAX_WEB_LOCATORS_PER_FINDING + 1)
             ]
         )
+
+
+# ---------------------------------------------------------------------------
+# The branch's failure handling: transient is retried, deterministic is not
+# ---------------------------------------------------------------------------
+
+
+async def _run_branch(producer: ResearchFindingProducer) -> dict[str, Any]:
+    """Drive one researcher branch through a real compiled graph."""
+    return await (
+        _build_graph(producer)
+        .compile(checkpointer=InMemorySaver())
+        .ainvoke(
+            _base_state(), config=cast("Any", {"configurable": {"thread_id": "r"}})
+        )
+    )
+
+
+@pytest.mark.asyncio
+async def test_transient_branch_failure_is_retried_like_every_sibling_node() -> None:
+    """A researcher branch survives a transient failure, as its siblings do.
+
+    The branch was the one model-backed node in the topology wired without the
+    retry policy, so a transient provider failure in a single researcher aborted
+    the whole fan-out. This drives the real compiled graph through a first-call
+    connection failure and asserts the run still completes.
+    """
+    attempts: list[int] = []
+
+    async def flaky(state: TeamState, spec: dict[str, Any]) -> dict[str, Any]:
+        attempts.append(1)
+        if len(attempts) == 1:
+            raise ConnectionError("provider socket dropped mid-turn")
+        return {
+            "claim": "recovered",
+            "locators": [],
+            "source_thread": spec["thread_id"],
+        }
+
+    result = await _run_branch(flaky)
+
+    assert len(attempts) == 2, "the branch retried exactly once and then succeeded"
+    assert result["research_findings"][0]["claim"] == "recovered"
+
+
+@pytest.mark.asyncio
+async def test_contract_violation_is_not_retried() -> None:
+    """A deterministic contract violation fails fast rather than burning turns.
+
+    This is why normalising at the producer is the resolution and a retry route
+    is not: the same input reproduces the same refusal, so retrying only spends
+    turns to fail identically. The attempt count is the proof - an assertion that
+    the run failed would pass just as well if it had been retried three times.
+    """
+    attempts: list[int] = []
+
+    async def malformed(state: TeamState, spec: dict[str, Any]) -> dict[str, Any]:
+        attempts.append(1)
+        return {
+            "claim": "cited",
+            "locators": [
+                {
+                    "kind": WEB_LOCATOR_KIND,
+                    "url": "example.invalid/guide",
+                    "retrieved_at": "2026-08-01T09:30:00+00:00",
+                }
+            ],
+            "source_thread": spec["thread_id"],
+        }
+
+    with pytest.raises(ValueError, match="url scheme"):
+        await _run_branch(malformed)
+
+    assert attempts == [1], "no retry: the failure is deterministic"

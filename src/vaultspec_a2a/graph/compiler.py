@@ -334,6 +334,15 @@ def _wire_diverge_stage(
     ``make_researcher`` maps a thread spec to the branch node, so the topology
     supplies model-backed researchers while the fan-out/join structure stays
     model-agnostic and independently testable.
+
+    Each researcher carries the same retry policy as every other model-backed
+    node. A branch was the lone exception, so a transient provider failure in one
+    researcher aborted a whole fan-out that its siblings would have survived. The
+    policy retries transient failures ONLY: a deterministic error - a producer
+    handing the branch a contract-violating finding - still fails fast, since a
+    retry of a deterministic failure only spends a turn to fail identically. That
+    class is kept off the production path at the producer instead, where the
+    citation channel's locators are normalised into the contract.
     """
     if not specs:
         raise ConfigError(
@@ -344,7 +353,7 @@ def _wire_diverge_stage(
     researcher_names: list[str] = []
     for index, spec in enumerate(specs):
         name = researcher_node_name(dispatch_name, index)
-        builder.add_node(name, make_researcher(spec))
+        builder.add_node(name, make_researcher(spec), retry_policy=_NODE_RETRY_POLICY)
         builder.add_edge(name, synthesis_name)
         researcher_names.append(name)
 

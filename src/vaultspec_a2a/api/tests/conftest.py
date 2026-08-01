@@ -15,8 +15,10 @@ checkpointer implementation, not a ``MemorySaver`` stub.
 """
 
 import asyncio
+from collections.abc import AsyncGenerator, AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
+from typing import cast
 
 import httpx
 import pytest
@@ -26,6 +28,7 @@ from fastapi.responses import JSONResponse
 from httpx import ASGITransport
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from sqlalchemy.ext.asyncio import (
+    AsyncEngine,
     AsyncSession,
     async_sessionmaker,
     create_async_engine,
@@ -37,6 +40,12 @@ from ...control.worker_management import LazyWorkerSpawner
 from ...database.models import Base
 from ...streaming.aggregator import EventAggregator
 from ..app import create_app
+
+type SessionFactory = async_sessionmaker[AsyncSession]
+type JsonValue = (
+    bool | int | float | str | list[JsonValue] | dict[str, JsonValue] | None
+)
+type DispatchPayload = dict[str, JsonValue]
 
 _PACKAGE_DIR = str(Path(__file__).resolve().parent)
 
@@ -64,7 +73,9 @@ __all__: list[str] = []
 
 
 @pytest_asyncio.fixture
-async def engine(tmp_path_factory: pytest.TempPathFactory):
+async def engine(
+    tmp_path_factory: pytest.TempPathFactory,
+) -> AsyncIterator[AsyncEngine]:
     """File-backed async SQLAlchemy engine with all tables created."""
     case_dir = tmp_path_factory.mktemp("api-test-db")
     db_file = case_dir / "test.db"
@@ -76,13 +87,13 @@ async def engine(tmp_path_factory: pytest.TempPathFactory):
 
 
 @pytest_asyncio.fixture
-async def session_factory(engine):
+async def session_factory(engine: AsyncEngine) -> SessionFactory:
     """Async session factory bound to the file-backed engine."""
     return async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
 
 @pytest_asyncio.fixture
-async def session(engine):
+async def session(engine: AsyncEngine) -> AsyncIterator[AsyncSession]:
     """Provide a fresh async session for direct DB assertions."""
     factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
     async with factory() as sess:
@@ -95,7 +106,9 @@ async def session(engine):
 
 
 @pytest_asyncio.fixture
-async def checkpointer(tmp_path_factory: pytest.TempPathFactory):
+async def checkpointer(
+    tmp_path_factory: pytest.TempPathFactory,
+) -> AsyncIterator[AsyncSqliteSaver]:
     """Real AsyncSqliteSaver backed by a temporary SQLite file per test.
 
     Replaces the former MemorySaver stub so that gateway read-path enrichment
@@ -124,15 +137,14 @@ class _InProcessWorker:
     """
 
     def __init__(self) -> None:
-        self.dispatches: list[dict] = []
+        self.dispatches: list[DispatchPayload] = []
         self.dispatch_received = asyncio.Event()
         self.release_dispatch = asyncio.Event()
         self.release_dispatch.set()
 
         _app = FastAPI()
 
-        @_app.post("/dispatch")
-        async def _dispatch(request: Request):
+        async def _dispatch(request: Request) -> JSONResponse | dict[str, str]:
             expected = settings.internal_token
             if expected is not None:
                 authorization = request.headers.get("authorization")
@@ -142,15 +154,25 @@ class _InProcessWorker:
                         content={"detail": "Invalid internal token"},
                         headers={"WWW-Authenticate": "Bearer"},
                     )
-            body = await request.json()
+            body = cast("DispatchPayload", await request.json())
             self.dispatches.append(body)
             self.dispatch_received.set()
             await self.release_dispatch.wait()
-            return {"status": "dispatched", "thread_id": body.get("thread_id", "")}
+            thread_id = body.get("thread_id", "")
+            if not isinstance(thread_id, str):
+                thread_id = ""
+            return {"status": "dispatched", "thread_id": thread_id}
 
-        @_app.get("/health")
-        async def _health() -> dict:
+        async def _health() -> dict[str, str]:
             return {"status": "ok"}
+
+        _app.add_api_route(
+            "/dispatch",
+            _dispatch,
+            methods=["POST"],
+            response_model=None,
+        )
+        _app.add_api_route("/health", _health, methods=["GET"])
 
         self._client = httpx.AsyncClient(
             transport=ASGITransport(app=_app),
@@ -181,12 +203,14 @@ class _InProcessWorker:
 # App factory
 # ---------------------------------------------------------------------------
 
+type AppFixture = tuple[FastAPI, EventAggregator, _InProcessWorker, AsyncSqliteSaver]
+
 
 def make_app(
-    session_factory,
+    session_factory: SessionFactory,
     checkpointer: AsyncSqliteSaver,
     aggregator: EventAggregator | None = None,
-) -> tuple:
+) -> AppFixture:
     """Create a test FastAPI app with explicit app-state injection.
 
     Wires a real in-process dispatch receiver (ASGITransport over a
@@ -198,7 +222,7 @@ def make_app(
     """
 
     @asynccontextmanager
-    async def _test_lifespan(_app):
+    async def _test_lifespan(_app: FastAPI) -> AsyncGenerator[None]:
         yield
 
     app = create_app(

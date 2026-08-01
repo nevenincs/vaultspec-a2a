@@ -162,6 +162,11 @@ provider; the inner
 doc-reviewer keeps the team default (claude). Proves cross-provider collaboration
 authors real documents end to end. Codex auth is the file-based persisted ChatGPT
 session in the Codex home; no credential env is injected.
+Researchers on this profile reach the live web and cite what they retrieved: the
+codex lane carries a completed-retrieval proof, so the claim is backed rather
+than aspirational. The default profile makes no such claim — its researcher runs
+on a lane whose retrieval is not yet demonstrated, and a description promising
+online research there would be advertising a capability nothing has shown.
 """
 
 [team.profiles.codex.roles.vaultspec-researcher]

@@ -126,6 +126,7 @@ def test_clarification_pending_carries_only_the_request_id() -> None:
 
 
 def test_clarification_pending_request_id_truncates_over_cap() -> None:
+    """Capped at 64, not the generic 128 — matches the respond route's own cap."""
     frame = encode_sse_frame(
         {
             "type": "clarification-pending",
@@ -136,7 +137,7 @@ def test_clarification_pending_request_id_truncates_over_cap() -> None:
         thread_id="run-1",
     )
     payload = _data_payload(frame)
-    assert len(payload["request_id"]) == 128
+    assert len(payload["request_id"]) == 64
 
 
 # ---------------------------------------------------------------------------

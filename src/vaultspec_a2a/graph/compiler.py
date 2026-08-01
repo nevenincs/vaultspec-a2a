@@ -37,12 +37,14 @@ from ..thread.errors import (
 )
 from ..thread.state import TeamState
 from .enums import Model, PipelinePhase, Provider
+from .nodes.clarification import create_clarification_node
 from .nodes.diverge import (
     ResearchFindingProducer,
     create_research_dispatch_node,
     create_researcher_node,
     researcher_node_name,
 )
+from .nodes.ground import GROUND_SYSTEM_PROMPT, create_ground_node
 from .nodes.phase_gate import (
     DocumentProposalSubmitter,
     create_phase_gate_node,
@@ -1001,6 +1003,8 @@ def _compile_pipeline_loop(
 # Structural node names for the document phase machine. Fixed rather than
 # agent-id-derived so the phase gates and inner review loops can reference their
 # targets deterministically.
+_RA_GROUND = "ground"
+_RA_CLARIFICATION = "clarification"
 _RA_DISPATCH = "research_dispatch"
 _RA_SYNTHESIS = "synthesis"
 _RA_RESEARCH_REVIEW = "research_review"
@@ -1183,7 +1187,8 @@ def _compile_research_adr(
 
     Structural sequencing (gates enforced by graph shape, not LLM convention):
 
-        START -> diverge (N researchers) -> synthesis -> research_review
+        START -> ground -> [proceed] diverge (N researchers) -> synthesis -> research_review
+                        -> [clarify] clarification -> diverge
               -> [PASS] research_submit -> research_gate -> [approved] adr_author
                                                          -> [revise]   synthesis
               -> [REVISION] synthesis
@@ -1201,6 +1206,12 @@ def _compile_research_adr(
     D4) reuses the same doc-reviewer inner loop and phase-gate machinery as
     Research and ADR: it runs only after Gate 2 approves the ADR, so the plan is
     always grounded in an already-decided architecture.
+
+    The ground stage (agent-flow ADR D5 wiring) is one model turn deciding
+    proceed-vs-clarify, once, before any research begins; a clarify verdict
+    routes through the reusable clarification interrupt node
+    (``graph/nodes/clarification.py``) and always rejoins at diverge once
+    answered — there is exactly one clarification round per run.
 
     The diverge stage fans out to one researcher branch per configured
     thread spec; each document phase is guarded by the generalized phase gate
@@ -1239,6 +1250,24 @@ def _compile_research_adr(
         harness_mcp_servers=harness_mcp_servers,
         autonomous=autonomous,
     )
+
+    # Ground stage (agent-flow ADR D5 wiring): one triage turn on the
+    # researcher role's own model, run once before any research begins. It
+    # decides proceed-vs-clarify and routes via Command.goto; a clarify
+    # verdict parks on the reusable clarification interrupt node, which
+    # always rejoins at diverge once answered.
+    builder.add_node(
+        _RA_GROUND,
+        create_ground_node(
+            models["researcher"],
+            GROUND_SYSTEM_PROMPT,
+            clarify_target=_RA_CLARIFICATION,
+            proceed_target=_RA_DISPATCH,
+            name=_RA_GROUND,
+        ),
+    )
+    builder.add_node(_RA_CLARIFICATION, create_clarification_node(name=_RA_CLARIFICATION))
+    builder.add_edge(_RA_CLARIFICATION, _RA_DISPATCH)
 
     _wire_diverge_stage(
         builder,
@@ -1392,7 +1421,7 @@ def _compile_research_adr(
         ),
     )
 
-    builder.add_edge(START, _RA_DISPATCH)
+    builder.add_edge(START, _RA_GROUND)
     builder.add_edge(_RA_SYNTHESIS, _RA_RESEARCH_REVIEW)
     builder.add_conditional_edges(
         _RA_RESEARCH_REVIEW,

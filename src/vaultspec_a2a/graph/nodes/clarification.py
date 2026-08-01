@@ -27,6 +27,7 @@ questions are pending), and reads ``clarification_answers`` after resume.
 
 from __future__ import annotations
 
+import re
 import uuid
 from typing import TYPE_CHECKING, Any
 
@@ -64,6 +65,15 @@ MAX_ANSWER_CHARS = 4096
 
 CLARIFICATION_ANSWER_KINDS: frozenset[str] = frozenset({"choice", "text"})
 
+#: The token grammar the engine's `/v1/runs/{run_id}/clarifications/
+#: {request_id}/respond` boundary validates answer keys (question ids)
+#: against: alphanumeric plus ``_ - . :``, capped at 64 chars. Enforced HERE,
+#: at minting, so a question id this node ever advertises is always
+#: answerable through that boundary — a caller proposing e.g. a space or a
+#: unicode id degrades to having that question dropped rather than parking a
+#: run unanswerable through the dashboard.
+_QUESTION_ID_GRAMMAR = re.compile(r"^[A-Za-z0-9_.:-]{1,64}$")
+
 
 def _single_line(text: str) -> str:
     """Collapse any control/newline character out of *text*.
@@ -87,7 +97,9 @@ def bound_clarification_questions(
 
     A malformed or oversized question list degrades to its capped, valid
     subset rather than failing the run: any non-dict entry, or any entry
-    missing a non-empty ``id``/``prompt``, is dropped; a ``choice`` question's
+    missing a non-empty ``id``/``prompt``, is dropped; an ``id`` that does not
+    match the engine's answer-key token grammar (``_QUESTION_ID_GRAMMAR``) is
+    dropped rather than advertised unanswerable; a ``choice`` question's
     options list is capped and empty/duplicate option text is dropped.
     """
     bounded: list[dict[str, Any]] = []
@@ -97,7 +109,12 @@ def bound_clarification_questions(
             continue
         qid = _bounded_text(raw.get("id", ""), MAX_QUESTION_ID_CHARS)
         prompt = _bounded_text(raw.get("prompt", ""), MAX_QUESTION_PROMPT_CHARS)
-        if not qid or not prompt or qid in seen_ids:
+        if (
+            not qid
+            or not prompt
+            or qid in seen_ids
+            or not _QUESTION_ID_GRAMMAR.match(qid)
+        ):
             continue
         kind = raw.get("kind")
         kind = kind if kind in CLARIFICATION_ANSWER_KINDS else "text"

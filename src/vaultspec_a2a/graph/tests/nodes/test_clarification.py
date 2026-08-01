@@ -88,6 +88,18 @@ class TestBoundClarificationQuestions:
         questions = [{"id": "", "prompt": "no id"}, {"id": "q1", "prompt": ""}]
         assert bound_clarification_questions(questions) == []
 
+    def test_drops_ids_outside_the_engine_answer_key_grammar(self) -> None:
+        """An id the engine's respond boundary could never accept is dropped
+        at minting, not advertised as an unanswerable question."""
+        questions = [
+            {"id": "has space", "prompt": "Bad id"},
+            {"id": "emoji😀id", "prompt": "Bad id"},
+            {"id": "slash/id", "prompt": "Bad id"},
+            {"id": "good_id-1.2:3", "prompt": "Good id"},
+        ]
+        bounded = bound_clarification_questions(questions)
+        assert [q["id"] for q in bounded] == ["good_id-1.2:3"]
+
     def test_drops_duplicate_ids(self) -> None:
         questions = [
             {"id": "q1", "prompt": "First"},

@@ -44,8 +44,13 @@ Decide -> Gate 2 -> Plan -> Gate 3.
 
 ## Pipeline stages
 
-- **Ground** (supervisor): Retrieve governing ADRs and prior research. Decide
-  amend-vs-supersede posture. Compose the research thread specs.
+- **Ground** (vaultspec-researcher, one triage turn): Decide whether the
+  request carries enough information to proceed straight to research, or
+  whether a bounded clarifying question must be asked first (at most one
+  round, at most 4 questions). Structural sentinel routing: `GROUND READY`
+  proceeds to Diverge; `CLARIFICATION NEEDED` (with a JSON question array)
+  parks the run on the clarification interrupt until the human answers, then
+  always rejoins at Diverge.
 - **Diverge** (fan-out to vaultspec-researcher x N): Dispatch parallel research
   threads to their assigned topics. Accumulate findings in the thread's
   research_findings state field.

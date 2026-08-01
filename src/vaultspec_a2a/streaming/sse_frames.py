@@ -334,7 +334,10 @@ _PROGRESS_CATALOG: dict[str, dict[str, _FieldSpec]] = {
     # `document_approval_request`/`plan_approval_request` hold by staying out
     # of this catalog entirely - clarification-pending differs only in that
     # its id is worth a dedicated nudge frame per the ADR's own decision).
-    "clarification-pending": {"request_id": _Text(128)},
+    # Capped at 64, not the generic 128 permission_request uses: the
+    # clarification respond route's PathSafeClarificationRequestId accepts
+    # only <=64, so a longer id would ride this frame yet be unanswerable.
+    "clarification-pending": {"request_id": _Text(64)},
     # A plan entry's ``content`` is model-authored plan text - document-body
     # adjacent, and nothing consumes it - so only its classification survives.
     "plan_update": {"entries": _ObjectList(64, {"status": _ENUM, "priority": _ENUM})},

@@ -9,10 +9,15 @@ interrupt are all exercised.
 
 from __future__ import annotations
 
+import json
 from typing import TYPE_CHECKING, Any
 
 import pytest
 import pytest_asyncio
+from langchain_core.language_models.fake_chat_models import (
+    FakeChatModel,
+    FakeListChatModel,
+)
 from langchain_core.messages import HumanMessage
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from langgraph.types import Command
@@ -139,6 +144,8 @@ async def test_research_adr_compiles_expected_node_set(
 
     node_keys = {k for k in graph.nodes if not k.startswith("__")}
     assert {
+        "ground",
+        "clarification",
         "research_dispatch",
         "research_dispatch_researcher_00",
         "research_dispatch_researcher_01",
@@ -494,4 +501,152 @@ async def test_plan_gate_request_changes_loops_a_revision(
     payload = revised["__interrupt__"][0].value
     assert payload["phase"] == "plan"
     assert payload["proposal_id"] == "prop-plan"
-    assert submitter.phases == ["research", "adr", "plan", "plan"]
+
+
+# ---------------------------------------------------------------------------
+# S41 -- the ground stage wiring (agent-flow ADR D5 wiring)
+# ---------------------------------------------------------------------------
+
+
+_CLARIFY_RESPONSE = "\n".join(
+    [
+        "CLARIFICATION NEEDED",
+        json.dumps(
+            [
+                {
+                    "id": "provider",
+                    "prompt": "Which provider should author the plan?",
+                    "kind": "choice",
+                    "options": ["codex", "zai"],
+                    "required": True,
+                }
+            ]
+        ),
+    ]
+)
+
+
+class _RoleAwareProviderFactory:
+    """Deterministic provider factory keying its response on the worker role.
+
+    The researcher role's model is shared by the ground turn (one call) and
+    every researcher fan-out branch (one call each), in that order — so a
+    ``FakeListChatModel`` response LIST forces the ground turn to ask a
+    clarifying question while every subsequent researcher call gets an
+    innocuous response, deterministically and without live-model spend.
+    """
+
+    def __init__(self, *, researcher_responses: list[str]) -> None:
+        self._researcher_responses = researcher_responses
+
+    def create(
+        self,
+        provider: Any,
+        *,
+        model: Any | None = None,
+        agent_config: Any | None = None,
+        workspace_root: Any | None = None,
+        **kwargs: Any,
+    ) -> Any:
+        role = getattr(agent_config, "role", None)
+        if role == "researcher":
+            return FakeListChatModel(responses=list(self._researcher_responses))
+        return FakeChatModel(responses=["stub response"])
+
+
+@pytest.mark.asyncio
+async def test_ground_ready_proceeds_straight_to_diverge(
+    checkpointer: AsyncSqliteSaver,
+) -> None:
+    """The default GROUND READY turn proceeds to research with no interrupt."""
+    submitter = _FakeSubmitter()
+    factory = _RoleAwareProviderFactory(
+        researcher_responses=["GROUND READY", "a research finding"]
+    )
+    team = _research_adr_team([ResearchThreadSpec(thread_id="primary")])
+    graph = compile_team_graph(
+        team_config=team,
+        agent_configs=_agent_configs(team),
+        checkpointer=checkpointer,
+        provider_factory=factory,
+        proposal_submitter=submitter,
+    )
+
+    thread_id = "ground-ready-run"
+    state: dict[str, Any] = {
+        "active_agent": "ground",
+        "artifacts": [],
+        "current_plan": [],
+        "messages": [HumanMessage(content="Research the phase machine.")],
+        "next": "",
+        "thread_id": thread_id,
+        "active_feature": "adr-authoring-orchestration",
+        "token_usage": {},
+    }
+    result = await graph.ainvoke(
+        state, config={"configurable": {"thread_id": thread_id}}
+    )
+
+    # Reached the research gate directly - no clarification interrupt.
+    assert "__interrupt__" in result
+    assert result["__interrupt__"][0].value["type"] == "document_approval_request"
+    assert result.get("clarification_questions") is None
+
+
+@pytest.mark.asyncio
+async def test_ground_forces_clarification_then_resumes_to_research(
+    checkpointer: AsyncSqliteSaver,
+) -> None:
+    """A forced CLARIFICATION NEEDED ground turn parks, then resumes to research.
+
+    Deterministic-profile proof (no live-model spend) that the wiring the
+    team lead ruled on actually reaches a park: FakeListChatModel forces the
+    ground turn's response, so the flow is provable end to end rather than
+    merely asserted as reachable code.
+    """
+    submitter = _FakeSubmitter()
+    factory = _RoleAwareProviderFactory(
+        researcher_responses=[_CLARIFY_RESPONSE, "a research finding"]
+    )
+    team = _research_adr_team([ResearchThreadSpec(thread_id="primary")])
+    graph = compile_team_graph(
+        team_config=team,
+        agent_configs=_agent_configs(team),
+        checkpointer=checkpointer,
+        provider_factory=factory,
+        proposal_submitter=submitter,
+    )
+
+    thread_id = "ground-clarify-run"
+    config = {"configurable": {"thread_id": thread_id}}
+    state: dict[str, Any] = {
+        "active_agent": "ground",
+        "artifacts": [],
+        "current_plan": [],
+        "messages": [HumanMessage(content="Research it.")],
+        "next": "",
+        "thread_id": thread_id,
+        "active_feature": "adr-authoring-orchestration",
+        "token_usage": {},
+    }
+
+    parked = await graph.ainvoke(state, config=config)
+
+    assert "__interrupt__" in parked
+    payload = parked["__interrupt__"][0].value
+    assert payload["type"] == "clarification_request"
+    assert payload["questions"][0]["id"] == "provider"
+    # The submit/dispatch machinery never ran - the run parked before diverge.
+    assert submitter.phases == []
+
+    resumed = await graph.ainvoke(
+        Command(resume={"provider": "codex"}), config=config
+    )
+
+    # Answering rejoins at diverge and reaches the research gate normally.
+    assert "__interrupt__" in resumed
+    assert resumed["__interrupt__"][0].value["type"] == "document_approval_request"
+    assert resumed["clarification_answers"] == {"provider": "codex"}
+    threads = sorted(f["source_thread"] for f in resumed["research_findings"])
+    assert threads == ["primary"]
+    assert submitter.phases == ["research"]

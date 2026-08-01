@@ -12,6 +12,7 @@ from pydantic import ValidationError
 
 from ...authoring.contract import DOCUMENT_AUTHORING_ROLES, RESEARCH_ADR_ROLES
 from ...graph.enums import Model, Provider
+from ...providers.lane_admission import is_lane_admissible, lane_admission_reason
 from ...thread.errors import (
     AgentConfigNotFoundError,
     ConfigError,
@@ -84,6 +85,17 @@ class TestAgentConfigFromToml:
         cfg = load_agent_config("vaultspec-plan-author")
         assert cfg.role == "plan-author"
         assert cfg.persona.system_prompt
+
+    def test_plan_author_is_document_authoring_not_filesystem_write(self) -> None:
+        """agent-flow ADR D4/D7: the plan-author writer has no filesystem write.
+
+        vaultspec-plan-author was adapted from an orphaned coder-lane persona
+        (filesystem_write=true) to the research_adr Plan phase, where every
+        writer role authors only through the engine proposal path.
+        """
+        cfg = load_agent_config("vaultspec-plan-author")
+        assert cfg.capabilities.filesystem_write is False
+        assert cfg.capabilities.filesystem_read is True
 
     def test_coder_requires_approval(self) -> None:
         """Coder preset declares at least one require_approval_for entry."""
@@ -320,6 +332,79 @@ class TestTeamConfigFromToml:
         for team_id in _ALL_TEAM_IDS:
             cfg = load_team_config(team_id)
             assert len(cfg.workers) > 0, f"{team_id} has no workers"
+
+    def test_doc_editor_single_worker(self) -> None:
+        """vaultspec-doc-editor has exactly one worker: the doc-editor."""
+        cfg = load_team_config("vaultspec-doc-editor")
+        assert len(cfg.workers) == 1
+        assert cfg.workers[0].agent_id == "vaultspec-doc-editor"
+
+    def test_doc_editor_diverges_from_solo_coder_only_on_filesystem_write(
+        self,
+    ) -> None:
+        """agent-flow D2: doc-editor clones solo-coder's shape but flips write off.
+
+        Both presets are pipeline topology, one worker, authoring_bridge=true; the
+        ONE deliberate divergence is the worker's filesystem_write capability.
+        """
+        coder_team = load_team_config("vaultspec-solo-coder")
+        editor_team = load_team_config("vaultspec-doc-editor")
+        assert coder_team.topology.type == editor_team.topology.type
+        assert len(coder_team.workers) == len(editor_team.workers) == 1
+        assert coder_team.harness is not None
+        assert editor_team.harness is not None
+        assert coder_team.harness.authoring_bridge is True
+        assert editor_team.harness.authoring_bridge is True
+
+        coder_agent = load_agent_config("vaultspec-coder")
+        editor_agent = load_agent_config("vaultspec-doc-editor")
+        assert coder_agent.capabilities.filesystem_write is True
+        assert editor_agent.capabilities.filesystem_write is False
+        assert coder_agent.capabilities.filesystem_read == (
+            editor_agent.capabilities.filesystem_read
+        )
+        assert coder_agent.capabilities.terminal == editor_agent.capabilities.terminal
+
+    def test_doc_editor_preset_arms_authoring_bridge(self) -> None:
+        cfg = load_team_config("vaultspec-doc-editor")
+        assert cfg.harness is not None
+        assert cfg.harness.authoring_bridge is True
+        assert cfg.is_document_authoring is False
+
+    def test_doc_editor_served_profiles_name_only_admissible_lanes(self) -> None:
+        """agent-flow D3: every served doc-editor profile resolves to a proven lane.
+
+        `no-unproven-providers-in-served-profiles`: a profile may name a provider
+        lane only once a live test has completed a real turn on it. The proven set
+        is READ from the admission registry rather than restated here, so this
+        fails when a preset names a lane the registry does not admit, and does not
+        quietly go stale when a lane earns or loses its proof.
+
+        Covers every declared profile plus the implicit team-defaults overlay,
+        resolving the doc-editor's one worker down the real precedence chain.
+        """
+        cfg = load_team_config("vaultspec-doc-editor")
+        agent_cfg = load_agent_config("vaultspec-doc-editor")
+        worker_ref = cfg.workers[0]
+
+        for profile_id, profile in cfg.effective_profiles().items():
+            overlay = profile.roles.get(worker_ref.agent_id)
+            provider = None
+            if overlay is not None and overlay.provider is not None:
+                provider = overlay.provider
+            elif worker_ref.model.provider is not None:
+                provider = worker_ref.model.provider
+            elif agent_cfg.model.provider is not None:
+                provider = agent_cfg.model.provider
+            elif cfg.defaults.provider is not None:
+                provider = cfg.defaults.provider
+            assert provider is not None, (
+                f"profile {profile_id!r} leaves the doc-editor with no provider"
+            )
+            assert is_lane_admissible(provider), (
+                f"profile {profile_id!r} resolves doc-editor to {provider.value!r}: "
+                f"{lane_admission_reason(provider)}"
+            )
 
 
 # ---------------------------------------------------------------------------

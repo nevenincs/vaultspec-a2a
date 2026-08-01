@@ -68,3 +68,22 @@ mcp_servers       = ["vaultspec-rag"]
 
 [[team.workers]]
 agent_id = "vaultspec-doc-editor"
+
+# Model profiles. `team-defaults` is implicit (the empty overlay) and resolves the
+# doc-editor to the team default (claude) through the normal precedence chain; it
+# is not declared here. `zai` is the credential-gated Z.ai provider-axis lane: the
+# harness skips it loudly (naming the missing token) when ZAI_AUTH_TOKEN is absent,
+# and never fakes it. Every lane a served profile names must carry completed-turn
+# proof in the admission registry - a profile naming a lane without it is refused
+# at launch rather than served, so a lane is added here only after its own live
+# test has completed a real turn.
+[team.profiles.zai]
+display_name = "Z.ai"
+description  = """
+Z.ai provider-axis lane: the doc-editor runs on the Z.ai provider instead of the
+team default. Requires a configured Z.ai auth token; the harness skips this lane
+with a truthful reason when the credential is absent.
+"""
+
+[team.profiles.zai.roles.vaultspec-doc-editor]
+provider = "zai"

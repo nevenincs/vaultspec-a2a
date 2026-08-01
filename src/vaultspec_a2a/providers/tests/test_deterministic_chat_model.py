@@ -96,8 +96,11 @@ async def test_researcher_returns_findings_not_a_document() -> None:
 @pytest.mark.asyncio
 async def test_researcher_emits_clarification_sentinel_when_triggered() -> None:
     """The CLARIFICATION_TRIGGER_MARKER in any message forces the ground-stage
-    clarification sentinel + a parseable question array, so a live drive can
-    force one clarification round without live-model prompt engineering."""
+    clarification sentinel + a parseable two-question array (one choice, one
+    text; one required, one optional), so a live drive exercises the choice-
+    option surface, the free-text surface, the required-vs-optional gate, and
+    the multi-question recap in one park - not just a text input, which alone
+    would render identically whether choice-option handling works or not."""
     import json
 
     result = await _model("vaultspec-researcher", topic="layout").ainvoke(
@@ -107,8 +110,18 @@ async def test_researcher_emits_clarification_sentinel_when_triggered() -> None:
     lines = body.splitlines()
     assert lines[0] == "CLARIFICATION NEEDED"
     questions = json.loads("\n".join(lines[1:]))
-    assert isinstance(questions, list) and questions
-    assert questions[0]["id"] and questions[0]["prompt"]
+    assert isinstance(questions, list) and len(questions) == 2
+
+    choice, text = questions
+    assert choice["kind"] == "choice"
+    assert choice["required"] is True
+    assert isinstance(choice["options"], list) and len(choice["options"]) >= 2
+
+    assert text["kind"] == "text"
+    assert text["required"] is False
+
+    assert {q["id"] for q in questions} == {choice["id"], text["id"]}
+    assert all(q["id"] and q["prompt"] for q in questions)
 
 
 @pytest.mark.asyncio

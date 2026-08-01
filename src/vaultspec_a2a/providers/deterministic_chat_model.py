@@ -77,15 +77,28 @@ _GROUND_CLARIFICATION_SENTINEL = "CLARIFICATION NEEDED"
 #: live-model prompt engineering needed. Harmless if it also appears in a
 #: later diverge-stage researcher turn (only the ground node's own parser
 #: acts on the sentinel; a diverge finding that echoes it is inert text).
+#: Emits BOTH question kinds in one park (one ``choice``, one ``text``) so a
+#: single drive exercises the choice-option surface AND the free-text surface
+#: together, plus the required-vs-optional gate and the multi-question recap
+#: - not just the text path, which alone would leave a broken choice-option
+#: renderer indistinguishable from a working one (a text input renders either
+#: way). Well inside the D5 caps (<=4 questions, <=4 options per choice).
 CLARIFICATION_TRIGGER_MARKER = "DETERMINISTIC_FORCE_CLARIFICATION"
 
 _CLARIFICATION_TRIGGER_QUESTIONS = json.dumps(
     [
         {
+            "id": "provider",
+            "prompt": "Which provider should author the plan?",
+            "kind": "choice",
+            "options": ["codex", "zai", "claude"],
+            "required": True,
+        },
+        {
             "id": "scope",
             "prompt": "Which module should this research target?",
             "kind": "text",
-            "required": True,
+            "required": False,
         }
     ]
 )

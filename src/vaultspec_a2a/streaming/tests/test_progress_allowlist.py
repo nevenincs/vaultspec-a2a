@@ -13,10 +13,12 @@ from __future__ import annotations
 
 import pytest
 
+from ...api.schemas import ServerEventType
 from ..sse_frames import (
     _ALWAYS_SAFE_KEYS,
     _PROGRESS_CATALOG,
     MAX_PROGRESS_CONTENT_CHARS,
+    MAX_SSE_FRAME_BYTES,
     encode_sse_frame,
     enforce_progress_allowlist,
 )
@@ -304,10 +306,6 @@ def test_thread_terminal_keeps_its_status_under_the_event_type_alias() -> None:
             ("dropped_type", "artifact_update"),
         ),
         (
-            {"type": "connected", "client_id": "sse-1"},
-            ("client_id", "sse-1"),
-        ),
-        (
             {"type": "permission_request", "description": "Allow edit?"},
             ("description", "Allow edit?"),
         ),
@@ -320,6 +318,66 @@ def test_each_catalogued_lifecycle_field_survives(
     frame = enforce_progress_allowlist(payload)
     key, value = kept
     assert frame[key] == value
+
+
+# ---------------------------------------------------------------------------
+# The catalog enumerates only frame kinds something actually emits
+# ---------------------------------------------------------------------------
+
+# The frame kinds the SSE transport synthesises itself instead of projecting from
+# a domain event, so they carry no ``ServerEventType`` discriminator and cannot be
+# derived from that enum. Each has a real producer: ``thread_terminal`` and
+# ``stream_rejected`` are yielded by ``api.thread_stream._stream_thread_events``
+# (both driven live by ``api/tests/test_thread_stream.py`` and
+# ``api/tests/test_stream_slot_release.py``), and ``progress_dropped`` is the
+# over-cap sentinel, emitted for real by the test below rather than taken on
+# trust. A name belongs in this set only when a producer can be pointed at.
+_TRANSPORT_FRAME_KINDS = frozenset(
+    {"thread_terminal", "stream_rejected", "progress_dropped"}
+)
+
+
+def test_the_over_cap_sentinel_really_emits_its_transport_frame_kind() -> None:
+    """``progress_dropped`` is claimed as a transport kind, so it is proven here.
+
+    Driven over the cap through an identity key rather than the content field:
+    identity keys are copied verbatim by the projection while ``content`` is
+    truncated to its declared cap first, so an oversized body alone can no longer
+    reach the byte gate. That makes the unbounded identity keys the honest way in.
+    """
+    frame = encode_sse_frame(
+        {
+            "type": "message_chunk",
+            "thread_id": "run-" + "x" * (MAX_SSE_FRAME_BYTES + 1),
+            "content": "hello",
+        },
+        event="message_chunk",
+        thread_id="run-1",
+    )
+
+    assert b'"type":"progress_dropped"' in frame
+    assert b'"dropped_type":"message_chunk"' in frame
+    assert b'"reason":"frame_exceeds_cap"' in frame
+
+
+def test_the_catalog_enumerates_exactly_the_frame_kinds_that_can_be_produced() -> None:
+    """A catalogued kind nobody emits is a consumer-facing promise nobody keeps.
+
+    The catalog is the public wire contract, so a client written against it may
+    wait for a handshake frame that never arrives - which is how a deleted
+    surface's vocabulary outlives the surface. Asserted as an equality, in both
+    directions, because each direction fails differently: an entry with no
+    producer advertises a frame that never comes, while a producible kind with no
+    entry loses every one of its fields to the closed default the moment it is
+    emitted.
+
+    Both sides are derived, not listed: the projected kinds come from the live
+    ``ServerEvent`` discriminator enum, and the transport kinds from the set
+    above, whose members each name a producer.
+    """
+    projected = {kind.value for kind in ServerEventType}
+
+    assert set(_PROGRESS_CATALOG) == projected | _TRANSPORT_FRAME_KINDS
 
 
 # ---------------------------------------------------------------------------

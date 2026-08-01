@@ -312,11 +312,6 @@ _PROGRESS_CATALOG: dict[str, dict[str, _FieldSpec]] = {
         "error_detail": _Text(512),
     },
     "heartbeat": {"server_uptime_seconds": _Number()},
-    "connected": {
-        "client_id": _Text(128),
-        "server_version": _Text(64),
-        "active_threads": _TextList(64, 128),
-    },
     "stream_rejected": {"reason": _Text(64)},
     "progress_dropped": {"reason": _Text(64), "dropped_type": _Text(64)},
     "permission_request": {

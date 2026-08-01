@@ -132,7 +132,11 @@ def test_the_vocabulary_this_guard_scans_for_is_not_empty() -> None:
     # appearing here means one arrived on a merge again, which is exactly how the
     # last one got in. Derived from the registry rather than naming what was
     # removed, so the tripwire cannot rot into a check for one dead string.
-    assert not _egressing_servers(), (
+    # Exact equality rather than a truthiness check, which also pins the
+    # derivation's TYPE: a broken ``_egressing_servers`` returning ``None`` or a
+    # list would satisfy ``not ...`` and report green, while this fails. The
+    # content assertion and the derivation's contract are the same line.
+    assert _egressing_servers() == frozenset(), (
         "the registry declares an egressing entry; no vaultspec-owned egressing "
         "MCP server exists or is planned, so this is either a fiction that arrived "
         "on a merge or a real capability that owes this guard an update"

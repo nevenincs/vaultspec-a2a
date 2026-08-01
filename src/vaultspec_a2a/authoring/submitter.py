@@ -46,7 +46,7 @@ from .discovery import resolve_engine
 from .session import AuthoringSession
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
+    from collections.abc import Mapping, Sequence
 
     from ..thread.state import TeamState
     from ..worker.token_store import RunTokenStore
@@ -107,6 +107,13 @@ _HTML_COMMENT_RE = re.compile(r"<!--.*?-->", re.DOTALL)
 # it (ADR phase only) and routes the author to rewrite the H1 token.
 _LEGACY_STATUS_HEADING_RE = re.compile(r"^##[ \t]+Status[ \t]*$", re.MULTILINE)
 
+#: The research-finding locator ``kind`` that denotes an EXTERNAL web retrieval, as
+#: opposed to the internal `path:line` locators the findings contract has always
+#: carried. Web evidence reaches checkpointed state through the append-only
+#: ``research_findings`` reducer; the submit-node reads it back to hold the proposed
+#: document to the run's own retrievals.
+_WEB_LOCATOR_KIND = "web"
+
 
 class SubmitterError(AuthoringError):
     """Base of the fail-closed submitter error family.
@@ -137,9 +144,10 @@ class DocumentConformanceError(ProposalRevisionRequiredError):
 
     Carries one actionable note per violation (``revision_notes``) — leftover
     template annotation comments or placeholders, a wiki-/markdown-link in body
-    prose (which ``vault set-body --check`` refuses at apply), or a document that
-    does not begin at its frontmatter fence. Refused at the submit node (cheap,
-    local) BEFORE proposing.
+    prose (which ``vault set-body --check`` refuses at apply), a document that
+    does not begin at its frontmatter fence, or a web source the run retrieved and
+    the document does not disclose. Refused at the submit node (cheap, local)
+    BEFORE proposing.
 
     It is a :class:`ProposalRevisionRequiredError` (the phase-gate seam signal), NOT a
     fatal :class:`SubmitterError`: the submit node routes it back into the phase's
@@ -345,9 +353,10 @@ def _latest_document(
     # Strip any leading preamble narration so the submitted body BEGINS at its
     # frontmatter fence (the document proper), then refuse — routing to the
     # revision loop — anything the engine's set-body conformance check would
-    # reject at materialization.
+    # reject at materialization, plus any web source this run retrieved that the
+    # document fails to disclose.
     body = _strip_leading_preamble(body)
-    notes = _conformance_notes(body, doc_type)
+    notes = _conformance_notes(body, doc_type, _web_locator_urls(state))
     if notes:
         raise DocumentConformanceError(notes)
     return body, len(bodies)
@@ -384,7 +393,44 @@ def _split_frontmatter_body(text: str) -> tuple[str, str]:
     return text[: match.end()], text[match.end() :]
 
 
-def _conformance_notes(body: str, doc_type: str | None = None) -> list[str]:
+def _web_locator_urls(state: TeamState) -> list[str]:
+    """Distinct web-locator URLs across the run's accumulated research findings.
+
+    Every researcher branch appends a ``{claim, locators, source_thread}`` finding
+    through the append-only ``research_findings`` reducer, so checkpointed state
+    holds the run's complete retrieval record by the time any document is proposed.
+    A web locator is a dict carrying ``kind`` ``web`` and a ``url``; the internal
+    ``path:line`` locators that share the list are skipped, as is any malformed
+    entry — an unreadable locator must never manufacture a refusal, only a real
+    recorded retrieval may. Order is first-seen and duplicates collapse, so the
+    resulting refusal notes are deterministic and replay-exact.
+    """
+    urls: list[str] = []
+    seen: set[str] = set()
+    findings = state.get("research_findings") or []
+    if not isinstance(findings, list):
+        return urls
+    for finding in findings:
+        if not isinstance(finding, dict):
+            continue
+        locators = finding.get("locators")
+        if not isinstance(locators, list):
+            continue
+        for locator in locators:
+            if not isinstance(locator, dict):
+                continue
+            if locator.get("kind") != _WEB_LOCATOR_KIND:
+                continue
+            url = locator.get("url")
+            if isinstance(url, str) and url and url not in seen:
+                seen.add(url)
+                urls.append(url)
+    return urls
+
+
+def _conformance_notes(
+    body: str, doc_type: str | None = None, web_urls: Sequence[str] = ()
+) -> list[str]:
     """Collect actionable revision notes for every vault-conformance violation.
 
     Returns one note per violation (empty when the body is clean), so the writer
@@ -395,6 +441,13 @@ def _conformance_notes(body: str, doc_type: str | None = None) -> list[str]:
     document it additionally refuses a legacy ``## Status`` section (the status must
     ride the H1 token) — a check `vault set-body` does not make but `vault check`'s
     `adr-status` does, closed here so a non-canonical status never materializes.
+
+    *web_urls* carries the run's distinct web-locator URLs
+    (:func:`_web_locator_urls`), and each one absent from the body prose is its own
+    note: a document that consumed retrievals must disclose them. The refusal is
+    STRUCTURAL — whether a given claim needed a retrieval, and whether it cites the
+    right one, is not machine-decidable and is left to the reviewer persona and the
+    human phase gate.
     """
     notes: list[str] = []
     frontmatter, prose_region = _split_frontmatter_body(body)
@@ -435,6 +488,17 @@ def _conformance_notes(body: str, doc_type: str | None = None) -> list[str]:
             f"markdown link in body text: [{match.group(1)}]({match.group(2)}) - "
             "use a backtick code span for file references"
         )
+    # Web-source disclosure: scanned against the prose region, NOT the whole
+    # document, because an external URL is never legal in frontmatter — a URL
+    # smuggled into `related:` would corrupt the vault link graph and must not
+    # satisfy the obligation it violates.
+    for url in web_urls:
+        if url not in prose_region:
+            notes.append(
+                f"undisclosed web source: {url} - this run retrieved it, so the "
+                "document must cite it inline and list it in its Sources section "
+                "as a bare URL with the retrieval date (never in `related:`)"
+            )
     return notes
 
 

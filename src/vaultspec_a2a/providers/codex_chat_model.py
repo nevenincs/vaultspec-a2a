@@ -331,6 +331,15 @@ class CodexChatModel(BaseChatModel):
     workspace_root: str | None = None
     codex_home: str | None = None
     harness_mcp_servers: list[str] = Field(default_factory=list)
+    # The run's per-run authoring bridge, in the same flat spec shape
+    # ``codex_mcp_server_specs`` returns for the read-only harness registry
+    # (``{name, command, args, env, tools}``) — set via ``with_authoring_mcp_
+    # server`` (the Codex counterpart of the ACP lane's ``with_mcp_servers``
+    # authoring attach, dispatched from ``_acp_authoring.attach_authoring_
+    # tools``). Kept separate from ``harness_mcp_servers`` (names only, resolved
+    # through the closed registry) because the bridge is a per-run, non-registry
+    # spec the worker builds fresh every turn from the engine catalog.
+    authoring_mcp_server: dict[str, Any] | None = None
     approval_policy: str = "never"
     sandbox: str = "read-only"
     # Bounds the startup and per-request RPC waits only - the single-shot calls
@@ -372,18 +381,47 @@ class CodexChatModel(BaseChatModel):
         """
         return self.model_copy(update={"harness_mcp_servers": list(names)})
 
-    def _build_codex_config_home(self) -> Path | None:
-        """Build the per-run CODEX_HOME for the declared harness servers, or None.
+    def with_authoring_mcp_server(
+        self, spec: dict[str, Any] | None
+    ) -> "CodexChatModel":
+        """Return a copy carrying the run's per-run authoring bridge spec.
 
-        Returns the home path (whose ``config.toml`` carries the declared read-only
-        servers and whose ``auth.json`` is copied from the base home) when harness
-        servers are declared; the caller sets ``CODEX_HOME`` to it and cleans it up
-        after reap. Extracted from ``_astream`` so the composition-to-emission path
-        is testable without a live Codex turn.
+        Codex's counterpart of the ACP lane's ``with_mcp_servers`` authoring
+        attach: ``_acp_authoring.attach_authoring_tools`` calls this with the
+        flat spec ``codex_authoring_mcp_server_spec`` builds from the run's
+        ``AuthoringToolBinding`` so ``_build_codex_config_home`` can union it
+        into the per-run ``config.toml`` alongside any declared harness servers.
         """
-        if not self.harness_mcp_servers:
+        return self.model_copy(update={"authoring_mcp_server": spec})
+
+    def _build_codex_config_home(self) -> Path | None:
+        """Build the per-run CODEX_HOME for the declared servers, or None.
+
+        Returns the home path (whose ``config.toml`` carries the declared
+        read-only harness servers PLUS, when armed, the run's own authoring
+        bridge, and whose ``auth.json`` is copied from the base home) when
+        either is present; the caller sets ``CODEX_HOME`` to it and cleans it up
+        after reap. Extracted from ``_astream`` so the composition-to-emission
+        path is testable without a live Codex turn.
+
+        ADD-only union by name, mirroring the ACP lane's session-inject union in
+        ``_project_composition_onto_model``: the harness registry's read-only
+        servers first, then the authoring bridge appended (never replacing a
+        same-named harness entry — the registry and the bridge's own
+        ``AUTHORING_MCP_SERVER_NAME`` cannot collide in practice, but the order
+        keeps the harness registry as the trust root regardless).
+        """
+        specs = (
+            codex_mcp_server_specs(self.harness_mcp_servers)
+            if self.harness_mcp_servers
+            else []
+        )
+        if self.authoring_mcp_server is not None:
+            known = {spec["name"] for spec in specs}
+            if self.authoring_mcp_server["name"] not in known:
+                specs = [*specs, self.authoring_mcp_server]
+        if not specs:
             return None
-        specs = codex_mcp_server_specs(self.harness_mcp_servers)
         base = self.codex_home or settings.codex_home
         base_home = Path(base) if base else Path.home() / ".codex"
         return build_codex_config_home(specs, base_home)

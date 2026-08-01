@@ -25,6 +25,7 @@ if TYPE_CHECKING:
     from langchain_core.tools import BaseTool
 
     from ...authoring import FeedbackContextReader
+    from ...providers._acp_authoring import AuthoringToolBinding
     from ...worker.authoring_binding import AuthoringBindingProvider
 
 _logger = logging.getLogger(__name__)
@@ -385,6 +386,30 @@ async def _interrupt_permission_callback(
         ) from exc
 
 
+def _attach_authoring_tools(
+    model: BaseChatModel,
+    binding: "AuthoringToolBinding | None",
+    *,
+    autonomous: bool,
+) -> BaseChatModel:
+    """Attach the run's authoring binding onto *model*, or return it unchanged.
+
+    Thin, lazily-importing wrapper over
+    ``providers._acp_authoring.attach_authoring_tools``: the import is guarded
+    behind the ``binding is not None`` check, not just deferred to call time,
+    because the authoring provider module costs ~0.85s to load (it pulls the
+    stdio bridge's env contract and the catalog codec) and a run with no binding
+    must never pay it. Hoisting the import to worker.py's own module scope would
+    charge every worker turn regardless of binding — the import-time cold-start
+    class that already cost this project a lost CLI tool-registration race once.
+    """
+    if binding is None:
+        return model
+    from ...providers._acp_authoring import attach_authoring_tools
+
+    return attach_authoring_tools(model, binding, autonomous=autonomous)
+
+
 def create_worker_node(
     model: BaseChatModel,
     system_prompt: str,
@@ -475,18 +500,9 @@ def create_worker_node(
                 authoring_binding = await authoring_binding_provider.binding_for(
                     thread_id, name
                 )
-        if authoring_binding is not None:
-            # Import guarded by the binding, not just deferred: the authoring
-            # provider module costs ~0.85s to load (it pulls the stdio bridge's
-            # env contract and the catalog codec), and a run with no binding must
-            # never pay it. Hoisting this to module scope would charge every
-            # worker turn — the import-time cold-start class that already cost
-            # this project a lost CLI tool-registration race once.
-            from ...providers._acp_authoring import attach_authoring_tools
-
-            effective_model = attach_authoring_tools(
-                effective_model, authoring_binding, autonomous=autonomous
-            )
+        effective_model = _attach_authoring_tools(
+            effective_model, authoring_binding, autonomous=autonomous
+        )
         if harness_mcp_servers:
             from ...providers._acp_mcp import (
                 compose_harness_mcp_servers,

@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 import sys
+import tomllib
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -370,3 +371,147 @@ async def test_no_binding_leaves_session_without_mcp_servers(
 
     params = json.loads(record_file.read_text(encoding="utf-8"))
     assert params["mcpServers"] == []
+
+
+# ---------------------------------------------------------------------------
+# Codex lane: the same binding, wired through a real Codex app-server spawn.
+# ---------------------------------------------------------------------------
+
+# A minimal Codex app-server probe: before touching the wire protocol at all, it
+# reads its OWN CODEX_HOME/config.toml off disk (the file the real worker spawn
+# wrote) and records it - proving the wiring reaches a live child process, not
+# just the Python-level composed model. It then answers the one JSON-RPC request
+# it receives (``initialize``) with an error frame, so the turn fails fast
+# without needing the rest of the app-server protocol implemented here.
+#
+# Written out as a real script FILE (not passed inline via ``-c``): CodexChatModel
+# spawns through ``spawn_acp_process(..., use_exec=False)``, which on Windows
+# means ``create_subprocess_shell`` — the command line is handed to cmd.exe, whose
+# line-oriented parser truncates an embedded-newline ``-c "<script>"`` argument at
+# the first newline. The process then "succeeds" (exit 0) having executed nothing,
+# which is silent from the test's side: no record file, no error, just a hang
+# until the Codex protocol handshake times out. A real file path sidesteps
+# cmd.exe's line parsing entirely, matching the working ACP-lane pattern above
+# (``SIMULATOR_PATH``, a real file, never an inline ``-c`` script).
+_CODEX_AUTHORING_PROBE_SERVER = """
+import json, os, sys
+record_path = sys.argv[1]
+home = os.environ.get("CODEX_HOME", "")
+config_toml = ""
+if home:
+    cfg_path = os.path.join(home, "config.toml")
+    if os.path.exists(cfg_path):
+        with open(cfg_path, encoding="utf-8") as f:
+            config_toml = f.read()
+with open(record_path, "w", encoding="utf-8") as f:
+    json.dump({"codex_home": home, "config_toml": config_toml}, f)
+line = sys.stdin.readline()
+if line.strip():
+    msg = json.loads(line)
+    mid = msg.get("id")
+    if mid is not None:
+        out = {"id": mid, "error": {"code": -1, "message": "probe stub"}}
+        sys.stdout.write(json.dumps(out) + "\\n")
+        sys.stdout.flush()
+"""
+
+
+def _write_codex_authoring_probe(tmp_path: Path) -> Path:
+    """Materialize the probe script as a real file under *tmp_path*.
+
+    See the module comment above ``_CODEX_AUTHORING_PROBE_SERVER`` for why this
+    cannot be passed inline via ``-c`` on Windows.
+    """
+    probe_path = tmp_path / "_codex_authoring_probe.py"
+    probe_path.write_text(_CODEX_AUTHORING_PROBE_SERVER, encoding="utf-8")
+    return probe_path
+
+
+@pytest.mark.asyncio
+async def test_codex_worker_spawns_with_authoring_bridge_in_codex_home(
+    tmp_path: Path,
+) -> None:
+    """Codex counterpart of ``test_binding_surfaces_authoring_server_to_real_subprocess``.
+
+    Before the codex-authoring-bridge-attachment fix, ``attach_authoring_tools``
+    checked only ``with_mcp_servers`` (the ACP surface) and returned a Codex
+    model UNCHANGED — the real spawned ``codex app-server`` child process would
+    see a ``CODEX_HOME`` with no ``vaultspec-authoring`` block at all, so the
+    agent connected with none of the propose/read tools and the run burned its
+    step timeout finding out. Drives the worker node through a REAL
+    ``CodexChatModel`` and a REAL spawned subprocess (the probe above): the
+    probe reports what IT saw on disk in its own ``CODEX_HOME``, not what the
+    Python-level model object claims - closing the gap a purely in-process
+    assertion would leave open.
+    """
+    from ....providers._acp_authoring import AUTHORING_MCP_SERVER_NAME
+    from ....providers.codex_chat_model import CodexChatModel
+    from ....thread.errors import WorkerExecutionError
+
+    record_file = tmp_path / "codex_home_probe.json"
+    codex_home_base = tmp_path / "codex_base"
+    codex_home_base.mkdir()
+    probe_path = _write_codex_authoring_probe(tmp_path)
+    model = CodexChatModel(
+        command=[PYTHON_EXE, str(probe_path), str(record_file)],
+        codex_home=str(codex_home_base),
+        workspace_root=str(tmp_path),
+        timeout=10.0,
+    )
+    node = create_worker_node(
+        model=model,
+        system_prompt="You are a coder.",
+        name="coder",
+        autonomous=True,
+        authoring_binding_provider=_stdio_provider(),
+    )
+
+    with pytest.raises(WorkerExecutionError):
+        await node(_make_state())
+
+    recorded = json.loads(record_file.read_text(encoding="utf-8"))
+    assert recorded["codex_home"], "subprocess saw no CODEX_HOME"
+    cfg = tomllib.loads(recorded["config_toml"])
+    bridge = cfg["mcp_servers"][AUTHORING_MCP_SERVER_NAME]
+    assert bridge["command"]
+    assert bridge["args"] == ["-m", "vaultspec_a2a.protocols.mcp.authoring_stdio"]
+    assert set(bridge["enabled_tools"]) == {"read_context", "propose_changeset"}
+    env = bridge["env"]
+    assert env["VAULTSPEC_AUTHORING_BEARER"] == "machine-bearer-xyz"
+    assert env["VAULTSPEC_AUTHORING_RUN_ID"] == _THREAD_ID
+    assert env["VAULTSPEC_AUTHORING_BASE_URL"] == _ENGINE_URL
+
+
+@pytest.mark.asyncio
+async def test_codex_worker_without_binding_gets_no_authoring_block(
+    tmp_path: Path,
+) -> None:
+    """Without a binding, a real Codex spawn's CODEX_HOME carries no bridge."""
+    from ....providers.codex_chat_model import CodexChatModel
+    from ....thread.errors import WorkerExecutionError
+
+    record_file = tmp_path / "codex_home_probe.json"
+    codex_home_base = tmp_path / "codex_base"
+    codex_home_base.mkdir()
+    probe_path = _write_codex_authoring_probe(tmp_path)
+    model = CodexChatModel(
+        command=[PYTHON_EXE, str(probe_path), str(record_file)],
+        codex_home=str(codex_home_base),
+        workspace_root=str(tmp_path),
+        timeout=10.0,
+    )
+    node = create_worker_node(
+        model=model,
+        system_prompt="You are a coder.",
+        name="coder",
+        autonomous=True,
+    )
+
+    with pytest.raises(WorkerExecutionError):
+        await node(_make_state())
+
+    recorded = json.loads(record_file.read_text(encoding="utf-8"))
+    # No harness servers and no binding: _build_codex_config_home returns None,
+    # so CODEX_HOME is never redirected off the configured base home, and that
+    # base home carries no config.toml of its own.
+    assert recorded["config_toml"] == ""

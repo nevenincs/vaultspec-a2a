@@ -225,9 +225,25 @@ _PHASE_GROUNDING_DIRS: dict[str, tuple[str, ...]] = {
 #: research, so a plan citing an ADR *usually* has research upstream - but
 #: "usually" is not the guarantee, and a plan is the document a human executes
 #: from. It states its own provenance rather than inheriting an argument.
+#: The doc types vaultspec-core's own reference check sanctions as ADR grounding.
+#: Core is the authority and this is its list, not a second opinion: its
+#: ``vaultcore/checks/references.py`` admits research, reference OR audit, and a
+#: check here that omitted audit would refuse an ADR core considers correctly
+#: grounded - a document the framework accepts, blocked by the runtime that
+#: serves it. The value is gated against core's source in
+#: ``authoring/tests/test_core_grounding_parity.py`` because core keeps it as a
+#: function-local tuple with no importable name to bind to.
+_CORE_ADR_GROUNDING: tuple[str, ...] = ("research", "reference", "audit")
+
 _PHASE_REQUIRED_GROUNDING: dict[str, tuple[tuple[str, ...], ...]] = {
-    PipelinePhase.ADR: (("research", "reference"),),
-    PipelinePhase.PLAN: (("adr",), ("research", "reference")),
+    PipelinePhase.ADR: (_CORE_ADR_GROUNDING,),
+    # DELIBERATELY STRICTER THAN CORE, by owner ruling. Core requires the ADR
+    # (error) and only NUDGES toward research (warning). Here both are required,
+    # because core's check runs over a vault that already exists while this one
+    # runs before the document is written: a warning core raises after the fact
+    # is a refusal worth making before a plan lands unsupported. Do not "align"
+    # this down to core's severity - the divergence is the decision.
+    PipelinePhase.PLAN: (("adr",), _CORE_ADR_GROUNDING),
 }
 
 

@@ -69,6 +69,7 @@ def assert_armed_lanes_authenticated(
     ws_root: Path | None,
     *,
     provider_factory: Any,
+    frozen_assignment: dict[str, dict[str, Any]] | None = None,
 ) -> None:
     """Refuse an armed preset whose config-home lane has no auth token.
 
@@ -83,7 +84,15 @@ def assert_armed_lanes_authenticated(
 
     ``provider_factory`` is injected (not read off a manager) so the gate is a
     pure, deterministically-testable seam - the same dependency-injection shape as
-    :func:`compile_team_graph`.
+    :func:`compile_team_graph`. ``frozen_assignment`` is the run's resolved
+    model-profile assignment (``DispatchRequest.model_assignment``) - without it
+    this gate silently re-resolved every worker against the team config's OWN
+    per-role defaults (the team-default provider, e.g. claude for research_adr),
+    never the profile the run actually selected, so a provider-axis profile that
+    routes every role away from claude (e.g. ``codex-all``) still tripped this
+    gate on a credential no role in the run would ever need. Threading the same
+    frozen assignment ``compile_team_graph`` itself compiles against keeps this
+    pre-flight check and the real compilation asking the identical question.
     """
     missing: dict[str, tuple[str, ...]] = {}
     for worker_ref in team_config.workers:
@@ -101,6 +110,7 @@ def assert_armed_lanes_authenticated(
                 team_config,
                 ws_root,
                 provider_factory=provider_factory,
+                frozen_assignment=frozen_assignment,
             )
         except ValueError:
             # Provider exhaustion is a distinct failure surfaced by compile.
@@ -383,6 +393,7 @@ class GraphLifecycleManager:
                 agent_configs,
                 ws_root,
                 provider_factory=self._provider_factory,
+                frozen_assignment=req.model_assignment,
             )
 
         return compile_team_graph(

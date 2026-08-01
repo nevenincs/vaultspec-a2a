@@ -249,8 +249,10 @@ class EventAggregator:
     ) -> list[PermissionRequest]:
         return self._emitters.get_pending_permissions(thread_id)
 
-    def get_agent_states(self) -> dict[str, AgentLifecycleState]:
-        return self._emitters.get_agent_states()
+    def get_agent_states(
+        self, thread_id: str | None = None
+    ) -> dict[str, AgentLifecycleState]:
+        return self._emitters.get_agent_states(thread_id)
 
     def get_tool_call_states(self, thread_id: str) -> dict[str, dict[str, str]]:
         return self._emitters.get_tool_call_states(thread_id)

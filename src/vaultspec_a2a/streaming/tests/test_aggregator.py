@@ -161,6 +161,76 @@ class TestEventEmission:
         assert sequenced.sequence == expected_seq
 
     @pytest.mark.asyncio
+    async def test_agent_state_does_not_leak_across_threads(
+        self, aggregator: EventAggregator
+    ) -> None:
+        """A role's state in one thread must not appear in another thread's
+        get_agent_states(thread_id) read - the EventAggregator is shared
+        across every thread a worker process handles over its lifetime, so
+        an agent_id-only key would let an unrelated, possibly already-
+        terminal thread's role state bleed into a live thread's status
+        (P10 finding: a doc-editor run's role appeared "working" inside an
+        unrelated adr-research run's roles list)."""
+        await aggregator.emit_agent_status(
+            thread_id="thread-doc-editor",
+            agent_id="vaultspec-doc-editor",
+            node_name="vaultspec-doc-editor",
+            state=AgentLifecycleState.WORKING,
+        )
+        await aggregator.emit_agent_status(
+            thread_id="thread-adr-research",
+            agent_id="vaultspec-researcher",
+            node_name="vaultspec-researcher",
+            state=AgentLifecycleState.WORKING,
+        )
+
+        adr_states = aggregator.get_agent_states("thread-adr-research")
+        assert "vaultspec-doc-editor" not in adr_states
+        assert adr_states == {"vaultspec-researcher": AgentLifecycleState.WORKING}
+
+        doc_editor_states = aggregator.get_agent_states("thread-doc-editor")
+        assert doc_editor_states == {
+            "vaultspec-doc-editor": AgentLifecycleState.WORKING
+        }
+
+        # Omitting thread_id preserves the historical cross-thread aggregate
+        # (unchanged behaviour for callers that intentionally want every
+        # role this worker process has ever reported, e.g. a multi-run
+        # overview) - both entries are visible there.
+        all_states = aggregator.get_agent_states()
+        assert all_states == {
+            "vaultspec-doc-editor": AgentLifecycleState.WORKING,
+            "vaultspec-researcher": AgentLifecycleState.WORKING,
+        }
+
+    @pytest.mark.asyncio
+    async def test_clear_thread_state_drops_only_that_threads_agent_states(
+        self, aggregator: EventAggregator
+    ) -> None:
+        """clear_thread_state purges a terminal thread's agent states so the
+        shared map does not grow unbounded over a long-lived worker's
+        lifetime, without disturbing a sibling thread's states."""
+        await aggregator.emit_agent_status(
+            thread_id="thread-a",
+            agent_id="agent-a",
+            node_name="agent-a",
+            state=AgentLifecycleState.WORKING,
+        )
+        await aggregator.emit_agent_status(
+            thread_id="thread-b",
+            agent_id="agent-b",
+            node_name="agent-b",
+            state=AgentLifecycleState.WORKING,
+        )
+
+        aggregator.clear_thread_state("thread-a")
+
+        assert aggregator.get_agent_states("thread-a") == {}
+        assert aggregator.get_agent_states("thread-b") == {
+            "agent-b": AgentLifecycleState.WORKING
+        }
+
+    @pytest.mark.asyncio
     async def test_emit_message_chunk(self, aggregator: EventAggregator) -> None:
         """emit_message_chunk delivers a MessageChunkEvent with correct content."""
         queue = aggregator.add_subscriber("client-1")

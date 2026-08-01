@@ -74,7 +74,7 @@ def enrich_snapshot_from_state(
     agent_data: list[AgentData] = []
     if aggregator is not None:
         node_summaries = aggregator.get_node_summaries()
-        agent_states = aggregator.get_agent_states()
+        agent_states = aggregator.get_agent_states(snapshot.thread_id)
         for node in node_summaries:
             agent_id = node.get("agent_id", node.get("node_name", ""))
             agent_data.append(

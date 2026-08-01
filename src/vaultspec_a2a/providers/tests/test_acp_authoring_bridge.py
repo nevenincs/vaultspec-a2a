@@ -8,7 +8,11 @@ at session setup (the transport half of the tool-advertisement proof; the exact
 advertised tool set — propose/read, no fs-write — is asserted over the real MCP
 protocol in ``protocols/mcp/tests/test_authoring_bridge.py``).
 
-Service-marked and reaped before any prompt, so no agent work and no spend.
+Service-marked and reaped before any prompt: the subject is session-setup
+connectivity, which is settled by the time the session exists, so a turn would
+add runtime without adding evidence. That reap is NOT a spend gate — the Claude
+lane authenticates with a flat-rate subscription token, not metered API billing.
+
 Skips with a pointer when the Claude CLI is unavailable (an infra gate).
 """
 

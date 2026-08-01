@@ -15,7 +15,13 @@ protocol surface ``_acp_session.py`` / ``_acp_protocol.py`` depend on survives t
 - the ``_meta.claudeCode.options.allowedTools`` auto-permit shape our headless
   ``setup_session`` emits is accepted without error.
 
-Service-marked and reaped before any ``session/prompt`` — no agent work, no spend.
+Service-marked and reaped before any ``session/prompt``: the subject here is the
+handshake surface, so a turn would add runtime and flakiness without adding
+evidence. That reap is NOT a spend gate — the Claude lane authenticates with a
+flat-rate ``CLAUDE_CODE_OAUTH_TOKEN`` subscription, not metered API billing, and
+``ANTHROPIC_API_KEY`` is scrubbed from every agent subprocess. Completed-turn
+coverage for this provider lives in ``test_claude_live_turn.py``.
+
 Skips with a pointer when the Claude CLI entry point is unavailable (an infra gate).
 """
 

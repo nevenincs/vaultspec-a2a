@@ -40,9 +40,16 @@ import pytest
 
 from ...authoring.discovery import HEARTBEAT_STALE_MS
 from ...thread.actor_tokens import MAX_ROLES_PER_RUN
+from ...thread.clarification import MAX_ANSWER_CHARS, MAX_REQUEST_ID_CHARS
 
 # Where the engine's a2a edge module lives inside the consuming project's tree.
 _EDGE_MODULE = Path("engine/crates/vaultspec-api/src/routes/ops/a2a.rs")
+
+# The engine declares its clarification bounds in the shared product crate
+# rather than on the edge module, and the edge only aliases them. Reading the
+# declaration is the point: an alias would report agreement with whatever the
+# declaration happens to say.
+_CONTRACT_MODULE = Path("engine/crates/vaultspec-product/src/a2a_contract.rs")
 
 # Env override first, then the conventional sibling checkouts. The worktree
 # layout this project develops in keeps both repositories side by side.
@@ -54,20 +61,30 @@ _CONVENTIONAL_ROOTS = (
 )
 
 
-def _edge_source() -> str:
-    """Return the engine edge module's text, or skip naming what is missing."""
+def _engine_module_source(module: Path) -> str:
+    """Return an engine module's text, or skip naming what is missing."""
     override = os.environ.get(_ENGINE_SOURCE_ENV)
     roots = [Path(override)] if override else list(_CONVENTIONAL_ROOTS)
     for root in roots:
-        candidate = root / _EDGE_MODULE
+        candidate = root / module
         if candidate.is_file():
             return candidate.read_text(encoding="utf-8")
-    searched = ", ".join(str(root / _EDGE_MODULE) for root in roots)
+    searched = ", ".join(str(root / module) for root in roots)
     pytest.skip(
         "engine source not on disk, so the shared bounds cannot be compared; "
         f"set {_ENGINE_SOURCE_ENV} to a dashboard checkout root (searched: "
         f"{searched})"
     )
+
+
+def _edge_source() -> str:
+    """Return the engine edge module's text, or skip naming what is missing."""
+    return _engine_module_source(_EDGE_MODULE)
+
+
+def _contract_source() -> str:
+    """Return the engine's shared a2a contract module, or skip."""
+    return _engine_module_source(_CONTRACT_MODULE)
 
 
 def _engine_const(source: str, name: str) -> int:
@@ -112,4 +129,65 @@ def test_heartbeat_staleness_is_the_same_number_on_both_sides() -> None:
     assert engine_stale_ms == HEARTBEAT_STALE_MS, (
         f"heartbeat staleness drift: engine A2A_HEARTBEAT_STALE_MS="
         f"{engine_stale_ms}, a2a HEARTBEAT_STALE_MS={HEARTBEAT_STALE_MS}"
+    )
+
+
+def test_clarification_answer_cap_is_the_same_number_on_both_sides() -> None:
+    """Red when the engine forwards an answer this side's wire model refuses.
+
+    This one is not hypothetical: the engine carried 4096 against this side's
+    2048 for the whole life of the clarification verb, and the dashboard mirrored
+    the engine. A human could type 4096 characters into the questionnaire, the
+    composer would accept and submit them, the engine would forward them, and
+    a2a returned 422 after a full round trip - with nothing in the message to say
+    which layer objected.
+
+    Both sibling guards stayed green through it, and the reason is the point of
+    this gate. The engine asserts its edge alias equals its contract constant,
+    and the dashboard asserts its constant equals the engine's contract constant.
+    Every check compares a copy against another copy of the SAME number, so a
+    wrong number is unanimous. Only a comparison against a2a's own constant -
+    this one - can see it.
+    """
+    engine_answer_chars = _engine_const(
+        _contract_source(), "A2A_MAX_CLARIFICATION_ANSWER_CHARS"
+    )
+
+    assert engine_answer_chars == MAX_ANSWER_CHARS, (
+        f"clarification answer cap drift: engine "
+        f"A2A_MAX_CLARIFICATION_ANSWER_CHARS={engine_answer_chars}, a2a "
+        f"MAX_ANSWER_CHARS={MAX_ANSWER_CHARS}. A wider engine forwards an answer "
+        "this side refuses at 422 after a round trip; a narrower one refuses an "
+        "answer this side would have taken. Both are silent at the layer that "
+        "caused them."
+    )
+
+
+def test_clarification_request_id_ceiling_is_not_below_what_a2a_mints() -> None:
+    """Red when the engine would refuse a request id this side can mint.
+
+    Deliberately an inequality, not an equality, because the two sides are not
+    making the same claim about this number. a2a's is a MINTING ceiling: the
+    respond route declares no bound on its ``request_id`` path parameter at all,
+    so nothing here refuses a long one. The engine's is an ACCEPTANCE bound on a
+    value it forwards.
+
+    That makes the drift one-directional. An engine ceiling below this side's
+    minting ceiling refuses a handle a2a issued, and the run stays parked with no
+    way to answer it through the browser edge - the questionnaire is displayed
+    and unanswerable. An engine ceiling above it costs nothing, because a2a
+    resolves the id against its own parked checkpoint and refuses an unknown one
+    on its own authority. So this asserts the safe direction rather than equality,
+    and a future widening on either side stays green.
+    """
+    engine_request_id_chars = _engine_const(
+        _contract_source(), "A2A_MAX_CLARIFICATION_REQUEST_ID_CHARS"
+    )
+
+    assert engine_request_id_chars >= MAX_REQUEST_ID_CHARS, (
+        f"clarification request-id ceiling too low: engine "
+        f"A2A_MAX_CLARIFICATION_REQUEST_ID_CHARS={engine_request_id_chars}, a2a "
+        f"mints up to MAX_REQUEST_ID_CHARS={MAX_REQUEST_ID_CHARS}. The engine "
+        "would refuse a handle this side issued, leaving the run parked on a "
+        "question that cannot be answered through the edge."
     )

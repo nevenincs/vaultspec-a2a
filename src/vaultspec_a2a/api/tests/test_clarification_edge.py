@@ -28,6 +28,7 @@ from ...graph.nodes.clarification import (
     create_clarification_request_node,
 )
 from ...thread.clarification import (
+    MAX_ANSWER_CHARS,
     ClarificationKind,
     ClarificationQuestion,
     ClarificationRequest,
@@ -328,6 +329,19 @@ async def test_an_over_long_answer_is_refused_at_the_wire(
     The refusal is a 422 from the wire model itself rather than a check inside
     the route, which is what makes the bound a contract instead of a convention:
     it cannot be bypassed by a call path that forgets to apply it.
+
+    Sized from :data:`MAX_ANSWER_CHARS` rather than from a literal, and asserting
+    BOTH sides of the ceiling. This test used to post a hardcoded ``"x" * 4096``,
+    which publishes the number 4096 next to the word "cap" in a file a consumer
+    reads to learn a2a's bounds - the engine adopted 4096 as this side's answer
+    cap and the dashboard mirrored the engine, while a2a has never enforced
+    anything but 2048.
+
+    It also could not fail. It answered only the OPTIONAL ``notes`` question, so
+    the required ``dock_side`` was left blank: delete the length cap entirely and
+    the request still 422s, from the required-question check one layer later.
+    Both answers are supplied below so the length is the only thing left to
+    object to, which is what makes the refusal evidence about the cap.
     """
     app, _agg, worker, cp = make_app(session_factory, checkpointer)
     async with httpx.AsyncClient(
@@ -337,13 +351,28 @@ async def test_an_over_long_answer_is_refused_at_the_wire(
         await _park_on_clarification(cp, thread_id=run_id, request_id="clarify-cap")
         worker.clear()
 
-        response = await client.post(
+        over = await client.post(
             f"/v1/runs/{run_id}/clarifications/clarify-cap/respond",
-            json={"answers": {"notes": "x" * 4096}},
+            json={
+                "answers": {
+                    "dock_side": "right",
+                    "notes": "x" * (MAX_ANSWER_CHARS + 1),
+                }
+            },
+        )
+        assert over.status_code == 422
+        assert worker.dispatches == []
+
+        # The ceiling itself is admitted. A cap is two behaviours, and a test
+        # that only drives the refusal cannot tell a correct bound from one set
+        # a character too low.
+        at_ceiling = await client.post(
+            f"/v1/runs/{run_id}/clarifications/clarify-cap/respond",
+            json={"answers": {"dock_side": "right", "notes": "x" * MAX_ANSWER_CHARS}},
         )
 
-    assert response.status_code == 422
-    assert worker.dispatches == []
+    assert at_ceiling.status_code == 200
+    assert worker.dispatches != []
 
 
 @pytest.mark.asyncio

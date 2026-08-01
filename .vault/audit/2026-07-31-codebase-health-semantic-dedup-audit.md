@@ -5,7 +5,7 @@ tags:
 date: '2026-07-31'
 modified: '2026-08-01'
 body_schema: 'body-v1'
-body_hash: 'sha256:1e6d5c27405d6509e01e88baeac414ea0af1f93206692592e0d466788e2d4260'
+body_hash: 'sha256:e00c483e7d75581e7d9e9a9e915ea7ba0729fe508f1204c82d97e28499214106'
 related:
   - "[[2026-07-19-codebase-health-audit]]"
   - "[[2026-07-19-codebase-health-plan]]"
@@ -105,10 +105,18 @@ the response schemas - and is never read back into graph state.
 The defect is therefore a durable-record and reporting-fidelity failure rather
 than an execution failure, and the severity is reduced accordingly. What remains
 is not trivial: the persisted record of a human authorization decision states the
-opposite of what the human decided, and that value is what the edge serves. A
-consumer outside this repository that gates on the reported approval state would
-turn this back into an execution concern, which is unknown from here and worth
-establishing rather than assuming.
+opposite of what the human decided, and that value is what the edge serves.
+
+The one thing that could have escalated it back to an execution concern has since
+been checked rather than left assumed. An external consumer gating on the
+reported approval state would make the corrupted value load-bearing again; the
+dashboard is the only such consumer, and it does not read the field at all -
+neither its engine nor its frontend references the approval status the edge
+serves. Its own approval plane is a separate changeset ledger with its own
+autonomy policy, where the recorded fact is which actor approved rather than
+anything sourced from this repository. The defect is confined to this project's
+own reporting surface, and the medium rating stands on verified grounds rather
+than on an open question.
 
 The module remains untested, which is why the defect survived: `thread/permission_fsm.py`
 has no test file anywhere in the tree, neither predicate is named by any test,
@@ -583,9 +591,25 @@ correlate while parked - and it parses an enum-shaped verdict with notes,
 returning a routing command object and carrying the revise prose in a
 validation-errors list.
 
+Re-verification corrected one detail: the two never coexist in a compiled graph.
+The compiler dispatches on topology type, so the plan gate compiles only under
+the star topology and the phase gates only under the research-ADR one. This is
+one protocol implemented twice across two topologies rather than a live in-graph
+divergence, which lowers the urgency without touching the duplication.
+
 The lineage is declared and unreconciled: the phase-gate module docstring states
 that it generalizes the plan-approval pattern into a factory parameterized by
-document phase, yet the older node was never migrated onto it. The divergence is
+document phase, yet the older node was never migrated onto it.
+
+External evidence has since arrived that bears on which convention is canonical,
+and it points one way. A downstream decision record in the consuming project
+specifies a new mid-run clarification gate for this repository and names the
+phase gate explicitly as the proven pattern it should follow. That is a third
+gate arriving on the newer convention, which makes the plan-approval node the
+outlier rather than the incumbent, and means the divergence grows rather than
+holds steady if nothing is done. It does not by itself authorize migrating the
+existing node - that remains the architectural call described below - but it
+removes the question of which way the codebase is travelling. The divergence is
 structural rather than cosmetic - return shape, resume payload shape, and the
 name and type of the revise-signal field all differ for the same conceptual
 step. Whoever adds a third gate, or changes how a rejection routes back with a

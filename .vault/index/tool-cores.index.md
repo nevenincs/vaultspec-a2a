@@ -37,6 +37,7 @@ related:
   - '[[2026-07-17-tool-cores-dedup-audit]]'
   - '[[2026-07-17-tool-cores-plan]]'
   - '[[2026-07-17-tool-cores-research]]'
+  - '[[2026-08-01-tool-cores-plan]]'
   - '[[2026-08-01-tool-cores-web-grounding-adr]]'
   - '[[2026-08-01-tool-cores-web-grounding-research]]'
 ---
@@ -88,6 +89,7 @@ Auto-generated index of all documents tagged with `#tool-cores`.
 ### plan
 
 - `2026-07-17-tool-cores-plan` - `tool-cores` plan
+- `2026-08-01-tool-cores-plan` - `tool-cores` plan
 
 ### research
 

@@ -5,30 +5,82 @@ The fan-out/join structure is exercised over a real ``StateGraph`` with an
 deterministic producer so the test isolates the diverge structure (dispatch
 fan-out, per-branch findings, reducer accumulation, synthesis join) from any
 model.
+
+The web-locator acceptance driver goes further and uses a file-backed
+``AsyncSqliteSaver`` -- the checkpointer production actually runs -- so the
+locator is proven to survive real serialisation to disk and back, not merely an
+in-process dict.
 """
 
 from __future__ import annotations
 
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage
 from langgraph.checkpoint.memory import InMemorySaver
+from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from langgraph.graph import END, START, StateGraph
 from langgraph.types import Command
 
 from ....graph.compiler import _wire_diverge_stage
 from ....graph.nodes.diverge import (
+    MAX_WEB_LOCATOR_EXCERPT_CHARS,
+    MAX_WEB_LOCATORS_PER_FINDING,
+    WEB_LOCATOR_KIND,
     create_research_dispatch_node,
     create_researcher_node,
     researcher_node_name,
 )
 from ....thread.state import TeamState
 
+if TYPE_CHECKING:
+    from pathlib import Path
+
 _SPECS: list[dict[str, Any]] = [
     {"thread_id": "codebase", "locators": ["compiler.py:402"]},
     {"thread_id": "prior-art", "locators": ["Send docs"]},
     {"thread_id": "engine", "locators": ["events endpoint"]},
+]
+
+
+def _web_locator(url: str, **overrides: Any) -> dict[str, Any]:
+    """Return a contract-conformant web locator, overridable field by field."""
+    locator: dict[str, Any] = {
+        "kind": WEB_LOCATOR_KIND,
+        "url": url,
+        "retrieved_at": "2026-08-01T09:30:00+00:00",
+        "title": "Send is the map-reduce primitive",
+        "excerpt": "Send launches one branch per item.",
+    }
+    locator.update(overrides)
+    return locator
+
+
+#: Specs whose findings mix an internal locator with a retrieved web locator,
+#: which is the shape a web-grounded branch actually produces.
+_WEB_SPECS: list[dict[str, Any]] = [
+    {
+        "thread_id": "codebase",
+        "locators": ["compiler.py:402"],
+    },
+    {
+        "thread_id": "prior-art",
+        "locators": [
+            "Send docs",
+            _web_locator("https://example.invalid/langgraph/send"),
+        ],
+    },
+    {
+        "thread_id": "engine",
+        "locators": [
+            _web_locator(
+                "https://example.invalid/engine/events",
+                title="Events endpoint",
+                excerpt="The events endpoint streams run updates.",
+            )
+        ],
+    },
 ]
 
 
@@ -161,3 +213,251 @@ def test_researcher_node_name_is_deterministic() -> None:
     assert researcher_node_name("research_dispatch", 12) == (
         "research_dispatch_researcher_12"
     )
+
+
+# ---------------------------------------------------------------------------
+# Typed web locators in the finding contract
+# ---------------------------------------------------------------------------
+
+
+def _web_urls(findings: list[dict[str, Any]]) -> list[str]:
+    """Return every web-locator URL across *findings*, in encounter order."""
+    return [
+        locator["url"]
+        for finding in findings
+        for locator in finding["locators"]
+        if isinstance(locator, dict) and locator.get("kind") == WEB_LOCATOR_KIND
+    ]
+
+
+@pytest.mark.asyncio
+async def test_web_locators_reach_synthesis_and_survive_the_checkpoint(
+    tmp_path: Path,
+) -> None:
+    """A web locator survives dispatch, the reducer, and a real checkpoint.
+
+    This is the acceptance driver for the typed web locator, and it deliberately
+    never sets ``research_findings`` on state: the locators are produced inside
+    the branches, fan in through the append-only reducer, are observed at the
+    synthesis join, and are then read back from a SECOND ``AsyncSqliteSaver``
+    opened on the same file after the first connection closed. A direct
+    field-set would prove only that a dict can be assigned; the reopen proves
+    the locator round-tripped through the checkpointer's real serialisation to
+    disk, which is the seam that rejects a shape it cannot serialise.
+    """
+    checkpoint_path = tmp_path / "diverge-checkpoints.sqlite"
+    config: dict[str, Any] = {"configurable": {"thread_id": "web-locator-run"}}
+    seen_at_synthesis: dict[str, list[dict[str, Any]]] = {}
+
+    async def synthesis_node(state: TeamState) -> dict[str, Any]:
+        seen_at_synthesis["findings"] = list(state.get("research_findings") or [])
+        return {"messages": [AIMessage(content="synthesised", name="synthesist")]}
+
+    def _build() -> StateGraph:
+        builder: StateGraph = StateGraph(cast("Any", TeamState))
+        dispatch = _wire_diverge_stage(
+            builder,
+            dispatch_name="research_dispatch",
+            synthesis_name="synthesis",
+            specs=_WEB_SPECS,
+            make_researcher=lambda spec: create_researcher_node(spec, _fake_producer),
+        )
+        builder.add_node("synthesis", synthesis_node)
+        builder.add_edge(START, dispatch)
+        builder.add_edge("synthesis", END)
+        return builder
+
+    async with AsyncSqliteSaver.from_conn_string(str(checkpoint_path)) as saver:
+        await saver.setup()
+        graph = _build().compile(checkpointer=saver)
+        result = await graph.ainvoke(_base_state(), config=cast("Any", config))
+
+    expected_urls = sorted(
+        [
+            "https://example.invalid/engine/events",
+            "https://example.invalid/langgraph/send",
+        ]
+    )
+    assert sorted(_web_urls(result["research_findings"])) == expected_urls
+
+    # The synthesis stage consumed the locators, not just the claims: web
+    # evidence is available to the synthesist exactly where internal evidence is.
+    assert sorted(_web_urls(seen_at_synthesis["findings"])) == expected_urls
+
+    # Internal locators are untouched by the typed channel.
+    assert "compiler.py:402" in [
+        locator
+        for finding in seen_at_synthesis["findings"]
+        for locator in finding["locators"]
+        if isinstance(locator, str)
+    ]
+
+    # Reopen the persisted checkpoint with a fresh connection and recompiled
+    # graph: nothing from the first process-local run is in play here.
+    async with AsyncSqliteSaver.from_conn_string(str(checkpoint_path)) as reopened:
+        replayed = (
+            await _build()
+            .compile(checkpointer=reopened)
+            .aget_state(cast("Any", config))
+        )
+
+    restored = replayed.values["research_findings"]
+    assert sorted(_web_urls(restored)) == expected_urls
+    engine_locator = next(
+        locator
+        for finding in restored
+        for locator in finding["locators"]
+        if isinstance(locator, dict)
+        and locator["url"] == "https://example.invalid/engine/events"
+    )
+    assert engine_locator == {
+        "kind": "web",
+        "url": "https://example.invalid/engine/events",
+        "retrieved_at": "2026-08-01T09:30:00+00:00",
+        "title": "Events endpoint",
+        "excerpt": "The events endpoint streams run updates.",
+    }
+
+
+async def _locator_producer(state: TeamState, spec: dict[str, Any]) -> dict[str, Any]:
+    """Emit a finding whose locators are taken verbatim from the spec."""
+    return {
+        "claim": f"finding from {spec['thread_id']}",
+        "locators": spec["locators"],
+        "source_thread": spec["thread_id"],
+    }
+
+
+async def _run_with_locators(locators: list[Any]) -> dict[str, Any]:
+    """Drive a researcher branch whose producer emits exactly *locators*."""
+    spec: dict[str, Any] = {"thread_id": "codebase", "locators": locators}
+    node = create_researcher_node(spec, _locator_producer)
+    return await node(_base_state())
+
+
+@pytest.mark.asyncio
+async def test_minimal_web_locator_needs_no_optional_fields() -> None:
+    """Title and excerpt are optional; kind, url, and retrieved_at are not."""
+    result = await _run_with_locators(
+        [
+            {
+                "kind": "web",
+                "url": "https://example.invalid/a",
+                "retrieved_at": "2026-08-01",
+            }
+        ]
+    )
+    assert result["research_findings"][0]["locators"][0]["retrieved_at"] == "2026-08-01"
+
+
+@pytest.mark.asyncio
+async def test_web_locator_accepts_zulu_retrieved_at() -> None:
+    result = await _run_with_locators(
+        [_web_locator("https://example.invalid/a", retrieved_at="2026-08-01T09:30:00Z")]
+    )
+    locator = result["research_findings"][0]["locators"][0]
+    assert locator["retrieved_at"] == "2026-08-01T09:30:00Z"
+
+
+@pytest.mark.asyncio
+async def test_typed_locator_with_unknown_kind_is_refused() -> None:
+    with pytest.raises(ValueError, match="declares kind 'ftp'"):
+        await _run_with_locators(
+            [{"kind": "ftp", "url": "ftp://example.invalid/a", "retrieved_at": "2026"}]
+        )
+
+
+@pytest.mark.asyncio
+async def test_typed_locator_without_kind_is_refused() -> None:
+    with pytest.raises(ValueError, match="declares kind None"):
+        await _run_with_locators(
+            [{"url": "https://example.invalid/a", "retrieved_at": "2026-08-01"}]
+        )
+
+
+@pytest.mark.asyncio
+async def test_web_locator_missing_required_key_is_refused() -> None:
+    with pytest.raises(
+        ValueError, match=r"missing required key\(s\) \['retrieved_at'\]"
+    ):
+        await _run_with_locators([{"kind": "web", "url": "https://example.invalid/a"}])
+
+
+@pytest.mark.asyncio
+async def test_web_locator_with_unknown_key_is_refused() -> None:
+    """The shape is closed: an undeclared field never reaches checkpointed state."""
+    with pytest.raises(ValueError, match=r"unknown key\(s\) \['snippet'\]"):
+        await _run_with_locators(
+            [_web_locator("https://example.invalid/a", snippet="extra")]
+        )
+
+
+@pytest.mark.asyncio
+async def test_web_locator_rejects_non_web_url_scheme() -> None:
+    """A local-file URL must never enter a channel disclosed to a reader."""
+    with pytest.raises(ValueError, match="url scheme 'file'"):
+        await _run_with_locators([_web_locator("file:///etc/passwd")])
+
+
+@pytest.mark.asyncio
+async def test_web_locator_rejects_unparseable_retrieved_at() -> None:
+    with pytest.raises(ValueError, match="is not ISO-8601"):
+        await _run_with_locators(
+            [_web_locator("https://example.invalid/a", retrieved_at="last Tuesday")]
+        )
+
+
+@pytest.mark.asyncio
+async def test_web_locator_rejects_non_str_retrieved_at() -> None:
+    with pytest.raises(TypeError, match="'retrieved_at'"):
+        await _run_with_locators(
+            [_web_locator("https://example.invalid/a", retrieved_at=1754039400)]
+        )
+
+
+@pytest.mark.asyncio
+async def test_web_locator_excerpt_over_cap_is_refused() -> None:
+    """The cap is enforced, not silently applied: the producer must elide."""
+    with pytest.raises(ValueError, match="cap is"):
+        await _run_with_locators(
+            [
+                _web_locator(
+                    "https://example.invalid/a",
+                    excerpt="x" * (MAX_WEB_LOCATOR_EXCERPT_CHARS + 1),
+                )
+            ]
+        )
+
+
+@pytest.mark.asyncio
+async def test_web_locator_excerpt_at_cap_is_admitted() -> None:
+    """The boundary is inclusive, so the cap refuses only genuine overflow."""
+    excerpt = "x" * MAX_WEB_LOCATOR_EXCERPT_CHARS
+    result = await _run_with_locators(
+        [_web_locator("https://example.invalid/a", excerpt=excerpt)]
+    )
+    assert result["research_findings"][0]["locators"][0]["excerpt"] == excerpt
+
+
+@pytest.mark.asyncio
+async def test_web_locator_count_over_cap_is_refused() -> None:
+    over_cap = [
+        _web_locator(f"https://example.invalid/{index}")
+        for index in range(MAX_WEB_LOCATORS_PER_FINDING + 1)
+    ]
+    with pytest.raises(ValueError, match="web locators; cap is"):
+        await _run_with_locators(over_cap)
+
+
+@pytest.mark.asyncio
+async def test_internal_locator_count_is_not_capped() -> None:
+    """The count cap bounds retrieved evidence only; internal locators are free."""
+    internal = [f"compiler.py:{index}" for index in range(200)]
+    result = await _run_with_locators(internal)
+    assert result["research_findings"][0]["locators"] == internal
+
+
+@pytest.mark.asyncio
+async def test_locator_of_unsupported_type_is_refused() -> None:
+    with pytest.raises(TypeError, match=r"must be a str .* or a dict"):
+        await _run_with_locators([["compiler.py:402"]])

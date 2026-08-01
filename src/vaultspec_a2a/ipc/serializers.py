@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING
 from ..graph.events import (
     AgentStatus,
     ArtifactUpdate,
+    ClarificationPending,
     ErrorOccurred,
     MessageChunk,
     PermissionRequest,
@@ -26,12 +27,25 @@ __all__ = ["sequenced_to_dict"]
 
 
 def _event_type(event: object) -> str | None:
-    """Return the stable wire event type for a domain event."""
+    """Return the stable wire event type for a domain event.
+
+    Every event a worker broadcasts MUST have a case here. An event that falls
+    through relays with no ``type`` at all, and the gateway's closed catalog then
+    projects an untyped frame onto the always-safe identity keys - so the frame
+    reaches subscribers stripped of everything that made it meaningful, while the
+    worker-side emission looks perfectly healthy. Nothing raises, and an
+    in-process test of the emitter passes, because the loss happens on the far
+    side of the IPC boundary. Adding an event kind without adding it here is
+    therefore silent, and is exactly how the clarification nudge shipped
+    undeliverable.
+    """
     match event:
         case AgentStatus():
             return "agent_status"
         case ArtifactUpdate():
             return "artifact_update"
+        case ClarificationPending():
+            return "clarification_pending"
         case ErrorOccurred():
             return "error"
         case MessageChunk():

@@ -3,7 +3,10 @@ id           = "vaultspec-adr-research-clarify"
 display_name = "Vaultspec ADR Research (asks first)"
 description  = """
 Deterministic variant of vaultspec-adr-research that asks its human a bounded
-questionnaire BEFORE the research fans out. Identical research_adr topology and
+questionnaire BEFORE the research fans out. It uses the in-process deterministic
+provider rather than the tape server: the tape corpus carries no turns for the
+document roles this topology runs, and an in-process provider needs no container,
+so the loop certifies on hosts least able to run one. Identical research_adr topology and
 the same five worker agent_ids as the mock variant (so actor-token bundle keys
 and submitter role keys are unchanged); the only difference is the declared
 [team.clarification] block.
@@ -20,7 +23,7 @@ a run can stop for a question and exactly which one it will ask.
 """
 
 [team.defaults]
-provider   = "mock"
+provider   = "deterministic"
 capability = "mid"
 
 [team.topology]
@@ -67,20 +70,20 @@ recursion_limit      = 50
 
 [[team.workers]]
 agent_id = "vaultspec-researcher"
-model    = { provider = "mock" }
+model    = { provider = "deterministic" }
 
 [[team.workers]]
 agent_id = "vaultspec-synthesist"
-model    = { provider = "mock" }
+model    = { provider = "deterministic" }
 
 [[team.workers]]
 agent_id = "vaultspec-adr-author"
-model    = { provider = "mock" }
+model    = { provider = "deterministic" }
 
 [[team.workers]]
 agent_id = "vaultspec-plan-author"
-model    = { provider = "mock" }
+model    = { provider = "deterministic" }
 
 [[team.workers]]
 agent_id = "vaultspec-doc-reviewer"
-model    = { provider = "mock" }
+model    = { provider = "deterministic" }

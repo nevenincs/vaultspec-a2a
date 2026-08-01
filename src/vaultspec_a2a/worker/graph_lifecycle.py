@@ -17,6 +17,7 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from ..domain_config import domain_config
 from ..graph.compiler import _resolve_model_for_worker, compile_team_graph
 from ..graph.enums import Provider
+from ..streaming import node_metadata_from_graph
 from ..team.team_config import AgentConfig, load_agent_config, load_team_config
 from ..telemetry import ws_span
 from ..thread.constants import DEFAULT_SUPERVISOR_ID
@@ -272,17 +273,7 @@ class GraphLifecycleManager:
         ``_node_metadata`` cache so that ``emit_team_status`` and the REST
         ``/team-status`` endpoint include role/display_name/description.
         """
-        nodes: dict[str, dict[str, str]] = {}
-        for node_name, node_spec in getattr(graph, "nodes", {}).items():
-            meta = getattr(node_spec, "metadata", None) or {}
-            if meta:
-                nodes[node_name] = {
-                    "role": str(meta.get("role", "")),
-                    "display_name": str(meta.get("display_name", "")),
-                    "description": str(meta.get("description", "")),
-                    "provider": str(meta.get("provider", "")),
-                    "model": str(meta.get("model", "")),
-                }
+        nodes = node_metadata_from_graph(graph)
         if nodes:
             await self._bridge.send_event(
                 thread_id,

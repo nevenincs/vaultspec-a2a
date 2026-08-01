@@ -43,8 +43,13 @@ class ActorTokenBundle(BaseModel):
         receives its own token via :meth:`actor_token`.
     engine_bearer:
         The machine bearer minted at engine boot, forwarded so a worker's
-        authoring bridge can reach the engine. Optional: when absent the worker
-        resolves the bearer from the engine discovery file instead.
+        authoring bridge can reach the engine. Optional in the wire shape only:
+        a run that carries no bearer leaves the bridge unarmed, because the
+        bearer is meaningful only paired with the engine origin it was minted
+        for. A consumer that resolves its OWN origin may substitute the bearer
+        from that same resolution (the executor's run-end session close does);
+        a consumer holding a separately-supplied origin must not, since pairing
+        a bearer with a foreign origin would misdirect the credential.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")

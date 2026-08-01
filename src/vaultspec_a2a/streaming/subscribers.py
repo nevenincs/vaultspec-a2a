@@ -14,6 +14,7 @@ from ..domain_config import domain_config
 from ..graph.protocols import NullTelemetryHook, TelemetryHook
 from ..thread.errors import EventAggregatorError
 from .fanout import deliver_bounded
+from .node_metadata import node_metadata_from_graph
 from .types import SequencedEvent, StreamableGraph
 
 logger = logging.getLogger(__name__)
@@ -203,17 +204,7 @@ class SubscriberManager:
 
     def register_graph(self, graph: StreamableGraph) -> None:
         """Cache node metadata from a compiled LangGraph graph."""
-        self._node_metadata = {}
-        for node_name, node_spec in getattr(graph, "nodes", {}).items():
-            meta = getattr(node_spec, "metadata", None) or {}
-            if meta:
-                self._node_metadata[node_name] = {
-                    "role": str(meta.get("role", "")),
-                    "display_name": str(meta.get("display_name", "")),
-                    "description": str(meta.get("description", "")),
-                    "provider": str(meta.get("provider", "")),
-                    "model": str(meta.get("model", "")),
-                }
+        self._node_metadata = node_metadata_from_graph(graph)
         logger.debug(
             "register_graph: cached metadata for %d nodes", len(self._node_metadata)
         )

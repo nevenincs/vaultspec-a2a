@@ -63,6 +63,13 @@ class AuthoringBindingProvider:
         eligibility policy). When coverage is present, the engine catalog is
         fetched once per run (cached in the :class:`RunCatalogStore`) and reused
         for every subsequent role in the same run.
+
+        A missing bearer is NOT resolved from the engine discovery file here.
+        Two reasons, both binding: ``resolve_engine`` is synchronous (a blocking
+        ``httpx`` probe) and this runs on the worker's event loop, and it returns
+        its own origin, which this provider must not pair with the fail-closed
+        ``engine_base_url`` it was compiled against. Aiming a bearer at an origin
+        it was not minted for is the hazard that outweighs arming the bridge.
         """
         bearer = self._token_store.engine_bearer(thread_id)
         actor_token = self._token_store.actor_token(thread_id, agent_id)

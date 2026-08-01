@@ -122,6 +122,33 @@ class TestAuthoringBindingProvider:
         assert await provider.binding_for("t1", "vaultspec-coder") is None
 
     @pytest.mark.asyncio
+    async def test_registered_bundle_without_bearer_yields_none(self) -> None:
+        # The bundle is REGISTERED and carries this role's actor token, but the
+        # dispatch supplied no engine bearer. The provider does not substitute
+        # one from engine discovery (that would pair a bearer with an origin it
+        # was not minted for), so the bridge stays unarmed rather than armed
+        # against the wrong engine.
+        token_store = RunTokenStore()
+        token_store.register(
+            "t1",
+            ActorTokenBundle(
+                tokens={"vaultspec-coder": "actor-xyz"}, engine_bearer=None
+            ),
+        )
+        assert token_store.has("t1")  # not the no-bundle case
+        assert token_store.actor_token("t1", "vaultspec-coder") == "actor-xyz"
+        assert token_store.engine_bearer("t1") is None
+
+        catalog_store = RunCatalogStore()
+        catalog_store.register("t1", _snapshot("read_context"))
+        provider = AuthoringBindingProvider(
+            engine_base_url=_ENGINE_URL,
+            token_store=token_store,
+            catalog_store=catalog_store,
+        )
+        assert await provider.binding_for("t1", "vaultspec-coder") is None
+
+    @pytest.mark.asyncio
     async def test_role_without_token_yields_none(self) -> None:
         # Bearer present, but this specific role has no actor token: no binding,
         # so one role can never ride another's principal.

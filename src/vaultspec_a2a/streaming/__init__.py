@@ -13,11 +13,19 @@ sequenced output.
 """
 
 from .aggregator import EventAggregator
+from .node_metadata import (
+    NODE_METADATA_FIELDS,
+    node_metadata_fields,
+    node_metadata_from_graph,
+)
 from .types import SequencedEvent, StreamableGraph, classify_tool_kind
 
 __all__ = [
+    "NODE_METADATA_FIELDS",
     "EventAggregator",
     "SequencedEvent",
     "StreamableGraph",
     "classify_tool_kind",
+    "node_metadata_fields",
+    "node_metadata_from_graph",
 ]

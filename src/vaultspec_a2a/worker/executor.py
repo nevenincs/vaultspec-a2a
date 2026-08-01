@@ -274,11 +274,16 @@ class Executor:
             )
             if not isinstance(session_id, str) or not session_id:
                 return  # non-authoring run — no engine session to close
-            bearer = self._token_store.engine_bearer(thread_id)
             actor_token = self._token_store.actor_token(thread_id, _CLOSE_SESSION_ROLE)
             engine = resolve_engine()
-            if not bearer or not actor_token or engine is None:
+            if not actor_token or engine is None:
                 return  # no credentials or no reachable engine — degrade silently
+            # The run's own bearer when the dispatch carried one, else the bearer
+            # the SAME resolution paired with ``engine.base_url`` below. Falling
+            # back is sound only here: origin and bearer arrive from one
+            # ``resolve_engine()`` call, so the credential can never be aimed at
+            # an origin it was not minted for.
+            bearer = self._token_store.engine_bearer(thread_id) or engine.bearer_token
             async with AuthoringClient(
                 engine.base_url,
                 bearer,

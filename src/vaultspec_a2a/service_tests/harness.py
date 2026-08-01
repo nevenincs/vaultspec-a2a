@@ -18,10 +18,14 @@ import httpx
 
 from ..control.config import settings
 from ..lifecycle.manager import tree_kill
-from ..tests.gateway_boot import free_port
+from ..tests.gateway_boot import GatewayBootError, free_port
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Sequence
+
+# A process this harness owns, its label, and the log it writes: enough to fail
+# a readiness wait with the exit code and the tail that explain the death.
+_WatchedProcess = tuple[str, "subprocess.Popen[str]", Path]
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 COMPOSE_FILE = REPO_ROOT / "service" / "docker-compose.integration.yml"
@@ -108,16 +112,56 @@ def _spawn_process(
     return proc, log_file
 
 
+_ERROR_LOG_TAIL_CHARS = 4000
+_DIAGNOSTIC_LOG_TAIL_CHARS = 20000
+
+
+def _log_tail(log_path: Path, *, limit: int = _ERROR_LOG_TAIL_CHARS) -> str:
+    """Return the last *limit* characters of *log_path*, or ``""``."""
+    try:
+        return log_path.read_text(encoding="utf-8", errors="replace")[-limit:]
+    except OSError:
+        return ""
+
+
+def _log_tail_suffix(watch: Sequence[_WatchedProcess]) -> str:
+    """Render the watched processes' log tails for a failure message."""
+    parts = [
+        f"\n--- {name} log tail ---\n{tail}"
+        for name, _proc, log_path in watch
+        if (tail := _log_tail(log_path))
+    ]
+    return "".join(parts)
+
+
 def _wait_for(
     label: str,
     probe: Callable[[], bool],
     *,
     timeout: float = 120.0,
     interval: float = 1.0,
+    watch: Sequence[_WatchedProcess] = (),
 ) -> None:
+    """Poll *probe* until it passes, failing fast on a dead watched process.
+
+    Supplying *watch* makes the wait DEATH-AWARE: a child that exits before the
+    probe passes fails immediately with its exit code and log tail rather than
+    burning the whole deadline — the bind-race signature, and the reason the
+    shared gateway-boot poll checks liveness every iteration. Waits with no
+    owning process (the compose-managed services, whose lifecycle Docker owns)
+    pass no *watch* and keep the plain deadline behaviour, because there is no
+    exit status to consult.
+    """
     deadline = time.monotonic() + timeout
     last_error: Exception | None = None
     while time.monotonic() < deadline:
+        for name, proc, log_path in watch:
+            if proc.poll() is not None:
+                raise GatewayBootError(
+                    f"{label}: {name} exited before readiness "
+                    f"(exit {proc.returncode})"
+                    f"{_log_tail_suffix([(name, proc, log_path)])}"
+                )
         try:
             if probe():
                 return
@@ -127,6 +171,7 @@ def _wait_for(
     raise TimeoutError(
         f"Timed out waiting for {label}"
         + (f": {last_error}" if last_error is not None else "")
+        + _log_tail_suffix(watch)
     )
 
 
@@ -253,6 +298,23 @@ class ServiceStack:
             resp = client.get("/health")
             return resp.status_code == 200
 
+    def _watched(self, *names: str) -> list[_WatchedProcess]:
+        """Return the named harness-owned processes that are currently spawned.
+
+        Only processes this harness holds a ``Popen`` for are watchable; the
+        compose-managed services are deliberately absent, since Docker owns
+        their lifecycle and there is no local exit status to read.
+        """
+        owned: dict[str, subprocess.Popen[str] | None] = {
+            "gateway": self._gateway_proc,
+            "worker": self._worker_proc,
+        }
+        return [
+            (name, proc, self.runtime_dir / f"{name}.log")
+            for name in names
+            if (proc := owned[name]) is not None
+        ]
+
     def start(self) -> None:
         """Bring the deterministic compose stack online and wait for readiness."""
         self._ensure_runtime_dir()
@@ -264,10 +326,14 @@ class ServiceStack:
                 self._gateway_http_ready,
                 timeout=120.0,
                 interval=1.0,
+                watch=self._watched("gateway"),
             )
             self._start_worker()
             self._wait_for_process_health(
-                self.worker_health, label="worker health", timeout=120.0
+                self.worker_health,
+                label="worker health",
+                timeout=120.0,
+                watch=self._watched("worker"),
             )
             self.wait_for_ready()
         except Exception:
@@ -372,12 +438,14 @@ class ServiceStack:
         *,
         label: str,
         timeout: float,
+        watch: Sequence[_WatchedProcess] = (),
     ) -> None:
         _wait_for(
             label,
             lambda: probe().get("status") == "ok",
             timeout=timeout,
             interval=1.0,
+            watch=watch,
         )
 
     def stop(self) -> None:
@@ -470,7 +538,7 @@ class ServiceStack:
         ):
             if proc_path.exists():
                 (self.runtime_dir / f"{name}-tail.txt").write_text(
-                    proc_path.read_text(encoding="utf-8", errors="replace")[-20000:],
+                    _log_tail(proc_path, limit=_DIAGNOSTIC_LOG_TAIL_CHARS),
                     encoding="utf-8",
                 )
 
@@ -510,7 +578,15 @@ class ServiceStack:
                 and checks.get("circuit_breaker", {}).get("status") == "closed"
             )
 
-        _wait_for("gateway readiness", _probe, timeout=180.0, interval=2.0)
+        # The aggregate probe spans both owned processes, so either dying is a
+        # fast failure rather than a 180s burn ending in a bare timeout.
+        _wait_for(
+            "gateway readiness",
+            _probe,
+            timeout=180.0,
+            interval=2.0,
+            watch=self._watched("gateway", "worker"),
+        )
         return self.health()
 
     def health(self) -> dict[str, Any]:

@@ -35,6 +35,7 @@ from ..graph.events import (
 )
 from ..graph.protocols import NullTelemetryHook, TelemetryHook
 from .buffering import BufferingManager
+from .node_metadata import node_metadata_fields
 from .subscribers import SubscriberManager
 from .types import SequencedEvent, classify_tool_kind, map_acp_option_kind
 
@@ -514,11 +515,10 @@ class EventEmitters:
             data = dict(agent_data)
             node_name = data.get("node_name", "")
             node_meta = node_metadata.get(node_name, {})
-            data.setdefault("role", node_meta.get("role", ""))
-            data.setdefault("display_name", node_meta.get("display_name", ""))
-            data.setdefault("description", node_meta.get("description", ""))
-            data.setdefault("provider", node_meta.get("provider", ""))
-            data.setdefault("model", node_meta.get("model", ""))
+            # Defaulted, not assigned: a caller-supplied value for any of these
+            # wins over the cached node metadata.
+            for field, value in node_metadata_fields(node_meta).items():
+                data.setdefault(field, value)
             if hasattr(data.get("state"), "value"):
                 data["state"] = data["state"].value
             agent_summaries.append(
@@ -618,13 +618,7 @@ class EventEmitters:
         if isinstance(nodes, dict):
             self._subscribers.set_node_metadata(
                 {
-                    name: {
-                        "role": str(meta.get("role", "")),
-                        "display_name": str(meta.get("display_name", "")),
-                        "description": str(meta.get("description", "")),
-                        "provider": str(meta.get("provider", "")),
-                        "model": str(meta.get("model", "")),
-                    }
+                    name: node_metadata_fields(meta)
                     for name, meta in nodes.items()
                     if isinstance(meta, dict)
                 }

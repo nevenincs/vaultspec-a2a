@@ -23,7 +23,14 @@ from langchain_core.messages import HumanMessage
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from langgraph.types import Command
 
-from ...team.team_config import ResearchThreadSpec, load_agent_config, load_team_config
+from ...team.team_config import (
+    ResearchThreadSpec,
+    TopologyType,
+    load_agent_config,
+    load_team_config,
+)
+from ...thread.clarification import CLARIFICATION_TOPOLOGIES
+from ...thread.errors import ConfigError
 from ..compiler import _clarification_request_id, compile_team_graph
 
 if TYPE_CHECKING:
@@ -134,6 +141,47 @@ async def test_a_declaring_preset_wires_the_stage_ahead_of_the_fan_out(
     assert {"clarification_request", "clarification_gate"} <= node_keys
     # The existing machine is untouched beside it.
     assert {"research_dispatch", "synthesis", "research_gate", "adr_gate"} <= node_keys
+
+
+@pytest.mark.parametrize(
+    "topology_type",
+    [t for t in TopologyType if t.value not in CLARIFICATION_TOPOLOGIES],
+    ids=lambda t: t.value,
+)
+def test_compiling_a_questionnaire_onto_a_topology_that_never_asks_is_refused(
+    topology_type: TopologyType,
+    pf: ProviderFactoryProtocol,
+) -> None:
+    """Compile refuses the graph that would accept questions and never ask them.
+
+    Preset load refuses this pairing first, but load is not the only door into the
+    compiler: a validated config can be moved onto another topology afterwards -
+    ``model_copy`` re-runs no validator, and this test walks in through exactly
+    that door with a REAL declaring preset. Without the compile-time refusal the
+    call below returns a perfectly usable graph with no clarification node in it,
+    which is the silent-skip failure in its finished form: a run that was told to
+    ask, that never asks, and that reports success.
+
+    The topology is asserted by name in the message because the two halves of the
+    contradiction live in different blocks of the preset, and the author needs to
+    be told which one the compiler read.
+    """
+    team = _team(_ASKING_PRESET)
+    moved = team.model_copy(
+        update={"topology": team.topology.model_copy(update={"type": topology_type})}
+    )
+    assert moved.clarification is not None, "the probe must still declare questions"
+
+    with pytest.raises(ConfigError, match=topology_type.value) as raised:
+        compile_team_graph(
+            team_config=moved,
+            agent_configs=_agent_configs(moved),
+            checkpointer=None,
+            provider_factory=pf,
+            proposal_submitter=_FakeSubmitter(),
+        )
+
+    assert "clarification" in str(raised.value)
 
 
 @pytest.mark.asyncio

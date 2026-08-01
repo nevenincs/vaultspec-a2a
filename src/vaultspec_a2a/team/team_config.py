@@ -27,9 +27,11 @@ from pydantic import BaseModel, Field, model_validator
 from ..authoring.contract import is_document_authoring_topology
 from ..graph.enums import Model, Provider
 from ..thread.clarification import (
+    CLARIFICATION_TOPOLOGIES,
     MAX_QUESTIONS_PER_REQUEST,
     ClarificationQuestion,
     ClarificationRequest,
+    topology_honours_clarification,
 )
 from ..thread.errors import (
     AgentConfigNotFoundError,
@@ -548,6 +550,30 @@ class TeamConfig(BaseModel):
                 f"team '{self.id}' declares an unusable [team.clarification]: {exc}"
             ) from exc
         return self
+
+    @model_validator(mode="after")
+    def validate_clarification_topology(self) -> "TeamConfig":
+        """Refuse a questionnaire declared on a topology that never asks it.
+
+        Only the topologies named in :data:`CLARIFICATION_TOPOLOGIES` mount the
+        clarification stage when their graph is built, so a ``[team.clarification]``
+        block on any other topology is a promise nothing keeps: the preset loads,
+        reports valid, ships, and its runs never stop to ask. That failure is
+        invisible from the outside - a run that skipped its own questionnaire looks
+        exactly like a run that had none - which is why it is refused here rather
+        than logged or ignored. Refusing keeps "does this preset ask?" answerable
+        from the preset alone, the same property the declaration itself exists for.
+        """
+        if self.clarification is None or topology_honours_clarification(
+            self.topology.type
+        ):
+            return self
+        raise ConfigError(
+            f"team '{self.id}' declares [team.clarification] on topology "
+            f"'{self.topology.type.value}', which does not mount the clarification "
+            f"stage; the questions would never be asked. Topologies that ask: "
+            f"{sorted(CLARIFICATION_TOPOLOGIES)}."
+        )
 
     def clarification_request(self, request_id: str) -> ClarificationRequest | None:
         """Project the declared questions into the request a run would park on.

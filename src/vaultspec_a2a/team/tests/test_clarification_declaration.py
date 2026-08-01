@@ -19,12 +19,13 @@ from typing import Any
 import pytest
 
 from ...thread.clarification import (
+    CLARIFICATION_TOPOLOGIES,
     MAX_OPTIONS_PER_QUESTION,
     MAX_QUESTIONS_PER_REQUEST,
     ClarificationKind,
 )
 from ...thread.errors import ConfigError
-from ..team_config import TeamConfig, load_team_config
+from ..team_config import TeamConfig, TopologyType, load_team_config
 
 _PRESET_DIR = Path(__file__).resolve().parents[1] / "presets" / "teams"
 
@@ -44,6 +45,31 @@ def _base_team(**clarification: Any) -> dict[str, Any]:
     }
     if clarification:
         team["clarification"] = clarification
+    return team
+
+
+def _topology_block(topology_type: TopologyType) -> dict[str, Any]:
+    """A minimally valid ``[team.topology]`` block for *topology_type*.
+
+    Built per type rather than shared, because the order/loop_node requirements
+    differ - a team that failed on those instead would prove nothing about the
+    clarification rule under test.
+    """
+    if topology_type is TopologyType.PIPELINE:
+        return {"type": topology_type.value, "order": ["vaultspec-researcher"]}
+    if topology_type is TopologyType.PIPELINE_LOOP:
+        return {
+            "type": topology_type.value,
+            "order": ["vaultspec-researcher", "vaultspec-synthesist"],
+            "loop_node": "vaultspec-synthesist",
+        }
+    return {"type": topology_type.value, "order": []}
+
+
+def _team_on(topology_type: TopologyType, **clarification: Any) -> dict[str, Any]:
+    """The minimal team, moved onto *topology_type*."""
+    team = _base_team(**clarification)
+    team["topology"] = _topology_block(topology_type)
     return team
 
 
@@ -151,6 +177,59 @@ def test_a_duplicate_option_is_refused() -> None:
         TeamConfig.model_validate(
             _base_team(questions=[_question(options=["same", "same"])]),
         )
+
+
+# ---------------------------------------------------------------------------
+# The declaration is refused by a topology that would never ask it
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "topology_type",
+    [t for t in TopologyType if t.value not in CLARIFICATION_TOPOLOGIES],
+    ids=lambda t: t.value,
+)
+def test_declaring_questions_on_a_topology_that_never_asks_is_refused(
+    topology_type: TopologyType,
+) -> None:
+    """The silent-skip failure: accepted at load, never honoured at run time.
+
+    Only the topologies that mount the clarification stage can ask, so a block
+    declared on any other one is a questionnaire nobody would ever see - and a run
+    that skipped its own questions is indistinguishable from a run that had none.
+    The refusal names the offending topology so the preset author is told which
+    half of the contradiction to change, rather than being left to infer it.
+
+    Parametrized over the live ``TopologyType`` members rather than a hand-written
+    list, so a topology added later is covered the day it is added: it either
+    mounts the stage (and joins the honouring set) or it refuses the declaration.
+    """
+    with pytest.raises(ConfigError, match=topology_type.value) as raised:
+        TeamConfig.model_validate(_team_on(topology_type, questions=[_question()]))
+
+    assert "clarification" in str(raised.value)
+
+
+@pytest.mark.parametrize(
+    "topology_type",
+    [t for t in TopologyType if t.value in CLARIFICATION_TOPOLOGIES],
+    ids=lambda t: t.value,
+)
+def test_a_topology_that_asks_still_accepts_its_declaration(
+    topology_type: TopologyType,
+) -> None:
+    """The guard refuses the unwired topologies WITHOUT disarming the wired one."""
+    team = TeamConfig.model_validate(_team_on(topology_type, questions=[_question()]))
+
+    assert team.clarification is not None
+    assert team.clarification_request("req-1") is not None
+
+
+def test_a_topology_that_never_asks_is_untouched_when_it_declares_nothing() -> None:
+    """The guard is scoped to the declaration, not to the topology."""
+    for topology_type in TopologyType:
+        team = TeamConfig.model_validate(_team_on(topology_type))
+        assert team.clarification is None
 
 
 # ---------------------------------------------------------------------------

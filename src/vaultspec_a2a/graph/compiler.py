@@ -30,7 +30,11 @@ from langgraph.graph.state import CompiledStateGraph
 from langgraph.types import RetryPolicy
 
 from ..authoring.contract import RESEARCH_ADR_ROLES
-from ..thread.clarification import ClarificationRequest
+from ..thread.clarification import (
+    CLARIFICATION_TOPOLOGIES,
+    ClarificationRequest,
+    topology_honours_clarification,
+)
 from ..thread.errors import (
     ConfigError,
     ProviderSessionError,
@@ -432,7 +436,9 @@ def compile_team_graph(
 
     Raises:
         ConfigError: If a worker agent_id from team_config is not in agent_configs,
-                     or if topology configuration is invalid.
+                     if topology configuration is invalid, or if a clarification
+                     questionnaire is declared on a topology that mounts no
+                     clarification stage.
         ValueError:  If an unknown topology type is encountered.
     """
     from ..team.team_config import TopologyType
@@ -445,6 +451,23 @@ def compile_team_graph(
         raise ValueError(
             f"Unknown topology type: {topology.type!r}. "
             f"Expected one of: {[t.value for t in TopologyType]}"
+        )
+
+    # Only the topologies below mount the clarification stage, so compiling a
+    # config that declares questions onto any other topology would produce a graph
+    # that silently never asks them. Preset load refuses this too, but a config can
+    # reach the compiler without re-running its validators (``model_copy`` is the
+    # obvious route), so the refusal is repeated where the graph is actually built
+    # - the last point at which the declaration and the wiring can still be
+    # compared.
+    if getattr(team_config, "clarification", None) is not None and (
+        not topology_honours_clarification(topology.type)
+    ):
+        raise ConfigError(
+            f"Team {getattr(team_config, 'id', '?')!r} declares a clarification "
+            f"questionnaire on topology {topology.type.value!r}, which compiles no "
+            f"clarification stage; the questions would never be asked. Topologies "
+            f"that ask: {sorted(CLARIFICATION_TOPOLOGIES)}."
         )
 
     # interrupt_before disabled: approval flows via interrupt() inside the node only.

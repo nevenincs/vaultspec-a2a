@@ -45,6 +45,7 @@ if TYPE_CHECKING:
 __all__ = [
     "CLARIFICATION_INTERRUPT_TYPE",
     "CLARIFICATION_RESUME_TYPE",
+    "CLARIFICATION_TOPOLOGIES",
     "MAX_ANSWER_CHARS",
     "MAX_OPTIONS_PER_QUESTION",
     "MAX_OPTION_CHARS",
@@ -55,6 +56,7 @@ __all__ = [
     "ClarificationQuestion",
     "ClarificationRequest",
     "pending_clarification",
+    "topology_honours_clarification",
     "validate_clarification_answers",
 ]
 
@@ -63,6 +65,30 @@ __all__ = [
 # dispatch boundaries, so they are named once here.
 CLARIFICATION_INTERRUPT_TYPE = "clarification_request"
 CLARIFICATION_RESUME_TYPE = "clarification_response"
+
+# The topologies whose compiled graph actually MOUNTS the clarification stage,
+# named once so the layer that accepts a declaration and the layer that honours it
+# cannot disagree. Membership is a promise about the graph builder, not a label: a
+# topology named here mounts the request and gate nodes in ``graph.compiler``, and
+# a topology absent from it refuses a ``[team.clarification]`` declaration outright
+# at preset load and again at compile. Refusing is the point - a declaration
+# accepted by a topology that never asks is a run that silently skips its own
+# questionnaire, which is indistinguishable from a working run until a human
+# notices they were never asked.
+#
+# Topology-type STRING values: ``TopologyType`` is a ``StrEnum``, so a member
+# equals and hashes as its ``str`` value and callers pass enum members directly.
+CLARIFICATION_TOPOLOGIES: frozenset[str] = frozenset({"research_adr"})
+
+
+def topology_honours_clarification(topology_type: str) -> bool:
+    """Return whether a graph of *topology_type* mounts the clarification stage.
+
+    Accepts a ``TopologyType`` member directly (``StrEnum``), so no stringification
+    is needed at call sites.
+    """
+    return topology_type in CLARIFICATION_TOPOLOGIES
+
 
 # Cardinality bounds. A questionnaire is a bounded interruption of a run, not a
 # form: four questions is the ceiling a human answers without abandoning the run,

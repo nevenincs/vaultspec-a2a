@@ -72,6 +72,21 @@ class TestBoundClarificationQuestions:
         bounded = bound_clarification_questions(questions)
         assert len(bounded) == MAX_CLARIFICATION_QUESTIONS
 
+    def test_malformed_leading_entries_do_not_shrink_the_cap_window(self) -> None:
+        """Filter THEN cap: 2 malformed leaders in a 6-entry list still yield
+        the 4 valid trailing questions, not 2 - the cap applies to the valid
+        result, not the raw input window."""
+        questions = [
+            {"id": "", "prompt": "malformed: no id"},
+            {"id": "bad", "prompt": ""},
+            *(
+                {"id": f"q{i}", "prompt": f"Question {i}?"}
+                for i in range(4)
+            ),
+        ]
+        bounded = bound_clarification_questions(questions)
+        assert [q["id"] for q in bounded] == ["q0", "q1", "q2", "q3"]
+
     def test_caps_option_count_for_choice_questions(self) -> None:
         questions = [
             {

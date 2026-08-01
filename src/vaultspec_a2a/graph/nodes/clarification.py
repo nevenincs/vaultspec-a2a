@@ -104,10 +104,18 @@ def bound_clarification_questions(
     match the engine's answer-key token grammar (``_QUESTION_ID_GRAMMAR``) is
     dropped rather than advertised unanswerable; a ``choice`` question's
     options list is capped and empty/duplicate option text is dropped.
+
+    Filter THEN cap, not the reverse: the ``MAX_CLARIFICATION_QUESTIONS``
+    limit applies to the VALID result, not the raw input window, so malformed
+    leading entries can never push valid ones out of the cap (a 6-entry list
+    with 2 malformed leaders still yields the 4 valid trailing questions, not
+    2).
     """
     bounded: list[dict[str, Any]] = []
     seen_ids: set[str] = set()
-    for raw in questions[:MAX_CLARIFICATION_QUESTIONS]:
+    for raw in questions:
+        if len(bounded) >= MAX_CLARIFICATION_QUESTIONS:
+            break
         if not isinstance(raw, dict):
             continue
         qid = _bounded_text(raw.get("id", ""), MAX_QUESTION_ID_CHARS)

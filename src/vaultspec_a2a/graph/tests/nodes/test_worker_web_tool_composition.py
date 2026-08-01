@@ -9,13 +9,18 @@ the payload carries the exact built-in names, under the decided bounds, for
 exactly the roles the read floor already covers and no others.
 
 The lane proof is constructed here rather than declared, and that is deliberate.
-The shipped declaration is empty by design, so a test that waited for a real entry
-could not exist until the capability shipped - which is precisely how a seam
-reaches production having never once run lit. The verdict therefore arrives as a
-parameter, the same shape the Codex posture resolver uses: the test supplies a
-``WebLaneProof`` exactly as a live-proof change would record one, and the
-production composition seam consumes it unchanged. What the test never does is
-edit the declaration, reach past the seam, or set an allowlist field directly.
+The declaration landed empty, so a test that waited for a real entry could not have
+existed until the capability shipped - which is precisely how a seam reaches
+production having never once run lit. The verdict therefore arrives as a parameter,
+the same shape the Codex posture resolver uses: the test supplies a ``WebLaneProof``
+exactly as a live-proof change would record one, and the production composition seam
+consumes it unchanged. What the test never does is edit the declaration, reach past
+the seam, or set an allowlist field directly.
+
+The supplied-proof shape is KEPT now that real entries exist, rather than retired in
+favour of them. It covers a tool set no shipped lane has yet earned in full, so the
+seam stays proven for names ahead of any lane's proof; the derivation from the real
+declaration is exercised separately, on both stances, at the end of this module.
 
 The names it supplies are not written out; they are read off the egress axis, so a
 built-in added to or removed from that declaration changes what this test demands
@@ -32,8 +37,8 @@ reach, and the lane verdict is derived by the caller and arrives as data, so an
 unearned lane contributes an empty tuple and composes NOTHING. That silence is the
 honest shape here, because a built-in is a property of the lane rather than an
 advertisement anybody wrote. The consequence for tests is concrete: the native
-counterpart of "refused on every lane shipped today" is "dark on every lane
-shipped today", and it is asserted below as darkness, not as a raised error.
+counterpart of a refusal is DARKNESS on an unproven lane, and it is asserted below
+as darkness, not as a raised error.
 """
 
 from __future__ import annotations
@@ -54,7 +59,13 @@ from ....providers._acp_mcp import (
     NativeToolDomainPosture,
     compose_native_read_tools,
 )
-from ....providers.lane_admission import WebLaneProof, web_tool_names_for
+from ....providers.lane_admission import (
+    PROVEN_TURN_LANES,
+    PROVEN_WEB_LANES,
+    WebLaneProof,
+    is_lane_admissible,
+    web_tool_names_for,
+)
 from ...enums import Provider
 from ...nodes.worker import create_worker_node
 
@@ -113,8 +124,13 @@ def _make_state() -> TeamState:
     }
 
 
-def _model(tmp_path: Path, *, session_new: Path):
-    """A real ACP model on the Claude lane, recording what the CLI receives."""
+def _model(tmp_path: Path, *, session_new: Path, provider: str = "claude"):
+    """A real ACP model on *provider*'s lane, recording what the CLI receives.
+
+    The lane is a parameter because the production derivation now has two answers to
+    give - a proven lane's names and an unproven lane's nothing - and both must be
+    driven through the same spawn rather than one being argued from the other.
+    """
     from ....providers.acp_chat_model import AcpChatModel
 
     return AcpChatModel(
@@ -130,7 +146,7 @@ def _model(tmp_path: Path, *, session_new: Path):
         # armed run always carries its lane token.
         env_vars={"ANTHROPIC_AUTH_TOKEN": "env-auth-token"},
         workspace_root=str(tmp_path),
-        provider="claude",
+        provider=provider,
     )
 
 
@@ -166,24 +182,44 @@ def test_the_supplied_proof_matches_the_shipped_declaration() -> None:
 
 
 @pytest.mark.parametrize("lane", (*Provider, "not-a-lane", None))
-def test_no_lane_shipped_today_earns_a_web_builtin(
+def test_only_a_declared_lane_earns_a_web_builtin(
     lane: Provider | str | None,
 ) -> None:
-    """Deny is the default, and today it is the answer every lane gives.
+    """Deny is the default, and the declaration is the only thing that lifts it.
 
-    The native counterpart of the registry path's "refused on every lane shipped
-    today", expressed as darkness because this path does not refuse. Every
-    ``Provider`` this tree ships is driven, not a chosen few, so a lane added later
-    is covered the day it is added rather than the day somebody remembers to extend
-    a list. The two non-members matter as much as the members: an unrecognised
-    string and a model that declared no lane must both land on deny rather than
-    fall through, since an unidentifiable lane is exactly a lane with no proof.
+    The native counterpart of the registry path's refusal, expressed as darkness
+    because this path does not refuse. Every ``Provider`` this tree ships is driven,
+    not a chosen few, so a lane added later is covered the day it is added rather
+    than the day somebody remembers to extend a list. The two non-members matter as
+    much as the members: an unrecognised string and a model that declared no lane
+    must both land on deny rather than fall through, since an unidentifiable lane is
+    exactly a lane with no proof.
 
-    Lanes with completed-TURN proof are included deliberately. Turn proof and
-    retrieval proof are separate claims, and a lane that may be served must not
-    thereby be read as a lane that may reach outward.
+    Expectations are read FROM the declaration rather than restated, so this keeps
+    saying something as lanes earn their proofs; what it pins is that composition
+    and declaration never disagree, in either direction.
     """
-    assert web_tool_names_for(lane) == ()
+    proof = PROVEN_WEB_LANES.get(lane) if isinstance(lane, Provider) else None
+    assert web_tool_names_for(lane) == (proof.tool_names if proof else ())
+
+
+def test_completed_turn_proof_does_not_read_as_completed_retrieval_proof() -> None:
+    """A lane that may be SERVED is not thereby a lane that may reach outward.
+
+    The two proofs are separate claims over the same lane, and the failure this
+    guards is the quiet one: a lane sliding into web activation on the strength of
+    its turn admission. Asserted against a lane that really does hold turn proof
+    and really does not hold retrieval proof, so the claim has a live subject
+    rather than being true of an empty set.
+    """
+    turn_only = [lane for lane in PROVEN_TURN_LANES if lane not in PROVEN_WEB_LANES]
+    assert turn_only, (
+        "every turn-proven lane is now web-proven too, so this claim has no subject; "
+        "name a lane deliberately or retire the test with a reason"
+    )
+    for lane in turn_only:
+        assert is_lane_admissible(lane)
+        assert web_tool_names_for(lane) == ()
 
 
 @pytest.mark.asyncio
@@ -304,28 +340,68 @@ async def test_a_supervised_run_receives_no_web_builtin(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
-async def test_the_production_derivation_still_yields_nothing_today(
+async def test_the_production_derivation_stays_dark_for_an_unproven_lane(
     tmp_path: Path,
 ) -> None:
     """The same document role, composed the way production composes it, stays dark.
 
-    The three tests above supply the proof; this one does not, and drives the node
-    exactly as the graph does. It is what keeps the lit assertions from reading as
-    a claim that the capability is on: the seam admits a proven lane's names, and
-    no lane is proven, so the shipped payload is the read floor alone.
+    The tests above SUPPLY the proof; this one supplies none and drives the node
+    exactly as the graph does, on a lane the declaration does not carry. It is what
+    keeps the lit assertions from reading as a claim that the capability is on
+    everywhere: the seam admits a proven lane's names, this lane has none, so the
+    shipped payload is the read floor alone.
 
     The equality guard distinguishes the two ways this could pass. Darkness because
-    no lane has earned the names is the state under test; darkness because the
+    the lane has earned no names is the state under test; darkness because the
     names were withdrawn from the tree is a different fact wearing its clothes.
     """
     assert WEB_TOOL_NAMES == DECIDED_WEB_TOOL_NAMES
+    unproven = next(
+        lane for lane in PROVEN_TURN_LANES if lane not in PROVEN_WEB_LANES
+    ).value
     record_file = tmp_path / "session_new.json"
 
     allowed = await _allowed_tools_at_spawn(
-        _model(tmp_path, session_new=record_file),
+        _model(tmp_path, session_new=record_file, provider=unproven),
         role="researcher",
         record_file=record_file,
     )
 
-    assert web_tool_names_for("claude") == ()
+    assert web_tool_names_for(unproven) == ()
     assert allowed == list(NATIVE_READ_TOOL_NAMES)
+
+
+@pytest.mark.asyncio
+async def test_the_production_derivation_lights_a_proven_lane(
+    tmp_path: Path,
+) -> None:
+    """The production derivation, with nothing supplied, carries a proven lane's names.
+
+    The counterpart the module lacked while the declaration was empty, and the one
+    that matters most now that it is not: no proof is handed in, the lane is read
+    off the model exactly as the graph reads it, and the spawned CLI receives the
+    read floor PLUS precisely what that lane's own proof recorded. Asserted as the
+    declaration's own tuple rather than a literal, so a lane that later earns a
+    second built-in is covered without an edit, and a lane whose names were widened
+    beyond its proof fails here.
+    """
+    # Not merely the first declared lane: a lane whose reach is CONFIGURED rather
+    # than permitted declares no names at all and would make this observation
+    # vacuous. The subject has to be a lane that composes something.
+    permitting = [lane for lane, proof in PROVEN_WEB_LANES.items() if proof.tool_names]
+    assert permitting, (
+        "no declared web lane composes an allowlist name, so a lit production "
+        "derivation cannot be observed at this seam; every proven lane today "
+        "delivers its reach through configuration instead"
+    )
+    proven = permitting[0]
+    earned = PROVEN_WEB_LANES[proven].tool_names
+    record_file = tmp_path / "session_new.json"
+
+    allowed = await _allowed_tools_at_spawn(
+        _model(tmp_path, session_new=record_file, provider=proven.value),
+        role="researcher",
+        record_file=record_file,
+    )
+
+    assert allowed == [*NATIVE_READ_TOOL_NAMES, *earned]

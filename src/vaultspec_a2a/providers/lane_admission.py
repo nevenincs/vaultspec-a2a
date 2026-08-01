@@ -234,6 +234,21 @@ PROVEN_WEB_LANES: Mapping[Provider, WebLaneProof] = MappingProxyType(
             "value only the live index could supply, and the same prompt under "
             "the disabled posture performed no search at all",
         ),
+        # Only ``WebFetch`` is declared, because only ``WebFetch`` was exercised.
+        # The proven run's agent reached the web by fetching named URLs; its
+        # ``WebSearch`` sibling never fired, so composing it here would activate a
+        # tool on the strength of another tool's evidence - the exact substitution
+        # this declaration exists to refuse. ``WebSearch`` is earned by its own run.
+        Provider.CLAUDE: WebLaneProof(
+            test=(
+                "src/vaultspec_a2a/service_tests/test_claude_web_grounding_live.py"
+                "::test_claude_lane_completes_a_real_web_retrieval"
+            ),
+            proves="a real autonomous claude run fetched a live URL and carried the "
+            "retrieved value into checkpointed state as a typed web locator and into "
+            "the proposed research document's Sources section",
+            tool_names=("WebFetch",),
+        ),
     }
 )
 

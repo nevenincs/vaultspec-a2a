@@ -243,12 +243,13 @@ class TestWebDeclaration:
     def test_only_a_lane_with_recorded_retrieval_proof_is_activated(self) -> None:
         """Activation follows the declaration exactly - no lane rides along.
 
-        The declaration landed empty and now carries one lane, so this states
-        which one and asserts every other member of the enum is still dark. That
-        second half is what stops the gate degrading into a formality as lanes are
-        added: a proof recorded for one lane must activate that lane alone.
+        The declaration landed empty and now carries the lanes whose live proofs
+        have landed, so this states which ones and asserts every other member of
+        the enum is still dark. That second half is what stops the gate degrading
+        into a formality as lanes are added: a proof recorded for one lane must
+        activate that lane alone.
         """
-        assert set(PROVEN_WEB_LANES) == {Provider.CODEX}
+        assert set(PROVEN_WEB_LANES) == {Provider.CODEX, Provider.CLAUDE}
         for provider in Provider:
             expected = provider in PROVEN_WEB_LANES
             assert is_web_lane_proven(provider) is expected
@@ -265,6 +266,20 @@ class TestWebDeclaration:
         for provider in Provider:
             if provider not in PROVEN_WEB_LANES:
                 assert web_tool_names_for(provider) == ()
+
+    def test_a_permitted_reach_activates_exactly_the_names_its_proof_exercised(
+        self,
+    ) -> None:
+        """A lane delivering reach through built-ins composes those built-ins only.
+
+        The counterpart shape to the configured lane above, and the reason
+        ``tool_names`` rides the proof rather than a lane-blind constant: the
+        claude proof fetched named URLs and never searched, so its declaration
+        carries the fetch built-in alone. A search name appearing here would be a
+        tool activated on another tool's evidence, which is the substitution this
+        whole declaration exists to refuse.
+        """
+        assert web_tool_names_for(Provider.CLAUDE) == ("WebFetch",)
 
     def test_an_unidentified_lane_denies_instead_of_raising(self) -> None:
         """A model that declared no lane, or one nobody has heard of, is unproven.

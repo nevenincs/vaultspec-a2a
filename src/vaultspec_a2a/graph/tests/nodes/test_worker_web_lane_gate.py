@@ -49,10 +49,16 @@ SIMULATOR_PATH = Path(__file__).parent.parent / "acp_simulator.py"
 PYTHON_EXE = sys.executable
 
 # Lanes driven through the real spawn, none of which carries web proof: one with
-# completed-turn proof (claude), one with none (kimi), and a model that declared no
+# completed-turn proof (zai), one with none (kimi), and a model that declared no
 # lane at all. Turn proof must not read as web proof, and an unidentified lane must
 # deny rather than fall through.
-UNPROVEN_WEB_LANES = ("claude", "kimi", None)
+#
+# The turn-proven exemplar is zai rather than claude because claude has since earned
+# its own completed-retrieval proof and is no longer dark. Picking the exemplar off
+# the live declaration instead would make this suite agree with the gate by
+# construction and stop it testing anything, so the roster is named here and the
+# guard below is what keeps the naming honest.
+UNPROVEN_WEB_LANES = ("zai", "kimi", None)
 
 # Any built-in whose name marks it as reaching the network. Asserted as a pattern
 # rather than an exact pair so a future built-in named `WebX` cannot slip into an

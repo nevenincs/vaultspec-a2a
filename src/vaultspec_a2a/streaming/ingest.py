@@ -27,6 +27,31 @@ from .transformer import (
 
 logger = logging.getLogger(__name__)
 
+# Bounds how much of a caught exception's own text reaches a client-visible
+# error event, so a pathological exception message (or one wrapping a large
+# response body, as ``AuthoringTransportError`` sometimes does) cannot blow up
+# an SSE frame. The full exception is always logged in full via
+# ``logger.exception`` above regardless of this cap.
+_MAX_INGEST_ERROR_MESSAGE_LEN = 500
+
+
+def _summarize_ingest_exception(exc: BaseException) -> str:
+    """A client-visible, single-line summary of an uncaught ingest exception.
+
+    Ingest previously discarded the real exception here and always reported
+    the generic "Graph event stream failed unexpectedly", leaving both
+    run-status and the relay stream with no way to distinguish a transient
+    infrastructure fault from something like an expired authoring credential
+    on resume — the actual reason lived only in the worker's own log. Every
+    other classified branch in this handler (recursion limit, step timeout)
+    already reports a specific reason; this restores that for the catch-all.
+    """
+    detail = f"{type(exc).__name__}: {exc}".strip()
+    detail = " ".join(detail.split())  # collapse embedded newlines
+    if len(detail) > _MAX_INGEST_ERROR_MESSAGE_LEN:
+        detail = detail[: _MAX_INGEST_ERROR_MESSAGE_LEN - 1] + "…"
+    return f"Graph event stream failed unexpectedly: {detail}"
+
 
 class IngestManager:
     """Graph consumption lifecycle: ingest, cancel, cleanup."""
@@ -189,7 +214,7 @@ class IngestManager:
                         thread_id=thread_id,
                         agent_id=agent_id,
                         code="INGEST_ERROR",
-                        message="Graph event stream failed unexpectedly",
+                        message=_summarize_ingest_exception(exc),
                         recoverable=False,
                     )
             finally:

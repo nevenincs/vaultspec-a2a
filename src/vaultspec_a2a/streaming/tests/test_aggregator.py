@@ -1531,3 +1531,71 @@ class TestRecursionLimitDetection:
         err = error_events[-1]
         assert err.code == "RECURSION_LIMIT_EXCEEDED"
         assert err.recoverable is False
+
+
+class _FailingGraph:
+    """Graph stub that raises an arbitrary, uncaught exception from ingest.
+
+    Reproduces the S37 resume failure: a node deep in the graph (e.g. an
+    authoring submission whose actor credential is no longer valid) raises
+    something ingest never classifies as an interrupt, recursion limit, or
+    step timeout — the generic catch-all branch.
+    """
+
+    async def astream_events(
+        self, graph_input: object, config: object, *, version: str
+    ):
+        raise RuntimeError(
+            "authoring transport error (401 authoring_actor_token_unknown): "
+            "unknown or revoked authoring principal"
+        )
+        yield  # make it an async generator
+
+    async def aget_state(self, config: object) -> object:
+        return type(
+            "_State", (), {"tasks": [], "values": {}, "next": [], "config": {}}
+        )()
+
+
+assert issubclass(_FailingGraph, StreamableGraph)  # protocol drift guard
+
+
+class TestGenericIngestExceptionDetection:
+    """Tests for the catch-all exception branch in ingest() (S37 resume fix)."""
+
+    @pytest.mark.asyncio
+    async def test_ingest_reports_the_real_exception_not_a_generic_message(
+        self, aggregator: EventAggregator
+    ) -> None:
+        """The emitted error names the actual failure, not a generic string.
+
+        Before this fix, every uncaught exception here was reported to
+        run-status/relay clients as the same fixed string regardless of
+        cause, so a resumed run that died on an expired authoring credential
+        was indistinguishable from any other unrelated ingest crash.
+        """
+        queue = aggregator.add_subscriber("client-1")
+        aggregator.subscribe("client-1", ["thread-generic-fail"])
+
+        graph = _FailingGraph()
+        config = {"configurable": {"thread_id": "thread-generic-fail"}}
+        await aggregator.ingest(
+            thread_id="thread-generic-fail",
+            agent_id="supervisor",
+            graph=graph,
+            graph_input={"messages": []},
+            config=config,
+        )
+
+        sequenced_all = []
+        while not queue.empty():
+            sequenced_all.append(queue.get_nowait())
+        domain_events = [s.event for s in sequenced_all]
+
+        error_events = [e for e in domain_events if isinstance(e, ErrorOccurred)]
+        assert len(error_events) >= 1
+        err = error_events[-1]
+        assert err.code == "INGEST_ERROR"
+        assert err.recoverable is False
+        assert "authoring_actor_token_unknown" in err.message
+        assert "RuntimeError" in err.message

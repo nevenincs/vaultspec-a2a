@@ -104,3 +104,27 @@ Carry forward the corroboration posture for semantic proofs (daemon-log
 evidence recorded in exec records, disclosed as a non-test surface) and the
 masking-gap lesson (never prove wiring by constructing states production
 cannot reach).
+
+### Web-grounding execution sweep (2026-08-01, P01) - one finding, open
+
+Raised during Phase `P01` of the web-grounding plan, by the Step that split the
+registry trust root rather than by a review pass.
+
+- `unexercisable-trust-root-guards` (low, open) - the registry's fail-loud trust
+  assertions cannot be made to fire by any legitimate test, and this predates
+  the Step that found it. The registry is closed by design, with no plugin or
+  discovery machinery, so no production input can present an undeclared entry to
+  either composition seam. Removing the newly added egress assertion from the
+  seam breaks zero tests; removing the pre-existing read-only assertion breaks
+  zero tests either. A fail-loud guard that no production input can reach is
+  documentation rather than enforcement. The Step deliberately kept both, and
+  moved the enforceable half to a registry construction seam that refuses an
+  undeclared entry at import, making such an entry unconstructible rather than
+  merely unsurfaceable - which is the stronger property. So nothing is broken
+  and nothing needs fixing today. It is recorded because the module has carried
+  an unprovable guard since before this work, because the same reasoning will
+  apply to every future assertion placed at that seam, and because the honest
+  reading is that the constructor is the enforcement and the seam guards are
+  redundancy. Anyone later tempted to prove the seam guards by monkeypatching
+  the registry or adding an injection parameter with no production caller should
+  read this entry first: both were considered and refused here.

@@ -37,6 +37,7 @@ from __future__ import annotations
 import asyncio
 import io
 import tempfile
+import unicodedata
 from typing import TYPE_CHECKING, TextIO
 
 from mcp import ClientSession
@@ -72,8 +73,26 @@ _probe_lock = asyncio.Lock()
 
 # Enough of the server's own stderr to explain a refusal (an unresolvable
 # requirement, a missing interpreter, a server-side traceback) without dumping an
-# unbounded build log into the run's error.
+# unbounded build log into the run's error. This is a hard ceiling on the
+# returned tail, elision marker included - a marker added on top of a full-width
+# slice would put the result back over the very bound it was applied to satisfy.
 _STDERR_TAIL_CHARS = 2000
+_STDERR_ELISION = "..."
+
+
+def _drop_orphaned_combining_marks(text: str) -> str:
+    """Drop leading combining marks left without the base they attach to.
+
+    Slicing a tail is safe per character but not per grapheme: cutting between a
+    base character and its combining marks strands those marks, and a stranded
+    mark does not render as itself - it composes onto whatever now precedes it,
+    putting an accent on the elision marker. Dropping them loses one already-cut
+    character and keeps the diagnostic readable.
+    """
+    index = 0
+    while index < len(text) and unicodedata.combining(text[index]):
+        index += 1
+    return text[index:]
 
 
 def _stderr_tail(captured: TextIO) -> str:
@@ -92,7 +111,8 @@ def _stderr_tail(captured: TextIO) -> str:
     if not text:
         return ""
     if len(text) > _STDERR_TAIL_CHARS:
-        text = "..." + text[-_STDERR_TAIL_CHARS:]
+        kept = text[-(_STDERR_TAIL_CHARS - len(_STDERR_ELISION)) :]
+        text = _STDERR_ELISION + _drop_orphaned_combining_marks(kept)
     return f" Server stderr: {text}"
 
 

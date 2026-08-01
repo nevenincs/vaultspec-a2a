@@ -175,15 +175,45 @@ def sweep_orphan_worker_logs(
     return removed
 
 
+# A UTF-8 continuation byte matches 0b10xxxxxx, a pattern no character ever
+# starts with, and a character spans at most four bytes - so at most three
+# continuation bytes can sit between an arbitrary offset and the next boundary.
+_UTF8_CONTINUATION_MASK = 0xC0
+_UTF8_CONTINUATION_MARKER = 0x80
+_UTF8_MAX_CONTINUATION_BYTES = 3
+
+
+def _advance_to_character_boundary(raw: bytes) -> bytes:
+    """Drop the partial character a byte-offset seek may have landed inside."""
+    index = 0
+    while (
+        index < min(len(raw), _UTF8_MAX_CONTINUATION_BYTES)
+        and raw[index] & _UTF8_CONTINUATION_MASK == _UTF8_CONTINUATION_MARKER
+    ):
+        index += 1
+    return raw[index:]
+
+
 def _read_log_tail(log_path: Path, max_bytes: int = _WORKER_STDERR_TAIL_BYTES) -> str:
-    """Read and decode the tail of a worker stderr log file."""
+    """Read and decode the tail of a worker stderr log file.
+
+    The tail starts at a byte offset, which for a log carrying non-ASCII provider
+    output lands inside a character as often as not. Trimming the stranded
+    continuation bytes costs at most three bytes of an already-truncated
+    diagnostic and keeps the first line readable, where decoding them would open
+    every non-ASCII tail with replacement characters.
+    """
     if max_bytes <= 0 or not log_path.exists():
         return ""
     with log_path.open("rb") as handle:
         handle.seek(0, 2)
         size = handle.tell()
-        handle.seek(max(size - max_bytes, 0))
-        return handle.read(max_bytes).decode(errors="replace").strip()
+        offset = max(size - max_bytes, 0)
+        handle.seek(offset)
+        raw = handle.read(max_bytes)
+    if offset:
+        raw = _advance_to_character_boundary(raw)
+    return raw.decode("utf-8", errors="replace").strip()
 
 
 def _build_worker_restart_detail(

@@ -26,11 +26,19 @@ _SUPPORTED_HOOKS = ("pre-commit",)
 
 
 def _git_stdout(repo_root: Path, *args: str) -> str:
+    # Git reports paths as UTF-8 on every platform, but ``text=True`` alone
+    # decodes with the locale encoding - cp1252 on a stock Windows - which turns
+    # a repository under a non-ASCII path into mojibake that resolves nowhere, or
+    # raises on a byte the code page leaves undefined. The encoding is stated
+    # rather than inherited, and a byte that still will not decode degrades to a
+    # replacement character instead of raising out of a hook install.
     completed = subprocess.run(
         ["git", *args],
         cwd=repo_root,
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
         check=True,
     )
     return completed.stdout.strip()

@@ -269,12 +269,20 @@ def render_env(
 
 def _build_sha(cwd: Path) -> str | None:
     """Best-effort short git SHA of *cwd*'s HEAD, or ``None`` outside a repo."""
+    # A SHA is ASCII, but the captured stderr beside it is not: git names the
+    # offending path when *cwd* is not a repository, and a non-ASCII path under a
+    # locale decode fails inside subprocess's reader thread rather than raising
+    # here. ``run`` would then return with ``stdout`` set to None and the strip
+    # below would raise AttributeError - out of a helper whose whole contract is
+    # to answer None on failure. Stating the encoding keeps it best-effort.
     try:
         result = subprocess.run(
             ["git", "rev-parse", "--short", "HEAD"],
             cwd=cwd,
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             check=False,
         )
     except OSError:

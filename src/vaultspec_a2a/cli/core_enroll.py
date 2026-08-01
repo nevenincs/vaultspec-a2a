@@ -31,11 +31,18 @@ _RUNTIME_SEEDS = (
 def _run(
     root: Path, *args: str, capture: bool = False
 ) -> subprocess.CompletedProcess[str]:
+    # Both tools driven through here - git and vaultspec-core - emit UTF-8 on
+    # every platform, so the encoding is stated rather than left to the locale
+    # (cp1252 on a stock Windows), which would mangle a non-ASCII repository path
+    # in ``git status`` output or raise on a byte that code page leaves
+    # undefined.
     return subprocess.run(
         args,
         cwd=root,
         check=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
         capture_output=capture,
     )
 

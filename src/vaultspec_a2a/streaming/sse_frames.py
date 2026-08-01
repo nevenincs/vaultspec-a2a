@@ -24,6 +24,17 @@ shares them:
   ``progress_dropped`` sentinel rather than emitted or truncated — the stream
   stays within the engine's pass-through limits and never blocks on an oversized
   event, and the consumer learns to catch up from ``run-status``.
+
+The per-field caps count CHARACTERS and the frame cap counts BYTES, so the two
+only agree if the byte cap leaves room for the catalog's worst-case expansion.
+Under UTF-8 plus JSON escaping one source character can cost twelve bytes, so a
+frame whose every field sits inside its character cap can still breach a byte
+cap sized for ASCII — and it would breach it only for non-ASCII text, turning
+the drop sentinel from a backstop into the normal path for a CJK or emoji team
+while an English one streamed fine. That coupling is enforced here rather than
+asserted: :func:`catalog_worst_case_frame_bytes` derives the true worst case
+from the catalog itself, and a cap that cannot cover it is a design error the
+streaming tests fail on.
 """
 
 from __future__ import annotations
@@ -48,6 +59,7 @@ __all__ = [
     "MAX_PROGRESS_CONTENT_CHARS",
     "MAX_SSE_FRAME_BYTES",
     "SSE_FRAME_VERSION",
+    "catalog_worst_case_frame_bytes",
     "encode_sse_frame",
     "enforce_progress_allowlist",
     "semantic_phase_for_node",
@@ -56,11 +68,24 @@ __all__ = [
 SSE_FRAME_VERSION = "v1"
 
 
-# Hard per-frame byte cap for the encoded SSE frame. Sized to carry ordinary
-# progress payloads with headroom while staying far under the engine's 8 MiB
-# pass-through cap; an oversized frame degrades to a sentinel (frames are
-# droppable, so this loses progress detail, never run authority).
-MAX_SSE_FRAME_BYTES = 256 * 1024
+# Hard per-frame byte cap for the encoded SSE frame. Sized so that EVERY
+# catalogued frame type fits at its declared character caps even when every
+# character is an astral-plane one costing twelve escaped bytes - see
+# :func:`catalog_worst_case_frame_bytes`, which derives that figure from the
+# catalog and which the streaming tests hold this constant against. The cap is
+# therefore reachable only through an identity key (``message_id`` and friends
+# pass verbatim by design), never through a catalogued field, so a non-ASCII
+# team streams exactly as an English one does. Still an order of magnitude under
+# the engine's 8 MiB pass-through cap; an oversized frame degrades to a sentinel
+# (frames are droppable, so this loses progress detail, never run authority).
+MAX_SSE_FRAME_BYTES = 1024 * 1024
+
+
+# Worst-case encoded bytes per source character. :func:`_encode` serializes with
+# ``ensure_ascii=True``, under which a non-BMP character leaves as an escaped
+# surrogate pair (``\\udXXX\\udYYY``) - twelve bytes for one character, the most
+# any single character can cost. Every other character is cheaper.
+_MAX_JSON_BYTES_PER_CHAR = 12
 
 
 # Per-frame character cap for the permitted message/thought token stream. The
@@ -336,6 +361,70 @@ _PROGRESS_CATALOG: dict[str, dict[str, _FieldSpec]] = {
 }
 
 
+# The costliest character a catalogued field can carry: astral plane, so twelve
+# bytes once escaped. Used to build the worst-case witness frame below.
+_WORST_CASE_CHAR = "\U0001f600"
+
+
+def _worst_case_value(spec: _FieldSpec) -> object:
+    """Build the largest value *spec* admits, filled with the costliest character."""
+    match spec:
+        case _Text(max_chars=limit):
+            return _WORST_CASE_CHAR * limit
+        case _TextList(max_items=items, max_chars=limit):
+            return [_WORST_CASE_CHAR * limit] * items
+        case _ObjectList(max_items=items, fields=fields):
+            entry = {key: _worst_case_value(inner) for key, inner in fields.items()}
+            return [entry] * items
+        case _Number():
+            # The longest repr a JSON number reaches; cheaper than any text field
+            # but not free, so it is counted rather than assumed away.
+            return -1.7976931348623157e308
+        case _Integer():
+            return -(2**63)
+        case _Flag():
+            return False
+
+
+def catalog_worst_case_frame_bytes() -> int:
+    """Return the largest encoded frame the catalog can admit through its fields.
+
+    Builds, for every catalogued frame type, the maximal payload its declared
+    caps permit - every text field filled to its character cap with the costliest
+    character UTF-8 and JSON escaping can produce - and measures each through the
+    real projection and serialization steps. The result is a measured witness
+    rather than an estimate, so it accounts for key names, punctuation, and the
+    identity keys too, and a catalog entry added later is covered without anyone
+    remembering to extend a parallel table.
+
+    Deliberately measured through :func:`_encode` rather than
+    :func:`encode_sse_frame`: the latter replaces an over-cap frame with the drop
+    sentinel, which would clamp every measurement to the very cap this figure
+    exists to be compared against and make that comparison unfalsifiable.
+
+    This is a design-time coherence check, not an emit-path helper: it allocates
+    the worst case for every frame type and belongs in tests and review, never in
+    a per-frame code path.
+    """
+    return max(
+        len(
+            _encode(
+                enforce_progress_allowlist(
+                    {
+                        "type": frame_type,
+                        "api_version": SSE_FRAME_VERSION,
+                        **{
+                            key: _worst_case_value(spec) for key, spec in fields.items()
+                        },
+                    }
+                ),
+                frame_type,
+            )
+        )
+        for frame_type, fields in _PROGRESS_CATALOG.items()
+    )
+
+
 def enforce_progress_allowlist(
     payload: Mapping[str, object],
 ) -> Mapping[str, object]:
@@ -382,7 +471,18 @@ def _stamp_semantic_phase(payload: Mapping[str, object]) -> Mapping[str, object]
 
 
 def _encode(payload: Mapping[str, object], event: str | None) -> bytes:
-    """Serialize one payload as a wire SSE frame."""
+    """Serialize one payload as a wire SSE frame.
+
+    ``ensure_ascii=True`` is load-bearing and must not be traded away for the
+    smaller payload ``ensure_ascii=False`` would give. JSON leaves U+2028,
+    U+2029, and U+0085 unescaped, but :meth:`str.splitlines` treats all three as
+    line breaks — so an unescaped one would split a single ``data:`` line in two,
+    and a consumer rejoining the parts per the SSE grammar would silently read a
+    newline where the producer wrote a separator. Escaping every non-ASCII
+    character costs bytes (which :data:`MAX_SSE_FRAME_BYTES` is sized for) and
+    buys the guarantee that the serialized payload holds no character
+    ``splitlines`` can break on.
+    """
     lines: list[str] = []
     if event:
         lines.append(f"event: {event}")

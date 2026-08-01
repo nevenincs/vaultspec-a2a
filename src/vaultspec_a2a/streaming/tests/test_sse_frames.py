@@ -4,10 +4,13 @@ from __future__ import annotations
 
 import json
 
+import pytest
+
 from ..sse_frames import (
     MAX_PROGRESS_CONTENT_CHARS,
     MAX_SSE_FRAME_BYTES,
     SSE_FRAME_VERSION,
+    catalog_worst_case_frame_bytes,
     encode_sse_frame,
     semantic_phase_for_node,
 )
@@ -22,6 +25,17 @@ def _data_payload(frame: bytes) -> dict[str, object]:
         if line.startswith("data: ")
     )
     return json.loads(data)
+
+
+def _agents_of(payload: dict[str, object]) -> list[dict[str, object]]:
+    """Narrow the ``agents`` list of a decoded ``team_status`` payload."""
+    agents = payload["agents"]
+    assert isinstance(agents, list)
+    entries: list[dict[str, object]] = []
+    for item in agents:
+        assert isinstance(item, dict)
+        entries.append({str(key): value for key, value in item.items()})
+    return entries
 
 
 def test_frame_is_stamped_with_the_contract_version() -> None:
@@ -67,6 +81,102 @@ def test_oversized_frame_degrades_to_a_versioned_drop_sentinel() -> None:
     assert payload["dropped_type"] == "message_chunk"
     assert payload["thread_id"] == "run-1"
     assert frame.startswith(b"event: progress_dropped\n")
+
+
+def test_catalogued_caps_cannot_breach_the_frame_byte_cap() -> None:
+    """The character caps and the byte cap must be sized against each other.
+
+    The per-field caps count characters and the frame cap counts bytes, so they
+    agree only if the byte cap covers the catalog's worst-case UTF-8 and JSON
+    expansion. Were it smaller, a frame every one of whose fields respected its
+    cap could still be dropped - and only ever for non-ASCII text.
+    """
+    assert catalog_worst_case_frame_bytes() <= MAX_SSE_FRAME_BYTES
+
+
+@pytest.mark.parametrize(
+    ("label", "filler"),
+    [
+        ("cjk", "中"),
+        ("astral", "\U0001f600"),
+        ("combining", "é"),
+    ],
+)
+def test_team_status_within_character_caps_survives_non_ascii(
+    label: str, filler: str
+) -> None:
+    """Non-ASCII text inside every declared cap must stream, not degrade.
+
+    ``team_status`` drives the agent panel, and its declared caps are the largest
+    in the catalog. Filling them with multibyte text keeps every field inside its
+    character cap while multiplying the encoded byte count several-fold; the
+    frame must still arrive, or a CJK or emoji team would silently lose the one
+    frame an English team receives.
+    """
+    text = (filler * 512)[:256]
+    frame = encode_sse_frame(
+        {
+            "type": "team_status",
+            "active_thread_ids": [text[:128]] * 64,
+            "agents": [
+                {
+                    "agent_id": text[:63],
+                    "state": text[:64],
+                    "node_name": text[:128],
+                    "provider": text[:64],
+                    "model": text[:128],
+                    "role": text[:64],
+                    "display_name": text[:128],
+                    "description": text[:256],
+                }
+            ]
+            * 64,
+        },
+        event="team_status",
+        thread_id="run-1",
+    )
+    payload = _data_payload(frame)
+    assert payload["type"] == "team_status", (
+        f"{label} team_status degraded to {payload['type']!r} despite every "
+        f"field sitting inside its character cap"
+    )
+    # Round-trips as characters, not mojibake or escapes.
+    assert _agents_of(payload)[0]["description"] == text[:256]
+
+
+@pytest.mark.parametrize(
+    ("name", "separator"),
+    [
+        # Built by code point rather than written literally: these three are
+        # invisible in source and indistinguishable from a space to a reader.
+        ("line separator", chr(0x2028)),
+        ("paragraph separator", chr(0x2029)),
+        ("next line", chr(0x0085)),
+    ],
+)
+def test_unicode_line_separators_never_split_a_data_line(
+    name: str, separator: str
+) -> None:
+    """A separator inside content must not break the frame into two data lines.
+
+    JSON leaves these three unescaped, yet ``str.splitlines`` counts all three as
+    line breaks. If one reached the wire raw it would split the ``data:`` line,
+    and a consumer rejoining the parts under the SSE grammar would read a newline
+    where the producer wrote a separator - corrupting content while every length
+    bound still looked satisfied.
+    """
+    content = f"before{separator}after"
+    frame = encode_sse_frame(
+        {"type": "message_chunk", "content": content},
+        event="message_chunk",
+        thread_id="run-1",
+    )
+    body = frame.split(b"\n\n", 1)[0]
+    data_lines = [
+        line for line in body.decode("utf-8").splitlines() if line.startswith("data: ")
+    ]
+    assert len(data_lines) == 1, f"{name} split the frame into {len(data_lines)} lines"
+    assert _data_payload(frame)["content"] == content
 
 
 def test_over_cap_catalogued_text_truncates_instead_of_dropping_the_frame() -> None:

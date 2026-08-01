@@ -39,6 +39,7 @@ from ...thread.enums import CleanupKind, ThreadStatus
 from .snapshots import ThreadStateSnapshot
 
 __all__ = [
+    "MAX_RUN_MESSAGE_CHARS",
     "ActiveRunRecord",
     "ActiveRunsResponse",
     "DesktopReadiness",
@@ -74,6 +75,13 @@ __all__ = [
 ]
 
 _API_VERSION = "v1"
+
+# Character bound on a run's opening prompt, exported because it is half of a
+# cross-repo contract rather than this schema's private business: a consumer that
+# re-checks the prompt must apply the same UNIT, and the unit is characters. See
+# ``RunStartRequest.message`` for the byte budget that follows from it.
+MAX_RUN_MESSAGE_CHARS = 65536
+
 _PATH_SAFE_RUN_ID = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9_-]{0,127}$")
 PathSafeRunId = Annotated[
     str,
@@ -201,11 +209,17 @@ class RunStartRequest(BaseModel):
     # A non-empty preset is mandatory on the v1 verb: the engine-facing contract
     # never creates the internal surface's non-dispatched draft.
     team_preset: str = Field(min_length=1, max_length=64)
-    # 64 KB cap bounds LLM token consumption and keeps the run-start payload safe
-    # to wrap under the engine pass-through caps. Empty is permitted only on a
-    # ``prepare``, which carries no opening message; ``start``/``commit`` require
-    # a non-empty prompt (enforced stage-aware below).
-    message: str = Field(default="", max_length=65536)
+    # The opening prompt, bounded at 65536 CHARACTERS - not bytes. The bound is
+    # a proxy for LLM token consumption, and tokens track characters, so counting
+    # bytes instead would hand a CJK or emoji author a quarter of the prompt an
+    # ASCII author gets for the same model cost. A consumer that bounds this
+    # field in bytes must therefore budget 65536 * 4 = 262144, the most UTF-8 can
+    # spend on the permitted character count; that figure is well inside the
+    # engine's pass-through cap, so no truncation is owed anywhere on the path.
+    # Empty is permitted only on a ``prepare``, which carries no opening message;
+    # ``start``/``commit`` require a non-empty prompt (enforced stage-aware
+    # below).
+    message: str = Field(default="", max_length=MAX_RUN_MESSAGE_CHARS)
     actor_tokens: ActorTokenBundle | None = None
     metadata: ThreadMetadata | None = None
     autonomous: bool | None = None

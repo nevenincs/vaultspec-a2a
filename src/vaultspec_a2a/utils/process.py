@@ -50,6 +50,17 @@ logger = logging.getLogger(__name__)
 _POLL_INTERVAL = 0.1
 _PS_TIMEOUT = 5.0
 
+# Error handler for every process-table probe below. Each parses ASCII columns -
+# pids, ppids, netstat fields - but the surrounding text is whatever the host
+# locale produces, and a localized Windows emits bytes the ANSI code page leaves
+# undefined (0x81, 0x8D, 0x90, 0x9D). A strict decode of one of those does not
+# surface as a catchable subprocess failure: it is raised inside subprocess's
+# reader thread, so ``run`` returns with ``stdout`` set to None and the parse
+# below dies on an AttributeError that names nothing about encodings. Degrading
+# an undecodable byte keeps the ASCII columns - the only part any of these
+# parsers reads - intact and the probe answerable.
+_PROBE_DECODE_ERRORS = "replace"
+
 # Windows Job Object constants (winnt.h). A job created with
 # KILL_ON_JOB_CLOSE terminates every assigned process when the job is terminated
 # OR when the last handle to it is closed, so an owner that crashes still reaps
@@ -198,6 +209,7 @@ def _ps_parent_map() -> dict[int, int]:
             ["ps", "-A", "-o", "pid=,ppid="],
             capture_output=True,
             text=True,
+            errors=_PROBE_DECODE_ERRORS,
             timeout=_PS_TIMEOUT,
             check=False,
         )
@@ -361,6 +373,7 @@ def _win_parent_map() -> dict[int, int]:
             ],
             capture_output=True,
             text=True,
+            errors=_PROBE_DECODE_ERRORS,
             timeout=_PS_TIMEOUT,
             check=False,
         )
@@ -380,6 +393,7 @@ def _netstat_listener_pid(port: int) -> int | None:
             ["netstat", "-ano", "-p", "tcp"],
             capture_output=True,
             text=True,
+            errors=_PROBE_DECODE_ERRORS,
             timeout=_PS_TIMEOUT,
             check=False,
         )
@@ -461,6 +475,7 @@ def _lsof_listener_pid(port: int) -> int | None:
             ["lsof", "-nP", f"-iTCP:{port}", "-sTCP:LISTEN", "-t"],
             capture_output=True,
             text=True,
+            errors=_PROBE_DECODE_ERRORS,
             timeout=_PS_TIMEOUT,
             check=False,
         )

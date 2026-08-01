@@ -66,11 +66,18 @@ def _windows_system_executable(name: str) -> str:
 @cache
 def windows_current_user_sid() -> str:
     """Resolve the current Windows account SID without localized name parsing."""
+    # Only the SID column is read, and a SID is ASCII by construction - but the
+    # account name sharing the row is not, and a strict locale decode of a
+    # non-ASCII account name fails inside subprocess's reader thread, leaving
+    # ``stdout`` as None and this function raising AttributeError instead of
+    # resolving a SID that was perfectly readable. Degrading the name keeps the
+    # SID intact.
     completed = subprocess.run(
         [_windows_system_executable("whoami.exe"), "/user", "/fo", "csv", "/nh"],
         check=True,
         capture_output=True,
         text=True,
+        errors="replace",
         creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
     )
     row = next(csv_reader([completed.stdout.strip()]))

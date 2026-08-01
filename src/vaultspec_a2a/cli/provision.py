@@ -134,7 +134,19 @@ def _run_install(workspace_root: Path) -> str:
     workspace_root.mkdir(parents=True, exist_ok=True)
     cmd = [*_core_base_command(), "install", "--target", str(workspace_root)]
     try:
-        proc = subprocess.run(cmd, capture_output=True, text=True, check=False)
+        # vaultspec-core emits UTF-8; the locale encoding (cp1252 on a stock
+        # Windows) would mangle a non-ASCII path in installer output, and its
+        # undefined bytes would raise a decode error out of provisioning. Both
+        # the summary and the failure detail below are surfaced to the user, so
+        # the encoding is stated and undecodable bytes degrade rather than raise.
+        proc = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            check=False,
+        )
     except OSError as exc:
         raise ProvisionError(f"could not launch vaultspec-core install: {exc}") from exc
     if proc.returncode != 0:
@@ -175,6 +187,8 @@ def _resolved_version() -> str | None:
             cmd,
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             check=False,
             timeout=_VERSION_PROBE_TIMEOUT,
         )

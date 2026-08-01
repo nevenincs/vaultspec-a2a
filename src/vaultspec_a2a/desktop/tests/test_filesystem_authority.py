@@ -245,3 +245,66 @@ if os.name == "nt":
 
         assert raised.value.errno == errno.EEXIST
         assert (tmp_path / "published").read_bytes() == b"preserved"
+
+
+if os.name == "nt":
+
+    def test_a_publication_lease_rides_out_a_peer_holding_the_directory(
+        tmp_path: Path,
+    ) -> None:
+        """A transient sharing violation is waited out, not raised.
+
+        A publication lease additionally requests DELETE, which a concurrent
+        holder of the same directory need not be sharing. Before this was ridden
+        out, one lost race raised immediately - and because this lease guards the
+        service-discovery heartbeat, that meant a live gateway silently stopped
+        publishing where it could be found for the rest of its life, on any
+        machine where a second process touched the directory. That is the normal
+        case here, not an exotic one.
+
+        The peer is a real conflicting Windows handle, opened without sharing
+        DELETE, released from a timer while the lease is being attempted. No
+        patching: the retry either outlasts a genuine sharing violation or the
+        test fails.
+        """
+        import threading
+
+        library = _windows_library()
+        create_file = _create_file_w(library)
+        authority = resolve_directory_authority(tmp_path)
+
+        # FILE_SHARE_READ | FILE_SHARE_WRITE, deliberately WITHOUT FILE_SHARE_DELETE,
+        # so a publication lease's DELETE request collides with this holder.
+        blocker = create_file(
+            str(tmp_path),
+            0x0080 | 0x0020,
+            0x00000001 | 0x00000002,
+            None,
+            3,
+            0x02000000 | 0x00200000,
+            None,
+        )
+        assert blocker not in {None, ctypes.c_void_p(-1).value}, (
+            "could not open the blocking handle, so this test would prove nothing"
+        )
+
+        released = threading.Event()
+
+        def _release() -> None:
+            library.CloseHandle(blocker)
+            released.set()
+
+        timer = threading.Timer(0.25, _release)
+        timer.start()
+        try:
+            with directory_lease(authority, publication=True) as leased:
+                assert leased.native_handle is not None
+        finally:
+            timer.cancel()
+            if not released.is_set():
+                library.CloseHandle(blocker)
+
+        assert released.is_set(), (
+            "the lease returned before the blocking handle was released, so the "
+            "collision never happened and the retry was not exercised"
+        )

@@ -7,6 +7,7 @@ import errno
 import os
 import stat
 import sys
+import time
 from contextlib import contextmanager
 from dataclasses import dataclass, replace
 from pathlib import Path
@@ -20,6 +21,16 @@ _FILE_READ_ATTRIBUTES = 0x00000080
 _FILE_TRAVERSE = 0x00000020
 _FILE_GENERIC_READ = 0x80000000
 _FILE_GENERIC_WRITE = 0x40000000
+#: Windows ``ERROR_SHARING_VIOLATION``. Raised when another process holds the
+#: target without sharing the access being requested - transient by nature here,
+#: because the other holder is a peer mid-lease rather than a permanent owner.
+_ERROR_SHARING_VIOLATION = 32
+#: How long a directory lease rides out a sharing violation before giving up.
+#: Sized like the atomic writer's replace window: long enough to outlast a peer's
+#: lease, short enough that a genuinely wedged holder still surfaces as an error.
+_LEASE_RETRY_SECONDS = 2.0
+_LEASE_RETRY_INTERVAL_SECONDS = 0.02
+
 _DELETE = 0x00010000
 _FILE_SHARE_READ = 0x00000001
 _FILE_SHARE_WRITE = 0x00000002
@@ -253,18 +264,35 @@ def _windows_directory_lease(
 ) -> Iterator[DirectoryAuthority]:
     library = _windows_library()
     create_file = _create_file_w(library)
-    handle_value = create_file(
-        str(authority.path),
-        _FILE_READ_ATTRIBUTES | _FILE_TRAVERSE | (_DELETE if publication else 0),
-        _FILE_SHARE_READ | _FILE_SHARE_WRITE,
-        None,
-        _OPEN_EXISTING,
-        _FILE_FLAG_BACKUP_SEMANTICS | _FILE_FLAG_OPEN_REPARSE_POINT,
-        None,
-    )
     invalid_handle = ctypes.c_void_p(-1).value
-    if handle_value in {None, invalid_handle}:
-        raise _last_windows_error(authority.path)
+    # A publication lease additionally asks for DELETE, which a concurrent holder
+    # of this directory need not be sharing. That collision is TRANSIENT - the
+    # other holder is itself mid-lease and about to release - so it is ridden out
+    # rather than raised, the same treatment the atomic writer already gives the
+    # identical Windows sharing violation on its rename.
+    #
+    # Raising immediately here is not a smaller failure than a hang: this lease
+    # guards the discovery heartbeat, so a single lost race stops a live service
+    # publishing where it can be found, permanently and silently, on any machine
+    # where a second process touches the directory. That is precisely the
+    # multi-session case this project runs in.
+    deadline = time.monotonic() + _LEASE_RETRY_SECONDS
+    while True:
+        handle_value = create_file(
+            str(authority.path),
+            _FILE_READ_ATTRIBUTES | _FILE_TRAVERSE | (_DELETE if publication else 0),
+            _FILE_SHARE_READ | _FILE_SHARE_WRITE,
+            None,
+            _OPEN_EXISTING,
+            _FILE_FLAG_BACKUP_SEMANTICS | _FILE_FLAG_OPEN_REPARSE_POINT,
+            None,
+        )
+        if handle_value not in {None, invalid_handle}:
+            break
+        error = _last_windows_error(authority.path)
+        if error.errno != _ERROR_SHARING_VIOLATION or time.monotonic() >= deadline:
+            raise error
+        time.sleep(_LEASE_RETRY_INTERVAL_SECONDS)
     handle = cast("int", handle_value)
     leased = replace(authority, native_handle=handle)
     close_handle = _close_handle(library)

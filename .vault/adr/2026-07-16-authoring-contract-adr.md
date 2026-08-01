@@ -4,6 +4,7 @@ tags:
   - '#authoring-contract'
 date: '2026-07-16'
 modified: '2026-07-16'
+body_hash: 'sha256:d11b5191d1c05b70330b1f9562b71f6d017abcf999841971de5fb06e82a178fd'
 related:
   - '[[2026-07-16-authoring-contract-reference]]'
   - '[[2026-07-15-agent-harness-provisioning-adr]]'

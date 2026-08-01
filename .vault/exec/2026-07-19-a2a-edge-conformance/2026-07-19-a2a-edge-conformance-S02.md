@@ -4,6 +4,7 @@ tags:
   - '#a2a-edge-conformance'
 date: '2026-07-19'
 modified: '2026-07-19'
+body_hash: 'sha256:24b6d5eead6e0d3acb0e44236179b62621b8851bdc503e04c5f1a6145611cc68'
 step_id: 'S02'
 related:
   - "[[2026-07-19-a2a-edge-conformance-plan]]"

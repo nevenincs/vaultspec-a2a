@@ -4,6 +4,7 @@ tags:
   - '#orchestration-capabilities'
 date: '2026-07-14'
 modified: '2026-07-15'
+body_hash: 'sha256:abc73f2a38a65e90630dd1b6cd932dae18694869c7696e5ad492296f6721463c'
 related:
   - "[[2026-07-14-a2a-edge-conformance-adr]]"
 ---

@@ -4,6 +4,7 @@ tags:
 - '#protocol-bridging-translation'
 date: 2026-02-26
 modified: '2026-07-15'
+body_hash: 'sha256:61f5cd1a057e53b55e0e06eae89047b02a0a21460fd0374169db72959f1a6092'
 related:
 - '[[2026-03-31-docs-vault-migration-research]]'
 ---

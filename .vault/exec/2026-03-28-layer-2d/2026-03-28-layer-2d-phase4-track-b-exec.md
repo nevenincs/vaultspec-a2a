@@ -4,6 +4,7 @@ tags:
   - '#layer-2d'
 date: '2026-03-28'
 modified: '2026-07-14'
+body_hash: 'sha256:22e038568e3495d7cfcc724c6d1d95b0810f427f26c2157b7cf518ff583ec0e9'
 related:
   - '[[2026-03-28-layer2d-file-size-plan]]'
 ---

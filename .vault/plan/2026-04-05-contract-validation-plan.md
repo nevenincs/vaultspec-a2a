@@ -4,6 +4,7 @@ tags:
   - '#contract-validation'
 date: 2026-04-05
 modified: '2026-07-15'
+body_hash: 'sha256:12056cc7c654c24440ae3e6b84e854804c50586a4a6261cb4f475d73c2b0d749'
 related:
   - "[[2026-04-05-contract-validation-adr]]"
   - "[[2026-04-05-contract-validation-research]]"

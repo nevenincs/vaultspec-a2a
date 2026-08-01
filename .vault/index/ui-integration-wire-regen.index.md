@@ -5,6 +5,7 @@ tags:
   - '#ui-integration-wire-regen'
 date: '2026-07-22'
 modified: '2026-07-22'
+body_hash: 'sha256:14e7a2a88352dd5e9ad028831942ad2cecaeccae9439dd34181b76f1becb508f'
 related:
   - '[[2026-04-04-ci-contract-gates-research]]'
   - '[[2026-04-04-ui-integration-wire-regen-phase1-step-exec]]'

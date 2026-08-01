@@ -4,6 +4,7 @@ tags:
   - '#infra-config'
 date: '2026-03-28'
 modified: '2026-07-15'
+body_hash: 'sha256:313f9f7fdd8781e875ab31032f306aaaa26d5121dc1a5c2cca91e573a49ba541'
 related:
   - '[[2026-03-28-post-layer2d-boundary-audit]]'
   - '[[2026-03-28-layer2d-rolling-audit]]'

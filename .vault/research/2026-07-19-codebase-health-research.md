@@ -4,6 +4,7 @@ tags:
   - '#codebase-health'
 date: '2026-07-19'
 modified: '2026-07-19'
+body_hash: 'sha256:505907b59ad700f8a3728c92c809d6a3064b09cea5bc85d25217d1e1502d3862'
 related:
   - "[[2026-07-19-codebase-health-audit]]"
   - "[[2026-07-18-desktop-product-profile-adr]]"

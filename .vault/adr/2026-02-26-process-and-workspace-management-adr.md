@@ -4,6 +4,7 @@ tags:
 - '#process-and-workspace-management'
 date: 2026-02-26
 modified: '2026-07-15'
+body_hash: 'sha256:f495805cc3513f8ce027794c9ed863e45d38510332ab9cfb3716bf965bc7295f'
 related:
 - '[[2026-03-31-docs-vault-migration-research]]'
 ---

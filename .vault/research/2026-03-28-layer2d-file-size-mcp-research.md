@@ -4,6 +4,7 @@ tags:
   - '#layer-2d'
 date: '2026-03-28'
 modified: '2026-07-15'
+body_hash: 'sha256:bcaca3730e9e68b58a0b19023ba2220efa63efe9d43d9231fd4f8975684f237a'
 related:
   - '[[2026-03-28-post-layer2c-boundary-audit]]'
   - '[[2026-03-28-database-layer-adr]]'

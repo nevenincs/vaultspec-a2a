@@ -4,6 +4,7 @@ tags:
   - '#database-layer'
 date: '2026-03-28'
 modified: '2026-07-15'
+body_hash: 'sha256:056d39b58bb28c7abf72c196bac96d39fff3966f4dedf79c06f11f05e766c46d'
 related:
   - '[[2026-03-28-database-layer-research]]'
   - '[[2026-03-28-post-layer2b-boundary-audit]]'

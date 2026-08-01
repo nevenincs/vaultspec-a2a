@@ -4,6 +4,7 @@ tags:
   - "#vowel-counter"
 date: 2026-03-26
 modified: '2026-07-15'
+body_hash: 'sha256:58c2586192729f3da8ff0f24f894f6e9c27d240f213a9a8471ba5bcefc00070d'
 related:
   - "[[2026-03-31-docs-vault-migration-research]]"
   - "[[2026-03-26-vowel-counter-implementation-plan]]"

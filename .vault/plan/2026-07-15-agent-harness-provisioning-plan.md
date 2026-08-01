@@ -4,6 +4,7 @@ tags:
   - '#agent-harness-provisioning'
 date: '2026-07-15'
 modified: '2026-07-17'
+body_hash: 'sha256:1f339a0d6b4b062c89d51c79fc1bb03c66d50c0da0313da7fd7e5ab7364f76ba'
 tier: L2
 related:
   - '[[2026-07-15-agent-harness-provisioning-adr]]'

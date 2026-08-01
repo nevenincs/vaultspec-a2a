@@ -4,6 +4,7 @@ tags:
   - "#ide-mcp-setup"
 date: 2026-03-31
 modified: '2026-07-19'
+body_hash: 'sha256:b0c6e6e74e95f4485fcefd1b4a913cb57442d34a2d93d564a065e4fb8a3a0ae2'
 related:
   - "[[2026-02-25-llm-context-provider-abstraction-adr]]"
   - "[[2026-03-04-worker-process-architecture-adr]]"

@@ -4,6 +4,7 @@ tags:
   - '#desktop-product-profile'
 date: '2026-07-18'
 modified: '2026-07-18'
+body_hash: 'sha256:d718063810ecaf147708a1dd29fb3cc925d614e29f65794a019c9930dbf47c5b'
 related:
   - "[[2026-07-18-desktop-product-profile-research]]"
   - "[[2026-07-14-a2a-edge-conformance-adr]]"

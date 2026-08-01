@@ -4,6 +4,7 @@ tags:
   - '#kimi-provider'
 date: '2026-07-17'
 modified: '2026-07-17'
+body_hash: 'sha256:4ab1c7f23365cbf94d45511ec82bbf44747a522440d4cab5a709056d609d7b91'
 related:
   - '[[2026-07-17-kimi-provider-adr]]'
   - '[[2026-07-17-kimi-provider-research]]'

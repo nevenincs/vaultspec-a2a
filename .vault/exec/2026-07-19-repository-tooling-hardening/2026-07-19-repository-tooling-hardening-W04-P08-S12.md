@@ -4,6 +4,7 @@ tags:
   - '#repository-tooling-hardening'
 date: '2026-07-19'
 modified: '2026-07-20'
+body_hash: 'sha256:e45fb9ab206489a68db4920ab3506c321caef679c8fcea087e73fdffc66bc855'
 step_id: 'S12'
 related:
   - "[[2026-07-19-repository-tooling-hardening-plan]]"

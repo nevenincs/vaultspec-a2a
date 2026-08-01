@@ -4,6 +4,7 @@ tags:
   - '#document-authoring-orchestration'
 date: '2026-07-14'
 modified: '2026-07-14'
+body_hash: 'sha256:38889e2c8cb12ccab5c46d12036f2ba31ef9d50bc18dfb2ae6fcb2d0e6cc0a81'
 related:
   - "[[2026-07-14-orchestration-capabilities-audit]]"
   - "[[2026-07-14-a2a-edge-conformance-adr]]"

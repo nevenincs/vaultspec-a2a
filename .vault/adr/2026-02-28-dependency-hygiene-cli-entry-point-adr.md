@@ -4,6 +4,7 @@ tags:
 - '#dependency-hygiene-cli-entry-point'
 date: 2026-02-28
 modified: '2026-07-15'
+body_hash: 'sha256:62e1d13a6f1a1464a75f4e24f1a43fb7869b0ba9742705412ea426b1c100cd5b'
 related:
 - '[[2026-02-26-tech-stack-deployment-adr]]'
 - '[[2026-02-26-approved-module-hierarchy-adr]]'

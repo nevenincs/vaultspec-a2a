@@ -5,6 +5,7 @@ tags:
   - '#dashboard-bundled-runtime'
 date: '2026-07-24'
 modified: '2026-07-24'
+body_hash: 'sha256:60a7f90a6183f2d8a4bd6bb92f3a739adb8b551ff575e6010df8a7379702df47'
 related:
   - '[[2026-07-24-dashboard-bundled-runtime-adr]]'
   - '[[2026-07-24-dashboard-bundled-runtime-audit]]'

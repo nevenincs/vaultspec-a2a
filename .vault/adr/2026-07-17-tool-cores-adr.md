@@ -4,6 +4,7 @@ tags:
   - '#tool-cores'
 date: '2026-07-17'
 modified: '2026-07-18'
+body_hash: 'sha256:4ce205dc94d5c883479a5f44cb9a939fdb60ba441bbff1d8b9a0a3e14b63fa57'
 related:
   - "[[2026-07-17-tool-cores-research]]"
   - "[[2026-07-15-agent-harness-provisioning-adr]]"

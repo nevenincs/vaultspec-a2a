@@ -13,6 +13,7 @@ supersedes:
   - '2026-02-26-frontend-backend-contract-adr'
   - '2026-04-05-contract-validation-adr'
 modified: '2026-07-19'
+body_hash: 'sha256:0dc4cb3b077004799a105c68ab39dd2377e73131c02bc97ee02e25b3196c65c2'
 ---
 
 # `a2a-edge-conformance` adr: `adopting the dashboard edge contract under a salvage-and-verify posture` | (**status:** `accepted`)

@@ -4,6 +4,7 @@ tags:
   - '#tool-cores'
 date: '2026-07-17'
 modified: '2026-07-17'
+body_hash: 'sha256:4dd33990a92bcf559b5e2052b4f2e16a502d0b73b617721b5e9e87fdc3240411'
 tier: L2
 related:
   - '[[2026-07-17-tool-cores-adr]]'

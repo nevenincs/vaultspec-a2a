@@ -4,6 +4,7 @@ tags:
   - '#authoring-contract'
 date: '2026-07-16'
 modified: '2026-07-16'
+body_hash: 'sha256:9f4fdf34493c19b125dd91d6324b441eef70eb5db445819e0fe7b3d796f59da0'
 related: []
 ---
 

@@ -4,6 +4,7 @@ tags:
 - '#universal-rule-propagation'
 date: 2026-03-31
 modified: '2026-07-15'
+body_hash: 'sha256:c4ac0aecfe34227819235f367dda5640a27ace07b56451077e1b0817c0e666b6'
 related:
   - '[[2026-03-31-docs-vault-migration-research]]'
   - '[[2026-07-15-graph-agent-framework-harness-adr]]'

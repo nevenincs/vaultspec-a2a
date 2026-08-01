@@ -4,6 +4,7 @@ tags:
   - '#adr-authoring-orchestration'
 date: '2026-07-15'
 modified: '2026-07-15'
+body_hash: 'sha256:bdaddf8390a1193b8380d5ab6cdcfa404188f53194298abbbe72e59357661ac9'
 related:
   - "[[2026-07-14-adr-authoring-orchestration-plan]]"
 ---

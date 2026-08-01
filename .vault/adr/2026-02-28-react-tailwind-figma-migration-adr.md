@@ -7,6 +7,7 @@ related:
   - "[[2026-03-31-docs-vault-migration-research]]"
 superseded_by: '2026-07-14-a2a-edge-conformance-adr'
 modified: '2026-07-15'
+body_hash: 'sha256:4dc4bb32e705a293a2d0121b583771983b2001db175f62968621bfb906e3da31'
 ---
 # `react-tailwind-figma-migration` adr: `adr-018` | (**status:** `superseded`)
 

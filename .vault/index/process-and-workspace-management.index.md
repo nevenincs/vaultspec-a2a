@@ -5,6 +5,7 @@ tags:
   - '#process-and-workspace-management'
 date: '2026-07-22'
 modified: '2026-07-22'
+body_hash: 'sha256:acb37b0b7611d27089348801dbceebaf1d9f3e0de945eeb1ea1f35871b79fa0f'
 related:
   - '[[2026-02-26-process-and-workspace-management-adr]]'
 ---

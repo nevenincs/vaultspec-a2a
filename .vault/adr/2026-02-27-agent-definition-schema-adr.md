@@ -4,6 +4,7 @@ tags:
 - '#agent-definition-schema'
 date: 2026-02-27
 modified: '2026-07-15'
+body_hash: 'sha256:12c6f0c4369ee05e25940b12efd76a49d74ece9da59292601e249efb598c54c2'
 related:
 - '[[2026-02-25-llm-context-provider-abstraction-adr]]'
 - '[[2026-02-26-orchestration-topology-pipeline-adr]]'

@@ -4,6 +4,7 @@ tags:
   - '#service-layer'
 date: '2026-03-30'
 modified: '2026-07-15'
+body_hash: 'sha256:4c4e7426d42b568ff853b38b2f65a73162e55702116f74045d9d38f5432e8468'
 related:
   - '[[2026-03-28-infra-config-research]]'
   - '[[2026-03-28-infra-config-rolling-audit]]'

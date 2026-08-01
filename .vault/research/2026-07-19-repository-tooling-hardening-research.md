@@ -4,6 +4,7 @@ tags:
   - '#repository-tooling-hardening'
 date: '2026-07-19'
 modified: '2026-07-19'
+body_hash: 'sha256:0e989d4ce5b28e1bf32f61618c03a32dbbd62b0f095468fec9fd59c02904d353'
 related:
   - "[[2026-03-19-control-layer-cli-justfile-separation-adr]]"
   - "[[2026-03-20-service-lifecycle-architecture-adr]]"

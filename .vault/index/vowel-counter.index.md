@@ -5,6 +5,7 @@ tags:
   - '#vowel-counter'
 date: '2026-07-22'
 modified: '2026-07-22'
+body_hash: 'sha256:f6004e0e4ad201d713cc8d431239872a80a867e2dc9c810033cbd02c22cd03da'
 related:
   - '[[2026-03-26-vowel-counter-adr]]'
   - '[[2026-03-26-vowel-counter-implementation-create-file-exec]]'

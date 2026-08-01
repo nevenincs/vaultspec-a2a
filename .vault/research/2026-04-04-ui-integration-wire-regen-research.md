@@ -4,6 +4,7 @@ tags:
   - '#ui-integration-wire-regen'
 date: 2026-04-04
 modified: '2026-07-15'
+body_hash: 'sha256:862794e0afc52e843848cea860414f9f746156f41c1076c3b70b45b6e446fb74'
 related:
   - "[[2026-02-26-frontend-backend-contract-adr]]"
   - "[[2026-02-28-react-tailwind-figma-migration-adr]]"

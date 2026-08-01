@@ -4,6 +4,7 @@ tags:
   - '#ecosystem-artifact-lifecycle'
 date: '2026-07-21'
 modified: '2026-07-21'
+body_hash: 'sha256:7b6d6615aba82a53a019312667e9d1c0573409ad2445cdd06d658f688c24f002'
 step_id: 'S13'
 related:
   - "[[2026-07-21-ecosystem-artifact-lifecycle-plan]]"

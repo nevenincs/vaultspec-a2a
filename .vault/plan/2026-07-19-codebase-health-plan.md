@@ -4,6 +4,7 @@ tags:
   - '#codebase-health'
 date: '2026-07-19'
 modified: '2026-07-31'
+body_hash: 'sha256:51d4ac26b48cc4bc1ad40058bb599224069bcf26f9f6d71f1c9e563fe1c47aff'
 tier: L3
 related:
   - '[[2026-07-19-codebase-health-adr]]'

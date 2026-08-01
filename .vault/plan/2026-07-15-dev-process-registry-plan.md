@@ -4,6 +4,7 @@ tags:
   - '#dev-process-registry'
 date: '2026-07-15'
 modified: '2026-07-16'
+body_hash: 'sha256:4e52a0447a47eea03fcac225e092a561da38ab0dbcd26e2c8e73d3ae78a983e7'
 tier: L2
 related:
   - '[[2026-07-15-dev-process-registry-adr]]'

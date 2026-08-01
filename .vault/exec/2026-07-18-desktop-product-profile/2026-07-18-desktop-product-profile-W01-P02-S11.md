@@ -4,6 +4,7 @@ tags:
   - '#desktop-product-profile'
 date: '2026-07-19'
 modified: '2026-07-19'
+body_hash: 'sha256:8b28eb3542c13dade8d21e88bee89f859c03f55ab7223ca5d507c23addb706b8'
 step_id: 'S11'
 related:
   - "[[2026-07-18-desktop-product-profile-plan]]"

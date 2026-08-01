@@ -4,6 +4,7 @@ tags:
 - '#team-composition-topology'
 date: 2026-02-27
 modified: '2026-07-15'
+body_hash: 'sha256:5adb8d0bde0bcca9be1dfbf2d87352e62e17b1f43033aa234fe215d9ec25ec0d'
 related:
   - '[[2026-03-31-docs-vault-migration-research]]'
   - '[[2026-02-26-orchestration-topology-pipeline-adr]]'

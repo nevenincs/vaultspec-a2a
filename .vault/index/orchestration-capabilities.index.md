@@ -5,6 +5,7 @@ tags:
   - '#orchestration-capabilities'
 date: '2026-07-22'
 modified: '2026-07-22'
+body_hash: 'sha256:2d3255f0743e210d5c7f413ecafa4c9e7c76f2a90c2f835356449a1c06422e7d'
 related:
   - '[[2026-07-14-orchestration-capabilities-audit]]'
   - '[[2026-07-14-orchestration-capabilities-research]]'

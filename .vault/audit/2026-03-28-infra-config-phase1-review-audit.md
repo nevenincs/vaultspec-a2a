@@ -4,6 +4,7 @@ tags:
   - '#infra-config'
 date: '2026-03-28'
 modified: '2026-07-15'
+body_hash: 'sha256:e6e84e394530597e2c07875d1d338b3e7ebe45f0400a5b32d38b0082cb29ccc2'
 related:
   - '[[2026-03-28-infra-config-plan]]'
   - '[[2026-03-28-infra-config-adr]]'

@@ -4,6 +4,7 @@ tags:
   - '#entry-point-layer'
 date: '2026-03-24'
 modified: '2026-07-15'
+body_hash: 'sha256:ab8050664a55f5dcaddcbdb13d951aedb0408e715f2b9c196487761373d2c0da'
 related:
   - '[[2026-03-24-entry-point-decomposition-adr]]'
   - '[[2026-03-24-api-module-research]]'

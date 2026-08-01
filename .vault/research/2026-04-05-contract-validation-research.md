@@ -4,6 +4,7 @@ tags:
   - '#contract-validation'
 date: 2026-04-05
 modified: '2026-07-15'
+body_hash: 'sha256:d871b9fd3db4d6a241cbbd5969f2c0b27ca674acafdcf093848a1d084d48e481'
 related:
   - "[[2026-04-04-ui-integration-wire-regen-plan]]"
   - "[[2026-04-04-ui-integration-wire-regen-rolling-audit]]"

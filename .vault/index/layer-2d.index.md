@@ -5,6 +5,7 @@ tags:
   - '#layer-2d'
 date: '2026-07-22'
 modified: '2026-07-22'
+body_hash: 'sha256:fe23ef0b74601a0edd3ee5fa3c751b18c3cf480b23cacae166ced124f450d00d'
 related:
   - '[[2026-03-28-layer-2d-phase1-track-a-exec]]'
   - '[[2026-03-28-layer-2d-phase2-track-a-exec]]'

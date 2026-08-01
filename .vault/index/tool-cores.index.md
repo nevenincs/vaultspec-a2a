@@ -5,6 +5,7 @@ tags:
   - '#tool-cores'
 date: '2026-07-22'
 modified: '2026-07-22'
+body_hash: 'sha256:fd4330a8ecf7c2ddd61d1a886c39850584c8ccf3241a40731f70e76a5520fcbb'
 related:
   - '[[2026-07-17-tool-cores-P01-S01]]'
   - '[[2026-07-17-tool-cores-P01-S02]]'

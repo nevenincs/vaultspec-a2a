@@ -5,6 +5,7 @@ tags:
   - '#codebase-health'
 date: '2026-07-25'
 modified: '2026-07-25'
+body_hash: 'sha256:ecec5fbb3883bffb71d18745a82b446c4d89403c55674689058c35a020b2ef33'
 related:
   - '[[2026-07-19-codebase-health-W01-P01-S01]]'
   - '[[2026-07-19-codebase-health-W01-P01-S02]]'

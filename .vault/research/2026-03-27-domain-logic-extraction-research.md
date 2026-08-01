@@ -4,6 +4,7 @@ tags:
   - '#domain-logic'
 date: '2026-03-27'
 modified: '2026-07-15'
+body_hash: 'sha256:5617e022ad3e662044a7564e37866507f85d5cf17cb1f9b2c644bfd4dda5275a'
 related:
   - '[[2026-03-24-core-layer-boundary-audit]]'
   - '[[2026-03-24-entry-point-decomposition-adr]]'

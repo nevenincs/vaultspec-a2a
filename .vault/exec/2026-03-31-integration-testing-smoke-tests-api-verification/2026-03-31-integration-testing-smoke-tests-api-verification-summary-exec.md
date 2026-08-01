@@ -4,6 +4,7 @@ tags:
   - '#integration-testing-smoke-tests-api-verification'
 date: '2026-03-31'
 modified: '2026-07-15'
+body_hash: 'sha256:092911440ee7b3773ae2bf36d3e202b6d52e9b9d74431e4c7e94bc5710069fd7'
 related:
   - '[[2026-03-31-integration-testing-smoke-tests-api-verification-plan]]'
   - '[[2026-03-31-integration-testing-smoke-tests-api-verification-adr]]'

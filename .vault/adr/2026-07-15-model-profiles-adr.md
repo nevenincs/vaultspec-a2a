@@ -4,6 +4,7 @@ tags:
   - '#model-profiles'
 date: '2026-07-15'
 modified: '2026-07-15'
+body_hash: 'sha256:c3b1e37409e54d47555c8a26a1bb8a7906b84edfb362818cf4a62531aea6453d'
 related:
   - "[[2026-02-27-team-composition-topology-adr]]"
   - "[[2026-07-14-adr-authoring-orchestration-adr]]"

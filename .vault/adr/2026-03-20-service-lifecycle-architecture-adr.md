@@ -11,6 +11,7 @@ related:
   - '[[2026-07-15-dev-process-registry-adr]]'
   - '[[2026-07-19-repository-tooling-hardening-adr]]'
 modified: '2026-07-19'
+body_hash: 'sha256:8d6398c33cc4c55026556b81657694c460f90a4c4572e7cf0cf157c98b60c852'
 ---
 # `service-lifecycle-architecture` adr: `adr-039` | (**status:** `accepted`)
 

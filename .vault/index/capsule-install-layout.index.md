@@ -5,6 +5,7 @@ tags:
   - '#capsule-install-layout'
 date: '2026-07-22'
 modified: '2026-07-22'
+body_hash: 'sha256:f5e6e1c126db9a4881ae01b55c632a603605894c22cf886fb5d98885432519c4'
 related:
   - '[[2026-07-21-capsule-install-layout-adr]]'
   - '[[2026-07-21-capsule-install-layout-reference]]'

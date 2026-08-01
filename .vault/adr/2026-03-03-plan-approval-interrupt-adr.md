@@ -4,6 +4,7 @@ tags:
 - '#plan-approval-interrupt'
 date: 2026-03-03
 modified: '2026-07-15'
+body_hash: 'sha256:cb15c04dbe5e9b56e70fcda449c853666a067adbe89c1e4eb3c6818f7c8029c2'
 related:
 - '[[2026-03-03-teamstate-enrichment-sdd-blackboard-adr]]'
 - '[[2026-03-03-contextual-anchoring-graph-lifecycle-adr]]'

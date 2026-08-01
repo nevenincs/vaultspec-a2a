@@ -4,6 +4,7 @@ tags:
   - '#ui-integration-wire-regen'
 date: '2026-04-05'
 modified: '2026-07-15'
+body_hash: 'sha256:0af1629a95161d775e308fe40d56d44a68fc01938aef61e7a4a9ec6e6ab1392d'
 related:
   - "[[2026-02-26-frontend-backend-contract-adr]]"
   - "[[2026-04-04-ui-integration-wire-regen-research]]"

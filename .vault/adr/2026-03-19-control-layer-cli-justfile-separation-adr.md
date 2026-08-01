@@ -8,6 +8,7 @@ related:
   - "[[2026-03-31-docs-vault-migration-research]]"
 superseded_by: '2026-07-19-repository-tooling-hardening-adr'
 modified: '2026-07-19'
+body_hash: 'sha256:6b7ae3fbcff144801d5efa61e416bdd9737c631535e42ccba1307f56f0edc933'
 ---
 # `control-layer-cli-justfile-separation` adr: `adr-038` | (**status:** `superseded`)
 

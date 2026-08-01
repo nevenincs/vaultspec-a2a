@@ -4,6 +4,7 @@ tags:
 - '#postgres-dual-backend'
 date: 2026-03-10
 modified: '2026-07-15'
+body_hash: 'sha256:e6527e9104bfe0b9a0a93cae363d5427c07139087b64ce781df1341235a75438'
 related:
 - '[[2026-03-31-database-migration-framework-adr]]'
 - '[[2026-03-04-worker-process-architecture-adr]]'

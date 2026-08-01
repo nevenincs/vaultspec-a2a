@@ -4,6 +4,7 @@ tags:
   - "#vowel-counter"
 date: 2026-03-26
 modified: '2026-07-15'
+body_hash: 'sha256:5b295c9669c34f4073dbbce61b35e002fa23a25d112ccdd7bff0e525027dd6b3'
 related:
   - "[[2026-03-26-vowel-counter-implementation-plan]]"
 ---

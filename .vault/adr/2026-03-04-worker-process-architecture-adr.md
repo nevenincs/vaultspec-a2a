@@ -4,6 +4,7 @@ tags:
 - '#worker-process-architecture'
 date: 2026-03-04
 modified: '2026-07-15'
+body_hash: 'sha256:51538497cb5d9fd0091d382f6db74e3a76db636b24fb865995e61f8e1d2a5320'
 related:
 - '[[2026-02-26-tech-stack-deployment-adr]]'
 - '[[2026-02-26-observability-telemetry-integration-adr]]'

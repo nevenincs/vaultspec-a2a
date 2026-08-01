@@ -4,6 +4,7 @@ tags:
   - '#agent-harness-provisioning'
 date: '2026-07-16'
 modified: '2026-07-16'
+body_hash: 'sha256:6a51bb67174cef45f98a37adb843df7c7aa0bfafa6367dd3d4e1c183e10384a1'
 step_id: 'S02'
 related:
   - "[[2026-07-15-agent-harness-provisioning-plan]]"

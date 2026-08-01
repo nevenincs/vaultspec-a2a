@@ -4,6 +4,7 @@ tags:
   - '#dev-process-registry'
 date: '2026-07-16'
 modified: '2026-07-16'
+body_hash: 'sha256:6c69b710c75e3f70c32382ddb16d1bb320bff2d83394b2433d71984061227db5'
 step_id: 'S04'
 related:
   - "[[2026-07-15-dev-process-registry-plan]]"

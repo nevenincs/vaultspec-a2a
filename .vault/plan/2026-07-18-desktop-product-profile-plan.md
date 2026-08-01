@@ -4,6 +4,7 @@ tags:
   - '#desktop-product-profile'
 date: '2026-07-18'
 modified: '2026-07-30'
+body_hash: 'sha256:3893bfd114939abc101e7343a4900ffa31973b218b0658453f746090f7f376ce'
 tier: L3
 related:
   - '[[2026-07-18-desktop-product-profile-adr]]'

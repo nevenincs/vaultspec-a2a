@@ -4,6 +4,7 @@ tags:
   - '#a2a-edge-conformance'
 date: '2026-07-15'
 modified: '2026-07-15'
+body_hash: 'sha256:dce375fbe5eb4025d2eb360604774b89d9841869c4a48f82ee6dfe283bdb33e0'
 related:
   - "[[2026-07-14-a2a-edge-conformance-plan]]"
   - "[[2026-07-14-a2a-edge-conformance-adr]]"

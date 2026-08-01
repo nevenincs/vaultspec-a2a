@@ -4,6 +4,7 @@ tags:
 - '#database-migration-framework'
 date: 2026-03-31
 modified: '2026-07-15'
+body_hash: 'sha256:319185eb9b41948783e634a704a488abe5f275e29f3064ff25bf4963742657b0'
 related:
 - '[[2026-03-31-docs-vault-migration-research]]'
 ---

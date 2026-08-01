@@ -5,6 +5,7 @@ tags:
   - '#worker-process-architecture'
 date: '2026-07-22'
 modified: '2026-07-22'
+body_hash: 'sha256:e6aa00b8d3edd5ab8eb5e9fd148f5c7230c805f0cdc499680dd8689363a952ae'
 related:
   - '[[2026-03-04-worker-process-architecture-adr]]'
 ---

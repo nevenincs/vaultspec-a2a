@@ -9,6 +9,7 @@ related:
   - "[[2026-04-04-ui-integration-wire-regen-rolling-audit]]"
 superseded_by: '2026-07-14-a2a-edge-conformance-adr'
 modified: '2026-07-15'
+body_hash: 'sha256:1f834404269fd413d13bb4ec7118931b208a27493ccd33b6f73cb4ba39b16707'
 ---
 # `contract-validation` adr: ci contract gate with custom ws codegen | (**status:** `superseded`)
 

@@ -4,6 +4,7 @@ tags:
 - '#containerization-strategy'
 date: 2026-02-28
 modified: '2026-07-15'
+body_hash: 'sha256:fc1756bf1e6132a082c8d6c4524afeb96ab89f05ef55c770574ef7f896448d5c'
 related:
 - '[[2026-02-26-tech-stack-deployment-adr]]'
 - '[[2026-02-26-observability-telemetry-integration-adr]]'

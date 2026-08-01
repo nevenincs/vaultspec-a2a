@@ -4,6 +4,7 @@ tags:
 - '#thread-metadata-context-injection'
 date: 2026-02-28
 modified: '2026-07-15'
+body_hash: 'sha256:b63a7b0940ad3b5c25c25f8fcc19d46bc057f989bc8d6edaa63800f9dabe0916'
 related:
 - '[[2026-02-26-orchestration-topology-pipeline-adr]]'
 - '[[2026-02-26-frontend-backend-contract-adr]]'

@@ -4,6 +4,7 @@ tags:
   - '#infra-config'
 date: '2026-03-28'
 modified: '2026-07-15'
+body_hash: 'sha256:0980019172e87a963737fb5fe91de0388ece9cde2a30efcbfe6f06553f4a184b'
 related:
   - '[[2026-03-28-infra-config-research]]'
   - '[[2026-03-28-post-layer2d-boundary-audit]]'

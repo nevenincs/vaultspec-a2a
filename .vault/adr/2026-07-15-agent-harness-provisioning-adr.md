@@ -4,6 +4,7 @@ tags:
   - '#agent-harness-provisioning'
 date: '2026-07-15'
 modified: '2026-07-18'
+body_hash: 'sha256:d0cb0b47147b96899133d8a1ed6364ed4766894da4b6e671efee04cf46e5dfc9'
 related:
   - '[[2026-07-14-adr-authoring-orchestration-adr]]'
   - '[[2026-07-15-model-profiles-adr]]'

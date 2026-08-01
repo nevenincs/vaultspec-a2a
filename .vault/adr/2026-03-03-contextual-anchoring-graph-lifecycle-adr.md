@@ -4,6 +4,7 @@ tags:
 - '#contextual-anchoring-graph-lifecycle'
 date: 2026-03-03
 modified: '2026-07-15'
+body_hash: 'sha256:eafafe320ba64f85a2f46a2b147a6af26c56093fc28801261e91b0bb2537a8f7'
 related:
 - '[[2026-02-27-team-composition-topology-adr]]'
 - '[[2026-02-28-thread-metadata-context-injection-adr]]'

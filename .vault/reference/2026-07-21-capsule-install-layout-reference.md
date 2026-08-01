@@ -4,6 +4,7 @@ tags:
   - '#capsule-install-layout'
 date: '2026-07-21'
 modified: '2026-07-21'
+body_hash: 'sha256:c18323c3e637e2145696b545bb4c11d556e1a9cf225bfeb520dc26de559e10a5'
 related:
   - '[[2026-07-18-desktop-product-profile-adr]]'
   - '[[2026-07-18-desktop-product-profile-plan]]'

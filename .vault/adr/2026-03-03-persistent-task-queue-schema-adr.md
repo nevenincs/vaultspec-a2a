@@ -4,6 +4,7 @@ tags:
 - '#persistent-task-queue-schema'
 date: 2026-03-03
 modified: '2026-07-15'
+body_hash: 'sha256:16c52a4948d04f60e0981ff014d198f9c941aa7d31736c90be2bdc25426ff788'
 related:
 - '[[2026-03-03-teamstate-enrichment-sdd-blackboard-adr]]'
 - '[[2026-03-03-blackboard-content-mounting-adr]]'

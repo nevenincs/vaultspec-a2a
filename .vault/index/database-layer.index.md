@@ -5,6 +5,7 @@ tags:
   - '#database-layer'
 date: '2026-07-22'
 modified: '2026-07-22'
+body_hash: 'sha256:30022e98de9f12664f7c58e73f7b0981e8dd8888d431c62ed88f53800fa0fc10'
 related:
   - '[[2026-03-28-database-layer-adr]]'
   - '[[2026-03-28-database-layer-plan]]'

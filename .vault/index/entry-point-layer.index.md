@@ -5,6 +5,7 @@ tags:
   - '#entry-point-layer'
 date: '2026-07-22'
 modified: '2026-07-22'
+body_hash: 'sha256:b57f7036c5ae42053d2eb453ef0f7aa623c50e5c92a08314be6b1c8078f32dfa'
 related:
   - '[[2026-03-24-api-module-research]]'
   - '[[2026-03-24-cross-import-dependency-map-research]]'

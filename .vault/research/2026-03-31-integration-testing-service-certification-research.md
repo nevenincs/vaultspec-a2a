@@ -4,6 +4,7 @@ tags:
   - '#integration-testing'
 date: '2026-03-31'
 modified: '2026-07-15'
+body_hash: 'sha256:fc9b9399e1935dd9cdad6f2a1b80dc551a07e7b361e08db8539e4c430db50b0e'
 related:
   - '[[2026-03-30-service-layer-research]]'
   - '[[2026-03-30-service-layer-rolling-audit]]'

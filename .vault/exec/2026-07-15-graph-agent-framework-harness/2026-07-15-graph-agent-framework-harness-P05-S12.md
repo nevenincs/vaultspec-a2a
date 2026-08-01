@@ -4,6 +4,7 @@ tags:
   - '#graph-agent-framework-harness'
 date: '2026-07-17'
 modified: '2026-07-17'
+body_hash: 'sha256:2b1449b3fa000aa8c3254047ce51e7754af99c6edc519ccd5f00f036f3af5137'
 step_id: 'S12'
 related:
   - "[[2026-07-15-graph-agent-framework-harness-plan]]"

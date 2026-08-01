@@ -4,6 +4,7 @@ tags:
   - '#dev-process-registry'
 date: '2026-07-15'
 modified: '2026-07-15'
+body_hash: 'sha256:1f92e90a79dbbdf865b3d947b54e2b7ec5f52f9b435f83c562a74f806a31b817'
 related:
   - "[[2026-07-14-a2a-edge-conformance-adr]]"
 ---

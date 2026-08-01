@@ -4,6 +4,7 @@ tags:
   - '#graph-agent-framework-harness'
 date: '2026-07-15'
 modified: '2026-07-15'
+body_hash: 'sha256:69e6053f78e89cb263a1632e50162716c85336c91cbf4772e726545a605a4919'
 related:
   - "[[2026-03-31-universal-rule-propagation-adr]]"
   - "[[2026-07-14-adr-authoring-orchestration-adr]]"

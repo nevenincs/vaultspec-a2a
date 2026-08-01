@@ -4,6 +4,7 @@ tags:
   - '#agent-harness-provisioning'
 date: '2026-07-16'
 modified: '2026-07-16'
+body_hash: 'sha256:e561ac5732979a74033d580134e6fd224ca32da8a1768b3133bbcf905250c980'
 related:
   - '[[2026-07-15-agent-harness-provisioning-plan]]'
   - '[[2026-07-15-agent-harness-provisioning-adr]]'

@@ -9,6 +9,7 @@ related:
   - "[[2026-07-21-capsule-install-layout-reference]]"
 superseded_by: '2026-07-24-dashboard-bundled-runtime-adr'
 modified: '2026-07-24'
+body_hash: 'sha256:a020e8874bbaa2af3d94ab9ef96a3785a006db11b2353f2a3e85361ab6821952'
 ---
 # `capsule-install-layout` adr: `one wheel-aware install-layout authority with a provenance-bearing installed inventory` | (**status:** `superseded`)
 

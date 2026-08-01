@@ -4,6 +4,7 @@ tags:
   - '#domain-logic'
 date: '2026-03-28'
 modified: '2026-07-15'
+body_hash: 'sha256:6eca3dba213bce531daff26de8332f1c68607e509db56629aadaa830db367336'
 related:
   - '[[2026-03-27-domain-logic-plan]]'
   - '[[2026-03-27-domain-logic-extraction-adr]]'

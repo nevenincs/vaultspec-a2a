@@ -4,6 +4,7 @@ tags:
   - '#integration-testing-smoke-tests-api-verification'
 date: '2026-03-31'
 modified: '2026-07-15'
+body_hash: 'sha256:90f35c2debc492909a6580b4f51091d7823dfa179c25618a02e6f0e171834fec'
 related:
   - '[[2026-03-30-service-layer-research]]'
   - '[[2026-03-30-service-layer-rolling-audit]]'

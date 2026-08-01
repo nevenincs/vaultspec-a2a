@@ -4,6 +4,7 @@ tags:
 - '#approved-module-hierarchy'
 date: 2026-02-26
 modified: '2026-07-15'
+body_hash: 'sha256:0155a1a5ea439fb205bcf2fe899af4871e7778b9dd4aa7d7628bd0b442f0cef0'
 related:
 - '[[2026-02-26-process-and-workspace-management-adr]]'
 - '[[2026-02-25-llm-context-provider-abstraction-adr]]'

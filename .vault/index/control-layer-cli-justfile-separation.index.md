@@ -5,6 +5,7 @@ tags:
   - '#control-layer-cli-justfile-separation'
 date: '2026-07-22'
 modified: '2026-07-22'
+body_hash: 'sha256:742b17d38ffd66f891624ff58976381e6490d9a65e7a4534b9463263753d64d8'
 related:
   - '[[2026-03-19-control-layer-cli-justfile-separation-adr]]'
 ---

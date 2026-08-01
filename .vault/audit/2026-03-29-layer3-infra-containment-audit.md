@@ -1,6 +1,7 @@
 ---
 date: 2026-03-29
 modified: '2026-07-15'
+body_hash: 'sha256:ea3e09d4149494fe4b1ee8e523ccd59fb1574aaa4a8de13aaad629fddb4f40ab'
 tags:
   - "#audit"
   - "#infra-config"

@@ -4,6 +4,7 @@ tags:
   - '#model-profiles'
 date: '2026-07-15'
 modified: '2026-07-15'
+body_hash: 'sha256:48d9c1d36aa9f5ebbbe3bb93fdfe2caafc776913cc83a5dd265586e17eab9d44'
 step_id: 'S04'
 related:
   - "[[2026-07-15-model-profiles-plan]]"

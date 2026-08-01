@@ -4,6 +4,7 @@ tags:
   - '#module-docstrings'
 date: '2026-07-19'
 modified: '2026-07-19'
+body_hash: 'sha256:b1ddf860afc0c1f1c8e3eb6c39c7752a719ce61829e70193b6204c89ff011778'
 related:
   - "[[2026-03-31-docs-vault-authority-retention-adr]]"
   - "[[2026-02-26-approved-module-hierarchy-adr]]"

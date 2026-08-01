@@ -4,6 +4,7 @@ tags:
   - '#tool-cores'
 date: '2026-07-17'
 modified: '2026-07-17'
+body_hash: 'sha256:d75b465ac85a184451fb92e7d7ba1239c4e4b7ed17ed74c8ac95945cb4ef0fcb'
 related:
   - "[[2026-07-15-graph-agent-framework-harness-plan]]"
   - "[[2026-07-15-agent-harness-provisioning-adr]]"

@@ -4,6 +4,7 @@ tags:
   - '#kimi-provider'
 date: '2026-07-17'
 modified: '2026-07-17'
+body_hash: 'sha256:48508c0e36606e4427e63d659babd1b0af9fa15ae822619e95a39b25c2bddfca'
 step_id: 'S15'
 related:
   - "[[2026-07-17-kimi-provider-plan]]"

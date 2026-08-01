@@ -4,6 +4,7 @@ tags:
   - '#entry-point-layer'
 date: '2026-03-24'
 modified: '2026-07-15'
+body_hash: 'sha256:48d8773a5f49836b3f9fe6e85f2c74f7319d76d6900eff1807212bf658c18783'
 related:
   - '[[2026-03-24-entry-point-layer-plan]]'
 ---

@@ -4,6 +4,7 @@ tags:
   - "#service-layer"
 date: 2026-03-30
 modified: '2026-07-15'
+body_hash: 'sha256:af0f35cf826aa04f61781151d1b06818c1271a4b833761c7baab4b50a558f824'
 related:
   - "[[2026-03-30-service-layer-research]]"
   - "[[2026-03-30-service-layer-plan]]"

@@ -4,6 +4,7 @@ tags:
 - '#phase-artifact-gates'
 date: 2026-03-03
 modified: '2026-07-15'
+body_hash: 'sha256:4f8958aa5f6070ca9e11247d6cf576a297cf35a93325aa30e42b2e1216616c5a'
 related:
 - '[[2026-03-03-teamstate-enrichment-sdd-blackboard-adr]]'
 - '[[2026-03-03-contextual-anchoring-graph-lifecycle-adr]]'

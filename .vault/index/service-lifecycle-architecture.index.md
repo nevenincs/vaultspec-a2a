@@ -5,6 +5,7 @@ tags:
   - '#service-lifecycle-architecture'
 date: '2026-07-22'
 modified: '2026-07-22'
+body_hash: 'sha256:cda89db341c044eb21a1376e13e6b85bc32d67de54d2ff4f0a2dd4758f7547af'
 related:
   - '[[2026-03-20-service-lifecycle-architecture-adr]]'
 ---

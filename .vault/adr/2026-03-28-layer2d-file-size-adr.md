@@ -4,6 +4,7 @@ tags:
   - '#layer-2d'
 date: '2026-03-28'
 modified: '2026-07-15'
+body_hash: 'sha256:4ad3a16bfdb6e4f0c4445cff28bf5e6ea5fbbac1c1d474b6838cf8ff1f7e2046'
 related:
   - '[[2026-03-28-layer2d-file-size-mcp-research]]'
   - '[[2026-03-28-post-layer2c-boundary-audit]]'

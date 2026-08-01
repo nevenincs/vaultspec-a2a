@@ -4,6 +4,7 @@ tags:
   - '#codebase-health'
 date: '2026-07-25'
 modified: '2026-07-25'
+body_hash: 'sha256:6541bbfd772da575bfd4dc38a9ae120c3d547fa1f5d10fdc4cad235011ba500e'
 step_id: 'S173'
 related:
   - "[[2026-07-19-codebase-health-plan]]"

@@ -4,6 +4,7 @@ tags:
   - '#adr-authoring-orchestration'
 date: '2026-07-14'
 modified: '2026-07-17'
+body_hash: 'sha256:57d6e5caeba5dd046462d2dda4a98cb277f5cfaaa7602b1dafd5d962a165a35e'
 tier: L2
 related:
   - '[[2026-07-14-a2a-edge-conformance-plan]]'

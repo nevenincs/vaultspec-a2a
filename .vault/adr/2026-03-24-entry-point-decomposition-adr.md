@@ -4,6 +4,7 @@ tags:
   - '#entry-point-layer'
 date: '2026-03-24'
 modified: '2026-07-15'
+body_hash: 'sha256:faadc929f3b6405f8328deee76d6a2e7eeae51efffd2c34717e42f69fb937161'
 related:
   - '[[2026-03-24-api-module-research]]'
   - '[[2026-03-24-worker-cli-research]]'

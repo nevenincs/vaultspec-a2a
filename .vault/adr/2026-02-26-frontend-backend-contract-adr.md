@@ -11,6 +11,7 @@ related:
   - "[[2026-03-31-docs-vault-migration-research]]"
 superseded_by: '2026-07-14-a2a-edge-conformance-adr'
 modified: '2026-07-15'
+body_hash: 'sha256:4b624d15cd9ed48998462b6b218f355977dc24a5c074fc0bcfb838a370211b21'
 ---
 # `frontend-backend-contract` adr: `adr-9` | (**status:** `superseded`)
 

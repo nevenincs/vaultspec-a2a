@@ -4,6 +4,7 @@ tags:
   - '#ui-integration-wire-regen'
 date: 2026-04-04
 modified: '2026-07-15'
+body_hash: 'sha256:4d5af78828ddd4bfa47304775efe33474d20b0f993b9dcecd8a89d3bf400b0bb'
 related:
   - "[[2026-04-04-ui-integration-wire-regen-plan]]"
 ---

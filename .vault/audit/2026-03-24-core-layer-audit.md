@@ -4,6 +4,7 @@ tags:
   - '#core-layer'
 date: '2026-03-24'
 modified: '2026-07-15'
+body_hash: 'sha256:0426ffdb8330c32f595c46aebdba324f17aedad98c6ec66040b5ae230a8a2b72'
 related:
   - '[[2026-03-23-core-layer-boundary-adr]]'
 ---

@@ -5,6 +5,7 @@ tags:
   - '#approved-module-hierarchy'
 date: '2026-07-22'
 modified: '2026-07-22'
+body_hash: 'sha256:a0ed32346b62710b60f422ef5019353c8c1d0673a0b3f90122ba0bdbed459082'
 related:
   - '[[2026-02-26-approved-module-hierarchy-adr]]'
 ---

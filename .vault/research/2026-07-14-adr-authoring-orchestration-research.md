@@ -4,6 +4,7 @@ tags:
   - '#adr-authoring-orchestration'
 date: '2026-07-14'
 modified: '2026-07-14'
+body_hash: 'sha256:e1447b13f66e9afc462fe593daaa4e8574728e513ca906ccca2ae5b6153f2bbe'
 related:
   - "[[2026-07-14-document-authoring-orchestration-audit]]"
   - "[[2026-07-14-orchestration-capabilities-research]]"

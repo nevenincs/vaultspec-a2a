@@ -4,6 +4,7 @@ tags:
   - '#ecosystem-artifact-lifecycle'
 date: '2026-07-21'
 modified: '2026-07-21'
+body_hash: 'sha256:af01ef1f1c9c28f0512c3f416ba7cbcde67265654d980f88a8f76cd350de30e7'
 tier: L3
 related:
   - '[[2026-07-21-ecosystem-artifact-lifecycle-adr]]'

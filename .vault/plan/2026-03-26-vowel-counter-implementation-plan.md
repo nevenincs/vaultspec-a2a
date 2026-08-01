@@ -4,6 +4,7 @@ tags:
 - '#vowel-counter'
 date: 2026-03-26
 modified: '2026-07-15'
+body_hash: 'sha256:7d2f6e743df23ecf01093f92eb08a74336d74f590ccfbbbf96b870a51d79017e'
 related:
 - '[[2026-03-31-docs-vault-authority-retention-adr]]'
 - '[[2026-03-31-docs-vault-migration-research]]'

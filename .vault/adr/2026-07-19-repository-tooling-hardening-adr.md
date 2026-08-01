@@ -11,6 +11,7 @@ related:
 supersedes:
   - '2026-03-19-control-layer-cli-justfile-separation-adr'
 modified: '2026-07-19'
+body_hash: 'sha256:74d22b1ded5b8e80fc886490c2eca703f0ae6b042443f3bf262c53b3965a945c'
 ---
 # `repository-tooling-hardening` adr: `one modular, locked, and reproducible repository control surface` | (**status:** `accepted`)
 

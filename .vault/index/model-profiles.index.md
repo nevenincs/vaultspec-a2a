@@ -5,6 +5,7 @@ tags:
   - '#model-profiles'
 date: '2026-07-22'
 modified: '2026-07-22'
+body_hash: 'sha256:25b7861ea3df875659428c7b3f61673f9063f3f565aa8a763410811d5150b274'
 related:
   - '[[2026-07-15-model-profiles-P01-S01]]'
   - '[[2026-07-15-model-profiles-P01-S02]]'

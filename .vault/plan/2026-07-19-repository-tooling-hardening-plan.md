@@ -4,6 +4,7 @@ tags:
   - '#repository-tooling-hardening'
 date: '2026-07-19'
 modified: '2026-07-20'
+body_hash: 'sha256:96d2ae6e6e0d65f4b90a72dedb7aaa8637d64c45d655180c11beff1e23308d59'
 tier: L3
 related:
   - '[[2026-07-19-repository-tooling-hardening-adr]]'

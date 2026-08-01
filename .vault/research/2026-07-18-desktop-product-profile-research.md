@@ -4,6 +4,7 @@ tags:
   - '#desktop-product-profile'
 date: '2026-07-18'
 modified: '2026-07-18'
+body_hash: 'sha256:96d0a82bd1419ae4c74be98f35cffd15ea7736eb4fd753af5d09506250934ca5'
 related:
   - "[[2026-03-20-service-lifecycle-architecture-adr]]"
   - "[[2026-03-04-worker-process-architecture-adr]]"

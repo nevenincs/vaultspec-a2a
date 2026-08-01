@@ -5,8 +5,8 @@ through ``AcpChatModel``, and the assertions are made against the payload the CL
 actually received - the ``session/new`` allowlist and the ``session/prompt``
 blocks. The declaration that would activate the capability is empty at landing, so
 what these tests state is that the tree carries the wiring WITHOUT the capability:
-an autonomous document role gets its read floor and nothing else, and its persona
-still tells the model it has no online access.
+an autonomous document role gets its read floor and nothing else, and the persona
+reaches the model exactly as shipped, with no web claim composed onto it.
 
 The lane is the axis under test. The read floor is a property of the ROLE, so the
 same autonomous researcher is driven on a lane with completed-turn proof, on one
@@ -98,6 +98,15 @@ def _allowed_tools(params: dict) -> list[str]:
     return meta.get("claudeCode", {}).get("options", {}).get("allowedTools", [])
 
 
+def _prompt_blocks(params: dict) -> list[str]:
+    """The text blocks the CLI received, in order and unaltered."""
+    return [
+        block.get("text", "")
+        for block in params.get("prompt", [])
+        if block.get("type") == "text"
+    ]
+
+
 def _prompt_text(params: dict) -> str:
     """The prompt the CLI received, whitespace-normalised for phrase matching.
 
@@ -105,12 +114,7 @@ def _prompt_text(params: dict) -> str:
     phrase spans a newline in the payload; matching against the raw text would miss
     the disclaimer and pass for the wrong reason.
     """
-    joined = " ".join(
-        block.get("text", "")
-        for block in params.get("prompt", [])
-        if block.get("type") == "text"
-    )
-    return " ".join(joined.split())
+    return " ".join(" ".join(_prompt_blocks(params)).split())
 
 
 @pytest.mark.asyncio
@@ -145,22 +149,59 @@ async def test_an_unproven_lane_surfaces_no_web_tool_name(
 
 
 @pytest.mark.asyncio
-async def test_an_unproven_lane_keeps_the_no_online_access_disclaimer(
-    tmp_path: Path,
+@pytest.mark.parametrize(
+    ("agent_id", "role"),
+    (("vaultspec-researcher", "researcher"), ("vaultspec-analyst", "researcher")),
+)
+async def test_an_unproven_lane_adds_no_web_capability_text(
+    tmp_path: Path, agent_id: str, role: str
 ) -> None:
-    """The real researcher persona reaches the model still disclaiming online reach.
+    """The persona reaches the model exactly as shipped - the run adds no claim.
 
-    The persona text is loaded from the bundled preset rather than written here, so
-    this fails the moment the shipped disclaimer is softened or dropped on a lane
-    that has not earned the claim - which is the failure mode the per-lane proof
-    gate exists to prevent: a capability claim the tools cannot back.
+    Byte equality against the bundled preset is the assertion that survives the
+    persona text itself changing: whatever a preset says today, an unproven lane
+    must receive it UNALTERED, so a web-capability paragraph composed
+    unconditionally instead of lane-conditionally fails here rather than reaching
+    a model whose tools cannot back it.
     """
     prompt_file = tmp_path / "session_prompt.json"
-    persona = load_agent_config("vaultspec-researcher").persona.system_prompt
+    persona = load_agent_config(agent_id).persona.system_prompt
     node = create_worker_node(
         model=_model(tmp_path, provider="claude", session_prompt=prompt_file),
         system_prompt=persona,
-        name="researcher",
+        name=agent_id,
+        autonomous=True,
+        role=role,
+    )
+
+    await node(_make_state())
+
+    blocks = _prompt_blocks(json.loads(prompt_file.read_text(encoding="utf-8")))
+    assert blocks[0] == persona
+    # The provider's own web built-ins are the capability this gate governs; no
+    # unproven-lane run may name one, whatever else a persona discusses.
+    joined = " ".join(blocks)
+    assert "WebSearch" not in joined
+    assert "WebFetch" not in joined
+
+
+@pytest.mark.asyncio
+async def test_a_shipped_disclaimer_reaches_the_model_intact(tmp_path: Path) -> None:
+    """A persona that disclaims online access still does so at the spawn.
+
+    The analyst is the shipped persona carrying that disclaimer, loaded from its
+    preset rather than written here, so this fails the moment the composition path
+    starts rewriting persona text on a lane that has earned no web proof.
+    """
+    prompt_file = tmp_path / "session_prompt.json"
+    persona = load_agent_config("vaultspec-analyst").persona.system_prompt
+    assert "no online access" in " ".join(persona.split()), (
+        "fixture precondition: the analyst preset is the disclaimer carrier"
+    )
+    node = create_worker_node(
+        model=_model(tmp_path, provider="claude", session_prompt=prompt_file),
+        system_prompt=persona,
+        name="vaultspec-analyst",
         autonomous=True,
         role="researcher",
     )
@@ -169,7 +210,3 @@ async def test_an_unproven_lane_keeps_the_no_online_access_disclaimer(
 
     prompt = _prompt_text(json.loads(prompt_file.read_text(encoding="utf-8")))
     assert "no online access" in prompt
-    # Guards the match above against a persona that says it has no online access
-    # and then names a web tool anyway.
-    assert "WebSearch" not in prompt
-    assert "WebFetch" not in prompt

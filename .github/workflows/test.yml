@@ -45,6 +45,46 @@ jobs:
       - name: Run canonical CI
         run: just ci
 
+      - name: Run type-strict sentinel
+        if: ${{ !cancelled() }}
+        continue-on-error: true
+        run: just lint type-strict
+
+      - name: Run type-platforms sentinel
+        if: ${{ !cancelled() }}
+        continue-on-error: true
+        run: just lint type-platforms
+
+      - name: Run complexity sentinel
+        if: ${{ !cancelled() }}
+        continue-on-error: true
+        run: just lint complexity
+
+      - name: Run cyclomatic sentinel
+        if: ${{ !cancelled() }}
+        continue-on-error: true
+        run: just lint cyclomatic
+
+      - name: Run shape sentinel
+        if: ${{ !cancelled() }}
+        continue-on-error: true
+        run: just lint shape
+
+      - name: Run limits sentinel
+        if: ${{ !cancelled() }}
+        continue-on-error: true
+        run: just lint limits
+
+      - name: Run nesting sentinel
+        if: ${{ !cancelled() }}
+        continue-on-error: true
+        run: just lint nesting
+
+      - name: Run size sentinel
+        if: ${{ !cancelled() }}
+        continue-on-error: true
+        run: just lint size
+
       # The environment synchronized above carries --extra server, which
       # installs the OTLP exporter, so no step before this one can observe a
       # base-only installation. This gate builds its own isolated default-deps

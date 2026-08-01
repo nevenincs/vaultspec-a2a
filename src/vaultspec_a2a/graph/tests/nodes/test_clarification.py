@@ -30,6 +30,7 @@ from langgraph.types import Command
 
 from ....graph.nodes.clarification import (
     ClarificationQuestionProducer,
+    _annotated_max_length,
     bound_clarification_questions,
     create_clarification_gate_node,
     create_clarification_request_node,
@@ -44,9 +45,20 @@ from ....thread.clarification import (
     ClarificationKind,
     ClarificationQuestion,
     ClarificationRequest,
+    OptionLabel,
+    PromptText,
     pending_clarification,
 )
 from ....thread.state import TeamState
+
+# The truncation target the coercion actually promises: what the wire model
+# ITSELF admits, read the same way graph.nodes.clarification._annotated_max_length
+# does — never the separately-declared MAX_PROMPT_CHARS/MAX_OPTION_CHARS
+# constants, which is exactly the drift (a truncation target one character past
+# what PromptText/OptionLabel accept) that silently dropped every question
+# landing at the canonical bound.
+_PROMPT_MODEL_MAX = _annotated_max_length(PromptText)
+_OPTION_MODEL_MAX = _annotated_max_length(OptionLabel)
 
 
 def _request(request_id: str = "clarify-1") -> ClarificationRequest:
@@ -566,6 +578,36 @@ class TestBoundClarificationQuestions:
         )
         assert bounded[0]["prompt"] == "delhereand-c1"
 
+    def test_the_truncation_lands_inside_the_cap_it_truncates_to(self) -> None:
+        """What the producer emits for an over-long proposal is what the wire takes.
+
+        The two halves are separately correct and could still disagree by one:
+        the producer must slice to exactly what the model admits, so the seam
+        holds only while both read the bound the same way. If the producer's
+        truncation target were even one character past what the model accepts,
+        every over-long proposal would be trimmed to a length the model then
+        refused - and lost silently, because this producer degrades rather than
+        raises. Building the real question set from the real producer's output,
+        and asserting its length against the model's OWN declared bound (never
+        a separate constant of the same name), is what ties the two halves
+        together instead of asserting each in isolation and hoping they agree.
+        """
+        bounded = bound_clarification_questions(
+            [
+                {
+                    "id": "q1",
+                    "prompt": "p" * (MAX_PROMPT_CHARS + 50),
+                    "kind": "choice",
+                    "options": ["o" * (MAX_OPTION_CHARS + 50)],
+                }
+            ]
+        )
+
+        assert len(bounded) == 1, "an over-long proposal was dropped, not trimmed"
+        question = ClarificationQuestion(**bounded[0])
+        assert len(question.prompt) == _PROMPT_MODEL_MAX
+        assert len((question.options or [""])[0]) == _OPTION_MODEL_MAX
+
     def test_truncates_overlong_strings_to_the_canonical_bounds(self) -> None:
         bounded = bound_clarification_questions(
             [
@@ -578,8 +620,8 @@ class TestBoundClarificationQuestions:
             ]
         )
         assert len(bounded[0]["id"]) == MAX_IDENTIFIER_CHARS
-        assert len(bounded[0]["prompt"]) == MAX_PROMPT_CHARS
-        assert len(bounded[0]["options"][0]) == MAX_OPTION_CHARS
+        assert len(bounded[0]["prompt"]) == _PROMPT_MODEL_MAX
+        assert len(bounded[0]["options"][0]) == _OPTION_MODEL_MAX
 
     def test_non_dict_entries_are_dropped(self) -> None:
         assert bound_clarification_questions(["not-a-dict", 42, None, []]) == []

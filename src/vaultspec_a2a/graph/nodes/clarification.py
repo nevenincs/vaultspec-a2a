@@ -55,20 +55,21 @@ to drift from the wire-side one.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, Protocol
+from typing import TYPE_CHECKING, Any, Protocol, get_args
 
+from annotated_types import MaxLen
 from langgraph.types import Command, interrupt
 from pydantic import ValidationError
 
 from ...thread.clarification import (
-    MAX_IDENTIFIER_CHARS,
-    MAX_OPTION_CHARS,
     MAX_OPTIONS_PER_QUESTION,
-    MAX_PROMPT_CHARS,
     MAX_QUESTIONS_PER_REQUEST,
     ClarificationKind,
     ClarificationQuestion,
     ClarificationRequest,
+    OptionLabel,
+    PromptText,
+    QuestionId,
     strip_control_characters,
 )
 
@@ -102,6 +103,36 @@ class ClarificationQuestionProducer(Protocol):
     async def __call__(self, state: TeamState) -> ClarificationRequest | None:
         """Return the question set to ask, or ``None`` to proceed unasked."""
         ...
+
+
+def _annotated_max_length(annotated_type: object) -> int:
+    """Read the ``MaxLen`` an ``Annotated[...]`` wire type alias declares.
+
+    Single source of truth: the coercion below truncates to exactly what the
+    wire model (:mod:`vaultspec_a2a.thread.clarification`) admits, read off the
+    model's own constraint, rather than a separately-declared constant that can
+    silently drift from it. That drift is exactly what previously dropped every
+    question landing at the canonical bound: truncation cut to the full
+    ``MAX_PROMPT_CHARS``/``MAX_OPTION_CHARS``, while ``PromptText``/``OptionLabel``
+    enforced one character less, so ``ClarificationQuestion(...)`` refused the
+    truncated result and the whole question was coerced away as unrecoverable.
+    """
+    for arg in get_args(annotated_type):
+        metadata = getattr(arg, "metadata", None)
+        if metadata is None:
+            continue
+        for constraint in metadata:
+            if isinstance(constraint, MaxLen):
+                return constraint.max_length
+    msg = f"{annotated_type!r} declares no MaxLen constraint to derive from"
+    raise ValueError(msg)
+
+
+# Derived once at import time from the wire models themselves (see
+# _annotated_max_length) rather than restated as independent constants.
+_QUESTION_ID_MAX_CHARS = _annotated_max_length(QuestionId)
+_PROMPT_MAX_CHARS = _annotated_max_length(PromptText)
+_OPTION_MAX_CHARS = _annotated_max_length(OptionLabel)
 
 
 def _bounded_text(value: object, max_chars: int) -> str:
@@ -146,14 +177,14 @@ def _coerce_question(raw: object) -> ClarificationQuestion | None:
         proposed = raw.get("options")
         if isinstance(proposed, list):
             for candidate in proposed[:MAX_OPTIONS_PER_QUESTION]:
-                label = _bounded_text(candidate, MAX_OPTION_CHARS)
+                label = _bounded_text(candidate, _OPTION_MAX_CHARS)
                 if label and label not in options:
                     options.append(label)
 
     try:
         return ClarificationQuestion(
-            id=_bounded_text(raw.get("id", ""), MAX_IDENTIFIER_CHARS),
-            prompt=_bounded_text(raw.get("prompt", ""), MAX_PROMPT_CHARS),
+            id=_bounded_text(raw.get("id", ""), _QUESTION_ID_MAX_CHARS),
+            prompt=_bounded_text(raw.get("prompt", ""), _PROMPT_MAX_CHARS),
             kind=kind,
             options=options,
             required=bool(raw.get("required", False)),

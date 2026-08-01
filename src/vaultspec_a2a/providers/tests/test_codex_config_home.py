@@ -555,8 +555,11 @@ def test_authoring_bridge_unions_with_harness_servers_in_one_config_toml(
     base.mkdir()
     model = CodexChatModel(command=["codex", "app-server"], codex_home=str(base))
 
-    composed = compose_harness_mcp_servers(model, ["vaultspec-rag"])
-    composed = attach_authoring_tools(composed, _authoring_binding(), autonomous=True)
+    harnessed = compose_harness_mcp_servers(model, ["vaultspec-rag"])
+    composed = attach_authoring_tools(harnessed, _authoring_binding(), autonomous=True)
+    # Both composition seams declare the base type; asserting the Codex type
+    # survives BOTH is the precondition for reading the config home at all.
+    assert isinstance(composed, CodexChatModel)
 
     home = composed._build_codex_config_home()
     assert home is not None

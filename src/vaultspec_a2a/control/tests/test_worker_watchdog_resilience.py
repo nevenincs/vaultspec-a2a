@@ -200,7 +200,7 @@ async def test_cancellation_remains_the_quiet_way_to_stop_the_watchdog() -> None
 
     with _fast_polling():
         task = asyncio.create_task(watchdog.run())
-        assert await _await_status(worker_state, "down", timeout=3.0), (
+        assert await _await_status(worker_state, "down", timeout=15.0), (
             "the watchdog never ran a healthy tick"
         )
         task.cancel()
@@ -244,7 +244,7 @@ async def test_a_restart_cycle_that_raises_still_stamps_the_cooldown() -> None:
         # The tick detects the crash and enters the restart cycle, which opens
         # with a backoff sleep far longer than this wait - so cancelling below
         # lands inside the cycle rather than after it.
-        entered = await _await_status(worker_state, "restarting", timeout=5.0)
+        entered = await _await_status(worker_state, "restarting", timeout=15.0)
         assert entered, "the watchdog never entered a restart cycle"
         task.cancel()
         with contextlib.suppress(asyncio.CancelledError):

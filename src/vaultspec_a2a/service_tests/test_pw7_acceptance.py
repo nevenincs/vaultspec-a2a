@@ -118,11 +118,30 @@ def _option_id_for(options: list[dict], kind: str) -> str | None:
 
 logger = logging.getLogger(__name__)
 
+# The gateway now fails closed on every /v1/ route (api/auth.py's
+# authenticate_request) unless the app was built with the explicit test-only
+# bypass (`allow_unauthenticated_v1_for_testing`, which a real subprocess boot
+# never sets) - the caller must present the gateway's own service-discovery
+# bearer, the same VAULTSPEC_A2A_GATEWAY_TOKEN the booting shell configured the
+# gateway process with. Absent, requests degrade to unauthenticated (a truthful
+# 401/503 from the gateway, not a silently-skipped assertion).
 _GATEWAY_URL = os.environ.get("VAULTSPEC_GATEWAY_URL", "http://127.0.0.1:18100")
+_GATEWAY_SERVICE_TOKEN = os.environ.get("VAULTSPEC_A2A_GATEWAY_TOKEN", "")
+_GATEWAY_AUTH_HEADERS = (
+    {"Authorization": f"Bearer {_GATEWAY_SERVICE_TOKEN}"}
+    if _GATEWAY_SERVICE_TOKEN
+    else {}
+)
+# P10 finding: this tuple predates the P02 Plan-phase addition (a third
+# research_adr worker role, vaultspec-planner, gating a third Gate 3) and was
+# never caught by any regression sweep because this whole module is
+# service-marked and skips without a reachable live stack - the P10 stack
+# boot is what first exercised it live since P02 landed.
 _RESEARCH_ADR_ROLES = (
     "vaultspec-researcher",
     "vaultspec-synthesist",
     "vaultspec-adr-author",
+    "vaultspec-planner",
     "vaultspec-doc-reviewer",
 )
 
@@ -1417,7 +1436,7 @@ class AcceptanceHarness:
             # reviewer distinct from the agent author clears the self-approval ban).
             reviewer_human = await self._mint(ec, f"rev-human:{self.run_id}", "human")
 
-            async with httpx.AsyncClient() as hc:
+            async with httpx.AsyncClient(headers=_GATEWAY_AUTH_HEADERS) as hc:
                 # Hardened run-start refusals (pure eligibility, no submit).
                 await self._run_start(
                     hc,

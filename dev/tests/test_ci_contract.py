@@ -76,13 +76,16 @@ def test_ci_contract() -> None:
 
     steps = _test_job_steps()
     assert len(_run_steps(steps, "just ci")) == 1
-    sentinel_steps = [
-        step
+    # Bind the run text rather than re-indexing: an isinstance check on
+    # ``step.get("run")`` does not narrow a second ``step["run"]`` lookup, so the
+    # str methods below were being read off ``object``.
+    sentinel_runs = [
+        run
         for step in steps
-        if isinstance(step.get("run"), str) and step["run"].startswith("just lint ")
+        if isinstance(run := step.get("run"), str) and run.startswith("just lint ")
     ]
     assert (
-        tuple(step["run"].removeprefix("just lint ") for step in sentinel_steps)
+        tuple(run.removeprefix("just lint ") for run in sentinel_runs)
         == STRICT_SENTINELS
     )
 
@@ -115,18 +118,17 @@ def test_ci_contract() -> None:
     assert type_platforms is not None
     assert type_platforms.keep_going
     assert len(type_platforms.steps) == len(PLATFORMS)
-    assert all(isinstance(step, Cmd) for step in type_platforms.steps)
+    # Filter-then-compare-length rather than ``all(isinstance(...))``: it asserts
+    # the identical property, and unlike the all() form it NARROWS, so every
+    # ``.argv`` below is read off Cmd instead of the step union.
+    cmd_steps = [step for step in type_platforms.steps if isinstance(step, Cmd)]
+    assert len(cmd_steps) == len(type_platforms.steps)
     assert (
-        tuple(
-            step.argv[step.argv.index("--python-platform") + 1]
-            for step in type_platforms.steps
-        )
+        tuple(step.argv[step.argv.index("--python-platform") + 1] for step in cmd_steps)
         == PLATFORMS
     )
-    assert all(
-        step.argv[-len(PYTHON_PATHS) :] == PYTHON_PATHS for step in type_platforms.steps
-    )
-    for platform, step in zip(PLATFORMS, type_platforms.steps, strict=True):
+    assert all(step.argv[-len(PYTHON_PATHS) :] == PYTHON_PATHS for step in cmd_steps)
+    for platform, step in zip(PLATFORMS, cmd_steps, strict=True):
         assert step.argv[:13] == (
             "uv",
             "run",

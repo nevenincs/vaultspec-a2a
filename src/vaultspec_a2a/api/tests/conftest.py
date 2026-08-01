@@ -18,7 +18,7 @@ import asyncio
 from collections.abc import AsyncGenerator, AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import cast
+from typing import Any, cast
 
 import httpx
 import pytest
@@ -45,7 +45,17 @@ type SessionFactory = async_sessionmaker[AsyncSession]
 type JsonValue = (
     bool | int | float | str | list[JsonValue] | dict[str, JsonValue] | None
 )
-type DispatchPayload = dict[str, JsonValue]
+
+# A recorded dispatch body, whose VALUES stay `Any` deliberately. Typing them as
+# `JsonValue` describes the wire shape accurately but makes the payload unusable
+# to the tests that consume it: a dispatch is navigated several levels deep
+# (``d["option_id"]["answers"]["scope"]``), and every step off a recursive union
+# is unsubscriptable because the union admits `int`, `str` and `None`. The
+# precision is real and unhelpful here - it forces a cast or a narrowing branch
+# at each of ~45 assertion sites, which buys no safety in a test that is
+# asserting the very structure it would be narrowing. The dict itself stays
+# typed, so the container contract is still stated.
+type DispatchPayload = dict[str, Any]
 
 _PACKAGE_DIR = str(Path(__file__).resolve().parent)
 

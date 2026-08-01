@@ -194,3 +194,16 @@ substring disclosure match with two accept-direction false negatives, an
 unlabelled parse error on a malformed authority, a state-schema constant living
 in a node module, and the delivery-seam parameter landed one Phase early - the
 last being required by its own Step's acceptance condition rather than drift.
+
+- `codex-temp-home-refuses-path-aliases` (low, open, pre-existing) - every Codex
+  run already emits a warning that it could not create PATH aliases, because it
+  refuses to place helper binaries under a temporary directory and the per-run
+  configuration home is created under the operating system temp tree by default.
+  Surfaced by live verification against the installed binary during the
+  web-grounding delivery Phase, not by any Step's own work. Nothing in the
+  current lane depends on those aliases, so the run proceeds - the warning is
+  honest rather than spurious. Recorded because it is noise on every Codex run
+  that a reader will eventually investigate, and because the desktop profile
+  already declares an accounted temporary-home root for exactly this class of
+  reason; pointing the Codex home at that root would likely silence it. Belongs
+  to whoever owns the config-home layout rather than to this feature.

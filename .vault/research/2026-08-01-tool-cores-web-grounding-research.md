@@ -5,7 +5,7 @@ tags:
 date: '2026-08-01'
 modified: '2026-08-01'
 body_schema: 'body-v1'
-body_hash: 'sha256:2be3fe8b35d3c61c74a7d6833ed95b634be253fdffc9fa2ff814eac9cc836167'
+body_hash: 'sha256:5489e8c91264c41686a405cacb94c7879cdf8bedd71c2e94a6a531d516e4518e'
 related:
   - "[[2026-07-17-tool-cores-adr]]"
   - "[[2026-07-17-tool-cores-research]]"
@@ -43,6 +43,27 @@ The names differ per lane and are exact:
 The split is not incidental: it reproduces exactly the delivery-shape asymmetry
 the governing decision already records between its Claude and Codex legs, where
 the capability is shared and only the serialization differs.
+
+### Correction, from the installed binary rather than documentation
+
+The finding below was first taken from published configuration documentation,
+which describes the mode as a feature-table entry. Verification against the
+installed command-line tool at version 0.146.0 shows that is wrong, and the
+binary is the authority.
+
+The mode is a TOP-LEVEL key in the configuration file, not an entry under the
+feature table. The two feature-table forms both report as deprecated, and the
+binary carries its own migration string instructing that the key be set at the
+top level or under a profile. The parser refuses an unknown value by naming the
+four it accepts, which is stronger evidence than any documentation page because
+it is the parser speaking.
+
+One structural consequence follows and it is not cosmetic. Because a top-level
+key placed after a table header belongs to that table, the mode must be emitted
+BEFORE any declared-server table in the generated file. Emitting it afterwards
+produces a file that parses cleanly and means something entirely different -
+silent misconfiguration rather than a loud failure - so the ordering needs a test
+of its own rather than a test that merely asserts the key is present.
 
 ### The Codex lane has a third mode that changes the exposure question
 

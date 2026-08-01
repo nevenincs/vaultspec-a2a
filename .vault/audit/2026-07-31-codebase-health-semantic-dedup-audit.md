@@ -3,9 +3,9 @@ tags:
   - '#audit'
   - '#codebase-health'
 date: '2026-07-31'
-modified: '2026-07-31'
+modified: '2026-08-01'
 body_schema: 'body-v1'
-body_hash: 'sha256:c2dc12e197699f87cb99583ed6365c426e44a00a16395d6970b571095e41d30e'
+body_hash: 'sha256:2773cd123e9ec626175bbcd9bff1759df3133b318cff10aac8241491f9bbc47d'
 related:
   - "[[2026-07-19-codebase-health-audit]]"
   - "[[2026-07-19-codebase-health-plan]]"
@@ -53,7 +53,7 @@ nobody thinks to look again, and three separate findings below have that shape.
 
 ## Findings
 
-### plan-approval-rejection-predicate-diverges-from-vocabulary | high | A rejected plan is durably recorded as approved because three predicates use three different rejection vocabularies
+### plan-approval-rejection-predicate-diverges-from-vocabulary | medium | A rejected plan is durably recorded and reported as approved because three predicates use three different rejection vocabularies
 
 Found independently by two investigators on separate axes; verified against
 source.
@@ -87,18 +87,34 @@ member of `REJECT_OPTION_IDS`, so the rejection flag computes false. Because the
 pause cause does correctly identify this as a plan approval, the effects
 descriptor carries an approved status, and `control/event_handlers.py` writes it
 through `set_thread_approval_state`, overwriting the correct rejected value. The
-worker node gates its "plan rejected by user, revise the implementation plan"
-system message on the approval status reading rejected, so that message never
-fires and the rejected plan proceeds to execution.
+same event also marks the permission row applied rather than rejected.
 
-Two aggravating facts. Severity is raised by a recent change rather than lowered
-by it: the refactor that made execution approval read from the approval status
-field alone removed the corroborating signal that might otherwise have masked
-this, so the overwritten field now solely determines whether a rejected plan
-executes. And the module is untested - `thread/permission_fsm.py` has no test
-file anywhere in the tree, and the event-handler tests exercise only the replay
-guard and the unknown-request-id path, never a rejection payload. The defect
-survived because nothing ever asserted the behaviour.
+CORRECTION, entered on re-verification against a later HEAD. An earlier revision
+of this finding claimed the overwrite lets a rejected plan proceed to execution,
+because the worker node gates its revise message on the approval status reading
+rejected. That claim was wrong and is withdrawn. The gate reads graph state, not
+the database column, and the two are separate: graph state is produced by the
+supervisor's plan-approval node from the interrupt resume value, which is built
+by an independent and correct comparison against the approve literal. On a
+rejection the supervisor therefore routes to a revision worker, sets the graph
+approval state to rejected, and populates the routing error the message gate
+matches. The revise message does fire, and the rejected plan does not execute.
+The database column flows outward only - into the API snapshot projection and
+the response schemas - and is never read back into graph state.
+
+The defect is therefore a durable-record and reporting-fidelity failure rather
+than an execution failure, and the severity is reduced accordingly. What remains
+is not trivial: the persisted record of a human authorization decision states the
+opposite of what the human decided, and that value is what the edge serves. A
+consumer outside this repository that gates on the reported approval state would
+turn this back into an execution concern, which is unknown from here and worth
+establishing rather than assuming.
+
+The module remains untested, which is why the defect survived: `thread/permission_fsm.py`
+has no test file anywhere in the tree, neither predicate is named by any test,
+and the event-handler tests exercise the replay guard, request persistence, and
+the unknown-request path but never submit a rejection. The two approval tests
+offer a reject option and assert only that the request lands pending.
 
 ### atomic-write-protocol-still-triplicated | high | The declared single home for atomic file writes has three unconverted siblings
 
@@ -480,8 +496,17 @@ inspects. If a single model turn emits both a permission request and a
 queue-tool call, the gate answers the permission, abandons the sibling call
 without ever answering it with a tool message, and returns a brand-new response
 that replaces the original - so the queue-tool call is never dispatched, never
-durably marked complete, and its identifier is discarded. This is plausible
-precisely on the deterministic mock provider the gate exists to serve.
+durably marked complete, and its identifier is discarded.
+
+Re-verification narrowed the reach, and the finding should be read with that
+narrowing. The sibling in question is specifically the MOCK permission gate: it
+early-returns unless the model identifies itself as the mock chat model and the
+lane is non-autonomous. Real ACP providers never reach it - their permission
+callback raises the interrupt from inside the model invocation, so no response
+is produced at all and the node re-runs whole on resume, re-emitting the queue
+calls. The drop is structurally live but confined to the mock-supervised lane,
+and the docstring's claim should be corrected to name the mock gate rather than
+the permission gate in general.
 
 Reachability was investigated specifically and settled at reachable in
 principle, not proven reachable. No shipped test constructs the mixed turn: the

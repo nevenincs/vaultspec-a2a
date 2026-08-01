@@ -6,7 +6,7 @@ tags:
 date: '2026-08-01'
 modified: '2026-08-01'
 body_schema: 'body-v1'
-body_hash: 'sha256:deb7f72592d12b5d65d5d42a333779ad045af1d53bb67640dd1a5fb147cd913b'
+body_hash: 'sha256:4b9f327f4eb60f8a9dfb4bdae5e7688b992bd30d269418b982e2c52fba230169'
 related:
   - '[[2026-07-19-repository-tooling-hardening-W01-P01-S01]]'
   - '[[2026-07-19-repository-tooling-hardening-W01-P01-summary]]'
@@ -35,6 +35,7 @@ related:
   - '[[2026-07-19-repository-tooling-hardening-W05-P10-S17]]'
   - '[[2026-07-19-repository-tooling-hardening-W05-P10-S18]]'
   - '[[2026-07-19-repository-tooling-hardening-W06-P11-S19]]'
+  - '[[2026-07-19-repository-tooling-hardening-W06-P11-S20]]'
   - '[[2026-07-19-repository-tooling-hardening-adr]]'
   - '[[2026-07-19-repository-tooling-hardening-audit]]'
   - '[[2026-07-19-repository-tooling-hardening-plan]]'
@@ -50,6 +51,7 @@ related:
   - '[[2026-08-01-repository-tooling-hardening-strict-s17-audit]]'
   - '[[2026-08-01-repository-tooling-hardening-strict-s18-audit]]'
   - '[[2026-08-01-repository-tooling-hardening-strict-s19-audit]]'
+  - '[[2026-08-01-repository-tooling-hardening-strict-s20-audit]]'
 ---
 
 # `repository-tooling-hardening` feature index
@@ -72,6 +74,7 @@ Auto-generated index of all documents tagged with `#repository-tooling-hardening
 - `2026-08-01-repository-tooling-hardening-strict-s17-audit` - `repository-tooling-hardening` audit: `advisory duplication visibility review`
 - `2026-08-01-repository-tooling-hardening-strict-s18-audit` - `repository-tooling-hardening` audit: `real CI anti-drift guard review`
 - `2026-08-01-repository-tooling-hardening-strict-s19-audit` - `repository-tooling-hardening` audit: `Ty portability review`
+- `2026-08-01-repository-tooling-hardening-strict-s20-audit` - `repository-tooling-hardening` audit: `Typed Radon boundary review`
 
 ### exec
 
@@ -102,6 +105,7 @@ Auto-generated index of all documents tagged with `#repository-tooling-hardening
 - `2026-07-19-repository-tooling-hardening-W05-P10-S17` - Schedule production JSCPD clone detection as a named advisory hosted-CI result.
 - `2026-07-19-repository-tooling-hardening-W05-P10-S18` - Prove exact root, workflow, sentinel, platform, advisory, blocking, and duplication anti-drift invariants from the real registry.
 - `2026-07-19-repository-tooling-hardening-W06-P11-S19` - Repair the Ty portability tranche for Windows-only ctypes and generic-length access.
+- `2026-07-19-repository-tooling-hardening-W06-P11-S20` - Type the health-instrument boundary without suppressions and preserve its measured-result contract.
 
 ### plan
 

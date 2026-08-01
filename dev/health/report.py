@@ -36,17 +36,36 @@ complexity`` for that dimension.
 from __future__ import annotations
 
 import ast
+import importlib
 import json
 from contextlib import suppress
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING
-
-from radon.complexity import cc_visit
-from radon.metrics import mi_visit
+from typing import TYPE_CHECKING, cast
 
 if TYPE_CHECKING:
     from collections.abc import Iterator, Sequence
+    from typing import Protocol
+
+    class _RadonBlock(Protocol):
+        @property
+        def lineno(self) -> int: ...
+
+        @property
+        def name(self) -> str: ...
+
+        @property
+        def complexity(self) -> int: ...
+
+    class _CCVisit(Protocol):
+        def __call__(self, code: str, **kwargs: object) -> Sequence[_RadonBlock]: ...
+
+    class _MIVisit(Protocol):
+        def __call__(self, code: str, multi: bool) -> float: ...
+
+
+cc_visit = cast("_CCVisit", importlib.import_module("radon.complexity").cc_visit)
+mi_visit = cast("_MIVisit", importlib.import_module("radon.metrics").mi_visit)
 
 #: The production package measured by every dimension below.
 PACKAGE = Path("src") / "vaultspec_a2a"

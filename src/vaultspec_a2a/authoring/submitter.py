@@ -37,6 +37,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from ..graph.enums import PipelinePhase
+from ..graph.nodes.diverge import WEB_LOCATOR_KIND
 from ..graph.nodes.phase_gate import ProposalRevisionRequiredError
 from ._envelope import AuthoringResponse, Denial
 from ._errors import AuthoringError
@@ -106,13 +107,6 @@ _HTML_COMMENT_RE = re.compile(r"<!--.*?-->", re.DOTALL)
 # ## Status section survives to disk and trips `adr-status`; the submit-node refuses
 # it (ADR phase only) and routes the author to rewrite the H1 token.
 _LEGACY_STATUS_HEADING_RE = re.compile(r"^##[ \t]+Status[ \t]*$", re.MULTILINE)
-
-#: The research-finding locator ``kind`` that denotes an EXTERNAL web retrieval, as
-#: opposed to the internal `path:line` locators the findings contract has always
-#: carried. Web evidence reaches checkpointed state through the append-only
-#: ``research_findings`` reducer; the submit-node reads it back to hold the proposed
-#: document to the run's own retrievals.
-_WEB_LOCATOR_KIND = "web"
 
 
 class SubmitterError(AuthoringError):
@@ -399,7 +393,8 @@ def _web_locator_urls(state: TeamState) -> list[str]:
     Every researcher branch appends a ``{claim, locators, source_thread}`` finding
     through the append-only ``research_findings`` reducer, so checkpointed state
     holds the run's complete retrieval record by the time any document is proposed.
-    A web locator is a dict carrying ``kind`` ``web`` and a ``url``; the internal
+    A web locator is a dict carrying the contract's :data:`WEB_LOCATOR_KIND` — owned
+    by the branch-side validation that admits it — and a ``url``; the internal
     ``path:line`` locators that share the list are skipped, as is any malformed
     entry — an unreadable locator must never manufacture a refusal, only a real
     recorded retrieval may. Order is first-seen and duplicates collapse, so the
@@ -419,7 +414,7 @@ def _web_locator_urls(state: TeamState) -> list[str]:
         for locator in locators:
             if not isinstance(locator, dict):
                 continue
-            if locator.get("kind") != _WEB_LOCATOR_KIND:
+            if locator.get("kind") != WEB_LOCATOR_KIND:
                 continue
             url = locator.get("url")
             if isinstance(url, str) and url and url not in seen:

@@ -29,6 +29,7 @@ import pytest
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
 
 from ...graph.enums import PipelinePhase
+from ...graph.nodes.diverge import WEB_LOCATOR_KIND
 from ...thread.actor_tokens import ActorTokenBundle
 from ...worker.token_store import RunTokenStore
 from ..submitter import (
@@ -88,12 +89,17 @@ _DISCLOSES_BOTH = _document(
 
 
 def _web_finding(*urls: str, thread: str = "t-01") -> dict[str, Any]:
-    """A research finding carrying one typed web locator per URL."""
+    """A research finding carrying one typed web locator per URL.
+
+    The ``kind`` is the finding contract's own constant, not a literal, so the
+    submitter is exercised against the vocabulary the branch-side validation
+    actually admits: if the two ever drift apart again, these tests fail.
+    """
     return {
         "claim": "every provider lane ships first-party web tools",
         "locators": [
             {
-                "kind": "web",
+                "kind": WEB_LOCATOR_KIND,
                 "url": url,
                 "retrieved_at": _RETRIEVED_AT,
                 "title": "tool reference",

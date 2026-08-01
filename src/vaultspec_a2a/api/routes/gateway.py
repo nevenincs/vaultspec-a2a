@@ -1080,11 +1080,14 @@ def _resolve_and_freeze_profile_or_refuse(
     """Validate the selected profile and freeze its effective assignment, or 4xx.
 
     Refuses an unknown profile (422) and a profile that is not runnable - a role
-    whose provider is not ready with no eligible fallback (422). Launch gates only
-    on provider readiness: the production acceptance gate and engine reachability
-    are discovery-certification signals surfaced by presets-list, not launch
-    blockers (enforcing them here would refuse every run). Never silently replaces
-    the selection with team-defaults.
+    naming a provider lane without completed-turn proof, or a role whose provider
+    is not ready with no eligible fallback (422). Launch gates on lane admission
+    and provider readiness: the production acceptance gate and engine
+    reachability are discovery-certification signals surfaced by presets-list,
+    not launch blockers (enforcing them here would refuse every run). The
+    admission term is NOT waived at launch - an unproven lane is refused here
+    with the provider named, so it can never be discovered mid-run. Never
+    silently replaces the selection with team-defaults.
     """
     from ...providers.model_profiles import (
         evaluate_profile_eligibility,
@@ -2128,7 +2131,14 @@ def _summarize_preset(
         description=tc.description,
         topology=tc.topology.type,
         worker_count=len(tc.workers),
-        required_roles=[w.agent_id for w in tc.workers],
+        # The same function run-start REFUSES against, not a second derivation of
+        # it: discovery advertises the roles a caller must mint, and a caller that
+        # mints exactly what it was told must never then be refused for missing
+        # one. Two independent list comprehensions agreeing today is not that
+        # guarantee - it is the guarantee's absence, and the failure it would
+        # produce lands before the graph ever runs, where nothing downstream can
+        # observe it.
+        required_roles=required_role_ids(tc),
         authoring_capability=authoring_capability(tc.topology.type),
         is_mock=is_mock,
         origin=_preset_origin(preset_id, ws_root, is_mock=is_mock),

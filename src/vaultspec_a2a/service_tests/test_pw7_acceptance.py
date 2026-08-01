@@ -115,6 +115,20 @@ logger = logging.getLogger(__name__)
 
 _GATEWAY_URL = os.environ.get("VAULTSPEC_GATEWAY_URL", "http://127.0.0.1:18100")
 
+# The gateway fails closed on every /v1/ route (`api/auth.py`'s
+# `authenticate_request`) unless the app was built with the explicit test-only
+# bypass, which a real subprocess boot never sets. So the caller must present the
+# gateway's own service-discovery bearer - the same VAULTSPEC_A2A_GATEWAY_TOKEN
+# the booting shell configured the gateway process with. Absent, requests degrade
+# to unauthenticated and the gateway answers a truthful 401/503; that is a loud
+# failure rather than a silently skipped assertion, which is the point.
+_GATEWAY_SERVICE_TOKEN = os.environ.get("VAULTSPEC_A2A_GATEWAY_TOKEN", "")
+_GATEWAY_AUTH_HEADERS = (
+    {"Authorization": f"Bearer {_GATEWAY_SERVICE_TOKEN}"}
+    if _GATEWAY_SERVICE_TOKEN
+    else {}
+)
+
 # Per-gate verdict policies (the lane axis).
 POLICY_AUTO = "AUTO"
 POLICY_HUMAN = "HUMAN"
@@ -164,6 +178,8 @@ _PRESET_LIVE = "vaultspec-adr-research"
 _PROFILE_CODEX = "codex"
 _PROFILE_ZAI = "zai"
 _ZAI_CREDENTIAL_ENV = "ZAI_AUTH_TOKEN"
+# The single-provider Codex lane: every role including the doc-reviewer.
+_PROFILE_CODEX_ALL = "codex-all"
 
 
 @dataclass(frozen=True, slots=True)
@@ -297,6 +313,18 @@ CASE_ZAI = _research_adr_case(
     profile_id=_PROFILE_ZAI,
     required_env=(_ZAI_CREDENTIAL_ENV,),
 )
+# The single-provider Codex lane: every role, doc-reviewer included, routes to
+# codex, so the run consumes no other provider's credential. That is what the
+# mixed lanes above cannot express - each of them falls back to claude for at
+# least one role - and it is witnessable with ZERO credential handling, since
+# codex authenticates from its own file-based local session.
+CASE_CODEX_ALL = _research_adr_case(
+    "codex-all",
+    "pw7-acceptance-codex-all",
+    {"research": POLICY_AUTO, "adr": POLICY_HUMAN},
+    preset=_PRESET_LIVE,
+    profile_id=_PROFILE_CODEX_ALL,
+)
 
 _ALL_CASES = (
     CASE_AUTO,
@@ -306,6 +334,7 @@ _ALL_CASES = (
     CASE_LIVE_AUTO,
     CASE_CODEX,
     CASE_ZAI,
+    CASE_CODEX_ALL,
 )
 
 
@@ -1367,7 +1396,7 @@ class AcceptanceHarness:
             # reviewer distinct from the agent author clears the self-approval ban).
             reviewer_human = await self._mint(ec, f"rev-human:{self.run_id}", "human")
 
-            async with httpx.AsyncClient() as hc:
+            async with httpx.AsyncClient(headers=_GATEWAY_AUTH_HEADERS) as hc:
                 # Hardened run-start refusals (pure eligibility, no submit).
                 await self._run_start(
                     hc,

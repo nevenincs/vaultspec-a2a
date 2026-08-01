@@ -30,6 +30,7 @@ from ...database import list_threads
 from ...graph.enums import Provider
 from ...providers.model_profiles import probe_provider_readiness
 from ...streaming.aggregator import EventAggregator
+from ...team.team_config import load_team_config
 from ..routes.gateway import _persisted_lease_id, admission_gate
 from .conftest import make_app
 
@@ -616,10 +617,18 @@ async def test_presets_list_is_truthful_and_resilient(
         # research/authoring roles; `zai` overlays zai. The overlay attribution
         # (source == "profile") is disclosed and the un-overlaid doc-reviewer falls
         # through to a different provider - a genuinely mixed profile.
-        authoring_roles = (
-            "vaultspec-researcher",
-            "vaultspec-synthesist",
-            "vaultspec-adr-author",
+        # Derived from the preset, not listed here: a mixed lane overlays every
+        # authoring worker and leaves the reviewer behind, so "the roles a mixed
+        # lane covers" IS "this preset's workers minus the reviewer". The hardcoded
+        # copy this replaces fell silently behind when the preset gained a
+        # plan-author role, turning a profile-coverage assertion into a stale-list
+        # assertion.
+        all_roles = tuple(
+            worker.agent_id
+            for worker in load_team_config("vaultspec-adr-research").workers
+        )
+        authoring_roles = tuple(
+            role for role in all_roles if role != "vaultspec-doc-reviewer"
         )
         codex_by_agent = {a["agent_id"]: a for a in profiles["codex"]["assignments"]}
         for agent_id in authoring_roles:
@@ -632,7 +641,6 @@ async def test_presets_list_is_truthful_and_resilient(
         # exactly one provider's credential. Asserting the doc-reviewer here is
         # the load-bearing part - it is the role the mixed lanes leave behind,
         # and the reason a provider-only proof cannot be expressed on them.
-        all_roles = (*authoring_roles, "vaultspec-doc-reviewer")
         for profile_id, provider_id in (("codex-all", "codex"), ("kimi-all", "kimi")):
             by_agent = {a["agent_id"]: a for a in profiles[profile_id]["assignments"]}
             assert set(by_agent) == set(all_roles)

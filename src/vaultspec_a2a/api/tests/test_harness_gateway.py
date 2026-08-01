@@ -22,6 +22,7 @@ import httpx
 import pytest
 
 from ...cli.provision import provision_workspace
+from ...team.team_config import load_team_config
 from .conftest import make_app
 from .test_gateway_live import _live_server
 
@@ -29,12 +30,19 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 _AUTHORING = "vaultspec-adr-research"
-_ROLES = (
-    "vaultspec-researcher",
-    "vaultspec-synthesist",
-    "vaultspec-adr-author",
-    "vaultspec-doc-reviewer",
-)
+
+
+def _authoring_roles() -> tuple[str, ...]:
+    """The preset's required agent ids, read from the preset itself.
+
+    Derived rather than listed: these tests exist to prove the HARNESS refuses a
+    run, which they can only do when every other gate passes, so a bundle that
+    silently falls behind the preset turns them into token-gate tests wearing a
+    harness-gate name. A hardcoded copy did exactly that when the preset gained a
+    plan-author role, so the roles now come from the same place the gate reads.
+    """
+    return tuple(worker.agent_id for worker in load_team_config(_AUTHORING).workers)
+
 
 pytestmark = pytest.mark.skipif(
     shutil.which("vaultspec-core") is None and shutil.which("uvx") is None,
@@ -45,7 +53,7 @@ pytestmark = pytest.mark.skipif(
 def _full_bundle() -> dict:
     """A complete per-role actor-token bundle so only the harness can refuse."""
     return {
-        "tokens": {role: f"tok-{role}" for role in _ROLES},
+        "tokens": {role: f"tok-{role}" for role in _authoring_roles()},
         "engine_bearer": "bearer",
     }
 

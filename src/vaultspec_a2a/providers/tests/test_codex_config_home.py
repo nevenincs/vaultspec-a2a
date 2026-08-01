@@ -312,40 +312,66 @@ class TestWebPostureThroughTheProductionModelSeam:
         finally:
             cleanup_codex_config_home(home)
 
-    def test_the_codex_lane_is_dark_because_it_carries_no_retrieval_proof(
+    def test_the_codex_lane_emits_live_because_it_carries_retrieval_proof(
         self, tmp_path: Path
     ) -> None:
-        # Both assertions matter, and the first is the one that keeps this test
-        # honest. It states the precondition the second depends on, so when a
-        # later step records real retrieval proof for codex this test FAILS and
-        # forces someone to revisit it, instead of quietly continuing to assert
-        # "disabled" about a lane that has since been activated.
+        # This test previously asserted the mirror image - dark, because the lane
+        # carried no proof - and was written to FAIL the day that proof was
+        # recorded rather than quietly go on describing a lane that had since
+        # been activated. That day came: the declaration now carries a live
+        # retrieval proof for this lane, so both halves are restated against the
+        # state that replaced it, and the first still states the precondition the
+        # second depends on.
         base = tmp_path / "base"
         base.mkdir()
-        assert Provider.CODEX not in PROVEN_WEB_LANES
-        assert self._emitted(self._model(base))["web_search"] == "disabled"
+        assert Provider.CODEX in PROVEN_WEB_LANES
+        assert self._emitted(self._model(base))["web_search"] == "live"
 
     def test_the_declared_lane_is_what_gets_asked_about(self, tmp_path: Path) -> None:
         # The verdict is taken for the model's OWN declared lane rather than a
-        # constant, so the wiring cannot be right by coincidence.
+        # constant, so the wiring cannot be right by coincidence. A lane with no
+        # recorded proof is asked the same question and answers the other way,
+        # which is what keeps the predicate from being constant-true now that the
+        # model's own lane is proven.
         base = tmp_path / "base"
         base.mkdir()
         model = self._model(base)
         assert model.provider == Provider.CODEX.value
-        assert is_web_lane_proven(model.provider) is False
+        assert is_web_lane_proven(model.provider) is True
+        assert is_web_lane_proven(Provider.KIMI.value) is False
 
-    def test_configuration_cannot_open_a_lane_the_gate_has_closed(
+    def test_configuration_cannot_open_a_lane_the_gate_has_closed(self) -> None:
+        # A deployment explicitly asking for live retrieval on a lane with no
+        # proof. The gate is applied after the preference is read, so the answer
+        # is still disabled. Without this precedence a config key would be a way
+        # around the proof requirement.
+        #
+        # The subject is a lane that is genuinely unproven rather than this
+        # module's own, because the model seam can only ask about the lane it
+        # declares and that lane now carries proof. The verdict is still the real
+        # predicate over the real declaration - nothing here is asserted about a
+        # hypothetical.
+        assert is_web_lane_proven(Provider.KIMI) is False
+        assert (
+            resolve_codex_web_search_mode(
+                web_proven=is_web_lane_proven(Provider.KIMI),
+                configured=CodexWebSearchMode.LIVE,
+            )
+            is CodexWebSearchMode.DISABLED
+        )
+
+    def test_configuration_narrows_a_lane_the_gate_has_opened(
         self, tmp_path: Path
     ) -> None:
-        # A deployment explicitly asking for live retrieval, through the real
-        # model API, on a lane with no proof. The gate is applied after the
-        # preference is read, so the answer is still disabled. Without this
-        # precedence a config key would be a way around the proof requirement.
+        # The other half of the precedence, and the one the model seam can still
+        # express: above the gate the deployment's preference governs, so an
+        # install that wants search with zero egress takes the cached posture
+        # through the real model API on a lane the gate has opened.
         base = tmp_path / "base"
         base.mkdir()
-        model = self._model(base, web_search_mode=CodexWebSearchMode.LIVE)
-        assert model.web_search_mode is CodexWebSearchMode.LIVE
-        assert self._emitted(model)["web_search"] == "disabled"
+        model = self._model(base, web_search_mode=CodexWebSearchMode.CACHED)
+        assert model.web_search_mode is CodexWebSearchMode.CACHED
+        assert self._emitted(model)["web_search"] == "cached"
 
     def test_the_deployment_preference_is_read_from_real_settings(self) -> None:
         # The zero-egress path is a real settings key, parsed by the real

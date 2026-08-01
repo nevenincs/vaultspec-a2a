@@ -238,14 +238,33 @@ class TestCitationResolution:
 
 
 class TestWebDeclaration:
-    """The web-grounding activation gate: empty at landing, dark by default."""
+    """The web-grounding activation gate: dark by default, lit only by proof."""
 
-    def test_no_lane_is_web_proven_at_landing(self) -> None:
-        """The capability ships wired and unactivated - that is the landing state."""
-        assert dict(PROVEN_WEB_LANES) == {}
+    def test_only_a_lane_with_recorded_retrieval_proof_is_activated(self) -> None:
+        """Activation follows the declaration exactly - no lane rides along.
+
+        The declaration landed empty and now carries one lane, so this states
+        which one and asserts every other member of the enum is still dark. That
+        second half is what stops the gate degrading into a formality as lanes are
+        added: a proof recorded for one lane must activate that lane alone.
+        """
+        assert set(PROVEN_WEB_LANES) == {Provider.CODEX}
         for provider in Provider:
-            assert is_web_lane_proven(provider) is False
-            assert web_tool_names_for(provider) == ()
+            expected = provider in PROVEN_WEB_LANES
+            assert is_web_lane_proven(provider) is expected
+
+    def test_a_configured_reach_activates_no_allowlist_name(self) -> None:
+        """The proven lane composes no tool name, because it has none to compose.
+
+        Its web reach is configuration - the posture written into its per-run
+        config home - not a built-in the allowlist can carry, so the honest
+        declaration records no names and composition adds nothing. A name
+        appearing here would be a tool the proof never exercised.
+        """
+        assert web_tool_names_for(Provider.CODEX) == ()
+        for provider in Provider:
+            if provider not in PROVEN_WEB_LANES:
+                assert web_tool_names_for(provider) == ()
 
     def test_an_unidentified_lane_denies_instead_of_raising(self) -> None:
         """A model that declared no lane, or one nobody has heard of, is unproven.

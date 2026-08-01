@@ -189,7 +189,10 @@ def test_cli_group_configures_cli_lane() -> None:
     from ...cli.main import main as cli
 
     # The group callback is the entrypoint's logging-wiring site; run it directly.
-    cli.callback()  # type: ignore[misc]
+    # Asserting it exists is part of the guarantee: a group that lost its callback
+    # would wire no lane at all, which is the failure this test is here to catch.
+    assert cli.callback is not None
+    cli.callback()
     root = logging.getLogger()
     assert root.level == logging.WARNING
     assert any(getattr(h, "stream", None) is sys.stderr for h in root.handlers)

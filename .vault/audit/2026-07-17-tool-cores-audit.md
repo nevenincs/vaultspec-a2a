@@ -358,3 +358,45 @@ blocked behind it for the same reason, as is the third-lane proof.
 The Codex lane is unaffected and is proven: it needs no engine, because its
 retrieval happens inside the provider's own turn rather than through the
 authoring path.
+
+### Why the live lane proofs never succeed: the harness cannot find or authenticate to a gateway the registry knows (2026-08-01)
+
+Chasing one skipping proof to ground produced a finding larger than the Step.
+The lane test has never passed on this host, and the reason is not the lane.
+
+**Ports are controlled, and the control is deliberate.** Development processes
+take a port allocated from their role's band and register it machine-globally
+with their pid, role, workspace, and liveness. Nothing is guessed and nothing is
+fixed: the registry is the discovery mechanism, and a second concurrent session
+gets a different port by design rather than colliding. That is a good design and
+it works - probing the registry located a live engine, gateway, and worker in
+seconds after the defaults had said nothing was there.
+
+**The live-test harness does not consult that registry.** It reads a gateway URL
+from an environment variable and falls back to a fixed default. On this host the
+gateway had been allocated two ports away from that default, so the harness
+concluded no stack existed and skipped truthfully - while the registry knew
+exactly where it was. Two mechanisms this project owns, neither wired to the
+other. The skip was honest and the conclusion it reported was wrong.
+
+**The service token is deliberately not discoverable, and that half is correct.**
+The gateway validates a service token that the configuration explicitly refuses
+to share with worker IPC or embed in discovery, and a validator rejects any
+configuration collapsing the two authorities. The registry record carries the
+internal IPC token file and no service token, exactly as intended. So a harness
+CAN learn where the gateway is and CANNOT learn how to authenticate to it -
+whoever starts the stack must hand that credential over out of band. Supplying
+the internal token instead produces a 401, which is the separation working.
+
+The consequence is a class rather than an incident: any live test gated on a
+reachable stack will skip on a correctly-running system whenever the port was
+allocated rather than defaulted, and will 401 whenever the credential was not
+passed out of band. Both failures read as environment problems and neither is.
+A proof that cannot run is indistinguishable from a proof that does not hold,
+which is why a lane admitted on such a proof cannot be trusted without the
+passing line.
+
+The repair is not to relax the gate. It is to let the harness resolve the
+gateway the same way everything else does - through the registry that already
+records it - and to make the out-of-band credential an explicit, named
+prerequisite rather than an environment variable a caller is assumed to know.

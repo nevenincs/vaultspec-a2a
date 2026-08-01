@@ -5,7 +5,7 @@ tags:
 date: '2026-08-01'
 modified: '2026-08-01'
 body_schema: 'body-v1'
-body_hash: 'sha256:333b49ecb4ce6bf212f6f4a6cc902c35e6c60aaa93a810de2e17dd831c916b78'
+body_hash: 'sha256:009a2a600757b0409784c4142b31a6ea60f6af6fbb55410df5d722077098ba79'
 related:
   - "[[2026-07-19-repository-tooling-hardening-reference]]"
   - "[[2026-07-19-repository-tooling-hardening-adr]]"
@@ -23,6 +23,8 @@ Core has a fast Ty target and a separate Basedpyright strict target. Its CI runs
 ### Reusable complexity contract
 
 Core treats cognitive complexity, nesting, and design size as named, independently reported CI gates. RAG keeps the same named local commands but makes unfinished dimensions advisory in its comprehensive CI lane. A2A already has stricter published defaults: cognitive complexity 15 in `pyproject.toml:375-376`, cyclomatic complexity 10 in `pyproject.toml:259-267`, and module size 1000 in `pyproject.toml:395-401`. The A2A health reporter uses Radon's API for cyclomatic and maintainability measurements, while Complexipy remains the sole cognitive-complexity authority; it must not be reimplemented in the reporter (`dev/health/report.py:23-33`).
+
+Complexipy's configuration is process-global: a `[tool.complexipy] exclude` policy would apply to both `lint complexity` and A2A's separate `audit complexity` target. The latter is intentionally a test-focused investigation command, so production exclusions must remain target-specific command arguments in `dev/toolchain.py`, not global configuration. Complexipy 6.2 accepts root-relative exclusions and normalizes Windows paths; the production target must exclude both direct and nested test-tier plus cache paths while retaining the existing configured limit.
 
 ### Duplication and CI tiering
 

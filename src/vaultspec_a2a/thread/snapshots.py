@@ -245,7 +245,12 @@ def clarification_data_from_interrupt(
             continue
         qid = raw.get("id")
         prompt = raw.get("prompt")
-        if not isinstance(qid, str) or not qid or not isinstance(prompt, str) or not prompt:
+        if (
+            not isinstance(qid, str)
+            or not qid
+            or not isinstance(prompt, str)
+            or not prompt
+        ):
             continue
         kind = raw.get("kind")
         kind = kind if kind in ("choice", "text") else "text"

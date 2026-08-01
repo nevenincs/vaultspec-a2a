@@ -212,9 +212,7 @@ class EventEmitters:
         ]
         for key in stale_tool_calls:
             self._tool_call_states.pop(key, None)
-        stale_agent_states = [
-            key for key in self._agent_states if key[0] == thread_id
-        ]
+        stale_agent_states = [key for key in self._agent_states if key[0] == thread_id]
         for key in stale_agent_states:
             self._agent_states.pop(key, None)
 
@@ -235,7 +233,10 @@ class EventEmitters:
         cross-run leak for a per-run status read.
         """
         if thread_id is None:
-            return {agent_id: state for (_tid, agent_id), state in self._agent_states.items()}
+            return {
+                agent_id: state
+                for (_tid, agent_id), state in self._agent_states.items()
+            }
         return {
             agent_id: state
             for (tid, agent_id), state in self._agent_states.items()

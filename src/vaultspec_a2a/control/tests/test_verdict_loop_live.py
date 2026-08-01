@@ -117,7 +117,9 @@ def _bridge_stub() -> WorkerBridge:
     async def _heartbeat(request: Request) -> Response:
         return Response(content='{"status":"ok"}', media_type="application/json")
 
-    bridge = WorkerBridge(api_url="http://control:8000", worker_id="verdict-loop-worker")
+    bridge = WorkerBridge(
+        api_url="http://control:8000", worker_id="verdict-loop-worker"
+    )
     bridge._client = httpx.AsyncClient(
         transport=ASGITransport(app=app), base_url="http://control:8000"
     )
@@ -269,11 +271,9 @@ async def test_live_engine_verdict_resumes_a_real_graph_through_the_real_worker(
             with anyio.fail_after(15.0):
                 while True:
                     snap = await graph.aget_state(config)
-                    if (
-                        snap.values.get("gate_pending_proposal_id")
-                        == info["proposal_id"]
-                        and snap.next == ("gate",)
-                    ):
+                    if snap.values.get("gate_pending_proposal_id") == info[
+                        "proposal_id"
+                    ] and snap.next == ("gate",):
                         break
                     await anyio.sleep(0.05)
 
@@ -354,9 +354,7 @@ async def test_live_engine_verdict_resumes_a_real_graph_through_the_real_worker(
                     db, f"{thread_id}:verdict-loop-gate"
                 )
                 assert gate_row is not None
-                assert (
-                    gate_row.request_status == PermissionRequestStatus.APPLIED.value
-                )
+                assert gate_row.request_status == PermissionRequestStatus.APPLIED.value
                 thread = await get_thread(db, thread_id)
                 assert thread is not None
                 assert thread.status != ThreadStatus.INPUT_REQUIRED.value

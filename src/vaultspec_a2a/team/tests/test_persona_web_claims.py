@@ -119,15 +119,24 @@ def test_the_vocabulary_this_guard_scans_for_is_not_empty() -> None:
     vocabulary = _web_vocabulary()
     assert vocabulary
 
+    # The native half carries the non-vacuity on its own: the CLI built-ins that
+    # reach outward are declared independently of the registry, so this guard keeps
+    # scanning every persona for real tokens even with no egressing server at all.
     assert _egressing_native_names() <= vocabulary
-    egressing = _egressing_servers()
-    assert egressing, (
-        "the registry declares no egressing entry, so the MCP half of this guard "
-        "scans for nothing - if an entry was withdrawn, say so here deliberately"
+
+    # Said here deliberately, which is what the withdrawn-entry case above always
+    # asked for. There is no vaultspec-owned egressing MCP server, and there will
+    # not be one: the entry that used to sit here put a first-party name on a
+    # third-party package for a server that does not exist. So the MCP half of this
+    # vocabulary is EMPTY by decision, not by a broken derivation - and an entry
+    # appearing here means one arrived on a merge again, which is exactly how the
+    # last one got in. Derived from the registry rather than naming what was
+    # removed, so the tripwire cannot rot into a check for one dead string.
+    assert not _egressing_servers(), (
+        "the registry declares an egressing entry; no vaultspec-owned egressing "
+        "MCP server exists or is planned, so this is either a fiction that arrived "
+        "on a merge or a real capability that owes this guard an update"
     )
-    for server in egressing:
-        for tool in _KNOWN_MCP_SERVERS[server].get("tools", ()):
-            assert f"mcp__{server}__{tool}" in vocabulary
 
 
 @pytest.mark.parametrize("agent_id", _shipped_agent_ids())

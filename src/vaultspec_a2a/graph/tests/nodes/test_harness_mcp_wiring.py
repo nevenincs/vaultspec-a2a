@@ -219,30 +219,6 @@ async def test_supervised_researcher_producer_does_not_auto_permit(
 
 
 @pytest.mark.asyncio
-async def test_researcher_producer_advertises_web_search_server(
-    tmp_path: Path,
-) -> None:
-    """The researcher producer path advertises the real web-search MCP server
-    (agent-flow ADR D6) through the SAME protocol-layer mechanism already
-    proven for vaultspec-rag — deterministic and offline: the ACP protocol
-    simulator is a local subprocess, never a real network call or a live
-    duckduckgo-mcp-server."""
-    record_file = tmp_path / "researcher_web_search_session_new.json"
-    producer = _make_research_producer(
-        _recording_model(record_file, tmp_path),
-        "You are the researcher.",
-        harness_mcp_servers=["vaultspec-web-search"],
-        autonomous=True,
-    )
-
-    await producer(_state(), {"thread_id": "t1", "topic": "x", "instructions": ""})
-    assert "vaultspec-web-search" in _server_names(record_file)
-    allowed = _allowed_tools(record_file)
-    assert "mcp__vaultspec-web-search__search" in allowed
-    assert "mcp__vaultspec-web-search__fetch_content" in allowed
-
-
-@pytest.mark.asyncio
 async def test_no_harness_declaration_advertises_no_extra_server(
     tmp_path: Path,
 ) -> None:

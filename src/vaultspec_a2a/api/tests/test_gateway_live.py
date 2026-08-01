@@ -586,6 +586,9 @@ async def test_presets_list_is_truthful_and_resilient(
             "zai",
             "kimi",
             "kimi-all",
+            "gemini",
+            "openai",
+            "zhipu",
         }
         assert profiles["team-defaults"]["is_default"] is True
 
@@ -660,6 +663,30 @@ async def test_presets_list_is_truthful_and_resilient(
                 zai_readiness.reason in entry
                 for entry in profiles["zai"]["unavailable_reasons"]
             )
+
+        # Agent-panel P09.S34: the kimi/gemini/openai/zhipu mixed lanes are the
+        # exact structural siblings of zai above - same honest-readiness
+        # discipline, same nested-reason carrying on an incomplete host.
+        for profile_id, provider in (
+            ("kimi", Provider.KIMI),
+            ("gemini", Provider.GEMINI),
+            ("openai", Provider.OPENAI),
+            ("zhipu", Provider.ZHIPU),
+        ):
+            by_agent = {
+                a["agent_id"]: a for a in profiles[profile_id]["assignments"]
+            }
+            readiness = probe_provider_readiness(provider)
+            for agent_id in authoring_roles:
+                assert by_agent[agent_id]["provider_id"] == profile_id
+                assert by_agent[agent_id]["source"] == "profile"
+                assert by_agent[agent_id]["provider_ready"] is readiness.ready
+            if not readiness.ready:
+                assert readiness.reason
+                assert any(
+                    readiness.reason in entry
+                    for entry in profiles[profile_id]["unavailable_reasons"]
+                )
 
         # Eligibility is reported honestly: the production acceptance gate is open,
         # so every profile is unavailable with a safe reason (no secrets anywhere).

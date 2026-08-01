@@ -36,9 +36,16 @@ Orthogonal to the verdict lane is the PROVIDER axis: a case selects a model
 profile at run-start, so the same MIXED contract
 runs under different providers. ``live-mixed`` is real Claude; ``codex`` overlays a
 mixed codex/claude profile (the research and authoring roles on the ``codex
-app-server`` provider, the inner doc-reviewer on Claude); ``zai`` overlays a Z.ai
-profile and is credential-gated - an absent ``ZAI_AUTH_TOKEN`` is a truthful skip
-naming the missing credential, never a faked pass.
+app-server`` provider, the inner doc-reviewer on Claude); ``zai``, ``kimi``,
+``gemini``, ``openai``, and ``zhipu`` each overlay their own mixed-provider
+profile and are credential-gated - an absent credential env var (named per
+lane: ``ZAI_AUTH_TOKEN``, ``KIMI_API_KEY``, ``GEMINI_API_KEY``,
+``OPENAI_API_KEY``, ``ZHIPU_API_KEY``) is a truthful skip naming the missing
+credential, never a faked pass. ``kimi``/``gemini``/``openai``/``zhipu`` are
+agent-panel P09.S34: as of that step none has a live completed turn witnessed
+through this harness, so the case exists to make the proof mechanical the
+moment a credential arrives, matching the exact shape already trusted for
+``codex``/``zai``.
 
 Gate detection keys on the ENGINE surface (a queued proposal / an applied-under-
 policy marker scoped to this run's changeset id ``cs:<run_id>:<phase>-r<cycle>``),
@@ -169,6 +176,23 @@ _PROFILE_CODEX = "codex"
 _PROFILE_ZAI = "zai"
 _ZAI_CREDENTIAL_ENV = "ZAI_AUTH_TOKEN"
 
+# Agent-panel P09.S34: the same provider-axis shape extended to kimi, gemini,
+# openai, and zhipu. Each is credential-gated on its own key - an absent key is
+# a truthful skip naming the missing variable, never a faked pass. `kimi` is
+# the completed-turn proof this lane exists to provide (the provider's live
+# coverage was pre-S34 handshake-only, per test_kimi_handshake_live.py's own
+# "reaped before any session/new" scope note); gemini/openai/zhipu land on the
+# identical shape so the exact same mechanism proves them the moment a
+# credential is available, with zero live coverage witnessed yet.
+_PROFILE_KIMI = "kimi"
+_KIMI_CREDENTIAL_ENV = "KIMI_API_KEY"
+_PROFILE_GEMINI = "gemini"
+_GEMINI_CREDENTIAL_ENV = "GEMINI_API_KEY"
+_PROFILE_OPENAI = "openai"
+_OPENAI_CREDENTIAL_ENV = "OPENAI_API_KEY"
+_PROFILE_ZHIPU = "zhipu"
+_ZHIPU_CREDENTIAL_ENV = "ZHIPU_API_KEY"
+
 
 @dataclass(frozen=True, slots=True)
 class AcceptanceCase:
@@ -295,6 +319,41 @@ CASE_ZAI = _research_adr_case(
     profile_id=_PROFILE_ZAI,
     required_env=(_ZAI_CREDENTIAL_ENV,),
 )
+# Agent-panel P09.S34: the kimi/gemini/openai/zhipu lanes, the exact structural
+# siblings of `zai` above (same gate shape, same credential-gated skip
+# discipline). `kimi` is this batch's headline completed-turn proof.
+CASE_KIMI = _research_adr_case(
+    "kimi",
+    "pw7-acceptance-kimi",
+    {"research": POLICY_AUTO, "adr": POLICY_HUMAN},
+    preset=_PRESET_LIVE,
+    profile_id=_PROFILE_KIMI,
+    required_env=(_KIMI_CREDENTIAL_ENV,),
+)
+CASE_GEMINI = _research_adr_case(
+    "gemini",
+    "pw7-acceptance-gemini",
+    {"research": POLICY_AUTO, "adr": POLICY_HUMAN},
+    preset=_PRESET_LIVE,
+    profile_id=_PROFILE_GEMINI,
+    required_env=(_GEMINI_CREDENTIAL_ENV,),
+)
+CASE_OPENAI = _research_adr_case(
+    "openai",
+    "pw7-acceptance-openai",
+    {"research": POLICY_AUTO, "adr": POLICY_HUMAN},
+    preset=_PRESET_LIVE,
+    profile_id=_PROFILE_OPENAI,
+    required_env=(_OPENAI_CREDENTIAL_ENV,),
+)
+CASE_ZHIPU = _research_adr_case(
+    "zhipu",
+    "pw7-acceptance-zhipu",
+    {"research": POLICY_AUTO, "adr": POLICY_HUMAN},
+    preset=_PRESET_LIVE,
+    profile_id=_PROFILE_ZHIPU,
+    required_env=(_ZHIPU_CREDENTIAL_ENV,),
+)
 
 _ALL_CASES = (
     CASE_AUTO,
@@ -304,6 +363,10 @@ _ALL_CASES = (
     CASE_LIVE_AUTO,
     CASE_CODEX,
     CASE_ZAI,
+    CASE_KIMI,
+    CASE_GEMINI,
+    CASE_OPENAI,
+    CASE_ZHIPU,
 )
 
 

@@ -286,3 +286,88 @@ provider = "kimi"
 
 [team.profiles.kimi-all.roles.vaultspec-doc-reviewer]
 provider = "kimi"
+
+# `gemini` is the Gemini (Google) provider-axis lane. Credential-gated on
+# GEMINI_API_KEY: the harness skips this lane loudly (naming the missing key)
+# when the key is absent from the environment, and never fakes it. The four
+# research/authoring roles run on `gemini` while the doc-reviewer keeps the
+# team default (claude). Landed alongside a credential-gated acceptance case
+# (agent-panel P09.S34) - no live completed turn has been witnessed through
+# this profile yet, so it is served on the same "gated proof in progress"
+# footing as `zai`/`kimi` were before their own first live pass.
+[team.profiles.gemini]
+display_name = "Gemini (mixed)"
+description  = """
+Mixed-provider provider-axis lane routing the researcher fan-out, the synthesist,
+the ADR author, and the planner to the Gemini (Google) provider; the inner
+doc-reviewer keeps the team default (claude). Requires a configured Gemini API
+key; the harness skips this lane with a truthful reason when the credential is
+absent.
+"""
+
+[team.profiles.gemini.roles.vaultspec-researcher]
+provider = "gemini"
+
+[team.profiles.gemini.roles.vaultspec-synthesist]
+provider = "gemini"
+
+[team.profiles.gemini.roles.vaultspec-adr-author]
+provider = "gemini"
+
+[team.profiles.gemini.roles.vaultspec-planner]
+provider = "gemini"
+
+# `openai` is the OpenAI provider-axis lane. Credential-gated on
+# OPENAI_API_KEY: the harness skips this lane loudly (naming the missing key)
+# when the key is absent from the environment, and never fakes it. The four
+# research/authoring roles run on `openai` while the doc-reviewer keeps the
+# team default (claude). Same "gated proof in progress" footing as `gemini`
+# above (agent-panel P09.S34) - no live completed turn witnessed yet.
+[team.profiles.openai]
+display_name = "OpenAI (mixed)"
+description  = """
+Mixed-provider provider-axis lane routing the researcher fan-out, the synthesist,
+the ADR author, and the planner to the OpenAI provider; the inner doc-reviewer
+keeps the team default (claude). Requires a configured OpenAI API key; the
+harness skips this lane with a truthful reason when the credential is absent.
+"""
+
+[team.profiles.openai.roles.vaultspec-researcher]
+provider = "openai"
+
+[team.profiles.openai.roles.vaultspec-synthesist]
+provider = "openai"
+
+[team.profiles.openai.roles.vaultspec-adr-author]
+provider = "openai"
+
+[team.profiles.openai.roles.vaultspec-planner]
+provider = "openai"
+
+# `zhipu` is the Zhipu (BigModel) provider-axis lane. Credential-gated on
+# ZHIPU_API_KEY: the harness skips this lane loudly (naming the missing key)
+# when the key is absent from the environment, and never fakes it. The four
+# research/authoring roles run on `zhipu` while the doc-reviewer keeps the
+# team default (claude). Same "gated proof in progress" footing as `gemini`/
+# `openai` above (agent-panel P09.S34) - no live completed turn witnessed yet.
+[team.profiles.zhipu]
+display_name = "Zhipu (mixed)"
+description  = """
+Mixed-provider provider-axis lane routing the researcher fan-out, the synthesist,
+the ADR author, and the planner to the Zhipu (BigModel) provider; the inner
+doc-reviewer keeps the team default (claude). Requires a configured Zhipu API
+key; the harness skips this lane with a truthful reason when the credential is
+absent.
+"""
+
+[team.profiles.zhipu.roles.vaultspec-researcher]
+provider = "zhipu"
+
+[team.profiles.zhipu.roles.vaultspec-synthesist]
+provider = "zhipu"
+
+[team.profiles.zhipu.roles.vaultspec-adr-author]
+provider = "zhipu"
+
+[team.profiles.zhipu.roles.vaultspec-planner]
+provider = "zhipu"

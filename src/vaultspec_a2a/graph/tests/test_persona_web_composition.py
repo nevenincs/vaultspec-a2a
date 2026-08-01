@@ -66,9 +66,11 @@ PYTHON_EXE = sys.executable
 #: derived from the declaration so the run is reproducible, but every expectation
 #: is still read FROM the declaration - if these two ever stop straddling it, the
 #: guard immediately below says so instead of the suite quietly testing one branch
-#: twice. ``claude`` additionally pins that completed-TURN proof does not read as
-#: completed-RETRIEVAL proof: it has the former and not the latter.
-DRIVEN_LANES: tuple[str, ...] = ("claude", "codex")
+#: twice. ``zai`` additionally pins that completed-TURN proof does not read as
+#: completed-RETRIEVAL proof: it has the former and not the latter. It replaced
+#: ``claude`` in that seat once claude earned its own retrieval proof - which is the
+#: straddle guard below having worked rather than a fixture rewritten for taste.
+DRIVEN_LANES: tuple[str, ...] = ("zai", "codex")
 
 #: Tool names no persona may contain. Real built-ins, but lane-specific: the
 #: command-line lanes each expose their own pair and the hosted-API lanes expose

@@ -500,29 +500,46 @@ async def on_terminal_create(
         # grandchildren. Without this the terminal child carried no containment and
         # fell back to the single-pid POSIX path.
         containment = ProcessContainment.create()
-        process = await asyncio.create_subprocess_exec(
-            command,
-            *args,
-            stdin=asyncio.subprocess.PIPE,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-            cwd=str(resolved_cwd),
-            env=terminal_env,
-            creationflags=creation_flags,
-            **containment.spawn_kwargs(),
-        )
+        # The containment is an OS handle on Windows, allocated before the spawn
+        # it contains. Everything from here to the point the terminal is
+        # registered can raise - the spawn itself, an unexpected assignment
+        # failure - and the outer handler converts any of it into an RPC error
+        # the caller sees as a refused terminal. A refused terminal that left a
+        # job handle open leaks one per attempt for the life of the session, so
+        # the handle is released on the way out, along with any process that did
+        # start (which nothing would otherwise reach: it is not yet in
+        # ``ctx.terminals``, so terminal/release could never find it).
         try:
-            containment.assign(process.pid)
-        except ProcessContainmentError:
-            logger.warning(
-                "Could not seat terminal child PID %d in its OS containment;"
-                " termination will fall back to a per-pid tree kill",
-                process.pid,
-                exc_info=True,
+            process = await asyncio.create_subprocess_exec(
+                command,
+                *args,
+                stdin=asyncio.subprocess.PIPE,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                cwd=str(resolved_cwd),
+                env=terminal_env,
+                creationflags=creation_flags,
+                **containment.spawn_kwargs(),
             )
-        setattr(process, _CONTAINMENT_ATTR, containment)
-        terminal_id = uuid4().hex[:8]
-        ctx.terminals[terminal_id] = process
+        except BaseException:
+            containment.close()
+            raise
+        try:
+            try:
+                containment.assign(process.pid)
+            except ProcessContainmentError:
+                logger.warning(
+                    "Could not seat terminal child PID %d in its OS containment;"
+                    " termination will fall back to a per-pid tree kill",
+                    process.pid,
+                    exc_info=True,
+                )
+            setattr(process, _CONTAINMENT_ATTR, containment)
+            terminal_id = uuid4().hex[:8]
+            ctx.terminals[terminal_id] = process
+        except BaseException:
+            await containment.terminate(term_timeout=5.0, kill_timeout=5.0)
+            raise
         return {
             "jsonrpc": "2.0",
             "id": rpc_id,

@@ -85,52 +85,58 @@ async def spawn_acp_process(
     )
     logger.info("ACP subprocess spawn starting", extra=log_extra)
     process: asyncio.subprocess.Process
-    if sys.platform == "win32":
-        if use_exec:
-            try:
+    # The containment is allocated above, before anything it contains exists, so
+    # a spawn that never produces a process must release it - on Windows it is a
+    # job handle, and a provider that fails to start is retried, so a leak here
+    # is per-attempt rather than one-off. One guard covers all three spawn
+    # branches: releasing in each branch's own handler is the split duty that let
+    # the equivalent leak survive elsewhere in this codebase.
+    try:
+        if sys.platform == "win32":
+            if use_exec:
                 process = await asyncio.create_subprocess_exec(
                     command[0],
                     *command[1:],
                     creationflags=subprocess.CREATE_NEW_PROCESS_GROUP,
                     **kwargs,
                 )
-            except Exception as exc:
-                logger.error("ACP subprocess spawn failed: %s", exc, extra=log_extra)
-                raise
-        else:
-            try:
+            else:
                 process = await asyncio.create_subprocess_shell(
                     subprocess.list2cmdline(command),
                     creationflags=subprocess.CREATE_NEW_PROCESS_GROUP,
                     **kwargs,
                 )
-            except Exception as exc:
-                logger.error("ACP subprocess spawn failed: %s", exc, extra=log_extra)
-                raise
-    else:
-        try:
+        else:
             process = await asyncio.create_subprocess_exec(
                 command[0],
                 *command[1:],
                 **kwargs,
             )
-        except Exception as exc:
-            logger.error("ACP subprocess spawn failed: %s", exc, extra=log_extra)
-            raise
+    except BaseException as exc:
+        containment.close()
+        logger.error("ACP subprocess spawn failed: %s", exc, extra=log_extra)
+        raise
     # Seat the provider root in its containment before it launches any MCP bridge
     # or grandchild. A Windows assignment failure downgrades to the per-pid tree
     # kill rather than failing the spawn.
     try:
-        containment.assign(process.pid)
-    except ProcessContainmentError:
-        logger.warning(
-            "Could not seat ACP provider PID %d in its OS containment; termination"
-            " will fall back to a per-pid tree kill",
-            process.pid,
-            extra=log_extra,
-            exc_info=True,
-        )
-    cast("Any", process)._vaultspec_containment = containment
+        try:
+            containment.assign(process.pid)
+        except ProcessContainmentError:
+            logger.warning(
+                "Could not seat ACP provider PID %d in its OS containment; termination"
+                " will fall back to a per-pid tree kill",
+                process.pid,
+                extra=log_extra,
+                exc_info=True,
+            )
+        cast("Any", process)._vaultspec_containment = containment
+    except BaseException:
+        # The root is alive but the caller will never receive it, so nothing else
+        # can reach it to reap it. Fell the tree rather than return a spawn the
+        # caller must clean up after a failure it was told about by exception.
+        await containment.terminate(term_timeout=5.0, kill_timeout=5.0)
+        raise
     logger.info(
         "ACP subprocess spawned",
         extra={**log_extra, "process_pid": process.pid},

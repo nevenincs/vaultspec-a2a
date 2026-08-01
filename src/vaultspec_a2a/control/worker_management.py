@@ -21,6 +21,7 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
     from pathlib import Path
 
     import httpx
@@ -467,6 +468,23 @@ async def _spawn_worker(
     Windows Job Object - and assigned before it does any descendant work, so the
     whole worker tree is reaped as one on shutdown. A Windows assignment failure
     is logged and downgraded to the per-pid fallback rather than failing the spawn.
+
+    Ownership contract - the caller allocates *containment* and the caller
+    releases it. This function never releases it on the caller's behalf, on any
+    exit, so there is no exit the caller has to know about: it releases on every
+    return that is not a live process, and on a raise. Splitting that duty (some
+    exits releasing here, others expecting the caller to) is what previously let
+    three exits leak the handle, so it is stated as one rule rather than a list.
+
+    What this function does guarantee is that nothing it spawned outlives a spawn
+    it did not report as successful: any process started here is reaped, tree and
+    all, before a ``None`` return or a propagating exception leaves the frame.
+    Reaping through a containment closes the handle as a side effect, which is
+    harmless - :meth:`ProcessContainment.close` is idempotent - but it is the
+    caller's release, not that side effect, that makes the release total.
+
+    Use :func:`_spawn_worker_owned` rather than calling this directly; it is the
+    single seam that honours the contract for both spawn paths.
     """
     # The armed desktop gateway owns its worker exclusively, but its private
     # worker port can still be occupied - a surviving prior generation after a
@@ -609,6 +627,68 @@ async def _spawn_worker(
             env=spawn_env,
             start_new_session=new_session,
         )
+    return await _await_worker_ready(
+        process,
+        containment,
+        worker_url=worker_url,
+        worker_port=worker_port,
+        generation=generation,
+        worker_command=worker_command,
+        stderr_log_path=stderr_log_path,
+    )
+
+
+async def _await_worker_ready(
+    process: subprocess.Popen[bytes],
+    containment: ProcessContainment | None,
+    *,
+    worker_url: str,
+    worker_port: int,
+    generation: int,
+    worker_command: Sequence[str],
+    stderr_log_path: Path,
+) -> subprocess.Popen[bytes] | None:
+    """Seat the spawned worker in its containment and wait for it to be ours.
+
+    Returns the handle once the worker at *worker_url* answers as this gateway's,
+    or ``None`` when it exited early or never became ready - reaping the tree in
+    both cases, so a ``None`` return never leaves a process on the worker port.
+
+    Split out of :func:`_spawn_worker` because this is exactly the region that
+    runs with a live process nobody else can yet reach: the handle exists only in
+    this frame until it is returned. A raise here - a cancellation on gateway
+    shutdown being the realistic one - would therefore strand the worker as an
+    orphan holding the port, which the next spawn refuses as an unidentified
+    occupant, wedging the band rather than merely leaking a process. Owning the
+    process and owning its failure are the same job, so they are the same
+    function.
+    """
+    try:
+        return await _await_worker_ready_inner(
+            process,
+            containment,
+            worker_url=worker_url,
+            worker_port=worker_port,
+            generation=generation,
+            worker_command=worker_command,
+            stderr_log_path=stderr_log_path,
+        )
+    except BaseException:
+        await _reap_unready_worker(process, containment)
+        raise
+
+
+async def _await_worker_ready_inner(
+    process: subprocess.Popen[bytes],
+    containment: ProcessContainment | None,
+    *,
+    worker_url: str,
+    worker_port: int,
+    generation: int,
+    worker_command: Sequence[str],
+    stderr_log_path: Path,
+) -> subprocess.Popen[bytes] | None:
+    """Seat and poll the worker; see :func:`_await_worker_ready` for the guard."""
     if containment is not None:
         # Assign the worker to its containment before it boots far enough to spawn
         # any descendant (provider roots, MCP bridges). A failed Windows
@@ -652,10 +732,13 @@ async def _spawn_worker(
                 "Worker exited prematurely: %s",
                 detail,
             )
-            if containment is not None:
-                # The worker died on its own; release the containment handle
-                # (Windows KILL_ON_JOB_CLOSE reaps any straggler it left behind).
-                containment.close()
+            # The root died on its own, but a descendant it had already spawned
+            # did not necessarily die with it, and one still holding the worker
+            # port wedges the next spawn exactly like a timed-out worker's tree
+            # would. Reap on the same terms rather than trusting a dead root to
+            # mean a dead tree; the reap also waits the handle, so no zombie is
+            # left on POSIX.
+            await _reap_unready_worker(process, containment)
             return None
 
         # Ready only when OUR worker answers: the port being open and healthy is not
@@ -691,6 +774,48 @@ async def _spawn_worker(
     )
     await _reap_unready_worker(process, containment)
     return None
+
+
+async def _spawn_worker_owned(
+    worker_url: str,
+    worker_port: int,
+    *,
+    generation: int,
+) -> tuple[subprocess.Popen[bytes] | None, ProcessContainment | None]:
+    """Spawn a worker, holding its OS containment only while it owns a live tree.
+
+    The single seam both spawn paths - first dispatch and watchdog restart - go
+    through, so the ownership contract is enforced in one place rather than
+    re-implemented per caller. It allocates the armed desktop profile's
+    containment (Compose and development get ``None`` and the unchanged per-pid
+    path), spawns, and releases the handle on every outcome except the one that
+    transfers ownership: a live process for the caller to shut down later.
+
+    Returns ``(process, containment)``, where a non-``None`` containment is always
+    paired with the live process it contains. A failed spawn returns
+    ``(None, None)`` - never a containment without a tree, which is the stale
+    handle a caller would otherwise have to remember to drop - and a raised spawn
+    propagates with the handle already released.
+    """
+    containment = (
+        ProcessContainment.create() if settings.desktop_profile_armed else None
+    )
+    owned = False
+    try:
+        process = await _spawn_worker(
+            worker_url,
+            worker_port,
+            containment=containment,
+            generation=generation,
+        )
+        owned = process is not None
+        return (process, containment) if owned else (None, None)
+    finally:
+        # One statement covers all three exits - failed spawn, raised spawn, and
+        # the success that hands ownership on - because "release unless ownership
+        # transferred" is the whole rule.
+        if not owned and containment is not None:
+            containment.close()
 
 
 async def _reap_unready_worker(
@@ -831,7 +956,18 @@ class LazyWorkerSpawner:
         return self._stderr_log_path
 
     async def ensure_worker(self) -> None:
-        """Spawn the worker if not already running.  No-op after first call."""
+        """Spawn the worker if not already running.  No-op after first call.
+
+        A spawn that raises leaves this spawner exactly as it found it - no
+        process handle, no containment handle, ``spawned`` still ``False`` - and
+        leaves nothing of that attempt alive, because the spawn seam reaps its own
+        tree and releases its own containment before propagating. The next
+        dispatch therefore retries a genuinely fresh spawn, which is the same
+        behaviour a spawn that merely returned failure gets. That equivalence is
+        the point: ``spawned`` is set after the spawn rather than before it, so it
+        can only ever mean "a worker this gateway can use exists", and an
+        exception is one of the ways it does not.
+        """
         if self._spawned:
             return
         async with self._lock:
@@ -861,21 +997,15 @@ class LazyWorkerSpawner:
             )
             # The armed desktop gateway owns its worker exclusively, so it spawns
             # the worker inside an OS containment and reaps the whole tree on
-            # shutdown. Other profiles keep the unchanged per-pid path.
-            self._containment = (
-                ProcessContainment.create() if settings.desktop_profile_armed else None
-            )
+            # shutdown. Other profiles keep the unchanged per-pid path. The spawn
+            # seam hands back a containment only alongside the live tree it
+            # contains, so these two fields are never separately true.
             generation = self.next_generation()
-            self._process = await _spawn_worker(
+            self._process, self._containment = await _spawn_worker_owned(
                 self._worker_url,
                 self._worker_port,
-                containment=self._containment,
                 generation=generation,
             )
-            if self._process is None:
-                # The spawn failed and already released its containment; drop the
-                # stale reference so shutdown does not double-reap.
-                self._containment = None
             # Mark as spawned even if _spawn_worker found it already running
             # (returns None when a same-gateway worker was already healthy). The
             # fallback probe must confirm the running worker is OURS: a bare health
@@ -941,7 +1071,18 @@ class LazyWorkerSpawner:
         The restart supplies the new tree's containment so shutdown reaps the
         replacement worker's tree, not a stale one; an adopted worker (no owned
         process) carries no containment.
+
+        The containment being replaced is released here, because this is the one
+        place the spawner's reference to it is dropped. The restart path reaches
+        this after shutting the old worker down, which already released it - but
+        only when the old worker was still running. The commonest restart trigger
+        is the opposite case, a worker that already exited, whose handle nothing
+        else would ever close. ``close`` is idempotent, so releasing on both paths
+        costs nothing and removes the distinction as a thing to get right.
         """
+        outgoing = self._containment
+        if outgoing is not None and outgoing is not containment:
+            outgoing.close()
         self._process = process
         self._containment = containment
         self._spawned = True
@@ -1074,13 +1215,46 @@ class WorkerWatchdog:
         ) >= settings.watchdog_restart_cooldown_seconds
 
     async def run(self) -> None:
-        """Main watchdog loop — runs until cancelled."""
+        """Main watchdog loop — runs until cancelled.
+
+        A failing tick must not end the supervisor. The loop exists to recover a
+        worker that has gone wrong, and the spawn it performs to do that is the
+        most likely thing in it to raise - so an unguarded tick made the first
+        failed recovery the last one, leaving the worker permanently unsupervised
+        with the circuit breaker held open by the cycle that died. The tick is
+        contained instead: the failure is logged and the next poll retries it,
+        which is the same treatment a restart that merely failed already gets.
+
+        Containment is per tick rather than a restart of the whole loop, because
+        the state a retry needs - the restart cooldown, the attempt counters, the
+        breaker - lives on this instance and survives a failed tick. Re-running
+        the loop from outside would either discard that state or duplicate the
+        backoff logic it encodes.
+
+        Cancellation still stops the loop, and it is the only thing that stops it
+        quietly. Any other exit is logged as critical before it propagates: a
+        watchdog can fail, but it must not fail silently, or the gateway reports a
+        supervised worker it is no longer supervising.
+        """
         try:
             while True:
                 await asyncio.sleep(settings.watchdog_poll_interval_seconds)
-                await self._tick()
+                try:
+                    await self._tick()
+                except Exception:
+                    logger.exception(
+                        "Worker watchdog tick failed; the watchdog stays active and"
+                        " retries on the next poll"
+                    )
         except asyncio.CancelledError:
             logger.info("Worker watchdog stopped")
+        except BaseException:
+            logger.critical(
+                "Worker watchdog terminated by an unhandled exception; the worker"
+                " is no longer supervised and will not be restarted automatically",
+                exc_info=True,
+            )
+            raise
 
     async def _tick(self) -> None:
         """One watchdog poll: detect, reconcile status, and restart only when owned."""
@@ -1159,8 +1333,14 @@ class WorkerWatchdog:
         self._cb.force_open()
 
         # --- Restart with exponential backoff ---
-        restarted, attempts = await self._attempt_restart()
-        self._last_restart_cycle_ts = time.monotonic()
+        # Stamp the cycle even when the restart raises, so the inter-cycle
+        # cooldown throttles a failing cycle exactly as it throttles a failed one.
+        # Without this the loop's per-tick failure containment would retry a
+        # raising spawn at the poll interval instead of the cooldown.
+        try:
+            restarted, attempts = await self._attempt_restart()
+        finally:
+            self._last_restart_cycle_ts = time.monotonic()
         self._mark_restart_finished(restarted, attempts)
         if restarted:
             self._cb.record_success()
@@ -1199,13 +1379,11 @@ class WorkerWatchdog:
 
             # Spawn a new worker inside a fresh containment (armed desktop only),
             # and hand it to the spawner so shutdown reaps the replacement's tree.
-            new_containment = (
-                ProcessContainment.create() if settings.desktop_profile_armed else None
-            )
-            new_proc = await _spawn_worker(
+            # A restart that fails hands back no containment either, so a retry
+            # loop cannot accumulate one handle per attempt.
+            new_proc, new_containment = await _spawn_worker_owned(
                 self._spawner.worker_url,
                 self._spawner.worker_port,
-                containment=new_containment,
                 generation=self._spawner.next_generation(),
             )
             if new_proc is not None:

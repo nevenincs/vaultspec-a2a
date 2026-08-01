@@ -6,7 +6,7 @@ tags:
 date: '2026-08-01'
 modified: '2026-08-01'
 body_schema: 'body-v1'
-body_hash: 'sha256:ea2d7cefaef5c41db3190968c7f48496883abcd61e1bb27180b74f51ecb882ae'
+body_hash: 'sha256:afcc2568d3cfc46fecaea131bb30587f124175d81bf3abc42abd818d4b26725e'
 related:
   - '[[2026-07-19-repository-tooling-hardening-W01-P01-S01]]'
   - '[[2026-07-19-repository-tooling-hardening-W01-P01-summary]]'
@@ -33,11 +33,13 @@ related:
   - '[[2026-07-19-repository-tooling-hardening-W05-P09-S15]]'
   - '[[2026-07-19-repository-tooling-hardening-W05-P10-S16]]'
   - '[[2026-07-19-repository-tooling-hardening-W05-P10-S17]]'
+  - '[[2026-07-19-repository-tooling-hardening-W05-P10-S18]]'
   - '[[2026-07-19-repository-tooling-hardening-adr]]'
   - '[[2026-07-19-repository-tooling-hardening-audit]]'
   - '[[2026-07-19-repository-tooling-hardening-plan]]'
   - '[[2026-07-19-repository-tooling-hardening-reference]]'
   - '[[2026-07-19-repository-tooling-hardening-research]]'
+  - '[[2026-08-01-repository-tooling-hardening-anti-drift-guard-reference]]'
   - '[[2026-08-01-repository-tooling-hardening-strict-quality-gates-reference]]'
   - '[[2026-08-01-repository-tooling-hardening-strict-quality-gates-research]]'
   - '[[2026-08-01-repository-tooling-hardening-strict-s13-audit]]'
@@ -45,6 +47,7 @@ related:
   - '[[2026-08-01-repository-tooling-hardening-strict-s15-audit]]'
   - '[[2026-08-01-repository-tooling-hardening-strict-s16-audit]]'
   - '[[2026-08-01-repository-tooling-hardening-strict-s17-audit]]'
+  - '[[2026-08-01-repository-tooling-hardening-strict-s18-audit]]'
 ---
 
 # `repository-tooling-hardening` feature index
@@ -65,6 +68,7 @@ Auto-generated index of all documents tagged with `#repository-tooling-hardening
 - `2026-08-01-repository-tooling-hardening-strict-s15-audit` - `repository-tooling-hardening` audit: `canonical CI review`
 - `2026-08-01-repository-tooling-hardening-strict-s16-audit` - `repository-tooling-hardening` audit: `hosted sentinel visibility review`
 - `2026-08-01-repository-tooling-hardening-strict-s17-audit` - `repository-tooling-hardening` audit: `advisory duplication visibility review`
+- `2026-08-01-repository-tooling-hardening-strict-s18-audit` - `repository-tooling-hardening` audit: `real CI anti-drift guard review`
 
 ### exec
 
@@ -93,6 +97,7 @@ Auto-generated index of all documents tagged with `#repository-tooling-hardening
 - `2026-07-19-repository-tooling-hardening-W05-P09-S15` - Reconcile the complete canonical CI sequence in the declarative registry before reducing the root recipe to delegation.
 - `2026-07-19-repository-tooling-hardening-W05-P10-S16` - Schedule one named hosted step per deterministic sentinel on every push and pull request, guarded by !cancelled and advisory until promotion.
 - `2026-07-19-repository-tooling-hardening-W05-P10-S17` - Schedule production JSCPD clone detection as a named advisory hosted-CI result.
+- `2026-07-19-repository-tooling-hardening-W05-P10-S18` - Prove exact root, workflow, sentinel, platform, advisory, blocking, and duplication anti-drift invariants from the real registry.
 
 ### plan
 
@@ -101,6 +106,7 @@ Auto-generated index of all documents tagged with `#repository-tooling-hardening
 ### reference
 
 - `2026-07-19-repository-tooling-hardening-reference` - `repository-tooling-hardening` reference: `Vaultspec tool provisioning and Git-ignore ownership`
+- `2026-08-01-repository-tooling-hardening-anti-drift-guard-reference` - `repository-tooling-hardening` reference: `real registry CI contract guard`
 - `2026-08-01-repository-tooling-hardening-strict-quality-gates-reference` - `strict-quality-gates` reference: `Core and RAG quality-harness contracts`
 
 ### research

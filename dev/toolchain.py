@@ -679,6 +679,7 @@ CI = Verb(
                 _verb("lint", "all"),
                 _verb("audit", "deps"),
                 uv_run("vaultspec-core", "vault", "check", "all"),
+                _verb("test", "harness"),
                 _verb("test", "unit"),
             ),
         ),

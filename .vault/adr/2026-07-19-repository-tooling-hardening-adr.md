@@ -13,7 +13,7 @@ related:
 supersedes:
   - '2026-03-19-control-layer-cli-justfile-separation-adr'
 modified: '2026-08-01'
-body_hash: 'sha256:012049c81c40336904fc584d43fb254aed861f24251dd74e0b09ea3830508d63'
+body_hash: 'sha256:23fc4f2b6cf05ded5325776f4d410799c4a38277a33a368b2c92daaa9994bbb3'
 ---
 # `repository-tooling-hardening` adr: `one modular, locked, and reproducible repository control surface` | (**status:** `accepted`)
 
@@ -202,3 +202,7 @@ Duplication remains a reviewed investigation lead. `audit duplication` continues
 Static quality does not certify runtime behavior. Unit, service, desktop, Compose, provider-live, cross-repository, and acceptance lanes retain their distinct prerequisites. The static-quality job starts no service, uses no provider credential, dispatches no GPU work, and does not infer runtime certification from a type or complexity verdict.
 
 A real-code anti-drift guard is mandatory. It imports the declarative registry and inspects the tracked root `justfile` and hosted workflow without mocks, patches, or mirrored command logic. The guard proves root `just ci` delegates to the sole declarative CI owner; the hosted job invokes `just ci`; every strict sentinel has exactly one visible hosted step; blocking membership exactly matches `lint all`; advisory sentinels carry `continue-on-error`; hosted steps invoke named targets only; duplication remains advisory and outside `lint all`; and `type-platforms` covers exactly the three declared platforms over the canonical Python paths.
+
+## Amendment (2026-08-01, canonical anti-drift enforcement)
+
+The anti-drift guard is a required canonical CI check, not a workflow-only diagnostic. `CI.all` runs `test harness` after Vault validation and before `test unit`. The `TEST.harness` target retains exclusive ownership of `pytest dev`; the hosted workflow adds no separate harness step and product `testpaths` remain unchanged. Root `just ci` and the hosted workflow's existing `just ci` invocation therefore enforce the same guard through the sole declarative CI owner.

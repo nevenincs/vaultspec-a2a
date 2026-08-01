@@ -4,7 +4,7 @@ tags:
   - '#repository-tooling-hardening'
 date: '2026-07-19'
 modified: '2026-08-01'
-body_hash: 'sha256:3b71d25ce5765a7e089dc94182b06912dbacf28372cd77476304566f8f56c5df'
+body_hash: 'sha256:5112fedb60fc4a94f2dbdc7918667460e99ac007b3c3d6803734add343039066'
 tier: L3
 related:
   - '[[2026-07-19-repository-tooling-hardening-adr]]'
@@ -114,7 +114,7 @@ Make every strict and advisory result independently visible in CI and prove the 
 
 - [x] `W05.P10.S16` - Schedule one named hosted step per deterministic sentinel on every push and pull request, guarded by !cancelled and advisory until promotion.; `.github/workflows/test.yml`.
 - [x] `W05.P10.S17` - Schedule production JSCPD clone detection as a named advisory hosted-CI result.; `.github/workflows/test.yml`.
-- [ ] `W05.P10.S18` - Prove exact root, workflow, sentinel, platform, advisory, blocking, and duplication anti-drift invariants from the real registry.; `dev/tests/test_ci_contract.py`.
+- [x] `W05.P10.S18` - Prove exact root, workflow, sentinel, platform, advisory, blocking, and duplication anti-drift invariants from the real registry.; `dev/toolchain.py, dev/tests/test_ci_contract.py`.
 
 ## Wave `W06` - strict type and portability remediation
 

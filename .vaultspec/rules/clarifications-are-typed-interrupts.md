@@ -11,7 +11,7 @@ name: clarifications-are-typed-interrupts
 - **Disclosure is authoritative on `run-status`.** The pending clarification
   (request id + question payload) is projected from the live checkpoint into the
   `run-status` response so a reload re-renders the questionnaire from authoritative
-  state. Relay frames (`clarification-pending`) carry the request id ONLY and are
+  state. Relay frames (`clarification_pending`) carry the request id ONLY and are
   non-authoritative nudges to re-read `run-status` — never the source of questions.
 - **Resume is the typed verb only.** Answers re-enter exclusively through the
   clarification respond verb mapped to `Command(resume=...)` of the parked node,

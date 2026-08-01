@@ -32,6 +32,8 @@ You MUST respect these rules at all times:
 @.codex/rules/02-operations.md
 @.codex/rules/03-vaultspec.md
 @.codex/rules/90-custom.md
+@.codex/rules/clarifications-are-typed-interrupts.md
+@.codex/rules/no-unproven-providers-in-served-profiles.md
 @.codex/rules/vaultspec-cli.builtin.md
 @.codex/rules/vaultspec-discovery.builtin.md
 @.codex/rules/vaultspec-rag.builtin.md

@@ -7,6 +7,8 @@ You MUST respect these rules at all times:
 @.claude/rules/02-operations.md
 @.claude/rules/03-vaultspec.md
 @.claude/rules/90-custom.md
+@.claude/rules/clarifications-are-typed-interrupts.md
+@.claude/rules/no-unproven-providers-in-served-profiles.md
 @.claude/rules/vaultspec-cli.builtin.md
 @.claude/rules/vaultspec-discovery.builtin.md
 @.claude/rules/vaultspec-rag.builtin.md

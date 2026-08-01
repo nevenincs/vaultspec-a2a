@@ -10,6 +10,11 @@ The refusal is STRUCTURAL: it decides only whether every distinct retrieved URL
 appears in the proposed body. Whether a claim needed a retrieval, and whether it
 cites the right one, is not machine-decidable and is not refused here.
 
+It is also scoped to the research document, the one home the vault gives external
+evidence. Later documents cite the research by stem rather than restating what it
+found, so demanding URLs from them would force one rule to be broken to satisfy
+another.
+
 The refusal precedes every engine call, so the submitter under test is pointed at
 an origin nothing listens on: a passing run opens no socket, and a run that
 reached the network would fail with a transport error rather than the refusal.
@@ -281,6 +286,45 @@ class TestWebLocatorReader:
             ],
         )
         assert _web_locator_urls(state) == []
+
+
+class TestDocumentTypeScope:
+    """Only the research document owes the disclosure; the rest cite it by stem."""
+
+    @pytest.mark.parametrize("doc_type", ["adr", "reference", "plan", "audit", None])
+    def test_a_non_research_document_owes_no_disclosure(
+        self, doc_type: str | None
+    ) -> None:
+        # An ADR that decides on web-grounded research cites the research stem; it
+        # does not restate the evidence, and no template but research carries a
+        # Sources section to restate it into.
+        assert _conformance_notes(_SILENT, doc_type, [_URL_A, _URL_B]) == []
+
+    def test_an_adr_body_submits_while_the_run_holds_retrievals(self) -> None:
+        # Same accumulated state that refuses a research document, driven through
+        # the seam the production __call__ uses, with the ADR phase's doc_type.
+        state = _state(_SILENT, [_web_finding(_URL_A)])
+        body, _ = _latest_document(state, _WRITER, _SENTINEL, "adr")
+        assert body == _SILENT
+
+    def test_the_same_state_still_refuses_the_research_document(self) -> None:
+        # The contrast that makes the scoping a real axis rather than a disabled
+        # check: one doc_type refuses on exactly the state the other accepts.
+        state = _state(_SILENT, [_web_finding(_URL_A)])
+        with pytest.raises(DocumentConformanceError):
+            _latest_document(state, _WRITER, _SENTINEL, "research")
+
+    def test_other_conformance_rules_still_apply_to_a_non_research_document(
+        self,
+    ) -> None:
+        # Scoping the web rule must not blunt the rules that were already there.
+        body = _SILENT.replace(
+            "The fetch tool retrieves only search-derived or user-supplied URLs.",
+            "See [[2026-08-01-web-grounding-adr]] for the decision.",
+        )
+        notes = _conformance_notes(body, "plan", [_URL_A])
+        assert any("wiki-link in body" in note for note in notes)
+        assert not any("undisclosed web source" in note for note in notes)
 
 
 class TestConformanceNoteComposition:

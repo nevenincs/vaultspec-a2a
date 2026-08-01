@@ -145,9 +145,9 @@ class DocumentConformanceError(ProposalRevisionRequiredError):
     Carries one actionable note per violation (``revision_notes``) — leftover
     template annotation comments or placeholders, a wiki-/markdown-link in body
     prose (which ``vault set-body --check`` refuses at apply), a document that
-    does not begin at its frontmatter fence, or a web source the run retrieved and
-    the document does not disclose. Refused at the submit node (cheap, local)
-    BEFORE proposing.
+    does not begin at its frontmatter fence, or a research document that hides a
+    web source the run retrieved. Refused at the submit node (cheap, local) BEFORE
+    proposing.
 
     It is a :class:`ProposalRevisionRequiredError` (the phase-gate seam signal), NOT a
     fatal :class:`SubmitterError`: the submit node routes it back into the phase's
@@ -353,8 +353,8 @@ def _latest_document(
     # Strip any leading preamble narration so the submitted body BEGINS at its
     # frontmatter fence (the document proper), then refuse — routing to the
     # revision loop — anything the engine's set-body conformance check would
-    # reject at materialization, plus any web source this run retrieved that the
-    # document fails to disclose.
+    # reject at materialization, plus — for a research document — any web source
+    # this run retrieved that it fails to disclose.
     body = _strip_leading_preamble(body)
     notes = _conformance_notes(body, doc_type, _web_locator_urls(state))
     if notes:
@@ -443,8 +443,10 @@ def _conformance_notes(
     `adr-status` does, closed here so a non-canonical status never materializes.
 
     *web_urls* carries the run's distinct web-locator URLs
-    (:func:`_web_locator_urls`), and each one absent from the body prose is its own
-    note: a document that consumed retrievals must disclose them. The refusal is
+    (:func:`_web_locator_urls`), and for a ``research`` document each one absent from
+    the body prose is its own note: the document that consumed the retrievals must
+    disclose them. Later documents cite the research by stem instead of restating
+    its evidence, so the obligation is theirs only through it. The refusal is
     STRUCTURAL — whether a given claim needed a retrieval, and whether it cites the
     right one, is not machine-decidable and is left to the reviewer persona and the
     human phase gate.
@@ -488,17 +490,27 @@ def _conformance_notes(
             f"markdown link in body text: [{match.group(1)}]({match.group(2)}) - "
             "use a backtick code span for file references"
         )
-    # Web-source disclosure: scanned against the prose region, NOT the whole
-    # document, because an external URL is never legal in frontmatter — a URL
-    # smuggled into `related:` would corrupt the vault link graph and must not
-    # satisfy the obligation it violates.
-    for url in web_urls:
-        if url not in prose_region:
-            notes.append(
-                f"undisclosed web source: {url} - this run retrieved it, so the "
-                "document must cite it inline and list it in its Sources section "
-                "as a bare URL with the retrieval date (never in `related:`)"
-            )
+    # Web-source disclosure, RESEARCH ONLY. The vault's document boundary gives
+    # each fact one home: the research document grounds, and every later document
+    # cites it by stem without restating its evidence. A URL is evidence, so its
+    # home is the research document — the only template in the tree carrying a
+    # `## Sources` section. Demanding URLs in an ADR, reference, plan, or audit
+    # would leave the writer nowhere sanctioned to put them and force one rule to
+    # be broken to satisfy another; such a document discharges the obligation by
+    # citing the research stem that holds them.
+    #
+    # Scanned against the prose region, NOT the whole document, because an
+    # external URL is never legal in frontmatter — a URL smuggled into `related:`
+    # would corrupt the vault link graph and must not satisfy the obligation by
+    # committing a different violation.
+    if doc_type == "research":
+        for url in web_urls:
+            if url not in prose_region:
+                notes.append(
+                    f"undisclosed web source: {url} - this run retrieved it, so the "
+                    "document must cite it inline and list it in its Sources section "
+                    "as a bare URL with the retrieval date (never in `related:`)"
+                )
     return notes
 
 

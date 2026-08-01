@@ -30,12 +30,15 @@ class ServerEventType(StrEnum):
     TOOL_CALL_START = "tool_call_start"
     TOOL_CALL_UPDATE = "tool_call_update"
     PERMISSION_REQUEST = "permission_request"
-    # Snake_case to match every other member here. The originating specification
-    # writes this kind hyphenated, but it writes the verbs hyphenated too
-    # (``run-status``, ``run-start``, ``presets-list``) where the served spellings
-    # are plainly not, so the hyphen reads as prose rather than as the literal
-    # token. An inconsistent key would be real drift; a consumer-visible spelling
-    # difference is a one-line change if the hyphen turns out to be literal.
+    # Snake_case because this is a FRAME KIND, and every frame kind is snake_case.
+    # The originating specification writes it hyphenated, but that is its house
+    # style for naming things rather than evidence about the token: it hyphenates
+    # the edge verbs too, and those genuinely ARE hyphenated on the wire
+    # (``/ops/a2a/run-start`` is a real URL). So two spellings coexist here on
+    # purpose - edge verbs hyphenated, progress-stream frame kinds snake_case -
+    # and this member belongs to the second family. Do not "align" the verbs to
+    # match it; that would break the edge. A consumer-visible spelling stays a
+    # one-line change here if the hyphen ever proves literal for frame kinds too.
     CLARIFICATION_PENDING = "clarification_pending"
     ARTIFACT_UPDATE = "artifact_update"
     PLAN_UPDATE = "plan_update"

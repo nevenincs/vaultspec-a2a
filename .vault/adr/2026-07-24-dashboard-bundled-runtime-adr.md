@@ -4,17 +4,18 @@ tags:
   - "#dashboard-bundled-runtime"
 date: '2026-07-24'
 related:
-  - '[[2026-07-24-dashboard-bundled-runtime-reference]]'
-  - '[[2026-07-18-desktop-product-profile-adr]]'
-  - '[[2026-07-21-capsule-install-layout-adr]]'
-  - '[[2026-07-21-ecosystem-artifact-lifecycle-adr]]'
-  - '[[2026-07-18-desktop-product-profile-plan]]'
+  - "[[2026-07-24-dashboard-bundled-runtime-reference]]"
+  - "[[2026-07-18-desktop-product-profile-adr]]"
+  - "[[2026-07-21-capsule-install-layout-adr]]"
+  - "[[2026-07-21-ecosystem-artifact-lifecycle-adr]]"
+  - "[[2026-07-18-desktop-product-profile-plan]]"
 supersedes:
   - '2026-07-21-capsule-install-layout-adr'
-modified: '2026-07-24'
+superseded_by: '2026-08-01-dashboard-bundled-runtime-subordination-adr'
+modified: '2026-08-01'
 body_hash: 'sha256:0c59a12a444838254a7d6aee535a353d876d9d9c2873b32909b5b519a9e333a2'
 ---
-# `dashboard-bundled-runtime` adr: `a2a is a dashboard-bundled runtime, not an installable product` | (**status:** `accepted`)
+# `dashboard-bundled-runtime` adr: `a2a is a dashboard-bundled runtime, not an installable product` | (**status:** `superseded`)
 
 ## Problem Statement
 

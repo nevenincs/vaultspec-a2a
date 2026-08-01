@@ -319,6 +319,10 @@ _PROBE_SCRIPT = textwrap.dedent(
     """
     import json
     from vaultspec_a2a.graph.enums import Provider
+    from vaultspec_a2a.providers.lane_admission import (
+        is_lane_admissible,
+        lane_admission_reason,
+    )
     from vaultspec_a2a.providers.model_profiles import (
         AssignmentSource,
         ProfileAssignment,
@@ -327,11 +331,11 @@ _PROBE_SCRIPT = textwrap.dedent(
         probe_provider_readiness,
     )
 
-    def _role(agent_id, fallbacks):
+    def _role(agent_id, fallbacks, provider):
         return RoleAssignment(
             role_id=agent_id,
             agent_id=agent_id,
-            provider=Provider.ZHIPU,
+            provider=provider,
             capability=None,
             model_name="",
             fallback_providers=fallbacks,
@@ -340,11 +344,19 @@ _PROBE_SCRIPT = textwrap.dedent(
         )
 
     zhipu = probe_provider_readiness(Provider.ZHIPU)
+    zai = probe_provider_readiness(Provider.ZAI)
     assignment = ProfileAssignment(
         profile_id="probe",
         roles=[
-            _role("with-fallback", [Provider.MOCK]),
-            _role("no-fallback", []),
+            # Primary lane has NO completed-turn proof; the fallback is ready.
+            _role("inadmissible-with-fallback", [Provider.MOCK], Provider.ZHIPU),
+            # Primary lane IS proven, but its credential is absent here.
+            _role("unready-with-fallback", [Provider.MOCK], Provider.ZAI),
+            # The control for the pair above: same lane, no fallback declared, so
+            # the only difference between them IS the fallback. On an unproven
+            # lane this would be refused by admission instead and prove nothing
+            # about fallbacks at all.
+            _role("no-fallback", [], Provider.ZAI),
         ],
     )
     elig = evaluate_profile_eligibility(
@@ -354,7 +366,17 @@ _PROBE_SCRIPT = textwrap.dedent(
     print(json.dumps({
         "zhipu_ready": zhipu.ready,
         "zhipu_reason": zhipu.reason,
-        "with_fallback_eligible": by_agent["with-fallback"].eligible,
+        "zhipu_admissible": is_lane_admissible(Provider.ZHIPU),
+        "zhipu_admission_reason": lane_admission_reason(Provider.ZHIPU),
+        "zai_ready": zai.ready,
+        "zai_admissible": is_lane_admissible(Provider.ZAI),
+        "inadmissible_with_fallback_eligible": (
+            by_agent["inadmissible-with-fallback"].eligible
+        ),
+        "inadmissible_with_fallback_reason": (
+            by_agent["inadmissible-with-fallback"].reason
+        ),
+        "unready_with_fallback_eligible": by_agent["unready-with-fallback"].eligible,
         "no_fallback_eligible": by_agent["no-fallback"].eligible,
         "no_fallback_reason": by_agent["no-fallback"].reason,
     }))
@@ -421,16 +443,50 @@ def test_present_credential_flips_readiness(tmp_path) -> None:
     assert _DUMMY_ZHIPU_KEY not in json.dumps(out)
 
 
-def test_eligible_fallback_makes_role_eligible(tmp_path) -> None:
-    """A ready declared fallback makes an unready-primary role eligible.
+def test_a_ready_fallback_does_not_rescue_an_inadmissible_primary(tmp_path) -> None:
+    """A healthy fallback must NOT make an unproven lane serveable.
 
-    Evidence over real (scrubbed) settings: with Zhipu deterministically unready,
-    a role that declares a ready mock fallback is eligible, while an otherwise
-    identical role with no fallback is not - the eligibility engine composes real
-    per-provider readiness, not a hardcoded verdict.
+    The safety property, and the reason it needs a test rather than only the
+    sentence in ``evaluate_profile_eligibility``: admission and readiness are
+    different questions, so a profile that happens to carry a ready fallback must
+    not turn a lane with NO completed-turn proof into an eligible one. That would
+    be the admission rule defeated by an unrelated field - serving a lane nobody
+    has ever completed real work on, because something else in the same profile
+    was healthy.
+
+    Zhipu is the primary here precisely because it is unproven. The assertion
+    cites the admission reason rather than just the verdict, so the test names WHY
+    the lane is refused and fails loudly if the refusal ever starts coming from
+    somewhere else (a missing credential, say) that a credential could then undo.
     """
     out = _run_probe(tmp_path, _scrubbed_env())
-    assert out["zhipu_ready"] is False
-    assert out["with_fallback_eligible"] is True
+
+    assert out["zhipu_admissible"] is False
+    assert "no completed-turn proof" in out["zhipu_admission_reason"]
+
+    assert out["inadmissible_with_fallback_eligible"] is False
+    assert out["zhipu_admission_reason"] in out["inadmissible_with_fallback_reason"]
+
+
+def test_a_ready_fallback_does_rescue_an_unready_admissible_primary(tmp_path) -> None:
+    """A ready fallback still rescues a primary that is merely UNREADY.
+
+    The companion to the refusal above, and the original property this file
+    proved: fallback composition is real, not a hardcoded verdict. It needs its
+    own case because the two are one edit apart - a change that made admission
+    fallback-rescuable would be caught above, and a change that broke fallback
+    rescue entirely would be caught only here.
+
+    Z.ai is the primary because it is the inverse of Zhipu on the axis under test:
+    a PROVEN lane whose credential is absent from this scrubbed environment. So
+    the only thing standing between it and eligibility is readiness, which is
+    exactly what a fallback is allowed to answer.
+    """
+    out = _run_probe(tmp_path, _scrubbed_env())
+
+    assert out["zai_admissible"] is True
+    assert out["zai_ready"] is False
+
+    assert out["unready_with_fallback_eligible"] is True
     assert out["no_fallback_eligible"] is False
     assert "no eligible fallback" in out["no_fallback_reason"]

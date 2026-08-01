@@ -471,9 +471,26 @@ class TestAttachAuthoringTools:
         assert "type" not in wired.mcp_servers[0]
         assert wired.mcp_servers[0]["command"]
 
-    def test_model_without_acp_surface_is_returned_unchanged(self) -> None:
-        """A hosted model exposing no with_mcp_servers is passed through as-is."""
+    def test_model_without_acp_surface_is_refused_rather_than_passed_through(
+        self,
+    ) -> None:
+        """A hosted model with no mount surface is refused, not silently unarmed.
+
+        This asserted pass-through until the attachment generalized to the codex
+        lane. Pass-through was the wrong contract: a harness-armed run carrying an
+        authoring binding whose provider has no surface to mount it on would have
+        started an agent that silently lacked every declared authoring tool, which
+        is the dead-capability failure the harness exists to prevent. Refusing
+        before spawn names the mismatch instead.
+
+        The refusal is honest rather than complete. A hosted-API lane genuinely
+        cannot mount an ACP-shaped bridge, and the framework-bound tool path that
+        would serve it does not exist yet, so this lane is currently refused rather
+        than served. That gap is recorded on the feature's rolling trail; when the
+        hosted path lands, this test asserts a successful attachment instead.
+        """
         from langchain_openai import ChatOpenAI
 
         model = ChatOpenAI(api_key="test-key", model="gpt-4o")
-        assert attach_authoring_tools(model, _binding(), autonomous=True) is model
+        with pytest.raises(ConfigError, match="no surface to mount the bridge"):
+            attach_authoring_tools(model, _binding(), autonomous=True)

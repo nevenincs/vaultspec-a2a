@@ -1,28 +1,31 @@
-"""What a persona is allowed to tell a model about its reach, per lane.
+"""What a persona may tell a model about reaching the web, and what it may claim.
 
 The defect this closes was a persona that named a web tool by exact string five
-times over while no shipped preset put that tool anywhere near the run. The repair
-is not deletion: it is composition, so the claim is made exactly where it is true.
+times over - tools of a server that does not exist and never will. The repair is
+not a condition wrapped around that text but its replacement: the persona now
+describes searching the web in terms of the obligations that attach to a
+retrieval, and names no tool at all, because which tool performs one differs by
+lane and the model already sees the tools it was given.
 
-Two halves, tested through two different depths, because neither alone would be
-honest:
+Two properties are under test, and they pull in opposite directions on purpose:
 
-- The DARK half runs the real thing. The shipped ``vaultspec-adr-research`` preset
-  is compiled through :func:`~..compiler.compile_team_graph` and driven over a real
-  checkpointer against real ACP subprocesses, and the assertions are made on the
-  prompt text the CLI genuinely received. Nothing is constructed: the persona comes
-  from its preset, the lane from the model, the verdict from the shipped
-  declaration.
-- The LIT half supplies the verdict as a parameter to the same production
-  composition function the dark half just exercised. The declaration is empty by
-  design and must stay that way until a live retrieval earns an entry, so a test
-  that waited for one could not exist until after the capability shipped - which is
-  precisely how a seam reaches production having never once run lit. What the tests
-  never do is edit the declaration or reach past the seam.
+- **Capability is universal.** Every lane is built to search. No test here may
+  assert that a lane lacks web access, whatever the lane declaration says - a
+  persona telling an agent it cannot search would suppress a faculty the run has.
+- **The claim is conditional.** The lane declaration records which lanes have been
+  watched completing a real retrieval, and that governs what may be ASSERTED. An
+  undemonstrated lane gets "not yet demonstrated, say what happened", never "you
+  have no online access".
 
-The expectations are derived from the declarations rather than restated, so the day
-a lane earns its proof the dark assertions demand the paragraph instead of its
-absence, and no edit here is needed to notice.
+Two depths, because neither alone would be honest. The DEEP half compiles the
+shipped ``vaultspec-adr-research`` preset through
+:func:`~..compiler.compile_team_graph` and drives it over a real checkpointer
+against real ACP subprocesses, asserting on the prompt text the CLI genuinely
+received. The SHALLOW half supplies the verdict as a parameter to the same
+production composer, because the declaration is empty by design and a test that
+waited for an entry could not exist until after the capability shipped - which is
+how a seam reaches production having never once run its other branch. What the
+tests never do is edit the declaration or reach past the seam.
 """
 
 from __future__ import annotations
@@ -38,7 +41,7 @@ from langchain_core.messages import HumanMessage
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
 from ...authoring.contract import DOCUMENT_AUTHORING_ROLES
-from ...providers.lane_admission import is_web_lane_proven, web_tool_names_for
+from ...providers.lane_admission import is_web_lane_proven
 from ...team.team_config import (
     _PRESET_AGENTS_DIR,
     ResearchThreadSpec,
@@ -46,7 +49,6 @@ from ...team.team_config import (
     load_team_config,
 )
 from ..compiler import (
-    _NO_ONLINE_ACCESS_TEXT,
     _WEB_GROUNDING_MARKER,
     _compose_persona_prompt,
     _web_grounding_text,
@@ -61,15 +63,23 @@ PYTHON_EXE = sys.executable
 
 #: The lane every model in the compiled run below declares. It carries
 #: completed-turn proof and no web proof, which is the pairing that matters: turn
-#: proof must not read as web proof.
+#: proof must not read as retrieval proof.
 DRIVEN_LANE = "claude"
 
-#: Tool names a lit composition offers, shaped exactly as a ``WebLaneProof``
-#: records them - the built-ins a completed retrieval was actually performed with.
-LIT_TOOL_NAMES: tuple[str, ...] = ("WebFetch", "WebSearch")
+#: Tool names no persona may contain. Real built-ins, but lane-specific: the
+#: command-line lanes each expose their own pair and the hosted-API lanes expose
+#: none, so a persona naming any of them is asserting one lane's shape as
+#: universal. ``vaultspec-web-search`` is here because the fictional server whose
+#: tools the old text named must never reappear in persona prose.
+PER_LANE_TOOL_TOKENS: tuple[str, ...] = (
+    "WebSearch",
+    "WebFetch",
+    "vaultspec-web-search",
+)
 
-#: A role that authors no vault document. The read floor withholds itself from it
-#: and outward reach rides that same predicate, so a lane verdict must not move it.
+#: A role that authors no vault document. It still reaches the web - nothing here
+#: is allowed to imply otherwise - but the disclosure obligations are about
+#: documents it does not write, so an unmarked persona of this role is untouched.
 NON_DOCUMENT_ROLE = "coder"
 
 
@@ -77,17 +87,15 @@ def _shipped_agent_ids() -> list[str]:
     return sorted(path.stem for path in _PRESET_AGENTS_DIR.glob("*.toml"))
 
 
-def _expected_section(provider: str | None, role: str) -> str:
-    """What a role on *provider*'s lane must be told, per the live declarations.
+def _expected_section(provider: str | None) -> str:
+    """The paragraph a run on *provider*'s lane must compose, per the declaration.
 
     Read from the lane declaration rather than hardcoded, so this expresses the
-    RULE ("say what the lane earned") instead of today's answer to it. When a lane
-    is proven, this demands the capability paragraph; today it demands the
-    disclaimer, and the change of answer requires no edit here.
+    RULE ("assert only what this lane has demonstrated") instead of today's answer
+    to it. The day a lane earns its proof this demands the demonstrated stance with
+    no edit here.
     """
-    if is_web_lane_proven(provider) and role in DOCUMENT_AUTHORING_ROLES:
-        return _web_grounding_text(web_tool_names_for(provider))
-    return _NO_ONLINE_ACCESS_TEXT
+    return _web_grounding_text(demonstrated=is_web_lane_proven(provider))
 
 
 def _expected_persona(persona: str, provider: str | None, role: str) -> str:
@@ -96,15 +104,13 @@ def _expected_persona(persona: str, provider: str | None, role: str) -> str:
     Deliberately built by the production composer rather than restated: what is
     under test at the graph level is the WIRING - that the compiled machine routes
     each role's preset through this composition at all - not the wording, which the
-    lit tests below pin directly. A compiler that stopped composing would hand the
-    model the raw preset, and for a marked persona that is a different string from
-    this one, so the check fails loudly rather than quietly agreeing with itself.
+    shallow tests below pin directly. A compiler that stopped composing would hand
+    the model the raw preset, and for a marked persona that is a different string
+    from this one, so the check fails loudly rather than quietly agreeing with
+    itself.
     """
     return _compose_persona_prompt(
-        persona,
-        role=role,
-        proven=is_web_lane_proven(provider),
-        tool_names=web_tool_names_for(provider),
+        persona, role=role, demonstrated=is_web_lane_proven(provider)
     )
 
 
@@ -187,39 +193,61 @@ def _prompt_text(prompt_file: Path) -> str:
     return _normalise(" ".join(blocks))
 
 
-def test_the_researcher_preset_marks_where_its_reach_text_belongs() -> None:
-    """Fixture precondition for the run below: the marker is really in the preset.
+@pytest.mark.parametrize("agent_id", ("vaultspec-researcher", "vaultspec-analyst"))
+def test_the_research_presets_mark_the_spot_and_name_no_tool(agent_id: str) -> None:
+    """Fixture precondition for the run below, and a rule in its own right.
 
-    Without this the compiled-run assertions could pass against a persona that
-    simply never mentions online access, which is a different (and weaker) thing
-    than a persona whose claim is resolved per lane.
+    Two claims about the shipped prose. It marks where its web text belongs, so the
+    compiled-run assertions are not vacuous against a persona that simply never
+    mentions the web. And it names no tool: the old text hard-coded one lane's tool
+    names - of a server that does not exist - as though every run had them, and that
+    is what must never come back.
     """
-    persona = load_agent_config("vaultspec-researcher").persona.system_prompt
+    persona = load_agent_config(agent_id).persona.system_prompt
     assert _WEB_GROUNDING_MARKER in persona
 
-    web_vocabulary = ("WebSearch", "WebFetch", "vaultspec-web-search")
-    for token in web_vocabulary:
+    for token in PER_LANE_TOOL_TOKENS:
         assert token not in persona, (
-            f"the researcher preset names {token!r} statically; a reach claim "
-            "belongs at the composition seam, where the lane is known"
+            f"the {agent_id!r} preset names {token!r}; which tool performs a "
+            "retrieval differs by lane, so a persona that names one is asserting "
+            "a single lane's shape as universal"
         )
 
 
+def test_no_shipped_persona_names_a_per_lane_web_tool() -> None:
+    """The rule holds across the whole shipped persona surface, not just two files.
+
+    Scans description and system prompt together, because a false capability claim
+    in the served description is the same defect one surface along.
+    """
+    offenders: list[str] = []
+    for agent_id in _shipped_agent_ids():
+        agent = load_agent_config(agent_id)
+        served = f"{agent.description}\n{agent.persona.system_prompt}"
+        offenders += [
+            f"{agent_id}:{token}" for token in PER_LANE_TOOL_TOKENS if token in served
+        ]
+    assert not offenders, (
+        f"persona text names per-lane web tool(s) {sorted(offenders)}; the "
+        "composition seam describes the capability without naming a tool"
+    )
+
+
 @pytest.mark.asyncio
-async def test_the_compiled_run_tells_each_role_what_its_lane_earned(
+async def test_the_compiled_run_tells_each_role_what_its_lane_may_claim(
     checkpointer: AsyncSqliteSaver, tmp_path: Path
 ) -> None:
     """The real research machine, driven for real, on the lane it declared.
 
     The research gate parks the run once the researcher, synthesist, and reviewer
-    have each taken a turn, so their prompts are on disk by then. Three claims are
-    made against those prompts, and they fail for three different reasons: the
-    persona each role received is the composed one (the compiler routes through the
-    seam at all), no placeholder survived to the model, and no prompt names a web
-    tool the lane did not grant - the last being the original defect, stated
-    independently of which paragraph was composed.
+    have each taken a turn, so their prompts are on disk by then. Four claims are
+    made against those prompts and they fail for four different reasons: the persona
+    each role received is the composed one (the compiler routes through the seam at
+    all), no placeholder survived to the model, no prompt names a per-lane tool, and
+    - the one that would have been backwards before the universal-search ruling - no
+    prompt tells an agent it has no online access.
 
-    One run serves all three deliberately. Each turn is a real subprocess, so a
+    One run serves all four deliberately. Each turn is a real subprocess, so a
     second identical run would buy nothing but wall-clock time.
     """
     record_dir = tmp_path / "records"
@@ -259,7 +287,6 @@ async def test_the_compiled_run_tells_each_role_what_its_lane_earned(
     )
     assert "__interrupt__" in result, "the run must reach the research gate"
 
-    granted = web_tool_names_for(DRIVEN_LANE)
     checked = 0
     marked = 0
     for agent_id, prompt_file in factory.prompt_files.items():
@@ -280,15 +307,18 @@ async def test_the_compiled_run_tells_each_role_what_its_lane_earned(
             # A marked persona is the one that proves resolution HAPPENED: the raw
             # preset and the composed one differ, so the assertion above is not
             # satisfiable by a compiler that passed the preset straight through.
-            assert _normalise(_expected_section(DRIVEN_LANE, role)) in prompt
+            assert _normalise(_expected_section(DRIVEN_LANE)) in prompt
             marked += 1
 
-        for name in ("WebSearch", "WebFetch", "vaultspec-web-search"):
-            if name in granted:
-                continue
-            assert name not in prompt, (
-                f"{agent_id!r} was told about {name!r}, which its lane never granted"
+        for token in PER_LANE_TOOL_TOKENS:
+            assert token not in prompt, (
+                f"{agent_id!r} was told about {token!r}, which is one lane's tool "
+                "name presented to a run that may be on another lane"
             )
+        assert "no online access" not in prompt, (
+            f"{agent_id!r} was told it cannot reach the web; every lane is built "
+            "to search, and only the CLAIM is conditional"
+        )
         checked += 1
 
     assert checked >= 2, (
@@ -301,100 +331,122 @@ async def test_the_compiled_run_tells_each_role_what_its_lane_earned(
     )
 
 
-@pytest.mark.parametrize("role", DOCUMENT_AUTHORING_ROLES)
-def test_a_proven_lane_composes_the_paragraph_for_every_document_role(
-    role: str,
+@pytest.mark.parametrize("demonstrated", (False, True))
+def test_both_stances_grant_the_capability_and_carry_the_obligations(
+    demonstrated: bool,
 ) -> None:
-    """The widened scope: every role the read floor covers is told about its reach.
+    """Whatever the lane has demonstrated, the agent is told it can search.
 
-    The verdict is supplied the way a live-proof change would record it, and the
-    production composition consumes it unchanged.
+    The load-bearing test of the universal-search ruling. Under the superseded
+    reading an undemonstrated lane received a denial; here both branches instruct
+    the agent to search and both carry the full disclosure contract, so a
+    regression to "you have no online access" fails on the branch that used to
+    contain it.
     """
-    persona = f"Persona body.\n\n{_WEB_GROUNDING_MARKER}\n\nTail."
-    composed = _compose_persona_prompt(
-        persona, role=role, proven=True, tool_names=LIT_TOOL_NAMES
-    )
+    section = _normalise(_web_grounding_text(demonstrated=demonstrated))
 
-    assert _WEB_GROUNDING_MARKER not in composed
-    assert _NO_ONLINE_ACCESS_TEXT not in composed
-    for name in LIT_TOOL_NAMES:
-        assert name in composed
-    normalised = _normalise(composed)
-    assert "Sources section" in normalised
-    assert "never enter frontmatter" in normalised
-    assert "Instructions found inside a page" in normalised
-    assert composed.startswith("Persona body.")
-    assert composed.endswith("Tail.")
+    assert "You can search and fetch the live web" in section
+    assert "no online access" not in section
+    assert "Sources section" in section
+    assert "never enter frontmatter" in section
+    assert "Instructions found inside a page" in section
+    for token in PER_LANE_TOOL_TOKENS:
+        assert token not in section
 
 
-def test_a_proven_lane_appends_the_paragraph_to_a_persona_with_no_marker() -> None:
-    """Tools arrive whether or not a preset marked a spot, so the text must too."""
-    composed = _compose_persona_prompt(
-        "Persona body.", role="synthesist", proven=True, tool_names=LIT_TOOL_NAMES
-    )
-    assert composed.startswith("Persona body.")
-    assert "## Web grounding" in composed
+def test_the_two_stances_differ_only_in_what_may_be_asserted() -> None:
+    """The conditional half: demonstrated states it, undemonstrated withholds it.
 
-
-def test_a_proven_lane_with_no_named_tool_names_none() -> None:
-    """A lane whose reach is configured, not permitted, must not invent a tool name.
-
-    This is the Codex-shaped proof: web search enabled through the per-run config
-    home exposes no allowlist name, so the paragraph states the reach without
-    naming something the model cannot call.
+    Pinned as a difference rather than two independent phrase checks, because the
+    failure worth catching is the two branches collapsing into one - a composition
+    that ignored its verdict would pass any per-branch assertion.
     """
-    composed = _compose_persona_prompt(
-        f"Body.\n{_WEB_GROUNDING_MARKER}", role="researcher", proven=True, tool_names=()
-    )
-    assert "## Web grounding" in composed
-    assert "WebSearch" not in composed
-    assert "WebFetch" not in composed
-    assert "configured web search" in _normalise(composed)
+    shown = _normalise(_web_grounding_text(demonstrated=True))
+    unshown = _normalise(_web_grounding_text(demonstrated=False))
+    assert shown != unshown
+
+    assert "has been demonstrated end to end on this lane" in shown
+    assert "not yet been demonstrated on this lane" in unshown
+    # The undemonstrated lane is told to try and then report, never to abstain.
+    assert "Use it - it is expected to work" in unshown
+    assert "say so plainly in your findings" in unshown
 
 
-def test_a_proven_lane_grants_a_non_document_role_nothing() -> None:
-    """Lane proof is necessary, not sufficient: the role predicate still decides."""
+@pytest.mark.parametrize("role", DOCUMENT_AUTHORING_ROLES)
+@pytest.mark.parametrize("demonstrated", (False, True))
+def test_every_document_role_receives_the_paragraph(
+    role: str, demonstrated: bool
+) -> None:
+    """The obligations follow the document content, on every lane and both stances.
+
+    The scope the record widened: any role that puts document content into the
+    world carries the disclosure contract, whether or not its preset marked a spot.
+    """
     marked = _compose_persona_prompt(
+        f"Persona body.\n\n{_WEB_GROUNDING_MARKER}\n\nTail.",
+        role=role,
+        demonstrated=demonstrated,
+    )
+    assert _WEB_GROUNDING_MARKER not in marked
+    assert "## Web grounding" in marked
+    assert marked.startswith("Persona body.")
+    assert marked.endswith("Tail.")
+
+    appended = _compose_persona_prompt(
+        "Persona body.", role=role, demonstrated=demonstrated
+    )
+    assert appended.startswith("Persona body.")
+    assert "## Web grounding" in appended
+
+
+@pytest.mark.parametrize("demonstrated", (False, True))
+def test_an_unmarked_non_document_persona_is_byte_identical(
+    demonstrated: bool,
+) -> None:
+    """Blast radius of the default is zero, and silence is not a denial.
+
+    A persona outside the document roles is left exactly as authored. That is not a
+    statement that it cannot search - it can - only that the citation obligations
+    are about documents it does not author, so there is nothing to say to it here.
+    """
+    composed = _compose_persona_prompt(
+        "Body.", role=NON_DOCUMENT_ROLE, demonstrated=demonstrated
+    )
+    assert composed == "Body."
+
+
+@pytest.mark.parametrize("demonstrated", (False, True))
+def test_a_marked_non_document_persona_still_resolves_its_marker(
+    demonstrated: bool,
+) -> None:
+    """A marker is honoured whatever the role, because a leaked one is instruction.
+
+    The analyst is exactly this case in the shipped tree: its role is outside the
+    document set, and it marks the spot anyway.
+    """
+    composed = _compose_persona_prompt(
         f"Body.\n{_WEB_GROUNDING_MARKER}",
         role=NON_DOCUMENT_ROLE,
-        proven=True,
-        tool_names=LIT_TOOL_NAMES,
+        demonstrated=demonstrated,
     )
-    assert _NO_ONLINE_ACCESS_TEXT in marked
-    assert "## Web grounding" not in marked
-
-    unmarked = _compose_persona_prompt(
-        "Body.", role=NON_DOCUMENT_ROLE, proven=True, tool_names=LIT_TOOL_NAMES
-    )
-    assert unmarked == "Body."
-
-
-def test_an_unproven_lane_leaves_an_unmarked_persona_byte_identical() -> None:
-    """The blast radius of the default is zero: silence is not rewritten into prose."""
-    persona = load_agent_config("vaultspec-analyst").persona.system_prompt
-    composed = _compose_persona_prompt(
-        persona, role="analyst", proven=False, tool_names=()
-    )
-    assert composed == persona
+    assert _WEB_GROUNDING_MARKER not in composed
+    assert "## Web grounding" in composed
 
 
 @pytest.mark.parametrize("agent_id", _shipped_agent_ids())
-@pytest.mark.parametrize("proven", (False, True))
+@pytest.mark.parametrize("demonstrated", (False, True))
 def test_no_shipped_persona_ships_a_literal_placeholder(
-    agent_id: str, proven: bool
+    agent_id: str, demonstrated: bool
 ) -> None:
     """A marker is resolved in every state, so no run can leak one to a model.
 
-    Both verdicts and every shipped persona, because an unresolved placeholder is
+    Both stances and every shipped persona, because an unresolved placeholder is
     not a cosmetic defect: the model reads it as instruction text. Scoped to THIS
     marker deliberately - a supervisor persona legitimately carries the roster
     placeholder, which a different seam resolves later in the same compile.
     """
     agent = load_agent_config(agent_id)
     composed = _compose_persona_prompt(
-        agent.persona.system_prompt,
-        role=agent.role,
-        proven=proven,
-        tool_names=LIT_TOOL_NAMES if proven else (),
+        agent.persona.system_prompt, role=agent.role, demonstrated=demonstrated
     )
     assert _WEB_GROUNDING_MARKER not in composed

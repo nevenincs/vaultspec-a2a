@@ -161,13 +161,16 @@ async def test_an_unproven_lane_surfaces_no_web_tool_name(
 async def test_an_unproven_lane_adds_no_web_capability_text(
     tmp_path: Path, agent_id: str, role: str
 ) -> None:
-    """The persona reaches the model exactly as shipped - the run adds no claim.
+    """The persona reaches the model exactly as shipped - this node composes none.
 
     Byte equality against the bundled preset is the assertion that survives the
-    persona text itself changing: whatever a preset says today, an unproven lane
-    must receive it UNALTERED, so a web-capability paragraph composed
-    unconditionally instead of lane-conditionally fails here rather than reaching
-    a model whose tools cannot back it.
+    persona text itself changing, and what it pins is that web-capability text has
+    exactly ONE composition seam, at graph compile, and that this node is not a
+    second one. A persona rewritten here as well would be composed twice.
+
+    The tool-name assertions below are the surviving half of the older claim: a
+    persona names no per-lane built-in in any state, because which tool performs a
+    retrieval differs by lane.
     """
     prompt_file = tmp_path / "session_prompt.json"
     persona = load_agent_config(agent_id).persona.system_prompt
@@ -191,17 +194,29 @@ async def test_an_unproven_lane_adds_no_web_capability_text(
 
 
 @pytest.mark.asyncio
-async def test_a_shipped_disclaimer_reaches_the_model_intact(tmp_path: Path) -> None:
-    """A persona that disclaims online access still does so at the spawn.
+async def test_a_shipped_capability_bound_reaches_the_model_intact(
+    tmp_path: Path,
+) -> None:
+    """A bound the persona actually states still reaches the spawn unaltered.
 
-    The analyst is the shipped persona carrying that disclaimer, loaded from its
-    preset rather than written here, so this fails the moment the composition path
-    starts rewriting persona text on a lane that has earned no web proof.
+    The analyst is the carrier, loaded from its preset rather than written here, so
+    this fails the moment the worker path starts rewriting persona text.
+
+    The bound asserted is the terminal one, not an online-access one, and the
+    difference is a decision rather than a convenience: the owner directive makes
+    every lane capable of searching the web, so no shipped persona may deny online
+    access and a test demanding that denial would pin a falsehood. Web reach is
+    composed one seam earlier, at graph compile, and is proven there
+    (``graph/tests/test_persona_web_composition.py``).
     """
     prompt_file = tmp_path / "session_prompt.json"
     persona = load_agent_config("vaultspec-analyst").persona.system_prompt
-    assert "no online access" in " ".join(persona.split()), (
-        "fixture precondition: the analyst preset is the disclaimer carrier"
+    normalised_persona = " ".join(persona.split())
+    assert "You have no terminal" in normalised_persona, (
+        "fixture precondition: the analyst preset is the capability-bound carrier"
+    )
+    assert "no online access" not in normalised_persona, (
+        "a shipped persona may not deny web reach; every lane is built to search"
     )
     node = create_worker_node(
         model=_model(tmp_path, provider="claude", session_prompt=prompt_file),
@@ -214,4 +229,4 @@ async def test_a_shipped_disclaimer_reaches_the_model_intact(tmp_path: Path) -> 
     await node(_make_state())
 
     prompt = _prompt_text(json.loads(prompt_file.read_text(encoding="utf-8")))
-    assert "no online access" in prompt
+    assert "You have no terminal" in prompt

@@ -127,7 +127,7 @@ class TestResolution:
             "vaultspec-researcher",
             "vaultspec-synthesist",
             "vaultspec-adr-author",
-            "vaultspec-planner",
+            "vaultspec-plan-author",
             "vaultspec-doc-reviewer",
         }
         # Heterogeneous team: doc-reviewer is a different provider than the rest.

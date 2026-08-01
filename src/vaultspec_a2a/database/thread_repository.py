@@ -52,6 +52,7 @@ __all__ = [
     "list_non_terminal_threads",
     "list_threads",
     "mark_thread_deleting",
+    "normalize_workspace_identity",
     "record_thread_execution_state",
     "set_thread_approval_state",
     "set_thread_repair_state",
@@ -79,6 +80,22 @@ def _path_safe_run_id_clause() -> ColumnElement[bool]:
     return ThreadModel.id.regexp_match(r"^[A-Za-z0-9_][A-Za-z0-9_-]{0,127}$")
 
 
+def normalize_workspace_identity(value: str | os.PathLike[str]) -> str:
+    """Return an OS-canonical workspace identity without requiring existence.
+
+    The single formula behind workspace-scoped run discovery. The write seam
+    projects it into the durable selector and the read seam applies it to an
+    incoming query; both then hash the result through ``_workspace_key``, so one
+    shared definition is what guarantees the write-time and read-time hashes
+    agree. Two hand-copied formulas would desynchronise silently on any edit -
+    discovery would simply return nothing, with no error to notice.
+
+    The ``0008`` migration carries its own frozen copy on purpose; see the note
+    there. It is pinned to the formula as it ran and must not be routed here.
+    """
+    return os.path.normcase(os.path.realpath(os.fspath(value)))
+
+
 def _discovery_selectors(metadata: str | None) -> tuple[str | None, str | None]:
     """Project bounded discovery selectors once at the metadata write seam."""
     if not metadata:
@@ -98,7 +115,7 @@ def _discovery_selectors(metadata: str | None) -> tuple[str | None, str | None]:
     ):
         workspace = None
     else:
-        workspace = os.path.normcase(os.path.realpath(workspace))
+        workspace = normalize_workspace_identity(workspace)
     if (
         not isinstance(feature, str)
         or not 1 <= len(feature) <= _MAX_DISCOVERY_FEATURE_TAG_LENGTH

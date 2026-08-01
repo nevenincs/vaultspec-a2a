@@ -7,7 +7,10 @@ import os
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from ..database.thread_repository import list_active_thread_page
+from ..database.thread_repository import (
+    list_active_thread_page,
+    normalize_workspace_identity,
+)
 from ..thread.enums import ThreadStatus
 
 if TYPE_CHECKING:
@@ -44,11 +47,6 @@ class ActiveRunDiscoveryResult:
     truncated: bool
 
 
-def _normalise_workspace(value: str | Path) -> str:
-    """Return an OS-canonical workspace identity without requiring existence."""
-    return os.path.normcase(os.path.realpath(os.fspath(value)))
-
-
 async def discover_active_runs(
     db: AsyncSession,
     *,
@@ -80,7 +78,7 @@ async def discover_active_runs(
             f"{_MAX_WORKSPACE_ROOT_LENGTH} characters"
         )
     expected_workspace = (
-        await asyncio.to_thread(_normalise_workspace, expected_workspace_source)
+        await asyncio.to_thread(normalize_workspace_identity, expected_workspace_source)
         if expected_workspace_source is not None
         else None
     )

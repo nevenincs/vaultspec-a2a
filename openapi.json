@@ -1342,7 +1342,7 @@
         "additionalProperties": false,
         "type": "object",
         "title": "ActorTokenBundle",
-        "description": "A run's per-role actor tokens plus the engine machine bearer.\n\nParameters\n----------\ntokens:\n    Mapping of role identifier (the worker ``agent_id`` or the supervisor\n    constant) to that role's engine-minted actor token. A role only ever\n    receives its own token via :meth:`actor_token`.\nengine_bearer:\n    The machine bearer minted at engine boot, forwarded so a worker's\n    authoring bridge can reach the engine. Optional: when absent the worker\n    resolves the bearer from the engine discovery file instead."
+        "description": "A run's per-role actor tokens plus the engine machine bearer.\n\nParameters\n----------\ntokens:\n    Mapping of role identifier (the worker ``agent_id`` or the supervisor\n    constant) to that role's engine-minted actor token. A role only ever\n    receives its own token via :meth:`actor_token`.\nengine_bearer:\n    The machine bearer minted at engine boot, forwarded so a worker's\n    authoring bridge can reach the engine. Optional in the wire shape only:\n    a run that carries no bearer leaves the bridge unarmed, because the\n    bearer is meaningful only paired with the engine origin it was minted\n    for. A consumer that resolves its OWN origin may substitute the bearer\n    from that same resolution (the executor's run-end session close does);\n    a consumer holding a separately-supplied origin must not, since pairing\n    a bearer with a foreign origin would misdirect the credential."
       },
       "AgentLifecycleState": {
         "type": "string",
@@ -1895,7 +1895,7 @@
           "ineligible"
         ],
         "title": "ProviderEligibility",
-        "description": "Whether at least one subprocess provider command resolves on this host.\n\nComputed through the no-instantiation classify seam: no provider is\nconstructed and no subprocess is spawned to determine it."
+        "description": "Whether at least one subprocess provider can actually run on this host.\n\nComputed through the credential-aware readiness probe: the configured\ncredential is checked first, then command resolvability. The probe is still\nno-instantiation - no provider is constructed and no subprocess is spawned\nto determine it - but a resolvable launch command is not on its own\nsufficient, because a provider whose binary is installed with its\ncredential absent cannot run. Codex is the deliberate exception: its auth\nis a file-based persisted session rather than a configured secret, so it\ngates on command resolvability alone."
       },
       "RoleAssignmentSummary": {
         "properties": {
@@ -2008,7 +2008,7 @@
           "blocked"
         ],
         "title": "RunAdmission",
-        "description": "Whether the gateway would admit a run right now - the execution-ready fact.\n\n``ready`` means execution-ready: a reachable worker and an eligible provider.\n``deferred`` means gateway-ready but not yet execution-ready - the worker is\ncold or starting and will start on demand. It remains informational on the\nreadiness surface, while staged ``prepare`` admission refuses it fail-closed.\n``blocked`` means a hard gateway dependency (the database) is unavailable."
+        "description": "Whether the gateway would admit a run right now - the execution-ready fact.\n\n``ready`` means execution-ready: a reachable worker and a provider that is\nboth installed and credentialed, so this staged gate and the\ncredential-aware gate launch applies agree, rather than admitting a run and\nreserving capacity for it that the latter then refuses.\n``deferred`` means gateway-ready but not yet execution-ready - the worker is\ncold or starting and will start on demand. It remains informational on the\nreadiness surface, while staged ``prepare`` admission refuses it fail-closed.\n``blocked`` means a hard gateway dependency (the database) is unavailable."
       },
       "RunAgentSummary": {
         "properties": {

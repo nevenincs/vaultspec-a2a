@@ -22,6 +22,16 @@ _BACKFILL_PAGE = 500
 
 
 def _selectors(raw: str | None) -> tuple[str | None, str | None]:
+    """Project the discovery selectors for the one-time backfill below.
+
+    A DELIBERATE frozen duplicate of the live projection in
+    ``database/thread_repository.py`` (whose normalization now lives in
+    ``normalize_workspace_identity``), bounds inlined rather than imported. Do
+    not route this at the shared helper: a migration must keep reproducing the
+    formula exactly as it ran when it was applied, and importing the live one
+    would let a later edit retroactively change what this migration did to
+    databases that already ran it. The duplication is the point.
+    """
     if not raw:
         return None, None
     try:

@@ -125,10 +125,16 @@ class WorkerLifecycleState(StrEnum):
 
 
 class ProviderEligibility(StrEnum):
-    """Whether at least one subprocess provider command resolves on this host.
+    """Whether at least one subprocess provider can actually run on this host.
 
-    Computed through the no-instantiation classify seam: no provider is
-    constructed and no subprocess is spawned to determine it.
+    Computed through the credential-aware readiness probe: the configured
+    credential is checked first, then command resolvability. The probe is still
+    no-instantiation - no provider is constructed and no subprocess is spawned
+    to determine it - but a resolvable launch command is not on its own
+    sufficient, because a provider whose binary is installed with its
+    credential absent cannot run. Codex is the deliberate exception: its auth
+    is a file-based persisted session rather than a configured secret, so it
+    gates on command resolvability alone.
     """
 
     ELIGIBLE = "eligible"
@@ -138,7 +144,10 @@ class ProviderEligibility(StrEnum):
 class RunAdmission(StrEnum):
     """Whether the gateway would admit a run right now - the execution-ready fact.
 
-    ``ready`` means execution-ready: a reachable worker and an eligible provider.
+    ``ready`` means execution-ready: a reachable worker and a provider that is
+    both installed and credentialed, so this staged gate and the
+    credential-aware gate launch applies agree, rather than admitting a run and
+    reserving capacity for it that the latter then refuses.
     ``deferred`` means gateway-ready but not yet execution-ready - the worker is
     cold or starting and will start on demand. It remains informational on the
     readiness surface, while staged ``prepare`` admission refuses it fail-closed.

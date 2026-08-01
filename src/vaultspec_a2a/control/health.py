@@ -249,27 +249,33 @@ def assemble_health_status(
 
 
 def _eligible_provider_names() -> list[str]:
-    """Return the subprocess providers whose launch command resolves on this host.
+    """Return the subprocess providers that can actually run on this host.
 
-    Uses ``classify_provider_command`` - the no-instantiation seam that resolves a
-    provider's command purely from filesystem and configuration, constructing no
-    model and spawning no subprocess. Z.ai is omitted because it launches the same
-    ACP wrapper as Claude; counting it again would double-count one backend. A
-    provider whose command cannot be resolved is simply left out.
+    Uses ``probe_provider_readiness`` - the credential-aware seam that gates on
+    the configured credential FIRST and only then on command resolvability. It
+    remains no-instantiation: no model is constructed and no subprocess is
+    spawned. Resolving the launch command alone is not sufficient, because a
+    provider whose binary is installed with its credential absent cannot run;
+    admitting it here reserves execution capacity for a run that the
+    credential-aware gate applied at launch then refuses.
+
+    Codex is the one provider the resolver deliberately gates on command
+    resolvability alone - its auth is a file-based persisted session in the
+    Codex home rather than a configured secret, so there is no credential to
+    check. That asymmetry is the resolver's to own; this seam does not restate
+    it, so the two can never disagree. Z.ai is omitted because it launches the
+    same ACP wrapper as Claude; counting it again would double-count one
+    backend.
     """
     from ..graph.enums import Provider
-    from ..providers.factory import classify_provider_command
-    from ..thread.errors import ConfigError
+    from ..providers.model_profiles import probe_provider_readiness
 
     candidates = (Provider.CLAUDE, Provider.GEMINI, Provider.CODEX, Provider.KIMI)
-    eligible: list[str] = []
-    for provider in candidates:
-        try:
-            classify_provider_command(provider)
-        except (ValueError, ConfigError):
-            continue
-        eligible.append(provider.value)
-    return eligible
+    return [
+        provider.value
+        for provider in candidates
+        if probe_provider_readiness(provider).ready
+    ]
 
 
 def assemble_desktop_readiness(
@@ -356,13 +362,13 @@ def assemble_desktop_readiness(
             else WorkerLifecycleState.STARTING
         )
 
-    # --- Provider eligibility via the no-instantiation classify seam. ---
+    # --- Provider eligibility via the credential-aware readiness probe. ---
     eligible_providers = _eligible_provider_names()
     if eligible_providers:
         provider_eligibility = ProviderEligibility.ELIGIBLE
     else:
         provider_eligibility = ProviderEligibility.INELIGIBLE
-        reasons.append("no subprocess provider command resolves on this host")
+        reasons.append("no subprocess provider is installed and credentialed here")
 
     # --- Run admission: execution readiness, distinct from gateway readiness. ---
     if gateway_readiness is not GatewayReadiness.READY:

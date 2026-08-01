@@ -207,13 +207,27 @@ _PHASE_GROUNDING_DIRS: dict[str, tuple[str, ...]] = {
     PipelinePhase.PLAN: ("adr", "research", "reference"),
 }
 
-#: The applied doc types a phase REQUIRES among its grounding before it may be
-#: proposed at all (any one of them satisfies the requirement). Absent them, the
-#: submit refuses into the revision loop rather than materializing an ungrounded
-#: document ``vault check`` would reject.
-_PHASE_REQUIRED_GROUNDING: dict[str, tuple[str, ...]] = {
-    PipelinePhase.ADR: ("research", "reference"),
-    PipelinePhase.PLAN: ("adr",),
+#: What a phase must already have on disk before it may be proposed at all, as
+#: requirement GROUPS: every group must be satisfied, and any one doc type inside
+#: a group satisfies that group. Absent them, the submit refuses into the revision
+#: loop rather than materializing an ungrounded document ``vault check`` would
+#: reject.
+#:
+#: The two-level shape exists because the framework's dependency graph is itself
+#: two-level. An ADR needs the problem understood, and research and reference are
+#: PARALLEL entry points into that - either one grounds a decision, so they share
+#: a group. A plan needs two independent things: the decision it executes, and the
+#: investigation behind that decision. A single flat any-of list cannot say that -
+#: it would accept a plan citing an ADR and no research, which is the case this
+#: shape exists to refuse.
+#:
+#: Transitivity is deliberately not relied on. An ADR cannot land without its
+#: research, so a plan citing an ADR *usually* has research upstream - but
+#: "usually" is not the guarantee, and a plan is the document a human executes
+#: from. It states its own provenance rather than inheriting an argument.
+_PHASE_REQUIRED_GROUNDING: dict[str, tuple[tuple[str, ...], ...]] = {
+    PipelinePhase.ADR: (("research", "reference"),),
+    PipelinePhase.PLAN: (("adr",), ("research", "reference")),
 }
 
 
@@ -260,31 +274,44 @@ def _grounding_dated_stem(
 
 
 def _refuse_ungrounded(phase: str, related: list[str]) -> None:
-    """Refuse a grounded phase whose required upstream document has not materialized.
+    """Refuse a grounded phase whose required upstream documents have not materialized.
 
-    The vault schema requires an ADR to cite its research and a plan to cite its ADR;
-    the grounding links are resolved from APPLIED proposals only, so an empty (or
-    wrong-type) grounding set means the upstream phase has not landed on disk yet.
-    Raising :class:`DocumentConformanceError` routes the run into the phase's revision
-    loop rather than failing it - the writer cannot fix this, but the guard keeps a
-    document ``vault check`` would reject off disk. In the normal flow each phase
-    applies before the next is authored and this never fires.
+    The framework's dependency graph is the rule: an ADR cites the investigation it
+    decides from, and a plan cites BOTH the decision it executes and that
+    investigation. Grounding links resolve from APPLIED proposals only, so a
+    missing type means that upstream phase has not landed on disk yet.
+
+    Every requirement group must be met; a group is met by any one of its types.
+    Raising :class:`DocumentConformanceError` routes the run into the phase's
+    revision loop rather than failing it - the writer cannot fix this, but the
+    guard keeps a document ``vault check`` would reject off disk. In the normal
+    flow each phase applies before the next is authored and this never fires.
     """
-    required = _PHASE_REQUIRED_GROUNDING.get(phase)
-    if not required:
+    groups = _PHASE_REQUIRED_GROUNDING.get(phase)
+    if not groups:
         return
-    if any(
-        stem.rstrip("]").endswith(f"-{doc_type}")
-        for stem in related
-        for doc_type in required
-    ):
+
+    def _satisfied(group: tuple[str, ...]) -> bool:
+        return any(
+            stem.rstrip("]").endswith(f"-{doc_type}")
+            for stem in related
+            for doc_type in group
+        )
+
+    missing = [group for group in groups if not _satisfied(group)]
+    if not missing:
         return
-    expected = " or ".join(required)
+
+    # Name every unmet group, not just the first: a writer told only about the
+    # ADR would satisfy it and be refused again for the research, one round trip
+    # per missing document.
+    unmet = "; ".join(" or ".join(group) for group in missing)
     raise DocumentConformanceError(
         [
-            f"{phase} document has no grounding reference: no applied {expected} "
-            f"document exists for this feature yet; the {expected} phase must "
-            f"materialize before the {phase} can cite it"
+            f"{phase} document is missing required grounding: no applied "
+            f"{unmet} document exists for this feature yet. A {phase} states its "
+            "own provenance, so each of these must materialize before it can "
+            "cite them."
         ]
     )
 

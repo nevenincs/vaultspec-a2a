@@ -35,6 +35,8 @@ from datetime import UTC, datetime, timedelta
 from enum import StrEnum
 from typing import TYPE_CHECKING
 
+from ..thread.actor_tokens import MAX_ROLES_PER_RUN
+
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
 
@@ -57,7 +59,11 @@ __all__ = [
 # is short enough that an abandoned prepare frees its slot promptly.
 _DEFAULT_MAX_RESERVATIONS = 5
 _DEFAULT_RESERVATION_TTL_SECONDS = 120.0
-_MAX_REQUIRED_ROLES = 64
+# The bundle's bound, not a second one: prepare declares the roles whose tokens
+# the engine then mints into an ActorTokenBundle, so a prepare this stage accepted
+# and a bundle that model would refuse describes a run admitted at one boundary
+# and rejected at the next.
+_MAX_REQUIRED_ROLES = MAX_ROLES_PER_RUN
 
 _REASON_NO_ROLES = "prepare requires at least one required role"
 _REASON_TOO_MANY_ROLES = (

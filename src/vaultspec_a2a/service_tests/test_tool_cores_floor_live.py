@@ -60,9 +60,10 @@ import httpx
 import pytest
 
 from ..api.schemas.enums import ServerEventType
+from ..control.run_start_policy import required_role_ids
+from ..team.team_config import load_team_config
 from .test_pw7_acceptance import (
     _PRESET_LIVE,
-    _RESEARCH_ADR_ROLES,
     AcceptanceCase,
     AcceptanceHarness,
     _reachable_stack,
@@ -203,7 +204,7 @@ def _floor_case(feature: str, adr_name: str) -> AcceptanceCase:
             "problem statement and decision, quoting the ADR filename as the "
             "locator for each claim."
         ),
-        roles=_RESEARCH_ADR_ROLES,
+        roles=tuple(required_role_ids(load_team_config(_PRESET_LIVE))),
         expected_doc_kinds=(),
         profile_id=_PROFILE_ID,
     )
@@ -352,7 +353,7 @@ def _rag_case(feature: str) -> AcceptanceCase:
             "read-only grounding decision'. Report the top file:line locations each "
             "search returns and cite them verbatim before anything else."
         ),
-        roles=_RESEARCH_ADR_ROLES,
+        roles=tuple(required_role_ids(load_team_config(_PRESET_LIVE))),
         expected_doc_kinds=(),
         profile_id=_PROFILE_ID,
     )

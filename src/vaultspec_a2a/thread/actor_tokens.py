@@ -20,13 +20,23 @@ import re
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-__all__ = ["ActorTokenBundle"]
+__all__ = ["MAX_ROLES_PER_RUN", "ActorTokenBundle"]
 
 # Bounds keep the forwarded payload self-describing and safe to wrap verbatim
 # inside the engine's pass-through envelope. The engine mints tokens
 # under a 160-byte restricted-charset rule; the caps here carry headroom without
 # admitting an unbounded field.
-_MAX_ROLES = 64
+
+# How many roles one run may carry, exported because it is not this model's
+# private business: the prepare stage bounds the role list it declares, the
+# engine mints one token per declared role, and this bundle carries the result.
+# Those three bounds describe one quantity, so a run that clears one and not
+# another would be refused at whichever boundary disagreed - after the caller
+# had already been told its request was fine. The engine holds its own copy of
+# this number, which this side cannot reach; that copy is the remaining half of
+# the duplication and is tracked as cross-repo work.
+MAX_ROLES_PER_RUN = 64
+_MAX_ROLES = MAX_ROLES_PER_RUN
 _MAX_TOKEN_BYTES = 512
 _MAX_ROLE_LENGTH = 63
 _ROLE_PATTERN = re.compile(r"[A-Za-z_][A-Za-z0-9_-]{0,62}\Z")

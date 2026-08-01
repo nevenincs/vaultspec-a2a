@@ -19,17 +19,23 @@ from ...thread.actor_tokens import ActorTokenBundle
 
 _AUTHORING = "vaultspec-adr-research"
 _CODER = "mock-success-single"
-_AUTHORING_ROLES = (
-    "vaultspec-researcher",
-    "vaultspec-synthesist",
-    "vaultspec-adr-author",
-    "vaultspec-doc-reviewer",
-)
+
+
+def _authoring_roles() -> tuple[str, ...]:
+    """The preset's own required roles, asked rather than restated.
+
+    These tests prove what the policy does with a COMPLETE bundle, so a list that
+    falls behind the preset does not weaken them - it inverts them, turning every
+    "eligible" case into a missing-token refusal and testing the opposite of its
+    name. That is what a hardcoded copy did here when the preset gained its
+    plan-author role.
+    """
+    return tuple(required_role_ids(load_team_config(_AUTHORING)))
 
 
 def _full_bundle() -> ActorTokenBundle:
     return ActorTokenBundle(
-        tokens={role: f"tok-{role}" for role in _AUTHORING_ROLES},
+        tokens={role: f"tok-{role}" for role in _authoring_roles()},
         engine_bearer="bearer",
     )
 
@@ -43,7 +49,18 @@ def test_coder_preset_is_not_document_authoring() -> None:
 
 
 def test_required_role_ids_are_the_worker_agent_ids() -> None:
-    assert required_role_ids(load_team_config(_AUTHORING)) == list(_AUTHORING_ROLES)
+    """Read the config directly, never through the helper under test.
+
+    ``_authoring_roles`` calls this very function, so asserting against it here
+    would compare the function to itself and pass however wrong it became. The
+    preset's declared workers are the independent source this contract is
+    defined against.
+    """
+    team_config = load_team_config(_AUTHORING)
+
+    assert required_role_ids(team_config) == [
+        worker.agent_id for worker in team_config.workers
+    ]
 
 
 def test_authoring_preset_is_eligible_with_feature_and_full_bundle() -> None:

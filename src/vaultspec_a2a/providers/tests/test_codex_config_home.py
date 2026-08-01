@@ -21,13 +21,15 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import pytest
+from pydantic import ValidationError
 
 from ...control.config import Settings
+from ...graph.enums import Provider
+from ...utils.enums import CodexWebSearchMode
 from .._acp_config_home import sweep_orphan_config_homes
 from .._acp_mcp import codex_mcp_server_specs
 from .._codex_config_home import (
     SERVED_WEB_SEARCH_MODE,
-    CodexWebSearchMode,
     build_codex_config_home,
     cleanup_codex_config_home,
     render_codex_config_toml,
@@ -35,9 +37,12 @@ from .._codex_config_home import (
     sweep_orphan_codex_homes,
 )
 from .._config_home_roots import ORPHAN_HOME_MIN_AGE_SECONDS, temp_home_root
+from ..lane_admission import PROVEN_WEB_LANES, is_web_lane_proven
 
 if TYPE_CHECKING:
     from collections.abc import Iterator, Sequence
+
+    from ..codex_chat_model import CodexChatModel
 
 
 @contextmanager
@@ -85,7 +90,7 @@ def _active_codex_leak_root() -> Path:
 
 def test_render_emits_parseable_mcp_server_block_for_rag() -> None:
     specs = codex_mcp_server_specs(["vaultspec-rag"])
-    toml = render_codex_config_toml(specs)
+    toml = render_codex_config_toml(specs, web_search=CodexWebSearchMode.DISABLED)
     parsed = tomllib.loads(toml)
     rag = parsed["mcp_servers"]["vaultspec-rag"]
     assert rag["command"] == "uvx"
@@ -99,7 +104,10 @@ def test_render_emits_parseable_mcp_server_block_for_rag() -> None:
 def test_render_constrains_to_read_tools_auto_approved() -> None:
     # P04.S19: enabled_tools names EXACTLY the registry's read tools (no write
     # verb the server also exposes), auto-approved so reads run headless.
-    toml = render_codex_config_toml(codex_mcp_server_specs(["vaultspec-rag"]))
+    toml = render_codex_config_toml(
+        codex_mcp_server_specs(["vaultspec-rag"]),
+        web_search=CodexWebSearchMode.DISABLED,
+    )
     rag = tomllib.loads(toml)["mcp_servers"]["vaultspec-rag"]
     assert rag["enabled_tools"] == [
         "search_vault",
@@ -127,7 +135,9 @@ def test_codex_model_defaults_keep_read_only_sandbox_defense_in_depth() -> None:
 
 def test_render_emits_env_subtable_when_present() -> None:
     specs = [{"name": "x-srv", "command": "c", "args": ["a"], "env": {"K": "V"}}]
-    parsed = tomllib.loads(render_codex_config_toml(specs))
+    parsed = tomllib.loads(
+        render_codex_config_toml(specs, web_search=CodexWebSearchMode.DISABLED)
+    )
     assert parsed["mcp_servers"]["x-srv"]["env"] == {"K": "V"}
 
 
@@ -136,7 +146,9 @@ def test_render_with_no_specs_still_declares_the_web_posture() -> None:
     # reason is the whole point of the web-posture work: Codex enables web search
     # when the key is absent, so an empty document is not "no capability", it is
     # "whatever the CLI defaults to". A server-less home must still say off.
-    parsed = tomllib.loads(render_codex_config_toml([]))
+    parsed = tomllib.loads(
+        render_codex_config_toml([], web_search=CodexWebSearchMode.DISABLED)
+    )
     assert parsed == {"web_search": "disabled"}
 
 
@@ -162,10 +174,10 @@ def _built_config(
 
 
 def test_web_posture_is_top_level_and_never_absorbed_by_a_server_table() -> None:
-    # tomllib IS the ordering proof: TOML binds a bare key to the table above it,
-    # so had `web_search` been emitted after `[mcp_servers.vaultspec-rag]` it would
-    # parse as an option OF that server and the top-level lookup would raise. The
-    # two assertions together pin the key to the document, not to a server.
+    # tomllib IS the semantic ordering proof: TOML binds a bare key to the table
+    # above it, so had `web_search` been emitted after `[mcp_servers.vaultspec-rag]`
+    # it would parse as an option OF that server and the top-level lookup would
+    # raise. The two assertions together pin the key to the document, not a server.
     parsed = tomllib.loads(
         render_codex_config_toml(
             codex_mcp_server_specs(["vaultspec-rag"]),
@@ -174,6 +186,19 @@ def test_web_posture_is_top_level_and_never_absorbed_by_a_server_table() -> None
     )
     assert parsed["web_search"] == "live"
     assert "web_search" not in parsed["mcp_servers"]["vaultspec-rag"]
+
+
+def test_web_posture_is_emitted_before_the_first_table_header() -> None:
+    # The textual companion to the test above, and the one that names the defect
+    # directly. Misordering here does not raise or corrupt the file - it produces
+    # a document that parses cleanly and means something else entirely, which is
+    # the worst available failure mode. Pin the byte order, not just the semantics.
+    rendered = render_codex_config_toml(
+        codex_mcp_server_specs(["vaultspec-rag"]),
+        web_search=CodexWebSearchMode.LIVE,
+    )
+    assert rendered.index("web_search") < rendered.index("[")
+    assert rendered.startswith('web_search = "live"')
 
 
 def test_proven_lane_serves_live_retrieval(tmp_path: Path) -> None:
@@ -230,15 +255,118 @@ def test_cached_posture_stays_selectable_for_a_zero_egress_deployment(
     assert cfg["web_search"] == "cached"
 
 
-def test_builder_default_ships_no_outward_reach(tmp_path: Path) -> None:
-    # A caller that never mentions web search must not ship one. This is not
-    # belt-and-braces: omitting the key entirely would leave Codex on its own
-    # default, which is NOT off, so the builder's silence has to be an explicit
-    # "disabled" in the file.
+def test_a_caller_that_never_decided_the_posture_cannot_build_a_home(
+    tmp_path: Path,
+) -> None:
+    """Omitting the posture is a TypeError, and that is load-bearing.
+
+    This replaces a weaker test that asserted a safe DEFAULT. The default had to
+    go, because while the proven-lane set is empty every resolution yields
+    ``disabled`` - so a defaulted argument makes the gate binding invisible, and
+    deleting the binding from the production model would leave the whole suite
+    green. Requiring the argument converts that from something a test might
+    notice into something the interpreter refuses to run.
+    """
     base = tmp_path / "base"
     base.mkdir()
-    cfg = _built_config(codex_mcp_server_specs(["vaultspec-rag"]), base)
-    assert cfg["web_search"] == "disabled"
+    with pytest.raises(TypeError):
+        build_codex_config_home(codex_mcp_server_specs(["vaultspec-rag"]), base)  # type: ignore[call-arg]
+    with pytest.raises(TypeError):
+        render_codex_config_toml(codex_mcp_server_specs(["vaultspec-rag"]))  # type: ignore[call-arg]
+
+
+class TestWebPostureThroughTheProductionModelSeam:
+    """The gate as the production path actually applies it.
+
+    Everything above drives the renderer and builder directly. These drive
+    ``CodexChatModel._build_codex_config_home`` - the ONLY place production builds
+    a Codex home - so the assertions cover the real composition: the lane verdict
+    read from the live declaration, the deployment preference read from the real
+    settings surface, and the file Codex will actually load.
+    """
+
+    def _model(self, base: Path, **kwargs: object) -> CodexChatModel:
+        from ..codex_chat_model import CodexChatModel
+
+        return CodexChatModel(
+            command=["codex", "app-server"],
+            harness_mcp_servers=["vaultspec-rag"],
+            codex_home=str(base),
+            **kwargs,
+        )
+
+    def _emitted(self, model: CodexChatModel) -> dict[str, Any]:
+        home = model._build_codex_config_home()
+        assert home is not None
+        try:
+            return tomllib.loads((home / "config.toml").read_text(encoding="utf-8"))
+        finally:
+            cleanup_codex_config_home(home)
+
+    def test_the_codex_lane_is_dark_because_it_carries_no_retrieval_proof(
+        self, tmp_path: Path
+    ) -> None:
+        # Both assertions matter, and the first is the one that keeps this test
+        # honest. It states the precondition the second depends on, so when a
+        # later step records real retrieval proof for codex this test FAILS and
+        # forces someone to revisit it, instead of quietly continuing to assert
+        # "disabled" about a lane that has since been activated.
+        base = tmp_path / "base"
+        base.mkdir()
+        assert Provider.CODEX not in PROVEN_WEB_LANES
+        assert self._emitted(self._model(base))["web_search"] == "disabled"
+
+    def test_the_declared_lane_is_what_gets_asked_about(self, tmp_path: Path) -> None:
+        # The verdict is taken for the model's OWN declared lane rather than a
+        # constant, so the wiring cannot be right by coincidence.
+        base = tmp_path / "base"
+        base.mkdir()
+        model = self._model(base)
+        assert model.provider == Provider.CODEX.value
+        assert is_web_lane_proven(model.provider) is False
+
+    def test_configuration_cannot_open_a_lane_the_gate_has_closed(
+        self, tmp_path: Path
+    ) -> None:
+        # A deployment explicitly asking for live retrieval, through the real
+        # model API, on a lane with no proof. The gate is applied after the
+        # preference is read, so the answer is still disabled. Without this
+        # precedence a config key would be a way around the proof requirement.
+        base = tmp_path / "base"
+        base.mkdir()
+        model = self._model(base, web_search_mode=CodexWebSearchMode.LIVE)
+        assert model.web_search_mode is CodexWebSearchMode.LIVE
+        assert self._emitted(model)["web_search"] == "disabled"
+
+    def test_the_deployment_preference_is_read_from_real_settings(self) -> None:
+        # The zero-egress path is a real settings key, parsed by the real
+        # pydantic constructor from the real env alias - not a string this test
+        # invented. Above the gate this is the value the resolver receives.
+        seated = Settings(VAULTSPEC_CODEX_WEB_SEARCH_MODE="cached")
+        assert seated.codex_web_search_mode is CodexWebSearchMode.CACHED
+        assert (
+            resolve_codex_web_search_mode(
+                web_proven=True, configured=seated.codex_web_search_mode
+            )
+            is CodexWebSearchMode.CACHED
+        )
+
+    def test_an_unrecognised_configured_mode_is_refused_at_settings_load(self) -> None:
+        # Fail at load, where the operator can see it, rather than at a spawn
+        # months later. The enum is the CLI's own vocabulary, so a value pydantic
+        # rejects here is exactly one Codex would have rejected too.
+        with pytest.raises(ValidationError):
+            Settings(VAULTSPEC_CODEX_WEB_SEARCH_MODE="live-ish")
+
+    def test_default_settings_leave_the_choice_to_the_served_posture(self) -> None:
+        # Unset must not mean disabled: it means "no deployment preference", so a
+        # proven lane serves live. Conflating the two would make the served
+        # posture unreachable without an explicit opt-in nobody was told to set.
+        assert Settings().codex_web_search_mode is None
+        assert (
+            resolve_codex_web_search_mode(web_proven=True, configured=None)
+            is SERVED_WEB_SEARCH_MODE
+        )
 
 
 def test_build_home_writes_config_and_copies_auth(tmp_path: Path) -> None:
@@ -247,7 +375,7 @@ def test_build_home_writes_config_and_copies_auth(tmp_path: Path) -> None:
     (base / "auth.json").write_text('{"token": "x"}', encoding="utf-8")
 
     specs = codex_mcp_server_specs(["vaultspec-rag"])
-    home = build_codex_config_home(specs, base)
+    home = build_codex_config_home(specs, base, web_search=CodexWebSearchMode.DISABLED)
     try:
         # Auth preserved for Codex's file-based auth.
         assert (home / "auth.json").exists()
@@ -267,7 +395,11 @@ def test_copied_credential_is_owner_only_on_posix(tmp_path: Path) -> None:
     base = tmp_path / "base"
     base.mkdir()
     (base / "auth.json").write_text("{}", encoding="utf-8")
-    home = build_codex_config_home(codex_mcp_server_specs(["vaultspec-rag"]), base)
+    home = build_codex_config_home(
+        codex_mcp_server_specs(["vaultspec-rag"]),
+        base,
+        web_search=CodexWebSearchMode.DISABLED,
+    )
     try:
         auth = home / "auth.json"
         assert auth.exists()
@@ -320,7 +452,11 @@ def test_build_home_tolerates_absent_auth(tmp_path: Path) -> None:
     # config home; nothing is copied and no error is raised.
     base = tmp_path / "empty_base"
     base.mkdir()
-    home = build_codex_config_home(codex_mcp_server_specs(["vaultspec-rag"]), base)
+    home = build_codex_config_home(
+        codex_mcp_server_specs(["vaultspec-rag"]),
+        base,
+        web_search=CodexWebSearchMode.DISABLED,
+    )
     try:
         assert not (home / "auth.json").exists()
         assert (home / "config.toml").exists()
@@ -330,7 +466,7 @@ def test_build_home_tolerates_absent_auth(tmp_path: Path) -> None:
 
 def test_cleanup_is_none_safe_and_idempotent(tmp_path: Path) -> None:
     cleanup_codex_config_home(None)
-    home = build_codex_config_home([], tmp_path)
+    home = build_codex_config_home([], tmp_path, web_search=CodexWebSearchMode.DISABLED)
     cleanup_codex_config_home(home)
     assert not home.exists()
     cleanup_codex_config_home(home)
@@ -346,7 +482,11 @@ def test_build_self_cleans_on_copy_failure(tmp_path: Path) -> None:
     pattern = os.path.join(str(_active_codex_leak_root()), "vaultspec-codex-home-*")
     before = set(glob.glob(pattern))
     with pytest.raises(OSError):
-        build_codex_config_home(codex_mcp_server_specs(["vaultspec-rag"]), base)
+        build_codex_config_home(
+            codex_mcp_server_specs(["vaultspec-rag"]),
+            base,
+            web_search=CodexWebSearchMode.DISABLED,
+        )
     assert set(glob.glob(pattern)) <= before  # no new home leaked
 
 
@@ -423,7 +563,9 @@ class TestCodexEntrypointAcceptsEmittedMcpConfig:
         codex = shutil.which("codex")
         assert codex is not None
         specs = codex_mcp_server_specs(["vaultspec-rag"])
-        home = build_codex_config_home(specs, tmp_path / "base")
+        home = build_codex_config_home(
+            specs, tmp_path / "base", web_search=CodexWebSearchMode.DISABLED
+        )
         try:
             proc = subprocess.run(
                 [codex, "mcp", "list"],
@@ -531,7 +673,7 @@ def test_unarmed_profile_creates_home_in_the_system_temp_root(tmp_path: Path) ->
 
     with _seated_settings(desktop_app_home=None) as unarmed:
         assert unarmed.desktop_temp_homes_dir is None
-        home = build_codex_config_home([], base)
+        home = build_codex_config_home([], base, web_search=CodexWebSearchMode.DISABLED)
     try:
         assert home.parent == Path(tempfile.gettempdir())
     finally:
@@ -562,7 +704,7 @@ def test_armed_desktop_profile_seats_the_home_inside_the_declared_root(
         # The declared root is itself carved out under the app home, never the
         # bare OS temp directory - the contrast the unarmed test exercises.
         assert declared_root != Path(tempfile.gettempdir())
-        home = build_codex_config_home([], base)
+        home = build_codex_config_home([], base, web_search=CodexWebSearchMode.DISABLED)
     try:
         assert home.parent == declared_root
         assert app_home in home.parents

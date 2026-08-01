@@ -50,7 +50,6 @@ rag = [
 
 [project.scripts]
 vaultspec-a2a = "vaultspec_a2a.cli.main:main"
-vaultspec-a2a-mcp = "vaultspec_a2a.protocols.mcp.__main__:main"
 
 [dependency-groups]
 docs = [
@@ -246,8 +245,6 @@ unfixable = ["B"]
 "src/vaultspec_a2a/api/routes/*.py" = ["B008"]
 "src/vaultspec_a2a/api/internal.py" = ["B008"]
 "src/vaultspec_a2a/worker/app.py" = ["B008"]
-# MCP server defines mcp=MCPServer() then imports tool modules for side-effect registration
-"src/vaultspec_a2a/protocols/mcp/server.py" = ["E402", "F401"]
 
 # INDUSTRY DEFAULTS, NOT CALIBRATED TO THIS TREE. The rules these two tables
 # configure are deliberately absent from `select` above, so they do not fire on

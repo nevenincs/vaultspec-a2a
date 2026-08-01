@@ -25,6 +25,43 @@ _MULTIBYTE = [
     pytest.param("é", 2, id="combining"),
 ]
 
+# The contract numbers, written out rather than imported.
+#
+# Every other assertion in this file sizes its input FROM
+# ``MAX_RUN_MESSAGE_CHARS``, so the pair moves together and the bound's value is
+# whatever the schema currently says: the file passes unchanged with the bound at
+# 4096. That is fine for the unit checks - they are about characters versus bytes,
+# not about the number - but it leaves the number itself unpinned, and the number
+# is half of a cross-repo contract. A consumer sizing a buffer cannot re-derive it
+# from our module, so it is stated here independently and must be changed in two
+# places deliberately.
+_CONTRACT_MESSAGE_CHARS = 65536
+# The byte budget ``RunStartRequest.message`` publishes for a byte-counting
+# consumer. UTF-8 spends at most four bytes on a character, so this is the exact
+# worst case of the character bound above, not an estimate.
+_CONTRACT_MESSAGE_BYTE_BUDGET = 262144
+
+
+def test_the_published_character_bound_is_the_contract_number() -> None:
+    """The bound a consumer was told to apply is the bound this schema applies.
+
+    Held against a literal because the two sides of this contract live in
+    different repositories: a consumer cannot import the constant, so a change
+    here that is not also made there silently splits the bound in two.
+    """
+    assert MAX_RUN_MESSAGE_CHARS == _CONTRACT_MESSAGE_CHARS
+
+
+def test_the_published_byte_budget_follows_from_the_character_bound() -> None:
+    """The schema's documented byte budget must be the character bound's worst case.
+
+    ``RunStartRequest.message`` tells a byte-counting consumer to budget
+    262144 bytes. That figure is prose in the schema, so nothing recomputes it
+    when the character bound moves; this is what makes the two disagree loudly
+    instead of quietly.
+    """
+    assert _CONTRACT_MESSAGE_BYTE_BUDGET == MAX_RUN_MESSAGE_CHARS * 4
+
 
 @pytest.mark.parametrize(("filler", "utf8_width"), _MULTIBYTE)
 def test_message_bound_counts_characters_not_bytes(
@@ -54,16 +91,20 @@ def test_message_bound_rejects_one_character_past_the_cap(
 
 
 def test_documented_byte_budget_covers_the_character_bound() -> None:
-    """The byte figure the schema publishes must cover the worst-case prompt.
+    """No prompt this schema admits can overrun the published byte budget.
 
-    ``RunStartRequest.message`` tells a byte-counting consumer to budget
-    ``MAX_RUN_MESSAGE_CHARS * 4``. UTF-8 spends at most four bytes on a character,
-    so that budget is exact rather than optimistic; a consumer sizing a buffer
-    from it cannot be overrun by any prompt this schema admits.
+    A consumer sizing a buffer from the schema's documented figure must not be
+    overrun by anything we accept. The widest prompt admissible is
+    ``MAX_RUN_MESSAGE_CHARS`` astral-plane characters at four bytes each, and it
+    is checked against the budget written down above rather than against a figure
+    recomputed from the same constant - ``len(x) <= len(x)`` is a fact about
+    UTF-8, true of any bound, and would hold just as well if the schema and the
+    published budget had drifted apart.
     """
     widest = "\U0001f600" * MAX_RUN_MESSAGE_CHARS
     accepted = RunStartRequest(team_preset="preset", message=widest).message
-    assert len(accepted.encode("utf-8")) <= MAX_RUN_MESSAGE_CHARS * 4
+
+    assert len(accepted.encode("utf-8")) == _CONTRACT_MESSAGE_BYTE_BUDGET
 
 
 @pytest.mark.parametrize(("filler", "utf8_width"), _MULTIBYTE)

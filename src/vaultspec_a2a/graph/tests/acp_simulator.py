@@ -58,6 +58,10 @@ def main() -> None:
         help="If set, write the received initialize params to this JSON file",
     )
     parser.add_argument(
+        "--record-session-prompt",
+        help="If set, write the received session/prompt params to this JSON file",
+    )
+    parser.add_argument(
         "--record-config-home",
         help="If set, dump the subprocess CLAUDE_CONFIG_DIR/.claude.json and "
         "authoring env to this JSON file on initialize",
@@ -102,6 +106,9 @@ def main() -> None:
                 "result": {"sessionId": args.session_id},
             }
         elif method == "session/prompt":
+            if args.record_session_prompt:
+                with open(args.record_session_prompt, "w", encoding="utf-8") as fh:
+                    json.dump(req.get("params", {}), fh)
             if args.error:
                 resp = {
                     "jsonrpc": "2.0",

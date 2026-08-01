@@ -40,10 +40,10 @@ import re
 import shutil
 import tempfile
 from contextlib import suppress
-from enum import StrEnum
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from ..utils.enums import CodexWebSearchMode
 from ._config_home_roots import sweep_orphan_homes, temp_home_root
 
 if TYPE_CHECKING:
@@ -51,7 +51,6 @@ if TYPE_CHECKING:
 
 __all__ = [
     "SERVED_WEB_SEARCH_MODE",
-    "CodexWebSearchMode",
     "build_codex_config_home",
     "cleanup_codex_config_home",
     "render_codex_config_toml",
@@ -87,28 +86,6 @@ def _toml_str_array(values: Sequence[str]) -> str:
 
 def _table_key(name: str) -> str:
     return name if _BARE_KEY.match(name) else _toml_str(name)
-
-
-class CodexWebSearchMode(StrEnum):
-    """The four values Codex's top-level ``web_search`` key accepts.
-
-    Not a local vocabulary: these are the CLI's own variants, and it validates
-    them itself - an unrecognised value is refused at config load with
-    ``unknown variant ... expected one of `disabled`, `cached`, `indexed`,
-    `live` in `web_search```. The names are therefore a served contract, asserted
-    against the installed CLI rather than pinned by a version constraint (the
-    house no-pinning rule); the entrypoint test in this module's suite is what
-    detects upstream drift.
-
-    ``CACHED`` reaches a provider-maintained index and makes NO outbound request
-    from the agent host; ``INDEXED`` permits external access only through
-    index-gated results; ``LIVE`` is unrestricted retrieval; ``DISABLED`` is off.
-    """
-
-    DISABLED = "disabled"
-    CACHED = "cached"
-    INDEXED = "indexed"
-    LIVE = "live"
 
 
 # The served posture for a lane that carries web proof. Cached is the safer mode
@@ -156,7 +133,7 @@ def _restrict(path: Path) -> None:
 def render_codex_config_toml(
     specs: Sequence[dict[str, Any]],
     *,
-    web_search: CodexWebSearchMode = CodexWebSearchMode.DISABLED,
+    web_search: CodexWebSearchMode,
 ) -> str:
     """Render the ``config.toml`` body for the declared read-only servers.
 
@@ -173,9 +150,14 @@ def render_codex_config_toml(
     Codex enables web search when the key is absent, so silence is a posture, not
     an abstention; first because TOML binds a bare key to the table above it - the
     same line emitted after ``[mcp_servers.<name>]`` would become an unrecognised
-    option of that server rather than the run's web posture. The default is
-    :attr:`~CodexWebSearchMode.DISABLED`, so a caller that has not consulted lane
-    admission cannot accidentally ship outward reach.
+    option of that server rather than the run's web posture.
+
+    It is REQUIRED and has no default, matching the registry's trust axes
+    (``_acp_mcp``): unsafe-by-omission, never silently permissive. A default would
+    be worse than inconvenient here - while the proven-lane set is empty every
+    resolution yields ``disabled``, so a defaulted argument would render the gate
+    binding invisible, and deleting the binding would leave every test green. A
+    caller that has not decided the posture must fail to build, not build quietly.
     """
     # Kept ahead of every table header; see the docstring for why this is a
     # correctness constraint rather than a layout preference.
@@ -201,7 +183,7 @@ def build_codex_config_home(
     specs: Sequence[dict[str, Any]],
     base_home: Path | None,
     *,
-    web_search: CodexWebSearchMode = CodexWebSearchMode.DISABLED,
+    web_search: CodexWebSearchMode,
 ) -> Path:
     """Create a per-run ``CODEX_HOME`` carrying only the declared servers.
 
@@ -215,9 +197,9 @@ def build_codex_config_home(
     config home so an uninstall can account for it and a system-wide temp sweep
     cannot delete it out from under a live run.
 
-    *web_search* is the run's web posture, normally the output of
-    :func:`resolve_codex_web_search_mode`; it defaults to disabled so a caller
-    that never asked for the capability never gets it.
+    *web_search* is the run's web posture and is required - see
+    :func:`render_codex_config_toml` for why it carries no default. Production
+    always passes the output of :func:`resolve_codex_web_search_mode`.
     """
     # mkdtemp creates an owner-only (0700) directory, so the copied credential is
     # traversal-protected by the dir even before the file's own mode is set.

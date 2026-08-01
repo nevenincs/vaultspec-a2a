@@ -36,6 +36,21 @@ def _write_log(tmp_path, name: str, text: str):
     return log
 
 
+def _longest_fitting_suffix(text: str, max_bytes: int) -> str:
+    """The tail the caller is owed, derived from what a tail IS.
+
+    Stated independently of the reader: keep as much of the end of *text* as
+    ``max_bytes`` bytes of UTF-8 can hold, cut on a character boundary. Written
+    as a search over suffixes rather than as a byte-offset-and-trim, so it shares
+    no logic with the implementation it is used to check - a reader that trimmed
+    the wrong number of bytes, or discarded more than it had to, disagrees here.
+    """
+    for start in range(len(text) + 1):
+        if len(text[start:].encode("utf-8")) <= max_bytes:
+            return text[start:].strip()
+    return ""
+
+
 @pytest.mark.parametrize("message", _SAMPLES)
 def test_the_samples_really_do_cut_mid_character(message: str) -> None:
     """Guard the guard: prove these widths land inside characters.
@@ -54,7 +69,15 @@ def test_the_samples_really_do_cut_mid_character(message: str) -> None:
 def test_tail_never_opens_with_a_broken_character(
     tmp_path, message: str, width: int
 ) -> None:
-    """Every seek alignment must yield clean text, not a stranded fragment."""
+    """Every seek alignment must yield clean text, not a stranded fragment.
+
+    The two properties below are necessary but not sufficient on their own: at
+    the narrowest widths the correct tail is the EMPTY string, and an empty tail
+    satisfies both trivially - it holds no replacement character and is a suffix
+    of anything. A reader that discarded more than the stranded bytes, or
+    everything, would pass. So the tail is also held against the independently
+    derived expectation of how much it should have kept.
+    """
     log = _write_log(tmp_path, "worker-autospawn-1.stderr.log", message)
 
     tail = _read_log_tail(log, max_bytes=width)
@@ -64,6 +87,11 @@ def test_tail_never_opens_with_a_broken_character(
     )
     # Whatever survived the cut is a genuine suffix of the original text.
     assert message.endswith(tail)
+    assert tail == _longest_fitting_suffix(message, width), (
+        f"tail cut at {width} bytes kept {len(tail)} characters where the widest "
+        f"boundary-aligned suffix that fits is "
+        f"{len(_longest_fitting_suffix(message, width))}"
+    )
 
 
 @pytest.mark.parametrize("message", _SAMPLES)

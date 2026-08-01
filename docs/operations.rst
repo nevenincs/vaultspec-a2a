@@ -53,9 +53,6 @@ targets a separate MCP console command rather than the native product CLI.
      - Provision or verify a run workspace through
        :mod:`vaultspec_a2a.cli.provision` and
        :mod:`vaultspec_a2a.context.harness`.
-   * - ``just dev product mcp``
-     - Run the separate Model Context Protocol (MCP) console bridge from
-       :mod:`vaultspec_a2a.protocols.mcp`.
 
 ``just doctor`` diagnoses repository prerequisites. It is distinct from
 ``just dev product doctor``, which checks gateway health. A foreground gateway

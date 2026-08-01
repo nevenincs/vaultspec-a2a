@@ -47,9 +47,6 @@ if TYPE_CHECKING:
         MigrationRange as MigrationRange,
     )
     from .contract import (
-        StandaloneMcpEntrypoint as StandaloneMcpEntrypoint,
-    )
-    from .contract import (
         component_manifest_schema as component_manifest_schema,
     )
     from .contract import (
@@ -65,7 +62,6 @@ _LAZY_IMPORTS = {
     "EntrypointKind": ".contract",
     "GatewayEntrypoint": ".contract",
     "MigrationRange": ".contract",
-    "StandaloneMcpEntrypoint": ".contract",
     "component_manifest_schema": ".contract",
     "export_component_manifest_schema": ".contract",
 }
@@ -94,7 +90,6 @@ __all__ = [
     "EntrypointKind",
     "GatewayEntrypoint",
     "MigrationRange",
-    "StandaloneMcpEntrypoint",
     "component_manifest_schema",
     "export_component_manifest_schema",
 ]

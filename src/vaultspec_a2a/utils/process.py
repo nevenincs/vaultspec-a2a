@@ -24,6 +24,7 @@ import asyncio
 import contextlib
 import logging
 import os
+import socket
 import subprocess
 import sys
 from enum import StrEnum
@@ -39,6 +40,7 @@ __all__ = [
     "classify_listener_ownership",
     "kill_pid_tree_async",
     "listener_belongs_to",
+    "parse_netstat_listener_pid",
     "pid_is_live",
     "port_listener_pid",
     "posix_descendant_pids",
@@ -50,15 +52,26 @@ logger = logging.getLogger(__name__)
 _POLL_INTERVAL = 0.1
 _PS_TIMEOUT = 5.0
 
-# Error handler for every process-table probe below. Each parses ASCII columns -
-# pids, ppids, netstat fields - but the surrounding text is whatever the host
-# locale produces, and a localized Windows emits bytes the ANSI code page leaves
-# undefined (0x81, 0x8D, 0x90, 0x9D). A strict decode of one of those does not
+# Decode settings for every process-table probe below. Each of them parses ASCII
+# tokens ONLY - pids, ppids, protocol names, dotted/hex addresses - while the
+# text surrounding those tokens is whatever the host locale produces.
+#
+# The encoding is stated as ASCII rather than inherited from the locale, which is
+# what makes that "ASCII tokens only" property enforced instead of incidental. A
+# console tool's real byte encoding is the host's OEM code page, which is neither
+# UTF-8 nor reliably the ANSI code page Python would otherwise pick, so decoding
+# a localized column "correctly" is not achievable here and is not worth
+# attempting: no parser below reads one. Under an ASCII decode every non-ASCII
+# byte becomes U+FFFD, which cannot be mistaken for a digit, a dot, a colon, or a
+# protocol name - so a future field added to one of these parsers cannot silently
+# come to depend on a locale-decoded string, which is how the netstat STATE
+# column became a defect in the first place.
+#
+# The errors handler must stay non-strict. A strict decode failure here does not
 # surface as a catchable subprocess failure: it is raised inside subprocess's
 # reader thread, so ``run`` returns with ``stdout`` set to None and the parse
-# below dies on an AttributeError that names nothing about encodings. Degrading
-# an undecodable byte keeps the ASCII columns - the only part any of these
-# parsers reads - intact and the probe answerable.
+# dies on an AttributeError that names nothing about encodings.
+_PROBE_ENCODING = "ascii"
 _PROBE_DECODE_ERRORS = "replace"
 
 # Windows Job Object constants (winnt.h). A job created with
@@ -209,6 +222,7 @@ def _ps_parent_map() -> dict[int, int]:
             ["ps", "-A", "-o", "pid=,ppid="],
             capture_output=True,
             text=True,
+            encoding=_PROBE_ENCODING,
             errors=_PROBE_DECODE_ERRORS,
             timeout=_PS_TIMEOUT,
             check=False,
@@ -309,12 +323,18 @@ def listener_belongs_to(port: int, root_pid: int) -> bool:
 def port_listener_pid(port: int) -> int | None:
     """Best-effort pid LISTENING on loopback *port*; ``None`` when unresolved.
 
-    Platform-aware and dependency-free: ``netstat`` on Windows, ``/proc/net`` then
-    ``lsof`` on POSIX. Returns ``None`` (never a guess) when no owner can be read,
-    so callers degrade rather than misattribute a port to the wrong process.
+    Platform-aware and dependency-free: the extended TCP table (then ``netstat``)
+    on Windows, ``/proc/net`` then ``lsof`` on POSIX. Returns ``None`` (never a
+    guess) when no owner can be read, so callers degrade rather than misattribute
+    a port to the wrong process.
+
+    Every path identifies the listening state by a machine-readable value - a
+    numeric constant on Windows and Linux, ``lsof``'s own ``-sTCP:LISTEN``
+    selector on other POSIX hosts - so no host's UI language can decide whether
+    this resolver answers.
     """
     if sys.platform == "win32":
-        return _netstat_listener_pid(port)
+        return _win_listener_pid(port)
     proc_pid = _proc_listener_pid(port)
     if proc_pid is not None:
         return proc_pid
@@ -373,6 +393,7 @@ def _win_parent_map() -> dict[int, int]:
             ],
             capture_output=True,
             text=True,
+            encoding=_PROBE_ENCODING,
             errors=_PROBE_DECODE_ERRORS,
             timeout=_PS_TIMEOUT,
             check=False,
@@ -387,29 +408,210 @@ def _win_parent_map() -> dict[int, int]:
     return mapping
 
 
+# Windows TCP-table constants (iphlpapi.h, tcpmib.h, winerror.h). The listener
+# table is requested by a numeric class and its rows carry a numeric state, so
+# the Windows lookup below is locale-independent by exactly the same construction
+# as the Linux ``/proc/net/tcp`` path's ``_TCP_LISTEN_STATE``.
+_AF_INET = 2
+_AF_INET6 = 23
+_TCP_TABLE_OWNER_PID_LISTENER = 3
+_MIB_TCP_STATE_LISTEN = 2
+_ERROR_INSUFFICIENT_BUFFER = 122
+
+
+def _win_listener_pid(port: int) -> int | None:
+    """Windows listener pid: the TCP table first, ``netstat`` only if it is absent.
+
+    ``GetExtendedTcpTable`` is the API ``netstat`` itself calls. Reading it
+    directly answers in-process (this runs inside a 100ms readiness poll, where a
+    per-poll process spawn is not free) and, decisively, it never renders the
+    connection state as text: the state arrives as a numeric constant in a binary
+    struct, so no part of the answer can be reworded by the host's UI language.
+
+    The ``netstat`` fallback exists only for a host where ``iphlpapi`` cannot be
+    called at all; it is separated from the "no listener is present" answer so the
+    common not-ready-yet poll does not spawn a process on every iteration.
+    """
+    try:
+        return _tcp_table_listener_pid(port)
+    except OSError as exc:
+        logger.debug(
+            "Windows TCP table unavailable (%s); falling back to netstat parsing "
+            "for the listener on port %d",
+            exc,
+            port,
+        )
+        return _netstat_listener_pid(port)
+
+
+def _tcp_table_listener_pid(port: int) -> int | None:
+    """The pid listening on *port* per the Windows TCP table; ``None`` if none is.
+
+    Raises ``OSError`` when the table cannot be read at all, which is what
+    distinguishes "this host cannot answer" from "nothing is listening" and keeps
+    the caller from falling back to a subprocess on every negative poll.
+    """
+    if sys.platform != "win32":  # pragma: no cover - Windows-only table
+        raise OSError("the extended TCP table is Windows-only")
+    for family in (_AF_INET, _AF_INET6):
+        for state, local_port, owning_pid in _tcp_table_rows(family):
+            # Both the state and the port are numbers off a binary struct: there
+            # is no display string anywhere in this comparison.
+            if state != _MIB_TCP_STATE_LISTEN or local_port != port:
+                continue
+            if owning_pid > 0:
+                return owning_pid
+    return None
+
+
+def _tcp_table_rows(family: int) -> list[tuple[int, int, int]]:
+    """``(state, local port, owning pid)`` for every listening row of *family*.
+
+    Raises ``OSError`` when ``iphlpapi`` cannot be loaded or the table cannot be
+    fetched, so an unavailable API is never mistaken for an empty table.
+    """
+    import ctypes
+    from ctypes import wintypes
+
+    class _MibTcpRowOwnerPid(ctypes.Structure):
+        _fields_ = (
+            ("dwState", wintypes.DWORD),
+            ("dwLocalAddr", wintypes.DWORD),
+            ("dwLocalPort", wintypes.DWORD),
+            ("dwRemoteAddr", wintypes.DWORD),
+            ("dwRemotePort", wintypes.DWORD),
+            ("dwOwningPid", wintypes.DWORD),
+        )
+
+    class _MibTcp6RowOwnerPid(ctypes.Structure):
+        _fields_ = (
+            ("ucLocalAddr", ctypes.c_ubyte * 16),
+            ("dwLocalScopeId", wintypes.DWORD),
+            ("dwLocalPort", wintypes.DWORD),
+            ("ucRemoteAddr", ctypes.c_ubyte * 16),
+            ("dwRemoteScopeId", wintypes.DWORD),
+            ("dwRemotePort", wintypes.DWORD),
+            ("dwState", wintypes.DWORD),
+            ("dwOwningPid", wintypes.DWORD),
+        )
+
+    row_type: type[ctypes.Structure] = (
+        _MibTcpRowOwnerPid if family == _AF_INET else _MibTcp6RowOwnerPid
+    )
+    try:
+        iphlpapi = ctypes.WinDLL("iphlpapi", use_last_error=True)
+        get_table = iphlpapi.GetExtendedTcpTable
+    except (AttributeError, OSError) as exc:
+        raise OSError(f"iphlpapi.GetExtendedTcpTable is unavailable: {exc}") from exc
+    get_table.restype = wintypes.DWORD
+    get_table.argtypes = (
+        ctypes.c_void_p,
+        ctypes.POINTER(wintypes.DWORD),
+        wintypes.BOOL,
+        wintypes.ULONG,
+        ctypes.c_int,
+        wintypes.ULONG,
+    )
+
+    def _fetch(buffer: Any, size: Any) -> int:
+        return int(
+            get_table(
+                buffer,
+                ctypes.byref(size),
+                False,
+                family,
+                _TCP_TABLE_OWNER_PID_LISTENER,
+                0,
+            )
+        )
+
+    size = wintypes.DWORD(0)
+    code = _fetch(None, size)
+    if code == 0 and size.value == 0:
+        return []
+    if code not in (0, _ERROR_INSUFFICIENT_BUFFER):
+        raise OSError(f"sizing the {family} TCP table failed with code {code}")
+    buffer = (ctypes.c_byte * size.value)()
+    code = _fetch(ctypes.byref(buffer), size)
+    if code != 0:
+        raise OSError(f"reading the {family} TCP table failed with code {code}")
+    # Layout: DWORD dwNumEntries followed by a packed array of dwNumEntries rows.
+    entries = wintypes.DWORD.from_buffer(buffer).value
+    row_size = ctypes.sizeof(row_type)
+    base = ctypes.sizeof(wintypes.DWORD)
+    rows: list[tuple[int, int, int]] = []
+    for index in range(entries):
+        offset = base + index * row_size
+        if offset + row_size > size.value:
+            break
+        row = row_type.from_buffer(buffer, offset)
+        # dwLocalPort holds a network-byte-order port in its low 16 bits.
+        local_port = socket.ntohs(int(row.dwLocalPort) & 0xFFFF)
+        rows.append(
+            (
+                int(row.dwState),
+                local_port,
+                int(row.dwOwningPid),
+            )
+        )
+    return rows
+
+
 def _netstat_listener_pid(port: int) -> int | None:
+    """Degraded Windows fallback: the listener pid parsed out of ``netstat -ano``."""
     try:
         completed = subprocess.run(
             ["netstat", "-ano", "-p", "tcp"],
             capture_output=True,
             text=True,
+            encoding=_PROBE_ENCODING,
             errors=_PROBE_DECODE_ERRORS,
             timeout=_PS_TIMEOUT,
             check=False,
         )
     except (OSError, subprocess.SubprocessError):
         return None
-    for line in completed.stdout.splitlines():
+    return parse_netstat_listener_pid(completed.stdout, port)
+
+
+def parse_netstat_listener_pid(output: str, port: int) -> int | None:
+    """The pid listening on *port* in ``netstat -ano -p tcp`` *output*, if any.
+
+    Split out as a pure function over captured text so the parse can be driven
+    with the output of a non-English Windows without spawning one.
+
+    Nothing here compares against a word. ``netstat`` localizes its STATE column
+    to the Windows UI language - ``ABHOEREN`` on German, ``A L'ECOUTE`` on French,
+    CJK on Japanese - so a literal ``"LISTENING"`` match resolves no pid at all on
+    those hosts, and the surrounding decode can degrade the very characters a
+    substring match would need. Two structural properties carry the parse instead:
+
+    - The state is read positionally from BOTH ends, never as ``parts[3]``. A
+      localized state can contain spaces (``A L'ECOUTE`` is two tokens), which
+      shifts every column to its right, so the pid is taken as the LAST field and
+      the addresses as the first fields. Only the protocol name, the two
+      addresses, and the pid are read, and none of those is display text.
+    - Listening is identified by the foreign address having port 0. A socket with
+      no peer is what "listening" MEANS in the table, and the address column is
+      numeric on every locale.
+
+    A Windows ``BOUND`` row (bound but not yet listening) shares the zero-peer
+    shape and is the one row this cannot tell from a listener. That resolves a
+    real owning pid rather than a wrong one, so the worst case is a conservative
+    refusal in an already-degraded path, never a listener falsely accepted as ours.
+    """
+    for line in output.splitlines():
         parts = line.split()
-        # Columns: Proto  Local Address  Foreign Address  State  PID
+        # Proto | Local Address | Foreign Address | State (1..n tokens) | PID
         if len(parts) < 5 or parts[0].upper() != "TCP":
             continue
-        if parts[3].upper() != "LISTENING":
+        if _addr_port(parts[2]) != 0:
             continue
         if _addr_port(parts[1]) != port:
             continue
-        if parts[4].isdigit():
-            return int(parts[4])
+        pid = parts[-1]
+        if pid.isdigit():
+            return int(pid)
     return None
 
 
@@ -475,6 +677,7 @@ def _lsof_listener_pid(port: int) -> int | None:
             ["lsof", "-nP", f"-iTCP:{port}", "-sTCP:LISTEN", "-t"],
             capture_output=True,
             text=True,
+            encoding=_PROBE_ENCODING,
             errors=_PROBE_DECODE_ERRORS,
             timeout=_PS_TIMEOUT,
             check=False,

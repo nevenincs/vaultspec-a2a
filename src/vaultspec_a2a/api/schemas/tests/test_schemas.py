@@ -5,6 +5,7 @@ serializes to JSON, and deserializes back to verify Pydantic validation and
 discriminated union dispatch.
 """
 
+import json
 from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import Any, TypedDict
@@ -237,12 +238,19 @@ class TestServerEventRoundTrip:
         ids=[f.__name__.lstrip("_") for f in ALL_SERVER_EVENTS],
     )
     def test_round_trip(self, factory: Callable[[], Any]) -> None:
-        """Serialize ServerEvent to JSON and deserialize back."""
+        """Every field survives the JSON wire form, not just the discriminator.
+
+        Comparing only the resolved type and its discriminator would pass while
+        the payload was dropped entirely: the union dispatches on ``type``, so a
+        field excluded from serialization still round-trips to a same-typed
+        object carrying defaults. Full equality is what makes this a
+        content-preservation check rather than a dispatch check.
+        """
         event = factory()
         json_bytes = event.model_dump_json()
         restored = server_event_adapter.validate_json(json_bytes)
         assert type(restored) is type(event)
-        assert restored.type == event.type
+        assert restored == event
 
     @pytest.mark.parametrize(
         "factory",
@@ -250,11 +258,50 @@ class TestServerEventRoundTrip:
         ids=[f.__name__.lstrip("_") for f in ALL_SERVER_EVENTS],
     )
     def test_model_dump_dict(self, factory: Callable[[], Any]) -> None:
-        """Serialize ServerEvent to dict and deserialize back."""
+        """The Python dump preserves every field, as the JSON form does."""
         event = factory()
         data = event.model_dump()
         restored = server_event_adapter.validate_python(data)
         assert type(restored) is type(event)
+        assert restored == event
+
+    def test_the_wire_form_is_the_shape_a_consumer_parses(self) -> None:
+        """Pin one event's serialized keys and values against a written literal.
+
+        Symmetric round-tripping cannot see a change that renames or re-types a
+        field on BOTH sides at once - encode and decode stay agreed while every
+        consumer of the published contract breaks. The expectation below is
+        written out in full, against a fixed timestamp rather than the module's
+        ``NOW``, so nothing in the model or the test module can move it.
+
+        The timestamp is asserted in RFC 3339 UTC form with the ``Z``
+        designator, which is what the stream actually emits. Python's
+        ``datetime.isoformat`` writes ``+00:00`` for the same instant, so a
+        consumer parsing strictly gets one of the two - and the difference is
+        invisible to any check that compares a serialized value against
+        ``isoformat``.
+        """
+        event = MessageChunkEvent(
+            thread_id="thread-1",
+            agent_id="agent-1",
+            timestamp=datetime(2026, 8, 1, 12, 30, 45, 123456, tzinfo=UTC),
+            sequence=1,
+            content="Hello",
+            message_id="msg-1",
+            finish_reason=None,
+        )
+
+        assert json.loads(event.model_dump_json()) == {
+            "type": "message_chunk",
+            "thread_id": "thread-1",
+            "agent_id": "agent-1",
+            "timestamp": "2026-08-01T12:30:45.123456Z",
+            "sequence": 1,
+            "metadata": None,
+            "content": "Hello",
+            "message_id": "msg-1",
+            "finish_reason": None,
+        }
 
 
 class TestToolCallContentDiscriminator:

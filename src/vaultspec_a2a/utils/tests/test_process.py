@@ -25,6 +25,7 @@ from ...utils.process import (
     classify_listener_ownership,
     kill_pid_tree_async,
     listener_belongs_to,
+    parse_netstat_listener_pid,
     pid_is_live,
     port_listener_pid,
     posix_descendant_pids,
@@ -268,6 +269,164 @@ def test_ownership_classification_reports_a_positively_foreign_holder() -> None:
         )
     finally:
         _reap(listener, stranger)
+
+
+# Real ``netstat -ano -p tcp`` output as a non-English Windows prints it. The
+# STATE column is localized to the Windows UI language, and the header row with
+# it, so a resolver that matches the word "LISTENING" reads nothing on any of
+# these hosts. Each block below holds one listener on port 8123 owned by pid 4242.
+_NETSTAT_ENGLISH = """
+Active Connections
+
+  Proto  Local Address          Foreign Address        State           PID
+  TCP    127.0.0.1:8123         0.0.0.0:0              LISTENING       4242
+  TCP    127.0.0.1:9000         93.184.216.34:443      ESTABLISHED     777
+"""
+
+_NETSTAT_GERMAN = """
+Aktive Verbindungen
+
+  Proto  Lokale Adresse         Remoteadresse          Status          PID
+  TCP    127.0.0.1:8123         0.0.0.0:0              ABHÖREN         4242
+  TCP    127.0.0.1:9000         93.184.216.34:443      HERGESTELLT     777
+"""
+
+# French is the case that breaks column indexing as well as literal matching:
+# the state is TWO tokens, so ``parts[3]`` is "À" and ``parts[4]`` is the rest of
+# the state rather than the pid.
+_NETSTAT_FRENCH = """
+Connexions actives
+
+  Proto  Adresse locale         Adresse distante       État            PID
+  TCP    127.0.0.1:8123         0.0.0.0:0              À L'ÉCOUTE      4242
+  TCP    127.0.0.1:9000         93.184.216.34:443      ÉTABLI          777
+"""
+
+_NETSTAT_JAPANESE = """
+アクティブな接続
+
+  プロトコル  ローカル アドレス  外部アドレス  状態  PID
+  TCP    127.0.0.1:8123         0.0.0.0:0              受信待ち        4242
+  TCP    127.0.0.1:9000         93.184.216.34:443      確立済み        777
+"""
+
+# The decode compounds the localization: ``text=True`` with ``errors="replace"``
+# and no explicit encoding decodes through the host code page, so localized state
+# text can reach the parser already destroyed. Even a substring or
+# normalized-word match would have nothing left to match here.
+_NETSTAT_MANGLED = """
+  Proto  Local Address          Foreign Address        ����            PID
+  TCP    127.0.0.1:8123         0.0.0.0:0              ABH�REN         4242
+"""
+
+_LOCALIZED_NETSTAT = {
+    "english": _NETSTAT_ENGLISH,
+    "german": _NETSTAT_GERMAN,
+    "french": _NETSTAT_FRENCH,
+    "japanese": _NETSTAT_JAPANESE,
+    "code-page-mangled": _NETSTAT_MANGLED,
+}
+
+
+@pytest.mark.parametrize("locale_name", sorted(_LOCALIZED_NETSTAT))
+def test_netstat_parse_resolves_the_listener_on_every_localized_windows(
+    locale_name: str,
+) -> None:
+    """The listener resolves whatever language the host renders its STATE column in.
+
+    This is the defect itself: matching the literal ``"LISTENING"`` resolves the
+    pid on an English host and ``None`` on every other one, which turns the
+    readiness ownership check into a permanent no-op on exactly the deployments
+    whose logs nobody reads in English. The parse must key on structure - a
+    zero-port peer address and a trailing pid - not on a word.
+    """
+    resolved = parse_netstat_listener_pid(_LOCALIZED_NETSTAT[locale_name], 8123)
+
+    assert resolved == 4242
+
+
+def test_netstat_parse_reads_the_pid_positionally_from_the_end() -> None:
+    """A multi-token localized state shifts every column, so a fixed index is wrong.
+
+    French prints ``À L'ÉCOUTE`` - two whitespace-separated tokens - so the row
+    splits into six fields instead of five and the pid lands at index 5, not 4.
+    Normalizing the state word would still not fix this: the pid has to be read
+    from the END of the row for any locale whose state is not a single token.
+    """
+    row = _NETSTAT_FRENCH.splitlines()[4]
+    assert len(row.split()) == 6  # the shift is real, not hypothetical
+    assert row.split()[4] != "4242"  # a fixed index reads the state, not the pid
+
+    assert parse_netstat_listener_pid(_NETSTAT_FRENCH, 8123) == 4242
+
+
+def test_netstat_parse_refuses_a_connected_row_on_the_same_local_port() -> None:
+    """The zero-peer discriminator must mean "listening", not "any row for the port".
+
+    Guards the replacement from degenerating into "return the pid of whatever row
+    mentions this port", which would resolve an outbound connection's pid and
+    misattribute the port to the wrong process - the exact misattribution
+    ``port_listener_pid`` promises never to make.
+    """
+    connected_only = """
+  Proto  Local Address          Foreign Address        State           PID
+  TCP    127.0.0.1:9000         93.184.216.34:443      ESTABLISHED     777
+"""
+    assert parse_netstat_listener_pid(connected_only, 9000) is None
+
+
+def test_netstat_parse_resolves_an_ipv6_wildcard_listener() -> None:
+    """A ``[::]`` wildcard listener serves loopback, so it must resolve too."""
+    ipv6 = """
+  Proto  Local Address          Foreign Address        State           PID
+  TCP    [::]:8123              [::]:0                 LISTENING       4242
+"""
+    assert parse_netstat_listener_pid(ipv6, 8123) == 4242
+
+
+def test_windows_tcp_table_resolves_a_real_listener_without_parsing_text() -> None:
+    """The primary Windows path resolves a real listener off the binary TCP table.
+
+    The localized-output tests above prove the degraded fallback; this proves the
+    path that actually runs. It reads ``GetExtendedTcpTable`` directly, so the
+    listening state is a numeric constant in a struct and no host language can
+    reword it - the same property the Linux path gets from ``/proc/net/tcp``'s
+    ``0A``. On POSIX the table is Windows-only and must say so rather than
+    silently report an empty table, which is what keeps the caller from treating
+    "cannot answer" as "nothing is listening".
+    """
+    from ...utils.process import _tcp_table_listener_pid
+
+    listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    listener.bind(("127.0.0.1", 0))
+    listener.listen(5)
+    port = listener.getsockname()[1]
+    try:
+        if sys.platform == "win32":
+            assert _tcp_table_listener_pid(port) == os.getpid()
+        else:
+            with pytest.raises(OSError):
+                _tcp_table_listener_pid(port)
+    finally:
+        listener.close()
+
+
+def test_windows_tcp_table_reports_no_listener_on_an_unbound_port() -> None:
+    """An unbound port is ``None``, not an error - the fallback must not be spawned.
+
+    The two negative answers are different: "nothing is listening" is the common
+    not-ready-yet poll and must stay in-process, while "this host cannot read the
+    table" is what earns the ``netstat`` fallback. Collapsing them would spawn a
+    subprocess on every iteration of the readiness loop.
+    """
+    from ...utils.process import _tcp_table_listener_pid
+
+    if sys.platform == "win32":
+        assert _tcp_table_listener_pid(free_port()) is None
+    else:
+        # POSIX never reaches this path; it must refuse rather than answer "none".
+        with pytest.raises(OSError):
+            _tcp_table_listener_pid(free_port())
 
 
 def test_the_boolean_contract_is_unchanged_by_the_classification() -> None:

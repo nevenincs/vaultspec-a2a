@@ -20,11 +20,8 @@ import pytest
 from langchain_core.messages import HumanMessage
 
 from ....providers._acp_authoring import authoring_allowed_tool_names
-from ...nodes.worker import (
-    NATIVE_READ_TOOL_NAMES,
-    _compose_native_read_tools,
-    create_worker_node,
-)
+from ....providers._acp_mcp import NATIVE_READ_TOOL_NAMES
+from ...nodes.worker import create_worker_node
 from .test_worker_authoring_wiring import _binding, _stdio_provider
 
 if TYPE_CHECKING:
@@ -159,48 +156,3 @@ async def test_human_in_loop_document_role_gets_no_allowlist(
 
     params = json.loads(record_file.read_text(encoding="utf-8"))
     assert _allowed_tools(params) == []
-
-
-class TestComposeNativeReadTools:
-    """The native-read composition is exact, role-scoped, and autonomous-only."""
-
-    def _fresh_model(self):
-        from ....providers.acp_chat_model import AcpChatModel
-
-        return AcpChatModel(command=["echo"], env_vars={}, workspace_root="/tmp/ws")
-
-    def test_autonomous_document_role_unions_read_names(self) -> None:
-        from ....providers.acp_chat_model import AcpChatModel
-
-        wired = _compose_native_read_tools(
-            self._fresh_model(), autonomous=True, role="researcher"
-        )
-        assert isinstance(wired, AcpChatModel)
-        assert wired.allowed_tools == list(NATIVE_READ_TOOL_NAMES)
-
-    def test_non_document_role_is_unchanged(self) -> None:
-        from ....providers.acp_chat_model import AcpChatModel
-
-        model = self._fresh_model()
-        wired = _compose_native_read_tools(model, autonomous=True, role=None)
-        assert isinstance(wired, AcpChatModel)
-        assert wired.allowed_tools == []
-
-    def test_human_in_loop_is_unchanged(self) -> None:
-        from ....providers.acp_chat_model import AcpChatModel
-
-        model = self._fresh_model()
-        wired = _compose_native_read_tools(model, autonomous=False, role="researcher")
-        assert isinstance(wired, AcpChatModel)
-        assert wired.allowed_tools == []
-
-    def test_existing_allowlist_is_preserved_and_deduped(self) -> None:
-        from ....providers.acp_chat_model import AcpChatModel
-
-        model = self._fresh_model().model_copy(
-            update={"allowed_tools": ["mcp__x__y", "Read"]}
-        )
-        wired = _compose_native_read_tools(model, autonomous=True, role="synthesist")
-        assert isinstance(wired, AcpChatModel)
-        # Pre-existing entries kept in place; only the missing read names appended.
-        assert wired.allowed_tools == ["mcp__x__y", "Read", "Grep", "Glob"]

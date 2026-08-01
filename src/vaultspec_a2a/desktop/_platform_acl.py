@@ -72,6 +72,15 @@ def windows_current_user_sid() -> str:
     # ``stdout`` as None and this function raising AttributeError instead of
     # resolving a SID that was perfectly readable. Degrading the name keeps the
     # SID intact.
+    #
+    # The decode is deliberately left to the locale here, and that is safe for a
+    # structural reason rather than an incidental one: nothing localized is ever
+    # compared. ``/fo csv /nh`` is a machine format, so no header or display
+    # label is emitted at all, and the SID is identified by its ``S-1-`` prefix -
+    # a token no UI language rewrites - with the row arity and that prefix both
+    # asserted below. A mangled account name therefore cannot produce a wrong
+    # SID; it can only fail the check, which raises rather than returning a
+    # plausible-looking wrong principal to a DACL.
     completed = subprocess.run(
         [_windows_system_executable("whoami.exe"), "/user", "/fo", "csv", "/nh"],
         check=True,

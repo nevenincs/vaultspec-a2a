@@ -295,10 +295,7 @@ API and protocols
    :synopsis: Hypertext Transfer Protocol (HTTP) and WebSocket wire schemas.
 
 .. py:module:: vaultspec_a2a.protocols.mcp
-   :synopsis: Model Context Protocol package boundary.
-
-.. py:module:: vaultspec_a2a.protocols.mcp.server
-   :synopsis: MCPServer construction.
+   :synopsis: Per-run authoring bridge package boundary.
 
 .. py:module:: vaultspec_a2a.protocols.mcp.authoring_stdio
    :synopsis: Engine authoring transport over standard input and output.

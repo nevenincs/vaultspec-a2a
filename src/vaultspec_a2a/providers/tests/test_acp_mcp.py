@@ -14,8 +14,10 @@ from langchain_openai import ChatOpenAI
 
 from ...thread.errors import ConfigError
 from .._acp_mcp import (
+    NATIVE_READ_TOOL_NAMES,
     codex_mcp_server_specs,
     compose_harness_mcp_servers,
+    compose_native_read_tools,
     config_home_mcp_servers,
     harness_allowed_tool_names,
     resolve_harness_mcp_servers,
@@ -334,6 +336,12 @@ def test_every_registry_entry_is_marked_read_only() -> None:
     # drifted write-capable entry fails at test time before it can ever surface.
     from .._acp_mcp import _KNOWN_MCP_SERVERS
 
+    # A loop over an empty registry asserts nothing, and "no entries" is exactly
+    # what a broken registry looks like - so the entry this invariant is about is
+    # named before it is iterated. Otherwise the strongest statement this test
+    # could make about the trust root is that it holds vacuously.
+    assert "vaultspec-rag" in _KNOWN_MCP_SERVERS, sorted(_KNOWN_MCP_SERVERS)
+
     for name, entry in _KNOWN_MCP_SERVERS.items():
         assert entry.get("read_only") is True, name
 
@@ -410,3 +418,54 @@ class TestHarnessCompositionStages:
         assert "vaultspec-rag" in resolution.available_servers
         assert unavailable == set()
         assert [s["name"] for s in resolved] == ["vaultspec-rag"]
+
+
+class TestComposeNativeReadTools:
+    """The native-read composition is exact, role-scoped, and autonomous-only."""
+
+    def _fresh_model(self) -> AcpChatModel:
+        return AcpChatModel(command=["echo"], env_vars={}, workspace_root="/tmp/ws")
+
+    def test_autonomous_document_role_unions_read_names(self) -> None:
+        wired = compose_native_read_tools(
+            self._fresh_model(), autonomous=True, role="researcher"
+        )
+        assert isinstance(wired, AcpChatModel)
+        assert wired.allowed_tools == list(NATIVE_READ_TOOL_NAMES)
+
+    def test_non_document_role_is_unchanged(self) -> None:
+        model = self._fresh_model()
+        wired = compose_native_read_tools(model, autonomous=True, role=None)
+        assert isinstance(wired, AcpChatModel)
+        assert wired.allowed_tools == []
+
+    def test_human_in_loop_is_unchanged(self) -> None:
+        model = self._fresh_model()
+        wired = compose_native_read_tools(model, autonomous=False, role="researcher")
+        assert isinstance(wired, AcpChatModel)
+        assert wired.allowed_tools == []
+
+    def test_existing_allowlist_is_preserved_and_deduped(self) -> None:
+        model = self._fresh_model().model_copy(
+            update={"allowed_tools": ["mcp__x__y", "Read"]}
+        )
+        wired = compose_native_read_tools(model, autonomous=True, role="synthesist")
+        assert isinstance(wired, AcpChatModel)
+        # Pre-existing entries kept in place; only the missing read names appended.
+        assert wired.allowed_tools == ["mcp__x__y", "Read", "Grep", "Glob"]
+
+    def test_advertised_mcp_servers_survive_the_allowlist_union(self) -> None:
+        """The read grant must not clear a server the authoring attach advertised."""
+        model = self._fresh_model().model_copy(
+            update={"mcp_servers": [{"name": "vaultspec-authoring", "type": "http"}]}
+        )
+        wired = compose_native_read_tools(model, autonomous=True, role="researcher")
+        assert isinstance(wired, AcpChatModel)
+        assert wired.mcp_servers == [{"name": "vaultspec-authoring", "type": "http"}]
+        assert wired.allowed_tools == list(NATIVE_READ_TOOL_NAMES)
+
+    def test_model_without_acp_surface_is_returned_unchanged(self) -> None:
+        """A hosted model exposing no with_mcp_servers is passed through as-is."""
+        model = ChatOpenAI(api_key="test-key", model="gpt-4o")
+        wired = compose_native_read_tools(model, autonomous=True, role="researcher")
+        assert wired is model

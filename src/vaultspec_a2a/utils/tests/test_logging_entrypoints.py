@@ -145,44 +145,32 @@ def test_service_entrypoint_creates_named_file_lane(
     assert (home / "runtime" / expected_log).exists()
 
 
-def test_mcp_http_entrypoint_uses_service_lane(tmp_path: Path) -> None:
+def test_authoring_bridge_stdio_entrypoint_keeps_stdout_clean(tmp_path: Path) -> None:
+    """The per-run authoring bridge must never write a log line to stdout.
+
+    stdout is the bridge's JSON-RPC frame channel. Launched without its engine
+    environment the bridge exits 2 after emitting a single value-free diagnostic
+    on stderr - so this exercises the real ``configure_logging("protocol")`` lane
+    and proves the lane put nothing on stdout.
+    """
     home = tmp_path / "home"
     home.mkdir()
     child = _write_child(
         tmp_path,
-        "mcp_http_child.py",
+        "authoring_stdio_child.py",
         (
-            "import sys\n"
-            "sys.argv = ['prog', '--transport', 'streamable-http', "
-            "'--host', '256.256.256.256']\n"
-            "from vaultspec_a2a.protocols.mcp.__main__ import main\n"
-            "try:\n"
-            "    main()\n"
-            "except BaseException:\n"
-            "    pass\n"
+            "import os\n"
+            "from vaultspec_a2a.protocols.mcp import authoring_stdio\n"
+            "for _var in (\n"
+            "    authoring_stdio.ENV_BASE_URL,\n"
+            "    authoring_stdio.ENV_BEARER,\n"
+            "    authoring_stdio.ENV_ACTOR_TOKEN,\n"
+            "    authoring_stdio.ENV_RUN_ID,\n"
+            "):\n"
+            "    os.environ.pop(_var, None)\n"
+            "authoring_stdio.main()\n"
         ),
     )
-    _run_child(
-        child,
-        env_extra={
-            "VAULTSPEC_A2A_HOME": str(home),
-            "VAULTSPEC_ENVIRONMENT": "production",
-        },
-        timeout=40.0,
-    )
-    assert (home / "runtime" / "mcp.log").exists()
-
-
-def test_mcp_stdio_entrypoint_keeps_stdout_clean(tmp_path: Path) -> None:
-    home = tmp_path / "home"
-    home.mkdir()
-    child = _write_child(
-        tmp_path,
-        "mcp_stdio_child.py",
-        ("from vaultspec_a2a.protocols.mcp.__main__ import main\nmain()\n"),
-    )
-    # stdin is DEVNULL -> run_stdio_async hits EOF and exits; the protocol lane must
-    # have kept stdout free of any log line.
     p = _run_child(
         child,
         env_extra={
@@ -191,17 +179,7 @@ def test_mcp_stdio_entrypoint_keeps_stdout_clean(tmp_path: Path) -> None:
         },
         timeout=40.0,
     )
-    assert p.returncode == 0, p.stderr
+    assert p.returncode == 2, p.stderr
+    assert "missing required engine env vars" in p.stderr
     assert not _has_log_json_on_stdout(p.stdout)
-
-
-def test_cli_group_configures_cli_lane() -> None:
-    from ...cli.main import main as cli
-
-    # The group callback is the entrypoint's logging-wiring site; run it directly.
-    assert cli.callback is not None
-    cli.callback()
-    root = logging.getLogger()
-    assert root.level == logging.WARNING
-    assert any(getattr(h, "stream", None) is sys.stderr for h in root.handlers)
-    assert not any(getattr(h, "stream", None) is sys.stdout for h in root.handlers)
+    assert p.stdout.strip() == ""

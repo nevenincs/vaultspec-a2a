@@ -15,7 +15,7 @@ from jsonschema import Draft202012Validator
 from jsonschema.exceptions import ValidationError as JsonSchemaValidationError
 from pydantic import ValidationError
 
-from .. import GatewayEntrypoint, StandaloneMcpEntrypoint
+from .. import GatewayEntrypoint
 from ..contract import (
     ComponentEntrypoint,
     ComponentManifest,
@@ -74,19 +74,12 @@ def _manifest_payload() -> dict[str, Any]:
                 "reference": "vaultspec_a2a.cli.main:main",
                 "relative_command": ["bin", "vaultspec-a2a"],
             },
-            "standalone_mcp": {
-                "kind": "standalone-mcp",
-                "console_script": "vaultspec-a2a-mcp",
-                "reference": "vaultspec_a2a.protocols.mcp.__main__:main",
-                "relative_command": ["bin", "vaultspec-a2a-mcp"],
-            },
         },
     }
 
 
 def test_typed_entrypoints_are_exported_from_desktop_facade() -> None:
     assert GatewayEntrypoint.__name__ == "GatewayEntrypoint"
-    assert StandaloneMcpEntrypoint.__name__ == "StandaloneMcpEntrypoint"
 
 
 def test_manifest_accepts_the_identity_and_entrypoint_boundary() -> None:
@@ -94,7 +87,6 @@ def test_manifest_accepts_the_identity_and_entrypoint_boundary() -> None:
     assert manifest.identity.name == "vaultspec-a2a"
     assert manifest.identity.version == "1.2.3"
     assert manifest.entrypoints.gateway.kind is EntrypointKind.GATEWAY
-    assert manifest.entrypoints.standalone_mcp.kind is EntrypointKind.STANDALONE_MCP
 
 
 def test_relative_command_accepts_bounded_runtime_segments() -> None:
@@ -120,15 +112,10 @@ def test_relative_command_rejects_unbounded_or_rooted_paths(
         )
 
 
-@pytest.mark.parametrize(
-    ("surface", "wrong_kind"),
-    [("gateway", "standalone-mcp"), ("standalone_mcp", "gateway")],
-)
-def test_manifest_rejects_crossed_entrypoint_kinds(
-    surface: str, wrong_kind: str
-) -> None:
+@pytest.mark.parametrize("wrong_kind", ["standalone-mcp", "worker", ""])
+def test_manifest_rejects_non_gateway_entrypoint_kinds(wrong_kind: str) -> None:
     payload = _manifest_payload()
-    payload["entrypoints"][surface]["kind"] = wrong_kind
+    payload["entrypoints"]["gateway"]["kind"] = wrong_kind
     with pytest.raises(ValidationError):
         ComponentManifest.model_validate(payload)
 
@@ -139,15 +126,12 @@ def test_draft202012_schema_accepts_the_production_manifest() -> None:
     Draft202012Validator(schema).validate(_manifest_payload())
 
 
-@pytest.mark.parametrize(
-    ("surface", "wrong_kind"),
-    [("gateway", "standalone-mcp"), ("standalone_mcp", "gateway")],
-)
-def test_draft202012_schema_rejects_crossed_entrypoint_kinds(
-    surface: str, wrong_kind: str
+@pytest.mark.parametrize("wrong_kind", ["standalone-mcp", "worker", ""])
+def test_draft202012_schema_rejects_non_gateway_entrypoint_kinds(
+    wrong_kind: str,
 ) -> None:
     payload = _manifest_payload()
-    payload["entrypoints"][surface]["kind"] = wrong_kind
+    payload["entrypoints"]["gateway"]["kind"] = wrong_kind
     with pytest.raises(JsonSchemaValidationError):
         Draft202012Validator(component_manifest_schema()).validate(payload)
 
@@ -172,10 +156,7 @@ def test_committed_schema_snapshot_exactly_matches_production_exporter() -> None
 def test_exported_schema_carries_entrypoint_path_bounds() -> None:
     schema = cast("dict[str, Any]", component_manifest_schema())
     assert set(schema["properties"]) == {"identity", "entrypoints"}
-    for definition, expected_kind in (
-        ("GatewayEntrypoint", "gateway"),
-        ("StandaloneMcpEntrypoint", "standalone-mcp"),
-    ):
+    for definition, expected_kind in (("GatewayEntrypoint", "gateway"),):
         properties = schema["$defs"][definition]["properties"]
         assert properties["kind"]["const"] == expected_kind
         command = properties["relative_command"]

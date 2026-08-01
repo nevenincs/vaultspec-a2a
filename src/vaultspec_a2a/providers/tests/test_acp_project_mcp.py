@@ -30,6 +30,7 @@ from .._acp_project_mcp import (
     PROJECTION_MARKER_KEY,
     ProjectionRefusedError,
     _declared_home_entries,
+    _split_projection,
     cleanup_projected_mcp,
     enumerate_ancestor_mcp_names,
     project_declared_mcp,
@@ -470,3 +471,58 @@ class TestAcpEntrypointAcceptsProjectedMcpConfig:
             assert "vaultspec-search-mcp" in out
         finally:
             cleanup_projected_mcp(projected)
+
+
+def test_split_projection_is_one_decomposition_for_recovery_and_cleanup() -> None:
+    """The shared split keeps the marker out of BOTH halves and copies both.
+
+    Re-projection and cleanup each rebuild or drop the marker, so a marker
+    surviving in ``other`` would be re-emitted stale. The copy matters because
+    both callers strip or merge into the result.
+    """
+    parsed = {
+        "mcpServers": {"project-own": {"command": "x"}},
+        "someOtherKey": {"kept": True},
+        PROJECTION_MARKER_KEY: {"added": ["project-own"], "base_absent": False},
+    }
+    servers, other = _split_projection(parsed)
+
+    assert servers == {"project-own": {"command": "x"}}
+    assert other == {"someOtherKey": {"kept": True}}
+    assert PROJECTION_MARKER_KEY not in other
+    assert PROJECTION_MARKER_KEY not in servers
+
+    servers.pop("project-own")
+    other.pop("someOtherKey")
+    assert parsed["mcpServers"] == {"project-own": {"command": "x"}}
+    assert parsed["someOtherKey"] == {"kept": True}
+
+
+@pytest.mark.parametrize("servers_value", [None, [], "mcpServers", 7])
+def test_split_projection_treats_a_non_mapping_server_block_as_empty(
+    servers_value: object,
+) -> None:
+    """A file naming no usable ``mcpServers`` has no servers, and never raises."""
+    parsed = {"mcpServers": servers_value, "keep": 1}
+    servers, other = _split_projection(parsed)
+    assert servers == {}
+    assert other == {"keep": 1}
+
+
+def test_cleanup_preserves_other_top_level_keys_through_the_shared_split(
+    tmp_path: Path,
+) -> None:
+    """Behaviour proof that both call sites still round-trip non-server keys."""
+    path = tmp_path / ".mcp.json"
+    path.write_text(
+        json.dumps({"$schema": "https://example.invalid/mcp", "mcpServers": {}}),
+        encoding="utf-8",
+    )
+    written = project_declared_mcp(tmp_path, [_rag_spec()])
+    assert written is not None
+    projected = json.loads(written.read_text(encoding="utf-8"))
+    assert projected["$schema"] == "https://example.invalid/mcp"
+
+    cleanup_projected_mcp(written)
+    restored = json.loads(path.read_text(encoding="utf-8"))
+    assert restored == {"$schema": "https://example.invalid/mcp", "mcpServers": {}}

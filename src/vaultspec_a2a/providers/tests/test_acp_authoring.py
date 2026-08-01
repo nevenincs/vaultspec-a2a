@@ -28,6 +28,8 @@ from .._acp_authoring import (
     AUTHORING_MCP_SERVER_NAME,
     AUTHORING_STDIO_MODULE,
     AuthoringToolBinding,
+    attach_authoring_tools,
+    authoring_allowed_tool_names,
     build_authoring_mcp_servers,
     build_authoring_stdio_mcp_servers,
     config_home_authoring_entry,
@@ -35,6 +37,7 @@ from .._acp_authoring import (
 )
 from .._acp_rpc_handlers import on_fs_write_text_file
 from .._acp_types import _AcpModelConfig, _AcpSessionContext
+from ..acp_chat_model import AcpChatModel
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -422,3 +425,55 @@ class TestAcpWriteGitSerialization:
         assert (tmp_path / "serialized.txt").read_text(encoding="utf-8") == (
             "written after the lock frees"
         )
+
+
+class TestAttachAuthoringTools:
+    """The composer picks the transport, and gates the allowlist on autonomy."""
+
+    def _model(self) -> AcpChatModel:
+        return AcpChatModel(command=["echo"], env_vars={}, workspace_root="/tmp/ws")
+
+    def test_allowed_names_are_exact_and_catalog_scoped(self) -> None:
+        names = authoring_allowed_tool_names(_binding())
+        assert names == [
+            "mcp__vaultspec-authoring__read_context",
+            "mcp__vaultspec-authoring__propose_changeset",
+        ]
+        assert "*" not in "".join(names)
+
+    def test_autonomous_attaches_allowlist(self) -> None:
+        wired = attach_authoring_tools(self._model(), _binding(), autonomous=True)
+        assert isinstance(wired, AcpChatModel)
+        assert wired.allowed_tools == authoring_allowed_tool_names(_binding())
+
+    def test_human_in_loop_gets_no_allowlist(self) -> None:
+        wired = attach_authoring_tools(self._model(), _binding(), autonomous=False)
+        assert isinstance(wired, AcpChatModel)
+        # No allowlist -> the human-in-loop permission prompt still gates every tool.
+        assert wired.allowed_tools == []
+
+    def test_absent_binding_returns_the_model_unchanged(self) -> None:
+        model = self._model()
+        assert attach_authoring_tools(model, None, autonomous=True) is model
+
+    def test_http_binding_advertises_the_http_bridge(self) -> None:
+        wired = attach_authoring_tools(self._model(), _binding(), autonomous=True)
+        assert isinstance(wired, AcpChatModel)
+        assert wired.mcp_servers == build_authoring_mcp_servers(_binding())
+        assert wired.mcp_servers[0]["type"] == "http"
+
+    def test_stdio_binding_advertises_the_stdio_bridge(self) -> None:
+        """Transport choice is load-bearing: only the stdio shape rides the home."""
+        binding = _stdio_binding()
+        wired = attach_authoring_tools(self._model(), binding, autonomous=True)
+        assert isinstance(wired, AcpChatModel)
+        assert wired.mcp_servers == build_authoring_stdio_mcp_servers(binding)
+        assert "type" not in wired.mcp_servers[0]
+        assert wired.mcp_servers[0]["command"]
+
+    def test_model_without_acp_surface_is_returned_unchanged(self) -> None:
+        """A hosted model exposing no with_mcp_servers is passed through as-is."""
+        from langchain_openai import ChatOpenAI
+
+        model = ChatOpenAI(api_key="test-key", model="gpt-4o")
+        assert attach_authoring_tools(model, _binding(), autonomous=True) is model

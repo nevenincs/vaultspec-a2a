@@ -21,6 +21,9 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
+import subprocess
+import sys
 from typing import Any
 
 import pytest
@@ -104,12 +107,65 @@ def test_the_run_id_is_part_of_the_digest(run_id: str) -> None:
 def test_the_fingerprint_is_stable_across_processes() -> None:
     """A digest that varied per process would make every replay look changed.
 
-    Hash randomisation applies to Python's own hashing, not to a cryptographic
-    digest over canonical text, and this asserts the value rather than trusting
-    that distinction.
+    A stored fingerprint outlives the process that wrote it: the gateway that
+    compares one on a retry is routinely a later process than the one that
+    persisted it. So the property that matters is stability ACROSS processes, and
+    two calls made side by side in this one cannot observe it - they would agree
+    just as readily under a per-process salt, which is exactly the defect that
+    would refuse every replay after a restart.
+
+    This therefore computes the digest in a genuinely separate interpreter and
+    compares it with the one computed here. The child is given a fresh
+    ``PYTHONHASHSEED`` so the run differs from this process in the one respect
+    Python varies by default.
     """
-    assert _current(_request()) == _current(_request())
-    assert len(_current(_request())) == 64
+    body = _request()
+    program = (
+        "from vaultspec_a2a.api.run_admission import ("
+        "CURRENT_REPLAY_DIGEST_RULE, replay_digest)\n"
+        "from vaultspec_a2a.api.schemas.gateway import RunStartRequest\n"
+        "import sys, json\n"
+        "body = RunStartRequest.model_validate_json(sys.argv[1])\n"
+        "print(replay_digest(body, rule=CURRENT_REPLAY_DIGEST_RULE))\n"
+    )
+    completed = subprocess.run(
+        [sys.executable, "-c", program, body.model_dump_json()],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        check=True,
+        env={**os.environ, "PYTHONHASHSEED": "1"},
+    )
+
+    assert completed.stdout.strip() == _current(body), (
+        "the replay fingerprint differs between processes, so no stored "
+        "fingerprint would ever match after a gateway restart"
+    )
+
+
+def test_the_current_rule_digests_exactly_what_its_specification_says() -> None:
+    """Pin the current rule's bytes to an independently derived expectation.
+
+    Every other assertion here is relational - two digests agree, or they differ.
+    Relational checks are satisfied by ANY deterministic function of the request,
+    so they cannot see the algorithm itself change; a digest computed over
+    different bytes, or with a different hash, keeps every one of them green.
+
+    The expectation is recomputed here from the rule as STATED - canonical JSON
+    with sorted keys and fixed separators, over every field except the two
+    request-identifying ones and the credential bundle, hashed with SHA-256 -
+    rather than by calling the production tables, so a change to those tables
+    fails here instead of redefining what the rule means.
+    """
+    body = _request(actor_tokens=_bundle("tok-1"))
+
+    payload = body.model_dump(
+        mode="json", exclude={"stage", "reservation_id", "actor_tokens"}
+    )
+    canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"))
+    expected = hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+    assert _current(body) == expected
 
 
 def test_every_excluded_field_exists_on_the_request_schema() -> None:

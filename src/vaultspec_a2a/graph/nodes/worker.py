@@ -534,9 +534,22 @@ def create_worker_node(
                 effective_model, harness_mcp_servers, allowed_tools=harness_allowed
             )
         from ...providers._acp_mcp import compose_native_read_tools
+        from ...providers.lane_admission import web_tool_names_for
 
+        # Web grounding rides the read floor but is gated one axis further: the
+        # floor is a property of the ROLE, while outward reach is a property of the
+        # LANE, and only a lane whose own live retrieval proof is recorded
+        # contributes any name here. An unproven lane - and a model that declared
+        # no lane at all - composes an empty tuple, so the capability stays dark
+        # through the same code path that will later light it, rather than through
+        # a branch that has never run.
         effective_model = compose_native_read_tools(
-            effective_model, autonomous=autonomous, role=role
+            effective_model,
+            autonomous=autonomous,
+            role=role,
+            extra_tool_names=web_tool_names_for(
+                getattr(effective_model, "provider", None)
+            ),
         )
 
         model_type = type(effective_model).__name__

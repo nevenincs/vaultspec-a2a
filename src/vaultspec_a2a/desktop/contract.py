@@ -11,8 +11,9 @@ These Pydantic models are the single authority for that manifest. The committed
 :func:`component_manifest_schema`; a certification gate proves the models and
 snapshot stay equal.
 
-The manifest declares the dashboard-owned gateway entry point and the
-caller-owned standalone Model Context Protocol (MCP) entry point. It carries no
+The manifest declares the dashboard-owned gateway entry point, which is the only
+launch surface the component publishes: A2A ships as an orchestration service and
+delivers no protocol adapter of its own. It carries no
 version-compatibility, bundled-runtime-asset, dependency-lock, or
 consistency-group machinery: the dashboard owns build, versioning, snapshot, and
 rollback, and does not negotiate compatibility with the runtime it ships.
@@ -43,7 +44,6 @@ __all__ = [
     "EntrypointKind",
     "GatewayEntrypoint",
     "MigrationRange",
-    "StandaloneMcpEntrypoint",
     "component_manifest_schema",
     "export_component_manifest_schema",
 ]
@@ -97,15 +97,14 @@ RelativeCommandSegment = Annotated[
 
 
 class EntrypointKind(StrEnum):
-    """The two launch surfaces the contract declares.
+    """The launch surface the contract declares.
 
-    ``gateway`` is the dashboard-owned desktop gateway launch. ``standalone_mcp``
-    is the caller-owned ``vaultspec-a2a-mcp`` adapter, which the desktop lifecycle
-    never launches or adopts.
+    ``gateway`` is the dashboard-owned desktop gateway launch, and is the only
+    surface A2A publishes: the component ships as an orchestration service, not
+    as an MCP adapter.
     """
 
     GATEWAY = "gateway"
-    STANDALONE_MCP = "standalone-mcp"
 
 
 class ComponentIdentity(BaseModel):
@@ -198,24 +197,13 @@ class GatewayEntrypoint(ComponentEntrypoint):
     )
 
 
-class StandaloneMcpEntrypoint(ComponentEntrypoint):
-    """The caller-owned standalone MCP launch surface."""
-
-    kind: Literal[EntrypointKind.STANDALONE_MCP] = Field(
-        description="The standalone MCP launch-surface discriminator."
-    )
-
-
 class ComponentEntrypoints(BaseModel):
-    """The dashboard-owned gateway launch and the caller-owned MCP launch."""
+    """The dashboard-owned gateway launch surface."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     gateway: GatewayEntrypoint = Field(
         description="Dashboard-owned desktop gateway launch entrypoint."
-    )
-    standalone_mcp: StandaloneMcpEntrypoint = Field(
-        description="Caller-owned standalone vaultspec-a2a-mcp entrypoint."
     )
 
 
@@ -238,9 +226,7 @@ class ComponentManifest(BaseModel):
     )
 
     identity: ComponentIdentity = Field(description="Component name and version.")
-    entrypoints: ComponentEntrypoints = Field(
-        description="Gateway and standalone MCP launch surfaces."
-    )
+    entrypoints: ComponentEntrypoints = Field(description="Gateway launch surface.")
 
 
 def component_manifest_schema() -> dict[str, object]:

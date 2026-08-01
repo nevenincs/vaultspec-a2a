@@ -16,7 +16,9 @@ owns three concerns:
 - **Eligibility**: ``evaluate_profile_eligibility`` composes readiness into
   per-role and per-profile eligibility with safe reasons, including the
   production acceptance-gate term reported honestly (unavailable until it
-  passes).
+  passes) and the lane-admission term from :mod:`.lane_admission` - a lane
+  without recorded completed-turn proof is refused here even when its credential
+  resolves, so readiness is necessary but never sufficient.
 
 This module lives in ``providers`` because the graph compiler consumes the
 resolver and cannot import ``control`` (that would cycle), while ``team`` cannot
@@ -45,6 +47,7 @@ from ..team.team_config import (
 )
 from ..thread.errors import AgentConfigNotFoundError, ConfigError
 from .factory import classify_provider_command
+from .lane_admission import lane_admission_reason, unproven_lanes_in
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -458,6 +461,27 @@ def probe_harness_ready(
 # ---------------------------------------------------------------------------
 
 
+def _lane_refusal(role: RoleAssignment) -> str | None:
+    """Refuse a role that names a lane without completed-turn proof, or ``None``.
+
+    Every lane the role could actually execute on is checked - the primary AND
+    every declared fallback - because a fallback is not decoration: a run that
+    degrades onto it would complete a real turn on an unproven lane mid-run,
+    which is exactly what the admission rule forbids. For the same reason a
+    proven fallback does NOT launder an unproven primary; naming an unproven lane
+    anywhere in the role refuses the role. Every offending lane is named, not
+    just the first, so one refusal reports the whole problem.
+    """
+    unproven = unproven_lanes_in([role.provider, *role.fallback_providers])
+    if not unproven:
+        return None
+    return "; ".join(
+        f"{'primary' if provider == role.provider else 'declared fallback'} "
+        f"{lane_admission_reason(provider)}"
+        for provider in unproven
+    )
+
+
 def evaluate_profile_eligibility(
     assignment: ProfileAssignment,
     *,
@@ -468,8 +492,13 @@ def evaluate_profile_eligibility(
 ) -> ProfileEligibility:
     """Compose per-role and per-profile eligibility with safe reasons.
 
-    A role is eligible when its primary provider is ready OR an eligible declared
-    fallback is ready. A profile is eligible when every role is eligible, the
+    A role is eligible when every lane it names is admissible under the
+    completed-turn rule (:mod:`.lane_admission`) AND its primary provider is
+    ready or an eligible declared fallback is ready. Admission is checked FIRST
+    and is not rescued by readiness or by a fallback: a lane with no completed
+    turn is refused here however healthy its credential looks, which is what
+    makes the rule a mechanism rather than a convention. A profile is eligible
+    when every role is eligible, the
     authoring engine is reachable, the production acceptance gate has passed, and
     the agent harness (when a verdict is supplied) is complete - each failing
     term contributes a safe reason and keeps the profile unavailable. The
@@ -497,6 +526,19 @@ def evaluate_profile_eligibility(
                 )
             )
             continue
+        lane_refusal = _lane_refusal(role)
+        if lane_refusal is not None:
+            role_results.append(
+                RoleEligibility(
+                    role_id=role.role_id,
+                    agent_id=role.agent_id,
+                    eligible=False,
+                    reason=lane_refusal,
+                )
+            )
+            continue
+        # Past this point every lane the role names is admissible, so the
+        # readiness search below can never rescue a role onto an unproven one.
         primary = _ready(role.provider)
         if primary.ready:
             role_results.append(

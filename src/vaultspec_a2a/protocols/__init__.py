@@ -1,33 +1,13 @@
-"""Expose the lazy Model Context Protocol bridge.
+"""Protocol adaptation for the Vaultspec A2A Orchestrator.
 
-The ``vaultspec-a2a-mcp`` entry point enters :mod:`vaultspec_a2a.protocols.mcp`.
-Importing this package must not eagerly load the MCP server.
-
-Server behavior belongs to :mod:`vaultspec_a2a.protocols.mcp.server`.
-Authoring transport belongs to
+A2A is an agent-to-agent orchestration framework and delivers no MCP server of
+its own. What lives here is the outbound direction only: the per-run authoring
+bridge the orchestrator spawns as a child of a provider CLI so that agent can
+reach the engine's vault-authoring tool catalog. See
 :mod:`vaultspec_a2a.protocols.mcp.authoring_stdio`.
 
 Keep protocol adaptation at this boundary. Runtime orchestration remains in
 :mod:`vaultspec_a2a.control`.
 """
 
-from typing import TYPE_CHECKING
-
-if TYPE_CHECKING:
-    from .mcp import mcp as mcp
-
-__all__ = ["mcp"]
-
-
-def __getattr__(name: str) -> object:
-    """Lazily resolve the ``mcp`` server on first attribute access (PEP 562).
-
-    Mirrors the lazy re-export in ``protocols.mcp``: importing a lightweight
-    submodule under this package must not eagerly load the heavy MCPServer
-    chain. The public ``mcp`` attribute is preserved, resolved on demand.
-    """
-    if name == "mcp":
-        from .mcp import mcp
-
-        return mcp
-    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+__all__: list[str] = []

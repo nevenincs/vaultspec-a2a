@@ -44,12 +44,18 @@ from pydantic import Field, PrivateAttr
 from ..control.config import settings
 from ..team.team_config import AgentConfig
 from ..utils import package_version
+from ..utils.enums import CodexWebSearchMode
 from ..workspace.environment import resolve_env_vars
 from ._acp_mcp import codex_mcp_server_specs
 from ._cleanup import CleanupStep, run_independent_cleanups
-from ._codex_config_home import build_codex_config_home, cleanup_codex_config_home
+from ._codex_config_home import (
+    build_codex_config_home,
+    cleanup_codex_config_home,
+    resolve_codex_web_search_mode,
+)
 from ._mcp_contract import verify_harness_mcp_contract
 from ._subprocess import kill_process_tree, spawn_acp_process
+from .lane_admission import is_web_lane_proven
 
 logger = logging.getLogger(__name__)
 
@@ -331,6 +337,12 @@ class CodexChatModel(BaseChatModel):
     cwd: str | None = None
     workspace_root: str | None = None
     codex_home: str | None = None
+    # Per-model override of the deployment's web-search posture, resolved against
+    # ``settings.codex_web_search_mode`` when unset - the same precedence
+    # ``codex_home`` above uses. Never an escape from lane admission: the gate is
+    # applied after this value is read, so an override can narrow a proven lane's
+    # reach and can never widen an unproven one's.
+    web_search_mode: CodexWebSearchMode | None = None
     harness_mcp_servers: list[str] = Field(default_factory=list)
     approval_policy: str = "never"
     sandbox: str = "read-only"
@@ -377,17 +389,34 @@ class CodexChatModel(BaseChatModel):
         """Build the per-run CODEX_HOME for the declared harness servers, or None.
 
         Returns the home path (whose ``config.toml`` carries the declared read-only
-        servers and whose ``auth.json`` is copied from the base home) when harness
-        servers are declared; the caller sets ``CODEX_HOME`` to it and cleans it up
-        after reap. Extracted from ``_astream`` so the composition-to-emission path
-        is testable without a live Codex turn.
+        servers, the run's web-grounding posture, and whose ``auth.json`` is copied
+        from the base home) when harness servers are declared; the caller sets
+        ``CODEX_HOME`` to it and cleans it up after reap. Extracted from
+        ``_astream`` so the composition-to-emission path is testable without a live
+        Codex turn.
+
+        The web posture is resolved here, at the only place a Codex home is built,
+        from the lane-admission verdict for this model's own declared lane. Codex
+        has no allowlistable web tool name to withhold, so this config write is the
+        entire activation surface for the capability on this lane: a lane with no
+        recorded retrieval proof emits ``disabled`` and can reach nothing.
         """
         if not self.harness_mcp_servers:
             return None
         specs = codex_mcp_server_specs(self.harness_mcp_servers)
         base = self.codex_home or settings.codex_home
         base_home = Path(base) if base else Path.home() / ".codex"
-        return build_codex_config_home(specs, base_home)
+        configured = self.web_search_mode
+        if configured is None:
+            configured = settings.codex_web_search_mode
+        return build_codex_config_home(
+            specs,
+            base_home,
+            web_search=resolve_codex_web_search_mode(
+                web_proven=is_web_lane_proven(self.provider),
+                configured=configured,
+            ),
+        )
 
     def _generate(
         self,

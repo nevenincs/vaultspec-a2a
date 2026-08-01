@@ -22,7 +22,7 @@ from pydantic import (
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 from ..domain_config import DomainSettingsConfig
-from ..utils.enums import Environment, LogLevel
+from ..utils.enums import CodexWebSearchMode, Environment, LogLevel
 
 if TYPE_CHECKING:
     from ..desktop.credentials import DesktopCredentialPaths
@@ -225,6 +225,21 @@ class InfraConfig(BaseSettings):
     codex_home: str | None = Field(
         default=None,
         validation_alias="CODEX_HOME",
+    )
+    # The Codex lane's web-grounding posture. Unset means a lane carrying web
+    # proof serves live retrieval, which is what keeps a multi-provider graph's
+    # findings differing by evidence rather than by which lane happened to run.
+    # A deployment that prefers zero egress sets "cached" - genuine search
+    # against a provider-maintained index with no outbound request from the agent
+    # host. This preference applies only ABOVE the lane-admission gate: it can
+    # narrow a proven lane's reach, never grant reach to an unproven one.
+    codex_web_search_mode: CodexWebSearchMode | None = Field(
+        default=None,
+        validation_alias="VAULTSPEC_CODEX_WEB_SEARCH_MODE",
+        description=(
+            "Override the Codex lane's web-search mode (disabled, cached, "
+            "indexed, live). Unset serves live on a web-proven lane."
+        ),
     )
     # Kimi (Moonshot AI) drives its own `kimi acp` agent. The CLI reads these
     # unprefixed names from its own environment (the Z.ai ANTHROPIC_* passthrough

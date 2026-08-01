@@ -2,20 +2,15 @@
   "$defs": {
     "ComponentEntrypoints": {
       "additionalProperties": false,
-      "description": "The dashboard-owned gateway launch and the caller-owned MCP launch.",
+      "description": "The dashboard-owned gateway launch surface.",
       "properties": {
         "gateway": {
           "$ref": "#/$defs/GatewayEntrypoint",
           "description": "Dashboard-owned desktop gateway launch entrypoint."
-        },
-        "standalone_mcp": {
-          "$ref": "#/$defs/StandaloneMcpEntrypoint",
-          "description": "Caller-owned standalone vaultspec-a2a-mcp entrypoint."
         }
       },
       "required": [
-        "gateway",
-        "standalone_mcp"
+        "gateway"
       ],
       "title": "ComponentEntrypoints",
       "type": "object"
@@ -106,67 +101,6 @@
       ],
       "title": "GatewayEntrypoint",
       "type": "object"
-    },
-    "StandaloneMcpEntrypoint": {
-      "additionalProperties": false,
-      "description": "The caller-owned standalone MCP launch surface.",
-      "properties": {
-        "kind": {
-          "const": "standalone-mcp",
-          "description": "The standalone MCP launch-surface discriminator.",
-          "title": "Kind",
-          "type": "string"
-        },
-        "console_script": {
-          "description": "Console-script name declared by the distribution.",
-          "maxLength": 128,
-          "minLength": 1,
-          "title": "Console Script",
-          "type": "string"
-        },
-        "reference": {
-          "description": "Entry-point object reference, e.g. 'pkg.module:main'.",
-          "maxLength": 256,
-          "minLength": 1,
-          "title": "Reference",
-          "type": "string"
-        },
-        "relative_command": {
-          "description": "Bounded argv path segments relative to the runtime root.",
-          "items": {
-            "description": "One portable, non-rooted runtime path segment; Windows device basenames and platform-invalid characters are forbidden.",
-            "maxLength": 128,
-            "minLength": 1,
-            "not": {
-              "anyOf": [
-                {
-                  "enum": [
-                    ".",
-                    ".."
-                  ]
-                },
-                {
-                  "pattern": "^(?:[Cc][Oo][Nn](?:[Ii][Nn]\\$|[Oo][Uu][Tt]\\$)?|[Pp][Rr][Nn]|[Aa][Uu][Xx]|[Nn][Uu][Ll]|[Cc][Oo][Mm][1-9\u00b9\u00b2\u00b3]|[Ll][Pp][Tt][1-9\u00b9\u00b2\u00b3])(?:\\..*)?$"
-                }
-              ]
-            },
-            "pattern": "^[^\\x00-\\x1f\\x7f<>:\"/\\\\|?*]*[^\\x00-\\x1f\\x7f<>:\"/\\\\|?*. ]$",
-            "type": "string"
-          },
-          "maxItems": 16,
-          "minItems": 1,
-          "title": "Relative Command",
-          "type": "array"
-        }
-      },
-      "required": [
-        "kind",
-        "console_script",
-        "reference",
-        "relative_command"
-      ],
-      "title": "StandaloneMcpEntrypoint",
-      "type": "object"
     }
   },
   "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -179,7 +113,7 @@
     },
     "entrypoints": {
       "$ref": "#/$defs/ComponentEntrypoints",
-      "description": "Gateway and standalone MCP launch surfaces."
+      "description": "Gateway launch surface."
     }
   },
   "required": [

@@ -11,6 +11,7 @@ new surface by default.
 from __future__ import annotations
 
 import json
+import subprocess
 import sys
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -28,7 +29,7 @@ from ....thread.actor_tokens import ActorTokenBundle
 from ....worker.authoring_binding import AuthoringBindingProvider
 from ....worker.catalog_store import RunCatalogStore
 from ....worker.token_store import RunTokenStore
-from ...nodes.worker import _attach_authoring_tools, create_worker_node
+from ...nodes.worker import create_worker_node
 
 if TYPE_CHECKING:
     from ....thread.state import TeamState
@@ -308,36 +309,6 @@ async def test_stdio_binding_surfaces_bridge_into_isolated_home(
     assert spawn_env["VAULTSPEC_AUTHORING_RUN_ID"] == _THREAD_ID
 
 
-class TestAuthoringAllowlist:
-    """The auto-permit allowlist is exact, catalog-derived, and autonomous-only."""
-
-    def test_allowed_names_are_exact_and_catalog_scoped(self) -> None:
-        binding = _binding()
-        names = authoring_allowed_tool_names(binding)
-        assert names == [
-            "mcp__vaultspec-authoring__read_context",
-            "mcp__vaultspec-authoring__propose_changeset",
-        ]
-        assert "*" not in "".join(names)
-
-    def test_autonomous_attaches_allowlist(self) -> None:
-        from ....providers.acp_chat_model import AcpChatModel
-
-        model = AcpChatModel(command=["echo"], env_vars={}, workspace_root="/tmp/ws")
-        wired = _attach_authoring_tools(model, _binding(), autonomous=True)
-        assert isinstance(wired, AcpChatModel)
-        assert wired.allowed_tools == authoring_allowed_tool_names(_binding())
-
-    def test_human_in_loop_gets_no_allowlist(self) -> None:
-        from ....providers.acp_chat_model import AcpChatModel
-
-        model = AcpChatModel(command=["echo"], env_vars={}, workspace_root="/tmp/ws")
-        wired = _attach_authoring_tools(model, _binding(), autonomous=False)
-        assert isinstance(wired, AcpChatModel)
-        # No allowlist → the human-in-loop permission prompt still gates every tool.
-        assert wired.allowed_tools == []
-
-
 @pytest.mark.asyncio
 async def test_no_binding_leaves_session_without_mcp_servers(
     tmp_path: Path,
@@ -370,3 +341,28 @@ async def test_no_binding_leaves_session_without_mcp_servers(
 
     params = json.loads(record_file.read_text(encoding="utf-8"))
     assert params["mcpServers"] == []
+
+
+def test_worker_import_does_not_load_the_authoring_provider_module() -> None:
+    """The authoring provider import stays deferred behind the binding guard.
+
+    Real fresh interpreter, no mocks: importing the worker node must NOT drag in
+    ``providers._acp_authoring``. That module costs roughly a second to load (it
+    pulls the stdio bridge's env contract and the catalog codec), and a run
+    without an authoring binding must never pay it. Hoisting the import to module
+    scope would charge every worker turn - the import-time cold-start class that
+    once cost this project a lost CLI tool-registration race - and this test is
+    what fails when someone "tidies" the deferred import upward.
+    """
+    probe = (
+        "import sys; import vaultspec_a2a.graph.nodes.worker; "
+        "print('vaultspec_a2a.providers._acp_authoring' in sys.modules)"
+    )
+    proc = subprocess.run(
+        [PYTHON_EXE, "-c", probe],
+        capture_output=True,
+        text=True,
+        check=True,
+        timeout=300,
+    )
+    assert proc.stdout.strip() == "False", proc.stdout + proc.stderr

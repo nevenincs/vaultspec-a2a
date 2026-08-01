@@ -26,6 +26,7 @@ from typing import TYPE_CHECKING, Any, cast
 import pytest
 
 from ...thread.errors import ConfigError
+from ...utils.enums import CodexWebSearchMode
 from .._acp_config_home import cleanup_isolated_config_home, create_isolated_config_home
 from .._acp_mcp import (
     _KNOWN_MCP_SERVERS,
@@ -240,7 +241,12 @@ class TestConfigHomeCarriesTheDeclaredAxis:
         # the axis cannot be satisfied on one delivery shape and skipped on the
         # other.
         specs = codex_mcp_server_specs([_RAG])
-        home = build_codex_config_home(specs, tmp_path)
+        # The web posture is a required argument on this builder (unsafe-by-
+        # omission, like the trust axes this test covers); this case is about the
+        # registry's axes, so it declares the closed posture explicitly.
+        home = build_codex_config_home(
+            specs, tmp_path, web_search=CodexWebSearchMode.DISABLED
+        )
         try:
             config = tomllib.loads((home / "config.toml").read_text(encoding="utf-8"))
         finally:

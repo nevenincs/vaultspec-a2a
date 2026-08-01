@@ -26,7 +26,3 @@ run *ARGS:
 # Provision or verify an agent workspace through the product CLI.
 workspace *ARGS:
     {{ product_cli }} workspace {{ ARGS }}
-
-# Start the standalone product MCP server.
-mcp TRANSPORT="stdio" *ARGS:
-    uv run --no-sync --frozen --no-default-groups vaultspec-a2a-mcp --transport {{ TRANSPORT }} {{ ARGS }}

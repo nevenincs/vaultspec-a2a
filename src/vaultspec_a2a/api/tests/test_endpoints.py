@@ -1471,18 +1471,37 @@ class TestListTeamPresets:
         assert "vaultspec-solo-coder" in preset_ids
 
     def test_preset_has_required_fields(self, session_factory, checkpointer) -> None:
-        """Each preset has id, display_name, description, topology, worker_count."""
+        """A listed preset describes itself, or says why it cannot.
+
+        Key PRESENCE is guaranteed by the response model - every declared field
+        serializes whether or not it holds anything - so ``"topology" in preset``
+        is true of a listing in which every descriptive field is null. What the
+        Rust backend actually depends on is the value: a loadable preset carries
+        its descriptors, and an unloadable one carries a reason instead of
+        silently listing blanks.
+        """
         app, _agg, _worker, _cp = make_app(session_factory, checkpointer)
 
         with TestClient(app, raise_server_exceptions=True) as client:
             resp = client.get("/v1/presets")
 
-        for preset in resp.json()["presets"]:
-            assert "id" in preset
-            assert "display_name" in preset
-            assert "description" in preset
-            assert "topology" in preset
-            assert "worker_count" in preset
+        presets = resp.json()["presets"]
+        # An empty listing would satisfy every per-preset assertion below by
+        # iterating nothing, and is itself the most likely failure.
+        assert presets, "the bundled presets did not list, so nothing was checked"
+
+        for preset in presets:
+            assert preset["id"], preset
+            if not preset["loadable"]:
+                assert preset["unavailable_reason"], (
+                    f"{preset['id']} is unloadable without saying why"
+                )
+                continue
+            assert preset["display_name"], preset
+            assert preset["description"], preset
+            assert preset["topology"], preset
+            assert isinstance(preset["worker_count"], int), preset
+            assert preset["worker_count"] > 0, preset
 
 
 # ---------------------------------------------------------------------------

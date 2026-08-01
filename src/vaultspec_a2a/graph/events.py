@@ -21,6 +21,7 @@ from .enums import (
 __all__ = [
     "AgentStatus",
     "ArtifactUpdate",
+    "ClarificationPending",
     "DomainEvent",
     "ErrorOccurred",
     "MessageChunk",
@@ -93,6 +94,25 @@ class PermissionRequest(DomainEvent):
     options: list[dict[str, str]] = field(default_factory=list)
     tool_call: str | None = None
     tool_kind: ToolKind | None = None
+
+
+@dataclass
+class ClarificationPending(DomainEvent):
+    """A run has parked on a question and is waiting for the human to answer.
+
+    Carries the correlation handle and NOTHING ELSE. The questions, their
+    prompts, and their options are deliberately absent: this event travels the
+    droppable progress relay, so anything a consumer could render from it would
+    be state it had reconstructed from a channel that is allowed to lose frames.
+    The questionnaire is read from the run's authoritative status snapshot, and
+    this event's only job is to say "now would be a good time to read it".
+
+    That is why there is no matching ``ClarificationResolved``: a consumer that
+    cannot treat this as authority has no use for a second non-authoritative
+    hint that it is gone.
+    """
+
+    request_id: str
 
 
 @dataclass

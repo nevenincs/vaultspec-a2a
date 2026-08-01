@@ -23,6 +23,7 @@ from ..graph.enums import (
 from ..graph.events import (
     AgentStatus,
     ArtifactUpdate,
+    ClarificationPending,
     DomainEvent,
     ErrorOccurred,
     MessageChunk,
@@ -415,6 +416,32 @@ class EventEmitters:
             thread_id=thread_id,
             request_id=request_id,
             event=event,
+        )
+        await self._subscribers.broadcast(SequencedEvent(event=event, sequence=seq))
+
+    async def emit_clarification_pending(
+        self,
+        thread_id: str,
+        agent_id: str,
+        request_id: str,
+    ) -> None:
+        """Emit the nudge that a run has parked on a questionnaire.
+
+        Deliberately NOT registered in ``_pending_permissions``. That registry
+        backs the permission surfaces - team-status' pending list and the durable
+        permission reconciliation - and a clarification is not a permission: it
+        has no options to choose and is answered through its own verb. Filing it
+        there would make it show up as an unanswered tool approval on surfaces
+        that could never resolve it.
+
+        The signature takes no question material because there is none to take.
+        """
+        seq = self.next_sequence(thread_id)
+        event = ClarificationPending(
+            thread_id=thread_id,
+            agent_id=agent_id,
+            timestamp=datetime.now(UTC).timestamp(),
+            request_id=request_id,
         )
         await self._subscribers.broadcast(SequencedEvent(event=event, sequence=seq))
 

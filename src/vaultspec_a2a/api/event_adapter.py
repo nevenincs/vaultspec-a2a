@@ -15,6 +15,7 @@ from ..graph.enums import AgentLifecycleState, PermissionOptionKind
 from ..graph.events import (
     AgentStatus,
     ArtifactUpdate,
+    ClarificationPending,
     DomainEvent,
     ErrorOccurred,
     MessageChunk,
@@ -38,6 +39,7 @@ from .schemas.events import (
     AgentStatusEvent,
     AgentSummary,
     ArtifactUpdateEvent,
+    ClarificationPendingEvent,
     ErrorEvent,
     MessageChunkEvent,
     PermissionOption,
@@ -185,6 +187,18 @@ def domain_to_wire(event: DomainEvent, sequence: int) -> ServerEvent:
                 options=options,
                 tool_call=event.tool_call,
                 tool_kind=event.tool_kind,
+            )
+
+        case ClarificationPending():
+            # Only the correlation handle crosses. There is no question payload
+            # on the domain event to forward even by accident - the omission is
+            # enforced by the type, not by this mapping remembering to drop it.
+            return ClarificationPendingEvent(
+                thread_id=event.thread_id,
+                agent_id=event.agent_id,
+                sequence=sequence,
+                timestamp=ts,
+                request_id=event.request_id,
             )
 
         case PlanUpdate():

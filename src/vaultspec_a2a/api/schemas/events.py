@@ -28,6 +28,7 @@ __all__ = [
     # Component models
     "AgentSummary",
     "ArtifactUpdateEvent",
+    "ClarificationPendingEvent",
     "ErrorEvent",
     "HeartbeatEvent",
     "MessageChunkEvent",
@@ -183,6 +184,23 @@ class PermissionRequestEvent(EventEnvelope):
     tool_kind: ToolKind | None = None
 
 
+class ClarificationPendingEvent(EventEnvelope):
+    """A run is parked on a questionnaire; re-read run-status to render it.
+
+    The narrowest event on this channel by design. It carries the request id and
+    the envelope's own thread id, and nothing a client could mistake for the
+    questions themselves - no prompts, no options, no kinds. A client that could
+    render the questionnaire from this frame would be rendering from a channel
+    that is permitted to drop frames, which is precisely the recovery bug the
+    authoritative status disclosure exists to prevent.
+    """
+
+    type: Literal[ServerEventType.CLARIFICATION_PENDING] = (
+        ServerEventType.CLARIFICATION_PENDING
+    )
+    request_id: str
+
+
 class ArtifactUpdateEvent(EventEnvelope):
     """Streaming file artifact content."""
 
@@ -243,6 +261,7 @@ ServerEvent = Annotated[
     | ToolCallStartEvent
     | ToolCallUpdateEvent
     | PermissionRequestEvent
+    | ClarificationPendingEvent
     | ArtifactUpdateEvent
     | PlanUpdateEvent
     | TeamStatusEvent

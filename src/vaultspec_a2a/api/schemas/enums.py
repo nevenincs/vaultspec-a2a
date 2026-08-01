@@ -30,6 +30,11 @@ class ServerEventType(StrEnum):
     TOOL_CALL_START = "tool_call_start"
     TOOL_CALL_UPDATE = "tool_call_update"
     PERMISSION_REQUEST = "permission_request"
+    # Spelled with a hyphen, alone among these members, because the value is a
+    # cross-repo contract token fixed by the shared edge specification rather
+    # than a name this repo is free to choose. Renaming it to match the local
+    # convention would silently break the consumer that matches on it.
+    CLARIFICATION_PENDING = "clarification-pending"
     ARTIFACT_UPDATE = "artifact_update"
     PLAN_UPDATE = "plan_update"
     TEAM_STATUS = "team_status"

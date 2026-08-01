@@ -328,6 +328,13 @@ _PROGRESS_CATALOG: dict[str, dict[str, _FieldSpec]] = {
             16, {"option_id": _Text(64), "name": _Text(128), "kind": _ENUM}
         ),
     },
+    # The clarification nudge enumerates ONE field, and the shortness of this
+    # entry is the contract rather than an oversight. The questions, prompts and
+    # options deliberately have no entry here, so even a producer that someday
+    # attached them to the frame could not carry them across this boundary - the
+    # catalog rebuilds by omission. A consumer correlates on the request id and
+    # reads the questionnaire itself from run-status.
+    "clarification-pending": {"request_id": _Text(128)},
     # A plan entry's ``content`` is model-authored plan text - document-body
     # adjacent, and nothing consumes it - so only its classification survives.
     "plan_update": {"entries": _ObjectList(64, {"status": _ENUM, "priority": _ENUM})},

@@ -17,6 +17,7 @@ from .enums import ServerEventType as ServerEventType
 from .events import AgentStatusEvent as AgentStatusEvent
 from .events import AgentSummary as AgentSummary
 from .events import ArtifactUpdateEvent as ArtifactUpdateEvent
+from .events import ClarificationPendingEvent as ClarificationPendingEvent
 from .events import ErrorEvent as ErrorEvent
 from .events import HeartbeatEvent as HeartbeatEvent
 from .events import MessageChunkEvent as MessageChunkEvent
@@ -45,6 +46,7 @@ __all__ = [
     "AgentSummary",
     "ArtifactSnapshot",
     "ArtifactUpdateEvent",
+    "ClarificationPendingEvent",
     "ErrorEvent",
     "EventEnvelope",
     "ExecutionTaskSnapshot",

@@ -24,6 +24,7 @@ from ..graph.enums import (
     ToolCallStatus,
 )
 from ..graph.protocols import NullTelemetryHook, TelemetryHook
+from ..thread.clarification import CLARIFICATION_INTERRUPT_TYPE
 from .buffering import BufferingManager
 from .emitters import EventEmitters
 from .sse_frames import enforce_progress_allowlist
@@ -482,6 +483,7 @@ async def emit_interrupt_events(
                 "permission_request",
                 "plan_approval_request",
                 "document_approval_request",
+                CLARIFICATION_INTERRUPT_TYPE,
             ):
                 continue
 
@@ -496,7 +498,25 @@ async def emit_interrupt_events(
             if request_id in emitters._pending_permissions:
                 continue
 
-            if interrupt_type == "plan_approval_request":
+            if interrupt_type == CLARIFICATION_INTERRUPT_TYPE:
+                # The nudge, and only the nudge: the payload sitting right here
+                # holds the prompts and options, and none of it is passed on.
+                # A consumer learns THAT a question is waiting from this frame
+                # and WHAT it asks from the run's status snapshot, so a dropped
+                # frame costs a prompt to re-read, never the question itself.
+                await emitters.emit_clarification_pending(
+                    thread_id=thread_id,
+                    agent_id=task.name,
+                    request_id=request_id,
+                )
+                await emitters.emit_agent_status(
+                    thread_id=thread_id,
+                    agent_id=task.name,
+                    node_name=task.name,
+                    state=AgentLifecycleState.INPUT_REQUIRED,
+                    detail="Awaiting an answer to a clarifying question",
+                )
+            elif interrupt_type == "plan_approval_request":
                 feature: str = payload.get("feature") or "unknown"
                 plan_paths: list[str] = payload.get("plan_paths") or []
                 exec_worker: str = payload.get("exec_worker") or "unknown"

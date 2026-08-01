@@ -457,3 +457,42 @@ guard, so every lane-scoping assertion has a real subject again - and a better
 one, because it is the path actually shipped rather than an exemplar kept alive
 to be tested. No injected exemplar is needed, and no test-only registry member
 should be introduced to substitute for one.
+
+### The gate ruling and the mechanism residue (2026-08-01, reconciliation review)
+
+The paragraph above sequenced the withdrawal behind the harness egress
+admission gate and promised that gate's coverage retargeted onto an injected
+exemplar. That clause is superseded here rather than rewritten: the owner
+directive removes the gate's only possible subject, and a proof-gated
+admission seam over a permanently empty subject set is precisely the
+dead-capability class this campaign exists to close. The dynamic gate is
+withdrawn with the entry - the admission seam, the proof record's
+harness-server half, and the served eligibility term all go; none of it ever
+landed on the main line as more than a committed test adapted to an
+uncommitted API, which is recorded as its own defect.
+
+The residue that survives is static. The registry's declared-egress set is
+asserted empty by a guard whose deliberate edit is the act of admitting a
+future egressing entry - the tripwire form that would have caught the fiction
+arriving on this week's merge - and the persona-claims guard keeps failing
+loudly on the same state, rewritten to attest the withdrawal rather than
+deleted. The egress axis itself, unconstructible when undeclared, stands
+unchanged: a future reviewed entry still declares its reach, and admitting an
+egressing one now requires a decision record before the guard edit that lets
+it in.
+
+What delivers the capability stands unchanged. The proven-lanes declaration
+remains the claim-and-activation governor the third amendment left it - never
+a capability veto - and the per-lane live-proof Steps remain the only path to
+lighting native tools and flipping persona text and preset claims, atomically
+per lane. Its harness-server half leaves with the gate; its native half is
+the whole story. The served-profile admission rule needs no amendment: it
+governs which lanes may be served and what presets and personas may assert,
+and has never governed what a lane is built to do, so the capability
+universality above changes nothing the rule speaks to.
+
+The delivery split needs no separate record: delivery is this record's
+decision, and the third amendment records the split with its rationale. The
+one decision it leaves open - which binding the hosted-API lanes take - is
+owed as an amendment here when that work is planned, together with the plan
+Step that does not exist today.

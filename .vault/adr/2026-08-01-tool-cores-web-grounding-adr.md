@@ -393,3 +393,67 @@ capability, because after the withdrawal web capability never rides the
 registry - it is first-party on command-line lanes and framework-bound on
 hosted-API lanes - and the gate guards only whatever future reviewed entry
 declares egress.
+
+### Cross-repo consequence of the universal-search directive
+
+The removed registry entry did not arrive by accident. It was built to satisfy
+the consuming project's own decision record, whose D6 calls for a web-search and
+fetch MCP server joining the researcher harness through the declaration
+mechanism. Its tests cite that record by name. So the owner directive does not
+merely delete a local mistake - it declines a cross-repo ask, and that is worth
+stating plainly rather than leaving the other side to discover a server they
+specified is never coming.
+
+The substance of D6 is satisfied and its mechanism is not. The researcher does
+get real web reach, on every lane rather than only where a server could be
+mounted, which is more than D6 asked for. What it does not get is a server: the
+command-line lanes carry first-party search already, and the hosted-API lanes
+take a framework-bound tool. D6's own wording anticipated using the existing
+declaration mechanism with no wire change, and no wire change is what happened -
+the delivery seam is simply the allowlist and the model binding rather than the
+registry.
+
+The record on this side is now the authority for how a2a delivers web reach. The
+consuming project's D6 should be amended to match, and until it is, a reader of
+that record will expect a server this repository will not provide. That
+divergence is recorded here rather than silently tolerated, because a
+specification nobody intends to honour is the same defect class as a docstring
+asserting an invariant the code does not hold.
+
+### Reconciling the two amendments about the removal, and closing it
+
+Two amendments above address the same withdrawal, written hours apart by
+different hands, and a reader deserves to be told which governs what rather than
+left to infer it.
+
+The universal-search amendment is authoritative for the DECISION: every provider
+lane must be able to search the web, no first-party search server exists or is
+planned, and delivery splits between the command-line lanes' own tools and a
+framework-bound tool for hosted-API lanes. That is an owner directive and it is
+not subject to the reconciliation below.
+
+The reconciliation amendment is authoritative for the HISTORY and for the
+rejection reasons. Its account is better than the universal-search amendment's:
+the entry shipped on a concurrent line before this record was committed, so the
+disagreement was concurrency rather than anyone reading a stale tree, and three
+of the four reasons originally given for rejecting a server do not survive
+contact with what actually shipped - the package needs no credential and carries
+no billing relationship. Those corrections stand. The decision does not rest on
+them; it rests on the lanes already having the capability, which is the one
+reason that held throughout.
+
+**The removal is no longer owed. It is done.** The registry entry and its
+desktop-capability action were withdrawn once the owner directive made the
+sequencing moot, and the registry now carries a single no-egress member with a
+comment recording why no web entry belongs there.
+
+The sequencing concern that amendment raised was correct and was met, though not
+in the order it anticipated. It warned that the entry was the egress mechanism's
+only egressing exemplar and that withdrawal must RETARGET that coverage rather
+than delete it. The removal did land first and did redden that coverage. The
+retarget is the native tool path: the command-line web tools are declared
+egressing in the native map and enforced by the native counterpart of the same
+guard, so every lane-scoping assertion has a real subject again - and a better
+one, because it is the path actually shipped rather than an exemplar kept alive
+to be tested. No injected exemplar is needed, and no test-only registry member
+should be introduced to substitute for one.

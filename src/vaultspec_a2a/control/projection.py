@@ -270,7 +270,7 @@ def apply_checkpoint_projection(
         snapshot.pending_permissions.append(permission)
         existing.add(permission.request_id)
 
-    # Mid-run clarification (agent-flow ADR D5(a)): checkpoint-truth
+    # Mid-run clarification: checkpoint-truth
     # disclosure only — no durable-row cross-check, unlike pending_permissions
     # above. A parked clarification survives a reload because it is read from
     # this same checkpoint projection every time, never cached in memory.

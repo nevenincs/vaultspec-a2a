@@ -310,7 +310,7 @@ def test_classify_permission_pause_reason_none() -> None:
 
 
 # ---------------------------------------------------------------------------
-# clarification_data_from_interrupt (agent-flow ADR D5)
+# clarification_data_from_interrupt
 # ---------------------------------------------------------------------------
 
 

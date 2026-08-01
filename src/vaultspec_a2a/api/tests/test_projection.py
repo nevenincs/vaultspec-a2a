@@ -190,7 +190,7 @@ def test_apply_checkpoint_projection_merges_interrupt_permissions() -> None:
 def test_apply_checkpoint_projection_merges_clarification_request() -> None:
     """A clarification_request interrupt surfaces as pending_clarification.
 
-    Mirrors the permission-merge test above but for agent-flow ADR D5's new
+    Mirrors the permission-merge test above but for the clarification
     interrupt kind, disclosed on a separate field (not pending_permissions —
     its bounded questions do not fit the single-decision PermissionData
     shape).

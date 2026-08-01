@@ -82,9 +82,9 @@ class _ClarificationQuestionSnapshot(BaseModel):
 class _ClarificationRequestSnapshot(BaseModel):
     """Layer 1 equivalent of ``thread.snapshots.ClarificationRequestData``.
 
-    A pending mid-run clarification (agent-flow ADR D5(a)): disclosed on
-    ``run-status`` so a reload re-renders the questionnaire from authoritative
-    state alone, never from a relay frame.
+    A pending mid-run clarification, disclosed on ``run-status`` so a reload
+    re-renders the questionnaire from authoritative state alone, never from a
+    relay frame.
     """
 
     request_id: str

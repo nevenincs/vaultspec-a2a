@@ -74,7 +74,7 @@ class DispatchRequest(BaseModel):
     active_feature: str | None = None
     # feedback-loop: the OPAQUE engine feedback-batch id for a revision run,
     # forwarded to the worker so it retrieves the authoritative batch from the
-    # engine read route. a2a never parses it (edge ADR D5); None when not
+    # engine read route. a2a never parses it; None when not
     # feedback-driven.
     feedback_batch_id: str | None = None
     pipeline_phase: str | None = None

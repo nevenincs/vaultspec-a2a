@@ -233,7 +233,7 @@ async def test_get_feedback_batch_reads_back_a_created_batch(
     """The a2a read path retrieves a feedback batch by id, verbatim (S11).
 
     The dashboard creates the batch; the a2a worker consumes it read-path-only via
-    ``AuthoringClient.get_feedback_batch`` (edge ADR D5). This drives the real
+    ``AuthoringClient.get_feedback_batch``. This drives the real
     create + read round-trip over the wire: freeze a batch, then read it back by
     its content-addressed id and assert the served items match.
     """

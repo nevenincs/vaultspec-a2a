@@ -1,4 +1,4 @@
-"""End-to-end tests for the mid-run clarification interrupt (agent-flow ADR D5).
+"""End-to-end tests for the mid-run clarification interrupt.
 
 Drives the real pieces together: a real ``StateGraph`` built on
 ``create_clarification_node()`` parks a genuine ``interrupt()`` against the

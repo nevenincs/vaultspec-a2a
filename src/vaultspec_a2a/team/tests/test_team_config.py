@@ -87,7 +87,7 @@ class TestAgentConfigFromToml:
         assert cfg.persona.system_prompt
 
     def test_plan_author_is_document_authoring_not_filesystem_write(self) -> None:
-        """agent-flow ADR D4/D7: the plan-author writer has no filesystem write.
+        """The plan-author writer has no filesystem write.
 
         vaultspec-plan-author was adapted from an orphaned coder-lane persona
         (filesystem_write=true) to the research_adr Plan phase, where every

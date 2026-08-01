@@ -94,8 +94,8 @@ def _build_worker_messages(
     mounted = state.get("mounted_context")
     if mounted:
         messages.append(SystemMessage(content=mounted))
-    # Feedback-loop grounding (ADR D4): on a revision run the writer sees the
-    # reviewer's authoritative comments, retrieved by id from the engine and
+    # Feedback-loop grounding: on a revision run the writer sees the reviewer's
+    # authoritative comments, retrieved by id from the engine and
     # rendered upstream. Placed after the mounted corpus so the revision
     # instruction is the last grounding the writer reads before the turn history.
     if feedback_grounding:
@@ -494,11 +494,11 @@ def create_worker_node(
             if thread_id:
                 queue_tool = create_mark_task_complete_tool(task_queue_port, thread_id)
 
-        # Feedback-loop grounding (ADR D4): a revision run carries an opaque
+        # Feedback-loop grounding: a revision run carries an opaque
         # feedback_batch_id in state; retrieve the reviewer's comments by id from
-        # the engine and ground the writer on them. Best-effort and read-path-only
-        # (edge ADR D5) - an unavailable batch degrades to no grounding rather than
-        # failing the turn. Absent id or reader = no grounding, zero behaviour change.
+        # the engine and ground the writer on them. Best-effort and read-path-only:
+        # an unavailable batch degrades to no grounding rather than failing the
+        # turn. Absent id or reader = no grounding, zero behaviour change.
         feedback_grounding: str | None = None
         if feedback_reader is not None:
             batch_id = state.get("feedback_batch_id")

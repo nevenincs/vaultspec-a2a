@@ -211,7 +211,7 @@ def test_an_uncatalogued_frame_keeps_only_its_identity_keys() -> None:
 
 
 # ---------------------------------------------------------------------------
-# clarification_pending (agent-flow ADR D5(b))
+# clarification_pending
 # ---------------------------------------------------------------------------
 
 

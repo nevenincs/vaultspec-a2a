@@ -363,7 +363,7 @@ class AuthoringClient:
         return await self.get("/v1/recovery", params=params)
 
     async def get_feedback_batch(self, batch_id: str) -> AuthoringResponse:
-        """Read one engine feedback batch by its opaque id (feedback-loop ADR D4).
+        """Read one engine feedback batch by its opaque id.
 
         ``GET /authoring/v1/feedback-batches/{batch_id}`` is the a2a edge's read
         path for the authoritative feedback context: the worker holds only the
@@ -372,8 +372,8 @@ class AuthoringClient:
         capability-by-id — the unguessable id IS the capability, not a session
         binding — so no per-actor token is sent. An unknown id is a 404 the
         transport surfaces as a typed :class:`AuthoringError`. a2a treats the
-        returned batch as opaque grounding context (edge ADR D5); it never parses
-        or owns the comment content.
+        returned batch as opaque grounding context; it never parses or owns
+        the comment content.
         """
         return await self.get(f"/v1/feedback-batches/{quote(batch_id, safe='')}")
 

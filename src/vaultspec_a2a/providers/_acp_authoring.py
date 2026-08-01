@@ -138,7 +138,7 @@ class AuthoringToolBinding:
     surface either transport on the pinned stack (S20 registration-scope matrix:
     only user-global home-config servers surface); the stdio bridge instead
     reaches the model by being admitted into the isolated config home as
-    user-global config (``config_home_authoring_entry``, S18), so the transport
+    user-global config (``config_home_authoring_entry``), so the transport
     choice is load-bearing — only the stdio shape rides the home channel.
 
     Parameters

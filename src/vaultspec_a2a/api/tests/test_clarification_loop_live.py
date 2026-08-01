@@ -2,7 +2,7 @@
 
 The sibling of ``control/tests/test_verdict_loop_live.py``: that test closes
 the engine-verdict half of the cross-process resume loop; this one closes the
-a2a-internal clarification half (agent-flow ADR D5), entirely self-contained
+a2a-internal clarification half, entirely self-contained
 (no live engine dependency).
 
 ``test_clarification_endpoint.py`` already proves the real pieces up to the

@@ -1,8 +1,8 @@
 """Read-path retrieval of an engine feedback batch for worker grounding.
 
-The consuming half of the a2a feedback loop (edge ADR D5, feedback-loop ADR D4):
+The consuming half of the a2a feedback loop:
 when a run carries an opaque ``feedback_batch_id`` in graph state (threaded from
-run-start, S11), the worker retrieves the authoritative batch BY ID from the
+run-start), the worker retrieves the authoritative batch BY ID from the
 engine and mounts its comments as grounding context for the writer's revision.
 a2a never owns or parses the batch as state - it reads the content fresh each
 mount pass and renders it into the transient mounted context, exactly as the

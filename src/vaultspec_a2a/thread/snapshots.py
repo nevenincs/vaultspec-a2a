@@ -63,8 +63,8 @@ __all__ = [
 ]
 
 # The interrupt payload's ``type`` discriminator for a mid-run clarification
-# question (agent-flow ADR D5). Named once here so the projection below and
-# any future producer/consumer read the same literal.
+# question. Named once here so the projection below and any future
+# producer/consumer read the same literal.
 CLARIFICATION_REQUEST_INTERRUPT_TYPE = "clarification_request"
 
 # Shared constant — previously duplicated in control/projection.py and
@@ -224,8 +224,8 @@ def clarification_data_from_interrupt(
 
     Returns ``None`` for any interrupt whose type is not
     :data:`CLARIFICATION_REQUEST_INTERRUPT_TYPE`, or whose ``questions`` list
-    contains no readable entry — this is checkpoint-truth disclosure (agent-
-    flow ADR D5(a)): the pending clarification survives a reload from
+    contains no readable entry — this is checkpoint-truth disclosure: the
+    pending clarification survives a reload from
     ``run-status`` alone because it is read from ``ProjectedInterrupt``
     (:func:`project_checkpoint_tuple`), never from in-memory state.
 
@@ -394,8 +394,8 @@ class ClarificationQuestionData:
 class ClarificationRequestData:
     """Layer 1 equivalent of ``_ClarificationRequestSnapshot``.
 
-    A pending mid-run clarification request (agent-flow ADR D5). ``request_id``
-    is the same checkpoint-derived interrupt id every other interrupt
+    A pending mid-run clarification request. ``request_id`` is the same
+    checkpoint-derived interrupt id every other interrupt
     projection uses (:class:`ProjectedInterrupt`), so the respond route's
     ``{run_id}/clarifications/{request_id}/respond`` path segment is exactly
     the id disclosed here.

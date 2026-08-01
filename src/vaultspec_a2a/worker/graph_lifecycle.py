@@ -586,7 +586,7 @@ class GraphLifecycleManager:
     def _build_feedback_reader(self) -> FeedbackContextReader | None:
         """Construct the feedback-batch reader for a research_adr run, or None.
 
-        The read-path companion to the submitter (edge ADR D5, feedback-loop D4):
+        The read-path companion to the submitter:
         on a revision run it retrieves the reviewer's batch by id to ground the
         document writers. Unlike the submitter it is NOT fail-closed - a run
         without a reachable engine simply grounds nothing (best-effort), because a

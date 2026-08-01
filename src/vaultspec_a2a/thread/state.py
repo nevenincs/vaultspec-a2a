@@ -173,7 +173,7 @@ class TeamState(TypedDict):
     # --- SDD blackboard awareness ---
     active_feature: NotRequired[str | None]
     # feedback-loop: the OPAQUE engine feedback-batch id for a revision run. Carried
-    # as an identifier only (edge ADR D5); the authoritative comment content is
+    # as an identifier only; the authoritative comment content is
     # retrieved from the engine batch read route, never owned in this state. None
     # when the run is not feedback-driven.
     feedback_batch_id: NotRequired[str | None]
@@ -247,7 +247,7 @@ class TeamState(TypedDict):
     # interrupt payload. Last-write-wins; a fresh submit overwrites it each phase.
     gate_pending_proposal_id: NotRequired[str | None]
 
-    # --- mid-run clarification (agent-flow ADR D5) ---
+    # --- mid-run clarification ---
     # There is deliberately no question-set field here. Questions reach a run
     # from its preset, resolved by the compiler's declared producer and committed
     # by the request node as clarification_request; nothing infers them from the

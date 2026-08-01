@@ -839,7 +839,7 @@ async def test_run_start_threads_feedback_batch_id_to_worker(
 ) -> None:
     """The opaque feedback_batch_id threads run-start -> metadata -> worker dispatch.
 
-    Feedback-loop carrier (edge ADR D5): a2a transports the opaque id only. The
+    Feedback-loop carrier: a2a transports the opaque id only. The
     run-start body carries it, the gateway folds it onto the run metadata, and the
     dispatch the worker receives carries it verbatim - the same path active_feature
     rides. a2a never parses the id; retrieval is the worker's engine read.

@@ -218,3 +218,38 @@ last being required by its own Step's acceptance condition rather than drift.
   whoever takes the live-proof Step, which has been amended to say so. The
   general lesson generalizes past this lane: for a server-side provider tool,
   absence from the prompt is not evidence of absence from the turn.
+
+### Correction to `unexercisable-trust-root-guards` (2026-08-01, S14 delivery)
+
+The finding as first recorded treated the two seam assertions as one class and
+said neither could be reached by legitimate production input. That is wrong
+about one of them, and the distinction is the whole point.
+
+The construction seam validates that a trust axis was DECLARED - that the key is
+present and boolean. It deliberately does not constrain WHAT was declared. So an
+entry declaring no local-write protection is perfectly constructible, and the
+read-only assertion is the only thing deciding whether such an entry may reach a
+surfacing config. It is enforcement, not redundancy. It cannot fire against
+today's registry solely because the single shipped entry declares protection;
+a second entry declaring otherwise would trip it immediately, with no code change
+and no weakening of the freeze. Deleting it - which the original finding invited
+as an option - would have removed live enforcement of a policy nothing else
+decides.
+
+The egress assertion genuinely is redundant, and remains so: it applies the same
+predicate to the same values the constructor already refused, and with the
+registry now frozen no path exists to introduce an entry after construction. It
+is kept as a cheap backstop against a future second registry or a construction
+path that bypasses the declared seam, and its docstring now says exactly that.
+
+Both are kept, for different reasons, and the module no longer implies the seams
+are the enforcement when the constructor is. The premise was proven rather than
+argued: a test drives the real constructor with an unprotected entry and shows it
+is admitted, which is what makes the reachability claim checkable instead of
+asserted. No injection parameter and no registry patching were introduced to
+force the guard end-to-end - both were considered and refused when the original
+finding was recorded, and that refusal was honoured.
+
+Recorded as a correction rather than an edit because the original was authored by
+this campaign. A finding that conflates two mechanisms is the same defect class
+as code that does, and it is worth the same visibility.

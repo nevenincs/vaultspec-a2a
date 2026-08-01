@@ -4,7 +4,7 @@ tags:
   - '#repository-tooling-hardening'
 date: '2026-07-19'
 modified: '2026-08-01'
-body_hash: 'sha256:5112fedb60fc4a94f2dbdc7918667460e99ac007b3c3d6803734add343039066'
+body_hash: 'sha256:17f87cccec1345cdbb8dfada0d138ad69ef6f182def9ee0efc4a3208e34db2ef'
 tier: L3
 related:
   - '[[2026-07-19-repository-tooling-hardening-adr]]'
@@ -124,7 +124,7 @@ Reduce Ty and Basedpyright debt in independent Terra-owned domains while preserv
 
 Repair portable typing and shared test-helper contracts before fan-out consumers.
 
-- [ ] `W06.P11.S19` - Repair the Ty portability tranche for Windows-only ctypes and generic-length access.; `src/vaultspec_a2a/control/tests/test_spawn_containment_ownership.py, src/vaultspec_a2a/streaming/tests/test_sse_frames.py, src/vaultspec_a2a/utils/process.py`.
+- [x] `W06.P11.S19` - Repair the Ty portability tranche for Windows-only ctypes and generic-length access.; `src/vaultspec_a2a/control/tests/test_spawn_containment_ownership.py, src/vaultspec_a2a/streaming/tests/test_sse_frames.py, src/vaultspec_a2a/utils/process.py`.
 - [ ] `W06.P11.S20` - Type the health-instrument boundary without suppressions and preserve its measured-result contract.; `dev/health/report.py`.
 - [ ] `W06.P11.S21` - Establish typed API test-fixture contracts before repairing dependent API tests.; `src/vaultspec_a2a/api/tests/conftest.py`.
 - [ ] `W06.P11.S22` - Repair the API endpoint test partition against the typed fixture contract.; `src/vaultspec_a2a/api/tests/test_endpoints.py`.

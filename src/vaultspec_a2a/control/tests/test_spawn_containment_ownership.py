@@ -93,10 +93,12 @@ def _open_handle_count() -> int:
     The direct measure of the leaked resource: a job object that is never closed
     is one more handle held by the gateway process for the rest of its life.
     """
+    if sys.platform != "win32":
+        raise RuntimeError("Windows handle counts are unavailable")
     import ctypes
-    from ctypes import wintypes
+    from ctypes import WinDLL, get_last_error, wintypes
 
-    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel32 = WinDLL("kernel32", use_last_error=True)
     kernel32.GetCurrentProcess.restype = wintypes.HANDLE
     kernel32.GetProcessHandleCount.restype = wintypes.BOOL
     kernel32.GetProcessHandleCount.argtypes = (
@@ -107,7 +109,7 @@ def _open_handle_count() -> int:
     if not kernel32.GetProcessHandleCount(
         kernel32.GetCurrentProcess(), ctypes.byref(count)
     ):
-        raise OSError(ctypes.get_last_error())
+        raise OSError(get_last_error())
     return int(count.value)
 
 

@@ -470,8 +470,10 @@ def _tcp_table_rows(family: int) -> list[tuple[int, int, int]]:
     Raises ``OSError`` when ``iphlpapi`` cannot be loaded or the table cannot be
     fetched, so an unavailable API is never mistaken for an empty table.
     """
+    if sys.platform != "win32":
+        raise OSError("the extended TCP table is Windows-only")
     import ctypes
-    from ctypes import wintypes
+    from ctypes import WinDLL, wintypes
 
     class _MibTcpRowOwnerPid(ctypes.Structure):
         _fields_ = (
@@ -499,7 +501,7 @@ def _tcp_table_rows(family: int) -> list[tuple[int, int, int]]:
         _MibTcpRowOwnerPid if family == _AF_INET else _MibTcp6RowOwnerPid
     )
     try:
-        iphlpapi = ctypes.WinDLL("iphlpapi", use_last_error=True)
+        iphlpapi = WinDLL("iphlpapi", use_last_error=True)
         get_table = iphlpapi.GetExtendedTcpTable
     except (AttributeError, OSError) as exc:
         raise OSError(f"iphlpapi.GetExtendedTcpTable is unavailable: {exc}") from exc

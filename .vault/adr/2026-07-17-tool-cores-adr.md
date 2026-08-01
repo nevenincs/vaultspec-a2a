@@ -3,14 +3,15 @@ tags:
   - '#adr'
   - '#tool-cores'
 date: '2026-07-17'
-modified: '2026-07-18'
-body_hash: 'sha256:4ce205dc94d5c883479a5f44cb9a939fdb60ba441bbff1d8b9a0a3e14b63fa57'
+modified: '2026-08-01'
+body_hash: 'sha256:d2f2ee8a17e4cfcb649b8f952df90357d7cc9ff72e01bd897b7155b25133ed87'
 related:
-  - "[[2026-07-17-tool-cores-research]]"
-  - "[[2026-07-15-agent-harness-provisioning-adr]]"
-  - "[[2026-07-14-a2a-edge-conformance-adr]]"
-  - "[[2026-07-15-graph-agent-framework-harness-adr]]"
-  - "[[2026-07-15-graph-agent-framework-harness-plan]]"
+  - '[[2026-07-17-tool-cores-research]]'
+  - '[[2026-08-01-tool-cores-web-grounding-research]]'
+  - '[[2026-07-15-agent-harness-provisioning-adr]]'
+  - '[[2026-07-14-a2a-edge-conformance-adr]]'
+  - '[[2026-07-15-graph-agent-framework-harness-adr]]'
+  - '[[2026-07-15-graph-agent-framework-harness-plan]]'
 ---
 # `tool-cores` adr: `read-only grounding tools for graph document agents` | (**status:** `accepted`)
 
@@ -260,3 +261,81 @@ declared read-only harness set PLUS at most the run's own authoring bridge, admi
 its guarded channel"; the session-injected copy remains the upstream re-arm channel (P05.S22).
 
 Amendment (2026-07-18, third S20 live drive): the isolated-config-home surfacing finding is refined by a decisive adapter-path discriminator. With everything a2a-side provably correct (should_isolate true, home written, ENABLE_TOOL_SEARCH=0, allowed_tools complete, bridge serving), the declared servers STILL did not surface to the model through the ACP-adapter path (`claude-agent-acp@0.59.0` -> `claude-agent-sdk` sdk.mjs spawning `claude` with `--mcp-config` + `--setting-sources`), while the SAME home config surfaces fine via a direct `claude -p`. The adapter path honours a different registration scope than the CLI's own user-scope home read: session/`--mcp-config` servers CONNECT but do not surface, and the user-global `CLAUDE_CONFIG_DIR` home is NOT honoured for tool surfacing - but PROJECT-scope `.mcp.json` (collected from every ancestor directory of the run cwd, `${VAR}`-expanded from the process environment - binary-verified - and auto-approved non-interactively) DOES surface. The surfacing invariant is therefore refined: on the adapter path the isolated home's proven function is SUPPRESSION, not surfacing; surfacing is delivered by PROJECTING the declared set (harness servers + the run's authoring bridge, same placeholder-env specs) into the run workspace's own `.mcp.json`, guarded by a signature marker (never clobber a foreign file). The home's role is refined to a per-scope governor: `enabledMcpjsonServers` pins the projected declared set ON, `enableAllProjectMcpServers:false` plus an ANCESTOR-WALKING `disabledMcpjsonServers`/`permissions.deny` (walking `.mcp.json` to the FILESYSTEM ROOT, minus the declared set) pins every other project-scope server OFF - closing the confirmed repo-root ancestor leak (a `vaultspec-core` `.mcp.json` above the run workspace granted the coder real write tools). The zero-secret-on-disk and read-only-write-path invariants are unchanged: the projected file carries only `${VAR}` placeholders, and no write-capable server is ever projected. Implemented as `2026-07-18` task #43 (branch `mcp-projection`); the live channel proof and the per-scope `--debug` forensic probe are owed follow-ups.
+
+## Amendment - outbound web grounding (2026-08-01, provider-native)
+
+Grounding gains a FOURTH leg. The original record scoped this decision to
+internal sources - the vault, the codebase, and the workspace filesystem - and
+delivered them over one closed server registry. That scope no longer covers the
+need: document agents authoring in 2026 must reach material that postdates any
+model's training and lives on no local disk. This amendment extends the same
+decision to outbound grounding rather than opening a second record, because the
+agents, the roles, the composition seams, and the read-only discipline are
+unchanged; only the reach is new. Evidence lives in
+`2026-08-01-tool-cores-web-grounding-research`.
+
+**No vendor, no key, no registry entry.** Every provider lane already ships
+first-party web capability licensed under the subscription that already
+authenticates the run. Reaching parity with what the CLIs natively do is
+therefore a permission-and-configuration change over seams that already exist,
+not an acquisition. A third-party search server was considered and rejected: it
+would add a credential plane, a vendor dependency, and a per-call cost to buy a
+capability the lanes already have. The closed registry stays closed and gains
+nothing.
+
+**Delivery reproduces the existing leg asymmetry exactly.** The Claude and Z.ai
+lanes union the CLI's native `WebSearch` and `WebFetch` into the session's
+exact-name allowlist, the same mechanism and the same function shape that
+already admits `Read`, `Grep`, and `Glob`; the Gemini lane does likewise with
+`google_web_search` and `web_fetch`. The Codex lane has no allowlistable tool
+name for this and instead carries a configuration feature in the per-run config
+home already threaded for its MCP entries. The capability is shared, the
+serialization differs - the same split this record already draws between its
+first two legs.
+
+**Scope: every document-authoring role, autonomous runs only.** Web grounding
+follows the read floor exactly, reusing the same role predicate rather than
+introducing per-role composition, which this record still defers. Human-in-the-
+loop runs are untouched and keep their permission prompts, so the interrupt
+already gates outbound reach there without further work. The narrower
+researcher-only scoping was considered and set aside: synthesis and review
+ground on the same material discovery surfaces, and a split would have bought a
+schema extension to express a boundary the roles do not actually observe.
+
+**Codex runs live retrieval.** Its cached mode - a provider-maintained index
+with no outbound request at all - was considered and rejected as the default
+despite being the safer posture, because a lane that silently answers from a
+stale index while its siblings read the live web breaks the parity this
+amendment exists to establish. Divergent freshness across lanes is a correctness
+hazard in a multi-provider graph, not a conservative default. The mode is
+configuration, so a deployment that wants the cached posture can take it.
+
+**The trust-root marker splits into two axes.** `read_only` asserts that an
+entry does not write locally, and it is asserted fail-loud so a drifted entry
+cannot be silently surfaced. A fetch capability satisfies that marker completely
+while remaining able to carry workspace content outward in a URL: local write
+and network reach are independent properties, and only the first was expressed.
+A `network_reach` axis is added beside it, unsafe-by-omission on the same
+fail-loud terms, so every present and future entry must declare whether it
+egresses rather than having that property inferred from silence.
+
+**The exposure is named rather than mitigated away.** The framework's own
+security guidance is explicit that retrieved content shares the context window
+with the system prompt, that models may follow instructions embedded in it, and
+that no prompt or delimiter strategy fully prevents this; the provider's own
+fetch documentation warns that enabling fetch where a model processes untrusted
+input alongside sensitive data poses a data-exfiltration risk. Both are accepted
+here as residual rather than solved. Two structural properties bound them: the
+fetch tool retrieves only URLs a user supplied or that a prior search returned,
+so it is not a general outbound client, and the `.vault` write deny remains in
+force, so retrieved text cannot become a vault document without traversing the
+authoring API and a human review. Domain allowlisting exists as a first-party
+control on the fetch surface and is the designated escalation if a deployment
+needs a tighter boundary than the run's own trust assumption.
+
+**Consequence.** A researcher can now ground on material that postdates the
+model, which is the capability the graph was missing; the same reach becomes
+available to every autonomous document role, and untrusted external text now
+enters the context window of agents that author records humans later rely on.
+That trade is deliberate, and the mitigation that carries it is the one already
+in place: nothing an agent authors reaches the vault without a human applying it.

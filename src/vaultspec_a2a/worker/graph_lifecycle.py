@@ -7,6 +7,7 @@ orchestration logic in ``Executor``.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from collections import OrderedDict
 from pathlib import Path
@@ -240,7 +241,7 @@ class GraphLifecycleManager:
         async with ws_span("executor.compile_graph", thread_id=req.thread_id) as span:
             span.set_attribute("team_preset", team_preset)
             try:
-                graph = self._compile_graph(req)
+                graph = await self._compile_graph(req)
                 span.add_event("graph_compiled")
             except Exception as exc:
                 logger.exception(
@@ -284,11 +285,14 @@ class GraphLifecycleManager:
     # Graph compilation
     # ------------------------------------------------------------------
 
-    def _compile_graph(self, req: DispatchRequest) -> CompiledStateGraph:
+    async def _compile_graph(self, req: DispatchRequest) -> CompiledStateGraph:
         """Load team/agent configs and compile a LangGraph ``StateGraph``.
 
         Uses the same two-level config discovery order as the monolith:
-        workspace override then bundled preset.
+        workspace override then bundled preset. ``async`` only because it may
+        await ``_build_proposal_submitter``/``_build_authoring_binding_provider``
+        below, which offload the engine-discovery retry loop off this event
+        loop; everything else here is synchronous config/compile work.
         """
         ws_root = Path(req.workspace_root).resolve() if req.workspace_root else None
 
@@ -342,7 +346,7 @@ class GraphLifecycleManager:
         proposal_submitter = None
         feedback_reader = None
         if team_config.topology.type == "research_adr":
-            proposal_submitter = self._build_proposal_submitter()
+            proposal_submitter = await self._build_proposal_submitter()
             feedback_reader = self._build_feedback_reader()
 
         # CLI-coder presets that arm the engine authoring bridge get a per-run
@@ -353,7 +357,7 @@ class GraphLifecycleManager:
         authoring_binding_provider = None
         harness = team_config.effective_harness()
         if harness is not None and harness.authoring_bridge:
-            authoring_binding_provider = self._build_authoring_binding_provider()
+            authoring_binding_provider = await self._build_authoring_binding_provider()
 
         # Compile gate (agent-harness-provisioning isolation invariant): an ARMED
         # preset - one declaring the authoring bridge OR harness MCP servers - can
@@ -397,7 +401,7 @@ class GraphLifecycleManager:
             model_assignment=req.model_assignment,
         )
 
-    def _build_proposal_submitter(self) -> DocumentProposalSubmitter:
+    async def _build_proposal_submitter(self) -> DocumentProposalSubmitter:
         """Construct the production authoring submitter for a research_adr run.
 
         Fails closed at build time: a research_adr run whose engine origin cannot
@@ -425,9 +429,15 @@ class GraphLifecycleManager:
         # Bounded poll, not a one-shot probe: the engine has measured multi-
         # second stall windows (scope-watcher rebuilds) during which a single
         # 3s /health probe misses a healthy engine and would truthfully fail a
-        # run that succeeds seconds later. Blocking is acceptable here - this
-        # path already blocks for the heavy graph compile itself.
-        engine = resolve_engine_with_retry()
+        # run that succeeds seconds later. Offloaded via to_thread rather than
+        # made async in place: resolve_engine_with_retry is a plain blocking
+        # function (time.sleep + a sync httpx probe, by its own design, reused
+        # by non-async callers too) and this is the one call site that runs on
+        # a live event loop — a worker's own step_timeout and the S37 ingest
+        # stall watchdog exist precisely because a blocking call here used to
+        # freeze the whole worker (heartbeats included) for the full retry
+        # window on every first compile of a preset+workspace cache key.
+        engine = await asyncio.to_thread(resolve_engine_with_retry)
         if engine is None:
             raise EngineUnavailableError(
                 "research_adr run requires a reachable authoring engine to submit "
@@ -459,7 +469,7 @@ class GraphLifecycleManager:
             },
         )
 
-    def _build_authoring_binding_provider(self) -> AuthoringBindingProvider:
+    async def _build_authoring_binding_provider(self) -> AuthoringBindingProvider:
         """Construct the per-run authoring-bridge binding provider for a coding run.
 
         Fails closed at build time exactly like the submitter: a bridged run whose
@@ -468,12 +478,14 @@ class GraphLifecycleManager:
         the compile guard. The provider reads the run's per-role tokens from this
         worker's :class:`RunTokenStore` at binding time and caches the engine
         catalog once per run in the shared :class:`RunCatalogStore`, so every
-        worker in the run shares one fetch.
+        worker in the run shares one fetch. Offloaded via ``to_thread`` for the
+        same reason as ``_build_proposal_submitter``: ``resolve_engine_with_retry``
+        blocks with ``time.sleep``, and this runs on a live worker event loop.
         """
         from ..authoring import EngineUnavailableError, resolve_engine_with_retry
         from .authoring_binding import AuthoringBindingProvider
 
-        engine = resolve_engine_with_retry()
+        engine = await asyncio.to_thread(resolve_engine_with_retry)
         if engine is None:
             raise EngineUnavailableError(
                 "authoring_bridge run requires a reachable engine to fetch the "

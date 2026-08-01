@@ -509,7 +509,9 @@ async def test_supervisor_resume_clears_stale_routing_error_after_approval() -> 
     first = await graph.ainvoke(state, config=config)
     assert "__interrupt__" in first
 
-    resumed = await graph.ainvoke(Command(resume={"approved": True}), config=config)
+    resumed = await graph.ainvoke(
+        Command(resume={"verdict": "approved"}), config=config
+    )
     assert resumed["next"] == "vaultspec-coder"
     assert resumed["current_plan"] == [
         {"content": "Route to vaultspec-coder", "status": "in_progress"}
@@ -548,7 +550,9 @@ async def test_supervisor_rejection_clears_consumed_approval_request_id() -> Non
     first = await graph.ainvoke(state, config=config)
     assert "__interrupt__" in first
 
-    resumed = await graph.ainvoke(Command(resume={"approved": False}), config=config)
+    resumed = await graph.ainvoke(
+        Command(resume={"verdict": "rejected"}), config=config
+    )
     assert resumed["next"] == "vaultspec-plan-author"
     assert resumed["approval_status"] == "rejected"
     assert "approval_request_id" in resumed
@@ -607,10 +611,51 @@ async def test_supervisor_rejection_replaces_stale_current_plan() -> None:
     first = await graph.ainvoke(state, config=config)
     assert "__interrupt__" in first
 
-    resumed = await graph.ainvoke(Command(resume={"approved": False}), config=config)
+    resumed = await graph.ainvoke(
+        Command(resume={"verdict": "rejected"}), config=config
+    )
     assert resumed["next"] == "vaultspec-plan-author"
     assert resumed["active_agent"] == "vaultspec-plan-author"
     assert resumed["current_plan"] == [
         {"content": "Route to vaultspec-plan-author", "status": "in_progress"}
     ]
+    assert resumed["approval_status"] == "rejected"
+
+
+@pytest.mark.asyncio
+async def test_plan_approval_node_no_longer_accepts_retired_approved_boolean() -> None:
+    """The plan gate speaks the verdict vocabulary now (D6) — the legacy
+    ``{"approved": bool}`` resume shape is retired, not bridged. A resume in
+    that shape carries no ``"verdict"`` key, so it parses to ``(None, None)``
+    and fails closed to revision exactly like any other unrecognised payload,
+    rather than being read as an approval.
+    """
+    model = _StaticSupervisorModel("vaultspec-coder")
+    node = create_supervisor_node(
+        model=model,
+        system_prompt="You are a supervisor.",
+        workers=["vaultspec-plan-author", "vaultspec-coder"],
+        worker_phase_map={"vaultspec-plan-author": "plan", "vaultspec-coder": "exec"},
+        autonomous=False,
+    )
+
+    graph = _build_approval_graph(
+        node,
+        ["vaultspec-plan-author", "vaultspec-coder"],
+        {"vaultspec-plan-author": "plan", "vaultspec-coder": "exec"},
+    )
+    config: RunnableConfig = {
+        "configurable": {"thread_id": "test-supervisor-retired-boolean-shape"}
+    }
+
+    state = _make_state_for_plan_approval(
+        vault_index={"plan": [".vault/plan/plan.md"]},
+    )
+
+    first = await graph.ainvoke(state, config=config)
+    assert "__interrupt__" in first
+
+    # The retired shape used to mean "approved". It must not any more.
+    resumed = await graph.ainvoke(Command(resume={"approved": True}), config=config)
+    assert resumed["next"] == "vaultspec-plan-author"
     assert resumed["approval_status"] == "rejected"

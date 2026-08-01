@@ -2631,6 +2631,18 @@
             "maxLength": 64,
             "minLength": 1,
             "title": "Option Id"
+          },
+          "notes": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 2048
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Notes"
           }
         },
         "additionalProperties": false,
@@ -2639,7 +2651,7 @@
           "option_id"
         ],
         "title": "RunPermissionRespondRequest",
-        "description": "Answer one permission request raised by a run.\n\nCarries only the chosen option. The options themselves were advertised on\nthe versioned progress stream in the ``permission_request`` frame that\nraised the question, so the answer names one rather than restating it."
+        "description": "Answer one permission request raised by a run.\n\nCarries the chosen option and, optionally, a reviewer comment. The options\nthemselves were advertised on the versioned progress stream in the\n``permission_request`` frame that raised the question, so the answer names\none rather than restating it. ``notes`` survives into the verdict resume\npayload for a locally-respondable verdict-style pause (D6); it is ignored\nfor a plain tool-permission response, which resumes on the bare option id."
       },
       "RunPermissionRespondResponse": {
         "properties": {

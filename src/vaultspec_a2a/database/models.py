@@ -131,6 +131,13 @@ class ThreadModel(Base):
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     repair_status: Mapped[str] = mapped_column(default="healthy")
     repair_reason: Mapped[str | None] = mapped_column(Text, default=None)
+    # The capped, single-line reason a run last transitioned to FAILED, or None
+    # for a run that never failed (and cleared by nothing — a run is terminal
+    # exactly once, so this is write-once per thread). Durable counterpart to
+    # the non-authoritative SSE relay's error_detail (012840a4): a reloaded
+    # panel reads run-status alone, never the live stream, so without this
+    # column it recovered a bare "failed" with no reason.
+    failure_reason: Mapped[str | None] = mapped_column(Text, default=None)
     execution_readiness: Mapped[str] = mapped_column(default="healthy")
     approval_status: Mapped[str | None] = mapped_column(default=None)
     approval_request_id: Mapped[str | None] = mapped_column(default=None)

@@ -183,3 +183,14 @@ def test_authoring_bridge_stdio_entrypoint_keeps_stdout_clean(tmp_path: Path) ->
     assert "missing required engine env vars" in p.stderr
     assert not _has_log_json_on_stdout(p.stdout)
     assert p.stdout.strip() == ""
+
+
+def test_cli_group_configures_cli_lane() -> None:
+    from ...cli.main import main as cli
+
+    # The group callback is the entrypoint's logging-wiring site; run it directly.
+    cli.callback()  # type: ignore[misc]
+    root = logging.getLogger()
+    assert root.level == logging.WARNING
+    assert any(getattr(h, "stream", None) is sys.stderr for h in root.handlers)
+    assert not any(getattr(h, "stream", None) is sys.stdout for h in root.handlers)

@@ -16,9 +16,14 @@ by accident - through an unresolvable provider string, say - would surface an
 outward-reaching tool to a headless agent with no prompt in front of it.
 
 A second, independent lock sits behind this one and is proven elsewhere: a native
-tool name that has not declared its network-egress axis is refused at the
-composition seam, so even a proof naming ``WebSearch`` today could not put it in an
-allowlist (``providers/tests/test_acp_mcp_egress_axis.py``).
+tool name that has not declared its network-egress axis - and, by the same
+declaration held in step with it, its usage bounds - is refused at the composition
+seam, so no built-in reaches an allowlist on an unstated reach
+(``providers/tests/test_acp_mcp_egress_axis.py``). The web built-ins have now made
+that declaration, which is what makes THIS module the load-bearing gate: nothing
+but the empty lane declaration stands between a document role and outward reach,
+and what the seam does once a lane earns its proof is proven separately
+(``test_worker_web_tool_composition.py``).
 """
 
 from __future__ import annotations

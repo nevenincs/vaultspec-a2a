@@ -947,6 +947,17 @@ class AcceptanceHarness:
         re-queues NOT-YET-APPLYING system approvals for human review; an
         already-applied changeset is past that seam and is never disturbed
         (engine `modes.rs` `requeue_system_approvals` gates on Approved heads).
+
+        D7 verification (approval-shape-reconciliation ADR, 2026-08-01): the
+        operator alone sets the engine's operation mode is a PRESERVED
+        property, not a gap this project fills. A repo-wide grep for
+        ``/v1/mode`` and ``set_operation_mode`` outside this module found
+        exactly two call sites, both test-only: this method, and
+        ``test_s20_solo_coder_bridge_live.py``'s reuse of it via the shared
+        :class:`AcceptanceHarness`. No `api/`, `control/`, `graph/`, or
+        `providers/` code calls the mode-setting endpoint. This method is
+        therefore the SOLE sanctioned caller; a new production call site would
+        need its own decision record per the ADR's own consequence.
         """
         result = await ec.post_command(
             "/v1/mode",

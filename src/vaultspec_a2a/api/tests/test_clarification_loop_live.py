@@ -25,7 +25,7 @@ recorded stub call.
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 
 import anyio
 import httpx
@@ -33,13 +33,15 @@ import pytest
 from fastapi import FastAPI, Request
 from fastapi.responses import Response
 from httpx import ASGITransport
-from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
 from ...worker.app import create_worker_app
 from ...worker.executor import Executor
 from ...worker.ipc import WorkerBridge
 from .conftest import make_app
 from .test_clarification_endpoint import _clarification_graph, _park_clarification
+
+if TYPE_CHECKING:
+    from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
 _BUNDLE_FREE_PRESET = "mock-success-single"
 _CACHE_KEY = ("clarification-loop-live", None, False)
@@ -155,7 +157,9 @@ async def test_respond_resumes_through_a_real_worker_and_executor(
                         break
                     await anyio.sleep(0.05)
 
-            assert snap.values["clarification_answers"] == {"provider": "codex"}
+            assert snap.values["clarification_answers"] == {
+                request_id: {"provider": "codex"}
+            }
             assert snap.next == (), "the graph did not reach its terminal state"
 
 
@@ -191,6 +195,6 @@ async def test_reject_short_circuits_before_touching_the_real_worker(
             json={"answers": {"scope": "graph/nodes/clarification.py"}},
         )
 
-    assert resp.status_code == 409
+    assert resp.status_code == 422
     assert "provider" in resp.json()["detail"]
     assert worker.dispatches == []

@@ -326,6 +326,10 @@ class EventAggregator:
     def cancel_thread(self, thread_id: str) -> None:
         self._ingest.cancel_thread(thread_id)
 
+    def take_failure_reason(self, thread_id: str) -> str | None:
+        """Pop and return the reason ``thread_id``'s last FAILED ingest ended with."""
+        return self._ingest.take_failure_reason(thread_id)
+
     async def ingest(
         self,
         thread_id: str,

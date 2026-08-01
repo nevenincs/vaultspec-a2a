@@ -26,6 +26,7 @@ if TYPE_CHECKING:
 __all__ = [
     "CHECKPOINT_ERROR_REPAIR_MAP",
     "CLARIFICATION_REQUEST_INTERRUPT_TYPE",
+    "LOCALLY_RESPONDABLE_PAUSE_CAUSES",
     "PLAN_APPROVAL_PAUSE_CAUSES",
     "TERMINAL_STATUS_MAP",
     "WIRE_EVENT_TYPE_KEYS",
@@ -69,10 +70,13 @@ CLARIFICATION_REQUEST_INTERRUPT_TYPE = "clarification_request"
 # Shared constant — previously duplicated in control/projection.py and
 # control/event_handlers.py.
 # Verdict-style approval-gate pause causes (as opposed to tool permission pauses):
-# the FSM treats these as an approval whose resolution carries an approval_status
-# and whose resume value is a verdict, not a tool option. Both the execution
-# plan-approval gate and the document phase gates
-# park with this shape, so the document gate is classified here too.
+# the FSM and the served projection classify a pause here whenever its
+# resolution carries an approval_status rather than a bare tool option. This is
+# a CLASSIFICATION set, not an answerability set — the execution plan-approval
+# gate and the document phase gates both park with this shape, so both are
+# classified here, but that says nothing about who may ANSWER a document pause
+# (see LOCALLY_RESPONDABLE_PAUSE_CAUSES below). Consumed by projection.py,
+# permission_fsm.py, and thread_service.py.
 PLAN_APPROVAL_PAUSE_CAUSES: frozenset[str] = frozenset(
     {
         PermissionType.PLAN_APPROVAL.value,
@@ -80,6 +84,16 @@ PLAN_APPROVAL_PAUSE_CAUSES: frozenset[str] = frozenset(
         "document_approval_request",
     }
 )
+
+# The subset of PLAN_APPROVAL_PAUSE_CAUSES this repository's own respond route
+# may resolve. Excludes "document_approval_request": that pause is decided
+# solely by the engine review surface, correlated back into the run by the
+# verdict subscriber (the amended a2a-orchestration-edge contract: no second
+# approval authority in A2A). Consumed only by control/permission_service.py's
+# respond-route gating.
+LOCALLY_RESPONDABLE_PAUSE_CAUSES: frozenset[str] = PLAN_APPROVAL_PAUSE_CAUSES - {
+    "document_approval_request"
+}
 
 # Map aggregator outcome strings to ThreadStatus enum values.
 TERMINAL_STATUS_MAP: dict[str, str] = {
@@ -457,6 +471,12 @@ class ThreadStateData:
     pause_cause: str | None = None
     approval_status: str | None = None
     approval_request_id: str | None = None
+    # The capped, single-line reason this run last failed, or None (never
+    # failed, or the durable record predates the failure_reason column).
+    # Sourced straight from the durable threads.failure_reason column — never
+    # from a live SSE frame — so a reloaded panel recovers the same reason a
+    # connected client already saw (S37 / failure-reason persistence).
+    failure_reason: str | None = None
 
 
 # ---------------------------------------------------------------------------

@@ -13,11 +13,10 @@ ASGI app. No mocks: the worker is a real FastAPI app served over
 from __future__ import annotations
 
 import asyncio
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 
 from fastapi.testclient import TestClient
 from langchain_core.messages import HumanMessage
-from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from langgraph.graph import END, START, StateGraph
 
 from ...graph.nodes.clarification import (
@@ -33,19 +32,10 @@ from ...thread.clarification import (
 from ...thread.state import TeamState
 from .conftest import make_app
 
+if TYPE_CHECKING:
+    from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
+
 _BUNDLE_FREE_PRESET = "mock-success-single"
-
-_QUESTIONS = [
-    {
-        "id": "provider",
-        "prompt": "Which provider should author the plan?",
-        "kind": "choice",
-        "options": ["codex", "zai"],
-        "required": True,
-    },
-    {"id": "scope", "prompt": "Which module should this target?", "kind": "text"},
-]
-
 
 async def _produce_questions(_: TeamState) -> ClarificationRequest:
     """Provide the concrete questionnaire for this real graph exercise."""
@@ -162,7 +152,11 @@ class TestClarificationRoundTrip:
         dispatch = worker.dispatches[0]
         assert dispatch["action"] == "resume"
         assert dispatch["thread_id"] == thread_id
-        assert dispatch["option_id"] == {"provider": "codex"}
+        assert dispatch["option_id"] == {
+            "type": "clarification_response",
+            "request_id": request_id,
+            "answers": {"provider": "codex"},
+        }
 
     def test_reload_recovery_from_status_disclosure_alone(
         self, session_factory, checkpointer
@@ -174,7 +168,7 @@ class TestClarificationRoundTrip:
         proof: authoritative disclosure survives a fresh read with no relay
         frame and no prior request in scope.
         """
-        app1, _agg1, worker1, _cp1 = make_app(session_factory, checkpointer)
+        app1, _agg1, _worker1, _cp1 = make_app(session_factory, checkpointer)
         with TestClient(app1, raise_server_exceptions=True) as client1:
             create_resp = client1.post(
                 "/v1/runs",
@@ -224,7 +218,7 @@ class TestClarificationRoundTrip:
                 json={"answers": {"scope": "graph/nodes/clarification.py"}},
             )
 
-        assert resp.status_code == 409
+        assert resp.status_code == 422
         assert "provider" in resp.json()["detail"]
         assert worker.dispatches == []
 
@@ -251,7 +245,7 @@ class TestClarificationRoundTrip:
                 json={"answers": {"provider": "not-a-real-provider"}},
             )
 
-        assert resp.status_code == 409
+        assert resp.status_code == 422
         assert worker.dispatches == []
 
     def test_respond_to_unknown_request_id_is_not_found_or_conflict(
@@ -273,7 +267,7 @@ class TestClarificationRoundTrip:
                 json={"answers": {"provider": "codex"}},
             )
 
-        assert resp.status_code == 409
+        assert resp.status_code == 404
         assert worker.dispatches == []
 
     def test_respond_extra_answer_field_is_forbidden_by_the_wire_schema(

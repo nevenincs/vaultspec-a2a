@@ -12,6 +12,7 @@ from typing import Any
 
 from langgraph.types import Command
 
+from ..domain_config import domain_config
 from ..graph.enums import AgentLifecycleState
 from ..graph.protocols import NullTelemetryHook, TelemetryHook
 from ..thread.enums import ThreadStatus
@@ -25,6 +26,8 @@ from .transformer import (
     process_langgraph_event,
 )
 
+__all__ = ["IngestManager", "IngestStallTimeoutError"]
+
 logger = logging.getLogger(__name__)
 
 # Bounds how much of a caught exception's own text reaches a client-visible
@@ -33,6 +36,25 @@ logger = logging.getLogger(__name__)
 # an SSE frame. The full exception is always logged in full via
 # ``logger.exception`` above regardless of this cap.
 _MAX_INGEST_ERROR_MESSAGE_LEN = 500
+
+
+class IngestStallTimeoutError(TimeoutError):
+    """Raised when ``astream_events`` produces no new event within the stall budget.
+
+    S37: a run whose graph genuinely wedges mid-turn (observed live: the
+    ground/clarification interrupt path, cause still under investigation)
+    previously hung the ingest coroutine forever — no exception, no log line,
+    no checkpoint, the thread stuck ``running`` indefinitely with nothing to
+    show an operator or a reloaded panel why. LangGraph's own per-step
+    ``step_timeout`` (``graph.step_timeout``, set from the team TOML) is
+    supposed to bound exactly this, but did not fire across the observed
+    incidents, so this is an independent, unconditional outer bound: it does
+    not trust the graph's own internal timeout to save it. A ``TimeoutError``
+    subclass so it is caught by the SAME ``isinstance(exc, TimeoutError)``
+    branch below as LangGraph's own step_timeout by default; ``ingest()``
+    checks for this MORE SPECIFIC type first so the reported reason names the
+    stall (not a generic step_timeout) whenever this is the one that fired.
+    """
 
 
 def _summarize_ingest_exception(exc: BaseException) -> str:
@@ -72,6 +94,14 @@ class IngestManager:
         self._ingest_queues: dict[str, asyncio.Queue[dict[str, Any] | None]] = {}
         # Per-thread fan-out tasks
         self._fanout_tasks: dict[str, asyncio.Task[None]] = {}
+        # The capped, single-line reason the most recent FAILED ingest for a
+        # thread ended with (S37 / failure-reason persistence). Populated
+        # alongside every FAILED outcome branch in ``ingest()``; the caller
+        # (Executor._settle_run) consumes it via ``take_failure_reason`` right
+        # after reading the outcome string, so it never outlives the run it
+        # describes and never leaks across an unrelated later thread reusing
+        # the same dict key.
+        self._failure_reasons: dict[str, str] = {}
 
     # ------------------------------------------------------------------
     # Thread cancellation
@@ -103,9 +133,19 @@ class IngestManager:
         """Purge ingest-owned state scoped to ``thread_id``."""
         self._cancel_events.pop(thread_id, None)
         self._ingest_queues.pop(thread_id, None)
+        self._failure_reasons.pop(thread_id, None)
         task = self._fanout_tasks.pop(thread_id, None)
         if task is not None:
             task.cancel()
+
+    def take_failure_reason(self, thread_id: str) -> str | None:
+        """Pop and return the reason ``thread_id``'s last FAILED ingest ended with.
+
+        ``None`` when the thread never failed (or its reason was already
+        consumed) — the caller's default, never-durably-record-anything
+        behaviour is unchanged when there is nothing to report.
+        """
+        return self._failure_reasons.pop(thread_id, None)
 
     # ------------------------------------------------------------------
     # LangGraph graph ingest (research §1.3)
@@ -127,17 +167,39 @@ class IngestManager:
         cancel_event = self._get_cancel_event(thread_id)
         _is_interrupt = False
         _outcome = ThreadStatus.COMPLETED
+        stall_timeout = domain_config.ingest_event_stall_timeout_seconds
         with self._telemetry.start_span(
             "aggregator.ingest",
             thread_id=thread_id,
             agent_id=agent_id,
         ) as span:
             try:
-                async for raw_event in graph.astream_events(
+                # Bounded manual iteration, not `async for`: a plain `async for`
+                # trusts astream_events to eventually yield, raise, or exhaust on
+                # its own. S37 observed a real run wedge silently inside this
+                # exact loop — no event, no exception, no log line, forever — with
+                # LangGraph's own per-step `step_timeout` never firing to save it.
+                # Wrapping each `__anext__()` in `wait_for` makes "no progress for
+                # stall_timeout seconds" itself a caught, classified, reported
+                # failure instead of an invisible hang, regardless of whether that
+                # root cause is ever found.
+                event_stream = graph.astream_events(
                     graph_input,
                     config,
                     version="v2",
-                ):
+                ).__aiter__()
+                while True:
+                    try:
+                        raw_event = await asyncio.wait_for(
+                            event_stream.__anext__(), timeout=stall_timeout
+                        )
+                    except StopAsyncIteration:
+                        break
+                    except TimeoutError as exc:
+                        raise IngestStallTimeoutError(
+                            f"Ingest stalled: no event from the graph for over "
+                            f"{stall_timeout:.0f}s"
+                        ) from exc
                     if cancel_event.is_set():
                         logger.info("Ingest cancelled for thread %s", thread_id)
                         _outcome = ThreadStatus.CANCELLED
@@ -166,7 +228,17 @@ class IngestManager:
                     _GraphRecursionError is not None
                     and isinstance(exc, _GraphRecursionError)
                 ) or exc.__class__.__name__ == "GraphRecursionError"
-                _is_step_timeout = isinstance(exc, TimeoutError)
+                _is_ingest_stall = isinstance(exc, IngestStallTimeoutError)
+                # Checked after the more specific IngestStallTimeoutError above:
+                # LangGraph's own step_timeout is also a bare TimeoutError, and
+                # the stall watchdog is deliberately a TimeoutError subclass so
+                # it still lands here as a fallback classification if this branch
+                # order is ever lost — but the specific check gives the truer,
+                # more actionable reason whenever it is the one that fired.
+                _is_step_timeout = not _is_ingest_stall and isinstance(
+                    exc, TimeoutError
+                )
+                _reason: str | None = None
                 if _is_interrupt:
                     _outcome = "interrupted"
                     logger.info(
@@ -176,6 +248,10 @@ class IngestManager:
                     span.set_attribute("interrupted", True)
                 elif _is_recursion_limit:
                     _outcome = ThreadStatus.FAILED
+                    _reason = (
+                        "Graph recursion limit reached — check recursion_limit"
+                        " configuration"
+                    )
                     logger.warning(
                         "Graph recursion limit reached for thread %s", thread_id
                     )
@@ -184,28 +260,44 @@ class IngestManager:
                         thread_id=thread_id,
                         agent_id=agent_id,
                         code="RECURSION_LIMIT_EXCEEDED",
-                        message=(
-                            "Graph recursion limit reached — check recursion_limit"
-                            " configuration"
-                        ),
+                        message=_reason,
                         recoverable=False,
+                    )
+                elif _is_ingest_stall:
+                    _outcome = ThreadStatus.FAILED
+                    _reason = str(exc)
+                    logger.warning(
+                        "Ingest stall watchdog fired for thread %s (%.0fs, no "
+                        "LangGraph step_timeout caught it first)",
+                        thread_id,
+                        stall_timeout,
+                    )
+                    span.set_attribute("error.type", "ingest_stall_timeout")
+                    await self._emitters.emit_error(
+                        thread_id=thread_id,
+                        agent_id=agent_id,
+                        code="INGEST_STALL_TIMEOUT",
+                        message=_reason,
+                        recoverable=True,
                     )
                 elif _is_step_timeout:
                     _outcome = ThreadStatus.FAILED
+                    _reason = (
+                        "A graph node exceeded the step timeout — "
+                        "the operation may be retried"
+                    )
                     logger.warning("Graph step_timeout fired for thread %s", thread_id)
                     span.set_attribute("error.type", "step_timeout")
                     await self._emitters.emit_error(
                         thread_id=thread_id,
                         agent_id=agent_id,
                         code="STEP_TIMEOUT",
-                        message=(
-                            "A graph node exceeded the step timeout — "
-                            "the operation may be retried"
-                        ),
+                        message=_reason,
                         recoverable=True,
                     )
                 else:
                     _outcome = ThreadStatus.FAILED
+                    _reason = _summarize_ingest_exception(exc)
                     logger.exception(
                         "Error during graph ingest for thread %s", thread_id
                     )
@@ -214,9 +306,11 @@ class IngestManager:
                         thread_id=thread_id,
                         agent_id=agent_id,
                         code="INGEST_ERROR",
-                        message=_summarize_ingest_exception(exc),
+                        message=_reason,
                         recoverable=False,
                     )
+                if _reason is not None:
+                    self._failure_reasons[thread_id] = _reason
             finally:
                 self._clear_cancel_event(thread_id)
                 await self._buffering.flush_chunk_buffer(thread_id)

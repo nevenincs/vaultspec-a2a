@@ -34,10 +34,14 @@ if TYPE_CHECKING:
 __all__ = [
     "NATIVE_READ_TOOL_NAMES",
     "NATIVE_TOOL_EGRESS",
+    "NATIVE_WEB_TOOL_BOUNDS",
     "RAG_MCP_REQUIREMENT",
     "HarnessMcpCapabilityUnavailable",
     "HarnessMcpResolution",
     "HarnessMcpRuntimeProfile",
+    "NativeToolBoundHolder",
+    "NativeToolDomainPosture",
+    "NativeWebToolBounds",
     "codex_mcp_server_specs",
     "compose_harness_mcp_servers",
     "compose_native_read_tools",
@@ -791,6 +795,102 @@ NATIVE_TOOL_EGRESS: Mapping[str, bool] = MappingProxyType(
         "Read": False,
         "Grep": False,
         "Glob": False,
+        # The CLI's web built-ins, siblings of the read floor and delivered by the
+        # same exact-name allowlist. They write nothing locally and would have
+        # ridden the local-write assertion unchallenged; the egress axis is what
+        # makes their reach sayable, and saying it is what lets them be composed
+        # at all. Declared true here is a statement of reach, NOT an activation:
+        # the names only ever reach an allowlist by way of a lane whose own
+        # completed-retrieval proof carries them, and the guard below additionally
+        # refuses any egressing built-in whose usage bounds were never stated.
+        "WebSearch": True,
+        "WebFetch": True,
+    }
+)
+
+
+class NativeToolBoundHolder(StrEnum):
+    """Who actually holds a native web built-in's bound.
+
+    Named rather than assumed because the answer is not uniform and the difference
+    decides what a change to the bound would even mean. :attr:`PROVIDER` bounds are
+    compiled into the spawned CLI and are not settable by an embedder: the declared
+    value is a contract asserted against served behaviour (the discipline the
+    harness registry already applies to declared tool names), so revising it means
+    re-verifying the binary, never editing a setting. :attr:`CITATION_CHANNEL`
+    bounds are ours, held one layer up by the research-finding contract's cap on
+    web locators per finding - a branch cannot cite more retrievals than it may
+    make, so capping the citations caps the useful retrievals.
+    """
+
+    PROVIDER = "provider"
+    CITATION_CHANNEL = "citation-channel"
+
+
+class NativeToolDomainPosture(StrEnum):
+    """Which way a web built-in's domain control is pointed.
+
+    :attr:`BLOCKLIST` permits the open web minus what the provider refuses;
+    :attr:`ALLOWLIST` permits only named domains and is the stricter posture held
+    in reserve for a feature that needs it. The posture is visible in the spawn
+    payload rather than only here: the CLI reads an allowlist entry as a permission
+    rule, so a bare ``WebFetch`` is the blocklist posture rendered, while a
+    domain-scoped ``WebFetch(domain:...)`` rule would be the allowlist one. Only
+    bare declared names compose, so the served posture cannot silently invert.
+    """
+
+    BLOCKLIST = "blocklist"
+    ALLOWLIST = "allowlist"
+
+
+@dataclass(frozen=True, slots=True)
+class NativeWebToolBounds:
+    """The bounds one egressing native built-in runs under, and who holds each."""
+
+    max_uses_per_branch: int
+    uses_held_by: NativeToolBoundHolder
+    content_held_by: NativeToolBoundHolder
+    domain_posture: NativeToolDomainPosture
+
+
+# The decided bounds for the egressing built-ins, in one place because the axis
+# they express - how far outward reach may go per branch - is exactly as much a
+# trust declaration as the reach itself, and an outward-reaching tool composed with
+# no stated bound is the same unsafe-by-omission default the egress axis exists to
+# refuse. The guard below enforces the bijection: every egressing name has bounds,
+# and nothing else does.
+#
+# Verified against the CLI bundled with the pinned ACP adapter (claude-code 2.1.62)
+# rather than taken from documentation, which describes the hosted API's server
+# tools and their per-request parameters - a different surface that this lane does
+# not expose to an embedder:
+#
+#   - search uses: the CLI pins its search tool at eight uses per request. The
+#     decided bound and the served one coincide; there is no knob, and none is
+#     invented here to pretend otherwise.
+#   - fetch uses: the CLI offers no use cap for fetch, so the bound is held by the
+#     citation channel's per-finding web-locator cap, which carries the same value.
+#   - fetch content: the CLI never returns a fetched document to the agent's own
+#     context - it converts the body and applies the tool's prompt through a
+#     separate model turn - so the content bound is structural on that lane.
+#   - domain posture: the CLI runs a per-hostname blocklist check before every
+#     fetch unless a config-home setting disables it. Blocklist is therefore the
+#     served posture by leaving that setting unwritten, and the isolated config
+#     home must keep it that way.
+NATIVE_WEB_TOOL_BOUNDS: Mapping[str, NativeWebToolBounds] = MappingProxyType(
+    {
+        "WebSearch": NativeWebToolBounds(
+            max_uses_per_branch=8,
+            uses_held_by=NativeToolBoundHolder.PROVIDER,
+            content_held_by=NativeToolBoundHolder.PROVIDER,
+            domain_posture=NativeToolDomainPosture.BLOCKLIST,
+        ),
+        "WebFetch": NativeWebToolBounds(
+            max_uses_per_branch=16,
+            uses_held_by=NativeToolBoundHolder.CITATION_CHANNEL,
+            content_held_by=NativeToolBoundHolder.PROVIDER,
+            domain_posture=NativeToolDomainPosture.BLOCKLIST,
+        ),
     }
 )
 
@@ -818,11 +918,45 @@ def _require_declared_native_egress(names: Sequence[str]) -> None:
         )
 
 
+def _require_bounds_match_the_egress_axis(
+    egress: Mapping[str, bool], bounds: Mapping[str, NativeWebToolBounds]
+) -> None:
+    """Fail loud unless the bounds declaration and the egress axis name the same set.
+
+    This bijection is the whole enforcement, and it is deliberately the only one.
+    A per-composition bounds check would read well and never run: holding the two
+    declarations in step means an egressing name is a bounded name by construction,
+    so :func:`_require_declared_native_egress` already refuses everything such a
+    check could have caught. Enforcing the invariant once, at import, is the honest
+    shape - the alternative ships a guard nothing can reach and calls it defence.
+
+    Stating it the other way round matters too: a bounds entry for a tool that
+    never declared egress is a bound nothing enforces, because every consumer of
+    the bounds selects by the egress axis first.
+
+    Raises:
+        ConfigError: If either declaration names a tool the other does not.
+    """
+    egressing = {name for name, reaches in egress.items() if reaches}
+    bounded = set(bounds)
+    if egressing != bounded:
+        unbounded = sorted(egressing - bounded)
+        unreaching = sorted(bounded - egressing)
+        raise ConfigError(
+            "the native tool egress axis and the web bounds declaration disagree: "
+            f"egressing with no bounds: {unbounded or 'none'}; bounded but not "
+            f"declared egressing: {unreaching or 'none'}. Both declarations govern "
+            "the same tools and a guard consulting one must be able to trust the "
+            "other"
+        )
+
+
 # The floor discharges the same declaration obligation at construction that
 # :func:`_declare_registry` imposes on registry entries, so a name added to the
 # floor without an egress declaration fails at import rather than at the first
 # autonomous document run.
 _require_declared_native_egress(NATIVE_READ_TOOL_NAMES)
+_require_bounds_match_the_egress_axis(NATIVE_TOOL_EGRESS, NATIVE_WEB_TOOL_BOUNDS)
 
 
 def compose_native_read_tools(
@@ -846,7 +980,20 @@ def compose_native_read_tools(
     Every composed name must declare its network-egress axis in
     :data:`NATIVE_TOOL_EGRESS`; an undeclared one raises :class:`ConfigError`
     before any gate or projection, so an outward-reaching built-in cannot join the
-    allowlist on the strength of the local-read floor's assumptions.
+    allowlist on the strength of the local-read floor's assumptions. That single
+    check also carries the bounds obligation, because the axis and
+    :data:`NATIVE_WEB_TOOL_BOUNDS` are held to the same tool set at import: a name
+    this seam admits as egressing has necessarily stated its bounds too.
+
+    *extra_tool_names* is the composition point for lane-earned capability: it is
+    where a lane's own completed-retrieval proof delivers the exact web built-ins
+    that proof exercised. This function deliberately does NOT re-derive that
+    verdict - the lane declaration has one reader, and a second one here could
+    disagree with it - so an unearned name reaching this parameter is a caller
+    defect, not a state this seam can distinguish. What it does guarantee is that
+    whatever arrives is a bare declared name that stated both its reach and its
+    bounds, and that a supervised run or a non-document role composes nothing at
+    all regardless.
 
     The native-built-in counterpart of :func:`compose_harness_mcp_servers`: both
     mutate only the ACP session's advertised surface and allowlist, so they live

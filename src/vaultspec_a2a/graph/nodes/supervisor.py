@@ -18,6 +18,7 @@ from ...domain_config import domain_config
 from ...graph.enums import PipelinePhase
 from ...thread.enums import ApprovalStatus
 from ...thread.state import TeamState
+from .phase_gate import VERDICT_APPROVED, parse_verdict
 
 _logger = logging.getLogger(__name__)
 
@@ -347,8 +348,12 @@ def create_plan_approval_node(
     The interrupt payload and resume shapes are the existing wire contract
     consumed by the control and streaming layers: payload
     ``{"type": "plan_approval_request", "feature", "plan_paths",
-    "exec_worker"}``; resume ``{"approved": bool}`` or the literal
-    ``"approve"``.
+    "exec_worker"}``; resume ``{"verdict": "approved" | "rejected" |
+    "request_changes", "notes": str | None}`` — the same verdict vocabulary the
+    document phase gate resumes on (D6), parsed via the shared
+    :func:`...phase_gate.parse_verdict`. Any other verdict, including the
+    retired ``{"approved": bool}`` shape, fails closed to revision rather than
+    silently approving.
     """
 
     async def plan_approval_node(state: TeamState) -> dict[str, Any]:
@@ -363,12 +368,8 @@ def create_plan_approval_node(
                 "exec_worker": exec_worker,
             }
         )
-        approved = (
-            resume_value.get("approved")
-            if isinstance(resume_value, dict)
-            else resume_value == "approve"
-        )
-        if approved:
+        verdict, _notes = parse_verdict(resume_value)
+        if verdict == VERDICT_APPROVED:
             _logger.info(
                 "plan approved by user — routing to exec_worker=%r", exec_worker
             )

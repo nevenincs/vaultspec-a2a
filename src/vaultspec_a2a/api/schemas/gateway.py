@@ -493,6 +493,13 @@ class RunStatusResponse(BaseModel):
     repair_status: str | None = None
     execution_readiness: str | None = None
     degraded_reasons: list[str] = Field(default_factory=list)
+    # S37 / failure-reason persistence: the capped, single-line reason this
+    # run last transitioned to FAILED, sourced from the durable
+    # threads.failure_reason column (never a live SSE frame), so a reloaded
+    # panel recovers the SAME reason a connected client already saw over the
+    # relay (012840a4) rather than a bare "failed". Additive; None for a run
+    # that never failed, or one whose failure predates this field.
+    failure_reason: str | None = None
     # model-profiles: the frozen profile the run launched with and its
     # effective per-role assignment, reproduced verbatim from run metadata across
     # restarts (additive v1; absent for runs started before profiles landed).
@@ -634,14 +641,18 @@ class RunMessageResponse(BaseModel):
 class RunPermissionRespondRequest(BaseModel):
     """Answer one permission request raised by a run.
 
-    Carries only the chosen option. The options themselves were advertised on
-    the versioned progress stream in the ``permission_request`` frame that
-    raised the question, so the answer names one rather than restating it.
+    Carries the chosen option and, optionally, a reviewer comment. The options
+    themselves were advertised on the versioned progress stream in the
+    ``permission_request`` frame that raised the question, so the answer names
+    one rather than restating it. ``notes`` survives into the verdict resume
+    payload for a locally-respondable verdict-style pause (D6); it is ignored
+    for a plain tool-permission response, which resumes on the bare option id.
     """
 
     model_config = ConfigDict(extra="forbid")
 
     option_id: str = Field(min_length=1, max_length=64)
+    notes: str | None = Field(default=None, max_length=2048)
 
 
 class RunPermissionRespondResponse(BaseModel):

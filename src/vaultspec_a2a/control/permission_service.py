@@ -35,7 +35,10 @@ from ..thread.enums import (
     ThreadStatus,
 )
 from ..thread.permission_fsm import response_is_rejection
-from ..thread.snapshots import PLAN_APPROVAL_PAUSE_CAUSES
+from ..thread.snapshots import (
+    LOCALLY_RESPONDABLE_PAUSE_CAUSES,
+    PLAN_APPROVAL_PAUSE_CAUSES,
+)
 from .dispatch import safe_dispatch
 from .permission_options import extract_allowed_option_ids
 from .repair_transitions import (
@@ -175,7 +178,7 @@ class _PermissionTransition:
     """
 
     action: ControlActionModel
-    resume_value: str | dict[str, bool]
+    resume_value: str | dict[str, str | None]
     team_preset: str | None
     workspace_root: str | None
 
@@ -236,12 +239,16 @@ async def respond_to_permission(
     worker_client: httpx.AsyncClient,
     recursion_limit: int,
     trace_headers: dict[str, str] | None,
+    notes: str | None = None,
 ) -> PermissionResult:
     """Execute the permission-response state machine.
 
     Returns a :class:`PermissionResult` describing the outcome.  Commits the
     session before returning — the service owns its transaction boundary.
-    The caller translates errors into protocol-specific responses.
+    The caller translates errors into protocol-specific responses. ``notes``
+    is an optional reviewer comment threaded into the verdict resume payload
+    for a locally-respondable verdict-style pause (D6); it is ignored for a
+    plain tool-permission response, which resumes on the bare option id.
     """
     logger.info(
         "Permission response: request_id=%s, option_id=%s",
@@ -272,6 +279,7 @@ async def respond_to_permission(
         authorized=authorization,
         request_id=request_id,
         option_id=option_id,
+        notes=notes,
     )
     return await _dispatch_permission_resume(
         db,
@@ -341,6 +349,45 @@ async def _authorize_permission_response(
             action_status=ControlActionResultStatus.REJECTED_INVALID_STATE.value,
             error_detail="Permission request is not durably pending",
             error_status_code=409,
+        )
+
+    # ------------------------------------------------------------------
+    # 1.5. Refuse pauses this route has no authority to answer
+    # ------------------------------------------------------------------
+    # A verdict-style pause (PLAN_APPROVAL_PAUSE_CAUSES) that is not locally
+    # respondable is a document-approval pause: the engine review surface is
+    # the sole approval authority for it (the amended a2a-orchestration-edge
+    # contract — no second approval authority in A2A). Refusing here, before
+    # the idempotency and transition logic runs, means no control action is
+    # journalled and no resume value is ever constructed for this call.
+    if (
+        permission.pause_reason_type in PLAN_APPROVAL_PAUSE_CAUSES
+        and permission.pause_reason_type not in LOCALLY_RESPONDABLE_PAUSE_CAUSES
+    ):
+        logger.warning(
+            "Permission respond refused: request %s pauses on %r, which only "
+            "the engine review surface may decide",
+            request_id,
+            permission.pause_reason_type,
+            extra={
+                "thread_id": thread_id,
+                "request_id": request_id,
+                "action": "permission_response",
+                "pause_reason_type": permission.pause_reason_type,
+            },
+        )
+        return PermissionResult(
+            request_id=request_id,
+            thread_id=thread_id,
+            accepted=False,
+            applied=False,
+            action_status=ControlActionResultStatus.REJECTED_INVALID_STATE.value,
+            error_detail=(
+                "Document-approval pauses are decided by the engine review "
+                "surface, not this route; the run resumes only through the "
+                "verdict subscriber."
+            ),
+            error_status_code=403,
         )
 
     # ------------------------------------------------------------------
@@ -461,11 +508,11 @@ async def _authorize_permission_response(
 
     active_request_id: str | None = None
     pending_permissions = await get_pending_permission_requests(db, thread_id=thread_id)
-    if permission.pause_reason_type in PLAN_APPROVAL_PAUSE_CAUSES:
+    if permission.pause_reason_type in LOCALLY_RESPONDABLE_PAUSE_CAUSES:
         active_plan_permissions = [
             pending.request_id
             for pending in pending_permissions
-            if pending.pause_reason_type in PLAN_APPROVAL_PAUSE_CAUSES
+            if pending.pause_reason_type in LOCALLY_RESPONDABLE_PAUSE_CAUSES
         ]
         active_request_id = (
             active_plan_permissions[-1]
@@ -578,6 +625,7 @@ async def _record_permission_transition(
     authorized: _AuthorizedPermission,
     request_id: str,
     option_id: str,
+    notes: str | None,
 ) -> _PermissionTransition:
     """Write the durable pre-dispatch transition for an authorized response.
 
@@ -601,9 +649,16 @@ async def _record_permission_transition(
         except (json.JSONDecodeError, AttributeError):
             pass
 
-    resume_value: str | dict[str, bool] = option_id
-    if permission.pause_reason_type in PLAN_APPROVAL_PAUSE_CAUSES:
-        resume_value = {"approved": option_id == "approve"}
+    resume_value: str | dict[str, str | None] = option_id
+    if permission.pause_reason_type in LOCALLY_RESPONDABLE_PAUSE_CAUSES:
+        resume_value = {
+            "verdict": (
+                ApprovalStatus.APPROVED.value
+                if option_id == "approve"
+                else ApprovalStatus.REJECTED.value
+            ),
+            "notes": notes,
+        }
 
     action = await create_control_action(
         db,
@@ -619,7 +674,7 @@ async def _record_permission_transition(
         option_id=option_id,
         idempotency_key=resolved_idempotency_key,
     )
-    if permission.pause_reason_type in PLAN_APPROVAL_PAUSE_CAUSES:
+    if permission.pause_reason_type in LOCALLY_RESPONDABLE_PAUSE_CAUSES:
         submitted_status = _plan_response_approval_status(permission, option_id)
         await set_thread_approval_state(
             db,
@@ -755,7 +810,7 @@ async def _dispatch_permission_resume(
         idempotency_key=resolved_idempotency_key,
         approval_status=(
             _plan_response_approval_status(permission, option_id)
-            if permission.pause_reason_type in PLAN_APPROVAL_PAUSE_CAUSES
+            if permission.pause_reason_type in LOCALLY_RESPONDABLE_PAUSE_CAUSES
             else thread_record.approval_status
         ),
         dispatched=True,

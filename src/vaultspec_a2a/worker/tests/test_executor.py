@@ -1133,12 +1133,65 @@ class TestAuthoringBridgeFailClosed:
                 os.environ["HOME"] = str(empty_home)
                 try:
                     with pytest.raises(EngineUnavailableError):
-                        manager._build_authoring_binding_provider()
+                        await manager._build_authoring_binding_provider()
                 finally:
                     for k, v in saved.items():
                         if v is None:
                             os.environ.pop(k, None)
                         else:
                             os.environ[k] = v
+            finally:
+                await bridge.close()
+
+    @pytest.mark.asyncio(loop_scope="function")
+    async def test_engine_discovery_retry_is_offloaded_not_blocking_the_worker(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """resolve_engine_with_retry's blocking time.sleep must not freeze the
+        worker's event loop while it runs.
+
+        S37: before this fix, this call ran directly on the worker's single
+        event loop — heartbeats, every other thread's dispatch, everything —
+        was frozen solid for the full retry window on every first compile of
+        a preset+workspace cache key. Proven here by racing a fast
+        asyncio.sleep task against a stand-in for the blocking discovery
+        call: if the call is genuinely offloaded (asyncio.to_thread), the
+        fast task finishes first; if it were still blocking the loop
+        in-place, the fast task could not even be scheduled until the slow
+        call returned.
+        """
+        import asyncio
+        import time as time_module
+
+        from ... import authoring as authoring_pkg
+        from ...authoring import EngineUnavailableError
+
+        def _slow_blocking_resolve(*args: object, **kwargs: object) -> None:
+            time_module.sleep(0.3)
+            return None
+
+        monkeypatch.setattr(
+            authoring_pkg, "resolve_engine_with_retry", _slow_blocking_resolve
+        )
+
+        async with AsyncSqliteSaver.from_conn_string(":memory:") as cp:
+            await cp.setup()
+            bridge = _make_bridge()
+            try:
+                manager = Executor(checkpointer=cp, bridge=bridge)._graph_lifecycle
+
+                events: list[str] = []
+
+                async def _fast_concurrent_task() -> None:
+                    await asyncio.sleep(0.05)
+                    events.append("fast_task")
+
+                ticker = asyncio.create_task(_fast_concurrent_task())
+                with pytest.raises(EngineUnavailableError):
+                    await manager._build_authoring_binding_provider()
+                events.append("slow_build")
+                await ticker
+
+                assert events == ["fast_task", "slow_build"]
             finally:
                 await bridge.close()

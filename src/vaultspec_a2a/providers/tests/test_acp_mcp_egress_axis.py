@@ -32,7 +32,12 @@ from .._acp_mcp import (
     _KNOWN_MCP_SERVERS,
     NATIVE_READ_TOOL_NAMES,
     NATIVE_TOOL_EGRESS,
+    NATIVE_WEB_TOOL_BOUNDS,
+    NativeToolBoundHolder,
+    NativeToolDomainPosture,
+    NativeWebToolBounds,
     _declare_registry,
+    _require_bounds_match_the_egress_axis,
     codex_mcp_server_specs,
     compose_harness_mcp_servers,
     compose_native_read_tools,
@@ -48,6 +53,19 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 _RAG = "vaultspec-rag"
+
+# An outward-reaching built-in this tree has never heard of. It stands for the
+# live hazard the no-pinning house rule accepts: the provider ships a new web
+# built-in, a lane's proof names it, and it must be refused until somebody states
+# its reach here - membership IS the declaration, so an unknown name can never be
+# admitted on the strength of looking like one that was.
+_UNDECLARED_WEB_TOOL = "WebCrawl"
+_ALSO_UNDECLARED_WEB_TOOL = "WebScrape"
+
+# A built-in the CLI genuinely ships and this tree deliberately does not declare.
+# The refusal is not about whether a name is real; it is about whether its reach
+# was stated.
+_UNDECLARED_SHIPPED_TOOL = "Bash"
 
 
 def _as_an_importer_sees_it(structure: Mapping[str, Any]) -> dict[str, Any]:
@@ -132,8 +150,8 @@ class TestSpawnCompositionRefusesUndeclaredNativeTools:
 
     def test_undeclared_native_tool_is_refused_at_the_composition_seam(self) -> None:
         # The exact production call the worker node makes at spawn, composing a
-        # built-in whose egress axis was never declared. WebFetch is the real
-        # motivating case: it writes nothing locally, so the local-write axis
+        # built-in whose egress axis was never declared. An outward-reaching one is
+        # the motivating case: it writes nothing locally, so the local-write axis
         # would have admitted it silently.
         model = self._model()
         with pytest.raises(ConfigError) as excinfo:
@@ -141,13 +159,26 @@ class TestSpawnCompositionRefusesUndeclaredNativeTools:
                 model,
                 autonomous=True,
                 role="researcher",
-                extra_tool_names=("WebFetch",),
+                extra_tool_names=(_UNDECLARED_WEB_TOOL,),
             )
         message = str(excinfo.value)
-        assert "WebFetch" in message
+        assert _UNDECLARED_WEB_TOOL in message
         assert "egress" in message
         # The refusal is total: nothing was projected onto the session first.
         assert model.allowed_tools == []
+
+    def test_a_shipped_but_undeclared_builtin_is_refused_too(self) -> None:
+        # Being a real tool the CLI compiles in earns nothing here. The floor is
+        # three names because three names stated their reach, not because the
+        # others are unknown to the provider.
+        with pytest.raises(ConfigError) as excinfo:
+            compose_native_read_tools(
+                self._model(),
+                autonomous=True,
+                role="researcher",
+                extra_tool_names=(_UNDECLARED_SHIPPED_TOOL,),
+            )
+        assert _UNDECLARED_SHIPPED_TOOL in str(excinfo.value)
 
     def test_the_refusal_names_every_undeclared_tool(self) -> None:
         with pytest.raises(ConfigError) as excinfo:
@@ -155,11 +186,11 @@ class TestSpawnCompositionRefusesUndeclaredNativeTools:
                 self._model(),
                 autonomous=True,
                 role="researcher",
-                extra_tool_names=("WebSearch", "WebFetch"),
+                extra_tool_names=(_UNDECLARED_WEB_TOOL, _ALSO_UNDECLARED_WEB_TOOL),
             )
         message = str(excinfo.value)
-        assert "WebSearch" in message
-        assert "WebFetch" in message
+        assert _UNDECLARED_WEB_TOOL in message
+        assert _ALSO_UNDECLARED_WEB_TOOL in message
 
     def test_refusal_precedes_the_autonomy_and_role_gates(self) -> None:
         # Validate-first: an undeclared tool set is a configuration error on every
@@ -172,7 +203,7 @@ class TestSpawnCompositionRefusesUndeclaredNativeTools:
                     self._model(),
                     autonomous=autonomous,
                     role=role,
-                    extra_tool_names=("WebFetch",),
+                    extra_tool_names=(_UNDECLARED_WEB_TOOL,),
                 )
 
     def test_refusal_applies_to_a_model_with_no_acp_surface(self) -> None:
@@ -184,7 +215,7 @@ class TestSpawnCompositionRefusesUndeclaredNativeTools:
                 model,
                 autonomous=True,
                 role="researcher",
-                extra_tool_names=("WebFetch",),
+                extra_tool_names=(_UNDECLARED_WEB_TOOL,),
             )
 
     def test_the_declared_read_floor_still_composes(self) -> None:
@@ -266,13 +297,13 @@ class TestNativeEgressCatalogRefusesRuntimeDeclaration:
 
     def test_declaring_a_web_tool_at_runtime_is_refused(self) -> None:
         # The attack the mutable catalog allowed: membership IS the declaration,
-        # so one assignment from any importer would have declared the CLI's
-        # outward-reaching fetch built-in local and walked it through the
-        # composition guard, which consults exactly this mapping.
+        # so one assignment from any importer would have declared an unknown
+        # outward-reaching built-in local and walked it through the composition
+        # guard, which consults exactly this mapping.
         with pytest.raises(TypeError):
-            _as_an_importer_sees_it(NATIVE_TOOL_EGRESS)["WebFetch"] = False
+            _as_an_importer_sees_it(NATIVE_TOOL_EGRESS)[_UNDECLARED_WEB_TOOL] = False
 
-        assert "WebFetch" not in NATIVE_TOOL_EGRESS
+        assert _UNDECLARED_WEB_TOOL not in NATIVE_TOOL_EGRESS
         # The refusal is not merely cosmetic: the production composition seam still
         # rejects the name after the attempt, which is the property that matters.
         with pytest.raises(ConfigError):
@@ -280,8 +311,20 @@ class TestNativeEgressCatalogRefusesRuntimeDeclaration:
                 self._model(),
                 autonomous=True,
                 role="researcher",
-                extra_tool_names=("WebFetch",),
+                extra_tool_names=(_UNDECLARED_WEB_TOOL,),
             )
+
+    def test_relabelling_a_declared_web_tool_as_local_is_refused(self) -> None:
+        # The same attack against a tool that IS declared, and the sharper of the
+        # two now that the web built-ins are in the catalog: flipping the fetch
+        # tool's axis to false would not add a name, it would strip the reach off
+        # one already composable and drop it into the local read floor's
+        # assumptions - including the bounds guard, which only fires on names the
+        # axis marks as egressing.
+        with pytest.raises(TypeError):
+            _as_an_importer_sees_it(NATIVE_TOOL_EGRESS)["WebFetch"] = False
+        assert NATIVE_TOOL_EGRESS["WebFetch"] is True
+        assert NATIVE_TOOL_EGRESS["WebSearch"] is True
 
     def test_redeclaring_a_floor_tool_as_egressing_is_refused(self) -> None:
         # Overwriting an existing declaration is the same defect from the other
@@ -295,6 +338,109 @@ class TestNativeEgressCatalogRefusesRuntimeDeclaration:
         with pytest.raises(TypeError):
             del _as_an_importer_sees_it(NATIVE_TOOL_EGRESS)["Read"]
         assert set(NATIVE_READ_TOOL_NAMES) <= set(NATIVE_TOOL_EGRESS)
+
+
+class TestEgressingBuiltinsMustStateTheirBounds:
+    """Stated reach is half a declaration; how far it may go per branch is the rest."""
+
+    def _model(self) -> AcpChatModel:
+        return AcpChatModel(command=["echo"], env_vars={}, workspace_root="/tmp/ws")
+
+    def test_every_egressing_builtin_declares_bounds(self) -> None:
+        egressing = {name for name, reaches in NATIVE_TOOL_EGRESS.items() if reaches}
+        assert egressing == set(NATIVE_WEB_TOOL_BOUNDS)
+        assert egressing == {"WebSearch", "WebFetch"}
+
+    def test_no_local_builtin_carries_web_bounds(self) -> None:
+        # The bounds declaration governs outward reach and nothing else; a bound on
+        # a local tool would be a rule with no enforcement path behind it.
+        for name in NATIVE_READ_TOOL_NAMES:
+            assert name not in NATIVE_WEB_TOOL_BOUNDS
+
+    def test_the_declared_bounds_are_the_decided_ones(self) -> None:
+        search = NATIVE_WEB_TOOL_BOUNDS["WebSearch"]
+        fetch = NATIVE_WEB_TOOL_BOUNDS["WebFetch"]
+        assert search.max_uses_per_branch == 8
+        assert fetch.max_uses_per_branch == 16
+        # Who holds each bound is part of the decision, not an implementation note:
+        # a provider-held bound is re-verified against the binary, while a
+        # channel-held one is ours to change and ours to keep honest.
+        assert search.uses_held_by is NativeToolBoundHolder.PROVIDER
+        assert fetch.uses_held_by is NativeToolBoundHolder.CITATION_CHANNEL
+        assert search.content_held_by is NativeToolBoundHolder.PROVIDER
+        assert fetch.content_held_by is NativeToolBoundHolder.PROVIDER
+        assert search.domain_posture is NativeToolDomainPosture.BLOCKLIST
+        assert fetch.domain_posture is NativeToolDomainPosture.BLOCKLIST
+
+    def test_the_fetch_budget_and_the_citation_cap_are_one_number(self) -> None:
+        """The fetch bound has no provider knob, so the citation channel holds it.
+
+        Imported from the finding contract rather than restated, because the whole
+        claim is that a branch cannot cite more retrievals than it may make. Two
+        independently-edited copies of 16 would let the bound drift out from under
+        the tool that has no other limit.
+        """
+        from ...graph.nodes.diverge import MAX_WEB_LOCATORS_PER_FINDING
+
+        fetch = NATIVE_WEB_TOOL_BOUNDS["WebFetch"]
+        assert fetch.uses_held_by is NativeToolBoundHolder.CITATION_CHANNEL
+        assert fetch.max_uses_per_branch == MAX_WEB_LOCATORS_PER_FINDING
+
+    def test_an_egressing_tool_without_bounds_is_refused_at_import(self) -> None:
+        # The production guard, run against a declaration pair that disagrees.
+        # Reaching it in the shipped tree is impossible by construction - that IS
+        # the property - so the disagreement is supplied rather than provoked, and
+        # the same call runs at import over the real declarations.
+        with pytest.raises(ConfigError) as excinfo:
+            _require_bounds_match_the_egress_axis(
+                {"Read": False, "WebSearch": True, "WebFetch": True},
+                {"WebSearch": NATIVE_WEB_TOOL_BOUNDS["WebSearch"]},
+            )
+        assert "WebFetch" in str(excinfo.value)
+
+    def test_bounds_for_a_tool_that_never_declared_egress_are_refused(self) -> None:
+        # The mirror defect: a bound nothing enforces, because the guard that reads
+        # it only ever fires on names the egress axis marks as reaching outward.
+        with pytest.raises(ConfigError) as excinfo:
+            _require_bounds_match_the_egress_axis(
+                {"Read": False},
+                {
+                    "Read": NativeWebToolBounds(
+                        max_uses_per_branch=1,
+                        uses_held_by=NativeToolBoundHolder.PROVIDER,
+                        content_held_by=NativeToolBoundHolder.PROVIDER,
+                        domain_posture=NativeToolDomainPosture.BLOCKLIST,
+                    )
+                },
+            )
+        assert "Read" in str(excinfo.value)
+
+    def test_the_bounds_catalog_cannot_be_declared_into_at_runtime(self) -> None:
+        # Same reasoning as the egress catalog: a guard is worth what its catalog
+        # is worth, and a mutable one would let an importer widen a use cap or flip
+        # the domain posture to an allowlist with a single assignment.
+        with pytest.raises(TypeError):
+            _as_an_importer_sees_it(NATIVE_WEB_TOOL_BOUNDS)[_UNDECLARED_WEB_TOOL] = (
+                NATIVE_WEB_TOOL_BOUNDS["WebFetch"]
+            )
+        assert _UNDECLARED_WEB_TOOL not in NATIVE_WEB_TOOL_BOUNDS
+
+    def test_a_declared_bound_is_itself_immutable(self) -> None:
+        with pytest.raises(AttributeError):
+            NATIVE_WEB_TOOL_BOUNDS["WebFetch"].max_uses_per_branch = 4096  # ty: ignore
+        assert NATIVE_WEB_TOOL_BOUNDS["WebFetch"].max_uses_per_branch == 16
+
+    def test_a_fully_declared_web_tool_composes(self) -> None:
+        # The lit path through the production seam: both declarations satisfied, an
+        # autonomous document role, and the names land on the session by exact name.
+        wired = compose_native_read_tools(
+            self._model(),
+            autonomous=True,
+            role="researcher",
+            extra_tool_names=("WebSearch", "WebFetch"),
+        )
+        assert isinstance(wired, AcpChatModel)
+        assert wired.allowed_tools == [*NATIVE_READ_TOOL_NAMES, "WebSearch", "WebFetch"]
 
 
 class TestHarnessRegistryRefusesRuntimeDeclaration:

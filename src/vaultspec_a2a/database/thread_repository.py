@@ -365,12 +365,45 @@ async def mark_thread_deleting(
     return thread
 
 
+# Bounds threads.failure_reason so a pathological exception message (or one
+# wrapping a large response body) can never blow up the durable row or the
+# RunStatusResponse it is served through. Mirrors streaming/ingest.py's
+# _MAX_INGEST_ERROR_MESSAGE_LEN — kept as a separate constant rather than a
+# shared import because this is the last-line durable-write boundary: every
+# producer (ingest's classified reasons, a compile-time refusal's exception
+# text, the ingest-stall watchdog) should already be capped and single-line
+# by the time it reaches here, but this makes that an enforced invariant of
+# the column, not a convention callers must each remember.
+_MAX_FAILURE_REASON_LEN = 500
+
+
+def _capped_single_line(text: str) -> str:
+    """Collapse embedded newlines and cap *text* to the failure-reason bound."""
+    collapsed = " ".join(text.split())
+    if len(collapsed) > _MAX_FAILURE_REASON_LEN:
+        collapsed = collapsed[: _MAX_FAILURE_REASON_LEN - 1] + "…"
+    return collapsed
+
+
 async def update_thread_status(
     session: AsyncSession,
     thread_id: str,
     status: ThreadStatus | str,
+    *,
+    failure_reason: str | None = None,
 ) -> ThreadModel | None:
-    """Update a thread's status with transition validation."""
+    """Update a thread's status with transition validation.
+
+    ``failure_reason`` is additive and leaves the column UNCHANGED when
+    falsy (``None`` or empty), so every existing caller — completed,
+    cancelled, and every already-shipped failed-status write that doesn't
+    pass it — is untouched; there is deliberately no explicit-clear path,
+    since a thread's failure reason is write-once per terminal transition.
+    Pass a non-empty value only on a FAILED transition that has a reason to
+    durably record; the text is capped and flattened to a single line here,
+    the one write boundary every producer passes through, regardless of
+    whether the caller already capped it.
+    """
     coerced_status = _coerce_status(status)
     thread = await session.get(ThreadModel, thread_id)
     if thread is None:
@@ -382,6 +415,8 @@ async def update_thread_status(
         # example after an interrupted migration or legacy direct write).
         thread.is_active = coerced_status in ACTIVE_STATUSES
         thread.updated_at = _utcnow()
+        if failure_reason:
+            thread.failure_reason = _capped_single_line(failure_reason)
         await session.flush()
         return thread
 
@@ -390,6 +425,8 @@ async def update_thread_status(
     thread.status = coerced_status.value
     thread.is_active = coerced_status in ACTIVE_STATUSES
     thread.updated_at = _utcnow()
+    if failure_reason:
+        thread.failure_reason = _capped_single_line(failure_reason)
     await session.flush()
     return thread
 

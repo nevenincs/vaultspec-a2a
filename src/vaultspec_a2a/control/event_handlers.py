@@ -188,8 +188,22 @@ async def _handle_terminal_event(
             factory = get_session_factory()
         else:
             factory = session_factory
+        # error_detail rides the same thread_terminal payload the SSE relay
+        # already surfaces it through (012840a4); threading it into the
+        # durable status write here is the only additional step needed for a
+        # reloaded panel (run-status alone, never the live stream) to recover
+        # it too. update_thread_status leaves the column untouched on every
+        # other outcome (completed, cancelled) since failure_reason is falsy.
+        error_detail = payload.get("error_detail")
+        failure_reason = error_detail if isinstance(error_detail, str) else None
+
         async with factory() as db:
-            await update_thread_status(db, thread_id, ThreadStatus(status_str))
+            await update_thread_status(
+                db,
+                thread_id,
+                ThreadStatus(status_str),
+                failure_reason=failure_reason,
+            )
             await expire_pending_permission_requests(db, thread_id=thread_id)
             latest_cancel = await get_latest_control_action(
                 db, thread_id=thread_id, action_type=ControlActionType.CANCEL

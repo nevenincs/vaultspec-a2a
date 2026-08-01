@@ -2283,7 +2283,68 @@ class TestPermissionRespond:
 
         assert live.status_code == 200
         assert len(worker.dispatches) == 1
-        assert worker.dispatches[0]["option_id"] == {"approved": True}
+        assert worker.dispatches[0]["option_id"] == {
+            "verdict": "approved",
+            "notes": None,
+        }
+
+    def test_respond_notes_field_survives_into_verdict_resume_payload(
+        self, session_factory, checkpointer
+    ) -> None:
+        """A reviewer comment on a locally-respondable verdict pause reaches the
+        resumed run's verdict payload untouched — the shape D6 unifies on.
+        """
+        app, _agg, worker, _cp = make_app(session_factory, checkpointer)
+
+        async def _seed_plan_approval() -> None:
+            async with session_factory() as session:
+                await record_permission_request(
+                    session,
+                    request_id=request_id,
+                    thread_id=thread_id,
+                    pause_reason_type="plan_approval",
+                    description="Approve plan?",
+                    allowed_options=[
+                        {
+                            "option_id": "approve",
+                            "name": "Approve Plan",
+                            "kind": "allow_once",
+                        },
+                        {
+                            "option_id": "reject",
+                            "name": "Reject - Revise Plan",
+                            "kind": "reject_once",
+                        },
+                    ],
+                    tool_call="plan_approval",
+                )
+                await session.commit()
+
+        with TestClient(app, raise_server_exceptions=True) as client:
+            create_resp = client.post(
+                "/v1/runs",
+                json={
+                    "team_preset": _BUNDLE_FREE_PRESET,
+                    "message": "plan approval notes test",
+                },
+            )
+            assert create_resp.status_code == 201
+            thread_id = create_resp.json()["run_id"]
+            request_id = f"{thread_id}:req-plan-notes"
+            asyncio.run(_seed_plan_approval())
+
+            worker.dispatches.clear()
+            resp = client.post(
+                f"/v1/runs/{thread_id}/permissions/{request_id}/respond",
+                json={"option_id": "approve", "notes": "Looks solid, ship it."},
+            )
+
+        assert resp.status_code == 200
+        assert len(worker.dispatches) == 1
+        assert worker.dispatches[0]["option_id"] == {
+            "verdict": "approved",
+            "notes": "Looks solid, ship it.",
+        }
 
 
 class TestDeleteThread:
@@ -2516,7 +2577,7 @@ class TestDeleteThread:
         dispatch = worker.dispatches[0]
         assert dispatch["action"] == "resume"
         assert dispatch["thread_id"] == thread_id
-        assert dispatch["option_id"] == {"approved": True}
+        assert dispatch["option_id"] == {"verdict": "approved", "notes": None}
 
     def test_rejects_stale_second_response_after_submission(
         self, session_factory, checkpointer

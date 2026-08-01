@@ -141,6 +141,31 @@ def test_the_fingerprint_is_stable_across_processes() -> None:
         "the replay fingerprint differs between processes, so no stored "
         "fingerprint would ever match after a gateway restart"
     )
+    # Both sides are also held against a written value, so this stays a real
+    # check if the subprocess ever stops being a genuinely separate process.
+    assert _current(body) == _STABLE_DIGEST
+
+
+# The fingerprint of ``_request()`` under the rule now in force, written down
+# rather than computed. Confirmed identical across eight interpreters, including
+# runs under PYTHONHASHSEED 0, 1, 12345, and 99991 - so it pins the digest that
+# stored fingerprints on disk were written with. It doubles as the
+# canonicalisation guard: any change to field ordering, JSON separators, the
+# exclusion set, or the hash moves this value and fails here rather than
+# silently refusing every replay of a run started before the change.
+_STABLE_DIGEST = "d86e1fae08b2151ef9b9c54019e7b340f790a5718a933983d5d6804f77934b5e"
+
+
+def test_the_stored_fingerprint_value_itself_is_pinned() -> None:
+    """A stored digest cannot be recomputed, so its VALUE is the contract.
+
+    Every relational assertion in this module - two digests agree, or differ -
+    is satisfied by any deterministic function of the request. None of them can
+    see the algorithm change underneath. A run whose fingerprint was persisted
+    before such a change replays as a different intention and is refused, and no
+    test here would have gone red.
+    """
+    assert _current(_request()) == _STABLE_DIGEST
 
 
 def test_the_current_rule_digests_exactly_what_its_specification_says() -> None:

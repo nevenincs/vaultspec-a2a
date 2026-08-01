@@ -1437,6 +1437,7 @@ async def run_status_endpoint(
         repair_status=snapshot.repair_status,
         execution_readiness=snapshot.execution_readiness,
         degraded_reasons=snapshot.degraded_reasons,
+        failure_reason=snapshot.failure_reason,
         profile_id=frozen.profile_id if frozen is not None else None,
         assignments=await _disclose_frozen(frozen),
         lease_id=_persisted_lease_id(
@@ -1885,6 +1886,7 @@ async def run_permission_respond_endpoint(
         worker_client=worker_client,
         recursion_limit=domain_config.graph_recursion_limit,
         trace_headers=trace_headers(),
+        notes=body.notes,
     )
 
     if result.dispatched:

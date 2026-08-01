@@ -409,7 +409,10 @@ class TestInternalEvents:
 
         assert resp.status_code == 200
         assert len(worker.dispatches) == 1
-        assert worker.dispatches[0]["option_id"] == {"approved": True}
+        assert worker.dispatches[0]["option_id"] == {
+            "verdict": "approved",
+            "notes": None,
+        }
 
     @pytest.mark.asyncio(loop_scope="function")
     async def test_degraded_execution_state_projection_preserves_last_good_state(
@@ -871,3 +874,102 @@ class TestAggregatorGCOnTerminal:
         assert record.__dict__["status"] == "completed"
         assert record.__dict__["event_type"] == "thread_terminal"
         assert record.__dict__["action"] == "thread_terminal_status_skipped"
+
+
+class TestTerminalEventFailureReasonPersistence:
+    """S37 / failure-reason persistence: error_detail durably records on FAILED.
+
+    012840a4 made the SSE relay surface the real exception text; these prove
+    the durable counterpart — a reloaded panel (run-status alone, never the
+    live stream) recovers the SAME reason, not a bare "failed".
+    """
+
+    @pytest.mark.asyncio(loop_scope="function")
+    async def test_error_detail_on_a_failed_terminal_event_is_durably_recorded(
+        self,
+        session_factory,
+    ) -> None:
+        from ...control.event_handlers import _handle_terminal_event
+        from ...database.models import ThreadModel
+
+        async with session_factory() as session:
+            thread = await create_thread(session, thread_id="t-failed-with-reason")
+            await session.commit()
+            assert thread.failure_reason is None
+
+        await _handle_terminal_event(
+            "t-failed-with-reason",
+            {
+                "event_type": "thread_terminal",
+                "status": "failed",
+                "error_detail": "Ingest stalled: no event from the graph for over 90s",
+            },
+            session_factory=session_factory,
+        )
+
+        async with session_factory() as session:
+            row = await session.get(ThreadModel, "t-failed-with-reason")
+            assert row is not None
+            assert row.status == "failed"
+            assert (
+                row.failure_reason
+                == "Ingest stalled: no event from the graph for over 90s"
+            )
+
+    @pytest.mark.asyncio(loop_scope="function")
+    async def test_a_completed_terminal_event_leaves_failure_reason_untouched(
+        self,
+        session_factory,
+    ) -> None:
+        """No error_detail on completed/cancelled — the column stays None."""
+        from ...control.event_handlers import _handle_terminal_event
+        from ...database import update_thread_status
+        from ...database.models import ThreadModel
+        from ...thread.enums import ThreadStatus
+
+        async with session_factory() as session:
+            thread = await create_thread(session, thread_id="t-completed-no-reason")
+            # submitted -> completed directly is not a valid transition (mirrors
+            # test_terminal_event_log_includes_runtime_fields above); route
+            # through running first, matching a real dispatched run.
+            await update_thread_status(session, thread.id, ThreadStatus.RUNNING)
+            await session.commit()
+
+        await _handle_terminal_event(
+            "t-completed-no-reason",
+            {"event_type": "thread_terminal", "status": "completed"},
+            session_factory=session_factory,
+        )
+
+        async with session_factory() as session:
+            row = await session.get(ThreadModel, "t-completed-no-reason")
+            assert row is not None
+            assert row.status == "completed"
+            assert row.failure_reason is None
+
+    @pytest.mark.asyncio(loop_scope="function")
+    async def test_a_non_string_error_detail_is_ignored_not_persisted(
+        self,
+        session_factory,
+    ) -> None:
+        """A malformed relay payload (e.g. error_detail as a number) never
+        reaches the durable column — falls back to leaving it untouched
+        rather than raising or coercing garbage into the record."""
+        from ...control.event_handlers import _handle_terminal_event
+        from ...database.models import ThreadModel
+
+        async with session_factory() as session:
+            await create_thread(session, thread_id="t-malformed-detail")
+            await session.commit()
+
+        await _handle_terminal_event(
+            "t-malformed-detail",
+            {"event_type": "thread_terminal", "status": "failed", "error_detail": 42},
+            session_factory=session_factory,
+        )
+
+        async with session_factory() as session:
+            row = await session.get(ThreadModel, "t-malformed-detail")
+            assert row is not None
+            assert row.status == "failed"
+            assert row.failure_reason is None

@@ -53,6 +53,7 @@ __all__ = [
     "ProposalRevisionRequiredError",
     "create_phase_gate_node",
     "create_phase_submit_node",
+    "parse_verdict",
 ]
 
 VERDICT_APPROVED = "approved"
@@ -94,8 +95,15 @@ class DocumentProposalSubmitter(Protocol):
         ...
 
 
-def _parse_verdict(resume_value: object) -> tuple[str | None, str | None]:
-    """Extract ``(verdict, notes)`` from a gate resume payload."""
+def parse_verdict(resume_value: object) -> tuple[str | None, str | None]:
+    """Extract ``(verdict, notes)`` from a gate resume payload.
+
+    The one verdict-shape parser (D6): the document phase gate below and the
+    legacy plan-approval node (:func:`...supervisor.create_plan_approval_node`)
+    both resume on ``{"verdict": "approved" | "rejected" | "request_changes",
+    "notes": str | None}`` and both parse it here, rather than each re-deriving
+    its own reading of the shape.
+    """
     if not isinstance(resume_value, dict):
         return None, None
     verdict = resume_value.get("verdict")
@@ -216,7 +224,7 @@ def create_phase_gate_node(
                 "feature": state.get("active_feature"),
             }
         )
-        verdict, notes = _parse_verdict(resume_value)
+        verdict, notes = parse_verdict(resume_value)
 
         if verdict == VERDICT_APPROVED:
             return Command(

@@ -1599,3 +1599,128 @@ class TestGenericIngestExceptionDetection:
         assert err.recoverable is False
         assert "authoring_actor_token_unknown" in err.message
         assert "RuntimeError" in err.message
+
+
+class _StallingGraph:
+    """Graph stub whose astream_events never yields (S37 stall watchdog).
+
+    Reproduces the observed live incident: a run whose graph genuinely
+    wedges mid-turn produced no event, no exception, no checkpoint write, and
+    no log line — the ingest coroutine hung forever. ingest()'s bounded
+    manual iteration must turn "no progress within the stall budget" into a
+    caught, classified failure instead.
+    """
+
+    async def astream_events(
+        self, graph_input: object, config: object, *, version: str
+    ):
+        await asyncio.sleep(3600)  # never reached under the test's tiny timeout
+        yield  # pragma: no cover -- make it an async generator
+
+    async def aget_state(self, config: object) -> object:
+        return type(
+            "_State", (), {"tasks": [], "values": {}, "next": [], "config": {}}
+        )()
+
+
+assert issubclass(_StallingGraph, StreamableGraph)  # protocol drift guard
+
+
+class TestIngestStallWatchdog:
+    """Tests for the S37 ingest-stall safety net (astream_events wedge)."""
+
+    @pytest.mark.asyncio
+    async def test_stall_fails_loud_with_a_named_reason_not_a_silent_hang(
+        self, aggregator: EventAggregator, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A graph that never yields an event fails fast, not forever."""
+        monkeypatch.setattr(domain_config, "ingest_event_stall_timeout_seconds", 0.05)
+        queue = aggregator.add_subscriber("client-1")
+        aggregator.subscribe("client-1", ["thread-stall"])
+
+        graph = _StallingGraph()
+        config = {"configurable": {"thread_id": "thread-stall"}}
+        # The test's own outer bound: if the watchdog regressed to not firing
+        # at all, this fails the test loudly in 5s rather than hanging the
+        # suite for the graph's simulated hour-long stall.
+        outcome = await asyncio.wait_for(
+            aggregator.ingest(
+                thread_id="thread-stall",
+                agent_id="supervisor",
+                graph=graph,
+                graph_input={"messages": []},
+                config=config,
+            ),
+            timeout=5.0,
+        )
+
+        assert outcome == "failed"
+
+        sequenced_all = []
+        while not queue.empty():
+            sequenced_all.append(queue.get_nowait())
+        domain_events = [s.event for s in sequenced_all]
+
+        error_events = [e for e in domain_events if isinstance(e, ErrorOccurred)]
+        assert len(error_events) >= 1
+        err = error_events[-1]
+        assert err.code == "INGEST_STALL_TIMEOUT"
+        assert err.recoverable is True
+        assert "stalled" in err.message.lower()
+
+    @pytest.mark.asyncio
+    async def test_stall_reason_is_retrievable_via_take_failure_reason(
+        self, aggregator: EventAggregator, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The stall reason is exposed for the durable failure_reason column.
+
+        Executor._settle_run reads this after ingest() returns to thread it
+        into emit_terminal_status(error_detail=...) — the S37 failure-reason
+        persistence path. A consumed reason must never be popped twice.
+        """
+        monkeypatch.setattr(domain_config, "ingest_event_stall_timeout_seconds", 0.05)
+        graph = _StallingGraph()
+        config = {"configurable": {"thread_id": "thread-stall-reason"}}
+        outcome = await asyncio.wait_for(
+            aggregator.ingest(
+                thread_id="thread-stall-reason",
+                agent_id="supervisor",
+                graph=graph,
+                graph_input={"messages": []},
+                config=config,
+            ),
+            timeout=5.0,
+        )
+        assert outcome == "failed"
+
+        reason = aggregator.take_failure_reason("thread-stall-reason")
+        assert reason is not None
+        assert "stalled" in reason.lower()
+        # A pop: the second read finds nothing left to report.
+        assert aggregator.take_failure_reason("thread-stall-reason") is None
+
+    @pytest.mark.asyncio
+    async def test_a_normal_completing_graph_never_trips_the_watchdog(
+        self, aggregator: EventAggregator, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A graph that exhausts normally is unaffected by the bounded rewrite.
+
+        Regression guard for turning astream_events' plain ``async for`` into
+        a manual, wait_for-bounded iteration: a fast, well-behaved run must
+        still complete cleanly with no failure reason recorded.
+        """
+        monkeypatch.setattr(domain_config, "ingest_event_stall_timeout_seconds", 5.0)
+        state = type(
+            "_State", (), {"tasks": [], "values": {}, "next": [], "config": {}}
+        )()
+        graph = _SilentGraph(state)
+        config = {"configurable": {"thread_id": "thread-normal"}}
+        outcome = await aggregator.ingest(
+            thread_id="thread-normal",
+            agent_id="supervisor",
+            graph=graph,
+            graph_input={"messages": []},
+            config=config,
+        )
+        assert outcome == "completed"
+        assert aggregator.take_failure_reason("thread-normal") is None

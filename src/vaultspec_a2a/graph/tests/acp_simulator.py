@@ -44,6 +44,12 @@ def main() -> None:
         "--response", default="FINISH", help="Text to return in agent_message_chunk"
     )
     parser.add_argument(
+        "--response-file",
+        help="If set, read the agent_message_chunk text from this UTF-8 file "
+        "instead of --response. Multi-line or shell-hostile agent prose cannot "
+        "ride argv: the Windows spawn path goes through cmd.exe.",
+    )
+    parser.add_argument(
         "--session-id", default="sim-sess-123", help="Session ID to return"
     )
     parser.add_argument(
@@ -67,6 +73,11 @@ def main() -> None:
         "authoring env to this JSON file on initialize",
     )
     args = parser.parse_args()
+
+    response_text = args.response
+    if args.response_file:
+        with open(args.response_file, encoding="utf-8") as fh:
+            response_text = fh.read()
 
     for line in sys.stdin:
         if not line.strip():
@@ -124,7 +135,7 @@ def main() -> None:
                         "sessionId": args.session_id,
                         "update": {
                             "sessionUpdate": "agent_message_chunk",
-                            "content": {"text": args.response},
+                            "content": {"text": response_text},
                         },
                     },
                 }

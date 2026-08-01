@@ -13,6 +13,7 @@ map.  Three topology types are supported:
 import functools
 import logging
 from collections.abc import Callable
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
@@ -62,6 +63,7 @@ from .nodes.supervisor import create_plan_approval_node, create_supervisor_node
 from .nodes.vault_reader import build_initial_vault_index, create_mount_node
 from .nodes.worker import WorkerNode, create_worker_node
 from .protocols import ProviderFactoryProtocol, TaskQueuePort
+from .web_locators import extract_web_locators
 
 logger = logging.getLogger(__name__)
 
@@ -1145,9 +1147,12 @@ def _make_research_producer(
     """Bridge a researcher model into a ResearchFindingProducer.
 
     Runs one model turn scoped to the branch's thread spec and packages the
-    response as a finding keyed by the thread id. Locators are left to the
-    researcher's prose in this structural wiring; richer locator extraction is a
-    later refinement.
+    response as a finding keyed by the thread id. The web sources the turn cites
+    are promoted into typed web locators by :func:`extract_web_locators`, which
+    is this channel's only production emitter: it normalises at the producer so
+    the branch-side validation - which raises out of a researcher node carrying
+    no retry policy, and so would abort the run with no revision route - is
+    unreachable from the production path.
 
     The researcher is the fourth research_adr document persona, so its turn
     receives the role-scoped document-authoring conventions the worker path
@@ -1206,9 +1211,15 @@ def _make_research_producer(
                 model, harness_mcp_servers, allowed_tools=harness_allowed
             )
         response = await effective_model.ainvoke(messages)
+        claim = str(response.content)
+        # Stamped once for the whole turn: a provider-native retrieval happens
+        # inside the turn and is not separately observable, so the turn's
+        # completion is the finest honest granularity for retrieved_at - and it
+        # is finer than the date a Sources section discloses.
+        retrieved_at = datetime.now(UTC).isoformat(timespec="seconds")
         return {
-            "claim": str(response.content),
-            "locators": [],
+            "claim": claim,
+            "locators": extract_web_locators(claim, retrieved_at=retrieved_at),
             "source_thread": spec.get("thread_id", ""),
         }
 

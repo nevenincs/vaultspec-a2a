@@ -208,6 +208,11 @@ def create_clarification_gate_node(*, proceed_target: str) -> WorkerNode:
 
         resume_value = interrupt(request.as_interrupt_payload())
         answers = _parse_answers(resume_value, request)
+        recorded_answers = state.get("clarification_answers")
+        all_answers = (
+            dict(recorded_answers) if isinstance(recorded_answers, dict) else {}
+        )
+        all_answers[request.request_id] = answers
 
         update: dict[str, Any] = {
             "next": proceed_target,
@@ -216,7 +221,7 @@ def create_clarification_gate_node(*, proceed_target: str) -> WorkerNode:
             # questionnaire the human already filled in.
             "clarification_request": None,
             "clarification_request_id": None,
-            "clarification_answers": {request.request_id: answers},
+            "clarification_answers": all_answers,
         }
         return Command(goto=proceed_target, update=update)
 

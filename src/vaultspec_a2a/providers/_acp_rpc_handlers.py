@@ -304,6 +304,24 @@ async def on_request_permission(
     else:
         # M14: an option list whose leading entry carries no usable id falls back
         # to the conventional allow-once id rather than subscripting it.
+        #
+        # D7 verification (approval-shape-reconciliation ADR, 2026-08-01;
+        # explicitly left undecided there, verify-only, no behaviour change):
+        # traced whether a MUTATING tool call can reach this branch under
+        # autonomy for a non-Kimi (e.g. Claude-family) lane. It can. Under
+        # autonomy, worker.py's _resolve_effective_worker_model leaves the
+        # model's permission_callback unset (it only wires
+        # _interrupt_permission_callback when NOT autonomous), so
+        # config.permission_callback is falsy here and, for any acp_family
+        # other than "kimi", every permission request the CLI raises lands in
+        # THIS branch. Unlike _kimi_autonomous_option_id, it applies no
+        # tool-name or tool-kind allowlist: it auto-approves the first offered
+        # option unconditionally. A request reaches on_request_permission only
+        # for a tool NOT already covered by config.allowed_tools (the CLI's own
+        # static pre-approval), so an uncovered mutating call (write/edit/bash)
+        # is auto-approved here exactly like a read. This is the asymmetry the
+        # ADR's grounding reference names against Kimi's exact-name allowlist;
+        # whether to close it is its own future decision, not this one.
         option_id = _option_id_at(options, 0, default="allow_once")
 
     # M17: validate that option_id is among the offered options before returning.

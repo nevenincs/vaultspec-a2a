@@ -118,6 +118,9 @@ from .models import (
     TokenUsageEntry as TokenUsageEntry,
 )
 from .snapshots import (
+    LOCALLY_RESPONDABLE_PAUSE_CAUSES as LOCALLY_RESPONDABLE_PAUSE_CAUSES,
+)
+from .snapshots import (
     PLAN_APPROVAL_PAUSE_CAUSES as PLAN_APPROVAL_PAUSE_CAUSES,
 )
 from .snapshots import (
@@ -154,6 +157,7 @@ from .state import TeamState as TeamState
 
 __all__ = [
     "DEFAULT_SUPERVISOR_ID",
+    "LOCALLY_RESPONDABLE_PAUSE_CAUSES",
     "PLAN_APPROVAL_PAUSE_CAUSES",
     "ActorTokenBundle",
     "AgentConfigNotFoundError",

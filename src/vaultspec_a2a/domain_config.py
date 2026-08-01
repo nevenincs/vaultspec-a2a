@@ -85,6 +85,19 @@ class DomainConfig(BaseModel):
         default=10.0,
         description="Aggregator: timeout (seconds) for checkpointer aget_state calls.",
     )
+    ingest_event_stall_timeout_seconds: float = Field(
+        default=90.0,
+        description=(
+            "Ingest: maximum seconds to wait for the NEXT astream_events event "
+            "before treating the graph run as stalled (S37). Independent of a "
+            "team's own step_timeout_seconds (a per-node budget LangGraph is "
+            "supposed to enforce internally, but was observed live to not "
+            "always fire) — this is an unconditional outer bound on the ingest "
+            "loop itself, so a genuine wedge fails loud and retriable instead "
+            "of leaving a thread stuck RUNNING forever with no checkpoint, no "
+            "error, and no log line."
+        ),
+    )
 
     # -- Context window sizing -----------------------------------------------
 

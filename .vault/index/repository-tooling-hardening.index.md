@@ -6,7 +6,7 @@ tags:
 date: '2026-08-01'
 modified: '2026-08-01'
 body_schema: 'body-v1'
-body_hash: 'sha256:23f842646675102aa6caa00b08cdf9fb88a2bc07265c4e855714604aba075f54'
+body_hash: 'sha256:011944ae1b3d5e78085dbb3181ec48e3f8a1b4c80c8d6190d2585e717ca07610'
 related:
   - '[[2026-07-19-repository-tooling-hardening-W01-P01-S01]]'
   - '[[2026-07-19-repository-tooling-hardening-W01-P01-summary]]'
@@ -58,6 +58,7 @@ related:
   - '[[2026-08-01-repository-tooling-hardening-strict-s21-audit]]'
   - '[[2026-08-01-repository-tooling-hardening-strict-s22-audit]]'
   - '[[2026-08-01-repository-tooling-hardening-strict-s23-audit]]'
+  - '[[2026-08-01-repository-tooling-hardening-strict-s24-control-init-audit]]'
 ---
 
 # `repository-tooling-hardening` feature index
@@ -84,6 +85,7 @@ Auto-generated index of all documents tagged with `#repository-tooling-hardening
 - `2026-08-01-repository-tooling-hardening-strict-s21-audit` - `repository-tooling-hardening` audit: `Typed API fixture contract review`
 - `2026-08-01-repository-tooling-hardening-strict-s22-audit` - `repository-tooling-hardening` audit: `Typed API endpoint partition review`
 - `2026-08-01-repository-tooling-hardening-strict-s23-audit` - `repository-tooling-hardening` audit: `Live gateway and clarification contract review`
+- `2026-08-01-repository-tooling-hardening-strict-s24-control-init-audit` - `repository-tooling-hardening` audit: `Control package export contract review`
 
 ### exec
 

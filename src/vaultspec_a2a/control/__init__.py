@@ -17,26 +17,3 @@ Control services coordinate :mod:`vaultspec_a2a.thread`,
 """
 
 from __future__ import annotations
-
-__all__ = [
-    "circuit_breaker",
-    "cleanup",
-    "config",
-    "db",
-    "diagnostics",
-    "dispatch",
-    "drain",
-    "event_handlers",
-    "health",
-    "hooks",
-    "permission_service",
-    "projection",
-    "repair_transitions",
-    "repositories",
-    "snapshot",
-    "team_service",
-    "thread_service",
-    "thread_state_service",
-    "verdict_subscriber",
-    "worker_management",
-]

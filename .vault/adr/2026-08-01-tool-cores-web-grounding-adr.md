@@ -214,3 +214,49 @@ against the injection exposure the research says cannot be prompted away.
 - The registry's split egress axis is new auditable surface: future entries
   must declare it, and a missing declaration fails loud, inheriting the
   unsafe-by-omission default.
+
+## Amendment - scope and Codex posture widened (2026-08-01, owner decision)
+
+Two of D3's bounds are widened by owner decision. The rest of this record - the
+citation channel, the refusal discipline, the per-lane proof gate, the first-party
+bounds, and the split egress axis - stands unchanged, and the reasoning D3
+recorded for the narrower posture is preserved above rather than rewritten,
+because it remains the argument against what follows.
+
+**Scope widens to every document-authoring role.** D3 admitted the web tools for
+the researcher and analyst roles only. They are now admitted for the same role
+predicate that already governs the native read floor, so any role receiving
+`Read`, `Grep`, and `Glob` in an autonomous run also receives `WebSearch` and
+`WebFetch`. The exclusions D3 named are unchanged in substance: the predicate
+does not cover coder lanes, and human-in-the-loop runs keep their permission
+prompts regardless of role, so the interrupt still gates outbound reach there.
+
+What is genuinely given up is the containment argument D3 made - that confining
+outbound reach to the two discovery roles limits what an injected instruction can
+reach. Synthesis and review ground on the same external material discovery
+surfaces, and a boundary the roles do not observe in practice buys narrower
+exposure at the cost of agents that cannot verify what they are asked to
+synthesize. The residual risk is accepted on the bounds already named, and the
+mandatory human gate before any document applies remains the load-bearing one.
+
+**Codex serves live retrieval.** D3 served the cached mode - a provider-maintained
+index with no outbound request from the agent host - and deferred live mode to a
+further amendment. This is that amendment: live mode is now the served default.
+
+The cached posture is the safer one and D3 was right that it delivers genuine
+search with zero egress. It is set aside because divergent freshness across lanes
+is itself a correctness hazard in a multi-provider graph: a lane answering from a
+provider-maintained index while its siblings read the live web produces
+findings that differ by provider rather than by evidence, and a graph whose
+conclusions depend on which lane happened to run is not reproducible. Parity of
+reach is the property this capability exists to establish. The mode remains
+configuration, so a deployment preferring zero egress can still take cached
+without a further record.
+
+Two consequences of this record are restated accordingly: the prompt-injection
+surface opens on every autonomous document-authoring lane rather than the
+discovery roles alone, and role scoping is no longer among the bounds carrying
+that risk - the remaining bounds are the fetch tool's URL-origin restriction, the
+use and token caps, provenance-marked evidence, reviewer citation validation, and
+the human gate. The staleness-visibility note attached to cached mode no longer
+applies to the served posture.

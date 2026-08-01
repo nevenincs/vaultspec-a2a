@@ -52,7 +52,19 @@ _PRODUCTION_PRESET_INVENTORY: Final = frozenset(
         "vaultspec_a2a/team/presets/agents/vaultspec-researcher.toml",
         "vaultspec_a2a/team/presets/agents/vaultspec-supervisor.toml",
         "vaultspec_a2a/team/presets/agents/vaultspec-synthesist.toml",
+        # KNOWN DEBT, declared rather than hidden: no served team names this
+        # agent - its own team was retired - so it ships with no runtime
+        # consumer. It is NOT deleted because it is currently the shipped
+        # persona the web-lane darkness proof reads for its disclaimer, so
+        # removing it would take a live safety guard with it. It needs either a
+        # team or a different carrier for that proof; until then it is debt with
+        # an owner rather than surface nobody has looked at.
+        "vaultspec_a2a/team/presets/agents/vaultspec-analyst.toml",
         "vaultspec_a2a/team/presets/teams/vaultspec-adr-research.toml",
+        # Served: discover_team_preset_ids() offers it, so presets-list does too.
+        # Referenced by id at runtime rather than by import, which is why a
+        # source grep alone reads it as a test fixture.
+        "vaultspec_a2a/team/presets/teams/vaultspec-adr-research-clarify.toml",
         "vaultspec_a2a/team/presets/teams/vaultspec-doc-editor.toml",
         "vaultspec_a2a/team/presets/teams/vaultspec-solo-coder.toml",
     }

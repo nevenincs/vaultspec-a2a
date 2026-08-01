@@ -6,6 +6,7 @@ date: '2026-08-01'
 related:
   - "[[2026-07-24-dashboard-bundled-runtime-adr]]"
   - "[[2026-07-21-capsule-install-layout-adr]]"
+  - '[[2026-08-01-dashboard-bundled-runtime-consumer-record-correction-reference]]'
 supersedes:
   - '2026-07-24-dashboard-bundled-runtime-adr'
 modified: '2026-08-01'

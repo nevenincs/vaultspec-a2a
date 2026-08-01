@@ -3,13 +3,15 @@ generated: true
 tags:
   - '#index'
   - '#dashboard-bundled-runtime'
-date: '2026-07-24'
-modified: '2026-07-24'
-body_hash: 'sha256:60a7f90a6183f2d8a4bd6bb92f3a739adb8b551ff575e6010df8a7379702df47'
+date: '2026-08-01'
+modified: '2026-08-01'
+body_schema: 'body-v1'
 related:
   - '[[2026-07-24-dashboard-bundled-runtime-adr]]'
   - '[[2026-07-24-dashboard-bundled-runtime-audit]]'
   - '[[2026-07-24-dashboard-bundled-runtime-reference]]'
+  - '[[2026-08-01-dashboard-bundled-runtime-consumer-record-correction-reference]]'
+  - '[[2026-08-01-dashboard-bundled-runtime-subordination-adr]]'
 ---
 
 # `dashboard-bundled-runtime` feature index
@@ -20,7 +22,8 @@ Auto-generated index of all documents tagged with `#dashboard-bundled-runtime`.
 
 ### adr
 
-- `2026-07-24-dashboard-bundled-runtime-adr` - `dashboard-bundled-runtime` adr: `a2a is a dashboard-bundled runtime, not an installable product` | (**status:** `accepted`)
+- `2026-07-24-dashboard-bundled-runtime-adr` - `dashboard-bundled-runtime` adr: `a2a is a dashboard-bundled runtime, not an installable product` | (**status:** `superseded`)
+- `2026-08-01-dashboard-bundled-runtime-subordination-adr` - `dashboard-bundled-runtime` adr: `the dashboard is the authority; a2a supplies what it requires` | (**status:** `accepted`)
 
 ### audit
 
@@ -29,3 +32,4 @@ Auto-generated index of all documents tagged with `#dashboard-bundled-runtime`.
 ### reference
 
 - `2026-07-24-dashboard-bundled-runtime-reference` - `dashboard-bundled-runtime` reference: `packaging removal inventory and process-model seam`
+- `2026-08-01-dashboard-bundled-runtime-consumer-record-correction-reference` - `dashboard-bundled-runtime` reference: `corrected consumer input for the subordination decision`

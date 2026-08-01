@@ -11,9 +11,9 @@ graph asked and a question the wire renders drift apart.
 
 Bounds are the contract, not advice, so they live in the type system rather than
 in prose: at most :data:`MAX_QUESTIONS_PER_REQUEST` questions per request, at most
-:data:`MAX_OPTIONS_PER_QUESTION` options per choice, and every string capped. A
-producer that exceeds a bound fails construction where it is written, not silently
-at the wire.
+:data:`MAX_OPTIONS_PER_QUESTION` options per choice, and every string capped and
+free of control characters. A producer that exceeds a bound fails construction
+where it is written, not silently at the wire.
 
 Two rules shape the design beyond the bounds:
 
@@ -32,10 +32,11 @@ Two rules shape the design beyond the bounds:
 
 from __future__ import annotations
 
+import unicodedata
 from enum import StrEnum
 from typing import TYPE_CHECKING, Annotated, Any, Literal, Self
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import AfterValidator, BaseModel, ConfigDict, Field, model_validator
 
 from .snapshots import project_checkpoint_tuple
 
@@ -57,6 +58,7 @@ __all__ = [
     "ClarificationQuestion",
     "ClarificationRequest",
     "pending_clarification",
+    "strip_control_characters",
     "topology_honours_clarification",
     "validate_clarification_answers",
 ]
@@ -118,8 +120,75 @@ ClarificationRequestId = Annotated[
     str,
     Field(min_length=1, max_length=MAX_REQUEST_ID_CHARS, pattern=_IDENTIFIER_PATTERN),
 ]
-OptionLabel = Annotated[str, Field(min_length=1, max_length=MAX_OPTION_CHARS)]
-AnswerText = Annotated[str, Field(max_length=MAX_ANSWER_CHARS)]
+
+
+def _is_line_safe(char: str) -> bool:
+    """Return whether *char* may appear in clarification text.
+
+    A control character is one in the Unicode ``Cc`` general category, and
+    nothing narrower. That set is chosen to be exactly what the browser edge
+    ahead of this one refuses in the same values, character for character: it
+    tests the same category, so C0, DEL, and the C1 range all fall on the same
+    side here as they do there. Narrowing this to the C0 block would leave DEL
+    and C1 admitted here and refused there - a value this layer accepted that
+    the edge in front of it would have rejected, which is the drift the shared
+    definition exists to prevent.
+
+    TAB IS A CONTROL CHARACTER and is refused with the rest, which is the one
+    part of this worth stating outright because it used to be excepted. Keeping
+    tab in a question's text while the edge refused it in an answer made a
+    ``choice`` option whose label carried a tab literally unanswerable: the
+    label was offered verbatim, an answer must match an option verbatim, and
+    the only string that could match was one the edge would not forward. The
+    run parks forever on a question nobody can answer. Tab buys a single-line
+    string nothing - it is whitespace a model emitted incidentally - so the
+    exception cost a stranded run and bought no expressiveness.
+    """
+    return unicodedata.category(char) != "Cc"
+
+
+def strip_control_characters(text: str) -> str:
+    """Return *text* with every control character removed.
+
+    The coercing half of the same rule :data:`AnswerText` refuses on. Producers
+    of question text use this because their input is a model turn's proposal,
+    where dropping a stray newline is better than losing the question; the
+    answer path refuses instead, because an answer arrives from a client that
+    can be told to fix it, and silently rewriting what a human typed is worse
+    than telling them it was not accepted - especially for a ``choice``, where
+    a coerced value would go on to be matched verbatim against the declared
+    options and could silently become a different answer than the one given.
+    One rule, two dispositions - stated once here so the two halves cannot
+    drift into disagreeing about what a control character is.
+    """
+    return "".join(char for char in text if _is_line_safe(char))
+
+
+def _refuse_control_characters(value: str) -> str:
+    """Refuse clarification text carrying a control character."""
+    if strip_control_characters(value) != value:
+        msg = "clarification text must not contain control characters"
+        raise ValueError(msg)
+    return value
+
+
+# Every clarification string is capped AND control-character-free. The
+# constraint rides the annotations rather than the gateway schema so that it
+# binds every producer of one of these values - the graph node that builds a
+# question, the resume payload, the HTTP route - instead of only the route that
+# happens to face the network.
+#
+# This is a2a's own boundary, not a courtesy duplicate of the browser edge's.
+# The edge lives in another repository on its own release cadence, and the
+# route these values arrive on is a first-class attach-gated `/v1` verb that any
+# holder of the attach credential may call directly - the edge is one client of
+# it, not a gate in front of it. A check that holds only while one caller
+# behaves is not a boundary, so this one is enforced here on its own account and
+# would still hold if the edge dropped its copy tomorrow.
+LineSafeText = Annotated[str, AfterValidator(_refuse_control_characters)]
+OptionLabel = Annotated[LineSafeText, Field(min_length=1, max_length=MAX_OPTION_CHARS)]
+PromptText = Annotated[LineSafeText, Field(min_length=1, max_length=MAX_PROMPT_CHARS)]
+AnswerText = Annotated[LineSafeText, Field(max_length=MAX_ANSWER_CHARS)]
 
 
 class ClarificationKind(StrEnum):
@@ -147,7 +216,7 @@ class ClarificationQuestion(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     id: QuestionId
-    prompt: str = Field(min_length=1, max_length=MAX_PROMPT_CHARS)
+    prompt: PromptText
     kind: ClarificationKind
     options: list[OptionLabel] | None = Field(
         default=None, max_length=MAX_OPTIONS_PER_QUESTION

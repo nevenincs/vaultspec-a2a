@@ -15,6 +15,7 @@ from __future__ import annotations
 import asyncio
 from typing import TYPE_CHECKING, Any, cast
 
+import pytest
 from fastapi.testclient import TestClient
 from langchain_core.messages import HumanMessage
 from langgraph.graph import END, START, StateGraph
@@ -25,6 +26,7 @@ from ...graph.nodes.clarification import (
 )
 from ...streaming.aggregator import EventAggregator
 from ...thread.clarification import (
+    MAX_ANSWER_CHARS,
     ClarificationKind,
     ClarificationQuestion,
     ClarificationRequest,
@@ -37,8 +39,14 @@ if TYPE_CHECKING:
 
 _BUNDLE_FREE_PRESET = "mock-success-single"
 
-async def _produce_questions(_: TeamState) -> ClarificationRequest:
-    """Provide the concrete questionnaire for this real graph exercise."""
+
+async def _produce_questions(state: TeamState) -> ClarificationRequest:
+    """Provide the concrete questionnaire for this real graph exercise.
+
+    The parameter is named ``state`` rather than discarded because the producer
+    Protocol declares it as a keyword-capable name, so a differently-named
+    parameter does not satisfy the seam it is being passed into.
+    """
     return ClarificationRequest(
         request_id="clarification-endpoint-request",
         questions=[
@@ -73,7 +81,7 @@ def _clarification_graph(checkpointer: AsyncSqliteSaver) -> Any:
         "clarification_gate",
         create_clarification_gate_node(proceed_target="complete"),
     )
-    builder.add_node("complete", lambda _: {})
+    builder.add_node("complete", lambda state: {})
     builder.add_edge(START, "clarification_request")
     builder.add_edge("complete", END)
     return builder.compile(checkpointer=checkpointer)
@@ -107,9 +115,7 @@ async def _park_clarification(
 class TestClarificationRoundTrip:
     """Park -> disclose -> respond -> resume, over the real graph."""
 
-    def test_park_disclose_respond_resume(
-        self, session_factory, checkpointer
-    ) -> None:
+    def test_park_disclose_respond_resume(self, session_factory, checkpointer) -> None:
         app, _agg, worker, _cp = make_app(session_factory, checkpointer)
 
         with TestClient(app, raise_server_exceptions=True) as client:
@@ -270,6 +276,204 @@ class TestClarificationRoundTrip:
         assert resp.status_code == 404
         assert worker.dispatches == []
 
+    def test_respond_refuses_a_newline_in_a_free_text_answer(
+        self, session_factory, checkpointer
+    ) -> None:
+        """A ``text`` answer is free prose, but it is single-line free prose.
+
+        The one surface that renders this questionnaire renders a text answer
+        as a single-line input by deliberate contract, and the edge in front of
+        this route refuses a control character in the same value. A newline
+        therefore cannot come from the sanctioned client at all, and admitting
+        one here would mean two callers of the same route get two behaviours.
+        """
+        app, _agg, worker, _cp = make_app(session_factory, checkpointer)
+
+        with TestClient(app, raise_server_exceptions=True) as client:
+            create_resp = client.post(
+                "/v1/runs",
+                json={"team_preset": _BUNDLE_FREE_PRESET, "message": "plan it"},
+            )
+            thread_id = create_resp.json()["run_id"]
+            worker.dispatches.clear()
+
+            payload = asyncio.run(
+                _park_clarification(checkpointer, thread_id=thread_id)
+            )
+            request_id = payload["request_id"]
+
+            resp = client.post(
+                f"/v1/runs/{thread_id}/clarifications/{request_id}/respond",
+                json={
+                    "answers": {
+                        "provider": "codex",
+                        "scope": "first line\nsecond line",
+                    }
+                },
+            )
+
+        assert resp.status_code == 422
+        # Refused at the wire model, before any run state was touched: the run
+        # stays parked on its question rather than resuming on a mangled answer.
+        assert worker.dispatches == []
+
+    def test_respond_refuses_a_tab_in_an_answer(
+        self, session_factory, checkpointer
+    ) -> None:
+        """Tab is a control character here, exactly as it is at the edge.
+
+        The sharp edge of the rule and the reason it is worth its own test: tab
+        was once excepted on the question-producing side while the edge refused
+        it in an answer, which is the asymmetry that could offer a ``choice``
+        option no admissible answer could match.
+        """
+        app, _agg, worker, _cp = make_app(session_factory, checkpointer)
+
+        with TestClient(app, raise_server_exceptions=True) as client:
+            create_resp = client.post(
+                "/v1/runs",
+                json={"team_preset": _BUNDLE_FREE_PRESET, "message": "plan it"},
+            )
+            thread_id = create_resp.json()["run_id"]
+            worker.dispatches.clear()
+
+            payload = asyncio.run(
+                _park_clarification(checkpointer, thread_id=thread_id)
+            )
+            request_id = payload["request_id"]
+
+            resp = client.post(
+                f"/v1/runs/{thread_id}/clarifications/{request_id}/respond",
+                json={"answers": {"provider": "codex", "scope": "graph\tnodes"}},
+            )
+
+        assert resp.status_code == 422
+        assert worker.dispatches == []
+
+    def test_respond_refuses_a_mixture_and_takes_the_clean_equivalent(
+        self, session_factory, checkpointer
+    ) -> None:
+        """The same sheet fails dirty and succeeds clean.
+
+        Paired deliberately: a refusal test alone cannot tell "the control
+        character was refused" from "this sheet was never acceptable", so the
+        identical sheet with the control characters removed is driven straight
+        after and must resume the run.
+        """
+        app, _agg, worker, _cp = make_app(session_factory, checkpointer)
+
+        with TestClient(app, raise_server_exceptions=True) as client:
+            create_resp = client.post(
+                "/v1/runs",
+                json={"team_preset": _BUNDLE_FREE_PRESET, "message": "plan it"},
+            )
+            thread_id = create_resp.json()["run_id"]
+            worker.dispatches.clear()
+
+            payload = asyncio.run(
+                _park_clarification(checkpointer, thread_id=thread_id)
+            )
+            request_id = payload["request_id"]
+
+            dirty = client.post(
+                f"/v1/runs/{thread_id}/clarifications/{request_id}/respond",
+                json={
+                    "answers": {
+                        "provider": "codex",
+                        "scope": "tab\there\nand a newline\x7fand a del",
+                    }
+                },
+            )
+            assert dirty.status_code == 422
+            assert worker.dispatches == []
+
+            clean = client.post(
+                f"/v1/runs/{thread_id}/clarifications/{request_id}/respond",
+                json={
+                    "answers": {
+                        "provider": "codex",
+                        "scope": "tabhereand a newlineand a del",
+                    }
+                },
+            )
+
+        assert clean.status_code == 200
+        assert len(worker.dispatches) == 1
+        assert worker.dispatches[0]["option_id"]["answers"] == {
+            "provider": "codex",
+            "scope": "tabhereand a newlineand a del",
+        }
+
+    def test_respond_counts_the_answer_cap_in_characters_not_bytes(
+        self, session_factory, checkpointer
+    ) -> None:
+        """A multibyte answer sitting exactly on the cap is accepted.
+
+        The cap is a CHARACTER count on both sides of this boundary. A
+        byte-counting implementation would refuse this answer at roughly a
+        third of the length the contract promises, and would do it only for
+        non-ASCII text - so the ceiling is asserted with characters that do not
+        fit in one byte, which is the only way the distinction is visible.
+        """
+        app, _agg, worker, _cp = make_app(session_factory, checkpointer)
+        # Three bytes each in UTF-8; a byte-based cap would refuse this at
+        # MAX_ANSWER_CHARS characters.
+        at_the_cap = "世" * MAX_ANSWER_CHARS
+        assert len(at_the_cap.encode()) > MAX_ANSWER_CHARS
+
+        with TestClient(app, raise_server_exceptions=True) as client:
+            create_resp = client.post(
+                "/v1/runs",
+                json={"team_preset": _BUNDLE_FREE_PRESET, "message": "plan it"},
+            )
+            thread_id = create_resp.json()["run_id"]
+            worker.dispatches.clear()
+
+            payload = asyncio.run(
+                _park_clarification(checkpointer, thread_id=thread_id)
+            )
+            request_id = payload["request_id"]
+
+            resp = client.post(
+                f"/v1/runs/{thread_id}/clarifications/{request_id}/respond",
+                json={"answers": {"provider": "codex", "scope": at_the_cap}},
+            )
+
+        assert resp.status_code == 200
+        assert worker.dispatches[0]["option_id"]["answers"]["scope"] == at_the_cap
+
+    def test_respond_refuses_one_character_over_the_cap(
+        self, session_factory, checkpointer
+    ) -> None:
+        """The other half of the cap: a ceiling that never refuses is not one."""
+        app, _agg, worker, _cp = make_app(session_factory, checkpointer)
+
+        with TestClient(app, raise_server_exceptions=True) as client:
+            create_resp = client.post(
+                "/v1/runs",
+                json={"team_preset": _BUNDLE_FREE_PRESET, "message": "plan it"},
+            )
+            thread_id = create_resp.json()["run_id"]
+            worker.dispatches.clear()
+
+            payload = asyncio.run(
+                _park_clarification(checkpointer, thread_id=thread_id)
+            )
+            request_id = payload["request_id"]
+
+            resp = client.post(
+                f"/v1/runs/{thread_id}/clarifications/{request_id}/respond",
+                json={
+                    "answers": {
+                        "provider": "codex",
+                        "scope": "a" * (MAX_ANSWER_CHARS + 1),
+                    }
+                },
+            )
+
+        assert resp.status_code == 422
+        assert worker.dispatches == []
+
     def test_respond_extra_answer_field_is_forbidden_by_the_wire_schema(
         self, session_factory, checkpointer
     ) -> None:
@@ -290,4 +494,69 @@ class TestClarificationRoundTrip:
             )
 
         assert resp.status_code == 422
+
+    @pytest.mark.parametrize(
+        "answer", ["codex\nand a second line", "codex\tand a tab", "codex\x7fdel"]
+    )
+    def test_respond_refuses_a_control_bearing_answer_at_the_wire(
+        self, session_factory, checkpointer, answer: str
+    ) -> None:
+        """A control character in an answer 422s before any run state is read.
+
+        The request id below is deliberately one that does not exist: a 404
+        would mean the schema admitted the answer and the route got as far as
+        resolving the questionnaire, so the 422 is what proves the bound bit at
+        the wire rather than a step later. The empty dispatch list is the other
+        half of that proof - nothing was resumed on the way to refusing.
+        """
+        app, _agg, worker, _cp = make_app(session_factory, checkpointer)
+
+        with TestClient(app, raise_server_exceptions=True) as client:
+            create_resp = client.post(
+                "/v1/runs",
+                json={"team_preset": _BUNDLE_FREE_PRESET, "message": "plan it"},
+            )
+            thread_id = create_resp.json()["run_id"]
+            worker.dispatches.clear()
+
+            resp = client.post(
+                f"/v1/runs/{thread_id}/clarifications/nosuchrequest/respond",
+                json={"answers": {"provider": answer}},
+            )
+
+        assert resp.status_code == 422
+        assert "control characters" in resp.text
         assert worker.dispatches == []
+
+    def test_respond_takes_an_ordinary_answer_over_the_same_route(
+        self, session_factory, checkpointer
+    ) -> None:
+        """The bound refuses control characters and nothing more.
+
+        The negative case above would also pass against a schema that refused
+        every answer, so the positive case is what proves the refusal is
+        selective: the same route, the same shape, an answer without a control
+        character, and the run resumes.
+        """
+        app, _agg, worker, _cp = make_app(session_factory, checkpointer)
+
+        with TestClient(app, raise_server_exceptions=True) as client:
+            create_resp = client.post(
+                "/v1/runs",
+                json={"team_preset": _BUNDLE_FREE_PRESET, "message": "plan it"},
+            )
+            thread_id = create_resp.json()["run_id"]
+            worker.dispatches.clear()
+
+            payload = asyncio.run(
+                _park_clarification(checkpointer, thread_id=thread_id)
+            )
+            request_id = payload["request_id"]
+
+            resp = client.post(
+                f"/v1/runs/{thread_id}/clarifications/{request_id}/respond",
+                json={"answers": {"provider": "codex", "scope": "a b"}},
+            )
+
+        assert resp.status_code == 200
+        assert worker.dispatches != []

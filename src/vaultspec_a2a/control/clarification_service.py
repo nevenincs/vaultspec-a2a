@@ -14,10 +14,22 @@ every other resume path uses (the ``control_actions`` journal, ``safe_dispatch``
 mechanism (agent-flow ADR D5(c) rationale).
 
 Per the engine-side contract (already committed): the engine forwards the
-``{"answers": {question_id: value}}`` envelope verbatim and validates only its
-own bounds (ids, entry count, value length/single-line); it judges no answer
-CONTENT. Option-id existence, per-question satisfaction, and required-question
-completeness are this service's authority.
+``{"answers": {question_id: value}}`` envelope verbatim and applies its own
+bounds to it (ids, entry count, value length, no control characters) before
+forwarding; it judges no answer CONTENT. Option-id existence, per-question
+satisfaction, and required-question completeness are this service's authority.
+
+Those engine-side bounds are a pre-filter, NOT this side's boundary, and the
+distinction is load-bearing. The route these answers arrive on is a first-class
+attach-gated ``/v1`` verb: the engine is one client of it, not a gate in front
+of it, and any holder of the attach credential reaches it directly. The engine
+is also a separate repository on its own release cadence, so a bound it drops
+is a bound this side loses without a failing test here to say so. a2a therefore
+enforces the shape of an answer on its own account - the cap and the
+control-character refusal both ride
+:data:`vaultspec_a2a.thread.clarification.AnswerText`, which every answer is
+parsed through no matter which caller sent it. Nothing below relies on the
+engine having checked first.
 """
 
 from __future__ import annotations
@@ -25,7 +37,7 @@ from __future__ import annotations
 import hashlib
 import json
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from ..database import (
     create_control_action,
@@ -87,7 +99,7 @@ class ClarificationResult:
     error_detail: str | None = None
     error_status_code: int | None = None
     circuit_open: bool = False
-    failure_type: "FailureType | None" = None
+    failure_type: FailureType | None = None
 
 
 def _workspace_root(thread_metadata: str | None) -> str | None:
@@ -195,9 +207,12 @@ async def respond_to_clarification(
             error_status_code=404,
         )
 
-    resolved_idempotency_key = idempotency_key or hashlib.sha256(
-        f"{request_id}:{json.dumps(answers, sort_keys=True)}".encode()
-    ).hexdigest()
+    resolved_idempotency_key = (
+        idempotency_key
+        or hashlib.sha256(
+            f"{request_id}:{json.dumps(answers, sort_keys=True)}".encode()
+        ).hexdigest()
+    )
     existing_action = await get_control_action_by_idempotency_key(
         db, thread_id=run_id, idempotency_key=resolved_idempotency_key
     )
@@ -278,13 +293,17 @@ async def respond_to_clarification(
 
     if not outcome.success:
         policy, typed_failure = evaluate_dispatch_failure(outcome.failure_type)
-        action.idempotency_key = f"{resolved_idempotency_key}:dispatch-failed:{action.id}"
+        action.idempotency_key = (
+            f"{resolved_idempotency_key}:dispatch-failed:{action.id}"
+        )
         if policy.should_mark_failed:
             await apply_dispatch_failure(
                 db, run_id, failed_status=ThreadStatus.INPUT_REQUIRED
             )
         else:
-            action.result_status = ControlActionResultStatus.REJECTED_INVALID_STATE.value
+            action.result_status = (
+                ControlActionResultStatus.REJECTED_INVALID_STATE.value
+            )
         error_detail: str | None = outcome.detail or "Worker dispatch failed"
         error_status_code: int | None = None
         if policy.is_circuit_open:

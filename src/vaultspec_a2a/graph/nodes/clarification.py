@@ -69,6 +69,7 @@ from ...thread.clarification import (
     ClarificationKind,
     ClarificationQuestion,
     ClarificationRequest,
+    strip_control_characters,
 )
 
 if TYPE_CHECKING:
@@ -103,21 +104,17 @@ class ClarificationQuestionProducer(Protocol):
         ...
 
 
-def _single_line(text: str) -> str:
-    """Drop every control character except tab out of *text*.
+def _bounded_text(value: object, max_chars: int) -> str:
+    """Render *value* as a single-line string truncated to *max_chars*.
 
     A newline inside a prompt or an option would survive into the checkpoint and
     out to a renderer that lays each question out as one line, so it is removed
-    at the point the untrusted text enters rather than guarded against at each
-    place it is displayed.
+    where the untrusted text enters rather than guarded against at each place it
+    is displayed. What counts as a control character is the contract module's
+    call, not this one's.
     """
-    return "".join(ch for ch in text if ch == "\t" or ch >= " ")
-
-
-def _bounded_text(value: object, max_chars: int) -> str:
-    """Render *value* as a single-line string truncated to *max_chars*."""
     text = value if isinstance(value, str) else str(value)
-    return _single_line(text)[:max_chars]
+    return strip_control_characters(text)[:max_chars]
 
 
 def _coerce_question(raw: object) -> ClarificationQuestion | None:

@@ -40,6 +40,7 @@ from ....thread.clarification import (
     MAX_OPTIONS_PER_QUESTION,
     MAX_PROMPT_CHARS,
     MAX_QUESTIONS_PER_REQUEST,
+    ClarificationAnswers,
     ClarificationKind,
     ClarificationQuestion,
     ClarificationRequest,
@@ -524,7 +525,46 @@ class TestBoundClarificationQuestions:
         bounded = bound_clarification_questions(
             [{"id": "q1", "prompt": "line one\nline two\ttabbed"}]
         )
-        assert bounded[0]["prompt"] == "line oneline two\ttabbed"
+        assert bounded[0]["prompt"] == "line oneline twotabbed"
+
+    def test_strips_tab_from_an_option_label_so_the_option_stays_answerable(
+        self,
+    ) -> None:
+        """A tab kept here would make the option it labels unanswerable.
+
+        An option is offered verbatim and an answer must match it verbatim, but
+        a tab is a control character on the answer path - so a label carrying
+        one could only be matched by a string the answer path refuses, parking
+        the run on a question with no admissible answer. Stripping it here is
+        what keeps the offered label and the acceptable answer the same string.
+        """
+        bounded = bound_clarification_questions(
+            [
+                {
+                    "id": "q1",
+                    "prompt": "Which lane?",
+                    "kind": "choice",
+                    "options": ["web\tlane", "local lane"],
+                }
+            ]
+        )
+        offered = bounded[0]["options"][0]
+        assert offered == "weblane"
+        # The proof that matters is not the spelling but that the offered label
+        # is admissible as an answer to its own question.
+        assert ClarificationAnswers(request_id="r1", answers={"q1": offered})
+
+    def test_strips_del_and_c1_controls_the_edge_would_also_refuse(self) -> None:
+        """Control characters above the C0 block are stripped too.
+
+        DEL and the C1 range are Unicode ``Cc`` exactly as C0 is, and the
+        browser edge ahead of this one tests that same category. A narrower
+        rule here would emit text that edge refuses.
+        """
+        bounded = bound_clarification_questions(
+            [{"id": "q1", "prompt": "del\x7fhere\x85and-c1"}]
+        )
+        assert bounded[0]["prompt"] == "delhereand-c1"
 
     def test_truncates_overlong_strings_to_the_canonical_bounds(self) -> None:
         bounded = bound_clarification_questions(

@@ -3153,6 +3153,17 @@
             "type": "array",
             "title": "Degraded Reasons"
           },
+          "failure_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Failure Reason"
+          },
           "profile_id": {
             "anyOf": [
               {
@@ -3738,6 +3749,16 @@
             "type": "array",
             "title": "Pending Permissions"
           },
+          "pending_clarification": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/_ClarificationRequestSnapshot"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "artifacts": {
             "items": {
               "$ref": "#/components/schemas/ArtifactSnapshot"
@@ -3944,6 +3965,17 @@
               }
             ],
             "title": "Approval Request Id"
+          },
+          "failure_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Failure Reason"
           }
         },
         "type": "object",
@@ -4309,6 +4341,63 @@
         ],
         "title": "_AgentSnapshot",
         "description": "Wire projection of the canonical agent descriptor within a snapshot.\n\nMirrors ``thread.snapshots.AgentData``."
+      },
+      "_ClarificationQuestionSnapshot": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "prompt": {
+            "type": "string",
+            "title": "Prompt"
+          },
+          "kind": {
+            "type": "string",
+            "title": "Kind"
+          },
+          "required": {
+            "type": "boolean",
+            "title": "Required",
+            "default": false
+          },
+          "options": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Options"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "prompt",
+          "kind"
+        ],
+        "title": "_ClarificationQuestionSnapshot",
+        "description": "Layer 1 equivalent of ``thread.snapshots.ClarificationQuestionData``."
+      },
+      "_ClarificationRequestSnapshot": {
+        "properties": {
+          "request_id": {
+            "type": "string",
+            "title": "Request Id"
+          },
+          "questions": {
+            "items": {
+              "$ref": "#/components/schemas/_ClarificationQuestionSnapshot"
+            },
+            "type": "array",
+            "title": "Questions"
+          }
+        },
+        "type": "object",
+        "required": [
+          "request_id"
+        ],
+        "title": "_ClarificationRequestSnapshot",
+        "description": "Layer 1 equivalent of ``thread.snapshots.ClarificationRequestData``.\n\nA pending mid-run clarification (agent-flow ADR D5(a)): disclosed on\n``run-status`` so a reload re-renders the questionnaire from authoritative\nstate alone, never from a relay frame."
       },
       "_PermissionOptionSnapshot": {
         "properties": {

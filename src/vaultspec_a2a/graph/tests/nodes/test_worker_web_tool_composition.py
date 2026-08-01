@@ -166,7 +166,9 @@ def test_the_supplied_proof_matches_the_shipped_declaration() -> None:
 
 
 @pytest.mark.parametrize("lane", (*Provider, "not-a-lane", None))
-def test_no_lane_shipped_today_earns_a_web_builtin(lane: object) -> None:
+def test_no_lane_shipped_today_earns_a_web_builtin(
+    lane: Provider | str | None,
+) -> None:
     """Deny is the default, and today it is the answer every lane gives.
 
     The native counterpart of the registry path's "refused on every lane shipped

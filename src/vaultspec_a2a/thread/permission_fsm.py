@@ -6,9 +6,10 @@ progress-applied events as frozen descriptor dataclasses.
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 
-from ..graph.enums import REJECT_OPTION_IDS
+from ..graph.enums import is_rejection_response
 from .enums import (
     ApprovalStatus,
     ControlActionType,
@@ -27,7 +28,33 @@ __all__ = [
     "compute_permission_request_effects",
     "compute_permission_resolution_effects",
     "compute_progress_applied_effects",
+    "response_is_rejection",
 ]
+
+
+def response_is_rejection(
+    allowed_options_json: str | None,
+    response_option_id: str | None,
+) -> bool:
+    """Decode a durable options column and return the one rejection verdict.
+
+    The offered options are stored as a JSON string, so this owns only the decode
+    and delegates the actual judgement to :func:`~..graph.enums.is_rejection_response`.
+    It exists so the three settlement sites — the submission stamp in the control
+    service, the ``permission_resolved`` projection, and the progress-inferred
+    fallback — share one decode *and* one verdict instead of each re-deriving
+    rejection from whichever field it happened to have in scope.
+
+    A column that is absent, empty, or malformed JSON yields no options, which
+    routes the verdict to the option-id fallback rather than reading as approved.
+    """
+    options: object = None
+    if isinstance(allowed_options_json, str) and allowed_options_json:
+        try:
+            options = json.loads(allowed_options_json)
+        except json.JSONDecodeError:
+            options = None
+    return is_rejection_response(options, response_option_id)
 
 
 @dataclass(frozen=True, slots=True)
@@ -72,11 +99,10 @@ class PermissionResolutionEffects:
 def compute_permission_resolution_effects(
     response_option_id: str | None,
     pause_reason_type: str | None,
+    allowed_options_json: str | None = None,
 ) -> PermissionResolutionEffects:
     """Compute state-machine effects of a permission resolution event."""
-    is_rejected = (
-        response_option_id is not None and response_option_id in REJECT_OPTION_IDS
-    )
+    is_rejected = response_is_rejection(allowed_options_json, response_option_id)
     target_status = (
         PermissionRequestStatus.REJECTED
         if is_rejected
@@ -111,20 +137,28 @@ class ProgressAppliedEffects:
 def compute_progress_applied_effects(
     response_option_id: str | None,
     pause_reason_type: str | None,
+    allowed_options_json: str | None = None,
 ) -> ProgressAppliedEffects:
-    """Compute per-permission effects when progress implies application."""
+    """Compute per-permission effects when progress implies application.
+
+    Progress only tells us the worker moved on, never *how* the human answered,
+    so the settled status is derived from the recorded response exactly as the
+    primary resolution path derives it. A denial inferred from progress therefore
+    settles as REJECTED, not as the repository's applied default.
+    """
     is_plan = (pause_reason_type or "") in PLAN_APPROVAL_PAUSE_CAUSES
+    is_rejected = response_is_rejection(allowed_options_json, response_option_id)
 
     approval: ApprovalStatus | None = None
     if is_plan:
-        approval = (
-            ApprovalStatus.REJECTED
-            if response_option_id == "reject"
-            else ApprovalStatus.APPROVED
-        )
+        approval = ApprovalStatus.REJECTED if is_rejected else ApprovalStatus.APPROVED
 
     return ProgressAppliedEffects(
-        target_status=PermissionRequestStatus.APPLIED,
+        target_status=(
+            PermissionRequestStatus.REJECTED
+            if is_rejected
+            else PermissionRequestStatus.APPLIED
+        ),
         last_applied_action=ControlActionType.PERMISSION_RESPONSE_APPLIED,
         is_plan_approval=is_plan,
         approval_status=approval,

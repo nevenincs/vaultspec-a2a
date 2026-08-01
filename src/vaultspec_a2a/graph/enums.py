@@ -9,10 +9,13 @@ canonical Layer 1 definitions. All consumers import directly from here.
 
 from enum import StrEnum
 
+from .acp_options import option_id_of
+
 __all__ = [
     "MODEL_MAP",
     "PROVIDER_DEFAULT_MODELS",
     "REJECT_OPTION_IDS",
+    "REJECT_OPTION_KINDS",
     "RESEARCH_ADR_NODE_PHASE",
     "AgentLifecycleState",
     "Model",
@@ -22,6 +25,7 @@ __all__ = [
     "Provider",
     "ToolCallStatus",
     "ToolKind",
+    "is_rejection_response",
     "research_adr_semantic_phase",
 ]
 
@@ -93,9 +97,76 @@ class PermissionOptionKind(StrEnum):
     REJECT_ALWAYS = "reject_always"
 
 
-REJECT_OPTION_IDS: frozenset[str] = frozenset(
+REJECT_OPTION_KINDS: frozenset[str] = frozenset(
     member.value for member in PermissionOptionKind if member.value.startswith("reject")
 )
+"""The closed set of ``PermissionOptionKind`` values that deny a request.
+
+A *kind* is drawn from the ACP schema enum, so this set is total over it. It is
+matched against an option's ``kind`` field — never against an option *id*, which
+is a different, provider-defined namespace (see :data:`REJECT_OPTION_IDS`).
+"""
+
+
+REJECT_OPTION_IDS: frozenset[str] = REJECT_OPTION_KINDS | frozenset(
+    {"reject", "deny", "deny_once", "deny_always"}
+)
+"""The rejecting option *ids* this system is known to mint or receive.
+
+Unlike a kind, an option id is free-form and provider-defined: Kimi offers a bare
+``"reject"`` whose kind is ``reject_once``, the plan and document approval gates
+mint ``"reject"``, the no-options fallback mints ``"deny_once"``, the ACP handlers
+fall back to the bare literals ``"deny"`` and ``"reject"``, and providers that
+spell an id with its kind offer ``"reject_once"``/``"reject_always"`` — hence the
+union with :data:`REJECT_OPTION_KINDS`.
+
+This set is therefore a *best-effort* recogniser and can never be complete, which
+is precisely why :func:`is_rejection_response` consults the declared kind first
+and reaches for this only when no kind is available.
+"""
+
+
+def is_rejection_response(options: object, option_id: str | None) -> bool:
+    """Report whether the chosen option denies the request it answered.
+
+    This is the single rejection verdict for the whole system. Every settlement
+    site — the submission stamp, the ``permission_resolved`` projection, and the
+    progress-inferred fallback — asks this one question, so a denial cannot be
+    recorded as an approval by one path and a rejection by another.
+
+    The verdict prefers the option's declared ``kind`` because a kind is a closed
+    vocabulary: it is total over :class:`PermissionOptionKind` and so classifies a
+    provider id this module has never seen. Only when the chosen option cannot be
+    found among ``options``, or carries no usable kind, does it fall back to the
+    id spellings in :data:`REJECT_OPTION_IDS` — a legacy or malformed durable row
+    still gets the best answer available rather than silently reading as approved.
+
+    Args:
+        options:   The options that were offered, as decoded from the durable
+                   ``allowed_options_json`` column or an in-flight payload. Both
+                   the ACP ``optionId`` and snake_case ``option_id`` spellings are
+                   accepted. Anything that is not a list of dicts simply offers
+                   no kind, which routes the verdict to the id fallback.
+        option_id: The id the responder chose. ``None`` or empty means nothing was
+                   chosen, which is not a rejection.
+
+    Returns:
+        True when the response denied the request.
+    """
+    if not option_id:
+        return False
+    if isinstance(options, list):
+        for option in options:
+            if option_id_of(option) != option_id:
+                continue
+            kind = option.get("kind") if isinstance(option, dict) else None
+            # ``kind`` may arrive as a PermissionOptionKind or its bare value; a
+            # StrEnum compares equal to its value, so normalising to str covers
+            # both without narrowing to one transport's spelling.
+            if isinstance(kind, str) and kind:
+                return kind in REJECT_OPTION_KINDS
+            break
+    return option_id in REJECT_OPTION_IDS
 
 
 class PermissionType(StrEnum):

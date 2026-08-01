@@ -407,6 +407,7 @@ async def _apply_permission_resolution(
     fx_res = compute_permission_resolution_effects(
         permission.response_option_id,
         permission.pause_reason_type,
+        permission.allowed_options_json,
     )
     await mark_permission_request_applied(
         db, request_id=request_id, status=fx_res.target_status
@@ -509,8 +510,11 @@ async def _handle_progress_event(
             fx = compute_progress_applied_effects(
                 permission.response_option_id,
                 permission.pause_reason_type,
+                permission.allowed_options_json,
             )
-            await mark_permission_request_applied(db, request_id=permission.request_id)
+            await mark_permission_request_applied(
+                db, request_id=permission.request_id, status=fx.target_status
+            )
             await create_control_action(
                 db,
                 thread_id=thread_id,

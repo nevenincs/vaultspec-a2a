@@ -16,6 +16,7 @@ from ...database import (
     get_permission_request,
     record_permission_request,
     record_permission_response_submission,
+    set_thread_approval_state,
 )
 from ...database.models import Base, ControlActionModel, ThreadModel
 
@@ -206,6 +207,194 @@ async def test_document_approval_request_is_persisted_as_durable_pending_permiss
         assert thread.status == "input_required"
         assert thread.approval_status == "pending"
         assert thread.approval_request_id == request_id
+
+
+async def _answered_rejection(
+    session_factory,
+    *,
+    title: str,
+    pause_reason_type: str,
+    options: list[dict[str, object]],
+    stamp_thread_rejected: bool,
+) -> tuple[str, str]:
+    """Park a thread on a permission the human denied, awaiting settlement.
+
+    Reproduces the real pre-settlement state: the response has been submitted
+    (leaving the row ``answered_pending_apply``) and, for a plan approval, the
+    control service has already stamped the thread REJECTED. Returns
+    ``(thread_id, request_id)``.
+    """
+    async with session_factory() as session:
+        thread = await create_thread(session, title=title)
+        request_id = f"{thread.id}:perm-reject"
+        await record_permission_request(
+            session,
+            request_id=request_id,
+            thread_id=thread.id,
+            pause_reason_type=pause_reason_type,
+            description="Approve?",
+            allowed_options=options,
+            tool_call=pause_reason_type,
+        )
+        await record_permission_response_submission(
+            session,
+            request_id=request_id,
+            option_id="reject",
+            idempotency_key="response-reject-1",
+        )
+        if stamp_thread_rejected:
+            await set_thread_approval_state(
+                session,
+                thread.id,
+                approval_status="rejected",
+                approval_request_id=request_id,
+                approval_reason="Approve?",
+            )
+        await session.commit()
+        thread_id = thread.id
+
+    async with session_factory() as session:
+        permission = await get_permission_request(session, request_id)
+        assert permission is not None
+        assert permission.request_status == "answered_pending_apply"
+        assert permission.response_option_id == "reject"
+
+    return thread_id, request_id
+
+
+_PLAN_OPTIONS: list[dict[str, object]] = [
+    {"option_id": "approve", "name": "Approve Plan", "kind": "allow_once"},
+    {"option_id": "reject", "name": "Reject — Revise Plan", "kind": "reject_once"},
+]
+
+# Kimi's real offer: the ACP wire spells the identity ``optionId``, and the option
+# id ``"reject"`` is provider-defined -- it is not a PermissionOptionKind value.
+_KIMI_OPTIONS: list[dict[str, object]] = [
+    {"optionId": "approve", "kind": "allow_once"},
+    {"optionId": "reject", "kind": "reject_once"},
+]
+
+
+@pytest.mark.asyncio
+async def test_plan_rejection_survives_the_resolution_projection(
+    session_factory,
+) -> None:
+    """The resolution handler must not overwrite a denial with an approval.
+
+    The control service stamps the thread REJECTED when the response is submitted.
+    The ``permission_resolved`` projection then recomputes the verdict, and used to
+    recompute it from a rejecting-*kind* set matched against the response option
+    *id* -- so the bare ``"reject"`` the plan gate mints read as an approval and was
+    written straight over the correct state.
+    """
+    thread_id, request_id = await _answered_rejection(
+        session_factory,
+        title="Plan rejection",
+        pause_reason_type="plan_approval_request",
+        options=_PLAN_OPTIONS,
+        stamp_thread_rejected=True,
+    )
+
+    await _handle_permission_event(
+        thread_id,
+        {"type": "permission_resolved", "request_id": request_id},
+        session_factory=session_factory,
+    )
+
+    async with session_factory() as session:
+        permission = await get_permission_request(session, request_id)
+        assert permission is not None
+        assert permission.request_status == "rejected"
+
+        thread = await session.get(ThreadModel, thread_id)
+        assert thread is not None
+        assert thread.approval_status == "rejected"
+
+
+@pytest.mark.asyncio
+async def test_plan_rejection_inferred_from_progress_settles_as_rejected(
+    session_factory,
+) -> None:
+    """The progress fallback must reach the same verdict as the primary path.
+
+    Progress only says the worker moved on. It used to settle every answered
+    permission as APPLIED unconditionally, passing no status at all so the
+    repository default decided -- which silently converted a denial into an
+    applied approval.
+    """
+    thread_id, request_id = await _answered_rejection(
+        session_factory,
+        title="Plan rejection via progress",
+        pause_reason_type="plan_approval_request",
+        options=_PLAN_OPTIONS,
+        stamp_thread_rejected=True,
+    )
+
+    await _handle_progress_event(
+        thread_id,
+        {"type": "message_chunk", "content": "worker resumed"},
+        session_factory=session_factory,
+    )
+
+    async with session_factory() as session:
+        permission = await get_permission_request(session, request_id)
+        assert permission is not None
+        assert permission.request_status == "rejected"
+
+        thread = await session.get(ThreadModel, thread_id)
+        assert thread is not None
+        assert thread.approval_status == "rejected"
+
+
+@pytest.mark.asyncio
+async def test_a_kimi_tool_denial_settles_as_rejected_on_both_paths(
+    session_factory,
+) -> None:
+    """A provider-defined rejecting id must settle as a denial, not an approval.
+
+    Kimi offers ``{"optionId": "reject", "kind": "reject_once"}`` -- the id is not
+    its kind, which is what proves option ids are free-form. The denial is real:
+    the ACP agent does receive ``"reject"`` and the tool is refused, so recording
+    it as applied corrupts the journal rather than authorising anything.
+    """
+    resolved_thread, resolved_request = await _answered_rejection(
+        session_factory,
+        title="Kimi denial via resolution",
+        pause_reason_type="bash",
+        options=_KIMI_OPTIONS,
+        stamp_thread_rejected=False,
+    )
+    await _handle_permission_event(
+        resolved_thread,
+        {"type": "permission_resolved", "request_id": resolved_request},
+        session_factory=session_factory,
+    )
+
+    progress_thread, progress_request = await _answered_rejection(
+        session_factory,
+        title="Kimi denial via progress",
+        pause_reason_type="bash",
+        options=_KIMI_OPTIONS,
+        stamp_thread_rejected=False,
+    )
+    await _handle_progress_event(
+        progress_thread,
+        {"type": "message_chunk", "content": "worker resumed"},
+        session_factory=session_factory,
+    )
+
+    async with session_factory() as session:
+        for request_id in (resolved_request, progress_request):
+            permission = await get_permission_request(session, request_id)
+            assert permission is not None
+            assert permission.request_status == "rejected"
+
+        # A tool permission carries no plan approval state, so neither path may
+        # invent one on the thread.
+        for thread_id in (resolved_thread, progress_thread):
+            thread = await session.get(ThreadModel, thread_id)
+            assert thread is not None
+            assert thread.approval_status is None
 
 
 @pytest.mark.asyncio

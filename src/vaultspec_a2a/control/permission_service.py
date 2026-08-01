@@ -24,7 +24,6 @@ from ..database import (
     set_thread_approval_state,
     update_thread_status,
 )
-from ..graph.enums import REJECT_OPTION_IDS
 from ..ipc.schemas import DispatchRequest, to_dispatch_action
 from ..thread.dispatch_policy import FailureType, evaluate_dispatch_failure
 from ..thread.enums import (
@@ -35,6 +34,7 @@ from ..thread.enums import (
     PermissionRequestStatus,
     ThreadStatus,
 )
+from ..thread.permission_fsm import response_is_rejection
 from ..thread.snapshots import PLAN_APPROVAL_PAUSE_CAUSES
 from .dispatch import safe_dispatch
 from .permission_options import extract_allowed_option_ids
@@ -71,11 +71,19 @@ def _allowed_option_ids(permission: object) -> set[str]:
     return extract_allowed_option_ids(raw_options)
 
 
-def _plan_response_approval_status(option_id: str) -> str:
-    """Report the submitted plan decision without flattening it to pending."""
+def _plan_response_approval_status(permission: object, option_id: str) -> str:
+    """Report the submitted plan decision without flattening it to pending.
+
+    Reads the verdict from the shared predicate against the options the request
+    actually offered, so the status stamped here at submission is the same one the
+    ``permission_resolved`` projection recomputes later. Deriving it twice from
+    different fields is what previously let the projection overwrite a rejection
+    with an approval.
+    """
+    raw_options = getattr(permission, "allowed_options_json", None)
     return (
         ApprovalStatus.REJECTED.value
-        if option_id in REJECT_OPTION_IDS or option_id == "reject"
+        if response_is_rejection(raw_options, option_id)
         else ApprovalStatus.APPROVED.value
     )
 
@@ -612,7 +620,7 @@ async def _record_permission_transition(
         idempotency_key=resolved_idempotency_key,
     )
     if permission.pause_reason_type in PLAN_APPROVAL_PAUSE_CAUSES:
-        submitted_status = _plan_response_approval_status(option_id)
+        submitted_status = _plan_response_approval_status(permission, option_id)
         await set_thread_approval_state(
             db,
             thread_id,
@@ -746,7 +754,7 @@ async def _dispatch_permission_resume(
         action_id=action.id,
         idempotency_key=resolved_idempotency_key,
         approval_status=(
-            _plan_response_approval_status(option_id)
+            _plan_response_approval_status(permission, option_id)
             if permission.pause_reason_type in PLAN_APPROVAL_PAUSE_CAUSES
             else thread_record.approval_status
         ),

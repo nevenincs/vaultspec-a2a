@@ -201,11 +201,11 @@ IN_PROCESS_LANES: frozenset[Provider] = frozenset(
 )
 
 # ---------------------------------------------------------------------------
-# THE WEB DECLARATION - edit by hand, never derive. EMPTY, and that is the
-# landing state, not an oversight: the wiring lands before the PROOF, so every
-# seam is asserted dark. Empty means no lane has yet demonstrated a retrieval,
-# never that a lane cannot reach the web - capability is universal and this
-# mapping governs activation and claims alone.
+# THE WEB DECLARATION - edit by hand, never derive. It landed EMPTY, because the
+# wiring lands before the PROOF and every seam is asserted dark until a live run
+# earns it. Absence still means no lane has yet demonstrated a retrieval, never
+# that a lane cannot reach the web - capability is universal and this mapping
+# governs activation and claims alone.
 #
 # Add an entry ONLY after watching the cited test complete a REAL RETRIEVAL on
 # that lane end to end - the fetched material reaching checkpointed state as a
@@ -219,7 +219,23 @@ IN_PROCESS_LANES: frozenset[Provider] = frozenset(
 # Adding a lane here flips its web tools and its persona text together, in one
 # change, for that lane only. Removing a lane is always safe.
 # ---------------------------------------------------------------------------
-PROVEN_WEB_LANES: Mapping[Provider, WebLaneProof] = MappingProxyType({})
+PROVEN_WEB_LANES: Mapping[Provider, WebLaneProof] = MappingProxyType(
+    {
+        # No tool names: this lane's web reach is CONFIGURED, through the
+        # ``web_search`` posture of its per-run config home, and it exposes no
+        # allowlistable built-in to compose. The empty tuple is the honest
+        # declaration for that shape, not an omission.
+        Provider.CODEX: WebLaneProof(
+            test=(
+                "src/vaultspec_a2a/service_tests/test_codex_web_grounding_live.py"
+                "::test_retrieval_returns_a_current_fact_the_model_cannot_recall"
+            ),
+            proves="a real codex turn under the served live posture retrieved a "
+            "value only the live index could supply, and the same prompt under "
+            "the disabled posture performed no search at all",
+        ),
+    }
+)
 
 
 def _require_web_proof_implies_turn_proof(

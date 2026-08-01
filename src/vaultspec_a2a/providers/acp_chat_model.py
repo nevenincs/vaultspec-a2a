@@ -74,6 +74,7 @@ from ._acp_rpc_handlers import (
 from ._acp_session import initialize_session, setup_prompt, setup_session
 from ._acp_types import PermissionCallback, _AcpModelConfig, _AcpSessionContext
 from ._cleanup import CleanupStep, run_independent_cleanups
+from ._mcp_contract import verify_harness_mcp_contract
 from ._subprocess import kill_process_tree as _kill_process_tree
 from ._subprocess import spawn_acp_process as _spawn_acp_process
 from .acp_exceptions import (
@@ -306,6 +307,18 @@ class AcpChatModel(BaseChatModel):
         # load-bearing, which is why it is gated on the bridge, not the transport.
         if self._config.allowed_tools:
             env["ENABLE_TOOL_SEARCH"] = "0"
+
+        # Fail loud: every registry-known harness server this session is about to
+        # advertise must actually serve the read-only tools the registry declares
+        # for it. The declared names ARE the run's allowlist and the surfacing
+        # config's contents, so a server that no longer serves one of them would
+        # leave the agent advertising and auto-permitting a tool it can never call
+        # - grounding silently absent, run still green. The launch spec carries no
+        # version constraint by design; this check, not a pinned version, is what
+        # makes the declaration trustworthy. Probed before any config home or
+        # workspace projection is written, so a refusal leaves nothing to clean up,
+        # and memoized per launch identity so the cost lands once per process.
+        await verify_harness_mcp_contract(self._config.mcp_servers, env=env)
 
         # Redirect the Claude/Z.ai CLI to a per-run isolated config home so the
         # worker's MCP surface is exactly the declared set: the operator's

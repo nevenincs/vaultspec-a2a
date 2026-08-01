@@ -3,19 +3,19 @@ set windows-shell := ["powershell.exe", "-NoLogo", "-NoProfile", "-Command"]
 
 rag_cli := "uv run --no-sync --frozen --no-default-groups --extra rag vaultspec-rag"
 
-# Fail when ACP runtime acquisition no longer matches the project lock.
-_check-runtime-authority:
-    uv run --no-sync --frozen --no-default-groups --extra rag python -c "from importlib.metadata import version; from vaultspec_a2a.providers._acp_mcp import _LOCKED_RAG_MCP_REQUIREMENT as requirement; expected = 'vaultspec-rag[mcp]==' + version('vaultspec-rag'); raise SystemExit(0 if requirement == expected else 'RAG runtime drift: ' + requirement + ' != ' + expected)"
+# Fail when the ACP launch spec does not serve the tools the harness declares.
+_check-tool-contract:
+    uv run --no-sync --frozen --no-default-groups --extra rag python -c "import asyncio, os; from vaultspec_a2a.providers._acp_mcp import resolve_harness_mcp_servers; from vaultspec_a2a.providers._mcp_contract import verify_harness_mcp_contract; asyncio.run(verify_harness_mcp_contract(resolve_harness_mcp_servers(['vaultspec-rag']), env=dict(os.environ)))"
 
 # Resolve locked RAG dependencies and enroll the workspace without external provisioning.
 setup:
     uv sync --locked --no-default-groups --extra rag
-    just dev rag _check-runtime-authority
+    just dev rag _check-tool-contract
     {{ rag_cli }} install --mode dependency --no-mcp --no-provision --no-torch-config --yes
 
 # Enroll RAG after its profile has already been synchronized; do not download models or Qdrant.
 install:
-    just dev rag _check-runtime-authority
+    just dev rag _check-tool-contract
     {{ rag_cli }} install --mode dependency --no-mcp --no-provision --no-torch-config --yes
 
 # Preview non-provisioning workspace enrollment.
@@ -24,9 +24,9 @@ install-dry-run:
 
 # Deliberately refresh RAG inside its declared compatibility range.
 upgrade:
-    uv run --no-sync --frozen --no-default-groups --extra rag python -c "import subprocess; from vaultspec_a2a.providers._acp_mcp import _LOCKED_RAG_MCP_REQUIREMENT as requirement; subprocess.run(['uv', 'lock', '--upgrade-package', requirement], check=True)"
+    uv lock --upgrade-package vaultspec-rag
     uv sync --locked --no-default-groups --extra rag
-    just dev rag _check-runtime-authority
+    just dev rag _check-tool-contract
     {{ rag_cli }} install --mode dependency --upgrade --no-mcp --no-provision --no-torch-config --yes
     {{ rag_cli }} --version
     {{ rag_cli }} status

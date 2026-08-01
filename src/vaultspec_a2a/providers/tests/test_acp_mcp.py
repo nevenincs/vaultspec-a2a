@@ -32,7 +32,7 @@ def test_resolve_known_server_returns_stdio_spec() -> None:
     # uvx invokes the published package's console script, cwd-independent.
     assert spec["args"] == [
         "--from",
-        "vaultspec-rag[mcp]==0.3.2",
+        "vaultspec-rag[mcp]",
         "vaultspec-search-mcp",
     ]
 
@@ -61,8 +61,27 @@ def test_harness_specs_are_provider_child_launch_specs_not_self_spawned() -> Non
         assert not hasattr(mod, banned), f"registry module must not spawn ({banned})"
 
 
-def test_locked_rag_runtime_acquisition_executes_the_published_cli() -> None:
-    """The resolved production launch command acquires a runnable locked MCP CLI."""
+def test_no_registry_launch_spec_constrains_a_version() -> None:
+    """No registry entry may constrain the version of the server it launches.
+
+    The harness servers are released independently of this project, so every form
+    of version constraint - exact pin, floor, ceiling, or compatible-release - in a
+    launch spec stalls the ecosystem behind this project's upgrade cadence. The
+    compatibility boundary is the declared tool surface, verified against the
+    server's own ``tools/list``, so a constraint reappearing here is a regression
+    caught in the suite rather than in a downstream consumer's blocked upgrade.
+    """
+    from .._acp_mcp import _KNOWN_MCP_SERVERS
+
+    for name, entry in _KNOWN_MCP_SERVERS.items():
+        for arg in entry.get("args", ()):
+            assert not any(
+                operator in str(arg) for operator in ("==", ">=", "<=", "~=", "!=")
+            ), f"{name} launch spec constrains a version: {arg!r}"
+
+
+def test_rag_runtime_acquisition_executes_the_published_cli() -> None:
+    """The resolved production launch command acquires a runnable MCP CLI."""
     spec = resolve_harness_mcp_servers(["vaultspec-rag"])[0]
     proc = subprocess.run(
         [spec["command"], *spec["args"], "--help"],
@@ -238,7 +257,7 @@ def test_config_home_servers_selects_registry_known_shapes_for_claude_json() -> 
             "command": "uvx",
             "args": [
                 "--from",
-                "vaultspec-rag[mcp]==0.3.2",
+                "vaultspec-rag[mcp]",
                 "vaultspec-search-mcp",
             ],
         },
@@ -250,7 +269,7 @@ def test_config_home_servers_selects_registry_known_shapes_for_claude_json() -> 
         "command": "uvx",
         "args": [
             "--from",
-            "vaultspec-rag[mcp]==0.3.2",
+            "vaultspec-rag[mcp]",
             "vaultspec-search-mcp",
         ],
     }
@@ -327,7 +346,7 @@ def test_codex_specs_resolves_read_only_registry_entry_with_tools() -> None:
     assert spec["command"] == "uvx"
     assert spec["args"] == [
         "--from",
-        "vaultspec-rag[mcp]==0.3.2",
+        "vaultspec-rag[mcp]",
         "vaultspec-search-mcp",
     ]
     # The read tools ride along for the Codex enabled_tools allowlist.

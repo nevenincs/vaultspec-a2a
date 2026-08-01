@@ -325,6 +325,7 @@ class TestAllExports:
             "ErrorSeverity",
             "EventAggregatorError",
             "GitWorkspaceError",
+            "HarnessToolContractError",
             "IsolationRequiredError",
             "NicknameConflictError",
             "PermissionDeniedError",

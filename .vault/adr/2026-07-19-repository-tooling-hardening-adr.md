@@ -10,7 +10,7 @@ related:
   - '[[2026-07-15-dev-process-registry-adr]]'
 supersedes:
   - '2026-03-19-control-layer-cli-justfile-separation-adr'
-modified: '2026-07-19'
+modified: '2026-08-01'
 body_hash: 'sha256:74d22b1ded5b8e80fc886490c2eca703f0ae6b042443f3bf262c53b3965a945c'
 ---
 # `repository-tooling-hardening` adr: `one modular, locked, and reproducible repository control surface` | (**status:** `accepted`)
@@ -129,3 +129,57 @@ unnecessary.
 - Opens: a dedicated Core Git-ignore diagnostics verb, registry-managed RAG
   services, and stricter hosted controls when repository-plan capabilities
   permit them.
+
+## Amendment (2026-08-01, no version pinning of independently released capabilities)
+
+Reversal, on the owner's ruling. The Constraint "Package upgrades are deliberate
+lockfile mutations followed by convergence checks" and the Implementation bullet
+"Execute Core and RAG from the project lock; provision and upgrade commands
+verify versions and convergence" were read, at
+`repository-tooling-hardening-W01-P02-S03`, as licence to write an exact version
+into a RUNTIME LAUNCH SPEC: the agent harness acquired its RAG MCP capability as
+`uvx --from vaultspec-rag[mcp]==0.3.2 vaultspec-search-mcp`, with a recipe gate
+failing the build whenever that literal drifted from the installed version. That
+reading is now wrong, and the record is refined rather than superseded.
+
+The ruling: a version constraint on a separately released capability is
+forbidden here in every form - exact pin, floor, ceiling, or compatible-release
+alike. Reproducibility was the stated gain; its cost is that this project's
+upgrade cadence becomes a gate on every consumer of the wider ecosystem, and the
+upgrade burden is pushed outward onto all of them. The owner has ruled that cost
+too high against ecosystem development velocity.
+
+The evidence agrees with the ruling on its own terms. By 2026-08-01 the pin had
+gone stale against this very repository: the `rag` extra declared
+`vaultspec-rag[mcp]>=0.3.8` while the launch spec still demanded `==0.3.2`, so
+the convergence gate the pin existed to satisfy was itself red, and every
+`setup`, `install`, and `upgrade` path through it failed. A pin its own project
+has already outgrown buys no reproducibility - only breakage.
+
+What replaces it: the CONTRACT, asserted rather than merely declared. The harness
+registry already names, per server, the read-only tools a run expects it to
+serve; those names become the autonomous allowlist and the Codex `enabled_tools`
+set. That declaration is now load-bearing - verified against the server's own
+`tools/list` over a real MCP handshake before a run launches, at the two seams
+where a run commits to launching the declared set (the ACP spawn, beside the
+existing isolation refusal, and the Codex home emission). A server that does not
+serve a declared tool, or that cannot be probed at all, is refused with a message
+naming the missing tool; an unverifiable contract is treated as an unmet one. The
+compatibility boundary becomes the served tool surface - the thing a run actually
+depends on - rather than a version number standing in for it. This converts a
+declared-but-unchecked contract, the defect class this repository keeps
+rediscovering, into a checked one, so the reversal strengthens the guarantee it
+removes.
+
+Scope, precisely. This amendment governs version constraints written into RUNTIME
+ACQUISITION of capabilities released independently of this project. It does NOT
+relax the record's other locking authority: `uv.lock` and `uv sync --locked`
+remain the reproducibility mechanism for this project's own development
+environment, and hosted workflows keep their immutable action pins. Those bind
+only this repository's own builds; they never constrain a consumer's resolution,
+which is the harm being ruled out.
+
+Upstream, `vaultspec-core#300` and `vaultspec-rag#337` ask both servers for a
+`--read-only` launch mode on the same principle - consumers assert the served
+surface rather than pin a version. The launch specs are shaped so that adopting
+the flag is a one-line addition to `args`, not a rework.

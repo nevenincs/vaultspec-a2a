@@ -32,6 +32,7 @@ if TYPE_CHECKING:
 
 __all__ = [
     "NATIVE_READ_TOOL_NAMES",
+    "RAG_MCP_REQUIREMENT",
     "HarnessMcpCapabilityUnavailable",
     "HarnessMcpResolution",
     "HarnessMcpRuntimeProfile",
@@ -39,7 +40,9 @@ __all__ = [
     "compose_harness_mcp_servers",
     "compose_native_read_tools",
     "config_home_mcp_servers",
+    "declared_harness_tools",
     "harness_allowed_tool_names",
+    "is_known_harness_server",
     "reject_duplicate_identities",
     "reject_duplicate_names",
     "resolve_harness_mcp_capabilities",
@@ -74,18 +77,29 @@ class HarnessMcpResolution:
 
 
 # Known MCP server name -> registry entry. Explicit and closed by design.
-# ``uvx --from vaultspec-rag[mcp]==0.3.2 vaultspec-search-mcp`` is used rather
-# than the repo ``.mcp.json``'s ``uv run vaultspec-search-mcp`` because the ACP
-# subprocess is spawned in the run workspace with no uv project cwd. The exact
-# package extra and version deliberately reproduce the project lock's MCP
-# capability while remaining independent of the cwd.
+# ``uvx --from vaultspec-rag[mcp] vaultspec-search-mcp`` is used rather than the
+# repo ``.mcp.json``'s ``uv run vaultspec-search-mcp`` because the ACP subprocess
+# is spawned in the run workspace with no uv project cwd; the package extra names
+# the MCP capability while remaining independent of the cwd.
+#
+# The requirement carries NO version constraint, deliberately. The harness servers
+# are released independently of this project, so constraining them here - by exact
+# pin, floor, or range alike - stalls the whole ecosystem behind this project's
+# upgrade cadence while proving nothing about the capability the run actually
+# needs. The compatibility boundary is the ``tools`` declaration below, and it is
+# verified against the server's own ``tools/list`` before a run launches
+# (``_mcp_contract.verify_harness_mcp_contract``). A future read-only launch flag
+# is a one-line addition to ``args`` here.
 #
 # ``tools`` is registry metadata, NOT part of the ACP ``session/new`` mcpServer
 # shape: it names the server's READ-ONLY tools that may join the autonomous
 # allowlist (``mcp__<server>__<tool>``). It is stripped from the launch spec in
 # ``resolve_harness_mcp_servers`` so it never leaks into the session payload. The
 # write verbs the rag server also exposes (``reindex_vault``/``reindex_codebase``)
-# are deliberately omitted, honoring the read-only composition boundary.
+# are deliberately omitted, honoring the read-only composition boundary. It is
+# also the LOAD-BEARING contract: the declared names are what a run advertises and
+# auto-permits, so a server that does not serve them is refused at the spawn seam
+# rather than handed to an agent whose grounding tools would silently be absent.
 # ``read_only`` is the registry's trust-root marker: only an entry explicitly
 # flagged read-only may ever be written into the surfacing config home. It is
 # asserted fail-loud at :func:`config_home_mcp_servers` build time so a future
@@ -97,12 +111,12 @@ class HarnessMcpResolution:
 # authoring bridge relies on) — registry env values must be literals, never
 # accidental ``${...}`` strings.
 _LAUNCH_SPEC_KEYS = ("name", "command", "args", "env")
-_LOCKED_RAG_MCP_REQUIREMENT = "vaultspec-rag[mcp]==0.3.2"
+RAG_MCP_REQUIREMENT = "vaultspec-rag[mcp]"
 _KNOWN_MCP_SERVERS: dict[str, dict[str, Any]] = {
     "vaultspec-rag": {
         "name": "vaultspec-rag",
         "command": "uvx",
-        "args": ["--from", _LOCKED_RAG_MCP_REQUIREMENT, "vaultspec-search-mcp"],
+        "args": ["--from", RAG_MCP_REQUIREMENT, "vaultspec-search-mcp"],
         "tools": ("search_vault", "search_codebase", "get_code_file"),
         "read_only": True,
         "runtime_acquisition": True,
@@ -121,6 +135,35 @@ _DESKTOP_CAPABILITY_ACTIONS = {
 def _launch_spec(entry: dict[str, Any]) -> dict[str, Any]:
     """Return the ACP-shape launch spec, stripped of registry-only metadata."""
     return {k: entry[k] for k in _LAUNCH_SPEC_KEYS if k in entry}
+
+
+def is_known_harness_server(name: str) -> bool:
+    """Return whether *name* is an entry of the closed harness registry.
+
+    The membership predicate the contract verifier uses to tell a registry-owned
+    server apart from the run's own authoring bridge, which travels in the same
+    advertised list but carries no static tool declaration.
+    """
+    return name in _KNOWN_MCP_SERVERS
+
+
+def declared_harness_tools(name: str) -> tuple[str, ...]:
+    """Return the read-only tools the registry declares for *name*.
+
+    The single reader of the ``tools`` declaration for contract verification, so
+    the names a run advertises, the names it auto-permits, and the names it
+    verifies the server serves can never drift apart.
+
+    Raises:
+        ConfigError: If *name* is not a known harness server.
+    """
+    entry = _KNOWN_MCP_SERVERS.get(name)
+    if entry is None:
+        raise ConfigError(
+            f"unknown harness MCP server {name!r}; known servers are "
+            f"{sorted(_KNOWN_MCP_SERVERS)}"
+        )
+    return tuple(entry.get("tools", ()))
 
 
 def _desktop_available(entry: dict[str, Any]) -> bool:

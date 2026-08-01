@@ -48,6 +48,7 @@ from ..workspace.environment import resolve_env_vars
 from ._acp_mcp import codex_mcp_server_specs
 from ._cleanup import CleanupStep, run_independent_cleanups
 from ._codex_config_home import build_codex_config_home, cleanup_codex_config_home
+from ._mcp_contract import verify_harness_mcp_contract
 from ._subprocess import kill_process_tree, spawn_acp_process
 
 logger = logging.getLogger(__name__)
@@ -457,6 +458,17 @@ class CodexChatModel(BaseChatModel):
         # The home is built INSIDE the try so a spawn failure cannot leak the
         # copied credential; it is cleaned up in the finally regardless of where
         # the turn fails.
+        # Fail loud before the home is emitted: the declared tool names become
+        # this lane's ``enabled_tools`` allowlist, so a server that no longer
+        # serves one of them would leave Codex permitted to call a tool that does
+        # not exist. The ACP lane applies the identical check at its own spawn
+        # seam; one registry, one contract, both transports. The launch spec
+        # carries no version constraint by design - this check is what makes the
+        # declaration trustworthy - and it is memoized per launch identity.
+        await verify_harness_mcp_contract(
+            codex_mcp_server_specs(self.harness_mcp_servers), env=env
+        )
+
         codex_config_home: Path | None = None
         client: _CodexAppServerClient | None = None
         try:

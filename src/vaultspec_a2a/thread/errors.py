@@ -120,6 +120,25 @@ class IsolationRequiredError(ConfigError):
     __slots__ = ()
 
 
+class HarnessToolContractError(ConfigError):
+    """Raised when a declared harness MCP server does not serve its declared tools.
+
+    The harness registry declares, per server, the read-only tools the run expects
+    it to serve; those names become the autonomous allowlist and the Codex
+    ``enabled_tools`` set. That declaration is the compatibility contract with the
+    separately released server, and it is verified against the server's own
+    ``tools/list`` before the run launches - a declared-but-unchecked contract is
+    the defect class this codebase keeps finding. A third sibling of
+    :class:`IsolationRequiredError` and :class:`ProjectionRefusedError`: all three
+    mean the run cannot establish the declared, bounded MCP surface it was promised,
+    so it must refuse rather than launch an agent whose grounding tools are silently
+    absent. Raised equally when the probe itself cannot complete, because an
+    unverifiable contract is an unmet one.
+    """
+
+    __slots__ = ()
+
+
 # ---------------------------------------------------------------------------
 # Agent execution
 # ---------------------------------------------------------------------------
@@ -316,6 +335,7 @@ __all__ = [
     "ErrorSeverity",
     "EventAggregatorError",
     "GitWorkspaceError",
+    "HarnessToolContractError",
     "IsolationRequiredError",
     "NicknameConflictError",
     "PermissionDeniedError",

@@ -88,7 +88,7 @@ def test_render_emits_parseable_mcp_server_block_for_rag() -> None:
     assert rag["command"] == "uvx"
     assert rag["args"] == [
         "--from",
-        "vaultspec-rag[mcp]==0.3.2",
+        "vaultspec-rag[mcp]",
         "vaultspec-search-mcp",
     ]
 

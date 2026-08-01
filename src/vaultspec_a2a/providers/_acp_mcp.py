@@ -19,13 +19,14 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import StrEnum
+from types import MappingProxyType
 from typing import TYPE_CHECKING, Any
 
 from ..authoring.contract import is_document_authoring_role
 from ..thread.errors import ConfigError
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Mapping, Sequence
     from typing import Literal
 
     from langchain_core.language_models import BaseChatModel
@@ -106,12 +107,14 @@ class HarnessMcpResolution:
 # REACHES OUTWARD. Neither implies the other: a fetch/search tool satisfies
 # read-only completely while still able to carry workspace content outward in a
 # URL, so a server that egresses can never ride a read-only-only assertion. Both
-# are asserted fail-loud at every surfacing seam - :func:`config_home_mcp_servers`
-# for the Claude home and :func:`codex_mcp_server_specs` for the Codex
-# ``config.toml`` - and again at registry construction (:func:`_declare_registry`),
-# so an entry that never declared its reach cannot exist to be composed. Both
 # default unsafe-by-omission (a missing declaration fails), never silently
 # permissive.
+#
+# :func:`_declare_registry` is the ONLY construction seam, and it both validates
+# and FREEZES: the returned mapping and every entry inside it are read-only views
+# over immutable values, so the registry cannot be extended, re-pointed, or
+# re-declared by an importer after import. Membership is a trust claim, and a
+# trust claim that any module can add with one assignment is not a claim at all.
 # WARNING: the config home is written with user-scope env expansion, so a literal
 # ``${...}`` placed in a future registry ``env`` value would be expanded by the
 # CLI from its process environment at parse time (the same mechanism the
@@ -122,14 +125,37 @@ _TRUST_AXES = ("read_only", "network_egress")
 RAG_MCP_REQUIREMENT = "vaultspec-rag[mcp]"
 
 
-def _declare_registry(entries: dict[str, dict[str, Any]]) -> dict[str, dict[str, Any]]:
-    """Return *entries* once every one declares both trust axes explicitly.
+def _frozen(value: Any) -> Any:
+    """Return an immutable view of *value*, recursively.
+
+    Lists become tuples and mappings become read-only proxies, so a frozen
+    registry entry has no mutable interior a holder could reach through. Scalars
+    are already immutable and pass through untouched.
+    """
+    if isinstance(value, list):
+        return tuple(_frozen(item) for item in value)
+    if isinstance(value, dict):
+        return MappingProxyType({key: _frozen(item) for key, item in value.items()})
+    return value
+
+
+def _declare_registry(
+    entries: dict[str, dict[str, Any]],
+) -> Mapping[str, Mapping[str, Any]]:
+    """Return a FROZEN registry once every entry declares both trust axes.
 
     The registry's single construction seam, so the declaration obligation is
     discharged where entries are written rather than only where they are read.
     Local write and network reach are independent properties and each is declared
     per entry; an omitted or non-boolean axis is refused here, which makes an
     undeclared entry unconstructible rather than merely unsurfaceable.
+
+    The returned mapping is a read-only view whose entries are themselves read-only
+    views over immutable values. Membership in this registry IS a trust claim - it
+    says a server was reviewed and may be surfaced into an agent's config - so it
+    must not be assertable at runtime by any importer holding the name. Freezing
+    here rather than at each reader keeps construction the only way in, which is
+    what lets the surfacing seams reason about what can possibly reach them.
 
     Raises:
         ConfigError: If an entry omits either trust axis or declares it
@@ -144,10 +170,10 @@ def _declare_registry(entries: dict[str, dict[str, Any]]) -> dict[str, dict[str,
                     "explicitly per entry - neither is inferred from the other, and "
                     "omission is never read as permission"
                 )
-    return entries
+    return MappingProxyType({name: _frozen(entry) for name, entry in entries.items()})
 
 
-_KNOWN_MCP_SERVERS: dict[str, dict[str, Any]] = _declare_registry(
+_KNOWN_MCP_SERVERS: Mapping[str, Mapping[str, Any]] = _declare_registry(
     {
         "vaultspec-rag": {
             "name": "vaultspec-rag",
@@ -172,9 +198,25 @@ _DESKTOP_CAPABILITY_ACTIONS = {
 }
 
 
-def _launch_spec(entry: dict[str, Any]) -> dict[str, Any]:
+def _wire_value(value: Any) -> Any:
+    """Return the mutable JSON-shaped counterpart of a frozen registry value.
+
+    The registry stores tuples and read-only proxies; the ACP ``session/new``
+    payload and the config-home writers are handed plain lists and dicts, which is
+    the shape every downstream consumer already expects. Materialising a fresh
+    container here also means a caller mutating the spec it was given cannot reach
+    back into the registry through a shared interior.
+    """
+    if isinstance(value, tuple):
+        return [_wire_value(item) for item in value]
+    if isinstance(value, MappingProxyType):
+        return {key: _wire_value(item) for key, item in value.items()}
+    return value
+
+
+def _launch_spec(entry: Mapping[str, Any]) -> dict[str, Any]:
     """Return the ACP-shape launch spec, stripped of registry-only metadata."""
-    return {k: entry[k] for k in _LAUNCH_SPEC_KEYS if k in entry}
+    return {k: _wire_value(entry[k]) for k in _LAUNCH_SPEC_KEYS if k in entry}
 
 
 def is_known_harness_server(name: str) -> bool:
@@ -206,7 +248,7 @@ def declared_harness_tools(name: str) -> tuple[str, ...]:
     return tuple(entry.get("tools", ()))
 
 
-def _desktop_available(entry: dict[str, Any]) -> bool:
+def _desktop_available(entry: Mapping[str, Any]) -> bool:
     """Return whether an entry explicitly proves offline desktop authority."""
     return (
         entry.get("desktop_available") is True
@@ -420,6 +462,16 @@ def _require_read_only(name: str) -> None:
 
     The local-write axis of the trust root: registry drift toward a write-capable
     entry can never be silently composed into a surfacing config.
+
+    This guard is ENFORCEMENT, not redundancy, and the distinction is worth being
+    precise about because the frozen registry makes it easy to assume otherwise.
+    :func:`_declare_registry` validates that the axis was DECLARED; it deliberately
+    does not constrain what was declared, so ``read_only: False`` is a perfectly
+    constructible entry. Deciding whether a declared value may be surfaced is this
+    function's job alone. It cannot fire against today's registry only because the
+    single shipped entry declares ``True`` - add a second entry that declares
+    ``False`` and it fires immediately, with no change here and no weakening of the
+    freeze. Compare :func:`_require_declared_egress`, which is genuinely redundant.
     """
     if not _KNOWN_MCP_SERVERS[name].get("read_only"):
         raise ConfigError(
@@ -436,6 +488,16 @@ def _require_declared_egress(name: str) -> None:
     outward, so satisfying :func:`_require_read_only` says nothing about reach.
     An undeclared axis is refused rather than defaulted, so composing a server
     whose outbound behaviour was never stated is impossible on either transport.
+
+    REDUNDANCY, not enforcement - kept deliberately, and labelled so nobody reads
+    it as the thing standing between a run and an undeclared server. It applies the
+    same predicate to the same values that :func:`_declare_registry` already
+    refused at construction, and since the registry is frozen, no path exists that
+    could present this seam an entry the constructor did not admit. It is retained
+    as a cheap backstop for the one way that could change: a second registry, or a
+    construction path that does not route through ``_declare_registry``. If that
+    ever happens this guard still fires; until then it can only pass. The
+    enforcement of the declaration obligation is the constructor.
     """
     if not isinstance(_KNOWN_MCP_SERVERS[name].get("network_egress"), bool):
         raise ConfigError(
@@ -454,6 +516,11 @@ def _require_trust_root(name: str) -> None:
     home and Codex config.toml), holding the local-write and network-egress
     assertions together so neither transport can surface an entry that satisfies
     one axis while leaving the other unstated.
+
+    The two halves it holds together are NOT of equal standing, and the pairing is
+    for one call site rather than one status: :func:`_require_read_only` decides a
+    policy the constructor never decides, while :func:`_require_declared_egress` is
+    redundancy behind it. Each says so itself.
     """
     _require_read_only(name)
     _require_declared_egress(name)
@@ -690,11 +757,21 @@ NATIVE_READ_TOOL_NAMES: tuple[str, ...] = ("Read", "Grep", "Glob")
 # compose undeclared than a registry entry is. Membership IS the declaration: a
 # name absent from this mapping has never stated its reach and is refused at
 # :func:`compose_native_read_tools` rather than defaulted to no-egress.
-NATIVE_TOOL_EGRESS: dict[str, bool] = {
-    "Read": False,
-    "Grep": False,
-    "Glob": False,
-}
+#
+# Because membership is the declaration, the mapping is a read-only view and not a
+# plain dict: this name is exported, so a mutable one would let any importer
+# declare ``WebFetch`` no-egress with a single assignment and walk it straight
+# through the composition guard below. The guard checks the catalog; the catalog
+# has to be something the guard can trust. Editing this source literal is the only
+# way to add a native tool, which is the point - it is the same deliberate,
+# reviewable act that adding a harness registry entry is.
+NATIVE_TOOL_EGRESS: Mapping[str, bool] = MappingProxyType(
+    {
+        "Read": False,
+        "Grep": False,
+        "Glob": False,
+    }
+)
 
 
 def _require_declared_native_egress(names: Sequence[str]) -> None:

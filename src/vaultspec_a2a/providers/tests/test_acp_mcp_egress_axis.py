@@ -10,13 +10,18 @@ The axis exists because ``read_only`` and network reach are independent: a
 fetch/search tool writes nothing locally while still able to carry workspace
 content outward in a URL, so a surface that satisfies the local-write assertion
 says nothing at all about whether it egresses.
+
+The same trust root is only worth as much as the structures that carry it, so the
+final classes here prove those structures are frozen: an axis declaration that any
+importer could add at runtime is not a declaration, and the guards downstream of it
+are only meaningful if the catalog they consult cannot be edited underneath them.
 """
 
 from __future__ import annotations
 
 import json
 import tomllib
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 import pytest
 
@@ -32,14 +37,28 @@ from .._acp_mcp import (
     compose_native_read_tools,
     config_home_mcp_servers,
     harness_allowed_tool_names,
+    resolve_harness_mcp_servers,
 )
 from .._codex_config_home import build_codex_config_home, cleanup_codex_config_home
 from ..acp_chat_model import AcpChatModel
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
     from pathlib import Path
 
 _RAG = "vaultspec-rag"
+
+
+def _as_an_importer_sees_it(structure: Mapping[str, Any]) -> dict[str, Any]:
+    """Bind a declaration structure the way a would-be declarer would bind it.
+
+    The freeze is a RUNTIME property; the annotation only advertises it, and a
+    module that imports one of these names is free to bind it as a plain ``dict``
+    and assign. That is precisely the attempt under test, so the cast is how the
+    attempt gets made at all - a statically refused statement would prove nothing
+    about what the object does when the assignment actually runs.
+    """
+    return cast("dict[str, Any]", structure)
 
 
 def _entry(**overrides: Any) -> dict[str, dict[str, Any]]:
@@ -231,3 +250,109 @@ class TestConfigHomeCarriesTheDeclaredAxis:
         assert _KNOWN_MCP_SERVERS[_RAG]["network_egress"] is False
         # The emitted Codex spec carries launch + allowlist fields only.
         assert "network_egress" not in specs[0]
+
+
+class TestNativeEgressCatalogRefusesRuntimeDeclaration:
+    """The exported egress catalog cannot be declared into at runtime."""
+
+    def _model(self) -> AcpChatModel:
+        return AcpChatModel(command=["echo"], env_vars={}, workspace_root="/tmp/ws")
+
+    def test_declaring_a_web_tool_at_runtime_is_refused(self) -> None:
+        # The attack the mutable catalog allowed: membership IS the declaration,
+        # so one assignment from any importer would have declared the CLI's
+        # outward-reaching fetch built-in local and walked it through the
+        # composition guard, which consults exactly this mapping.
+        with pytest.raises(TypeError):
+            _as_an_importer_sees_it(NATIVE_TOOL_EGRESS)["WebFetch"] = False
+
+        assert "WebFetch" not in NATIVE_TOOL_EGRESS
+        # The refusal is not merely cosmetic: the production composition seam still
+        # rejects the name after the attempt, which is the property that matters.
+        with pytest.raises(ConfigError):
+            compose_native_read_tools(
+                self._model(),
+                autonomous=True,
+                role="researcher",
+                extra_tool_names=("WebFetch",),
+            )
+
+    def test_redeclaring_a_floor_tool_as_egressing_is_refused(self) -> None:
+        # Overwriting an existing declaration is the same defect from the other
+        # direction - it would let a caller relabel a tool the floor already
+        # composes rather than smuggle a new one in.
+        with pytest.raises(TypeError):
+            _as_an_importer_sees_it(NATIVE_TOOL_EGRESS)["Read"] = True
+        assert NATIVE_TOOL_EGRESS["Read"] is False
+
+    def test_withdrawing_a_declaration_is_refused(self) -> None:
+        with pytest.raises(TypeError):
+            del _as_an_importer_sees_it(NATIVE_TOOL_EGRESS)["Read"]
+        assert set(NATIVE_READ_TOOL_NAMES) <= set(NATIVE_TOOL_EGRESS)
+
+
+class TestHarnessRegistryRefusesRuntimeDeclaration:
+    """The harness registry is closed by design AND frozen in fact."""
+
+    def test_declaring_a_server_at_runtime_is_refused(self) -> None:
+        with pytest.raises(TypeError):
+            _as_an_importer_sees_it(_KNOWN_MCP_SERVERS)["candidate"] = _entry()[
+                "candidate"
+            ]
+
+        assert "candidate" not in _KNOWN_MCP_SERVERS
+        # Still unknown at the production resolver, which is what "closed" means.
+        with pytest.raises(ConfigError) as excinfo:
+            resolve_harness_mcp_servers(["candidate"])
+        assert "candidate" in str(excinfo.value)
+
+    def test_flipping_a_declared_trust_axis_is_refused(self) -> None:
+        # Freezing only the outer mapping would leave the axes themselves writable,
+        # which defeats the trust root just as completely as adding an entry.
+        entry = _as_an_importer_sees_it(_KNOWN_MCP_SERVERS[_RAG])
+        with pytest.raises(TypeError):
+            entry["read_only"] = False
+        with pytest.raises(TypeError):
+            entry["network_egress"] = True
+        assert _KNOWN_MCP_SERVERS[_RAG]["read_only"] is True
+        assert _KNOWN_MCP_SERVERS[_RAG]["network_egress"] is False
+
+    def test_the_launch_command_line_is_immutable(self) -> None:
+        # The registry declares the argv that is actually executed, so a mutable
+        # interior is a reachable interior even when membership is sealed.
+        with pytest.raises(AttributeError):
+            _KNOWN_MCP_SERVERS[_RAG]["args"].append("--from=elsewhere")
+        assert "--from=elsewhere" not in _KNOWN_MCP_SERVERS[_RAG]["args"]
+
+    def test_a_resolved_launch_spec_is_a_detached_mutable_copy(self) -> None:
+        # The wire shape downstream consumers expect is unchanged (plain list), and
+        # mutating what a caller was handed cannot reach the registry through a
+        # shared interior.
+        spec = resolve_harness_mcp_servers([_RAG])[0]
+        assert isinstance(spec["args"], list)
+        spec["args"].append("--from=elsewhere")
+
+        assert "--from=elsewhere" not in resolve_harness_mcp_servers([_RAG])[0]["args"]
+        assert "--from=elsewhere" not in _KNOWN_MCP_SERVERS[_RAG]["args"]
+
+
+class TestConstructionSeamIsTheOnlyWayIn:
+    """What the constructor does and does not decide, stated as executable claims."""
+
+    def test_the_constructor_freezes_what_it_admits(self) -> None:
+        declared = _declare_registry(_entry())
+        with pytest.raises(TypeError):
+            _as_an_importer_sees_it(declared)["other"] = {}
+        with pytest.raises(TypeError):
+            _as_an_importer_sees_it(declared["candidate"])["read_only"] = False
+        assert isinstance(declared["candidate"]["args"], tuple)
+
+    def test_the_constructor_admits_a_non_read_only_entry(self) -> None:
+        # The premise behind keeping ``_require_read_only`` at the surfacing seams.
+        # The constructor validates that both axes were DECLARED; it deliberately
+        # does not constrain what was declared, so a write-capable entry is
+        # constructible and only the seam guard refuses to surface it. That guard
+        # is therefore live enforcement of a policy nothing else decides - unlike
+        # the egress assertion, which re-applies the constructor's own predicate.
+        declared = _declare_registry(_entry(read_only=False))
+        assert declared["candidate"]["read_only"] is False

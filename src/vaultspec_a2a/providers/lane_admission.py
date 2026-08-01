@@ -65,9 +65,18 @@ cannot be shown to complete a turn cannot be shown to complete a retrieval, and 
 incoherent state - a lane activated for web that is refused for service - is
 unrepresentable rather than merely unlikely.
 
-The set is EMPTY at first landing, by design: the tree carries the wiring for this
-capability before it carries the capability, so every seam is asserted dark and no
-persona claims a reach its tools do not have.
+The set is EMPTY at first landing, by design: the tree carries the wiring before it
+carries the PROOF, so every seam is asserted dark and no persona claims a reach it
+cannot demonstrate.
+
+Read "dark" precisely, because the distinction is a decided one and this module is
+where a reader will come looking for it. Every lane is CAPABLE of reaching the web -
+that is a property of the lane's own first-party tools and is never conditional on
+lane, role, preset, or proof. What an empty set withholds is ACTIVATION and the
+right to CLAIM: which tools compose into a run, and what a persona or a served
+preset may assert about reach. A lane absent from here is unproven, never incapable,
+and this mapping is not a capability veto. A gate that read it as one was built and
+withdrawn.
 """
 
 from __future__ import annotations
@@ -193,8 +202,10 @@ IN_PROCESS_LANES: frozenset[Provider] = frozenset(
 
 # ---------------------------------------------------------------------------
 # THE WEB DECLARATION - edit by hand, never derive. EMPTY, and that is the
-# landing state, not an oversight: the wiring lands before the capability so
-# every seam is asserted dark.
+# landing state, not an oversight: the wiring lands before the PROOF, so every
+# seam is asserted dark. Empty means no lane has yet demonstrated a retrieval,
+# never that a lane cannot reach the web - capability is universal and this
+# mapping governs activation and claims alone.
 #
 # Add an entry ONLY after watching the cited test complete a REAL RETRIEVAL on
 # that lane end to end - the fetched material reaching checkpointed state as a

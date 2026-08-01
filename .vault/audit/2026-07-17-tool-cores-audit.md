@@ -128,3 +128,18 @@ registry trust root rather than by a review pass.
   redundancy. Anyone later tempted to prove the seam guards by monkeypatching
   the registry or adding an injection parameter with no production caller should
   read this entry first: both were considered and refused here.
+
+- `discovery-retry-tests-fail-against-a-live-engine` (low, open, not this
+  feature's to fix) - two retry tests in the authoring discovery suite assert
+  that no engine resolves, and fail on any machine where one is actually
+  listening on the discovery endpoint. Every executor in this Phase hit them and
+  each independently attributed them by socket probe rather than assertion,
+  which is the right instinct but is wasted effort repeated three times. The
+  omission looks unintentional rather than deliberate: a sibling test in the
+  same file carries an explicit hedge comment about development machines
+  resolving the machine-global candidate, and these two do not. They predate
+  this work and are unrelated to it. Recorded here because they will redden the
+  authoring suite for anyone reviewing or extending this feature and read as
+  fallout from it, which they are not. The fix belongs to whoever owns that
+  suite: hedge the two tests the way their sibling already is, or bind them to a
+  port no development engine claims.

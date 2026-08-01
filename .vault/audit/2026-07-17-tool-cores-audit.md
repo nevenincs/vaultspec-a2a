@@ -143,3 +143,54 @@ registry trust root rather than by a review pass.
   fallout from it, which they are not. The fix belongs to whoever owns that
   suite: hedge the two tests the way their sibling already is, or bind them to a
   port no development engine claims.
+
+### Web-grounding P01 review (2026-08-01) - PASS, no blocker
+
+Formal review of the three contract-seam Steps. No critical or high finding; the
+Phase landed. Four findings carried forward, two of which are the same decision
+seen from different sides.
+
+- `web-locator-producer` (medium, open) - the typed channel has no production
+  emitter. The research producer returns an empty locator list unconditionally,
+  its own docstring deferring extraction to a later refinement, so the contract
+  admits a shape nothing produces and the submit refusal cannot fire in a real
+  run. Both Steps closed honestly on the acceptance conditions their rows state,
+  through the real injection seam - this is a plan gap, not an execution defect.
+  The later live-proof Step requires a real retrieval landing as a typed locator
+  and cannot pass without an extractor. Now assigned as a new Step in the
+  delivery Phase.
+- `refusal-has-no-revision-route` (medium, open) - branch-side locator
+  validation raises out of the researcher node, and that node is wired with no
+  retry policy unlike every sibling in the topology. Latent only because of the
+  finding above: once an extractor lands, a model-produced locator one character
+  over the excerpt cap, carrying an extra key, or missing a scheme aborts the
+  whole run instead of routing into the revision loop - and a retry would not
+  help, the failure being deterministic. Folded into the same new Step, because
+  deciding whether the producer clamps or the branch refuses resolves both.
+- `disclosure-scope-vs-record` (medium, open) - the submit refusal is scoped to
+  research documents while the governing record states the rule unconditionally
+  and the originating Step row repeats it unqualified. The narrowing is sound
+  and currently harmless, since the only topology using the researcher fan-out
+  accumulates all findings before the research gate. But code and record now
+  disagree, which is the drift class this campaign exists to close, so the
+  record needs amending rather than the code reverting.
+- `unreachable-trust-guards` (medium, open) - independently confirmed and
+  already recorded above; the review verified the property extends to the
+  pre-existing guard by tracing every registry reference and both call sites.
+
+The review also corrected a claim this campaign had itself recorded. The
+research-only scoping was partly justified on the grounds that a later document
+would have nowhere sanctioned to put a URL and so could not comply. That is
+false: a bare URL in prose is refused by nothing, because the markdown-link
+check deliberately exempts web targets. The scoping stands on the one-home
+convention alone. The code comment and the Step Record have both been corrected;
+the overstatement is noted here because it was authored by this campaign rather
+than inherited, and a wrong reason recorded confidently is the same defect class
+as a docstring asserting an invariant it does not hold.
+
+Five low findings are recorded in the review and not repeated here: a mutable
+public egress catalog where a read-only mapping would match its role, a raw
+substring disclosure match with two accept-direction false negatives, an
+unlabelled parse error on a malformed authority, a state-schema constant living
+in a node module, and the delivery-seam parameter landed one Phase early - the
+last being required by its own Step's acceptance condition rather than drift.

@@ -489,10 +489,12 @@ def _conformance_notes(
     # each fact one home: the research document grounds, and every later document
     # cites it by stem without restating its evidence. A URL is evidence, so its
     # home is the research document — the only template in the tree carrying a
-    # `## Sources` section. Demanding URLs in an ADR, reference, plan, or audit
-    # would leave the writer nowhere sanctioned to put them and force one rule to
-    # be broken to satisfy another; such a document discharges the obligation by
-    # citing the research stem that holds them.
+    # `## Sources` section. A later document discharges the obligation by citing
+    # the research stem that holds them. Note this is a convention, not an
+    # impossibility: a bare URL in ADR or plan prose is refused by nothing here,
+    # since the markdown-link check deliberately exempts `http(s)` targets. The
+    # rule is scoped because evidence has one home, not because a later document
+    # has nowhere to put it.
     #
     # Scanned against the prose region, NOT the whole document, because an
     # external URL is never legal in frontmatter — a URL smuggled into `related:`

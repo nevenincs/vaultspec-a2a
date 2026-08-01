@@ -98,6 +98,14 @@ class HarnessMcpResolution:
 # accidental ``${...}`` strings.
 _LAUNCH_SPEC_KEYS = ("name", "command", "args", "env")
 _LOCKED_RAG_MCP_REQUIREMENT = "vaultspec-rag[mcp]==0.3.2"
+# agent-flow ADR D6: the researcher's real web tool. `duckduckgo-mcp-server`
+# (PyPI, published by nickclyde) is a genuine, credential-free MCP server —
+# no API key, no runtime env — exposing `search` (DuckDuckGo results as
+# Markdown snippets) and `fetch_content` (extracts a result URL's page body).
+# Unpinned version deliberately mirrors no existing precedent here: unlike
+# vaultspec-rag (an in-house package this project's release pins), this is a
+# third-party server with no compatibility contract to track yet; pin it the
+# first time a breaking release actually bites.
 _KNOWN_MCP_SERVERS: dict[str, dict[str, Any]] = {
     "vaultspec-rag": {
         "name": "vaultspec-rag",
@@ -108,12 +116,24 @@ _KNOWN_MCP_SERVERS: dict[str, dict[str, Any]] = {
         "runtime_acquisition": True,
         "desktop_available": False,
     },
+    "vaultspec-web-search": {
+        "name": "vaultspec-web-search",
+        "command": "uvx",
+        "args": ["duckduckgo-mcp-server"],
+        "tools": ("search", "fetch_content"),
+        "read_only": True,
+        "runtime_acquisition": True,
+        "desktop_available": False,
+    },
 }
 
 _DESKTOP_ACQUISITION_REASON = "runtime acquisition is disabled for the desktop profile"
 _DESKTOP_CAPABILITY_ACTIONS = {
     "vaultspec-rag": (
         "Install the separately packaged vaultspec-rag desktop capability, then retry."
+    ),
+    "vaultspec-web-search": (
+        "Install the separately packaged web-search desktop capability, then retry."
     ),
 }
 

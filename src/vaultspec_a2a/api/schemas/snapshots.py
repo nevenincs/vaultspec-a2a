@@ -69,6 +69,28 @@ class _PermissionSnapshot(BaseModel):
     tool_kind: ToolKind | None = None
 
 
+class _ClarificationQuestionSnapshot(BaseModel):
+    """Layer 1 equivalent of ``thread.snapshots.ClarificationQuestionData``."""
+
+    id: str
+    prompt: str
+    kind: str
+    required: bool = False
+    options: list[str] = Field(default_factory=list)
+
+
+class _ClarificationRequestSnapshot(BaseModel):
+    """Layer 1 equivalent of ``thread.snapshots.ClarificationRequestData``.
+
+    A pending mid-run clarification (agent-flow ADR D5(a)): disclosed on
+    ``run-status`` so a reload re-renders the questionnaire from authoritative
+    state alone, never from a relay frame.
+    """
+
+    request_id: str
+    questions: list[_ClarificationQuestionSnapshot] = Field(default_factory=list)
+
+
 class _PermissionOptionSnapshot(BaseModel):
     """Permission option within a snapshot."""
 
@@ -119,6 +141,7 @@ class ThreadStateSnapshot(BaseModel):
     messages: list[MessageSnapshot] = Field(default_factory=list)
     tool_calls: list[ToolCallSnapshot] = Field(default_factory=list)
     pending_permissions: list[_PermissionSnapshot] = Field(default_factory=list)
+    pending_clarification: _ClarificationRequestSnapshot | None = None
     artifacts: list[ArtifactSnapshot] = Field(default_factory=list)
     plan: list[PlanEntry] = Field(default_factory=list)
     agents: list[_AgentSnapshot] = Field(default_factory=list)

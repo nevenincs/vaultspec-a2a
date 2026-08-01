@@ -65,8 +65,17 @@ class EventEmitters:
         # Track pending permission requests per thread.
         self._pending_permissions: dict[str, tuple[PermissionRequest, float]] = {}
 
-        # Track agent lifecycle states for team status endpoint.
-        self._agent_states: dict[str, AgentLifecycleState] = {}
+        # Track agent lifecycle states for team status endpoint, keyed by
+        # (thread_id, agent_id) - NOT agent_id alone. This EventAggregator
+        # instance is shared across every thread a worker process handles
+        # over its lifetime (one per Executor, not per run), so an agent_id-
+        # only key let a LATER, unrelated run's per-run status (and the
+        # team_status event built from it) report a role state left over
+        # from an EARLIER run that happened to share an agent_id - a real,
+        # observed cross-run state leak (e.g. a doc-editor run's role
+        # appearing "working" inside an unrelated, already-failed
+        # adr-research run's roles list).
+        self._agent_states: dict[tuple[str, str], AgentLifecycleState] = {}
 
         # Track tool call state for REST snapshot enrichment.
         self._tool_call_states: dict[tuple[str, str], dict[str, str]] = {}
@@ -203,14 +212,35 @@ class EventEmitters:
         ]
         for key in stale_tool_calls:
             self._tool_call_states.pop(key, None)
+        stale_agent_states = [
+            key for key in self._agent_states if key[0] == thread_id
+        ]
+        for key in stale_agent_states:
+            self._agent_states.pop(key, None)
 
     # ------------------------------------------------------------------
     # Agent state management
     # ------------------------------------------------------------------
 
-    def get_agent_states(self) -> dict[str, AgentLifecycleState]:
-        """Return a snapshot of current agent lifecycle states."""
-        return dict(self._agent_states)
+    def get_agent_states(
+        self, thread_id: str | None = None
+    ) -> dict[str, AgentLifecycleState]:
+        """Return a snapshot of current agent lifecycle states.
+
+        ``thread_id`` omitted preserves the historical cross-thread
+        aggregate view (every agent_id this worker process has ever seen,
+        last-write-wins on a shared agent_id across threads - unchanged
+        behaviour for callers building a multi-run overview). Passing
+        ``thread_id`` scopes the result to that run alone, closing the
+        cross-run leak for a per-run status read.
+        """
+        if thread_id is None:
+            return {agent_id: state for (_tid, agent_id), state in self._agent_states.items()}
+        return {
+            agent_id: state
+            for (tid, agent_id), state in self._agent_states.items()
+            if tid == thread_id
+        }
 
     # ------------------------------------------------------------------
     # Event emission (public API)
@@ -231,7 +261,7 @@ class EventEmitters:
         detail: str | None = None,
     ) -> None:
         """Emit an agent lifecycle state transition event."""
-        self._agent_states[agent_id] = state
+        self._agent_states[(thread_id, agent_id)] = state
         seq = self.next_sequence(thread_id)
         event = AgentStatus(
             thread_id=thread_id,
@@ -519,7 +549,9 @@ class EventEmitters:
     ) -> None:
         """Build agents list from ``_agent_states`` and emit ``team_status``."""
         agents: list[dict[str, Any]] = []
-        for agent_id, lifecycle in self._agent_states.items():
+        for (tid, agent_id), lifecycle in self._agent_states.items():
+            if tid != thread_id:
+                continue
             agents.append(
                 {
                     "agent_id": agent_id,
@@ -597,7 +629,7 @@ class EventEmitters:
                     raw_state,
                 )
                 return
-            self._agent_states[agent_id] = lifecycle
+            self._agent_states[(thread_id, agent_id)] = lifecycle
         self.next_sequence(thread_id)
 
     def _sync_permission_request(self, thread_id: str, payload: dict[str, Any]) -> None:

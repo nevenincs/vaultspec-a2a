@@ -45,7 +45,6 @@ _RELEASE_FIXTURE: Final = (
 _PRODUCTION_PRESET_INVENTORY: Final = frozenset(
     {
         "vaultspec_a2a/team/presets/agents/vaultspec-adr-author.toml",
-        "vaultspec_a2a/team/presets/agents/vaultspec-analyst.toml",
         "vaultspec_a2a/team/presets/agents/vaultspec-coder.toml",
         "vaultspec_a2a/team/presets/agents/vaultspec-doc-editor.toml",
         "vaultspec_a2a/team/presets/agents/vaultspec-doc-reviewer.toml",

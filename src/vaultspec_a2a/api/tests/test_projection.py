@@ -187,6 +187,59 @@ def test_apply_checkpoint_projection_merges_interrupt_permissions() -> None:
     ]
 
 
+def test_apply_checkpoint_projection_merges_clarification_request() -> None:
+    """A clarification_request interrupt surfaces as pending_clarification.
+
+    Mirrors the permission-merge test above but for agent-flow ADR D5's new
+    interrupt kind, disclosed on a separate field (not pending_permissions —
+    its bounded questions do not fit the single-decision PermissionData
+    shape).
+    """
+    snapshot = ThreadStateData(
+        thread_id="thread-1",
+        status="input_required",
+        last_sequence=0,
+    )
+    projection = CheckpointProjection(
+        channel_values={},
+        config={"configurable": {"thread_id": "thread-1", "checkpoint_id": "cp-1"}},
+        checkpoint_id="cp-1",
+        checkpoint_created_at=datetime(2026, 3, 9, 10, 20, tzinfo=UTC),
+        pause_cause="clarification_request",
+        pending_interrupts=[
+            ProjectedInterrupt(
+                interrupt_id="interrupt-clarify-1",
+                interrupt_type="clarification_request",
+                payload={
+                    "type": "clarification_request",
+                    "questions": [
+                        {
+                            "id": "provider",
+                            "prompt": "Which provider?",
+                            "kind": "choice",
+                            "required": True,
+                            "options": ["codex", "zai"],
+                        }
+                    ],
+                },
+            )
+        ],
+    )
+
+    projected = apply_checkpoint_projection(snapshot, projection)
+
+    assert projected.pending_clarification is not None
+    assert projected.pending_clarification.request_id == "interrupt-clarify-1"
+    assert len(projected.pending_clarification.questions) == 1
+    question = projected.pending_clarification.questions[0]
+    assert question.id == "provider"
+    assert question.required is True
+    assert question.options == ["codex", "zai"]
+    # A clarification interrupt must never populate pending_permissions — the
+    # two disclosure surfaces are distinct.
+    assert projected.pending_permissions == []
+
+
 def test_project_execution_state_model_normalizes_latest_row() -> None:
     """Execution-state rows should deserialize into frontend-safe snapshots."""
     model = ThreadExecutionStateModel(

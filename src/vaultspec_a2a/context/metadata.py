@@ -6,6 +6,7 @@ documents and generating human-friendly thread nicknames.
 """
 
 import glob
+import hashlib
 import re
 from pathlib import Path
 
@@ -146,16 +147,24 @@ def generate_nickname(
     Args:
         feature_tag: The feature grouping key.
         topology: The topology type (e.g. ``"star"``, ``"pipeline"``).
-        thread_id: The thread UUID (first 4 chars used as suffix).
+        thread_id: The thread's own id, hashed for the 4-char suffix.
 
     Returns:
         A nickname string conforming to the slug pattern.
     """
-    # H2: Guard against empty/short thread_id producing trailing-hyphen slugs
-    # that violate _NICKNAME_PATTERN (must end with [a-z0-9]).
-    short_hash = thread_id[:4] if thread_id else "0000"
-    if not short_hash:
-        short_hash = "0000"
+    # P10 finding: a positional thread_id[:4] slice discriminates real UUIDs
+    # fine, but collides identically for every caller whose id scheme shares a
+    # fixed literal prefix (e.g. the dashboard's "run-<hex>" run_id convention
+    # - EVERY such id's first four characters are the constant "run-", so
+    # every feature_tag-less dashboard run generated the SAME nickname and the
+    # second run of a session 409'd forever). Hashing the full thread_id makes
+    # the suffix depend on the whole string, immune to any caller's prefix
+    # convention, present or future - and, as a side effect, always produces
+    # a full 4-hex-char slug (H2's short/empty guard collapses into the one
+    # "no thread_id at all" case below).
+    short_hash = (
+        hashlib.sha256(thread_id.encode()).hexdigest()[:4] if thread_id else "0000"
+    )
     # M1: sanitize feature_tag — lowercase and strip all non-alphanumeric-hyphen
     # characters so the generated nickname always satisfies _NICKNAME_PATTERN.
     # Uppercase feature_tags would fail ThreadMetadata validation without this.

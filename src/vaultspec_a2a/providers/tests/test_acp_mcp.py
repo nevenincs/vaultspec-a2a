@@ -139,6 +139,62 @@ def test_resolve_empty_is_empty() -> None:
     assert resolve_harness_mcp_servers([]) == []
 
 
+# ---------------------------------------------------------------------------
+# vaultspec-web-search (agent-flow ADR D6 - the researcher's real web tool)
+# ---------------------------------------------------------------------------
+
+
+def test_resolve_web_search_server_returns_stdio_spec() -> None:
+    specs = resolve_harness_mcp_servers(["vaultspec-web-search"])
+    assert len(specs) == 1
+    spec = specs[0]
+    assert spec["name"] == "vaultspec-web-search"
+    assert spec["command"] == "uvx"
+    assert spec["args"] == ["duckduckgo-mcp-server"]
+
+
+def test_web_search_launch_spec_excludes_registry_only_tools_metadata() -> None:
+    spec = resolve_harness_mcp_servers(["vaultspec-web-search"])[0]
+    assert "tools" not in spec
+    assert set(spec) <= {"name", "command", "args", "env"}
+
+
+def test_web_search_allowed_tool_names_expands_to_flat_allowlist() -> None:
+    names = harness_allowed_tool_names(["vaultspec-web-search"])
+    assert names == [
+        "mcp__vaultspec-web-search__search",
+        "mcp__vaultspec-web-search__fetch_content",
+    ]
+
+
+def test_resolve_both_researcher_servers_together() -> None:
+    """rag and web-search compose without name collision (the researcher
+    harness declares both)."""
+    specs = resolve_harness_mcp_servers(["vaultspec-rag", "vaultspec-web-search"])
+    assert [s["name"] for s in specs] == ["vaultspec-rag", "vaultspec-web-search"]
+
+    names = harness_allowed_tool_names(["vaultspec-rag", "vaultspec-web-search"])
+    assert names == [
+        "mcp__vaultspec-rag__search_vault",
+        "mcp__vaultspec-rag__search_codebase",
+        "mcp__vaultspec-rag__get_code_file",
+        "mcp__vaultspec-web-search__search",
+        "mcp__vaultspec-web-search__fetch_content",
+    ]
+
+
+def test_compose_advertises_web_search_alongside_existing_servers() -> None:
+    model = AcpChatModel(command=["echo"], env_vars={})
+    composed = compose_harness_mcp_servers(
+        model, ["vaultspec-rag", "vaultspec-web-search"]
+    )
+    assert isinstance(composed, AcpChatModel)
+    assert [s["name"] for s in composed.mcp_servers] == [
+        "vaultspec-rag",
+        "vaultspec-web-search",
+    ]
+
+
 def test_compose_empty_names_is_a_noop() -> None:
     model = AcpChatModel(command=["echo"], env_vars={})
     assert compose_harness_mcp_servers(model, []) is model
@@ -286,15 +342,15 @@ def test_config_home_servers_preserves_env_when_present() -> None:
 
 
 def test_live_preset_harness_drives_read_only_rag_composition() -> None:
-    """The live preset's declared harness composes exactly the read-only rag surface.
+    """The live preset's declared harness composes exactly its read-only servers.
 
     The real ``vaultspec-adr-research`` preset's ``[team.harness]`` declaration
     flows through ``effective_harness`` into composition, so the opt-in makes RAG
-    grounding live for its document roles.
+    and web-search grounding (agent-flow ADR D6) live for its document roles.
     Walks the full chain preset harness -> effective_harness -> harness allowlist ->
-    compose, and asserts the composed session advertises the vaultspec-rag stdio
-    server while exactly its READ tools join the autonomous allowlist - no write
-    verb anywhere, and no registry-only metadata leaking into the session payload.
+    compose, and asserts the composed session advertises both stdio servers while
+    exactly their READ tools join the autonomous allowlist - no write verb
+    anywhere, and no registry-only metadata leaking into the session payload.
     """
     from ...team.team_config import load_team_config
 
@@ -302,26 +358,29 @@ def test_live_preset_harness_drives_read_only_rag_composition() -> None:
     harness = cfg.effective_harness()
     assert harness is not None
     names = harness.mcp_servers
-    assert names == ["vaultspec-rag"]
+    assert names == ["vaultspec-rag", "vaultspec-web-search"]
 
     allow = harness_allowed_tool_names(names)
     assert allow == [
         "mcp__vaultspec-rag__search_vault",
         "mcp__vaultspec-rag__search_codebase",
         "mcp__vaultspec-rag__get_code_file",
+        "mcp__vaultspec-web-search__search",
+        "mcp__vaultspec-web-search__fetch_content",
     ]
-    # Read-only boundary: the rag server's write verbs never reach the allowlist.
+    # Read-only boundary: no server's write verbs ever reach the allowlist.
     assert not any("reindex" in name for name in allow)
 
     model = AcpChatModel(command=["echo"], env_vars={})
     composed = compose_harness_mcp_servers(model, names, allowed_tools=allow)
     assert isinstance(composed, AcpChatModel)
     advertised = {s.get("name") for s in composed.mcp_servers}
-    assert "vaultspec-rag" in advertised
-    rag_spec = next(s for s in composed.mcp_servers if s.get("name") == "vaultspec-rag")
-    assert rag_spec["command"] == "uvx"
-    # Registry-only ``tools`` metadata is stripped from the session launch spec.
-    assert "tools" not in rag_spec
+    assert advertised == {"vaultspec-rag", "vaultspec-web-search"}
+    for server_name in ("vaultspec-rag", "vaultspec-web-search"):
+        spec = next(s for s in composed.mcp_servers if s.get("name") == server_name)
+        assert spec["command"] == "uvx"
+        # Registry-only ``tools`` metadata is stripped from the session launch spec.
+        assert "tools" not in spec
     # Exactly the composed read tools are auto-permitted (autonomous-only surface).
     assert composed.allowed_tools == allow
 

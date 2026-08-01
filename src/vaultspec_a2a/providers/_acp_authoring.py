@@ -79,6 +79,7 @@ __all__ = [
     "authoring_allowed_tool_names",
     "build_authoring_mcp_servers",
     "build_authoring_stdio_mcp_servers",
+    "codex_authoring_mcp_server_spec",
     "config_home_authoring_entry",
     "is_write_tool_name",
 ]
@@ -318,50 +319,111 @@ def build_authoring_stdio_mcp_servers(
     ]
 
 
+def codex_authoring_mcp_server_spec(binding: AuthoringToolBinding) -> dict[str, Any]:
+    """Build the Codex ``config.toml`` spec surfacing the bridged authoring tools.
+
+    Codex has no ACP ``session/new`` MCP negotiation — ``codex app-server`` speaks
+    a distinct JSON-RPC-over-stdio protocol — and no HTTP MCP transport of its
+    own; every ``[mcp_servers.<name>]`` block in its ``config.toml`` is always a
+    spawned stdio command, the structural analog of the ACP stdio bridge. This
+    always renders that stdio shape (never HTTP, so it requires the binding's
+    stdio transport fields): :func:`build_authoring_stdio_mcp_servers`'s single
+    entry, reshaped from the ACP list-of-``{name, value}`` env pairs into the flat
+    ``name -> value`` mapping :func:`~._codex_config_home.render_codex_config_toml`
+    consumes.
+
+    ``tools`` names EVERY catalog tool (not just reads), unlike the read-only
+    harness registry's ``codex_mcp_server_specs``: this is the engine's own
+    trusted channel, and its mutating tools (e.g. ``propose_changeset``) are
+    gated by the engine's own approval flow (human review before apply), never by
+    a CLI-local prompt — restricting to a read subset here would silently strip
+    the agent's propose path, the exact gap this function exists to close.
+
+    Raises ``ValueError`` (via :func:`build_authoring_stdio_mcp_servers`) when
+    the binding carries only the HTTP transport; the production
+    ``AuthoringBindingProvider`` always builds the stdio transport, so this is a
+    binding-shape guard, not a live gap.
+    """
+    [entry] = build_authoring_stdio_mcp_servers(binding)
+    return {
+        "name": entry["name"],
+        "command": entry["command"],
+        "args": list(entry.get("args", ())),
+        "env": {item["name"]: item["value"] for item in entry.get("env", ())},
+        "tools": list(binding.tool_names),
+    }
+
+
 def attach_authoring_tools(
     model: BaseChatModel,
     binding: AuthoringToolBinding | None,
     *,
     autonomous: bool,
 ) -> BaseChatModel:
-    """Surface the run's bridged authoring tools to an ACP session model.
+    """Surface the run's bridged authoring tools onto the provider's own session.
 
-    When a binding is present and the model exposes an ACP ``mcp_servers``
-    surface, return a copy whose ``session/new`` advertises the run's authoring
-    MCP server so the spawned CLI sees the propose/read tools. The transport is
-    chosen from the binding fields present: the stdio bridge (spawned subprocess)
-    when the binding carries the engine transport (``engine_base_url`` +
-    ``run_id``), otherwise the HTTP bridge. Session INJECTION of this spec does
-    not surface it on the pinned stack — the registration-scope matrix found
-    only user-global home-config servers surface — so the stdio bridge reaches the
-    model by a second step: its spec is admitted into the isolated config home as
-    user-global config (:func:`config_home_authoring_entry`, at the spawn seam),
-    which does surface. That makes the transport choice load-bearing: only the
-    stdio shape rides the home channel. Models without an MCP surface (mock,
-    hosted APIs) are returned unchanged. The binding lives only in the calling
-    worker closure — never in graph state or a checkpoint.
+    When a binding is present, dispatch on the model's own attachment surface —
+    the same provider-dispatch shape :func:`~._acp_mcp.compose_harness_mcp_servers`
+    uses for the read-only harness registry:
 
-    In autonomous (headless) mode ONLY, the exact bridged tool names are
-    auto-permitted so the CLI can invoke them without a local prompt — a
-    recorded approval policy, never a wildcard, and never for human-in-loop
-    runs, which keep their prompts. The real human gate stays the engine review
-    lane; the .vault deny policy still blocks fs writes.
+    - An ACP model (Claude/Z.ai/Kimi) exposes ``with_mcp_servers``: return a copy
+      whose ``session/new`` advertises the run's authoring MCP server. The
+      transport is chosen from the binding fields present: the stdio bridge
+      (spawned subprocess) when the binding carries the engine transport
+      (``engine_base_url`` + ``run_id``), otherwise the HTTP bridge. Session
+      INJECTION of this spec does not surface it on the pinned stack — the
+      registration-scope matrix found only user-global home-config servers
+      surface — so the stdio bridge reaches the model by a second step: its spec
+      is admitted into the isolated config home as user-global config
+      (:func:`config_home_authoring_entry`, at the spawn seam), which does
+      surface. That makes the transport choice load-bearing: only the stdio
+      shape rides the home channel.
+    - A Codex model exposes ``with_authoring_mcp_server``: return a copy whose
+      per-run ``CODEX_HOME`` ``config.toml`` carries the bridge as a
+      ``[mcp_servers.vaultspec-authoring]`` block (:func:`_build_codex_config_home`
+      on the Codex model unions it with any declared harness servers). There is
+      no separate surfacing step here — config.toml IS Codex's advertisement,
+      with no session-injection/user-global distinction to bridge.
+    - A model with NEITHER surface cannot mount the run's declared tools at all.
+      Previously this returned the model unchanged — a silent no-op that let a
+      harness-armed run start an agent with no authoring tools and burn its step
+      timeout finding out. Refusing loudly here, before any subprocess spawns,
+      is strictly earlier than that failure was ever going to be caught.
+
+    In autonomous (headless) mode ONLY, and only on the ACP lane, the exact
+    bridged tool names are auto-permitted so the CLI can invoke them without a
+    local prompt — a recorded approval policy, never a wildcard, and never for
+    human-in-loop runs, which keep their prompts. Codex carries no equivalent
+    per-tool local-prompt surface to permit (its headless posture is the model's
+    own ``approval_policy = "never"``), so ``autonomous`` is inert there. The real
+    human gate stays the engine review lane; the .vault deny policy still blocks
+    fs writes.
 
     This is the composer for the builders above; it holds no orchestration state
-    and touches nothing but the model's ACP surface, which is why it lives beside
-    them rather than in the graph node that calls it.
+    and touches nothing but the model's own surface, which is why it lives beside
+    them rather than in the graph node that calls it. The binding lives only in
+    the calling worker closure — never in graph state or a checkpoint.
     """
     if binding is None:
         return model
     attach = getattr(model, "with_mcp_servers", None)
-    if attach is None:
-        return model
-    allowed_tools = authoring_allowed_tool_names(binding) if autonomous else None
-    if binding.engine_base_url is not None and binding.run_id is not None:
-        mcp_servers = build_authoring_stdio_mcp_servers(binding)
-    else:
-        mcp_servers = build_authoring_mcp_servers(binding)
-    return attach(mcp_servers, allowed_tools)
+    if attach is not None:
+        allowed_tools = authoring_allowed_tool_names(binding) if autonomous else None
+        if binding.engine_base_url is not None and binding.run_id is not None:
+            mcp_servers = build_authoring_stdio_mcp_servers(binding)
+        else:
+            mcp_servers = build_authoring_mcp_servers(binding)
+        return attach(mcp_servers, allowed_tools)
+    codex_attach = getattr(model, "with_authoring_mcp_server", None)
+    if codex_attach is not None:
+        return codex_attach(codex_authoring_mcp_server_spec(binding))
+    raise ConfigError(
+        f"{type(model).__name__!r} exposes neither with_mcp_servers nor "
+        "with_authoring_mcp_server; this run is harness-armed with an authoring "
+        "binding but its resolved provider has no surface to mount the bridge "
+        "onto, so the declared authoring tools cannot reach the agent. Refusing "
+        "before spawn rather than starting an agent with no tools."
+    )
 
 
 def config_home_authoring_entry(

@@ -248,11 +248,12 @@ class TeamState(TypedDict):
     gate_pending_proposal_id: NotRequired[str | None]
 
     # --- mid-run clarification (agent-flow ADR D5) ---
-    # clarification_questions: the bounded question set a Ground/Diverge-stage
-    # node proposes; the clarification node reads this, bounds it again to the
-    # D5 caps, and raises interrupt() when non-empty. Last-write-wins — a
-    # caller sets it fresh each time it wants to ask.
-    clarification_questions: NotRequired[list[dict[str, Any]]]
+    # There is deliberately no question-set field here. Questions reach a run
+    # from its preset, resolved by the compiler's declared producer and committed
+    # by the request node as clarification_request; nothing infers them from the
+    # run's own prompt. A clarification_questions field existed for a node that
+    # did infer them, and it was removed with that node: state a stage writes and
+    # nothing reads is indistinguishable from a wiring fault.
     # clarification_answers is declared ONCE, above, keyed by request id and
     # carrying its merge reducer. A second declaration lived here describing a
     # flat {question_id: answer} map with last-write-wins, and being later it

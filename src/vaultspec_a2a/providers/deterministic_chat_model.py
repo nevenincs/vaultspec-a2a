@@ -15,7 +15,6 @@ advances the inner review loop. The feature tag and topic are configurable so a
 parameterized harness can assert the materialized document stems.
 """
 
-import json
 import logging
 from collections.abc import AsyncIterator
 from typing import Any, override
@@ -63,54 +62,12 @@ _ROLE_DISPATCH_KEYS: tuple[str, ...] = (
 # REVISION path is driven by the gate verdict, not this provider).
 _REVIEW_PASS = "PASS"
 
-# The literal ground-clarification sentinel line
-# (graph/nodes/ground.py's GROUND_CLARIFICATION_SENTINEL) is duplicated here
-# rather than imported - this leaf provider stays free of a graph/team runtime
-# edge (the same discipline _ROLE_DISPATCH_KEYS above documents). A
-# contract-sync test asserts the literal never diverges.
-_GROUND_CLARIFICATION_SENTINEL = "CLARIFICATION NEEDED"
-
-#: A run's initial message containing this exact marker forces the
-#: researcher's GROUND-stage turn to ask a clarifying question instead of
-#: proceeding straight to research - the deterministic lane's own trigger for
-#: exercising the agent-flow D5 clarification interrupt live, with no
-#: live-model prompt engineering needed. Harmless if it also appears in a
-#: later diverge-stage researcher turn (only the ground node's own parser
-#: acts on the sentinel; a diverge finding that echoes it is inert text).
-#: Emits BOTH question kinds in one park (one ``choice``, one ``text``) so a
-#: single drive exercises the choice-option surface AND the free-text surface
-#: together, plus the required-vs-optional gate and the multi-question recap
-#: - not just the text path, which alone would leave a broken choice-option
-#: renderer indistinguishable from a working one (a text input renders either
-#: way). Well inside the D5 caps (<=4 questions, <=4 options per choice).
-CLARIFICATION_TRIGGER_MARKER = "DETERMINISTIC_FORCE_CLARIFICATION"
-
-_CLARIFICATION_TRIGGER_QUESTIONS = json.dumps(
-    [
-        {
-            "id": "provider",
-            "prompt": "Which provider should author the plan?",
-            "kind": "choice",
-            "options": ["codex", "zai", "claude"],
-            "required": True,
-        },
-        {
-            "id": "scope",
-            "prompt": "Which module should this research target?",
-            "kind": "text",
-            "required": False,
-        },
-    ]
-)
-
-
-def _messages_carry_trigger(messages: list[BaseMessage] | None) -> bool:
-    """Whether any message's content carries the clarification trigger marker."""
-    if not messages:
-        return False
-    return any(
-        CLARIFICATION_TRIGGER_MARKER in str(getattr(m, "content", "")) for m in messages
-    )
+# This provider emits no clarification sentinel. A marker once lived here that
+# made the researcher's turn ask a question instead of researching, for a ground
+# stage that inferred questions from the run's own prompt. That stage is gone:
+# questions now come from the preset, so no model output can trigger one, and an
+# emitter whose only reader has been deleted is dead weight that reads as a
+# feature. Driving the clarification loop is the preset's job, not this model's.
 
 
 def _research_document(feature: str, topic: str) -> str:
@@ -213,7 +170,7 @@ class DeterministicResearchAdrChatModel(BaseChatModel):
     def _llm_type(self) -> str:
         return "deterministic-research-adr-chat-model"
 
-    def _content_for_role(self, messages: list[BaseMessage] | None = None) -> str:
+    def _content_for_role(self) -> str:
         """Return the deterministic content for this model's resolved role."""
         role = _role_of(self._agent_config.id if self._agent_config else None)
         if role == _ROLE_DOC_REVIEWER:
@@ -225,11 +182,6 @@ class DeterministicResearchAdrChatModel(BaseChatModel):
         if role == _ROLE_SYNTHESIST:
             return _research_document(self.feature_tag, self.topic)
         if role == _ROLE_RESEARCHER:
-            if _messages_carry_trigger(messages):
-                return (
-                    f"{_GROUND_CLARIFICATION_SENTINEL}\n"
-                    f"{_CLARIFICATION_TRIGGER_QUESTIONS}"
-                )
             return (
                 f"Research findings for `{self.topic}` under `{self.feature_tag}`: "
                 "the phase machine, gate parking, and materialization are the "
@@ -265,8 +217,8 @@ class DeterministicResearchAdrChatModel(BaseChatModel):
         **kwargs: Any,
     ) -> ChatResult:
         """Return the resolved role content as a single AIMessage."""
-        del stop, run_manager, kwargs  # interface-required, unused
-        content = self._content_for_role(messages)
+        del messages, stop, run_manager, kwargs  # interface-required, unused
+        content = self._content_for_role()
         return ChatResult(
             generations=[ChatGeneration(message=AIMessage(content=content))]
         )
@@ -280,6 +232,6 @@ class DeterministicResearchAdrChatModel(BaseChatModel):
         **kwargs: Any,
     ) -> AsyncIterator[ChatGenerationChunk]:
         """Yield the resolved role content as a single streaming chunk."""
-        del stop, run_manager, kwargs  # interface-required, unused
-        content = self._content_for_role(messages)
+        del messages, stop, run_manager, kwargs  # interface-required, unused
+        content = self._content_for_role()
         yield ChatGenerationChunk(message=AIMessageChunk(content=content))

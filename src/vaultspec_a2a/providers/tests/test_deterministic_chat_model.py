@@ -11,7 +11,6 @@ from ...graph.enums import MODEL_MAP, PROVIDER_DEFAULT_MODELS, Provider
 from ...team.team_config import AgentConfig, AgentPersonaConfig
 from ..deterministic_chat_model import (
     _ROLE_DISPATCH_KEYS,
-    CLARIFICATION_TRIGGER_MARKER,
     DeterministicResearchAdrChatModel,
     _role_of,
 )
@@ -94,45 +93,26 @@ async def test_researcher_returns_findings_not_a_document() -> None:
 
 
 @pytest.mark.asyncio
-async def test_researcher_emits_clarification_sentinel_when_triggered() -> None:
-    """The CLARIFICATION_TRIGGER_MARKER in any message forces the ground-stage
-    clarification sentinel + a parseable two-question array (one choice, one
-    text; one required, one optional), so a live drive exercises the choice-
-    option surface, the free-text surface, the required-vs-optional gate, and
-    the multi-question recap in one park - not just a text input, which alone
-    would render identically whether choice-option handling works or not."""
-    import json
+async def test_no_prompt_makes_this_provider_ask_a_question() -> None:
+    """No input turns a research turn into a clarification, marker text included.
 
-    result = await _model("vaultspec-researcher", topic="layout").ainvoke(
-        [HumanMessage(content=f"research it. {CLARIFICATION_TRIGGER_MARKER}")]
-    )
-    body = str(result.content)
-    lines = body.splitlines()
-    assert lines[0] == "CLARIFICATION NEEDED"
-    questions = json.loads("\n".join(lines[1:]))
-    assert isinstance(questions, list) and len(questions) == 2
-
-    choice, text = questions
-    assert choice["kind"] == "choice"
-    assert choice["required"] is True
-    assert isinstance(choice["options"], list) and len(choice["options"]) >= 2
-
-    assert text["kind"] == "text"
-    assert text["required"] is False
-
-    assert {q["id"] for q in questions} == {choice["id"], text["id"]}
-    assert all(q["id"] and q["prompt"] for q in questions)
-
-
-@pytest.mark.asyncio
-async def test_researcher_ignores_trigger_absent_marker() -> None:
-    """Without the marker, the researcher's ordinary findings text is unchanged."""
-    result = await _model("vaultspec-researcher", topic="layout").ainvoke(
-        [HumanMessage(content="research it, nothing special")]
-    )
-    body = str(result.content)
-    assert "CLARIFICATION NEEDED" not in body
-    assert "Research findings" in body
+    Questions reach a run from its preset, so a model that could talk itself into
+    asking one would be a second, undeclared source for "does this run stop?".
+    This provider once had exactly that: a marker that flipped the researcher into
+    emitting a clarification sentinel, read by a ground stage that no longer
+    exists. The old marker string is passed here deliberately - it must now be
+    ordinary prose, so a reintroduced trigger fails rather than passing unnoticed.
+    """
+    for prompt in (
+        "research it, nothing special",
+        "research it. DETERMINISTIC_FORCE_CLARIFICATION",
+    ):
+        result = await _model("vaultspec-researcher", topic="layout").ainvoke(
+            [HumanMessage(content=prompt)]
+        )
+        body = str(result.content)
+        assert "CLARIFICATION NEEDED" not in body
+        assert "Research findings" in body
 
 
 @pytest.mark.asyncio

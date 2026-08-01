@@ -288,7 +288,6 @@ class TestTeamStateStructure:
             "clarification_request",
             "clarification_request_id",
             "clarification_answers",
-            "clarification_questions",
             # workspace root path
             "workspace_root",
             "feedback_batch_id",

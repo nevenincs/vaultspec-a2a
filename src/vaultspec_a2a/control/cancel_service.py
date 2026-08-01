@@ -61,11 +61,31 @@ def raise_for_cancel_failure(result: CancelResult, *, resource_noun: str) -> Non
     """Translate a cancel outcome's failure into the HTTP error the route returns.
 
     Both the internal thread-cancel route and the versioned run-cancel verb
-    performed this mapping inline and identically - a not-found becomes 404, any
-    other dispatch failure becomes 502 - differing only in the resource noun.
-    Sharing it keeps the two edges from drifting to different status codes for
-    the same underlying outcome, which is the failure a duplicated mapping
+    performed this mapping inline and identically, differing only in the resource
+    noun. Sharing it keeps the two edges from drifting to different status codes
+    for the same underlying outcome, which is the failure a duplicated mapping
     invites.
+
+    The mapping follows :class:`~..thread.dispatch_policy.FailureType`'s own
+    split, which separates DOMAIN rejections from DISPATCH failures. A dispatch
+    failure means the request could not be delivered - the worker was unreachable,
+    the circuit was open, capacity was spent - and a bad gateway describes it
+    exactly. A domain rejection means delivery was never attempted because the
+    run's own state forbids the verb, and that is a statement about the resource,
+    never about an upstream. Reporting the second as the first is what this
+    function used to do, and it told a caller its infrastructure had failed when
+    the truth was that its run had already finished.
+
+    Three outcomes, therefore:
+
+    * **Absent** - 404, naming the resource.
+    * **Settled some other way** - 409, because a completed, failed, archived, or
+      tearing-down run cannot be cancelled and no retry will change that. The
+      status is the caller's signal to re-read the run rather than to retry.
+    * **Already cancelled** - no error at all. The verb is idempotent and the
+      state the caller asked for is the state that holds, so the route answers
+      with the run's terminal status and ``applied`` set. Refusing here would
+      make a second cancel fail purely for being second.
 
     Args:
         result: The cancel-service outcome to inspect.
@@ -73,13 +93,28 @@ def raise_for_cancel_failure(result: CancelResult, *, resource_noun: str) -> Non
             edge speaks its own vocabulary without owning the status logic.
 
     Raises:
-        HTTPException: 404 when the target is absent, 502 on any other dispatch
-            failure. Returns without raising when the cancel succeeded.
+        HTTPException: 404 when the target is absent, 409 when its state forbids
+            cancellation, 502 on a genuine dispatch failure. Returns without
+            raising when the cancel succeeded or was already satisfied.
     """
     from fastapi import HTTPException
 
     if result.failure_type == FailureType.NOT_FOUND:
         raise HTTPException(status_code=404, detail=f"{resource_noun} not found")
+    if result.failure_type == FailureType.TERMINAL:
+        # Discriminated on the run's own status rather than on ``applied``, which
+        # carries a different meaning on the success path and would make this read
+        # as a coincidence of two flags instead of the state check it is.
+        if result.thread_status == ThreadStatus.CANCELLED.value:
+            return
+        raise HTTPException(
+            status_code=409,
+            detail=result.error_detail
+            or (
+                f"{resource_noun} is in {result.thread_status!r} state and cannot "
+                "be cancelled"
+            ),
+        )
     if result.failure_type is not None:
         raise HTTPException(
             status_code=502, detail=result.error_detail or "Cancel dispatch failed"

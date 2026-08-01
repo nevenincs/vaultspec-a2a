@@ -88,7 +88,9 @@ from ..authoring import AuthoringClient, mint_actor_token
 from ..authoring._envelope import AuthoringResponse, Denial
 from ..authoring._errors import AuthoringTransportError
 from ..authoring.discovery import SERVICE_JSON_ENV, resolve_engine
+from ..control.run_start_policy import required_role_ids
 from ..graph.enums import PermissionOptionKind, ToolKind
+from ..team.team_config import load_team_config
 
 # A doc-authoring role may only ever need read-only research tools; any other
 # tool-permission request (a write/execute/unclassified kind) is a real acceptance
@@ -112,12 +114,6 @@ def _option_id_for(options: list[dict], kind: str) -> str | None:
 logger = logging.getLogger(__name__)
 
 _GATEWAY_URL = os.environ.get("VAULTSPEC_GATEWAY_URL", "http://127.0.0.1:18100")
-_RESEARCH_ADR_ROLES = (
-    "vaultspec-researcher",
-    "vaultspec-synthesist",
-    "vaultspec-adr-author",
-    "vaultspec-doc-reviewer",
-)
 
 # Per-gate verdict policies (the lane axis).
 POLICY_AUTO = "AUTO"
@@ -233,7 +229,13 @@ def _research_adr_case(
             "research and decide an SSE reconnection and cursor-persistence "
             "strategy for long-lived dashboard event streams"
         ),
-        roles=_RESEARCH_ADR_ROLES,
+        # Asked of the preset, never listed here. This harness mints one actor
+        # token per role and run-start refuses a bundle that misses any required
+        # role, so a stale list does not fail a lane's subject - it fails every
+        # lane at the eligibility gate, before dispatch, with no graph ever run.
+        # That is exactly what a hardcoded copy of these ids did when the preset
+        # gained its plan-author role.
+        roles=tuple(required_role_ids(load_team_config(preset))),
         expected_doc_kinds=("research", "adr"),
         gate_policy=gate_policy,
         profile_id=profile_id,

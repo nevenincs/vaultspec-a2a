@@ -253,3 +253,39 @@ finding was recorded, and that refusal was honoured.
 Recorded as a correction rather than an edit because the original was authored by
 this campaign. A finding that conflates two mechanisms is the same defect class
 as code that does, and it is worth the same visibility.
+
+### Post-merge dropped-symbol audit (2026-08-01) - clean beyond the known set
+
+The `feature/agent-flow` merge resolution took the ours side while keeping the
+incoming tests, dropping symbols whose callers survived. Four surfaced as type
+diagnostics; a fifth was invisible to every static gate because its consumer
+reached it dynamically, and would have refused every harness-armed run on one
+provider lane while the tree stayed green. That fifth one is why this audit
+exists: the type checker had demonstrably failed to bound the class.
+
+Two invisible classes were swept and both are clean.
+
+Presets and rules were checked by LOADING every shipped preset through the
+production loader rather than by reading them - a preset naming a dropped agent,
+role, or capability fails at load, not at import, so no static gate would show
+it. All fourteen load without error.
+
+Dynamic references were checked by parsing the whole package and collecting
+every attribute name reached through a runtime lookup, then cross-referencing
+each against every definition in the tree. Of the names with no definition
+anywhere, all are legitimate: platform-conditional process-creation and
+file-open flags probed precisely because they do not exist on every platform,
+and attributes belonging to third-party telemetry, command-line, and model
+libraries. Not one is an internal symbol the merge dropped. The restored
+provider method would have appeared in that list had it still been missing,
+which is what makes the sweep's negative result meaningful rather than merely
+empty.
+
+The statically-visible set is not this audit's concern and is being repaired
+separately; one had already landed when this ran.
+
+Recorded as a clean result deliberately. A verified negative on a class that
+static gates cannot see is worth as much as a hit, and without it the honest
+position would have been that the merge's blast radius was unknown rather than
+bounded. The method is reusable and is the point: load the presets, and
+cross-reference dynamic lookups against definitions.

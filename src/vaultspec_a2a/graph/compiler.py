@@ -37,6 +37,11 @@ from ..thread.errors import (
 )
 from ..thread.state import TeamState
 from .enums import Model, PipelinePhase, Provider
+from .nodes.clarification import (
+    ClarificationQuestionProducer,
+    create_clarification_gate_node,
+    create_clarification_request_node,
+)
 from .nodes.diverge import (
     ResearchFindingProducer,
     create_research_dispatch_node,
@@ -386,6 +391,7 @@ def compile_team_graph(
     feature_tag: str | None = None,
     task_queue_port: TaskQueuePort | None = None,
     proposal_submitter: DocumentProposalSubmitter | None = None,
+    clarification_producer: ClarificationQuestionProducer | None = None,
     feedback_reader: "FeedbackContextReader | None" = None,
     authoring_binding_provider: "AuthoringBindingProvider | None" = None,
     model_assignment: dict[str, dict[str, Any]] | None = None,
@@ -419,6 +425,13 @@ def compile_team_graph(
         feature_tag:             Optional feature tag for task-queue scoping.
         task_queue_port:         Optional database-backed task-queue port
                                  injected into worker and mount nodes.
+        clarification_producer:  Optional producer of mid-run clarification
+                                 questions. When supplied, the ``research_adr``
+                                 grounding stage gains a checkpointed
+                                 question/answer interrupt ahead of the diverge
+                                 fan-out; when omitted the stage is not wired at
+                                 all, so a run that has nobody to ask keeps the
+                                 exact graph shape it had before.
         provider_factory:        Provider factory for model creation.
 
     Returns:
@@ -494,6 +507,7 @@ def compile_team_graph(
             workspace_root=workspace_root,
             autonomous=autonomous,
             proposal_submitter=proposal_submitter,
+            clarification_producer=clarification_producer,
             feedback_reader=feedback_reader,
             frozen_assignment=model_assignment,
         )
@@ -1004,6 +1018,8 @@ def _compile_pipeline_loop(
 # Structural node names for the document phase machine. Fixed rather than
 # agent-id-derived so the phase gates and inner review loops can reference their
 # targets deterministically.
+_RA_CLARIFY_REQUEST = "clarification_request"
+_RA_CLARIFY_GATE = "clarification_gate"
 _RA_DISPATCH = "research_dispatch"
 _RA_SYNTHESIS = "synthesis"
 _RA_RESEARCH_REVIEW = "research_review"
@@ -1179,6 +1195,7 @@ def _compile_research_adr(
     workspace_root: Path | None = None,
     autonomous: bool = False,
     proposal_submitter: DocumentProposalSubmitter | None,
+    clarification_producer: ClarificationQuestionProducer | None = None,
     feedback_reader: "FeedbackContextReader | None" = None,
     frozen_assignment: dict[str, dict[str, Any]] | None = None,
 ) -> None:
@@ -1186,7 +1203,8 @@ def _compile_research_adr(
 
     Structural sequencing (gates enforced by graph shape, not LLM convention):
 
-        START -> diverge (N researchers) -> synthesis -> research_review
+        START -> [clarify_request -> clarify_gate ->]
+              -> diverge (N researchers) -> synthesis -> research_review
               -> [PASS] research_submit -> research_gate -> [approved] adr_author
                                                          -> [revise]   synthesis
               -> [REVISION] synthesis
@@ -1214,6 +1232,13 @@ def _compile_research_adr(
     whose propose-and-submit runs through the injected
     ``proposal_submitter``. The inner doc-review loop enforces the prose quality
     bar before each human gate.
+
+    The bracketed clarification pair is the grounding-stage question primitive
+    and is wired only when a ``clarification_producer`` is injected: without a
+    producer there is nobody to ask, and an unconditional pass-through node would
+    add a superstep to every run to accomplish nothing. Wired, it sits ahead of
+    the fan-out so a researcher's brief can incorporate the human's answer rather
+    than a guess - which is the whole point of asking before diverging.
     """
     if proposal_submitter is None:
         raise ConfigError(
@@ -1399,7 +1424,23 @@ def _compile_research_adr(
         ),
     )
 
-    builder.add_edge(START, _RA_DISPATCH)
+    if clarification_producer is None:
+        builder.add_edge(START, _RA_DISPATCH)
+    else:
+        builder.add_node(
+            _RA_CLARIFY_REQUEST,
+            create_clarification_request_node(
+                clarification_producer,
+                gate_target=_RA_CLARIFY_GATE,
+                proceed_target=_RA_DISPATCH,
+            ),
+        )
+        builder.add_node(
+            _RA_CLARIFY_GATE,
+            create_clarification_gate_node(proceed_target=_RA_DISPATCH),
+        )
+        builder.add_edge(START, _RA_CLARIFY_REQUEST)
+
     builder.add_edge(_RA_SYNTHESIS, _RA_RESEARCH_REVIEW)
     builder.add_conditional_edges(
         _RA_RESEARCH_REVIEW,

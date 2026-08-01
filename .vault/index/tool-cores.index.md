@@ -3,9 +3,9 @@ generated: true
 tags:
   - '#index'
   - '#tool-cores'
-date: '2026-07-22'
-modified: '2026-07-22'
-body_hash: 'sha256:fd4330a8ecf7c2ddd61d1a886c39850584c8ccf3241a40731f70e76a5520fcbb'
+date: '2026-08-01'
+modified: '2026-08-01'
+body_schema: 'body-v1'
 related:
   - '[[2026-07-17-tool-cores-P01-S01]]'
   - '[[2026-07-17-tool-cores-P01-S02]]'
@@ -37,6 +37,8 @@ related:
   - '[[2026-07-17-tool-cores-dedup-audit]]'
   - '[[2026-07-17-tool-cores-plan]]'
   - '[[2026-07-17-tool-cores-research]]'
+  - '[[2026-08-01-tool-cores-web-grounding-adr]]'
+  - '[[2026-08-01-tool-cores-web-grounding-research]]'
 ---
 
 # `tool-cores` feature index
@@ -48,6 +50,7 @@ Auto-generated index of all documents tagged with `#tool-cores`.
 ### adr
 
 - `2026-07-17-tool-cores-adr` - `tool-cores` adr: `read-only grounding tools for graph document agents` | (**status:** `accepted`)
+- `2026-08-01-tool-cores-web-grounding-adr` - `tool-cores` adr: `web grounding` | (**status:** `accepted`)
 
 ### audit
 
@@ -89,3 +92,4 @@ Auto-generated index of all documents tagged with `#tool-cores`.
 ### research
 
 - `2026-07-17-tool-cores-research` - `tool-cores` research: `read-only grounding tools for graph agents`
+- `2026-08-01-tool-cores-web-grounding-research` - `tool-cores` research: `provider-native web grounding`

@@ -364,6 +364,8 @@ def _is_usage_limit(failure_reason: str) -> bool:
 
 
 @pytest.mark.service
+@pytest.mark.resource("loopback-stack")
+@pytest.mark.resource("claude-cli-lane")
 @pytest.mark.asyncio
 @pytest.mark.timeout(_OBSERVE_DEADLINE_SECONDS + 600.0)
 async def test_claude_lane_completes_a_real_web_retrieval(
@@ -379,7 +381,7 @@ async def test_claude_lane_completes_a_real_web_retrieval(
     stack = _reachable_stack()
     if stack is None:
         external_prerequisite.absent("loopback-stack")
-    engine_base_url, engine_bearer, vault_root = stack
+    gateway_url, engine_base_url, engine_bearer, vault_root = stack
 
     shas_before = _fetch_live_commit_shas()
     if not shas_before:
@@ -397,6 +399,7 @@ async def test_claude_lane_completes_a_real_web_retrieval(
         engine_base_url=engine_base_url,
         engine_bearer=engine_bearer,
         vault_root=vault_root,
+        gateway_url=gateway_url,
     )
 
     before = _snapshot_vault(vault_root)

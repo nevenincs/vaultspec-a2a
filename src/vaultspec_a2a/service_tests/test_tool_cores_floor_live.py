@@ -219,6 +219,7 @@ def _floor_case(feature: str, adr_name: str) -> AcceptanceCase:
 
 
 @pytest.mark.service
+@pytest.mark.resource("loopback-stack")
 @pytest.mark.asyncio
 async def test_document_agent_reads_named_adr_midturn_and_cites(
     external_prerequisite: ExternalPrerequisiteRule,
@@ -231,7 +232,7 @@ async def test_document_agent_reads_named_adr_midturn_and_cites(
     stack = _reachable_stack()
     if stack is None:
         external_prerequisite.absent("loopback-stack")
-    engine_base_url, engine_bearer, vault_root = stack
+    gateway_url, engine_base_url, engine_bearer, vault_root = stack
 
     target_adr = _pick_named_adr(vault_root)
     if target_adr is None:
@@ -256,6 +257,7 @@ async def test_document_agent_reads_named_adr_midturn_and_cites(
         engine_base_url=engine_base_url,
         engine_bearer=engine_bearer,
         vault_root=vault_root,
+        gateway_url=gateway_url,
     )
 
     before = _snapshot_vault(vault_root)
@@ -386,6 +388,7 @@ def _resolving_citations(output: str, workspace_root: Path) -> list[str]:
 
 
 @pytest.mark.service
+@pytest.mark.resource("loopback-stack")
 @pytest.mark.asyncio
 async def test_document_agent_invokes_rag_search_midturn_and_cites(
     external_prerequisite: ExternalPrerequisiteRule,
@@ -410,7 +413,7 @@ async def test_document_agent_invokes_rag_search_midturn_and_cites(
     stack = _reachable_stack()
     if stack is None:
         external_prerequisite.absent("loopback-stack")
-    engine_base_url, engine_bearer, vault_root = stack
+    gateway_url, engine_base_url, engine_bearer, vault_root = stack
     workspace_root = vault_root.parent
 
     feature = f"tool-cores-semantic-{int(time.time())}"
@@ -420,6 +423,7 @@ async def test_document_agent_invokes_rag_search_midturn_and_cites(
         engine_base_url=engine_base_url,
         engine_bearer=engine_bearer,
         vault_root=vault_root,
+        gateway_url=gateway_url,
     )
 
     before = _snapshot_vault(vault_root)

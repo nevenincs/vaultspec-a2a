@@ -178,6 +178,7 @@ async def _run_changeset_ids(ec: AuthoringClient, run_id: str) -> set[str]:
 
 
 @pytest.mark.service
+@pytest.mark.resource("loopback-stack")
 @pytest.mark.asyncio
 async def test_solo_coder_invokes_bridged_authoring_tool_midturn(
     external_prerequisite: ExternalPrerequisiteRule,
@@ -195,7 +196,7 @@ async def test_solo_coder_invokes_bridged_authoring_tool_midturn(
     stack = _reachable_stack()
     if stack is None:
         external_prerequisite.absent("loopback-stack")
-    engine_base_url, engine_bearer, vault_root = stack
+    gateway_url, engine_base_url, engine_bearer, vault_root = stack
 
     feature = f"s20-solo-coder-{int(time.time())}"
     case = _solo_coder_case(feature)
@@ -204,6 +205,7 @@ async def test_solo_coder_invokes_bridged_authoring_tool_midturn(
         engine_base_url=engine_base_url,
         engine_bearer=engine_bearer,
         vault_root=vault_root,
+        gateway_url=gateway_url,
     )
 
     before = _snapshot_vault(vault_root)

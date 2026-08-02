@@ -5,7 +5,7 @@ tags:
 date: '2026-08-02'
 modified: '2026-08-02'
 body_schema: 'body-v1'
-body_hash: 'sha256:5822159ee3f36c384405536d3cf03768ff2a2a42dc5703e96f3354d36722bbc5'
+body_hash: 'sha256:2542da5ea35a1887ada0edd50a1e1fba161e4091910667adc4cb4840b1ee8048'
 related:
   - "[[2026-07-19-repository-tooling-hardening-plan]]"
 ---
@@ -77,6 +77,9 @@ The new researcher-node callback propagation always passed `config=None` to inje
 ### compiled-researcher-config-injection | high | open framework integration defect
 
 `RunnableConfig` is imported only under `TYPE_CHECKING` in the researcher node, so LangGraph cannot resolve the postponed runtime annotation, warns during graph compilation, and fails to inject public graph callback configuration into the divergence node. Move the import to runtime scope and add a config-aware producer regression through the compiled public graph; source-level forwarding is insufficient. `src/vaultspec_a2a/graph/nodes/diverge.py`; `src/vaultspec_a2a/graph/tests/nodes/test_diverge.py`.
+### complexity-state-projection | high | open structural defect
+
+The mandatory `just lint complexity` sentinel is now demonstrably blocking: `StateProjector.normalize_execution_state` scores 31, exceeding the configured 15-point limit. This is production complexity, not test-harness noise, and it prevents the strict Just/CI surface from becoming fully green. Decompose the normalization branches behind focused behavior-preserving tests, then rerun the complete complexity gate before promoting it from advisory to blocking CI. `src/vaultspec_a2a/worker/state_projection.py`.
 ## Recommendations
 
 - Provision a healthy loopback service-discovery record, then run the named engine-backed stdio service lane and append the outcome to this audit before declaring S26 fully runtime-proven.

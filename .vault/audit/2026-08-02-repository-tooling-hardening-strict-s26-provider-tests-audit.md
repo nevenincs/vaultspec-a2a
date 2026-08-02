@@ -5,7 +5,7 @@ tags:
 date: '2026-08-02'
 modified: '2026-08-02'
 body_schema: 'body-v1'
-body_hash: 'sha256:9a1d6b7e5f91bfd708943218382eb8ce9a1c5e8b88a9b82b42c53884c27516c3'
+body_hash: 'sha256:387d6253648d0d94938dd4957a9ba1da329aedec586c19e6d187768da545f956'
 related:
   - "[[2026-07-19-repository-tooling-hardening-plan]]"
 ---
@@ -94,6 +94,10 @@ Commit `d1f02edb` returns `NotRequired` to `typing`, keeps `TypedDict` at `typin
 ### state-projection-configurable-fail-open | medium | resolved
 
 Commit `26bccdcd` restores the pre-refactor fail-closed boundary: an absent `configurable` key yields `None`, while a present non-mapping raises `TypeError`. Direct normalization-contract tests prove both arms; the existing production emitter catches that exception and deterministically emits `execution_state_projection_unavailable`. This is structural/control-flow proof of degradation, not a live graph, bridge, persistence, or gateway proof. Independent review found no new defect; focused tests, Ruff, format, and Ty pass, and `_checkpoint_id` remains below the complexity limit. `src/vaultspec_a2a/worker/state_projection.py`; `src/vaultspec_a2a/worker/tests/test_state_projection.py`.
+
+### duplication-scope-label | low | open signal-integrity defect
+
+The `audit duplication` target and CI label claim production clone detection but invoke JSCPD across the whole package, including `tests`, `service_tests`, and `desktop_tests`. Current evidence is 21 clones / 534 duplicated lines, mostly in those test tiers, so the reported signal does not match its stated policy. Decide and implement one truthful contract before promotion: exclude test tiers for a production-only gate, or rename/reframe it as package-wide clone detection and triage the full result. Keep it advisory until the scope is accurate and the baseline is classified. `dev/toolchain.py`; `.github/workflows/test.yml`.
 ## Recommendations
 
 - Provision a healthy loopback service-discovery record, then run the named engine-backed stdio service lane and append the outcome to this audit before declaring S26 fully runtime-proven.

@@ -305,7 +305,10 @@ jobs:
             if [ "${RUNNER_OS}" = "Windows" ]; then
               tasklist //FI "IMAGENAME eq vaultspec-a2a.exe" 2>/dev/null || true
             else
-              ps -eo pid,ppid,comm,args | grep -i "[v]aultspec-a2a" || echo "(none)"
+              # pgrep rather than grepping ps: it matches processes directly, so
+              # there is no self-match to dodge and no dependence on this shell's
+              # ps column layout.
+              pgrep -af vaultspec-a2a || echo "(none)"
             fi
             exit 1
           fi

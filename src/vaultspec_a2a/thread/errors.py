@@ -1,14 +1,16 @@
-"""Exception types and error taxonomy for the A2A Orchestrator.
+"""Exception types for the A2A Orchestrator, and the rendering of one failure.
 
-Provides a structured error classification system with severity levels
-and recovery action hints, enabling the orchestrator to make intelligent
-recovery decisions instead of treating every failure as a crash.
+The hierarchy names WHERE a failure happened - configuration, agent process,
+protocol bridging, persistence, permissions, budget - so callers can catch at
+the granularity they can act on. It deliberately carries no classification of
+WHY a provider refused work: that is the provider condition vocabulary's job,
+resolved at the lane from the discriminator the provider itself put on the
+wire, and a second vocabulary here could only guess at it from the catch site.
 
-See: the legacy architecture gap analysis that originally introduced the
-typed error-taxonomy requirement.
+The renderers below are the shared half. Every path that has to name a failure
+in one client-visible line uses them, so a reason reads the same whether it came
+from the graph stream, the executor, or a dispatch that never started.
 """
-
-from enum import StrEnum
 
 # Bounds the message portion of one rendered exception identity. A client-visible
 # failure reason is assembled from a small number of these, and the durable
@@ -93,31 +95,6 @@ def describe_exception_chain(exc: BaseException) -> str:
     return detail
 
 
-class ErrorSeverity(StrEnum):
-    """Classification of error permanence.
-
-    Used by the orchestrator to decide whether retrying is worthwhile.
-    """
-
-    TRANSIENT = "transient"
-    PERMANENT = "permanent"
-    UNKNOWN = "unknown"
-
-
-class RecoveryAction(StrEnum):
-    """Suggested recovery action for an error.
-
-    The orchestrator's error-handling logic uses these hints to pick
-    a strategy without hard-coding recovery per exception type.
-    """
-
-    RETRY = "retry"
-    RETRY_WITH_BACKOFF = "retry_with_backoff"
-    REASSIGN = "reassign"
-    ESCALATE_TO_USER = "escalate_to_user"
-    ABORT = "abort"
-
-
 # ---------------------------------------------------------------------------
 # Base exceptions
 # ---------------------------------------------------------------------------
@@ -132,26 +109,12 @@ class GitWorkspaceError(Exception):
 class VaultspecError(Exception):
     """Base exception for all Vaultspec operations.
 
-    Every VaultspecError carries a ``severity`` and ``recovery_action``
-    so that callers can react programmatically.
+    A common root so a caller can catch everything this project raises without
+    also catching the interpreter's own failures. It adds no state of its own:
+    what a subclass carries is whatever that subclass's own failure needs.
     """
 
-    severity: ErrorSeverity = ErrorSeverity.UNKNOWN
-    recovery_action: RecoveryAction = RecoveryAction.ESCALATE_TO_USER
-
-    def __init__(
-        self,
-        message: str = "",
-        *,
-        severity: ErrorSeverity | None = None,
-        recovery_action: RecoveryAction | None = None,
-    ) -> None:
-        """Initialise with an optional message and per-instance overrides."""
-        if severity is not None:
-            self.severity = severity
-        if recovery_action is not None:
-            self.recovery_action = recovery_action
-        super().__init__(message)
+    __slots__ = ()
 
 
 # ---------------------------------------------------------------------------
@@ -163,9 +126,6 @@ class ConfigError(VaultspecError):
     """Raised when configuration is invalid or missing."""
 
     __slots__ = ()
-
-    severity = ErrorSeverity.PERMANENT
-    recovery_action = RecoveryAction.ABORT
 
 
 class ProjectionRefusedError(ConfigError):
@@ -196,7 +156,7 @@ class IsolationRequiredError(ConfigError):
     the spawn seam) must fail loud here rather than launch an agent with an
     unbounded MCP surface that inherits ambient and workspace ``.mcp.json``
     servers. A ``ConfigError`` so the compile path wraps it as a
-    ``GraphCompilationError`` and it carries the abort recovery action.
+    ``GraphCompilationError``.
     """
 
     __slots__ = ()
@@ -231,9 +191,6 @@ class AgentProcessError(VaultspecError):
 
     __slots__ = ()
 
-    severity = ErrorSeverity.TRANSIENT
-    recovery_action = RecoveryAction.RETRY_WITH_BACKOFF
-
 
 class WorkerExecutionError(VaultspecError):
     """Raised when a worker node's model invocation fails after all retries.
@@ -248,9 +205,6 @@ class WorkerExecutionError(VaultspecError):
     """
 
     __slots__ = ("message", "message_count", "model", "worker")
-
-    severity = ErrorSeverity.TRANSIENT
-    recovery_action = RecoveryAction.ESCALATE_TO_USER
 
     def __init__(
         self,
@@ -280,9 +234,6 @@ class ProtocolError(VaultspecError):
 
     __slots__ = ()
 
-    severity = ErrorSeverity.PERMANENT
-    recovery_action = RecoveryAction.ABORT
-
 
 # ---------------------------------------------------------------------------
 # Provider session
@@ -298,9 +249,6 @@ class ProviderSessionError(VaultspecError):
 
     __slots__ = ()
 
-    severity = ErrorSeverity.TRANSIENT
-    recovery_action = RecoveryAction.RETRY_WITH_BACKOFF
-
 
 # ---------------------------------------------------------------------------
 # Event aggregation
@@ -311,9 +259,6 @@ class EventAggregatorError(VaultspecError):
     """Raised when the central event bus or multiplexer encounters errors."""
 
     __slots__ = ()
-
-    severity = ErrorSeverity.TRANSIENT
-    recovery_action = RecoveryAction.RETRY
 
 
 # ---------------------------------------------------------------------------
@@ -326,9 +271,6 @@ class DatabaseError(VaultspecError):
 
     __slots__ = ()
 
-    severity = ErrorSeverity.TRANSIENT
-    recovery_action = RecoveryAction.RETRY_WITH_BACKOFF
-
 
 # ---------------------------------------------------------------------------
 # Permission engine
@@ -339,9 +281,6 @@ class PermissionDeniedError(VaultspecError):
     """Raised when a requested action is denied by the permission engine."""
 
     __slots__ = ()
-
-    severity = ErrorSeverity.PERMANENT
-    recovery_action = RecoveryAction.ESCALATE_TO_USER
 
 
 # ---------------------------------------------------------------------------
@@ -354,17 +293,11 @@ class TokenBudgetExceededError(VaultspecError):
 
     __slots__ = ()
 
-    severity = ErrorSeverity.PERMANENT
-    recovery_action = RecoveryAction.REASSIGN
-
 
 class ContextOverflowError(VaultspecError):
     """Raised when the LLM context window cannot fit the required payload."""
 
     __slots__ = ()
-
-    severity = ErrorSeverity.PERMANENT
-    recovery_action = RecoveryAction.REASSIGN
 
 
 # ---------------------------------------------------------------------------
@@ -376,9 +309,6 @@ class NicknameConflictError(VaultspecError):
     """Raised when a thread nickname already exists in the database."""
 
     __slots__ = ("nickname",)
-
-    severity = ErrorSeverity.PERMANENT
-    recovery_action = RecoveryAction.ESCALATE_TO_USER
 
     def __init__(self, nickname: str) -> None:
         """Raise with a descriptive message for the conflicting nickname."""
@@ -433,7 +363,6 @@ __all__ = [
     "ConfigError",
     "ContextOverflowError",
     "DatabaseError",
-    "ErrorSeverity",
     "EventAggregatorError",
     "GitWorkspaceError",
     "HarnessToolContractError",
@@ -443,7 +372,6 @@ __all__ = [
     "ProjectionRefusedError",
     "ProtocolError",
     "ProviderSessionError",
-    "RecoveryAction",
     "TeamConfigNotFoundError",
     "TokenBudgetExceededError",
     "VaultspecError",

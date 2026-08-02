@@ -17,6 +17,7 @@ from ..domain_config import domain_config
 from ..graph.enums import AgentLifecycleState
 from ..graph.protocols import NullTelemetryHook, TelemetryHook
 from ..thread.enums import ThreadStatus
+from ..thread.errors import describe_exception
 from .buffering import BufferingManager
 from .emitters import EventEmitters
 from .transformer import (
@@ -37,6 +38,12 @@ logger = logging.getLogger(__name__)
 # an SSE frame. The full exception is always logged in full via
 # ``logger.exception`` above regardless of this cap.
 _MAX_INGEST_ERROR_MESSAGE_LEN = 500
+
+# How many links of a ``__cause__`` chain reach a client. The links that carry
+# the answer are the first few - the catch site, its wrapper, and the fault that
+# started it - and every further link spends the capped budget on framework
+# plumbing the reader cannot act on.
+_MAX_INGEST_CAUSE_DEPTH = 4
 
 
 class IngestStallTimeoutError(TimeoutError):
@@ -68,9 +75,27 @@ def _summarize_ingest_exception(exc: BaseException) -> str:
     on resume — the actual reason lived only in the worker's own log. Every
     other classified branch in this handler (recursion limit, step timeout)
     already reports a specific reason; this restores that for the catch-all.
+
+    Naming only the caught exception was still not enough, because what reaches
+    this handler is rarely the failure itself: a provider fault raised inside a
+    worker node arrives as a wrapper, and describing the wrapper alone answers
+    where a run died rather than why. So the ``__cause__`` chain is walked and
+    each link described in turn. Only ``__cause__`` is followed, never
+    ``__context__``: an explicit ``raise ... from`` states that one failure
+    explains another, whereas implicit context merely records what happened to be
+    in flight, which is how an unrelated cleanup error comes to be reported as
+    the reason a run failed.
     """
-    detail = f"{type(exc).__name__}: {exc}".strip()
-    detail = " ".join(detail.split())  # collapse embedded newlines
+    links: list[str] = []
+    seen: set[int] = set()
+    current: BaseException | None = exc
+    while current is not None and len(links) < _MAX_INGEST_CAUSE_DEPTH:
+        if id(current) in seen:  # a chain may be cyclic; describe each link once
+            break
+        seen.add(id(current))
+        links.append(describe_exception(current))
+        current = current.__cause__
+    detail = " <- ".join(links)
     if len(detail) > _MAX_INGEST_ERROR_MESSAGE_LEN:
         detail = detail[: _MAX_INGEST_ERROR_MESSAGE_LEN - 1] + "…"
     return f"Graph event stream failed unexpectedly: {detail}"

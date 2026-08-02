@@ -30,6 +30,7 @@ from ...thread.errors import EventAggregatorError
 from .. import EventAggregator as CoreAggregator
 from .. import aggregator as agg_module
 from ..aggregator import EventAggregator, SequencedEvent, StreamableGraph
+from ..ingest import _summarize_ingest_exception
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -1599,6 +1600,82 @@ class TestGenericIngestExceptionDetection:
         assert err.recoverable is False
         assert "authoring_actor_token_unknown" in err.message
         assert "RuntimeError" in err.message
+
+
+class TestIngestExceptionCauseChain:
+    """Tests for the ``__cause__`` walk behind the catch-all's reason.
+
+    What reaches the catch-all is rarely the failure itself - a provider fault
+    raised in a worker node arrives as a wrapper - so describing only the caught
+    exception answered where a run died and never why.
+    """
+
+    def test_the_summary_names_the_cause_and_not_only_the_wrapper(self) -> None:
+        """The reason carries the failure that explains the one that was caught."""
+        cause = RuntimeError("provider refused: credit balance too low")
+        wrapper = ValueError("worker turn failed")
+        wrapper.__cause__ = cause
+
+        summary = _summarize_ingest_exception(wrapper)
+
+        assert "ValueError: worker turn failed" in summary
+        assert "RuntimeError: provider refused: credit balance too low" in summary
+
+    def test_implicit_context_is_never_reported_as_the_cause(self) -> None:
+        """Only an explicit ``raise ... from`` claims to explain a failure.
+
+        Implicit context records whatever happened to be in flight, so following
+        it would report an unrelated cleanup error as the reason a run failed.
+        """
+        try:
+            try:
+                raise RuntimeError("an unrelated error being handled")
+            except RuntimeError:
+                raise ValueError("the actual ingest failure") from None
+        except ValueError as exc:
+            summary = _summarize_ingest_exception(exc)
+
+        assert "the actual ingest failure" in summary
+        assert "an unrelated error being handled" not in summary
+
+    def test_a_cyclic_chain_terminates(self) -> None:
+        """A chain that loops back on itself must not spin the reporting path."""
+        first = RuntimeError("first")
+        second = ValueError("second")
+        first.__cause__ = second
+        second.__cause__ = first
+
+        summary = _summarize_ingest_exception(first)
+
+        assert summary.count("RuntimeError: first") == 1
+        assert "ValueError: second" in summary
+
+    def test_a_deep_chain_is_bounded_and_stays_within_the_frame_cap(self) -> None:
+        """Framework plumbing below the useful links cannot spend the budget."""
+        deepest = RuntimeError("link-9")
+        current: BaseException = deepest
+        for index in range(8, -1, -1):
+            wrapper = RuntimeError(f"link-{index}")
+            wrapper.__cause__ = current
+            current = wrapper
+
+        summary = _summarize_ingest_exception(current)
+
+        assert "link-0" in summary
+        assert "link-9" not in summary
+        assert len(summary) <= len("Graph event stream failed unexpectedly: ") + 500
+
+    def test_a_pathological_chain_is_capped(self) -> None:
+        """Two verbose links still cannot exceed the reason budget."""
+        cause = RuntimeError("c" * 4000)
+        wrapper = ValueError("w" * 4000)
+        wrapper.__cause__ = cause
+
+        summary = _summarize_ingest_exception(wrapper)
+
+        assert "\n" not in summary
+        assert summary.endswith("…")
+        assert len(summary) <= len("Graph event stream failed unexpectedly: ") + 500
 
 
 class _StallingGraph:

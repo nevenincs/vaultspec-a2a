@@ -21,6 +21,7 @@ from .acp_exceptions import AcpError as AcpError
 from .acp_exceptions import AcpErrorCode as AcpErrorCode
 from .acp_exceptions import AcpPromptError as AcpPromptError
 from .acp_exceptions import AcpSessionError as AcpSessionError
+from .conditions import ProviderCondition as ProviderCondition
 
 if TYPE_CHECKING:
     from .acp_chat_model import AcpChatModel as AcpChatModel
@@ -55,5 +56,6 @@ __all__ = [
     "AcpPromptError",
     "AcpSessionError",
     "MockChatModel",
+    "ProviderCondition",
     "ProviderFactory",
 ]

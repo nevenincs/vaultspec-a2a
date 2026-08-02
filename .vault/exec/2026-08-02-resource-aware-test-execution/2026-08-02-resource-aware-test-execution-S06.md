@@ -5,45 +5,11 @@ tags:
 date: '2026-08-02'
 modified: '2026-08-02'
 body_schema: 'body-v1'
-body_hash: 'sha256:50b77db006ec8179ec70f30a8562a8a70a9227dbdb8d2b4209f4c3921d1efa02'
+body_hash: 'sha256:a8bcb07e1ba555c8e95edb3f41d2f49a97c7c58e2b8127a203035a8e216b0854'
 step_id: 'S06'
 related:
   - "[[2026-08-02-resource-aware-test-execution-plan]]"
 ---
-
-<!-- FRONTMATTER RULES:
-     tags: one directory tag (hardcoded #exec) and one feature tag.
-     Replace resource-aware-test-execution with a kebab-case feature tag, e.g. #foo-bar.
-     Additional tags may be appended below the required pair.
-
-     modified: CLI-maintained last-modified stamp; set at scaffold time,
-     refreshed by mutating CLI verbs and vault check fix; never hand-edit.
-
-     step_id is the originating Step's canonical identifier, e.g. S01.
-     The S06 and 2026-08-02-resource-aware-test-execution-plan placeholders are machine-filled by
-     `vaultspec-core vault add exec`; do not fill them by hand.
-
-     Related: use wiki-links as '[[yyyy-mm-dd-foo-bar-plan]]' and link the
-     parent plan.
-
-     DO NOT add fields beyond those scaffolded; metadata lives
-     only in the frontmatter. -->
-
-<!-- LINK RULES:
-     - [[wiki-links]] are ONLY for .vault/ documents in the related: field above.
-     - NEVER use [[wiki-links]] or markdown links in the document body.
-     - NEVER reference file paths in the body. If you must name a source file,
-       class, or function, use inline backtick code: `src/module.py`. -->
-
-<!-- STEP RECORD:
-     This file represents one Step from the originating plan. Identified
-     by its canonical leaf identifier (S##) and ancestor display path.
-     The Implement the scheduling plugin with group computation, dist-mode guard, backstop derivation, and acquisition fixtures and ## Scope
-
-- `src/vaultspec_a2a/testing/plugin.py` placeholders below are machine-filled
-     by `vaultspec-core vault add exec` from the originating Step row;
-     do not fill them by hand. -->
-
 # Implement the scheduling plugin with group computation, dist-mode guard, backstop derivation, and acquisition fixtures
 
 ## Scope

@@ -5,12 +5,11 @@ tags:
 date: '2026-08-02'
 modified: '2026-08-02'
 body_schema: 'body-v1'
-body_hash: 'sha256:9ec7d8a1ff8c47472f000806efddb2a51163e249387314a78fe85d116b24aced'
+body_hash: 'sha256:90b1403fcafe8f4751baf5a0998cb9d83d1a5f6bbaaeab00cca8f30ca077f95f'
 related:
   - "[[2026-07-15-dev-process-registry-adr]]"
   - "[[2026-07-17-tool-cores-audit]]"
 ---
-
 # `resource-aware-test-execution` adr: `declaration-derived test scheduling over registry-backed resource leases` | (**status:** `accepted`)
 
 ## Problem Statement

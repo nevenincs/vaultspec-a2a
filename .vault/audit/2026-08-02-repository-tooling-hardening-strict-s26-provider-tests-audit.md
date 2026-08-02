@@ -5,7 +5,7 @@ tags:
 date: '2026-08-02'
 modified: '2026-08-02'
 body_schema: 'body-v1'
-body_hash: 'sha256:387d6253648d0d94938dd4957a9ba1da329aedec586c19e6d187768da545f956'
+body_hash: 'sha256:7cb6f50818783bd1519955c1d8e0c28e4dacb6534bd29839da1266d1f0526a07'
 related:
   - "[[2026-07-19-repository-tooling-hardening-plan]]"
 ---
@@ -98,6 +98,10 @@ Commit `26bccdcd` restores the pre-refactor fail-closed boundary: an absent `con
 ### duplication-scope-label | low | open signal-integrity defect
 
 The `audit duplication` target and CI label claim production clone detection but invoke JSCPD across the whole package, including `tests`, `service_tests`, and `desktop_tests`. Current evidence is 21 clones / 534 duplicated lines, mostly in those test tiers, so the reported signal does not match its stated policy. Decide and implement one truthful contract before promotion: exclude test tiers for a production-only gate, or rename/reframe it as package-wide clone detection and triage the full result. Keep it advisory until the scope is accurate and the baseline is classified. `dev/toolchain.py`; `.github/workflows/test.yml`.
+
+### transformer-malformed-payload-coverage | low | open coverage gap
+
+Independent review of the strict transformer hardening found the real StateGraph/InMemorySaver route preserves option kinds, IDs, clarification privacy, and input-required behavior, but direct malformed-field cases remain absent for `_payload_text` and non-list plan paths/options. Add fail-closed regressions for those payload shapes before treating the transformed interrupt boundary as fully malformed-input proven; do not reintroduce graph doubles or weaken the existing live-path assertions. `src/vaultspec_a2a/streaming/transformer.py`; `src/vaultspec_a2a/streaming/tests/test_permission_option_projection.py`.
 ## Recommendations
 
 - Provision a healthy loopback service-discovery record, then run the named engine-backed stdio service lane and append the outcome to this audit before declaring S26 fully runtime-proven.

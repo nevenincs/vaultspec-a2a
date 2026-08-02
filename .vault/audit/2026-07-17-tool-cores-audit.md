@@ -3,8 +3,8 @@ tags:
   - '#audit'
   - '#tool-cores'
 date: '2026-07-17'
-modified: '2026-07-17'
-body_hash: 'sha256:05161b7d92f2e26a6a3479f486ada5ad76dbccfa80a3420fc56ad1d8c50be4d6'
+modified: '2026-08-02'
+body_hash: 'sha256:551d078ff83f3441d1c243b41ef24e9d8837d60ac24ac9868c6ae926211ad4f5'
 related:
   - "[[2026-07-17-tool-cores-adr]]"
   - "[[2026-07-17-tool-cores-plan]]"
@@ -508,3 +508,88 @@ choice between withdrawing now and re-running on 2026-08-04 belongs to the
 owner. What must not happen is the gap being forgotten because the wiring
 finally works - a proof that cannot run and a proof that fails are the same
 evidence, which is precisely why this entry stays open.
+
+### acp-identity-fix-review-gate (2026-08-02) - REVISION REQUIRED
+
+Independent review of `27dc0dac` (the ACP identity fix that deleted
+`providers/_acp_config_home.py`) by the dedicated review persona. Verdict:
+FAIL on the ACP isolation lane. The identity diagnosis was right; what was
+removed on the way is the problem. Findings below spot-verified by the
+dispatching lead rather than accepted on report.
+
+- `acp-account-connector-suppression-has-no-replacement` (**critical**, open) -
+  the harness-provisioning ADR records that the config-home redirect closed TWO
+  scopes: the operator's user-global `mcpServers` AND the account's remote
+  connectors. The replacement, `project_confinement_settings`, builds its deny
+  set from `enumerate_ancestor_mcp_names() | ambient_user_mcp_names()`, and
+  `ambient_user_mcp_names` (`providers/_acp_project_mcp.py:362`) reads ONLY
+  `$CLAUDE_CONFIG_DIR/.claude.json` or `~/.claude.json` - VERIFIED by reading the
+  function. Account-side OAuth remote connectors are not in that file; they live
+  server-side on the account. The old mechanism suppressed them STRUCTURALLY, by
+  running in a home holding no credential. The child now runs under the
+  operator's real login with full OAuth, so those connectors load and are
+  neither disabled nor tool-denied. This is the S10 write-leak class - a live
+  Claude run scaffolding into `.vault/` through a user-global writable MCP -
+  reopened on the lane where it was first observed, with no test covering it
+  because the four deleted isolation tests were its only coverage.
+
+  The causation is worth stating plainly for whoever picks this up: the removal
+  was CORRECT and is not to be reverted. Suppression-by-credential-absence was
+  precisely what broke subscription identity, and the owner's contract is
+  explicit - we implement no authentication, the provider inherits the ambient
+  environment, the installed ACP binary runs as the operator does. So the fix
+  cannot be "put the isolated home back". Either an enforceable ambient-connector
+  control is built that does not touch identity, or the ADR is amended to state
+  which scopes are now out of scope and why the write-leak class is acceptable
+  there. What is not acceptable is the current state, where the record describes
+  a mechanism that no longer exists.
+
+- `acp-isolation-fail-loud-gate-is-orphaned` (high, open) - the ADR names two
+  fail-loud gates backing the pin. The spawn-time raise was removed with the
+  module; `IsolationRequiredError` survives at `thread/errors.py:188`, is
+  exported, and its docstring still describes the compile gate. VERIFIED: **zero**
+  raise sites tree-wide, sole importer an existence assertion in
+  `thread/tests/test_errors.py:524`. Orphaned capability plus a tautological
+  test - the same shape as `mark_permission_response_applied`. Reinstate a gate
+  or delete the class and its test; carrying a raise-less error class that an
+  ADR clause names as binding is the worst of both.
+
+- `acp-unarmed-runs-surface-the-whole-ambient-configuration` (high, open) -
+  confinement is applied only when a run declares servers, so an unarmed run
+  surfaces the operator's entire MCP configuration, including any writable vault
+  server. May be the right product call; landed without amending the record.
+
+- `acp-api-key-scrub-removed-silently` (medium, open) - the
+  `ANTHROPIC_API_KEY` pop under `CLAUDE_CODE_OAUTH_TOKEN` was removed. Consistent
+  with the no-auth contract, but on a box carrying a key this means silent
+  metered billing instead of the subscription, and no record acknowledges it.
+  `providers/tests/test_acp_migration_surface.py:22` still asserts in prose that
+  the key is scrubbed from every agent subprocess while popping it locally, so it
+  exercises production behaviour in neither direction.
+
+- `acp-confinement-residue-lands-in-the-operator-workspace` (medium, open) -
+  the replacement writes `<run_workspace>/.claude/settings.local.json` and relies
+  on a `finally` to restore it. Tree-kill reaps are routine here, and the old
+  design's residue sat in an accounted temp root with a stale-age sweep; this one
+  sits in the operator's own source tree with no sweep, so a killed run can leave
+  our confinement governing the operator's interactive `claude` indefinitely.
+
+- `acp-confinement-control-is-weaker-than-claimed-and-unproven-live` (medium,
+  open) - the docstring claims every other known server is "disabled by name AND
+  tool-denied". `enabledMcpjsonServers`/`disabledMcpjsonServers` govern
+  PROJECT-scope `.mcp.json` servers, so for a user-global name only the
+  `permissions.deny` half applies: the server still registers and its tools still
+  enumerate, only invocation is refused. The mechanism it replaced carried
+  ADR-recorded live verification on adapter 0.59.0 / SDK 0.3.207; this one has
+  none.
+
+Two framework-lane findings were also verified by the lead and belong to the
+resource-aware-test-execution audit rather than here, but are cross-referenced
+because both defeat safety that this lane's live proofs depend on: the pytest
+plugin is dropped by `dev/toolchain.py`'s `ADDOPTS_OVERRIDE` on the service
+target (VERIFIED: `pyproject.toml` addopts carries `-p`, the override does not),
+so the service tier runs with the whole framework disabled; and reservation
+markers have no heartbeat refresher (VERIFIED: zero `utime` calls in
+`lifecycle/registry.py` against one plus a refresher thread in
+`testing/leases.py`), so every held port decays at the 300s TTL inside a
+40-minute suite.

@@ -4,12 +4,11 @@ Every field must be JSON-serializable (primitives + dicts + lists only)
 so the SQLite checkpointer can persist state without pickle errors.
 """
 
-from typing import Annotated, Any
-
-from typing_extensions import NotRequired, TypedDict
+from typing import Annotated, Any, NotRequired
 
 from langchain_core.messages import BaseMessage
 from langgraph.graph.message import add_messages
+from typing_extensions import TypedDict
 
 __all__ = ["TeamState"]
 

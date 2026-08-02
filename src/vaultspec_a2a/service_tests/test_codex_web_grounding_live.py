@@ -84,6 +84,7 @@ from ..providers._codex_config_home import (
     cleanup_codex_config_home,
     resolve_codex_web_search_mode,
 )
+from ..providers._json_contract import json_list, json_object, json_text
 from ..providers._subprocess import spawn_acp_process
 from ..providers.codex_chat_model import (
     _CAPABILITIES,
@@ -274,7 +275,9 @@ async def _observe_turn(
             ),
             timeout=_RPC_TIMEOUT_SECONDS,
         )
-        thread_id = thread["thread"]["id"]
+        thread_id = json_text(
+            json_object(thread["thread"], at="thread")["id"], at="thread.id"
+        )
         await asyncio.wait_for(
             client.request(
                 "turn/start",
@@ -294,17 +297,18 @@ async def _observe_turn(
             )
             observation.frames.append(frame)
             method = frame.get("method")
-            params = frame.get("params") or {}
+            params = json_object(frame.get("params") or {}, at="frame.params")
             if method == "item/agentMessage/delta":
                 delta = params.get("delta")
                 if isinstance(delta, str):
                     observation.text += delta
             elif method == "turn/completed":
-                turn = params.get("turn") or {}
+                turn = json_object(params.get("turn") or {}, at="params.turn")
                 observation.status = str(turn.get("status"))
-                for item in turn.get("items") or []:
+                for raw in json_list(turn.get("items") or [], at="turn.items"):
+                    item = json_object(raw, at="turn.items[]")
                     if item.get("type") == "agentMessage" and item.get("text"):
-                        observation.text += f"\n{item['text']}"
+                        observation.text += f"\n{json_text(item['text'])}"
                 return observation
             elif method == "error":
                 observation.status = "error"

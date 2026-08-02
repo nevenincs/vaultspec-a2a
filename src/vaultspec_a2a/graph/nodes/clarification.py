@@ -79,7 +79,7 @@ from ...thread.clarification import (
 
 if TYPE_CHECKING:
     from ...thread.state import TeamState
-    from .worker import WorkerNode
+    from .worker import RoutingNode
 
 __all__ = [
     "ClarificationQuestionProducer",
@@ -253,7 +253,7 @@ def create_clarification_request_node(
     *,
     gate_target: str,
     proceed_target: str,
-) -> WorkerNode:
+) -> RoutingNode:
     """Create the deterministic pre-interrupt "decide what to ask" node.
 
     Consults *producer* once and commits its question set to the checkpoint
@@ -310,7 +310,7 @@ def create_clarification_request_node(
     return clarification_request_node
 
 
-def create_clarification_gate_node(*, proceed_target: str) -> WorkerNode:
+def create_clarification_gate_node(*, proceed_target: str) -> RoutingNode:
     """Create the pure gate that resolves the committed question request.
 
     Its only acts are the ``interrupt()`` on the committed question set and the

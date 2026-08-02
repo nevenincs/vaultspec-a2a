@@ -43,7 +43,7 @@ from langgraph.types import Command, interrupt
 
 if TYPE_CHECKING:
     from ...thread.state import TeamState
-    from .worker import WorkerNode
+    from .worker import RoutingNode
 
 __all__ = [
     "VERDICT_APPROVED",
@@ -119,7 +119,7 @@ def create_phase_submit_node(
     *,
     gate_target: str,
     revision_target: str,
-) -> WorkerNode:
+) -> RoutingNode:
     """Create the deterministic pre-interrupt propose-and-submit node.
 
     Runs the idempotent submitter and COMMITS the resulting correlation ids into
@@ -192,7 +192,7 @@ def create_phase_gate_node(
     *,
     approved_target: str,
     revision_target: str,
-) -> WorkerNode:
+) -> RoutingNode:
     """Create the pure per-phase document-approval gate node.
 
     The proposal was submitted and its id committed to state by the preceding

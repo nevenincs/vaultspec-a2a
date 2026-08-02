@@ -42,14 +42,43 @@ __all__ = ["create_worker_node"]
 
 
 class WorkerNode(Protocol):
-    """Protocol for the worker node callable with __name__ attribute."""
+    """Protocol for a graph node callable with a ``__name__`` attribute.
+
+    The return admits ``Command`` as well as a state update because routing nodes
+    are node callables too: the phase-submit, phase-gate and both clarification
+    nodes are all declared ``-> WorkerNode`` by their factories and all return
+    ``Command`` to steer the next hop. Declaring only ``dict`` described a subset
+    of the nodes this protocol is actually used for, so four production factories
+    were reported as returning the wrong type while behaving correctly.
+    """
 
     __name__: str
 
     async def __call__(
         self, state: TeamState, config: RunnableConfig | None = None
-    ) -> dict[str, Any]:
-        """Execute the worker's task."""
+    ) -> dict[str, Any] | Command[Any]:
+        """Execute the node's work, returning a state update or a route."""
+        ...
+
+
+class RoutingNode(Protocol):
+    """A node that only decides where the run goes next.
+
+    Separate from :class:`WorkerNode` because these take STATE ALONE. The phase
+    submit/gate nodes and both clarification nodes route on committed state and
+    need nothing from the run config, so requiring the parameter would have meant
+    adding one to each purely to satisfy a protocol - an argument that exists to
+    be ignored, which the linter is right to object to.
+
+    ``diverge`` reached the same conclusion independently and declared its own
+    node protocol locally; this is that shape, named once where both callers can
+    reach it.
+    """
+
+    __name__: str
+
+    async def __call__(self, state: TeamState) -> Command[Any]:
+        """Decide the next hop from committed state."""
         ...
 
 
@@ -145,7 +174,14 @@ def _wrap_worker_exception(
     model_type: str,
     message_count: int,
 ) -> WorkerExecutionError:
-    """Convert a non-interrupt worker failure into WorkerExecutionError."""
+    """Convert a non-interrupt worker failure into WorkerExecutionError.
+
+    ``exc`` is both chained onto the wrapper (``raise ... from``, at the call
+    site) and rendered into its message. The chain alone is not enough: it is
+    read by the retry classifier but by nothing that reports to a client, so a
+    wrapper carrying attribution only reduced every provider fault to the same
+    sentence by the time it reached the wire.
+    """
     _logger.exception(
         "worker[%s] model=%s raised during ainvoke — wrapping as WorkerExecutionError",
         worker,
@@ -156,6 +192,7 @@ def _wrap_worker_exception(
         worker=worker,
         model=model_type,
         message_count=message_count,
+        cause=exc,
     )
 
 

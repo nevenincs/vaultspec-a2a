@@ -41,13 +41,15 @@ import shutil
 import tempfile
 from contextlib import suppress
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from ..utils.enums import CodexWebSearchMode
 from ._config_home_roots import sweep_orphan_homes, temp_home_root
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
+
+    from ._json_contract import JsonObject
 
 __all__ = [
     "SERVED_WEB_SEARCH_MODE",
@@ -86,6 +88,47 @@ def _toml_str_array(values: Sequence[str]) -> str:
 
 def _table_key(name: str) -> str:
     return name if _BARE_KEY.match(name) else _toml_str(name)
+
+
+def _required_server_string(spec: JsonObject, field: str, *, server: str) -> str:
+    """Read one required non-blank string from a declared MCP server spec."""
+    value = spec.get(field)
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError(
+            f"Codex MCP server {server!r} field {field!r} must be a non-blank string"
+        )
+    return value
+
+
+def _optional_server_string_list(
+    spec: JsonObject, field: str, *, server: str
+) -> list[str]:
+    """Read one optional string-list field without widening the wire contract."""
+    if field not in spec:
+        return []
+    value = spec[field]
+    if not isinstance(value, list) or any(not isinstance(item, str) for item in value):
+        raise ValueError(
+            f"Codex MCP server {server!r} field {field!r} must be a list of strings"
+        )
+    return [item for item in value if isinstance(item, str)]
+
+
+def _optional_server_environment(spec: JsonObject, *, server: str) -> dict[str, str]:
+    """Read one optional string environment object from a server spec."""
+    if "env" not in spec:
+        return {}
+    value = spec["env"]
+    if not isinstance(value, dict):
+        raise ValueError(f"Codex MCP server {server!r} field 'env' must be an object")
+    environment: dict[str, str] = {}
+    for key, item in value.items():
+        if not isinstance(item, str):
+            raise ValueError(
+                f"Codex MCP server {server!r} field 'env' must be an object of strings"
+            )
+        environment[key] = item
+    return environment
 
 
 # The served posture for a lane that carries web proof. Cached is the safer mode
@@ -131,7 +174,7 @@ def _restrict(path: Path) -> None:
 
 
 def render_codex_config_toml(
-    specs: Sequence[dict[str, Any]],
+    specs: Sequence[JsonObject],
     *,
     web_search: CodexWebSearchMode,
 ) -> str:
@@ -163,24 +206,31 @@ def render_codex_config_toml(
     # correctness constraint rather than a layout preference.
     blocks: list[str] = [f"web_search = {_toml_str(web_search.value)}"]
     for spec in specs:
-        key = _table_key(spec["name"])
-        lines = [f"[mcp_servers.{key}]", f"command = {_toml_str(spec['command'])}"]
-        lines.append(f"args = {_toml_str_array(spec.get('args', ()))}")
+        name = _required_server_string(spec, "name", server="<unnamed>")
+        command = _required_server_string(spec, "command", server=name)
+        args = _optional_server_string_list(spec, "args", server=name)
+        tools = _optional_server_string_list(spec, "tools", server=name)
+        environment = _optional_server_environment(spec, server=name)
+        key = _table_key(name)
+        lines = [f"[mcp_servers.{key}]", f"command = {_toml_str(command)}"]
+        lines.append(f"args = {_toml_str_array(args)}")
         # Read-verb allowlist: exactly the registry's read tools, auto-approved.
-        lines.append(f"enabled_tools = {_toml_str_array(spec.get('tools', ()))}")
+        lines.append(f"enabled_tools = {_toml_str_array(tools)}")
         lines.append('default_tools_approval_mode = "auto"')
-        env = spec.get("env") or {}
         block = "\n".join(lines)
-        if env:
+        if environment:
             env_lines = [f"[mcp_servers.{key}.env]"]
-            env_lines += [f"{_table_key(k)} = {_toml_str(v)}" for k, v in env.items()]
+            env_lines += [
+                f"{_table_key(key)} = {_toml_str(value)}"
+                for key, value in environment.items()
+            ]
             block = block + "\n\n" + "\n".join(env_lines)
         blocks.append(block)
     return "\n\n".join(blocks) + "\n"
 
 
 def build_codex_config_home(
-    specs: Sequence[dict[str, Any]],
+    specs: Sequence[JsonObject],
     base_home: Path | None,
     *,
     web_search: CodexWebSearchMode,

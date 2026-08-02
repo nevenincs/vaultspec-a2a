@@ -23,7 +23,7 @@ from collections import deque
 from collections.abc import AsyncIterator, Mapping, Sequence
 from contextlib import suppress
 from pathlib import Path
-from typing import Any, override
+from typing import override
 
 from langchain_core.callbacks import (
     AsyncCallbackManagerForLLMRun,
@@ -39,7 +39,7 @@ from langchain_core.messages import (
     ToolMessage,
 )
 from langchain_core.outputs import ChatGeneration, ChatGenerationChunk, ChatResult
-from pydantic import Field, PrivateAttr
+from pydantic import Field, TypeAdapter, ValidationError
 
 from ..control.config import settings
 from ..team.team_config import AgentConfig
@@ -53,6 +53,7 @@ from ._codex_config_home import (
     cleanup_codex_config_home,
     resolve_codex_web_search_mode,
 )
+from ._json_contract import JsonObject, JsonValue
 from ._mcp_contract import verify_harness_mcp_contract
 from ._subprocess import kill_process_tree, spawn_acp_process
 from .lane_admission import is_web_lane_proven
@@ -115,14 +116,16 @@ __all__ = ["CodexChatModel"]
 # Client identity advertised in the ``initialize`` handshake. Mirrors the shape
 # the codex-companion plugin's own client sends; ``name`` is what the app-server
 # stamps into its user-agent.
-_CLIENT_INFO: dict[str, str] = {
+_JSON_OBJECT: TypeAdapter[JsonObject] = TypeAdapter(JsonObject)
+
+_CLIENT_INFO: JsonObject = {
     "title": "Vaultspec A2A",
     "name": "vaultspec-a2a",
     "version": package_version(),
 }
 # Opt out of the reasoning-summary delta firehose but keep agent-message deltas
 # for genuine token streaming (verified against codex-cli 0.144.4).
-_CAPABILITIES: dict[str, Any] = {
+_CAPABILITIES: JsonObject = {
     "experimentalApi": False,
     "optOutNotificationMethods": [
         "item/reasoning/summaryTextDelta",
@@ -162,6 +165,35 @@ class _CodexProtocolError(RuntimeError):
     """A JSON-RPC error frame or an unexpected turn failure from the app-server."""
 
 
+def _response_error_message(error: JsonValue) -> str:
+    """Return the human-safe message from one JSON-RPC error payload."""
+    if isinstance(error, dict):
+        message = error.get("message")
+        if isinstance(message, str) and message:
+            return message
+    return "codex app-server request failed"
+
+
+def _required_object_field(
+    message: JsonObject, field: str, *, context: str
+) -> JsonObject:
+    """Read one required JSON-object field from a protocol frame."""
+    value = message.get(field)
+    if not isinstance(value, dict):
+        raise _CodexProtocolError(f"codex {context} field {field!r} must be an object")
+    return value
+
+
+def _required_string_field(message: JsonObject, field: str, *, context: str) -> str:
+    """Read one required non-blank string from a protocol object."""
+    value = message.get(field)
+    if not isinstance(value, str) or not value:
+        raise _CodexProtocolError(
+            f"codex {context} field {field!r} must be a non-blank string"
+        )
+    return value
+
+
 class _CodexAppServerClient:
     """Minimal JSON-RPC-over-stdio client for a spawned ``codex app-server``.
 
@@ -184,8 +216,8 @@ class _CodexAppServerClient:
         self._stdout = process.stdout
         self._metadata = metadata
         self._next_id = 1
-        self._pending: dict[int, asyncio.Future[dict[str, Any]]] = {}
-        self.notifications: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
+        self._pending: dict[int, asyncio.Future[JsonObject]] = {}
+        self.notifications: asyncio.Queue[JsonObject] = asyncio.Queue()
         self._closed = False
         # An undrained pipe is a hang, not just lost diagnostics: the operating
         # system buffer fills and the child BLOCKS on its next stderr write. The
@@ -219,9 +251,12 @@ class _CodexAppServerClient:
                 if not text:
                     continue
                 try:
-                    message = json.loads(text)
-                except json.JSONDecodeError:
-                    logger.debug("codex app-server: unparseable JSONL line: %r", text)
+                    message = _JSON_OBJECT.validate_json(text)
+                except ValidationError:
+                    logger.debug(
+                        "codex app-server: malformed or non-object JSONL line: %r",
+                        text,
+                    )
                     continue
                 self._dispatch(message)
         except asyncio.CancelledError:
@@ -233,9 +268,13 @@ class _CodexAppServerClient:
                 _CodexProtocolError("codex app-server connection closed")
             )
 
-    def _dispatch(self, message: dict[str, Any]) -> None:
-        msg_id = message.get("id")
-        method = message.get("method")
+    def _dispatch(self, message: JsonObject) -> None:
+        raw_id = message.get("id")
+        msg_id = (
+            raw_id if isinstance(raw_id, int) and not isinstance(raw_id, bool) else None
+        )
+        raw_method = message.get("method")
+        method = raw_method if isinstance(raw_method, str) and raw_method else None
         # Server-initiated request (has both id and method): we support none, so
         # answer with a JSON-RPC "method not found" to keep the stream unblocked.
         if msg_id is not None and method:
@@ -245,15 +284,20 @@ class _CodexAppServerClient:
             future = self._pending.pop(msg_id, None)
             if future is None or future.done():
                 return
-            error = message.get("error")
-            if error is not None:
+            if "error" in message:
+                future.set_exception(
+                    _CodexProtocolError(_response_error_message(message["error"]))
+                )
+                return
+            result = message.get("result")
+            if not isinstance(result, dict):
                 future.set_exception(
                     _CodexProtocolError(
-                        error.get("message", "codex app-server request failed")
+                        "codex app-server response field 'result' must be an object"
                     )
                 )
-            else:
-                future.set_result(message.get("result") or {})
+                return
+            future.set_result(result)
             return
         if method:
             self.notifications.put_nowait(message)
@@ -264,24 +308,22 @@ class _CodexAppServerClient:
                 future.set_exception(exc)
         self._pending.clear()
 
-    def _send(self, message: dict[str, Any]) -> None:
+    def _send(self, message: JsonObject) -> None:
         self._stdin.write((json.dumps(message) + "\n").encode("utf-8"))
 
-    async def request(self, method: str, params: dict[str, Any]) -> dict[str, Any]:
+    async def request(self, method: str, params: JsonObject) -> JsonObject:
         """Send a request and await its matching response frame."""
         if self._closed:
             raise _CodexProtocolError("codex app-server client is closed")
         request_id = self._next_id
         self._next_id += 1
-        future: asyncio.Future[dict[str, Any]] = (
-            asyncio.get_running_loop().create_future()
-        )
+        future: asyncio.Future[JsonObject] = asyncio.get_running_loop().create_future()
         self._pending[request_id] = future
         self._send({"id": request_id, "method": method, "params": params})
         await self._stdin.drain()
         return await future
 
-    def notify(self, method: str, params: dict[str, Any]) -> None:
+    def notify(self, method: str, params: JsonObject) -> None:
         """Send a fire-and-forget notification frame."""
         if self._closed:
             return
@@ -352,7 +394,7 @@ class CodexChatModel(BaseChatModel):
     # tools``). Kept separate from ``harness_mcp_servers`` (names only, resolved
     # through the closed registry) because the bridge is a per-run, non-registry
     # spec the worker builds fresh every turn from the engine catalog.
-    authoring_mcp_server: dict[str, Any] | None = None
+    authoring_mcp_server: JsonObject | None = Field(default=None, exclude=True)
     approval_policy: str = "never"
     sandbox: str = "read-only"
     # Bounds the startup and per-request RPC waits only - the single-shot calls
@@ -370,14 +412,8 @@ class CodexChatModel(BaseChatModel):
     command_executable: str | None = None
     command_target: str | None = None
 
-    _agent_config: AgentConfig | None = PrivateAttr(default=None)
-
-    def __init__(self, **kwargs: Any) -> None:
-        agent_config = kwargs.get("agent_config")
-        super().__init__(**kwargs)
-        self._agent_config = agent_config
-
     @property
+    @override
     def _llm_type(self) -> str:
         return "codex-chat-model"
 
@@ -394,9 +430,7 @@ class CodexChatModel(BaseChatModel):
         """
         return self.model_copy(update={"harness_mcp_servers": list(names)})
 
-    def with_authoring_mcp_server(
-        self, spec: dict[str, Any] | None
-    ) -> "CodexChatModel":
+    def with_authoring_mcp_server(self, spec: JsonObject | None) -> "CodexChatModel":
         """Return a copy carrying the run's per-run authoring bridge spec.
 
         Codex's counterpart of the ACP lane's ``with_mcp_servers`` authoring
@@ -437,8 +471,13 @@ class CodexChatModel(BaseChatModel):
             else []
         )
         if self.authoring_mcp_server is not None:
-            known = {spec["name"] for spec in specs}
-            if self.authoring_mcp_server["name"] not in known:
+            known: set[str] = set()
+            for spec in specs:
+                known.add(_required_string_field(spec, "name", context="MCP server"))
+            authoring_name = _required_string_field(
+                self.authoring_mcp_server, "name", context="authoring MCP server"
+            )
+            if authoring_name not in known:
                 specs = [*specs, self.authoring_mcp_server]
         if not specs:
             return None
@@ -456,24 +495,26 @@ class CodexChatModel(BaseChatModel):
             ),
         )
 
+    @override
     def _generate(
         self,
         messages: list[BaseMessage],
         stop: list[str] | None = None,
         run_manager: CallbackManagerForLLMRun | None = None,
-        **kwargs: Any,
+        **kwargs: object,
     ) -> ChatResult:
         """Synchronous generation is unsupported; use the async path."""
         raise NotImplementedError(
             "CodexChatModel only supports async via _astream/_agenerate"
         )
 
+    @override
     async def _agenerate(
         self,
         messages: list[BaseMessage],
         stop: list[str] | None = None,
         run_manager: AsyncCallbackManagerForLLMRun | None = None,
-        **kwargs: Any,
+        **kwargs: object,
     ) -> ChatResult:
         """Accumulate the streamed chunks into a single ``ChatResult``."""
         generation: ChatGenerationChunk | None = None
@@ -490,13 +531,16 @@ class CodexChatModel(BaseChatModel):
         )
         return ChatResult(generations=[ChatGeneration(message=final)])
 
-    def _build_env(self) -> dict[str, str]:
+    def _workspace(self) -> Path:
+        """Return the one precedence-resolved workspace path for a Codex turn."""
+        return Path(self.workspace_root or self.cwd or str(Path.cwd()))
+
+    def _build_env(self, workspace: Path) -> dict[str, str]:
         """Return the subprocess env: scrubbed base plus an optional CODEX_HOME.
 
         Codex's persisted-session auth is file-based, so no secret is injected —
         only the non-secret ``CODEX_HOME`` override when configured.
         """
-        workspace = Path(self.workspace_root or self.cwd or str(Path.cwd()))
         env = resolve_env_vars(workspace)
         codex_home = self.codex_home or settings.codex_home
         if codex_home and codex_home.strip():
@@ -509,15 +553,16 @@ class CodexChatModel(BaseChatModel):
         messages: list[BaseMessage],
         stop: list[str] | None = None,
         run_manager: AsyncCallbackManagerForLLMRun | None = None,
-        **kwargs: Any,
+        **kwargs: object,
     ) -> AsyncIterator[ChatGenerationChunk]:
         """Drive one Codex turn, streaming assistant-message deltas."""
         prompt = _messages_to_prompt(messages)
         if not prompt.strip():
             raise ValueError("CodexChatModel received no prompt content")
 
-        cwd = str(Path(self.workspace_root or self.cwd or str(Path.cwd())))
-        env = self._build_env()
+        workspace = self._workspace()
+        cwd = str(workspace)
+        env = self._build_env(workspace)
         # Per-run isolated CODEX_HOME: when harness servers are declared, emit a
         # worker-owned config.toml carrying exactly those read-only servers and
         # redirect CODEX_HOME to it, suppressing the operator's ambient
@@ -579,7 +624,11 @@ class CodexChatModel(BaseChatModel):
                 ),
                 timeout=self.timeout,
             )
-            thread_id = thread["thread"]["id"]
+            thread_id = _required_string_field(
+                _required_object_field(thread, "thread", context="thread/start result"),
+                "id",
+                context="thread/start result thread",
+            )
 
             await asyncio.wait_for(
                 client.request(
@@ -639,7 +688,8 @@ class CodexChatModel(BaseChatModel):
                 timeout=idle_limit if idle_limit > 0 else None,
             )
             method = message.get("method")
-            params = message.get("params") or {}
+            raw_params = message.get("params")
+            params = raw_params if isinstance(raw_params, dict) else {}
 
             if method == "item/agentMessage/delta":
                 if params.get("threadId") not in (None, thread_id):
@@ -648,14 +698,18 @@ class CodexChatModel(BaseChatModel):
                 if isinstance(delta, str) and delta:
                     yield ChatGenerationChunk(message=AIMessageChunk(content=delta))
             elif method == "error":
-                error = params.get("error") or {}
+                error = params.get("error")
                 raise _CodexProtocolError(
-                    error.get("message", "codex app-server reported an error")
+                    _response_error_message(error)
+                    if error is not None
+                    else "codex app-server reported an error"
                 )
             elif method == "turn/completed":
                 if params.get("threadId") not in (None, thread_id):
                     continue
-                turn = params.get("turn") or {}
+                turn = _required_object_field(
+                    params, "turn", context="turn/completed notification"
+                )
                 status = turn.get("status")
                 if status != "completed":
                     raise _CodexProtocolError(

@@ -6,7 +6,7 @@ tags:
 date: '2026-08-02'
 modified: '2026-08-02'
 body_schema: 'body-v1'
-body_hash: 'sha256:1da46abfaddd8f9dba967b084d120a11df3aa978da836470ee71bbcb091f572f'
+body_hash: 'sha256:e5fc6df9de7599512e794a7674d7e502fe2fb6b04800475a6e43b7bde446a399'
 related:
   - '[[2026-07-19-repository-tooling-hardening-W01-P01-S01]]'
   - '[[2026-07-19-repository-tooling-hardening-W01-P01-summary]]'
@@ -67,6 +67,7 @@ related:
   - '[[2026-08-02-repository-tooling-hardening-strict-s24-thread-state-audit]]'
   - '[[2026-08-02-repository-tooling-hardening-strict-s24-verdict-subscriber-audit]]'
   - '[[2026-08-02-repository-tooling-hardening-strict-s24-worker-health-audit]]'
+  - '[[2026-08-02-repository-tooling-hardening-strict-s25-codex-audit]]'
   - '[[2026-08-02-repository-tooling-hardening-strict-s25-factory-audit]]'
   - '[[2026-08-02-repository-tooling-hardening-strict-s25-gemini-auth-audit]]'
   - '[[2026-08-02-repository-tooling-hardening-strict-s25-json-mcp-foundation-audit]]'
@@ -105,6 +106,7 @@ Auto-generated index of all documents tagged with `#repository-tooling-hardening
 - `2026-08-02-repository-tooling-hardening-strict-s24-thread-state-audit` - `repository-tooling-hardening` audit: `Control thread-state checkpoint boundary review`
 - `2026-08-02-repository-tooling-hardening-strict-s24-verdict-subscriber-audit` - `repository-tooling-hardening` audit: `Verdict subscriber type-boundary review`
 - `2026-08-02-repository-tooling-hardening-strict-s24-worker-health-audit` - `repository-tooling-hardening` audit: `Worker health public-contract review`
+- `2026-08-02-repository-tooling-hardening-strict-s25-codex-audit` - `repository-tooling-hardening` audit: `Codex closed wire and config review`
 - `2026-08-02-repository-tooling-hardening-strict-s25-factory-audit` - `repository-tooling-hardening` audit: `Provider factory canonical interface review`
 - `2026-08-02-repository-tooling-hardening-strict-s25-gemini-auth-audit` - `repository-tooling-hardening` audit: `Gemini credential boundary review`
 - `2026-08-02-repository-tooling-hardening-strict-s25-json-mcp-foundation-audit` - `repository-tooling-hardening` audit: `Provider JSON and MCP boundary review`

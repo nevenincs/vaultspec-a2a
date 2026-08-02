@@ -484,6 +484,12 @@ class ThreadStateData:
     # from a live SSE frame — so a reloaded panel recovers the same reason a
     # connected client already saw (S37 / failure-reason persistence).
     failure_reason: str | None = None
+    # The machine-readable counterpart to the reason above: which closed
+    # condition the failure resolved to, so a client branches on a value instead
+    # of parsing prose that changes whenever a vendor rewords a message. Read
+    # from the same durable row and on the same terms - None for a run that
+    # never failed, or whose record predates the column.
+    provider_condition: str | None = None
 
 
 # ---------------------------------------------------------------------------

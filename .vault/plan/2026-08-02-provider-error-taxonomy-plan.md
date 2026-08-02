@@ -4,7 +4,7 @@ tags:
   - '#provider-error-taxonomy'
 date: '2026-08-02'
 modified: '2026-08-02'
-body_hash: 'sha256:d0ab5785f24da55cd3f99dcdb1e1f30bc390f799176097cc1118c5c3b254d817'
+body_hash: 'sha256:7cad4fa0915547c464dec352a1d492da5c0c4c22e733b1ec41b4df312ec4aa25'
 tier: L3
 related:
   - '[[2026-08-02-provider-error-taxonomy-adr]]'
@@ -69,7 +69,7 @@ Carries the condition on the error frame, persists it beside the failure reason,
 - [x] `W01.P03.S17` - Persist the condition alongside the failure reason on the terminal write; `src/vaultspec_a2a/database/thread_repository.py`.
 - [x] `W01.P03.S18` - Align the failure reason bound to the consumer byte limit; `src/vaultspec_a2a/database/thread_repository.py`.
 - [x] `W01.P03.S19` - Thread the condition through the gateway terminal event handler; `src/vaultspec_a2a/control/event_handlers.py`.
-- [ ] `W01.P03.S20` - Read the condition into the thread state snapshot; `src/vaultspec_a2a/control/thread_state_service.py`.
+- [x] `W01.P03.S20` - Read the condition into the thread state snapshot; `src/vaultspec_a2a/control/thread_state_service.py`.
 - [ ] `W01.P03.S21` - Declare the condition on the domain snapshot dataclass; `src/vaultspec_a2a/api/schemas/snapshots.py`.
 - [ ] `W01.P03.S22` - Declare the condition on the run-status response schema; `src/vaultspec_a2a/api/schemas/gateway.py`.
 - [ ] `W01.P03.S23` - Project the condition onto the run-status response; `src/vaultspec_a2a/api/routes/gateway.py`.
@@ -107,7 +107,7 @@ Guarantees every path that fails a run records a condition, emits a terminal, an
 
 Removes the superseded dead vocabulary and proves a real provider failure surfaces a typed condition end to end on a served lane.
 
-- [ ] `W01.P06.S41` - Remove the dead severity and recovery-action vocabulary; `src/vaultspec_a2a/thread/errors.py`.
+- [x] `W01.P06.S41` - Remove the dead severity and recovery-action vocabulary; `src/vaultspec_a2a/thread/errors.py`.
 - [ ] `W01.P06.S42` - Withdraw the removed vocabulary from the thread package surface; `src/vaultspec_a2a/thread/__init__.py`.
 - [ ] `W01.P06.S43` - Replace the usage-limit substring sniff with the typed condition; `src/vaultspec_a2a/service_tests/test_claude_web_grounding_live.py`.
 - [ ] `W01.P06.S44` - Add a scripted failure scenario preset for the integration-verification ask; `src/vaultspec_a2a/team/presets/teams`.

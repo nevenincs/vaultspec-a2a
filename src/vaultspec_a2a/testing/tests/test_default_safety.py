@@ -55,8 +55,13 @@ def test_two_concurrent_processes_never_share_free_ports(tmp_path: Path) -> None
     script = (
         "import json, sys, time\n"
         "from pathlib import Path\n"
+        "from vaultspec_a2a.lifecycle import load_procs_config\n"
         "from vaultspec_a2a.tests.gateway_boot import free_port\n"
         "ports = [free_port() for _ in range(10)]\n"
+        "band = load_procs_config().role('scratch').band\n"
+        "assert all(p in band for p in ports), (\n"
+        "    'allocation fell back to ephemeral candidates; the reservation '\n"
+        "    'path this proof exists to exercise never ran: %r' % ports)\n"
         "Path(sys.argv[1]).write_text(json.dumps(ports))\n"
         "peer = Path(sys.argv[2])\n"
         "deadline = time.monotonic() + 120\n"
@@ -124,8 +129,6 @@ def test_second_session_is_admitted_degraded(tmp_path: Path) -> None:
             "pytest",
             str(suite / "test_hold.py"),
             "-p",
-            "vaultspec_a2a.testing.plugin",
-            "-p",
             "no:cacheprovider",
             "-q",
         ],
@@ -152,8 +155,6 @@ def test_second_session_is_admitted_degraded(tmp_path: Path) -> None:
                 "pytest",
                 str(suite / "test_quick.py"),
                 "-p",
-                "vaultspec_a2a.testing.plugin",
-                "-p",
                 "no:cacheprovider",
                 "-n",
                 "4",
@@ -170,3 +171,33 @@ def test_second_session_is_admitted_degraded(tmp_path: Path) -> None:
         holder.wait(timeout=60)
     assert second.returncode == 0, second.stdout + second.stderr
     assert "1 live peer test session(s); workers 4 -> 2" in second.stdout, second.stdout
+
+
+def test_held_reservations_are_heartbeated_past_the_ttl() -> None:
+    """A process-lifetime hold survives the reservation TTL.
+
+    Registry liveness reclaims a marker older than its TTL regardless of pid,
+    and a suite runs far longer than the TTL, so the hold is only real if its
+    marker's mtime keeps advancing. The marker is genuinely aged past the TTL
+    on disk; one refresh pass must bring it back to LIVE as the allocator
+    judges it.
+    """
+    import os
+    import time
+
+    from ...lifecycle import now_ms
+    from ...lifecycle.registry import RESERVATION_TTL_MS, _reservation_is_live
+    from ...tests.gateway_boot import (
+        _HELD_RESERVATIONS,
+        _refresh_held_markers_once,
+        free_port,
+    )
+
+    port = free_port()
+    reservation = next(r for r in _HELD_RESERVATIONS if r.port == port)
+    stale_s = (RESERVATION_TTL_MS + 60_000) / 1000
+    old = time.time() - stale_s
+    os.utime(reservation.path, times=(old, old))
+    assert _reservation_is_live(reservation.path, now=now_ms()) is False
+    _refresh_held_markers_once()
+    assert _reservation_is_live(reservation.path, now=now_ms()) is True

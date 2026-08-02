@@ -73,8 +73,6 @@ def _run_pytest(
             "pytest",
             str(suite_dir),
             "-p",
-            "vaultspec_a2a.testing.plugin",
-            "-p",
             "no:cacheprovider",
             "-q",
             *extra_args,
@@ -96,10 +94,13 @@ def test_contended_pair_serializes_and_disjoint_groups_run_concurrently(
 ) -> None:
     """The owner's acceptance shape, measured on the wall clock.
 
-    Four one-second tests in two exclusive groups under two workers: each
-    group's pair lands on one worker and never overlaps itself, while the two
-    groups genuinely overlap each other - concurrency exactly where the
-    declarations are disjoint, serialization exactly where they collide.
+    Four one-second tests in two exclusive groups under two workers. The
+    worker-id assertions prove PLACEMENT specifically - the scheduler put each
+    group on one worker. The non-overlap of a contended pair is guaranteed by
+    two independent layers (same-worker serial execution AND the lease taken
+    per test), so its timing evidence confirms the outcome without attributing
+    it to either layer alone; the cross-group overlap is what only correct
+    placement can produce.
     """
     suite = tmp_path / "suite"
     suite.mkdir()

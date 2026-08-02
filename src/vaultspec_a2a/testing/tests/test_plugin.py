@@ -19,23 +19,19 @@ import pytest
 if TYPE_CHECKING:
     from pathlib import Path
 
-_PLUGIN = "vaultspec_a2a.testing.plugin"
-
 
 def _run_collect(directory: Path) -> subprocess.CompletedProcess[str]:
     """Collect *directory* in a real pytest subprocess with the plugin loaded.
 
     ``-p no:cacheprovider`` keeps the probe from writing a cache into the
-    temporary tree, and the explicit ``-p`` mirrors how the repository loads the
-    plugin in ``addopts``.
+    temporary tree; the plugin itself arrives through its pytest11 entry
+    point, exactly as every real run receives it.
     """
     return subprocess.run(
         [
             sys.executable,
             "-m",
             "pytest",
-            "-p",
-            _PLUGIN,
             "-p",
             "no:cacheprovider",
             "--collect-only",
@@ -134,3 +130,37 @@ def test_collection_survives_with_and_without_claims(
         f"collection crashed:\n{result.stdout}\n{result.stderr}"
     )
     assert result.returncode == 0, f"{result.stdout}\n{result.stderr}"
+
+
+def test_plugin_survives_a_wholesale_addopts_override(tmp_path: Path) -> None:
+    """A lane that replaces addopts entirely still runs under the plugin.
+
+    The toolchain's service target reaches the service tier by overriding
+    ``addopts`` wholesale (``--override-ini``), which once silently disabled
+    every lease, group, and admission because the plugin rode in addopts. The
+    plugin now loads through its pytest11 entry point; this guard drives the
+    same override shape and proves a plugin-only fixture still resolves, so
+    the bypass cannot regress unnoticed.
+    """
+    (tmp_path / "test_guard.py").write_text(
+        "def test_guard(resource_leases) -> None:\n    assert resource_leases == {}\n"
+    )
+    completed = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "pytest",
+            str(tmp_path),
+            "--override-ini",
+            "addopts=--durations=10 --showlocals -ra --capture=sys",
+            "-p",
+            "no:cacheprovider",
+            "-q",
+        ],
+        capture_output=True,
+        text=True,
+        cwd=str(tmp_path),
+        timeout=180,
+        check=False,
+    )
+    assert completed.returncode == 0, completed.stdout + completed.stderr

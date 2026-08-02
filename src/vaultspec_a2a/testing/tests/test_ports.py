@@ -17,9 +17,16 @@ if TYPE_CHECKING:
 from ...lifecycle import load_procs_config
 
 
-def test_reserved_port_is_in_band_and_bindable(tmp_path: Path) -> None:
+def test_reserved_port_is_in_band_and_bindable() -> None:
+    """Reserved in the REAL machine-global home, because the bind is real.
+
+    An isolated home would make this test blind to concurrent sessions'
+    reservations while still binding on the shared loopback - it could bind a
+    port a peer has reserved but not yet bound. Binding through the real home
+    is the same discipline the fixture's ordinary callers get.
+    """
     band = load_procs_config().role(SCRATCH_ROLE).band
-    with reserved_port(home=tmp_path) as port:
+    with reserved_port() as port:
         assert port in band
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
             sock.bind(("127.0.0.1", port))

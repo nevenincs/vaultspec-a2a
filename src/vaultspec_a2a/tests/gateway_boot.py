@@ -47,6 +47,7 @@ import os
 import socket
 import subprocess
 import sys
+import threading
 import time
 from typing import IO, TYPE_CHECKING, Literal
 
@@ -185,23 +186,56 @@ def gateway_script(*, log_level: GatewayLogLevel) -> str:
 # caller gives no teardown moment, so its reservation is held for the process
 # lifetime and tidied at exit; a holder that dies untidily is reclaimed by the
 # registry's pid-death rule regardless, so a crashed run never wedges the band.
+#
+# Held markers are HEARTBEATED: registry reservation liveness treats a marker
+# older than its TTL (five minutes) as reclaimable regardless of pid, and a
+# full suite runs far longer than that, so an unrefreshed hold would silently
+# decay back to bind-probe behaviour mid-run - a late-binding worker could
+# find its promised port taken, and a never-binding negative-test port could
+# be claimed and bound under the test. One daemon thread touches every held
+# marker's mtime well inside the TTL, making "held for the process lifetime"
+# actually true.
 _HELD_RESERVATIONS: list[PortReservation] = []
-_RELEASE_REGISTERED = False
+_HELD_LOCK = threading.Lock()
+_HOLD_REFRESH_INTERVAL_S = 60.0
+_HOLD_REFRESH_STOP: threading.Event | None = None
+
+
+def _refresh_held_markers_once() -> None:
+    """Touch every held marker's mtime; missing files are tolerated."""
+    with _HELD_LOCK:
+        paths = [reservation.path for reservation in _HELD_RESERVATIONS]
+    for path in paths:
+        with contextlib.suppress(OSError):
+            os.utime(path)
 
 
 def _release_held_reservations() -> None:
     from ..lifecycle import release_reservation
 
+    stop = _HOLD_REFRESH_STOP
+    if stop is not None:
+        stop.set()
     while _HELD_RESERVATIONS:
         release_reservation(_HELD_RESERVATIONS.pop())
 
 
 def _hold_for_process_lifetime(reservation: PortReservation) -> None:
-    global _RELEASE_REGISTERED
-    if not _RELEASE_REGISTERED:
+    global _HOLD_REFRESH_STOP
+    if _HOLD_REFRESH_STOP is None:
+        stop = threading.Event()
+        _HOLD_REFRESH_STOP = stop
+
+        def _refresh_loop() -> None:
+            while not stop.wait(_HOLD_REFRESH_INTERVAL_S):
+                _refresh_held_markers_once()
+
+        threading.Thread(
+            target=_refresh_loop, name="held-reservation-refresh", daemon=True
+        ).start()
         atexit.register(_release_held_reservations)
-        _RELEASE_REGISTERED = True
-    _HELD_RESERVATIONS.append(reservation)
+    with _HELD_LOCK:
+        _HELD_RESERVATIONS.append(reservation)
 
 
 def _reserve_scratch(count: int) -> list[PortReservation] | None:

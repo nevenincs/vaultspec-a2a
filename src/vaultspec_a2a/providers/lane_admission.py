@@ -87,16 +87,20 @@ from typing import TYPE_CHECKING
 
 from ..graph.enums import Provider
 from ..thread.errors import ConfigError
+from .provider_catalog import ProviderCatalogKey
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Mapping
 
 __all__ = [
     "IN_PROCESS_LANES",
+    "PROVEN_CATALOG_TURN_LANES",
     "PROVEN_TURN_LANES",
     "PROVEN_WEB_LANES",
     "LaneProof",
     "WebLaneProof",
+    "catalog_lane_admission_reason",
+    "is_catalog_lane_admissible",
     "is_lane_admissible",
     "is_web_lane_proven",
     "lane_admission_reason",
@@ -188,6 +192,20 @@ PROVEN_TURN_LANES: Mapping[Provider, LaneProof] = MappingProxyType(
             proves="a real Z.ai turn against the real endpoint streams assistant "
             "content through the production ACP path",
         ),
+    }
+)
+
+# Catalog serving is execution-mode specific.  The older profile admission API is
+# provider-shaped, so it cannot safely answer this question: a future transport
+# for an already-proven provider must not inherit another transport's evidence.
+# Keep this declaration literal and deny-by-default for the same reason as the
+# provider-level proof map above.  A later migration can move every legacy
+# consumer onto this exact identity once profiles carry an execution mode.
+PROVEN_CATALOG_TURN_LANES: Mapping[ProviderCatalogKey, LaneProof] = MappingProxyType(
+    {
+        ProviderCatalogKey("codex", "codex-app-server"): PROVEN_TURN_LANES[
+            Provider.CODEX
+        ],
     }
 )
 
@@ -310,6 +328,21 @@ def is_lane_admissible(provider: Provider) -> bool:
     never heard of - deny is the default.
     """
     return provider in PROVEN_TURN_LANES or provider in IN_PROCESS_LANES
+
+
+def is_catalog_lane_admissible(key: ProviderCatalogKey) -> bool:
+    """Return whether this exact external execution lane has completed-turn proof."""
+    return key in PROVEN_CATALOG_TURN_LANES
+
+
+def catalog_lane_admission_reason(key: ProviderCatalogKey) -> str | None:
+    """Return a safe refusal reason for an unproven exact catalog lane."""
+    if is_catalog_lane_admissible(key):
+        return None
+    return (
+        f"provider lane {key.provider_id}/{key.execution_mode} has no exact "
+        "completed-turn proof; evidence from another execution mode is not inherited"
+    )
 
 
 def lane_admission_reason(provider: Provider) -> str | None:

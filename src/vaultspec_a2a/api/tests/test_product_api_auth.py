@@ -17,6 +17,7 @@ _TOKEN = "attach-credential-token-fedcba9876543210"
 _GATED_REQUESTS = (
     ("GET", "/v1/runs"),
     ("GET", "/v1/presets"),
+    ("GET", "/v1/provider-catalog?workspace_root=C%3A%5Cworkspace"),
 )
 
 

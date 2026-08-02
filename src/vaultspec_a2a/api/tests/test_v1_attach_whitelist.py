@@ -44,6 +44,7 @@ _EXPECTED_V1_ROUTES = {
     "POST /v1/runs/{run_id}/clarifications/{request_id}/respond",
     "GET /v1/runs/{run_id}/stream",
     "GET /v1/presets",
+    "GET /v1/provider-catalog",
     "GET /v1/service",
     "GET /v1/team/status",
 }
@@ -62,6 +63,7 @@ _WHITELIST_REQUESTS = (
     ("POST", "/v1/runs/some-run-id/clarifications/some-request-id/respond"),
     ("POST", "/v1/runs/some-run-id/archive"),
     ("GET", "/v1/presets"),
+    ("GET", "/v1/provider-catalog?workspace_root=C%3A%5Cworkspace"),
     ("GET", "/v1/service"),
     ("GET", "/v1/team/status"),
 )

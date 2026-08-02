@@ -79,7 +79,12 @@ from ...database import get_thread, get_thread_metadata
 from ...database.checkpoints import Checkpointer
 from ...database.permission_repository import get_permission_request
 from ...database.session import get_db
+from ...database.thread_repository import normalize_workspace_identity
 from ...domain_config import domain_config
+from ...providers.provider_catalog_service import (
+    ProviderCatalogScopeCapacityError,
+    ProviderCatalogService,
+)
 from ...streaming.aggregator import EventAggregator
 from ...thread.clarification import (
     ClarificationAnswers,
@@ -146,6 +151,7 @@ from ..schemas.gateway import (
     TeamStatusV1Response,
     TopologyPosition,
 )
+from ..schemas.provider_catalog import ProviderCatalogResponse
 from ..schemas.snapshots import ThreadStateSnapshot
 from ..thread_stream import build_thread_stream_response
 
@@ -162,6 +168,15 @@ _DEGRADED_CHECK_STATUSES: frozenset[str] = frozenset(
     {"error", "open", "down", "restarting", "half_open", "timeout"}
 )
 _JSON_OBJECT = TypeAdapter(dict[str, object])
+
+
+def provider_catalog_service(app: FastAPI) -> ProviderCatalogService:
+    """Return the process-wide bounded provider-catalog service."""
+    service = getattr(app.state, "provider_catalog_service", None)
+    if service is None:
+        service = ProviderCatalogService()
+        app.state.provider_catalog_service = service
+    return service
 
 
 def _object_mapping(value: object) -> dict[str, object] | None:
@@ -1961,6 +1976,47 @@ async def run_clarification_respond_endpoint(
         action_status=result.action_status,
         idempotency_key=result.idempotency_key,
     )
+
+
+# ---------------------------------------------------------------------------
+# provider-catalog
+# ---------------------------------------------------------------------------
+
+
+@router.get("/provider-catalog", response_model=ProviderCatalogResponse)
+async def provider_catalog_endpoint(
+    request: Request,
+    workspace_root: str = Query(min_length=1, max_length=4096),
+) -> ProviderCatalogResponse:
+    """Serve prompt-free, execution-lane-specific catalogs for one workspace."""
+    supplied_keys = set(request.query_params.keys())
+    if (
+        supplied_keys != {"workspace_root"}
+        or len(request.query_params.getlist("workspace_root")) != 1
+    ):
+        raise HTTPException(
+            status_code=422,
+            detail="provider-catalog accepts exactly one workspace_root query value",
+        )
+    requested = Path(workspace_root)
+    if not requested.is_absolute():
+        raise HTTPException(
+            status_code=422, detail="workspace_root must be an absolute directory"
+        )
+    canonical = normalize_workspace_identity(workspace_root)
+    if len(canonical) > 4096 or not Path(canonical).is_dir():
+        raise HTTPException(
+            status_code=422,
+            detail="workspace_root must identify an existing directory",
+        )
+    try:
+        records = await provider_catalog_service(request.app).records(canonical)
+    except ProviderCatalogScopeCapacityError:
+        raise HTTPException(
+            status_code=503,
+            detail="provider catalog workspace capacity is temporarily busy",
+        ) from None
+    return ProviderCatalogResponse.from_records(records)
 
 
 # ---------------------------------------------------------------------------

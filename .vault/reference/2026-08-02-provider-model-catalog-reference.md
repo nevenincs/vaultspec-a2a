@@ -5,7 +5,7 @@ tags:
 date: '2026-08-02'
 modified: '2026-08-02'
 body_schema: 'body-v1'
-body_hash: 'sha256:2b3da766b934ea5b3e2957e421e111de1a77adaddbb43156e9539a5bc37b0406'
+body_hash: 'sha256:4e47ff69a44a18862b88b99fec8fabe980f1fc1c5533965ee050e04cd75a0f8f'
 related:
   - "[[2026-02-25-llm-context-provider-abstraction-adr]]"
   - "[[2026-07-15-model-profiles-adr]]"
@@ -54,14 +54,14 @@ worktrees on 2026-08-02, including concurrent uncommitted A2A work.
 - ACP setup receives `configOptions`, locates the model-category option, and can
   set and verify a value before prompt:
   `src/vaultspec_a2a/providers/_acp_session.py:36-111`. This is an execution
-  handshake for a preselected value, not yet a served catalog endpoint.
+  handshake for a preselected value, separate from the prompt-free served catalog endpoint.
 
 ### Provider discovery surfaces
 
 | Lane | Authoritative discovery surface | Metadata available | Boundary |
 |---|---|---|---|
 | Generic ACP | session `configOptions`: `model`, `thought_level`, `model_config` | ordered opaque values, labels, descriptions, current/default values, adjacent controls | session-scoped; absence must remain absence |
-| Codex CLI | app-server `model/list` and `modelProvider/capabilities/read` | models, ordered reasoning efforts, speed/service tiers, defaults, upgrade metadata | production A2A does not call it yet |
+| Codex CLI | app-server `model/list` and `modelProvider/capabilities/read` | models, ordered reasoning efforts, speed/service tiers, defaults, upgrade metadata | registered prompt-free through `codex-app-server` |
 | Claude API | authenticated `GET /v1/models` | ids, names, limits, capabilities, supported effort values | Claude Code subscription choices should come from its ACP/config picker |
 | Claude Code | ACP/config picker or `/model` | account-appropriate choices, aliases, default, managed restrictions | aliases move; preserve provider-issued values |
 | Gemini API | authenticated `models.list` / `models.get` | supported actions and extended metadata | filter only by explicit `generateContent`; do not infer tiers |
@@ -77,6 +77,22 @@ and Zhipu have no independently proven enumeration surface in this pass, so thei
 registrations return empty unavailable catalogs with unknown authentication.
 Internal mock and deterministic providers are not registered. Catalog success is
 never treated as completed-turn admission.
+P01.S07 serves these registrations through authenticated
+`GET /v1/provider-catalog?workspace_root=...`. The route requires one absolute,
+existing directory, canonicalizes it for adapter cwd and cache identity, and
+rejects caller-selected refresh or unknown query input. A process-wide service
+bounds canonical workspace scopes to sixteen and seats one S01 single-flight
+cache per scope. Public JSON carries `api_version: v1`, catalog
+`schema_version: 1`, separate configured/transport/authentication/catalog/admission
+facts, derived selectability, effective expiry, models, and native controls.
+Internal model and option `provider_value` fields never leave A2A. Public opaque
+identifiers obey the Rust edge's 512-character bound and control identifiers its
+128-character bound; an invalid lane is isolated before cache insertion.
+
+Catalog admission is exact-mode and deny-by-default. Only `codex-app-server`
+currently has an intrinsically execution-mode-specific completed-turn citation.
+Claude and Z.AI provider-level citations do not capture the runtime-configurable
+ACP backend, so neither node nor binary catalog lanes inherit that evidence.
 
 Kimi Code configuration has two distinct modes. Persisted aliases live under the
 normal Kimi home, optionally relocated by `KIMI_CODE_HOME`. A temporary in-memory
@@ -108,20 +124,21 @@ in provider descriptors beside LangChain, not a hard-coded LangChain mapping.
 
 ### Health currently served and required separation
 
-`ProviderReadiness` collapses executable and credential checks into `ready`
-plus reason at `src/vaultspec_a2a/providers/model_profiles.py:157,322-389`.
-Codex checks command resolution without proving its persisted account. Dashboard
-receives only `provider_ready` at
-`frontend/src/stores/server/agent/a2aTeam.ts:96`; service state exposes aggregate
-eligibility and names at `src/vaultspec_a2a/api/schemas/gateway.py:902`.
+`ProviderReadiness` remains a legacy profile-readiness aggregate, but P01.S07 does
+not use it to populate catalog health. Each factory discovery result carries typed
+configuration and transport evidence independently beside authentication and
+catalog state. Missing commands affect transport only; explicit credentials or a
+complete temporary provider definition affect configuration only; absent evidence
+stays unknown. Successful authentication or catalog discovery may strengthen the
+observed axes without becoming completed-turn admission.
 
-A safe provider record needs separate `configured`, transport
-installation/resolution, `authenticated` (`true`, `false`, `unknown`, or
-`not_applicable`), `catalog_available`, completed-turn `admitted`, and derived
-`selectable` facts, plus bounded reasons, `checked_at`, catalog revision/freshness,
-and provider-issued options. Credential presence is configuration, not
-authentication; completed-turn admission is separate from both.
-
+The served health record exposes `configured`, `transport`, `authentication`,
+`catalog`, exact-lane `admission`, derived `selectable`, bounded safe reasons, and
+`checked_at`. Selectability is true only when configuration and transport are
+available, authentication is authenticated or not-applicable, the catalog is
+available and fresh, and that exact provider-plus-execution-mode lane is admitted.
+Dashboard independently rechecks catalog status, revision, checked time, and
+expiry before allowing a selection.
 ### Authoritative external references
 
 - ACP config options: https://agentclientprotocol.com/rfds/session-config-options

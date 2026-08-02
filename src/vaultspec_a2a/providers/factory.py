@@ -4,7 +4,7 @@ import logging
 import os
 import shutil
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -26,6 +26,7 @@ from .provider_catalog import (
     AuthenticationState,
     CatalogState,
     CatalogStatus,
+    HealthState,
     ProviderCatalog,
     ProviderCatalogKey,
 )
@@ -579,6 +580,8 @@ class ProviderCatalogDiscovery:
 
     catalog: ProviderCatalog
     authentication: AuthenticationState
+    configured: HealthState = HealthState.UNKNOWN
+    transport: HealthState = HealthState.UNKNOWN
 
 
 @dataclass(frozen=True, slots=True)
@@ -594,6 +597,8 @@ def _unavailable_catalog_discovery(
     *,
     reason: str,
     authentication: AuthenticationState = AuthenticationState.UNKNOWN,
+    configured: HealthState = HealthState.UNKNOWN,
+    transport: HealthState = HealthState.UNKNOWN,
 ) -> ProviderCatalogDiscovery:
     return ProviderCatalogDiscovery(
         catalog=ProviderCatalog(
@@ -606,62 +611,103 @@ def _unavailable_catalog_discovery(
             models=(),
         ),
         authentication=authentication,
+        configured=configured,
+        transport=transport,
     )
 
 
-async def _discover_claude_catalog(key: ProviderCatalogKey) -> ProviderCatalogDiscovery:
+def _transport_evidence(discovery: ProviderCatalogDiscovery) -> HealthState:
+    """Return transport evidence only when discovery observed a provider response."""
+    if discovery.catalog.state.status in {
+        CatalogStatus.AVAILABLE,
+        CatalogStatus.STALE,
+    } or discovery.authentication in {
+        AuthenticationState.AUTHENTICATED,
+        AuthenticationState.UNAUTHENTICATED,
+    }:
+        return HealthState.AVAILABLE
+    return HealthState.UNKNOWN
+
+
+async def _discover_claude_catalog(
+    key: ProviderCatalogKey, workspace_root: Path
+) -> ProviderCatalogDiscovery:
     try:
         command, metadata = _classify_acp_command(settings.acp_backend)
     except (ConfigError, ValueError):
         return _unavailable_catalog_discovery(
-            key, reason="provider catalog command is unavailable"
+            key,
+            reason="provider catalog command is unavailable",
+            transport=HealthState.UNAVAILABLE,
         )
-    env = resolve_env_vars(settings.project_root)
+    env = resolve_env_vars(workspace_root)
     use_exec = metadata["acp_backend"] == "binary"
     if use_exec:
         env["CLAUDE_AGENT_ACP_IS_SINGLE_FILE_BUN"] = "1"
     discovered = await discover_acp_catalog(
         tuple(command),
         env=env,
-        cwd=str(settings.project_root),
+        cwd=str(workspace_root),
         key=key,
         use_exec=use_exec,
         metadata={"provider": Provider.CLAUDE.value, **metadata},
     )
-    return ProviderCatalogDiscovery(discovered.catalog, discovered.authentication)
+    normalized = ProviderCatalogDiscovery(discovered.catalog, discovered.authentication)
+    return replace(normalized, transport=_transport_evidence(normalized))
 
 
-async def _discover_codex_catalog(key: ProviderCatalogKey) -> ProviderCatalogDiscovery:
+async def _discover_codex_catalog(
+    key: ProviderCatalogKey, workspace_root: Path
+) -> ProviderCatalogDiscovery:
     try:
         command, _ = _classify_codex_command()
         if command[0] == "codex":
             raise ValueError("Codex CLI is not resolvable")
     except ValueError:
         return _unavailable_catalog_discovery(
-            key, reason="provider catalog command is unavailable"
+            key,
+            reason="provider catalog command is unavailable",
+            transport=HealthState.UNAVAILABLE,
         )
-    env = resolve_env_vars(settings.project_root)
+    env = resolve_env_vars(workspace_root)
     if settings.codex_home:
         env["CODEX_HOME"] = settings.codex_home
     discovered = await discover_codex_catalog(
         tuple(command),
         env=env,
-        cwd=str(settings.project_root),
+        cwd=str(workspace_root),
         key=key,
     )
-    return ProviderCatalogDiscovery(discovered.catalog, discovered.authentication)
+    normalized = ProviderCatalogDiscovery(discovered.catalog, discovered.authentication)
+    return replace(normalized, transport=_transport_evidence(normalized))
 
 
-async def _discover_gemini_catalog(key: ProviderCatalogKey) -> ProviderCatalogDiscovery:
+async def _discover_gemini_catalog(
+    key: ProviderCatalogKey, workspace_root: Path
+) -> ProviderCatalogDiscovery:
     try:
         command, metadata = _classify_gemini_command(None)
         if metadata["command_origin"] == "fallback_cli_name":
             raise ValueError("Gemini CLI is not resolvable")
     except ValueError:
         return _unavailable_catalog_discovery(
-            key, reason="provider catalog command is unavailable"
+            key,
+            reason="provider catalog command is unavailable",
+            configured=(
+                HealthState.AVAILABLE
+                if any(
+                    (
+                        settings.gemini_api_key,
+                        settings.google_api_key,
+                        settings.google_application_credentials,
+                        settings.gemini_cli_home,
+                    )
+                )
+                else HealthState.UNKNOWN
+            ),
+            transport=HealthState.UNAVAILABLE,
         )
-    env = resolve_env_vars(settings.project_root)
+    env = resolve_env_vars(workspace_root)
     env.update(
         _build_gemini_env(
             settings.gemini_api_key,
@@ -673,22 +719,40 @@ async def _discover_gemini_catalog(key: ProviderCatalogKey) -> ProviderCatalogDi
     discovered = await discover_acp_catalog(
         tuple(command),
         env=env,
-        cwd=str(settings.project_root),
+        cwd=str(workspace_root),
         key=key,
         metadata={"provider": Provider.GEMINI.value, **metadata},
     )
-    return ProviderCatalogDiscovery(discovered.catalog, discovered.authentication)
+    normalized = ProviderCatalogDiscovery(
+        discovered.catalog,
+        discovered.authentication,
+        configured=(
+            HealthState.AVAILABLE
+            if any(
+                (
+                    settings.gemini_api_key,
+                    settings.google_api_key,
+                    settings.google_application_credentials,
+                    settings.gemini_cli_home,
+                )
+            )
+            else HealthState.UNKNOWN
+        ),
+    )
+    return replace(normalized, transport=_transport_evidence(normalized))
 
 
-async def _discover_kimi_catalog(key: ProviderCatalogKey) -> ProviderCatalogDiscovery:
+async def _discover_kimi_catalog(
+    key: ProviderCatalogKey, workspace_root: Path
+) -> ProviderCatalogDiscovery:
+    command: list[str] | None = None
+    metadata: dict[str, str] = {}
     try:
         command, metadata = _classify_kimi_command()
         if metadata["command_origin"] == "fallback_cli_name":
             raise ValueError("Kimi Code CLI is not resolvable")
     except ValueError:
-        return _unavailable_catalog_discovery(
-            key, reason="provider catalog command is unavailable"
-        )
+        command = None
     api_key = (
         settings.kimi_api_key.get_secret_value() if settings.kimi_api_key else None
     )
@@ -705,19 +769,41 @@ async def _discover_kimi_catalog(key: ProviderCatalogKey) -> ProviderCatalogDisc
                 settings.kimi_temporary_model_capabilities
             ),
         )
-    except ValueError as exc:
-        return _unavailable_catalog_discovery(key, reason=str(exc))
-    env = resolve_env_vars(settings.project_root)
+    except ValueError:
+        return _unavailable_catalog_discovery(
+            key,
+            reason="temporary Kimi provider configuration is incomplete",
+            configured=HealthState.UNAVAILABLE,
+            transport=(
+                HealthState.AVAILABLE
+                if command is not None
+                else HealthState.UNAVAILABLE
+            ),
+        )
+    configured = HealthState.AVAILABLE if injected else HealthState.UNKNOWN
+    if command is None:
+        return _unavailable_catalog_discovery(
+            key,
+            reason="provider catalog command is unavailable",
+            configured=configured,
+            transport=HealthState.UNAVAILABLE,
+        )
+    env = resolve_env_vars(workspace_root)
     env.update(injected)
     # Discovery is a sibling command, never `kimi acp provider list`.
     discovered = await discover_kimi_catalog(
         (command[0],),
         env=env,
-        cwd=str(settings.project_root),
+        cwd=str(workspace_root),
         key=key,
         metadata={"provider": Provider.KIMI.value, **metadata},
     )
-    return ProviderCatalogDiscovery(discovered.catalog, discovered.authentication)
+    normalized = ProviderCatalogDiscovery(
+        discovered.catalog,
+        discovered.authentication,
+        configured=configured,
+    )
+    return replace(normalized, transport=_transport_evidence(normalized))
 
 
 async def _discover_openai_catalog(key: ProviderCatalogKey) -> ProviderCatalogDiscovery:
@@ -726,15 +812,42 @@ async def _discover_openai_catalog(key: ProviderCatalogKey) -> ProviderCatalogDi
         api_key=settings.openai_api_key,
         key=key,
     )
-    return ProviderCatalogDiscovery(discovered.catalog, discovered.authentication)
+    return ProviderCatalogDiscovery(
+        discovered.catalog,
+        discovered.authentication,
+        configured=(
+            HealthState.AVAILABLE
+            if settings.openai_api_key
+            else HealthState.UNAVAILABLE
+        ),
+        transport=(
+            HealthState.AVAILABLE
+            if discovered.catalog.state.status is CatalogStatus.AVAILABLE
+            or discovered.authentication is AuthenticationState.UNAUTHENTICATED
+            else HealthState.UNKNOWN
+        ),
+    )
 
 
 async def _discover_unverified_catalog(
     key: ProviderCatalogKey,
 ) -> ProviderCatalogDiscovery:
+    provider = Provider(key.provider_id)
+    configured = HealthState.UNKNOWN
+    if provider is Provider.ZAI:
+        configured = (
+            HealthState.AVAILABLE
+            if settings.zai_auth_token
+            else HealthState.UNAVAILABLE
+        )
+    elif provider is Provider.ZHIPU:
+        configured = (
+            HealthState.AVAILABLE if settings.zhipu_api_key else HealthState.UNAVAILABLE
+        )
     return _unavailable_catalog_discovery(
         key,
         reason="provider lane has no verified prompt-free model enumeration",
+        configured=configured,
     )
 
 
@@ -787,13 +900,16 @@ def _admit_and_resolve_model_name(
 class ProviderFactory:
     """Factory for instantiating LangChain chat models for different providers."""
 
-    def catalog_registrations(self) -> tuple[ProviderCatalogRegistration, ...]:
+    def catalog_registrations(
+        self, workspace_root: Path | None = None
+    ) -> tuple[ProviderCatalogRegistration, ...]:
         """Return each external catalog lane with its exact discovery adapter.
 
         Registrations deliberately contain no model values. A lane without a
         verified enumeration surface remains present but unavailable, rather than
         inheriting an API or ACP catalog from a different execution mode.
         """
+        discovery_root = workspace_root or settings.project_root
         claude = ProviderCatalogKey(
             Provider.CLAUDE.value, f"claude-agent-acp:{settings.acp_backend}"
         )
@@ -807,13 +923,17 @@ class ProviderFactory:
         zhipu = ProviderCatalogKey(Provider.ZHIPU.value, "zhipu-openai-compatible-api")
         return (
             ProviderCatalogRegistration(
-                claude, lambda: _discover_claude_catalog(claude)
+                claude, lambda: _discover_claude_catalog(claude, discovery_root)
             ),
-            ProviderCatalogRegistration(codex, lambda: _discover_codex_catalog(codex)),
             ProviderCatalogRegistration(
-                gemini, lambda: _discover_gemini_catalog(gemini)
+                codex, lambda: _discover_codex_catalog(codex, discovery_root)
             ),
-            ProviderCatalogRegistration(kimi, lambda: _discover_kimi_catalog(kimi)),
+            ProviderCatalogRegistration(
+                gemini, lambda: _discover_gemini_catalog(gemini, discovery_root)
+            ),
+            ProviderCatalogRegistration(
+                kimi, lambda: _discover_kimi_catalog(kimi, discovery_root)
+            ),
             ProviderCatalogRegistration(
                 openai, lambda: _discover_openai_catalog(openai)
             ),

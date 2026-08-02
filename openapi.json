@@ -967,6 +967,64 @@
         }
       }
     },
+    "/v1/provider-catalog": {
+      "get": {
+        "summary": "Provider Catalog Endpoint",
+        "description": "Serve prompt-free, execution-lane-specific catalogs for one workspace.",
+        "operationId": "provider_catalog_endpoint_v1_provider_catalog_get",
+        "parameters": [
+          {
+            "name": "workspace_root",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 4096,
+              "title": "Workspace Root"
+            }
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProviderCatalogResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/presets": {
       "get": {
         "summary": "Presets List Endpoint",
@@ -1422,6 +1480,16 @@
         "title": "ActorTokenBundle",
         "description": "A run's per-role actor tokens plus the engine machine bearer.\n\nParameters\n----------\ntokens:\n    Mapping of role identifier (the worker ``agent_id`` or the supervisor\n    constant) to that role's engine-minted actor token. A role only ever\n    receives its own token via :meth:`actor_token`.\nengine_bearer:\n    The machine bearer minted at engine boot, forwarded so a worker's\n    authoring bridge can reach the engine. Optional in the wire shape only:\n    a run that carries no bearer leaves the bridge unarmed, because the\n    bearer is meaningful only paired with the engine origin it was minted\n    for. A consumer that resolves its OWN origin may substitute the bearer\n    from that same resolution (the executor's run-end session close does);\n    a consumer holding a separately-supplied origin must not, since pairing\n    a bearer with a foreign origin would misdirect the credential."
       },
+      "AdmissionState": {
+        "type": "string",
+        "enum": [
+          "admitted",
+          "not_admitted",
+          "unknown"
+        ],
+        "title": "AdmissionState",
+        "description": "Completed-turn admission evidence for an execution lane."
+      },
       "AgentLifecycleState": {
         "type": "string",
         "enum": [
@@ -1465,6 +1533,28 @@
         ],
         "title": "ArtifactSnapshot",
         "description": "Fully materialized file artifact."
+      },
+      "AuthenticationState": {
+        "type": "string",
+        "enum": [
+          "authenticated",
+          "unauthenticated",
+          "unknown",
+          "not_applicable"
+        ],
+        "title": "AuthenticationState",
+        "description": "Authentication evidence, separate from configuration presence."
+      },
+      "CatalogStatus": {
+        "type": "string",
+        "enum": [
+          "available",
+          "unavailable",
+          "stale",
+          "unknown"
+        ],
+        "title": "CatalogStatus",
+        "description": "Provider catalog availability and freshness."
       },
       "ClarificationKind": {
         "type": "string",
@@ -1592,6 +1682,17 @@
         ],
         "title": "ContextRef",
         "description": "Reference to a context document in the .vault hierarchy."
+      },
+      "ControlKind": {
+        "type": "string",
+        "enum": [
+          "model_config",
+          "thought_level",
+          "service_tier",
+          "other"
+        ],
+        "title": "ControlKind",
+        "description": "Provider-native control category without cross-provider semantics."
       },
       "DesktopReadiness": {
         "properties": {
@@ -1746,6 +1847,16 @@
         },
         "type": "object",
         "title": "HTTPValidationError"
+      },
+      "HealthState": {
+        "type": "string",
+        "enum": [
+          "available",
+          "unavailable",
+          "unknown"
+        ],
+        "title": "HealthState",
+        "description": "A factual binary health axis whose evidence may still be unknown."
       },
       "LivenessState": {
         "type": "string",
@@ -2060,6 +2171,183 @@
         "title": "Provider",
         "description": "Supported LLM providers."
       },
+      "ProviderCatalogEntryResponse": {
+        "properties": {
+          "entry_id": {
+            "type": "string",
+            "maxLength": 512,
+            "minLength": 1,
+            "pattern": "^[^\\x00-\\x1f\\x7f]+$",
+            "title": "Entry Id"
+          },
+          "display_name": {
+            "type": "string",
+            "maxLength": 256,
+            "minLength": 1,
+            "title": "Display Name"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 1024,
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "capabilities": {
+            "items": {
+              "type": "string",
+              "maxLength": 1024,
+              "minLength": 1
+            },
+            "type": "array",
+            "maxItems": 64,
+            "title": "Capabilities"
+          },
+          "native_control_ids": {
+            "items": {
+              "type": "string",
+              "maxLength": 128,
+              "minLength": 1,
+              "pattern": "^[^\\x00-\\x1f\\x7f]+$"
+            },
+            "type": "array",
+            "maxItems": 32,
+            "title": "Native Control Ids"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "entry_id",
+          "display_name"
+        ],
+        "title": "ProviderCatalogEntryResponse"
+      },
+      "ProviderCatalogRecordResponse": {
+        "properties": {
+          "provider_id": {
+            "type": "string",
+            "maxLength": 512,
+            "minLength": 1,
+            "pattern": "^[^\\x00-\\x1f\\x7f]+$",
+            "title": "Provider Id"
+          },
+          "display_name": {
+            "type": "string",
+            "maxLength": 256,
+            "minLength": 1,
+            "title": "Display Name"
+          },
+          "execution_mode": {
+            "type": "string",
+            "maxLength": 512,
+            "minLength": 1,
+            "pattern": "^[^\\x00-\\x1f\\x7f]+$",
+            "title": "Execution Mode"
+          },
+          "health": {
+            "$ref": "#/components/schemas/ProviderHealthResponse"
+          },
+          "catalog": {
+            "$ref": "#/components/schemas/ProviderLaneCatalogResponse"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "provider_id",
+          "display_name",
+          "execution_mode",
+          "health",
+          "catalog"
+        ],
+        "title": "ProviderCatalogRecordResponse"
+      },
+      "ProviderCatalogResponse": {
+        "properties": {
+          "api_version": {
+            "type": "string",
+            "const": "v1",
+            "title": "Api Version",
+            "default": "v1"
+          },
+          "providers": {
+            "items": {
+              "$ref": "#/components/schemas/ProviderCatalogRecordResponse"
+            },
+            "type": "array",
+            "maxItems": 128,
+            "title": "Providers"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "ProviderCatalogResponse"
+      },
+      "ProviderCatalogStateResponse": {
+        "properties": {
+          "status": {
+            "$ref": "#/components/schemas/CatalogStatus"
+          },
+          "checked_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Checked At"
+          },
+          "revision": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 512,
+                "minLength": 1,
+                "pattern": "^[^\\x00-\\x1f\\x7f]+$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Revision"
+          },
+          "expires_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expires At"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 1024,
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "status",
+          "checked_at"
+        ],
+        "title": "ProviderCatalogStateResponse"
+      },
       "ProviderEligibility": {
         "type": "string",
         "enum": [
@@ -2068,6 +2356,191 @@
         ],
         "title": "ProviderEligibility",
         "description": "Whether at least one subprocess provider can actually run on this host.\n\nComputed through the credential-aware readiness probe: the configured\ncredential is checked first, then command resolvability. The probe is still\nno-instantiation - no provider is constructed and no subprocess is spawned\nto determine it - but a resolvable launch command is not on its own\nsufficient, because a provider whose binary is installed with its\ncredential absent cannot run. Codex is the deliberate exception: its auth\nis a file-based persisted session rather than a configured secret, so it\ngates on command resolvability alone."
+      },
+      "ProviderHealthResponse": {
+        "properties": {
+          "configured": {
+            "$ref": "#/components/schemas/HealthState"
+          },
+          "transport": {
+            "$ref": "#/components/schemas/HealthState"
+          },
+          "authentication": {
+            "$ref": "#/components/schemas/AuthenticationState"
+          },
+          "catalog": {
+            "$ref": "#/components/schemas/CatalogStatus"
+          },
+          "admission": {
+            "$ref": "#/components/schemas/AdmissionState"
+          },
+          "selectable": {
+            "type": "boolean",
+            "title": "Selectable"
+          },
+          "reasons": {
+            "items": {
+              "type": "string",
+              "maxLength": 1024,
+              "minLength": 1
+            },
+            "type": "array",
+            "maxItems": 16,
+            "title": "Reasons"
+          },
+          "checked_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Checked At"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "configured",
+          "transport",
+          "authentication",
+          "catalog",
+          "admission",
+          "selectable",
+          "checked_at"
+        ],
+        "title": "ProviderHealthResponse"
+      },
+      "ProviderLaneCatalogResponse": {
+        "properties": {
+          "schema_version": {
+            "type": "integer",
+            "const": 1,
+            "title": "Schema Version",
+            "default": 1
+          },
+          "state": {
+            "$ref": "#/components/schemas/ProviderCatalogStateResponse"
+          },
+          "models": {
+            "items": {
+              "$ref": "#/components/schemas/ProviderCatalogEntryResponse"
+            },
+            "type": "array",
+            "maxItems": 256,
+            "title": "Models"
+          },
+          "native_controls": {
+            "items": {
+              "$ref": "#/components/schemas/ProviderNativeControlResponse"
+            },
+            "type": "array",
+            "maxItems": 32,
+            "title": "Native Controls"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "state"
+        ],
+        "title": "ProviderLaneCatalogResponse"
+      },
+      "ProviderNativeControlOptionResponse": {
+        "properties": {
+          "option_id": {
+            "type": "string",
+            "maxLength": 512,
+            "minLength": 1,
+            "pattern": "^[^\\x00-\\x1f\\x7f]+$",
+            "title": "Option Id"
+          },
+          "display_name": {
+            "type": "string",
+            "maxLength": 256,
+            "minLength": 1,
+            "title": "Display Name"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 1024,
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "option_id",
+          "display_name"
+        ],
+        "title": "ProviderNativeControlOptionResponse"
+      },
+      "ProviderNativeControlResponse": {
+        "properties": {
+          "control_id": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[^\\x00-\\x1f\\x7f]+$",
+            "title": "Control Id"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/ControlKind"
+          },
+          "display_name": {
+            "type": "string",
+            "maxLength": 256,
+            "minLength": 1,
+            "title": "Display Name"
+          },
+          "options": {
+            "items": {
+              "$ref": "#/components/schemas/ProviderNativeControlOptionResponse"
+            },
+            "type": "array",
+            "maxItems": 128,
+            "title": "Options"
+          },
+          "default_option_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 512,
+                "minLength": 1,
+                "pattern": "^[^\\x00-\\x1f\\x7f]+$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Default Option Id"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 1024,
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "control_id",
+          "kind",
+          "display_name"
+        ],
+        "title": "ProviderNativeControlResponse"
       },
       "RoleAssignmentSummary": {
         "properties": {

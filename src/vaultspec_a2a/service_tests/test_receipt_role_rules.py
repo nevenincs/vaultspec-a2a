@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import uuid
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Protocol, override, runtime_checkable
+from typing import TYPE_CHECKING, override
 
 import pytest
 from langchain_core.callbacks import BaseCallbackHandler
@@ -44,13 +44,6 @@ _WORKER_RULES_HEADER = "Project Coding Rules & Guidelines"
 _RESEARCH_ADR_PRESET = "vaultspec-adr-research-deterministic"
 
 
-@runtime_checkable
-class _ReceiptGraph(Protocol):
-    """The public compiled-graph boundary exercised by this receipt proof."""
-
-    async def ainvoke(self, state: TeamState, config: RunnableConfig) -> object: ...
-
-
 @dataclass
 class _PromptReceipt(BaseCallbackHandler):
     """Passively retain model prompts observed through RunnableConfig callbacks."""
@@ -74,12 +67,6 @@ def _raw_actor_token(response: AuthoringResponse) -> str:
     raw_token = payload.get("raw_token")
     assert isinstance(raw_token, str) and raw_token
     return raw_token
-
-
-def _receipt_graph(candidate: object) -> _ReceiptGraph:
-    """Narrow the compiler's erased LangGraph return at its public boundary."""
-    assert isinstance(candidate, _ReceiptGraph)
-    return candidate
 
 
 def _production_phase_specs() -> dict[str, PhaseAuthoringSpec]:
@@ -191,17 +178,15 @@ async def test_compiled_document_graph_receives_conventions_via_runtime_config(
     agent_configs = {
         worker.agent_id: load_agent_config(worker.agent_id) for worker in team.workers
     }
-    graph = _receipt_graph(
-        compile_team_graph(
-            team_config=team,
-            agent_configs=agent_configs,
-            provider_factory=ProviderFactory(),
-            checkpointer=InMemorySaver(),
-            workspace_root=workspace,
-            feature_tag=feature,
-            proposal_submitter=proposal_submitter,
-            model_assignment=_frozen_deterministic_assignment(list(agent_configs)),
-        )
+    graph = compile_team_graph(
+        team_config=team,
+        agent_configs=agent_configs,
+        provider_factory=ProviderFactory(),
+        checkpointer=InMemorySaver(),
+        workspace_root=workspace,
+        feature_tag=feature,
+        proposal_submitter=proposal_submitter,
+        model_assignment=_frozen_deterministic_assignment(list(agent_configs)),
     )
     receipt = _PromptReceipt()
     config: RunnableConfig = {

@@ -15,7 +15,7 @@ import logging
 from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any, Protocol, cast
 
 if TYPE_CHECKING:
     from collections.abc import Hashable
@@ -28,8 +28,7 @@ from langchain_core.runnables import RunnableConfig
 from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.errors import GraphRecursionError
 from langgraph.graph import END, START, StateGraph
-from langgraph.graph.state import CompiledStateGraph
-from langgraph.types import RetryPolicy
+from langgraph.types import Command, RetryPolicy
 
 from ..authoring.contract import RESEARCH_ADR_ROLES, is_document_authoring_role
 from ..thread.clarification import (
@@ -72,7 +71,18 @@ logger = logging.getLogger(__name__)
 # ``build_initial_vault_index`` is defined in ``nodes.vault_reader`` (the mount
 # node reuses it to refresh the index each pass) and re-exported here to preserve
 # the historical ``graph.compiler.build_initial_vault_index`` import surface.
-__all__ = ["build_initial_vault_index", "compile_team_graph"]
+__all__ = ["CompiledTeamGraph", "build_initial_vault_index", "compile_team_graph"]
+
+
+class CompiledTeamGraph(Protocol):
+    """The compiler's supported invocation surface for a team graph."""
+
+    async def ainvoke(
+        self,
+        input: TeamState | Command[str] | None,
+        config: RunnableConfig | None = None,
+    ) -> object: ...
+
 
 # Maps AgentConfig.role -> pipeline phase for worker_phase_map derivation.
 # Roles not in this map are exempt from phase prerequisite gating.
@@ -536,7 +546,7 @@ def compile_team_graph(
     agent_configs: dict[str, Any],
     *,
     provider_factory: ProviderFactoryProtocol,
-    checkpointer: BaseCheckpointSaver | None = None,
+    checkpointer: BaseCheckpointSaver[str] | None = None,
     supervisor_agent_config: Any | None = None,
     workspace_root: Path | None = None,
     autonomous: bool = False,
@@ -547,7 +557,7 @@ def compile_team_graph(
     feedback_reader: "FeedbackContextReader | None" = None,
     authoring_binding_provider: "AuthoringBindingProvider | None" = None,
     model_assignment: dict[str, dict[str, Any]] | None = None,
-) -> CompiledStateGraph:
+) -> CompiledTeamGraph:
     """Compile the LangGraph orchestration engine from a TeamConfig.
 
     Supports four topology types:
@@ -591,7 +601,7 @@ def compile_team_graph(
     """
     from ..team.team_config import TopologyType
 
-    builder = StateGraph(cast("Any", TeamState))
+    builder = StateGraph(TeamState)
     topology = team_config.topology
 
     # M3: validate topology_type is a known TopologyType enum value before dispatch.

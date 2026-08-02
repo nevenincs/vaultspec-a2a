@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING
 import httpx
 import pytest
 import pytest_asyncio
+from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
     AsyncSession,
@@ -14,7 +15,9 @@ from sqlalchemy.ext.asyncio import (
     create_async_engine,
 )
 
+from ...api.tests.clarification_harness import park_clarification
 from ...control.circuit_breaker import WorkerCircuitBreaker
+from ...control.clarification_service import respond_to_clarification
 from ...control.message_service import send_followup_message
 from ...control.repair_transitions import apply_dispatch_failure
 from ...control.worker_management import LazyWorkerSpawner
@@ -24,11 +27,13 @@ from ...database import (
 )
 from ...database.models import Base
 from ...providers.conditions import ProviderCondition
+from ...thread.clarification import ClarificationAnswers
 from ...thread.dispatch_policy import FailureType
 from ...thread.enums import ThreadStatus
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
+    from pathlib import Path
 
 
 @pytest_asyncio.fixture
@@ -250,3 +255,86 @@ async def test_an_undelivered_resume_does_not_stamp_a_failure_on_a_live_run(
         assert updated.provider_condition is None
         # Not lost, just carried where a still-live run can honestly carry it.
         assert updated.repair_reason == "the gateway worker is not reachable"
+
+
+@pytest.mark.asyncio
+async def test_a_definitely_undelivered_resume_records_why_the_answer_did_not_land(
+    session_factory: async_sessionmaker[AsyncSession],
+    tmp_path: Path,
+) -> None:
+    """An answer that never reached the parked node says so durably.
+
+    The clarification is parked in a real checkpoint by the real graph, and an
+    open circuit is a definite non-delivery: the resume never left the gateway,
+    so the claim is released and the answer certainly did not reach the node.
+    The run is untouched - still parked, still answerable - so the account is
+    recorded where a live run can carry it and nowhere that claims a failure.
+    """
+    thread_id = "undelivered-clarification-resume"
+    async with AsyncSqliteSaver.from_conn_string(
+        str(tmp_path / "clarification-checkpoints.db")
+    ) as checkpointer:
+        await checkpointer.setup()
+        parked = await park_clarification(checkpointer, thread_id=thread_id)
+
+        async with session_factory() as session:
+            await create_thread(
+                session,
+                thread_id=thread_id,
+                status=ThreadStatus.INPUT_REQUIRED,
+                title="Undelivered clarification resume",
+                repair_status="paused_resumable",
+                execution_readiness="paused_resumable",
+            )
+            await session.commit()
+
+        spawner = LazyWorkerSpawner(
+            worker_url="http://127.0.0.1:9",
+            worker_port=9,
+            auto_spawn=False,
+        )
+        spawner.replace_process(None)
+        circuit_breaker = WorkerCircuitBreaker(
+            failure_threshold=1,
+            recovery_timeout=30.0,
+        )
+        circuit_breaker.force_open()
+
+        async with (
+            httpx.AsyncClient(base_url="http://127.0.0.1:9", timeout=0.2) as client,
+            session_factory() as session,
+        ):
+            result = await respond_to_clarification(
+                session,
+                thread_id=thread_id,
+                request_id=parked.request.request_id,
+                resolution=ClarificationAnswers(
+                    request_id=parked.request.request_id,
+                    answers={"provider": "codex"},
+                ),
+                checkpointer=checkpointer,
+                worker_client=client,
+                circuit_breaker=circuit_breaker,
+                worker_spawner=spawner,
+                recursion_limit=1,
+                trace_headers=None,
+            )
+
+    assert result.dispatched is False
+    assert result.failure_type is FailureType.CIRCUIT_OPEN
+
+    async with session_factory() as session:
+        updated = await get_thread(session, thread_id)
+        assert updated is not None
+        # Still parked on the same question, so no failure may be stamped.
+        assert updated.status == ThreadStatus.INPUT_REQUIRED.value
+        assert updated.failure_reason is None
+        assert updated.provider_condition is None
+        assert updated.repair_reason is not None
+        assert updated.repair_reason.startswith("Clarification resume not delivered:")
+        assert result.error_detail is not None
+        assert result.error_detail in updated.repair_reason
+        # The resume stays resumable: a released claim is redrivable, and the
+        # pause it is parked on is unchanged.
+        assert updated.repair_status == "paused_resumable"
+        assert updated.execution_readiness == "paused_resumable"

@@ -4,7 +4,7 @@ tags:
   - '#provider-error-taxonomy'
 date: '2026-08-02'
 modified: '2026-08-02'
-body_hash: 'sha256:db856e36dd9bf54b2b6e578973a7381dd76ed61a342c01aaac38ed3542838aa1'
+body_hash: 'sha256:a632c84417096231ebd54b3306af7b3080736e5bbecdaa16e56e8223bba4b6fb'
 tier: L3
 related:
   - '[[2026-08-02-provider-error-taxonomy-adr]]'
@@ -93,7 +93,7 @@ Guarantees every path that fails a run records a condition, emits a terminal, an
 - [x] `W01.P05.S30` - Pass the dispatch failure reason from run creation; `src/vaultspec_a2a/control/thread_service.py`.
 - [x] `W01.P05.S31` - Record a durable reason where an undelivered follow-up settles; `src/vaultspec_a2a/control/message_service.py`.
 - [x] `W01.P05.S32` - Pass the dispatch failure reason from permission resume; `src/vaultspec_a2a/control/permission_service.py`.
-- [ ] `W01.P05.S33` - Record a durable reason when a clarification resume is not delivered; `src/vaultspec_a2a/control/clarification_service.py`.
+- [x] `W01.P05.S33` - Record a durable reason when a clarification resume is not delivered; `src/vaultspec_a2a/control/clarification_service.py`.
 - [x] `W01.P05.S34` - Emit a terminal from the executor top-level dispatch handler; `src/vaultspec_a2a/worker/executor.py`.
 - [x] `W01.P05.S35` - Record a condition on the missing-graph rejection; `src/vaultspec_a2a/worker/executor.py`.
 - [x] `W01.P05.S36` - Record a condition on the ingest and resume catch-alls; `src/vaultspec_a2a/worker/executor.py`.

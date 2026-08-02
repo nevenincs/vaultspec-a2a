@@ -39,6 +39,7 @@ from ..thread.enums import (
 )
 from .action_lease import claim_control_action, release_definite_non_delivery
 from .dispatch import safe_dispatch
+from .repair_transitions import record_undelivered_dispatch
 from .thread_state_service import read_run_snapshot
 
 if TYPE_CHECKING:
@@ -352,10 +353,24 @@ async def respond_to_clarification(
     )
     if not outcome.success:
         _policy, failure_type = evaluate_dispatch_failure(outcome.failure_type)
-        await release_definite_non_delivery(db, claim, failure_type)
+        detail = outcome.detail or "Worker dispatch failed"
+        if await release_definite_non_delivery(db, claim, failure_type):
+            # A released claim means the worker certainly scheduled no task, so
+            # the answer demonstrably did not reach the parked node. The run is
+            # untouched by that - it is still parked on the same questionnaire,
+            # still alive, and still answerable - so the account goes on the
+            # repair reason and never on the failure columns, which describe a
+            # run that failed. An ambiguous failure keeps its lease because
+            # delivery is undecided, and says nothing.
+            await record_undelivered_dispatch(
+                db,
+                thread_id,
+                reason=f"Clarification resume not delivered: {detail}",
+            )
+            await db.commit()
         return _result(
             action,
-            error_detail=outcome.detail or "Worker dispatch failed",
+            error_detail=detail,
             error_status_code=(
                 503 if failure_type is FailureType.CIRCUIT_OPEN else 502
             ),

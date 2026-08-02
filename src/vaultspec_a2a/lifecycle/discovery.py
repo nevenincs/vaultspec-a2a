@@ -256,8 +256,6 @@ def _replace_private_credential(path: Path, payload: bytes) -> Path:
             os.fsync(handle.fileno())
             if os.name == "posix":
                 os.fchmod(handle.fileno(), 0o600)
-            else:
-                _restrict_windows_file(leased.path / source_name)
             if os.name == "nt" or anonymous:
                 publish_no_replace(
                     leased,
@@ -265,6 +263,17 @@ def _replace_private_credential(path: Path, payload: bytes) -> Path:
                     destination_name,
                     source_fd=handle.fileno(),
                 )
+                if os.name == "nt":
+                    # Restrict the PUBLISHED file, not the source.
+                    # `SetNamedSecurityInfoW` opens by NAME, and doing that to
+                    # the source between creating it and renaming it put a
+                    # second opener on the exact file the rename needs
+                    # delete-class access to - a sharing violation the publisher
+                    # then took the blame for. Deferring exposes nothing: the
+                    # credential only ever exists inside the parent authority,
+                    # which this module restricts and verifies before writing
+                    # anything into it.
+                    _restrict_windows_file(leased.path / destination_name)
             else:
                 if leased.dir_fd is None:
                     raise OSError("POSIX credential authority is not leased")

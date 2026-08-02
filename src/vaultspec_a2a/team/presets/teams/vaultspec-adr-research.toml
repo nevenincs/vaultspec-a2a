@@ -117,33 +117,41 @@ agent_id = "vaultspec-doc-reviewer"
 # `required_surfaces` defaults to all five authoring surfaces, so this only
 # WIDENS the harness by the grounding server.
 #
-# rag is not the registry's only entry - it is the only one this preset SERVES.
-# The registry also knows an egressing web-search server, deliberately declared
-# and left unserved: a served preset may advertise a web capability only on a
-# lane carrying live proof that the capability completed real work, and no lane
-# carries that proof. Adding a name here is therefore a claim about proven work,
-# never a convenience.
+# rag is the registry's only entry, and web reach is deliberately NOT delivered
+# from here. An egressing web-search server was briefly registered and has been
+# withdrawn: no first-party search server exists or is planned, and web reach
+# comes from the tools a lane already has - the command-line lanes' own search
+# and fetch, admitted through the native allowlist, and a framework-bound tool
+# for the hosted-API lanes. So adding a server name here would not buy web
+# grounding; it would reintroduce a mechanism the record rejected.
 [team.harness]
 mcp_servers = ["vaultspec-rag"]
 
 # Model profiles. `team-defaults` is implicit (the empty overlay) and is the
-# default profile; it is not declared here. `fast` drops the two high-volume
-# roles (parallel research fan-out and the inner review loop) to the low
-# capability level while the three authoring roles keep the team default (mid),
-# where document quality matters. Roles absent from a profile fall through the
-# normal precedence chain unchanged.
+# default profile; it is not declared here. `fast` is the explicit all-low
+# profile used when every role must run at the lowest configured capability.
+# Provider-axis profiles also state their capability explicitly so a live test
+# never inherits a more expensive tier through an absent role overlay.
 [team.profiles.fast]
 display_name = "Fast"
 description  = """
-Lower-latency research and review: the researcher fan-out and the doc-reviewer
-run at the low capability level; the synthesist, adr-author, and plan-author keep
-the team default so authored documents retain full capability.
+All-low execution across every role. Use this profile for low-cost live-provider
+certification; authored documents trade quality for the explicit cost ceiling.
 """
 
 [team.profiles.fast.roles.vaultspec-researcher]
 capability = "low"
 
 [team.profiles.fast.roles.vaultspec-doc-reviewer]
+capability = "low"
+
+[team.profiles.fast.roles.vaultspec-synthesist]
+capability = "low"
+
+[team.profiles.fast.roles.vaultspec-adr-author]
+capability = "low"
+
+[team.profiles.fast.roles.vaultspec-plan-author]
 capability = "low"
 
 # `codex` is the mixed-provider provider-axis lane: the four research/authoring
@@ -171,15 +179,19 @@ online research there would be advertising a capability nothing has shown.
 
 [team.profiles.codex.roles.vaultspec-researcher]
 provider = "codex"
+capability = "low"
 
 [team.profiles.codex.roles.vaultspec-synthesist]
 provider = "codex"
+capability = "low"
 
 [team.profiles.codex.roles.vaultspec-adr-author]
 provider = "codex"
+capability = "low"
 
 [team.profiles.codex.roles.vaultspec-plan-author]
 provider = "codex"
+capability = "low"
 
 # `codex-all` is the single-provider Codex lane: unlike the mixed `codex` profile
 # above, it also routes the inner doc-reviewer to `codex`, so no role falls back
@@ -199,18 +211,23 @@ env is injected.
 
 [team.profiles.codex-all.roles.vaultspec-researcher]
 provider = "codex"
+capability = "low"
 
 [team.profiles.codex-all.roles.vaultspec-synthesist]
 provider = "codex"
+capability = "low"
 
 [team.profiles.codex-all.roles.vaultspec-adr-author]
 provider = "codex"
+capability = "low"
 
 [team.profiles.codex-all.roles.vaultspec-plan-author]
 provider = "codex"
+capability = "low"
 
 [team.profiles.codex-all.roles.vaultspec-doc-reviewer]
 provider = "codex"
+capability = "low"
 
 # `zai` is the Z.ai provider-axis lane. Credential-gated on ZAI_AUTH_TOKEN: the
 # harness skips this lane loudly (naming the missing token) when the token is
@@ -227,15 +244,19 @@ this lane with a truthful reason when the credential is absent.
 
 [team.profiles.zai.roles.vaultspec-researcher]
 provider = "zai"
+capability = "low"
 
 [team.profiles.zai.roles.vaultspec-synthesist]
 provider = "zai"
+capability = "low"
 
 [team.profiles.zai.roles.vaultspec-adr-author]
 provider = "zai"
+capability = "low"
 
 [team.profiles.zai.roles.vaultspec-plan-author]
 provider = "zai"
+capability = "low"
 
 # `kimi` is the Kimi (Moonshot AI) provider-axis lane. Credential-gated on
 # KIMI_API_KEY: the harness skips this lane loudly (naming the missing key) when
@@ -253,15 +274,19 @@ skips this lane with a truthful reason when the credential is absent.
 
 [team.profiles.kimi.roles.vaultspec-researcher]
 provider = "kimi"
+capability = "low"
 
 [team.profiles.kimi.roles.vaultspec-synthesist]
 provider = "kimi"
+capability = "low"
 
 [team.profiles.kimi.roles.vaultspec-adr-author]
 provider = "kimi"
+capability = "low"
 
 [team.profiles.kimi.roles.vaultspec-plan-author]
 provider = "kimi"
+capability = "low"
 
 # `kimi-all` is the single-provider Kimi lane, the Kimi counterpart of
 # `codex-all`: it also routes the inner doc-reviewer to `kimi`, so no role falls
@@ -280,15 +305,20 @@ reason when the credential is absent.
 
 [team.profiles.kimi-all.roles.vaultspec-researcher]
 provider = "kimi"
+capability = "low"
 
 [team.profiles.kimi-all.roles.vaultspec-synthesist]
 provider = "kimi"
+capability = "low"
 
 [team.profiles.kimi-all.roles.vaultspec-adr-author]
 provider = "kimi"
+capability = "low"
 
 [team.profiles.kimi-all.roles.vaultspec-plan-author]
 provider = "kimi"
+capability = "low"
 
 [team.profiles.kimi-all.roles.vaultspec-doc-reviewer]
 provider = "kimi"
+capability = "low"

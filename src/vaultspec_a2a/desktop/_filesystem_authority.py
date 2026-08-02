@@ -28,17 +28,22 @@ _FILE_GENERIC_WRITE = 0x40000000
 _ERROR_SHARING_VIOLATION = 32
 #: How long the two publication paths - the directory lease and the rename that
 #: publishes a held handle - ride out a sharing violation before giving up.
-#: Sized like the atomic writer's replace window: long enough to outlast a peer's
-#: lease, short enough that a genuinely wedged holder still surfaces as an error.
+#: Long enough to outlast a peer's lease or an external sampler, short enough
+#: that a genuinely wedged holder still surfaces as an error rather than a stall.
 #:
-#: This budget was briefly raised to ten seconds chasing a Windows release
-#: failure, on the theory that a real-time scanner was sampling the new
-#: credential. It was not: a READER holding the file without DELETE sharing
-#: blocks the publication for as long as it reads, and no budget survives that.
-#: The reader was fixed instead (`open_shared_read_descriptor`), so this is back
-#: to the window it was sized for. A retry budget is for transient holders; it is
-#: not a remedy for a lock two processes hold against each other.
-_SHARING_RETRY_SECONDS = 2.0
+#: Two seconds was right while the blocking openers were OURS - a reader without
+#: DELETE sharing, and a by-name re-ACL of the file about to be renamed. Both are
+#: fixed, and no budget would have helped with either: a lock two processes hold
+#: against each other does not expire.
+#:
+#: What remains on a Windows CI runner is external and outlives ten seconds. It
+#: is not per-file (five freshly named sources are denied in turn), not tied to a
+#: directory (the runner's scratch and a private workspace directory behave
+#: identically), and does not reproduce off that runner. Everything else having
+#: been eliminated, a transient-but-slow sampler is what is left, and a budget IS
+#: the remedy for that. Twenty seconds per attempt; the publication is attempted
+#: a bounded number of times, and the last failure still raises unchanged.
+_SHARING_RETRY_SECONDS = 20.0
 _SHARING_RETRY_INTERVAL_SECONDS = 0.02
 
 _DELETE = 0x00010000

@@ -23,13 +23,15 @@ _FILE_GENERIC_READ = 0x80000000
 _FILE_GENERIC_WRITE = 0x40000000
 #: Windows ``ERROR_SHARING_VIOLATION``. Raised when another process holds the
 #: target without sharing the access being requested - transient by nature here,
-#: because the other holder is a peer mid-lease rather than a permanent owner.
+#: because the other holder is a peer mid-lease, or a scanner sampling a file
+#: this process created microseconds ago, rather than a permanent owner.
 _ERROR_SHARING_VIOLATION = 32
-#: How long a directory lease rides out a sharing violation before giving up.
+#: How long the two publication paths - the directory lease and the rename that
+#: publishes a held handle - ride out a sharing violation before giving up.
 #: Sized like the atomic writer's replace window: long enough to outlast a peer's
 #: lease, short enough that a genuinely wedged holder still surfaces as an error.
-_LEASE_RETRY_SECONDS = 2.0
-_LEASE_RETRY_INTERVAL_SECONDS = 0.02
+_SHARING_RETRY_SECONDS = 2.0
+_SHARING_RETRY_INTERVAL_SECONDS = 0.02
 
 _DELETE = 0x00010000
 _FILE_SHARE_READ = 0x00000001
@@ -190,11 +192,28 @@ def _close_handle(library: _WindowsLibrary) -> _NativeFunction:
     return close_handle
 
 
+def _windows_error(error: int, path: Path) -> OSError:
+    """Build an :class:`OSError` that carries *error* as a WINDOWS error code.
+
+    The three-argument form puts its first argument in ``errno``, so a Windows
+    code lands in the POSIX slot and Python picks the exception class from it.
+    ``ERROR_SHARING_VIOLATION`` (32) then arrives as ``BrokenPipeError``, because
+    32 is ``EPIPE`` - carrying the correct Windows message, the wrong class, and
+    no ``winerror`` at all. A caller cannot classify that, and a diagnosis reading
+    "broken pipe" for a file another process is holding sends the next reader the
+    wrong way entirely.
+
+    The four-argument form is the one that means "this is a Windows code": it
+    selects the class from the winerror and fills ``errno`` from the platform's
+    own mapping, so both ``isinstance`` and ``exc.winerror`` answer truthfully.
+    """
+    return OSError(0, ctypes.FormatError(error), str(path), error)
+
+
 def _last_windows_error(path: Path) -> OSError:
     if sys.platform != "win32":
         raise OSError(errno.ENOSYS, "Windows error codes are unavailable", path)
-    error = int(ctypes.get_last_error())
-    return OSError(error, ctypes.FormatError(error), path)
+    return _windows_error(int(ctypes.get_last_error()), path)
 
 
 def _windows_handle_identity(
@@ -276,7 +295,7 @@ def _windows_directory_lease(
     # publishing where it can be found, permanently and silently, on any machine
     # where a second process touches the directory. That is precisely the
     # multi-session case this project runs in.
-    deadline = time.monotonic() + _LEASE_RETRY_SECONDS
+    deadline = time.monotonic() + _SHARING_RETRY_SECONDS
     while True:
         handle_value = create_file(
             str(authority.path),
@@ -290,9 +309,14 @@ def _windows_directory_lease(
         if handle_value not in {None, invalid_handle}:
             break
         error = _last_windows_error(authority.path)
-        if error.errno != _ERROR_SHARING_VIOLATION or time.monotonic() >= deadline:
+        # Keyed on winerror, never errno: these are Windows codes, and the two
+        # numbering spaces collide silently - 32 is ERROR_SHARING_VIOLATION here
+        # and EPIPE there, so an errno comparison would match the right failure
+        # for the wrong reason and stop matching the moment the error is
+        # constructed correctly.
+        if error.winerror != _ERROR_SHARING_VIOLATION or time.monotonic() >= deadline:
             raise error
-        time.sleep(_LEASE_RETRY_INTERVAL_SECONDS)
+        time.sleep(_SHARING_RETRY_INTERVAL_SECONDS)
     handle = cast("int", handle_value)
     leased = replace(authority, native_handle=handle)
     close_handle = _close_handle(library)
@@ -479,34 +503,47 @@ def _windows_publish_handle(
         ctypes.c_int,
     )
     set_information.restype = ctypes.c_long
-    io_status = _IoStatusBlock()
-    status = cast(
-        "int",
-        set_information(
-            source_handle,
-            ctypes.byref(io_status),
-            buffer,
-            len(buffer),
-            _FILE_RENAME_INFORMATION_CLASS,
-        ),
-    )
-    if status >= 0:
-        return
     status_to_error = library.RtlNtStatusToDosError
     status_to_error.argtypes = (ctypes.c_long,)
     status_to_error.restype = ctypes.c_ulong
-    error = cast("int", status_to_error(status))
+    # A rename is a delete-class operation on the source, so ANY peer holding
+    # that file without sharing DELETE denies it - and the peer need not be
+    # another instance of this program. A real-time scanner sampling a file this
+    # process created, wrote and re-ACLed microseconds earlier is the ordinary
+    # case, and it lets go on its own.
+    #
+    # This is the last rename in the package that failed a live publication on
+    # someone else's momentary handle: the atomic writer already rides the
+    # identical violation out on its replace, and the directory lease above does
+    # the same on its open. Riding it out here costs a bounded wait and gives up
+    # loudly at the deadline, so a genuinely wedged holder still surfaces rather
+    # than stalling a gateway that cannot publish where it can be found.
+    deadline = time.monotonic() + _SHARING_RETRY_SECONDS
+    while True:
+        io_status = _IoStatusBlock()
+        status = cast(
+            "int",
+            set_information(
+                source_handle,
+                ctypes.byref(io_status),
+                buffer,
+                len(buffer),
+                _FILE_RENAME_INFORMATION_CLASS,
+            ),
+        )
+        if status >= 0:
+            return
+        error = cast("int", status_to_error(status))
+        if error != _ERROR_SHARING_VIOLATION or time.monotonic() >= deadline:
+            break
+        time.sleep(_SHARING_RETRY_INTERVAL_SECONDS)
     if error in {80, 183}:
         raise FileExistsError(
             errno.EEXIST,
             "publication destination exists",
-            authority.path / destination_name,
+            str(authority.path / destination_name),
         )
-    raise OSError(
-        error,
-        ctypes.FormatError(error),
-        authority.path / destination_name,
-    )
+    raise _windows_error(error, authority.path / destination_name)
 
 
 def _posix_link_fd_no_replace(

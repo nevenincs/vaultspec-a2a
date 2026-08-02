@@ -8,7 +8,9 @@ from typing import TYPE_CHECKING
 import pytest
 
 from ...desktop._filesystem_authority import (
+    _ERROR_SHARING_VIOLATION,
     _create_file_w,
+    _windows_error,
     _windows_library,
     assert_directory_authority,
     create_private_file,
@@ -308,3 +310,31 @@ if os.name == "nt":
             "the lease returned before the blocking handle was released, so the "
             "collision never happened and the retry was not exercised"
         )
+
+    def test_a_sharing_violation_is_reported_as_one(tmp_path: Path) -> None:
+        """A Windows error code must not be read as a POSIX errno.
+
+        ERROR_SHARING_VIOLATION is 32, and so is EPIPE. Passing the Windows code
+        positionally makes Python pick the class from the errno table, so the one
+        failure this module retries on arrived as ``BrokenPipeError`` carrying the
+        text "another process" and no ``winerror`` - unclassifiable by any caller,
+        and a diagnosis that reads "broken pipe" for a file someone else is
+        holding. The assertion against the positional form is what keeps this
+        honest: it fails if the two shapes ever stop disagreeing.
+        """
+        error = _windows_error(_ERROR_SHARING_VIOLATION, tmp_path / "held")
+
+        assert isinstance(error, PermissionError)
+        assert not isinstance(error, BrokenPipeError)
+        assert error.winerror == _ERROR_SHARING_VIOLATION
+        assert error.errno == errno.EACCES
+        assert error.filename == str(tmp_path / "held")
+        assert "another process" in str(error)
+
+        positional = OSError(
+            _ERROR_SHARING_VIOLATION,
+            ctypes.FormatError(_ERROR_SHARING_VIOLATION),
+            str(tmp_path / "held"),
+        )
+        assert isinstance(positional, BrokenPipeError)
+        assert positional.winerror is None

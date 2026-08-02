@@ -328,6 +328,62 @@ def test_cleanup_never_touches_foreign_file(tmp_path: Path) -> None:
     assert _read(path) == foreign
 
 
+def test_cleanup_warns_and_preserves_bytes_for_marker_missing_fingerprint(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A marker missing a required field is foreign data, not ``null``.
+
+    Exercise the real filesystem boundary and preserve its exact bytes: a
+    malformed marker cannot authorize removing a same-named foreign server.
+    """
+    path = tmp_path / ".mcp.json"
+    path.write_text(
+        json.dumps(
+            {
+                "mcpServers": {"foreign": {"type": "stdio", "command": "x"}},
+                PROJECTION_MARKER_KEY: {"added": ["foreign"], "base_absent": False},
+            },
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+    before = path.read_bytes()
+
+    with caplog.at_level(logging.WARNING):
+        cleanup_projected_mcp(path)
+
+    assert path.read_bytes() == before
+    assert any("malformed" in record.getMessage() for record in caplog.records)
+
+
+def test_reprojection_refuses_and_preserves_bytes_for_marker_missing_fingerprint(
+    tmp_path: Path,
+) -> None:
+    """Malformed crash residue keeps every present server collision-protected."""
+    path = tmp_path / ".mcp.json"
+    path.write_text(
+        json.dumps(
+            {
+                "mcpServers": {
+                    "vaultspec-rag": {"type": "stdio", "command": "foreign"}
+                },
+                PROJECTION_MARKER_KEY: {
+                    "added": ["vaultspec-rag"],
+                    "base_absent": False,
+                },
+            },
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+    before = path.read_bytes()
+
+    with pytest.raises(ProjectionRefusedError, match="collide"):
+        project_declared_mcp(tmp_path, [_rag_spec()])
+
+    assert path.read_bytes() == before
+
+
 # --- reserved-name mid-run edit: defined behavior --------------------------
 
 

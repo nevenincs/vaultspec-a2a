@@ -6,7 +6,7 @@ tags:
 date: '2026-08-02'
 modified: '2026-08-02'
 body_schema: 'body-v1'
-body_hash: 'sha256:e5fc6df9de7599512e794a7674d7e502fe2fb6b04800475a6e43b7bde446a399'
+body_hash: 'sha256:b05cd1ed70fc9f0dde577d50d7b234b678597b28d72c64d4cd6885877f016cd3'
 related:
   - '[[2026-07-19-repository-tooling-hardening-W01-P01-S01]]'
   - '[[2026-07-19-repository-tooling-hardening-W01-P01-summary]]'
@@ -71,6 +71,7 @@ related:
   - '[[2026-08-02-repository-tooling-hardening-strict-s25-factory-audit]]'
   - '[[2026-08-02-repository-tooling-hardening-strict-s25-gemini-auth-audit]]'
   - '[[2026-08-02-repository-tooling-hardening-strict-s25-json-mcp-foundation-audit]]'
+  - '[[2026-08-02-repository-tooling-hardening-strict-s25-project-mcp-audit]]'
   - '[[2026-08-02-repository-tooling-hardening-strict-s25-provider-lazy-exports-audit]]'
 ---
 
@@ -110,6 +111,7 @@ Auto-generated index of all documents tagged with `#repository-tooling-hardening
 - `2026-08-02-repository-tooling-hardening-strict-s25-factory-audit` - `repository-tooling-hardening` audit: `Provider factory canonical interface review`
 - `2026-08-02-repository-tooling-hardening-strict-s25-gemini-auth-audit` - `repository-tooling-hardening` audit: `Gemini credential boundary review`
 - `2026-08-02-repository-tooling-hardening-strict-s25-json-mcp-foundation-audit` - `repository-tooling-hardening` audit: `Provider JSON and MCP boundary review`
+- `2026-08-02-repository-tooling-hardening-strict-s25-project-mcp-audit` - `repository-tooling-hardening` audit: `ACP project MCP trust boundary review`
 - `2026-08-02-repository-tooling-hardening-strict-s25-provider-lazy-exports-audit` - `repository-tooling-hardening` audit: `Provider lazy export contract review`
 
 ### exec

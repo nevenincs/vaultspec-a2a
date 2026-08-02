@@ -50,11 +50,14 @@ import hashlib
 import json
 import logging
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
+
+from pydantic import TypeAdapter, ValidationError
 
 from ..thread.errors import ConfigError, ProjectionRefusedError
 from ._acp_authoring import config_home_authoring_entry
 from ._acp_mcp import config_home_mcp_servers
+from ._json_contract import JsonObject, JsonValue
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -67,6 +70,8 @@ __all__ = [
 ]
 
 logger = logging.getLogger(__name__)
+
+_JSON_VALUE: TypeAdapter[JsonValue] = TypeAdapter(JsonValue)
 
 # Signature marker written at the top level of a projected ``.mcp.json``. Its
 # presence proves the entries WE added are ours to remove; a ``.mcp.json`` schema
@@ -86,14 +91,14 @@ def _mcp_names(mcp_path: Path) -> set[str]:
     except OSError:
         return set()
     try:
-        parsed = json.loads(raw)
-    except (ValueError, TypeError):
+        parsed = _JSON_VALUE.validate_json(raw)
+    except ValidationError:
         logger.warning("mcp config at %s is not valid JSON; ignoring", mcp_path)
         return set()
     servers = parsed.get("mcpServers") if isinstance(parsed, dict) else None
     if not isinstance(servers, dict):
         return set()
-    return {str(name) for name in servers}
+    return set(servers)
 
 
 def enumerate_ancestor_mcp_names(start_dir: Path | str | None) -> list[str]:
@@ -116,8 +121,8 @@ def enumerate_ancestor_mcp_names(start_dir: Path | str | None) -> list[str]:
 
 
 def _declared_home_entries(
-    mcp_servers: Sequence[dict[str, Any]],
-) -> dict[str, dict[str, Any]]:
+    mcp_servers: Sequence[JsonObject],
+) -> dict[str, JsonObject]:
     """Compose the declared surfacing entries (harness servers + authoring bridge).
 
     Reuses the exact isolated-home builders so the projected file and the home
@@ -140,7 +145,7 @@ def _declared_home_entries(
     return surfacing
 
 
-def _fingerprint(base: dict[str, Any]) -> str:
+def _fingerprint(base: JsonObject) -> str:
     """A content fingerprint of a pre-merge base (``mcpServers`` plus other
     top-level keys), enforced at cleanup and re-projection - not diagnostic-only.
 
@@ -164,8 +169,8 @@ def _safe_unlink(path: Path) -> None:
 
 
 def _split_projection(
-    parsed: dict[str, Any],
-) -> tuple[dict[str, Any], dict[str, Any]]:
+    parsed: JsonObject,
+) -> tuple[JsonObject, JsonObject]:
     """Split a parsed ``.mcp.json`` into its ``mcpServers`` map and its other keys.
 
     Both halves are copies, so a caller may strip or merge without mutating the
@@ -176,8 +181,8 @@ def _split_projection(
     treats it as such.
     """
     servers_raw = parsed.get("mcpServers")
-    servers: dict[str, Any] = dict(servers_raw) if isinstance(servers_raw, dict) else {}
-    other = {
+    servers: JsonObject = dict(servers_raw) if isinstance(servers_raw, dict) else {}
+    other: JsonObject = {
         k: v
         for k, v in parsed.items()
         if k not in ("mcpServers", PROJECTION_MARKER_KEY)
@@ -185,9 +190,38 @@ def _split_projection(
     return servers, other
 
 
+def _current_marker(
+    marker: JsonObject,
+) -> tuple[list[str], bool, str | None] | None:
+    """Return a complete, structurally valid current marker, or fail closed.
+
+    ``null`` is a valid JSON value for ``base_fingerprint`` when the original
+    base file was absent.  An omitted field is different: it is a malformed
+    current marker, so neither cleanup nor crash-residue recovery may trust its
+    ``added`` list.  Extra fields remain inert for forward compatibility.
+    """
+    required = ("added", "base_absent", "base_fingerprint")
+    if not all(field in marker for field in required):
+        return None
+    added = marker.get("added")
+    base_absent = marker.get("base_absent")
+    base_fingerprint = marker.get("base_fingerprint")
+    if not isinstance(added, list) or not isinstance(base_absent, bool):
+        return None
+    if base_fingerprint is not None and not isinstance(base_fingerprint, str):
+        return None
+
+    names: list[str] = []
+    for name in added:
+        if not isinstance(name, str):
+            return None
+        names.append(name)
+    return names, base_absent, base_fingerprint
+
+
 def _recover_base(
-    parsed: dict[str, Any],
-) -> tuple[dict[str, Any], dict[str, Any], bool, str | None]:
+    parsed: JsonObject,
+) -> tuple[JsonObject, JsonObject, bool, str | None]:
     """Recover the pre-merge base from an existing parsed ``.mcp.json``.
 
     Returns ``(base_servers, base_other, base_absent, base_fingerprint)`` where
@@ -212,15 +246,23 @@ def _recover_base(
         # Legacy whole-file projection: everything was ours; original was absent.
         return {}, {}, True, None
     if isinstance(marker, dict):
+        current_marker = _current_marker(marker)
+        if current_marker is None:
+            logger.warning(
+                "stale projection marker is malformed; treating every currently-"
+                "present server name as existing rather than stripping an "
+                "unverifiable added-list"
+            )
+            fresh_fingerprint = _fingerprint({"mcpServers": servers, **other})
+            return servers, other, False, fresh_fingerprint
+        added, base_absent, recorded_fingerprint = current_marker
         # Crash residue from this model: strip our prior additions, carry the
         # ORIGINAL pre-merge state forward so a later cleanup still restores it -
         # but only once the stripped base's fingerprint is verified to still
         # match what the marker recorded.
         stripped = dict(servers)
-        for name in marker.get("added") or []:
-            stripped.pop(str(name), None)
-        recorded_fingerprint = marker.get("base_fingerprint")
-        base_absent = bool(marker.get("base_absent", False))
+        for name in added:
+            stripped.pop(name, None)
         if recorded_fingerprint is not None:
             recovered_fingerprint = _fingerprint({"mcpServers": stripped, **other})
             if recovered_fingerprint != recorded_fingerprint:
@@ -239,7 +281,7 @@ def _recover_base(
 
 def project_declared_mcp(
     run_workspace: Path | str,
-    mcp_servers: Sequence[dict[str, Any]],
+    mcp_servers: Sequence[JsonObject],
 ) -> Path | None:
     """Merge the declared surfacing set into ``{run_workspace}/.mcp.json``.
 
@@ -259,16 +301,16 @@ def project_declared_mcp(
         return None
     path = Path(run_workspace) / ".mcp.json"
 
-    base_servers: dict[str, Any] = {}
-    base_other: dict[str, Any] = {}
+    base_servers: JsonObject = {}
+    base_other: JsonObject = {}
     base_absent = True
     base_fingerprint: str | None = None
 
     if path.exists():
         try:
             raw = path.read_text(encoding="utf-8")
-            parsed = json.loads(raw)
-        except (OSError, ValueError, TypeError) as exc:
+            parsed = _JSON_VALUE.validate_json(raw)
+        except (OSError, ValidationError) as exc:
             raise ProjectionRefusedError(
                 f"refusing to project into an unparseable .mcp.json at {path}: "
                 f"{exc}. Repair or remove the file, or use a clean run workspace."
@@ -289,14 +331,18 @@ def project_declared_mcp(
 
     merged = dict(base_servers)
     merged.update(surfacing)
-    content: dict[str, Any] = {
+    added_names: list[JsonValue] = []
+    for name in sorted(surfacing):
+        added_names.append(name)
+    projection_marker: JsonObject = {
+        "added": added_names,
+        "base_absent": base_absent,
+        "base_fingerprint": base_fingerprint,
+    }
+    content: JsonObject = {
         **base_other,
         "mcpServers": merged,
-        PROJECTION_MARKER_KEY: {
-            "added": sorted(surfacing),
-            "base_absent": base_absent,
-            "base_fingerprint": base_fingerprint,
-        },
+        PROJECTION_MARKER_KEY: projection_marker,
     }
     path.write_text(json.dumps(content, indent=2), encoding="utf-8")
     logger.debug(
@@ -330,8 +376,8 @@ def cleanup_projected_mcp(path: Path | None) -> None:
         return
     try:
         raw = path.read_text(encoding="utf-8")
-        parsed = json.loads(raw)
-    except (OSError, ValueError, TypeError):
+        parsed = _JSON_VALUE.validate_json(raw)
+    except (OSError, ValidationError):
         return
     if not isinstance(parsed, dict):
         return
@@ -344,15 +390,24 @@ def cleanup_projected_mcp(path: Path | None) -> None:
         # Foreign / not ours - never touch.
         return
 
+    current_marker = _current_marker(marker)
+    if current_marker is None:
+        logger.warning(
+            "skipping projection cleanup for %s: current marker is malformed; "
+            "leaving the file untouched",
+            path,
+        )
+        return
+
     servers, other = _split_projection(parsed)
 
-    recovered: dict[str, Any] = dict(servers)
-    for name in marker.get("added") or []:
+    added, base_absent, recorded_fingerprint = current_marker
+    recovered: JsonObject = dict(servers)
+    for name in added:
         # Remove ONLY what we added; a same-named entry a user re-added mid-run is
         # theirs now and survives (the marker's list is the authoritative scope).
-        recovered.pop(str(name), None)
+        recovered.pop(name, None)
 
-    recorded_fingerprint = marker.get("base_fingerprint")
     if recorded_fingerprint is not None:
         recovered_fingerprint = _fingerprint({"mcpServers": recovered, **other})
         if recovered_fingerprint != recorded_fingerprint:
@@ -365,12 +420,12 @@ def cleanup_projected_mcp(path: Path | None) -> None:
             )
             return
 
-    if bool(marker.get("base_absent", False)) and not recovered and not other:
+    if base_absent and not recovered and not other:
         # We created the file and nothing foreign remains - restore the absent state.
         _safe_unlink(path)
         return
 
-    restored: dict[str, Any] = {**other, "mcpServers": recovered}
+    restored: JsonObject = {**other, "mcpServers": recovered}
     try:
         path.write_text(json.dumps(restored, indent=2), encoding="utf-8")
     except OSError:

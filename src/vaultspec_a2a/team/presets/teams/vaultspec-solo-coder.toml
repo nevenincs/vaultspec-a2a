@@ -10,6 +10,13 @@ self-contained tasks. Fastest to spin up; no planning or review phase.
 provider   = "claude"
 capability = "mid"
 
+[team.profiles.fast]
+display_name = "Fast"
+description  = "All-low execution for cost-controlled live-provider certification."
+
+[team.profiles.fast.roles.vaultspec-coder]
+capability = "low"
+
 [team.topology]
 type  = "pipeline"
 order = ["vaultspec-coder"]

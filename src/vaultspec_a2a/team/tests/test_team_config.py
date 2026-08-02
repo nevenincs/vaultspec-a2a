@@ -30,6 +30,7 @@ from ..team_config import (
     TopologyType,
     WorkerOverrideConfig,
     WorkerRef,
+    discover_team_preset_ids,
     load_agent_config,
     load_team_config,
 )
@@ -1015,6 +1016,43 @@ class TestModelProfiles:
         assert all(
             overlay.capability == Model.LOW for overlay in fast.roles.values()
         ), "every fast overlay must pin LOW, or the profile is not all-low"
+
+    def test_every_preset_fast_profile_is_a_total_low_ceiling(self) -> None:
+        """`fast` means all-low in EVERY preset that serves it, not just one.
+
+        The adr-research case above is checked by name; this is the invariant
+        behind it, swept across whatever presets actually exist rather than a
+        hardcoded roster that goes stale the moment a preset is added. A team
+        shipping a partial `fast` is the original defect reintroduced under a
+        different file name.
+
+        Capability only. Provider is a separate axis: it is routing, not a
+        ceiling, and stays deliberately selective so a mixed lane keeps roles on
+        the team default. Asserting providers here would force every lane total
+        and collapse the mixed and single-provider profiles into duplicates.
+        """
+        checked: list[str] = []
+        for team_id in sorted(discover_team_preset_ids()):
+            try:
+                cfg = load_team_config(team_id)
+            except (ConfigError, ValidationError):
+                # Deliberately-invalid presets exist as loader fixtures; profile
+                # shape is meaningless for a team that cannot load at all.
+                continue
+            fast = cfg.profiles.get("fast")
+            if fast is None:
+                continue
+            checked.append(team_id)
+            declared_workers = {worker.agent_id for worker in cfg.workers}
+            assert set(fast.roles) == declared_workers, (
+                f"{team_id}: fast must overlay every declared worker; "
+                f"missing {sorted(declared_workers - set(fast.roles))}"
+            )
+            assert all(
+                overlay.capability == Model.LOW for overlay in fast.roles.values()
+            ), f"{team_id}: every fast overlay must pin LOW"
+
+        assert checked, "no preset declares a fast profile — the sweep proved nothing"
 
     def test_bundled_adr_research_exposes_kimi_profile(self) -> None:
         """The `kimi` profile routes authoring to Kimi while ceilinged everywhere.

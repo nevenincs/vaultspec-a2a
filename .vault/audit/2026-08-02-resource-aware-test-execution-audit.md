@@ -5,7 +5,7 @@ tags:
 date: '2026-08-02'
 modified: '2026-08-02'
 body_schema: 'body-v1'
-body_hash: 'sha256:dbcdf1f01ce90d0e5d58835e72f9595fe15e268814b22becb46b9170c65fb1c4'
+body_hash: 'sha256:63fd34dcf59b83c0a6c8b1866bcf229cfb65a705fc46cc3ccff82edb041e5a57'
 related:
   - "[[2026-08-02-resource-aware-test-execution-plan]]"
 ---
@@ -166,6 +166,64 @@ holder or TTL expiry) plus sub-millisecond interleaving; the bind probe and
 the boot path's fell-and-retry cover the consequence. Recorded rather than
 fixed - a compare-and-delete needs a rename dance the current risk does not
 justify; revisit if a live collision is ever traced here.
+
+### independent-review-corrections-2026-08-02 | high | resolved
+
+The independent review returned REVISION REQUIRED; each finding and its
+disposition:
+
+- Plugin wiring was strippable (verified: the toolchain's service target
+  replaces addopts wholesale, silently disabling every lease, group, and
+  admission on exactly the tier they protect). The plugin now loads through
+  its pytest11 entry point, the addopts channel is removed, and a guard test
+  drives the same override shape and proves a plugin-only fixture still
+  resolves. The plan's earlier wiring row is corrected by this entry: the
+  addopts wiring it recorded was insufficient.
+- Held reservations decayed at the reservation TTL (five minutes) inside a
+  forty-minute suite, silently degrading the default-safe property to
+  bind-probe behaviour mid-run; the process-lifetime claim in the amended
+  decision record was false for most of a run. Held markers are now
+  heartbeated by a daemon refresher well inside the TTL, with a test that
+  genuinely ages a marker past the TTL and proves one refresh pass restores
+  LIVE. This supersedes the narrow leased-port-only scope of the earlier
+  TTL finding: the free-port path was the one the safety claim rested on.
+- The throughput layer had no operator entry point: nothing in the tree
+  invoked distribution, so xdist was an admitted dependency with zero
+  callers. A parallel toolchain lane now runs the unit gate under
+  declaration-derived distribution; the wall-clock delta against the serial
+  baseline is deliberately NOT recorded yet - the box is saturated (sampled
+  load 100 percent, 250+ interpreters) and any figure taken now is noise.
+  Owed when the machine is quiet.
+- The capacity estimator double-discounted peers (the load sample already
+  contains their consumption, then the budget was divided again), flooring
+  the budget at one exactly when degradation mattered. Fair-share and
+  sampled-free-cores are now independent limits composed by minimum, and an
+  explicit operator budget skips the sample entirely.
+- Lease acquisition in the autouse fixture was unbounded while the item
+  clock kills through the thread method on Windows (no report). Acquisition
+  now shares one deadline bounded a margin under the item's timeout, so
+  contention fails loudly with the live holder named.
+- The shared-lease path unlinked an existing marker on O_EXCL collision
+  under an unverifiable "leftover" assumption that could destroy a live
+  sibling hold. Shared markers are now unique per acquisition (pid plus
+  sequence), making the collision structurally impossible; a reused-pid
+  leftover is retired by ordinary dual-signal liveness.
+- The bindable-port proof reserved in an isolated home while binding the
+  real loopback; it now reserves in the real machine-global home it binds
+  against. The cross-process proof asserts the reservation path actually
+  ran (in-band ports) so it cannot pass through the ephemeral fallback. The
+  scheduling-evidence prose now attributes worker placement to the
+  scheduler and non-overlap to both layers jointly.
+- Correction to the earlier double-reclaim finding's scale: the
+  window is the stale-judgment-to-create span, which includes a real bind
+  probe (roughly a quarter to half a second), not sub-millisecond as first
+  stated. Still narrow, still requiring a genuinely stale marker, still
+  covered by the bind probe and fell-and-retry; disposition unchanged.
+
+Out of scope, flagged to the desktop-profile owner: a typing cleanup on main
+removed the config-home None short-circuit the desktop contract relied on;
+two desktop-profile provider tests fail in isolation asserting a value the
+narrowed signature forbids. Traced, not fixed here.
 
 ## Recommendations
 

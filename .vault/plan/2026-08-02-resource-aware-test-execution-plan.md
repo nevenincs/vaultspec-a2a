@@ -4,7 +4,7 @@ tags:
   - '#resource-aware-test-execution'
 date: '2026-08-02'
 modified: '2026-08-02'
-body_hash: 'sha256:a3851c844c35fdb09621f8215179f13e775a01580d52f8afa110947b995d5f62'
+body_hash: 'sha256:8df5e4bece65c77948cd86756fa7a2aab735fb112fcbbe632dfa4e974af4a8c2'
 tier: L1
 related:
   - '[[2026-07-15-dev-process-registry-adr]]'
@@ -49,6 +49,11 @@ resolution, closing the audited harness-registry gap.
 - [x] `S14` - Move reservation-backed allocation inside the shared spawning primitives with candidate fallback; `src/vaultspec_a2a/tests/gateway_boot.py`.
 - [x] `S15` - Register every pytest session machine-globally and derive distributed worker counts from observed capacity; `src/vaultspec_a2a/testing/sessions.py`.
 - [x] `S16` - Prove cross-run exclusion for undeclared tests and degraded admission of a concurrent session; `src/vaultspec_a2a/testing/tests/`.
+- [x] `S17` - Load the plugin through its pytest11 entry point and guard against addopts stripping; `pyproject.toml`.
+- [x] `S18` - Heartbeat held reservations so process-lifetime holds outlive the reservation TTL; `src/vaultspec_a2a/tests/gateway_boot.py`.
+- [x] `S19` - Compose capacity limits by minimum, bound lease waits under the item clock, and make shared markers unique per acquisition; `src/vaultspec_a2a/testing/`.
+- [x] `S20` - Tighten the proofs against fallback passes and isolated-home binds; `src/vaultspec_a2a/testing/tests/`.
+- [x] `S21` - Add the parallel toolchain lane for declaration-derived distribution; `dev/toolchain.py`.
 
 ## Parallelization
 

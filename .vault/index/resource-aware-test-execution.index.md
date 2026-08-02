@@ -6,7 +6,7 @@ tags:
 date: '2026-08-02'
 modified: '2026-08-02'
 body_schema: 'body-v1'
-body_hash: 'sha256:ce05bde80fab0c7c1878943b5baef85babf5a40a4bb715f81fda75ada4846b12'
+body_hash: 'sha256:12732758abbb7d81224140d68a45c92ce8ae1df99494e2edb10409c6c16b641e'
 related:
   - '[[2026-08-02-resource-aware-test-execution-S01]]'
   - '[[2026-08-02-resource-aware-test-execution-S02]]'
@@ -24,6 +24,11 @@ related:
   - '[[2026-08-02-resource-aware-test-execution-S14]]'
   - '[[2026-08-02-resource-aware-test-execution-S15]]'
   - '[[2026-08-02-resource-aware-test-execution-S16]]'
+  - '[[2026-08-02-resource-aware-test-execution-S17]]'
+  - '[[2026-08-02-resource-aware-test-execution-S18]]'
+  - '[[2026-08-02-resource-aware-test-execution-S19]]'
+  - '[[2026-08-02-resource-aware-test-execution-S20]]'
+  - '[[2026-08-02-resource-aware-test-execution-S21]]'
   - '[[2026-08-02-resource-aware-test-execution-adr]]'
   - '[[2026-08-02-resource-aware-test-execution-audit]]'
   - '[[2026-08-02-resource-aware-test-execution-plan]]'
@@ -61,6 +66,11 @@ Auto-generated index of all documents tagged with `#resource-aware-test-executio
 - `2026-08-02-resource-aware-test-execution-S14` - Move reservation-backed allocation inside the shared spawning primitives with candidate fallback
 - `2026-08-02-resource-aware-test-execution-S15` - Register every pytest session machine-globally and derive distributed worker counts from observed capacity
 - `2026-08-02-resource-aware-test-execution-S16` - Prove cross-run exclusion for undeclared tests and degraded admission of a concurrent session
+- `2026-08-02-resource-aware-test-execution-S17` - Load the plugin through its pytest11 entry point and guard against addopts stripping
+- `2026-08-02-resource-aware-test-execution-S18` - Heartbeat held reservations so process-lifetime holds outlive the reservation TTL
+- `2026-08-02-resource-aware-test-execution-S19` - Compose capacity limits by minimum, bound lease waits under the item clock, and make shared markers unique per acquisition
+- `2026-08-02-resource-aware-test-execution-S20` - Tighten the proofs against fallback passes and isolated-home binds
+- `2026-08-02-resource-aware-test-execution-S21` - Add the parallel toolchain lane for declaration-derived distribution
 
 ### plan
 

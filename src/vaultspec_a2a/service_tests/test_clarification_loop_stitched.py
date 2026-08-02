@@ -64,16 +64,19 @@ import json
 import time
 import uuid
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 import httpx
 import pytest
+from pydantic import TypeAdapter, ValidationError
 
 from ..acceptance import certified_gateway
 from ..authoring.discovery import SERVICE_JSON_ENV, resolve_engine_with_retry
 from ..team.team_config import load_team_config
 
 if TYPE_CHECKING:
+    from collections.abc import Iterable
+
     from ..acceptance import CertifiedGateway
 
 # The preset that declares a questionnaire. Its questions are read from the
@@ -111,6 +114,67 @@ _WORKER_READY_BUDGET_SECONDS = "120"
 
 _PARK_BUDGET = 180.0
 _RESUME_BUDGET = 300.0
+_JSON_OBJECT = TypeAdapter(dict[str, object])
+_JSON_OBJECT_LIST = TypeAdapter(list[dict[str, object]])
+_TEXT_LIST = TypeAdapter(list[str])
+
+
+def _json_object(value: object, *, at: str) -> dict[str, object]:
+    """Narrow one real wire value to an object, or fail at that boundary."""
+    try:
+        return _JSON_OBJECT.validate_python(value)
+    except ValidationError as exc:
+        raise TypeError(f"expected an object at {at}: {exc}") from exc
+
+
+def _json_object_list(value: object, *, at: str) -> list[dict[str, object]]:
+    """Narrow one real wire value to an object list, or fail at that boundary."""
+    try:
+        return _JSON_OBJECT_LIST.validate_python(value)
+    except ValidationError as exc:
+        raise TypeError(f"expected an object list at {at}: {exc}") from exc
+
+
+def _response_object(response: httpx.Response, *, at: str) -> dict[str, object]:
+    """Decode an HTTP response before its contract fields are inspected."""
+    decoded: object = response.json()
+    return _json_object(decoded, at=at)
+
+
+def _required_object(
+    body: dict[str, object], field: str, *, at: str
+) -> dict[str, object]:
+    """Read a required object field from a certified wire response."""
+    if field not in body:
+        raise AssertionError(f"{at} did not contain required field {field!r}")
+    return _json_object(body[field], at=f"{at}.{field}")
+
+
+def _required_text(body: dict[str, object], field: str, *, at: str) -> str:
+    """Read a required text field from a certified wire response."""
+    value = body.get(field)
+    if not isinstance(value, str):
+        raise AssertionError(f"{at}.{field} was not text: {value!r}")
+    return value
+
+
+def _required_bool(body: dict[str, object], field: str, *, at: str) -> bool:
+    """Read a required boolean field from a certified wire response."""
+    value = body.get(field)
+    if not isinstance(value, bool):
+        raise AssertionError(f"{at}.{field} was not boolean: {value!r}")
+    return value
+
+
+def _optional_text_list(body: dict[str, object], field: str, *, at: str) -> list[str]:
+    """Read an optional list of text values without accepting malformed options."""
+    value = body.get(field)
+    if value is None:
+        return []
+    try:
+        return _TEXT_LIST.validate_python(value, strict=True)
+    except ValidationError as exc:
+        raise AssertionError(f"{at}.{field} was not a text list: {value!r}") from exc
 
 
 # ---------------------------------------------------------------------------
@@ -145,7 +209,7 @@ def _require_substrates() -> None:
 # ---------------------------------------------------------------------------
 
 
-def _declared_questions() -> list[dict[str, Any]]:
+def _declared_questions() -> list[dict[str, object]]:
     """The preset's own questions, through the production loader.
 
     Read rather than restated so a preset edit moves this expectation with it.
@@ -158,7 +222,10 @@ def _declared_questions() -> list[dict[str, Any]]:
             f"preset {_CLARIFY_PRESET!r} declares no questionnaire; this loop has "
             "nothing to certify"
         )
-    return [q.model_dump(mode="json") for q in team.clarification.questions]
+    return _json_object_list(
+        [q.model_dump(mode="json") for q in team.clarification.questions],
+        at="declared clarification questions",
+    )
 
 
 def _required_roles() -> list[str]:
@@ -170,14 +237,16 @@ def _required_roles() -> list[str]:
 # ---------------------------------------------------------------------------
 
 
-def _await_parked(gateway: CertifiedGateway, run_id: str, *, budget: float) -> dict:
+def _await_parked(
+    gateway: CertifiedGateway, run_id: str, *, budget: float
+) -> dict[str, object]:
     """Poll the authoritative snapshot until a questionnaire is disclosed."""
     deadline = time.monotonic() + budget
-    last: dict = {}
+    last: dict[str, object] = {}
     while time.monotonic() < deadline:
         response = gateway.status(run_id)
         if response.status_code == 200:
-            last = response.json()
+            last = _response_object(response, at="run-status while awaiting park")
             if last.get("pending_clarification"):
                 return last
             if last.get("status") in {"failed", "cancelled", "error"}:
@@ -204,14 +273,19 @@ def _transcript_tail(gateway: CertifiedGateway, run_id: str, *, keep: int = 4) -
         history = gateway.thread_state(run_id)
         if history.status_code != 200:
             return f"<history unavailable: HTTP {history.status_code}>"
-        messages = history.json().get("state", {}).get("messages", [])
+        history_body = _response_object(history, at="thread history transcript")
+        state = _required_object(history_body, "state", at="thread history transcript")
+        messages = _json_object_list(
+            state.get("messages"), at="thread history messages"
+        )
     except (httpx.HTTPError, ValueError, KeyError, TypeError) as exc:
         return f"<history unreadable: {type(exc).__name__}>"
     if not messages:
         return "<no turns recorded - the graph produced nothing>"
     return " | ".join(
-        f"{m.get('agent_id') or m.get('role')}: {str(m.get('content'))[:160]}"
-        for m in messages[-keep:]
+        f"{message.get('agent_id') or message.get('role')}: "
+        f"{str(message.get('content'))[:160]}"
+        for message in messages[-keep:]
     )
 
 
@@ -228,7 +302,13 @@ def _has_synthesis_turn(gateway: CertifiedGateway, run_id: str) -> bool:
         history = gateway.thread_state(run_id)
         if history.status_code != 200:
             return False
-        messages = history.json().get("state", {}).get("messages", [])
+        history_body = _response_object(history, at="thread history synthesis check")
+        state = _required_object(
+            history_body, "state", at="thread history synthesis check"
+        )
+        messages = _json_object_list(
+            state.get("messages"), at="thread history messages"
+        )
     except (httpx.HTTPError, ValueError, KeyError, TypeError):
         return False
     return any(
@@ -240,7 +320,7 @@ def _has_synthesis_turn(gateway: CertifiedGateway, run_id: str) -> bool:
 
 def _await_resumed_past_fan_out(
     gateway: CertifiedGateway, run_id: str, *, budget: float
-) -> dict:
+) -> dict[str, object]:
     """Poll until the run has genuinely left the questionnaire and done work.
 
     This is the assertion a 200 cannot make. Clearing the pending question is
@@ -258,21 +338,24 @@ def _await_resumed_past_fan_out(
     The narrower claim is the true one.
     """
     deadline = time.monotonic() + budget
-    last: dict = {}
+    last: dict[str, object] = {}
     while time.monotonic() < deadline:
         response = gateway.status(run_id)
         if response.status_code == 200:
-            last = response.json()
+            last = _response_object(response, at="run-status while awaiting resume")
             if not last.get("pending_clarification") and _has_synthesis_turn(
                 gateway, run_id
             ):
                 return last
             if last.get("status") in {"failed", "cancelled", "error"}:
+                topology = _required_object(
+                    last, "topology", at="failed run-status after clarification answer"
+                )
                 raise AssertionError(
                     f"run {run_id} settled {last.get('status')!r} after the answer "
                     f"instead of advancing.\n"
                     f"semantic_phase={last.get('semantic_phase')!r} "
-                    f"pause_cause={last.get('topology', {}).get('pause_cause')!r} "
+                    f"pause_cause={topology.get('pause_cause')!r} "
                     f"degraded={last.get('degraded_reasons')}\n"
                     f"transcript tail: {_transcript_tail(gateway, run_id)}"
                 )
@@ -284,7 +367,9 @@ def _await_resumed_past_fan_out(
     )
 
 
-def _read_frame(lines: Any, *, wanted: str, deadline: float) -> dict:
+def _read_frame(
+    lines: Iterable[str], *, wanted: str, deadline: float
+) -> dict[str, object]:
     """Return the first SSE frame whose ``type`` matches, or raise at *deadline*.
 
     The failure message is deliberately specific about what has ALREADY been
@@ -302,7 +387,8 @@ def _read_frame(lines: Any, *, wanted: str, deadline: float) -> dict:
             buffer.append(line.removeprefix("data: "))
             continue
         if line == "" and buffer:
-            payload = json.loads("".join(buffer))
+            decoded: object = json.loads("".join(buffer))
+            payload = _json_object(decoded, at="clarification SSE frame")
             buffer = []
             kind = str(payload.get("type") or payload.get("event_type") or "<untyped>")
             if kind not in seen:
@@ -381,12 +467,29 @@ def test_clarification_loop_parks_discloses_answers_and_resumes(
             # Ordering it ahead of the frame is what makes a later frame failure
             # diagnostic: it can no longer mean "the run never parked".
             parked = _await_parked(gateway, run_id, budget=_PARK_BUDGET)
-            pending = parked["pending_clarification"]
-            request_id = pending["request_id"]
+            pending = _required_object(
+                parked, "pending_clarification", at="parked run-status"
+            )
+            request_id = _required_text(
+                pending, "request_id", at="parked pending clarification"
+            )
 
-            assert pending["type"] == "clarification_request"
-            assert pending["questions"] == expected_questions
-            assert parked["topology"]["pause_cause"] == "clarification_request"
+            assert (
+                _required_text(pending, "type", at="parked pending clarification")
+                == "clarification_request"
+            )
+            assert (
+                _json_object_list(
+                    pending.get("questions"),
+                    at="parked pending clarification.questions",
+                )
+                == expected_questions
+            )
+            topology = _required_object(parked, "topology", at="parked run-status")
+            assert (
+                _required_text(topology, "pause_cause", at="parked topology")
+                == "clarification_request"
+            )
 
             # (3) Only now the relay. This assertion deliberately carries LESS
             # weight than the one above: the progress channel is droppable by
@@ -404,27 +507,36 @@ def test_clarification_loop_parks_discloses_answers_and_resumes(
         assert frame["request_id"] == request_id
         raw_frame = json.dumps(frame)
         for question in expected_questions:
-            assert question["prompt"] not in raw_frame
-            for option in question.get("options") or []:
+            assert (
+                _required_text(question, "prompt", at="declared question")
+                not in raw_frame
+            )
+            for option in _optional_text_list(
+                question, "options", at="declared question"
+            ):
                 assert option not in raw_frame
 
         # (4) Answer over real loopback HTTP, keyed by question id.
-        answers = {
-            question["id"]: (
-                (question["options"] or [""])[0]
-                if question["kind"] == "choice"
-                else "no additional constraints"
-            )
-            for question in expected_questions
-            if question["required"] or question["kind"] == "choice"
-        }
+        answers: dict[str, str] = {}
+        for question in expected_questions:
+            question_id = _required_text(question, "id", at="declared question")
+            kind = _required_text(question, "kind", at="declared question")
+            required = _required_bool(question, "required", at="declared question")
+            options = _optional_text_list(question, "options", at="declared question")
+            if kind == "choice":
+                answers[question_id] = options[0] if options else ""
+            elif required:
+                answers[question_id] = "no additional constraints"
         with gateway.client(timeout=60.0) as client:
             answered = client.post(
                 f"/v1/runs/{run_id}/clarifications/{request_id}/respond",
                 json={"answers": answers},
             )
         assert answered.status_code == 200, answered.text
-        assert answered.json()["accepted"] is True
+        assert (
+            _response_object(answered, at="clarification response").get("accepted")
+            is True
+        )
 
         # (5) The resume really reached the graph: the questionnaire is gone AND
         # the run produced the synthesis turn, which exists only after the
@@ -432,7 +544,7 @@ def test_clarification_loop_parks_discloses_answers_and_resumes(
         advanced = _await_resumed_past_fan_out(gateway, run_id, budget=_RESUME_BUDGET)
         answered_transcript = _transcript_tail(gateway, run_id, keep=8)
 
-    assert advanced["pending_clarification"] is None
+    assert advanced.get("pending_clarification") is None
     # The evidence is the work itself, not a status code: a resume that never
     # reached the graph produces no synthesis turn however cleanly it was
     # accepted. What happens to that document afterwards - whether the engine
@@ -463,7 +575,12 @@ def test_answering_a_question_the_run_is_not_parked_on_is_refused(
         assert started.status_code == 201, started.text
 
         parked = _await_parked(gateway, run_id, budget=_PARK_BUDGET)
-        real_request_id = parked["pending_clarification"]["request_id"]
+        pending = _required_object(
+            parked, "pending_clarification", at="parked run-status"
+        )
+        real_request_id = _required_text(
+            pending, "request_id", at="parked pending clarification"
+        )
 
         with gateway.client(timeout=60.0) as client:
             refused = client.post(
@@ -472,6 +589,16 @@ def test_answering_a_question_the_run_is_not_parked_on_is_refused(
             )
         assert refused.status_code == 404, refused.text
 
-        still_parked = gateway.status(run_id).json()
+        still_parked = _response_object(
+            gateway.status(run_id), at="run-status after refused answer"
+        )
 
-    assert still_parked["pending_clarification"]["request_id"] == real_request_id
+    still_pending = _required_object(
+        still_parked, "pending_clarification", at="run-status after refused answer"
+    )
+    assert (
+        _required_text(
+            still_pending, "request_id", at="still-parked pending clarification"
+        )
+        == real_request_id
+    )

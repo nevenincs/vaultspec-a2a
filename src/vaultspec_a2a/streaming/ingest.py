@@ -38,7 +38,7 @@ logger = logging.getLogger(__name__)
 class IngestStallTimeoutError(TimeoutError):
     """Raised when ``astream_events`` produces no new event within the stall budget.
 
-    S37: a run whose graph genuinely wedges mid-turn (observed live: the
+    A run whose graph genuinely wedges mid-turn (observed live: the
     ground/clarification interrupt path, cause still under investigation)
     previously hung the ingest coroutine forever — no exception, no log line,
     no checkpoint, the thread stuck ``running`` indefinitely with nothing to
@@ -134,7 +134,7 @@ class IngestManager:
         # Per-thread fan-out tasks
         self._fanout_tasks: dict[str, asyncio.Task[None]] = {}
         # The capped, single-line reason the most recent FAILED ingest for a
-        # thread ended with (S37 / failure-reason persistence). Populated
+        # thread ended with. Populated
         # alongside every FAILED outcome branch in ``ingest()``; the caller
         # (Executor._settle_run) consumes it via ``take_failure_reason`` right
         # after reading the outcome string, so it never outlives the run it
@@ -235,7 +235,7 @@ class IngestManager:
             try:
                 # Bounded manual iteration, not `async for`: a plain `async for`
                 # trusts astream_events to eventually yield, raise, or exhaust on
-                # its own. S37 observed a real run wedge silently inside this
+                # its own. A real run was observed wedging silently inside this
                 # exact loop — no event, no exception, no log line, forever — with
                 # LangGraph's own per-step `step_timeout` never firing to save it.
                 # Wrapping each `__anext__()` in `wait_for` makes "no progress for

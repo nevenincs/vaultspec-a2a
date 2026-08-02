@@ -14,11 +14,21 @@ import os
 import subprocess
 import sys
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+import pytest
 
 from ..conftest import EXTERNAL_PREREQUISITES
 
+if TYPE_CHECKING:
+    from collections.abc import Mapping
+
 REPO_ROOT = Path(__file__).resolve().parents[3]
 _LOST_ACK = "src/vaultspec_a2a/service_tests/test_engine_broker_lost_ack_live.py"
+_LIVE_PROVIDER_TESTS = (
+    _LOST_ACK,
+    "src/vaultspec_a2a/service_tests/test_dashboard_provider_catalog_live.py",
+)
 _QUIET_INI = "addopts=-ra --capture=sys"
 
 # pytest's exit code for a command-line usage error.
@@ -26,10 +36,14 @@ _USAGE_ERROR = 4
 
 
 def _pytest(
-    *args: str, without: tuple[str, ...] = ()
+    *args: str,
+    without: tuple[str, ...] = (),
+    with_env: Mapping[str, str] | None = None,
 ) -> subprocess.CompletedProcess[str]:
     """Run a real nested pytest, optionally with env vars stripped."""
     env = {k: v for k, v in os.environ.items() if k not in without}
+    if with_env is not None:
+        env.update(with_env)
     return subprocess.run(
         [sys.executable, "-m", "pytest", *args],
         cwd=REPO_ROOT,
@@ -100,6 +114,82 @@ def test_absent_cross_repo_engine_skips_instead_of_failing() -> None:
     assert result.returncode == 0, combined
     assert "1 skipped" in combined, combined
     assert "VAULTSPEC_ENGINE_SERVE_CMD" in combined, combined
+
+
+def test_live_provider_proofs_deselect_until_every_resource_is_declared() -> None:
+    """An unapproved real-provider turn never becomes a passing pytest skip."""
+    result = _pytest(
+        "--override-ini",
+        _QUIET_INI,
+        "-m",
+        "service",
+        "--collect-only",
+        "-q",
+        *_LIVE_PROVIDER_TESTS,
+        without=(
+            "VAULTSPEC_ENGINE_SERVE_CMD",
+            "VAULTSPEC_LIVE_PROVIDER_ID",
+            "VAULTSPEC_LIVE_EXECUTION_MODE",
+            "VAULTSPEC_LIVE_ENTRY_ID",
+            "VAULTSPEC_LIVE_CONTROL_ID",
+            "VAULTSPEC_LIVE_OPTION_ID",
+        ),
+    )
+    combined = result.stdout + result.stderr
+    assert result.returncode == pytest.ExitCode.NO_TESTS_COLLECTED, combined
+    assert "2 deselected" in combined, combined
+    assert "skipped" not in combined.casefold(), combined
+
+
+def test_declared_live_provider_selector_fails_before_collection_when_unset() -> None:
+    """A certification claim with no selector is a collection error, never a skip."""
+    result = _pytest(
+        "--require-prerequisite=provider-catalog-live-selection",
+        "--collect-only",
+        "-q",
+        _LIVE_PROVIDER_TESTS[1],
+        without=(
+            "VAULTSPEC_LIVE_PROVIDER_ID",
+            "VAULTSPEC_LIVE_EXECUTION_MODE",
+            "VAULTSPEC_LIVE_ENTRY_ID",
+            "VAULTSPEC_LIVE_CONTROL_ID",
+            "VAULTSPEC_LIVE_OPTION_ID",
+        ),
+    )
+    combined = result.stdout + result.stderr
+    assert result.returncode == _USAGE_ERROR, combined
+    assert "provider-catalog-live-selection" in combined, combined
+    assert "VAULTSPEC_LIVE_OPTION_ID" in combined, combined
+
+
+def test_live_provider_proofs_collect_only_after_all_resources_are_declared() -> None:
+    """Collection requires explicit authorization, before either process can start."""
+    required_env = {
+        "VAULTSPEC_ENGINE_SERVE_CMD": sys.executable,
+        "VAULTSPEC_LIVE_PROVIDER_ID": "collection-authorized",
+        "VAULTSPEC_LIVE_EXECUTION_MODE": "collection-authorized",
+        "VAULTSPEC_LIVE_ENTRY_ID": "collection-authorized",
+        "VAULTSPEC_LIVE_CONTROL_ID": "collection-authorized",
+        "VAULTSPEC_LIVE_OPTION_ID": "collection-authorized",
+    }
+    result = _pytest(
+        "--override-ini",
+        _QUIET_INI,
+        "-m",
+        "service",
+        "--require-prerequisite=dashboard-engine",
+        "--require-prerequisite=provider-catalog-live-selection",
+        "--collect-only",
+        "-q",
+        *_LIVE_PROVIDER_TESTS,
+        with_env=required_env,
+    )
+    combined = result.stdout + result.stderr
+    assert result.returncode == 0, combined
+    assert "test_production_engine_recovers_lost_run_start_ack_exactly_once" in combined
+    assert "test_dashboard_catalog_selection_completes_and_replays" in combined
+    assert "deselected" not in combined.casefold(), combined
+    assert "skipped" not in combined.casefold(), combined
 
 
 def test_a_gate_that_skips_despite_its_declaration_fails_the_session(

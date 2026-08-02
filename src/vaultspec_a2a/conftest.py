@@ -15,6 +15,11 @@ from typing import TYPE_CHECKING, NoReturn
 
 import pytest
 
+from .service_tests._provider_catalog_live import (
+    LIVE_PROVIDER_CATALOG_SELECTION_ENVIRON,
+    live_provider_catalog_selector_is_configured,
+)
+
 if TYPE_CHECKING:
     from collections.abc import Callable
 
@@ -56,6 +61,7 @@ os.environ.setdefault("OTEL_EXPORTER_OTLP_ENDPOINT", "http://198.51.100.1:4317")
 # when prerequisites are unavailable" — true without any per-suite restatement.
 
 DECLARE_OPTION = "--require-prerequisite"
+_COLLECTION_PREREQUISITES_MARK = "requires_prerequisites"
 
 
 class ExternalPrerequisite:
@@ -150,6 +156,17 @@ EXTERNAL_PREREQUISITES: tuple[ExternalPrerequisite, ...] = (
             "--port {port} --workspace {workspace}` template"
         ),
         probe=_env_set("VAULTSPEC_ENGINE_SERVE_CMD"),
+    ),
+    ExternalPrerequisite(
+        "provider-catalog-live-selection",
+        what="an explicitly opted-in current provider catalog selection",
+        supply=(
+            "choose a low-cost native option from the current served catalog, then "
+            "export "
+            + ", ".join(LIVE_PROVIDER_CATALOG_SELECTION_ENVIRON)
+            + " as its opaque provider/lane/entry/control/option identifiers"
+        ),
+        probe=live_provider_catalog_selector_is_configured,
     ),
     ExternalPrerequisite(
         "loopback-stack",
@@ -300,6 +317,11 @@ def pytest_addoption(parser: pytest.Parser) -> None:
 def pytest_configure(config: pytest.Config) -> None:
     """Abort before collection when a declared prerequisite is not real."""
     global _declared
+    config.addinivalue_line(
+        "markers",
+        "requires_prerequisites(*ids): deselects a billable live proof unless "
+        "the caller explicitly declares every listed external prerequisite.",
+    )
     _declared = frozenset(config.getoption("required_prerequisites") or [])
     unknown = sorted(_declared - _BY_ID.keys())
     if unknown:
@@ -318,6 +340,51 @@ def pytest_configure(config: pytest.Config) -> None:
             f"{DECLARE_OPTION} declares prerequisites this host does not have: "
             f"{', '.join(absent)}. {details}"
         )
+
+
+def _collection_prerequisites(item: pytest.Item) -> frozenset[str]:
+    """Return the explicitly declared resources a test must be authorized to use."""
+    required: set[str] = set()
+    for marker in item.iter_markers(name=_COLLECTION_PREREQUISITES_MARK):
+        for value in marker.args:
+            if not isinstance(value, str) or not value:
+                raise pytest.UsageError(
+                    f"{_COLLECTION_PREREQUISITES_MARK} on {item.nodeid} requires "
+                    "non-empty prerequisite ids"
+                )
+            if value not in _BY_ID:
+                raise pytest.UsageError(
+                    f"{_COLLECTION_PREREQUISITES_MARK} on {item.nodeid} names "
+                    f"unknown prerequisite {value!r}"
+                )
+            required.add(value)
+    return frozenset(required)
+
+
+def pytest_collection_modifyitems(
+    config: pytest.Config, items: list[pytest.Item]
+) -> None:
+    """Deselect opt-in live proofs until callers explicitly authorize every resource.
+
+    A configured live provider turn can spend a real credential.  It is
+    therefore neither a skip nor an implicit service test: normal collection
+    deselects it unless the caller declares every marked prerequisite.
+    ``pytest_configure`` then
+    refuses that explicit request before collection if a declared resource is
+    actually absent.
+    """
+    declared = declared_prerequisites()
+    selected: list[pytest.Item] = []
+    deselected: list[pytest.Item] = []
+    for item in items:
+        required = _collection_prerequisites(item)
+        if required and not required.issubset(declared):
+            deselected.append(item)
+        else:
+            selected.append(item)
+    if deselected:
+        config.hook.pytest_deselected(items=deselected)
+        items[:] = selected
 
 
 def pytest_runtest_logreport(report: pytest.TestReport) -> None:

@@ -32,6 +32,7 @@ from importlib.resources import files
 from typing import TYPE_CHECKING, override
 
 import httpx
+import pytest
 from pydantic import TypeAdapter, ValidationError
 
 from ..desktop.profile import derive_state_paths
@@ -42,12 +43,14 @@ from ..service_tests._live_desktop_gateway import (
 )
 from ..tests.gateway_boot import free_port
 from ..utils.process import ProcessContainment
+from ._provider_catalog_live import (
+    LIVE_PROVIDER_PREREQUISITES,
+    selection_from_served_catalog,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Generator
     from pathlib import Path
-
-    from ..conftest import ExternalPrerequisiteRule
 
 _RUN_ID = "run-cross-repo-lost-ack"
 _ENGINE_COMMAND_ENV = "VAULTSPEC_ENGINE_SERVE_CMD"
@@ -240,16 +243,7 @@ def _provision_workspace(workspace: Path) -> None:
         .read_text(encoding="utf-8")
     )
     (teams / "vaultspec-solo-coder.toml").write_text(
-        bundled_solo
-        + """
-
-[team.profiles.codex]
-display_name = "Codex live certification"
-description = "Route the production solo coder through the authenticated Codex lane."
-
-[team.profiles.codex.roles.vaultspec-coder]
-provider = "codex"
-""",
+        bundled_solo,
         encoding="utf-8",
     )
     git = shutil.which("git")
@@ -445,12 +439,11 @@ def _await_exactly_one_worker_dispatch(app_home: Path) -> None:
     assert dispatch_count == 1, observed_tail
 
 
+@pytest.mark.requires_prerequisites(*LIVE_PROVIDER_PREREQUISITES)
 def test_production_engine_recovers_lost_run_start_ack_exactly_once(
     tmp_path: Path,
-    external_prerequisite: ExternalPrerequisiteRule,
 ) -> None:
     """One accepted start survives response loss without duplicate dispatch."""
-    external_prerequisite("dashboard-engine")
     workspace = tmp_path / "dashboard-workspace"
     _provision_workspace(workspace)
     app_home = tmp_path / "app-home"
@@ -513,13 +506,29 @@ def test_production_engine_recovers_lost_run_start_ack_exactly_once(
                 )
                 session.raise_for_status()
                 scope = session.json()["data"]["active_scope"]
+                catalog_response = httpx.post(
+                    f"{engine_base}/ops/a2a/provider-catalog",
+                    headers={"Authorization": f"Bearer {token}"},
+                    json={"expected_scope": scope},
+                    timeout=30,
+                )
+                assert catalog_response.status_code == HTTPStatus.OK, (
+                    catalog_response.text
+                )
+                catalog_body = _json_object(
+                    catalog_response.content, source="engine provider-catalog response"
+                )
+                catalog_data = _optional_json_object(catalog_body.get("data"))
+                assert catalog_data is not None, catalog_body
+                catalog_envelope = catalog_data.get("envelope")
+                selection = selection_from_served_catalog(catalog_envelope)
                 started = httpx.post(
                     f"{engine_base}/ops/a2a/run-start",
                     headers={"Authorization": f"Bearer {token}"},
                     json={
                         "run_id": _RUN_ID,
                         "team_preset": "vaultspec-solo-coder",
-                        "profile_id": "codex",
+                        "selection": selection.model_dump(mode="json"),
                         "message": "Prove one durable dispatch after a lost ack.",
                         "expected_scope": scope,
                         "feature_tag": "cross-repo-lost-ack",

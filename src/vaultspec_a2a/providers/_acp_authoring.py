@@ -34,7 +34,7 @@ from __future__ import annotations
 import json
 import os
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, override
 from urllib.parse import urlparse
 
 from ..authoring import ACTOR_TOKEN_HEADER, BEARER_HEADER
@@ -69,6 +69,7 @@ if TYPE_CHECKING:
     from langchain_core.language_models import BaseChatModel
 
     from ..authoring import CatalogSnapshot
+    from ._json_contract import JsonObject, JsonValue
 
 __all__ = [
     "AUTHORING_MCP_SERVER_NAME",
@@ -114,6 +115,65 @@ def is_write_tool_name(name: str) -> bool:
     """Return True if ``name`` looks like a raw filesystem-write tool."""
     lowered = name.casefold()
     return any(marker in lowered for marker in _WRITE_TOOL_MARKERS)
+
+
+def _string_field(spec: JsonObject, field: str) -> str:
+    """Read one required non-empty string from a protocol object."""
+    value = spec.get(field)
+    if not isinstance(value, str) or not value:
+        raise ConfigError(
+            f"authoring bridge spec field {field!r} must be a non-empty string"
+        )
+    return value
+
+
+def _string_list(spec: JsonObject, field: str) -> list[str]:
+    """Read one required list of strings from a protocol object."""
+    value = spec.get(field)
+    if not isinstance(value, list):
+        raise ConfigError(
+            f"authoring bridge spec field {field!r} must be a string list"
+        )
+    strings: list[str] = []
+    for item in value:
+        if not isinstance(item, str):
+            raise ConfigError(
+                f"authoring bridge spec field {field!r} must be a string list"
+            )
+        strings.append(item)
+    return strings
+
+
+def _json_string_list(values: Sequence[str]) -> list[JsonValue]:
+    """Materialise strings in the invariant recursive JSON list representation."""
+    result: list[JsonValue] = []
+    result.extend(values)
+    return result
+
+
+def _json_object_list(spec: JsonObject, field: str) -> list[JsonObject]:
+    """Read one required list of JSON objects from a protocol object."""
+    value = spec.get(field)
+    if not isinstance(value, list):
+        raise ConfigError(
+            f"authoring bridge spec field {field!r} must be an object list"
+        )
+    objects: list[JsonObject] = []
+    for item in value:
+        if not isinstance(item, dict):
+            raise ConfigError(
+                f"authoring bridge spec field {field!r} must be an object list"
+            )
+        objects.append(item)
+    return objects
+
+
+def _string_environment(spec: JsonObject, field: str) -> JsonObject:
+    """Turn name/value environment objects into a fresh JSON string object."""
+    environment: JsonObject = {}
+    for item in _json_object_list(spec, field):
+        environment[_string_field(item, "name")] = _string_field(item, "value")
+    return environment
 
 
 def _is_loopback(url: str) -> bool:
@@ -204,6 +264,7 @@ class AuthoringToolBinding:
         """The tool names surfaced to the agent, in catalog order."""
         return self.snapshot.tool_names()
 
+    @override
     def __repr__(self) -> str:
         """Redacted representation — never leaks tokens."""
         return (
@@ -227,7 +288,7 @@ def authoring_allowed_tool_names(binding: AuthoringToolBinding) -> list[str]:
 
 def build_authoring_mcp_servers(
     binding: AuthoringToolBinding,
-) -> list[dict[str, Any]]:
+) -> list[JsonObject]:
     """Build the ACP ``mcpServers`` list surfacing the bridged authoring tools.
 
     Returns a single HTTP MCP server entry (the shape the claude-agent-acp CLI
@@ -241,24 +302,24 @@ def build_authoring_mcp_servers(
             "HTTP authoring bridge requires server_url on the binding; this "
             "binding carries only the stdio transport"
         )
-    return [
-        {
-            "name": AUTHORING_MCP_SERVER_NAME,
-            "type": "http",
-            "url": binding.server_url,
-            "headers": [
-                {"name": BEARER_HEADER, "value": f"Bearer {binding.bearer_token}"},
-                {"name": ACTOR_TOKEN_HEADER, "value": binding.actor_token},
-            ],
-        }
+    headers: list[JsonValue] = [
+        {"name": BEARER_HEADER, "value": f"Bearer {binding.bearer_token}"},
+        {"name": ACTOR_TOKEN_HEADER, "value": binding.actor_token},
     ]
+    entry: JsonObject = {
+        "name": AUTHORING_MCP_SERVER_NAME,
+        "type": "http",
+        "url": binding.server_url,
+        "headers": headers,
+    }
+    return [entry]
 
 
 def build_authoring_stdio_mcp_servers(
     binding: AuthoringToolBinding,
     *,
     python_executable: str | None = None,
-) -> list[dict[str, Any]]:
+) -> list[JsonObject]:
     """Build the ACP ``mcpServers`` list that spawns the per-run stdio bridge.
 
     Returns a single stdio MCP server entry (the shape claude-agent-acp consumes
@@ -288,7 +349,7 @@ def build_authoring_stdio_mcp_servers(
     # launched command, never the args signature the admission key rides on.
     bridge_argv = module_command(AUTHORING_STDIO_MODULE)
     command = python_executable or bridge_argv[0]
-    env = [
+    env: list[JsonObject] = [
         {"name": STDIO_ENV_BASE_URL, "value": binding.engine_base_url},
         {"name": STDIO_ENV_BEARER, "value": binding.bearer_token},
         {"name": STDIO_ENV_ACTOR_TOKEN, "value": binding.actor_token},
@@ -309,17 +370,18 @@ def build_authoring_stdio_mcp_servers(
     debug_marker = os.environ.get(STDIO_ENV_DEBUG_MARKER)
     if debug_marker:
         env.append({"name": STDIO_ENV_DEBUG_MARKER, "value": debug_marker})
-    return [
-        {
-            "name": AUTHORING_MCP_SERVER_NAME,
-            "command": command,
-            "args": bridge_argv[1:],
-            "env": env,
-        }
-    ]
+    environment: list[JsonValue] = []
+    environment.extend(env)
+    entry: JsonObject = {
+        "name": AUTHORING_MCP_SERVER_NAME,
+        "command": command,
+        "args": _json_string_list(bridge_argv[1:]),
+        "env": environment,
+    }
+    return [entry]
 
 
-def codex_authoring_mcp_server_spec(binding: AuthoringToolBinding) -> dict[str, Any]:
+def codex_authoring_mcp_server_spec(binding: AuthoringToolBinding) -> JsonObject:
     """Build the Codex ``config.toml`` spec surfacing the bridged authoring tools.
 
     Codex has no ACP ``session/new`` MCP negotiation — ``codex app-server`` speaks
@@ -345,12 +407,13 @@ def codex_authoring_mcp_server_spec(binding: AuthoringToolBinding) -> dict[str, 
     binding-shape guard, not a live gap.
     """
     [entry] = build_authoring_stdio_mcp_servers(binding)
+    env = _string_environment(entry, "env")
     return {
         "name": entry["name"],
         "command": entry["command"],
-        "args": list(entry.get("args", ())),
-        "env": {item["name"]: item["value"] for item in entry.get("env", ())},
-        "tools": list(binding.tool_names),
+        "args": _json_string_list(_string_list(entry, "args")),
+        "env": env,
+        "tools": _json_string_list(binding.tool_names),
     }
 
 
@@ -427,8 +490,8 @@ def attach_authoring_tools(
 
 
 def config_home_authoring_entry(
-    mcp_servers: Sequence[dict[str, Any]],
-) -> tuple[dict[str, dict[str, Any]], dict[str, str]]:
+    mcp_servers: Sequence[JsonObject],
+) -> tuple[dict[str, JsonObject], dict[str, str]]:
     """Admit the run's authoring bridge into the isolated config home (S18).
 
     The isolated home surfaces user-global ``mcpServers`` to the model, and the
@@ -459,12 +522,13 @@ def config_home_authoring_entry(
     surfacing an unvetted server. Returns ``({}, {})`` when no bridge spec is
     present, so a non-bridged run is unaffected.
     """
-    home: dict[str, dict[str, Any]] = {}
+    home: dict[str, JsonObject] = {}
     spawn_env: dict[str, str] = {}
     for spec in mcp_servers:
         if spec.get("name") != AUTHORING_MCP_SERVER_NAME:
             continue
-        if not is_module_invocation(spec.get("args"), AUTHORING_STDIO_MODULE):
+        raw_args = spec.get("args")
+        if not isinstance(raw_args, list):
             raise ConfigError(
                 f"refusing to admit server {AUTHORING_MCP_SERVER_NAME!r} into the "
                 f"isolated config home: its shape is not the per-run stdio "
@@ -472,23 +536,34 @@ def config_home_authoring_entry(
                 f"{AUTHORING_STDIO_MODULE!r} as built by "
                 f"build_authoring_stdio_mcp_servers)"
             )
-        if not spec.get("command"):
+        args = _string_list(spec, "args")
+        if not is_module_invocation(args, AUTHORING_STDIO_MODULE):
+            raise ConfigError(
+                f"refusing to admit server {AUTHORING_MCP_SERVER_NAME!r} into the "
+                f"isolated config home: its shape is not the per-run stdio "
+                f"authoring bridge (args must be this runtime's invocation of "
+                f"{AUTHORING_STDIO_MODULE!r} as built by "
+                f"build_authoring_stdio_mcp_servers)"
+            )
+        command = spec.get("command")
+        if not isinstance(command, str) or not command:
             raise ConfigError(
                 f"authoring bridge spec {AUTHORING_MCP_SERVER_NAME!r} is missing a "
                 f"command; cannot admit it into the isolated config home"
             )
-        env_list = spec.get("env")
-        if not env_list:
+        raw_env = spec.get("env")
+        if not isinstance(raw_env, list) or not raw_env:
             raise ConfigError(
                 f"authoring bridge spec {AUTHORING_MCP_SERVER_NAME!r} carries no env; "
                 f"the bridge cannot reach the engine without its VAULTSPEC_AUTHORING_* "
                 f"variables"
             )
-        home_env: dict[str, str] = {}
+        env_list = _json_object_list(spec, "env")
+        home_env: JsonObject = {}
         for item in env_list:
-            var = item["name"]
+            var = _string_field(item, "name")
             home_env[var] = f"${{{var}}}"
-            spawn_env[var] = item["value"]
+            spawn_env[var] = _string_field(item, "value")
         # Pin the emitted command to THIS runtime's own invocation rather than
         # passing the spec's value through: the authority renders the trusted
         # executable (the worker's venv interpreter from source, the frozen
@@ -499,7 +574,7 @@ def config_home_authoring_entry(
         home[AUTHORING_MCP_SERVER_NAME] = {
             "type": "stdio",
             "command": emitted_argv[0],
-            "args": emitted_argv[1:],
+            "args": _json_string_list(emitted_argv[1:]),
             "env": home_env,
         }
     return home, spawn_env

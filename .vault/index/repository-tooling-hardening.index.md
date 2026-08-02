@@ -6,7 +6,7 @@ tags:
 date: '2026-08-02'
 modified: '2026-08-02'
 body_schema: 'body-v1'
-body_hash: 'sha256:84f43044803919c70fdb75815fc1820edc3a918535b99ee545dcb36950a1d8ee'
+body_hash: 'sha256:1da46abfaddd8f9dba967b084d120a11df3aa978da836470ee71bbcb091f572f'
 related:
   - '[[2026-07-19-repository-tooling-hardening-W01-P01-S01]]'
   - '[[2026-07-19-repository-tooling-hardening-W01-P01-summary]]'
@@ -69,6 +69,7 @@ related:
   - '[[2026-08-02-repository-tooling-hardening-strict-s24-worker-health-audit]]'
   - '[[2026-08-02-repository-tooling-hardening-strict-s25-factory-audit]]'
   - '[[2026-08-02-repository-tooling-hardening-strict-s25-gemini-auth-audit]]'
+  - '[[2026-08-02-repository-tooling-hardening-strict-s25-json-mcp-foundation-audit]]'
   - '[[2026-08-02-repository-tooling-hardening-strict-s25-provider-lazy-exports-audit]]'
 ---
 
@@ -106,6 +107,7 @@ Auto-generated index of all documents tagged with `#repository-tooling-hardening
 - `2026-08-02-repository-tooling-hardening-strict-s24-worker-health-audit` - `repository-tooling-hardening` audit: `Worker health public-contract review`
 - `2026-08-02-repository-tooling-hardening-strict-s25-factory-audit` - `repository-tooling-hardening` audit: `Provider factory canonical interface review`
 - `2026-08-02-repository-tooling-hardening-strict-s25-gemini-auth-audit` - `repository-tooling-hardening` audit: `Gemini credential boundary review`
+- `2026-08-02-repository-tooling-hardening-strict-s25-json-mcp-foundation-audit` - `repository-tooling-hardening` audit: `Provider JSON and MCP boundary review`
 - `2026-08-02-repository-tooling-hardening-strict-s25-provider-lazy-exports-audit` - `repository-tooling-hardening` audit: `Provider lazy export contract review`
 
 ### exec

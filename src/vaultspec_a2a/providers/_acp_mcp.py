@@ -20,10 +20,17 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import StrEnum
 from types import MappingProxyType
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from ..authoring.contract import is_document_authoring_role
 from ..thread.errors import ConfigError
+from ._json_contract import (
+    FrozenJsonObject,
+    FrozenJsonValue,
+    JsonObject,
+    freeze_json,
+    thaw_json,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
@@ -129,23 +136,9 @@ _TRUST_AXES = ("read_only", "network_egress")
 RAG_MCP_REQUIREMENT = "vaultspec-rag[mcp]"
 
 
-def _frozen(value: Any) -> Any:
-    """Return an immutable view of *value*, recursively.
-
-    Lists become tuples and mappings become read-only proxies, so a frozen
-    registry entry has no mutable interior a holder could reach through. Scalars
-    are already immutable and pass through untouched.
-    """
-    if isinstance(value, list):
-        return tuple(_frozen(item) for item in value)
-    if isinstance(value, dict):
-        return MappingProxyType({key: _frozen(item) for key, item in value.items()})
-    return value
-
-
 def _declare_registry(
-    entries: dict[str, dict[str, Any]],
-) -> Mapping[str, Mapping[str, Any]]:
+    entries: JsonObject,
+) -> FrozenJsonObject:
     """Return a FROZEN registry once every entry declares both trust axes.
 
     The registry's single construction seam, so the declaration obligation is
@@ -165,25 +158,30 @@ def _declare_registry(
         ConfigError: If an entry omits either trust axis or declares it
             non-boolean.
     """
-    for name, entry in entries.items():
+    for name, value in entries.items():
+        if not isinstance(value, dict):
+            raise ConfigError(f"harness registry entry {name!r} must be a JSON object")
         for axis in _TRUST_AXES:
-            if not isinstance(entry.get(axis), bool):
+            if not isinstance(value.get(axis), bool):
                 raise ConfigError(
                     f"harness registry entry {name!r} does not declare {axis!r}; "
                     "both trust axes (local write, network egress) must be declared "
                     "explicitly per entry - neither is inferred from the other, and "
                     "omission is never read as permission"
                 )
-    return MappingProxyType({name: _frozen(entry) for name, entry in entries.items()})
+    frozen = freeze_json(entries)
+    if not isinstance(frozen, MappingProxyType):
+        raise ConfigError("harness MCP registry must freeze to a JSON object")
+    return frozen
 
 
-_KNOWN_MCP_SERVERS: Mapping[str, Mapping[str, Any]] = _declare_registry(
+_KNOWN_MCP_SERVERS: FrozenJsonObject = _declare_registry(
     {
         "vaultspec-rag": {
             "name": "vaultspec-rag",
             "command": "uvx",
             "args": ["--from", RAG_MCP_REQUIREMENT, "vaultspec-search-mcp"],
-            "tools": ("search_vault", "search_codebase", "get_code_file"),
+            "tools": ["search_vault", "search_codebase", "get_code_file"],
             "read_only": True,
             # Indexes and serves the local vault/codebase over stdio; no outbound
             # request leaves the agent host on its behalf.
@@ -209,25 +207,71 @@ _DESKTOP_CAPABILITY_ACTIONS = {
 }
 
 
-def _wire_value(value: Any) -> Any:
-    """Return the mutable JSON-shaped counterpart of a frozen registry value.
-
-    The registry stores tuples and read-only proxies; the ACP ``session/new``
-    payload and the config-home writers are handed plain lists and dicts, which is
-    the shape every downstream consumer already expects. Materialising a fresh
-    container here also means a caller mutating the spec it was given cannot reach
-    back into the registry through a shared interior.
-    """
-    if isinstance(value, tuple):
-        return [_wire_value(item) for item in value]
-    if isinstance(value, MappingProxyType):
-        return {key: _wire_value(item) for key, item in value.items()}
+def _frozen_object(value: FrozenJsonValue, *, context: str) -> FrozenJsonObject:
+    """Narrow one frozen JSON value to an object or refuse the registry shape."""
+    if not isinstance(value, MappingProxyType):
+        raise ConfigError(f"{context} must be a JSON object")
     return value
 
 
-def _launch_spec(entry: Mapping[str, Any]) -> dict[str, Any]:
+def _registry_entry(name: str) -> FrozenJsonObject:
+    """Return one closed registry entry as a frozen JSON object."""
+    value = _KNOWN_MCP_SERVERS.get(name)
+    if value is None:
+        raise ConfigError(
+            f"unknown harness MCP server {name!r}; known servers are "
+            f"{sorted(_KNOWN_MCP_SERVERS)}"
+        )
+    return _frozen_object(value, context=f"harness registry entry {name!r}")
+
+
+def _frozen_strings(
+    entry: FrozenJsonObject,
+    field: str,
+    *,
+    required: bool = False,
+) -> tuple[str, ...]:
+    """Read one tuple-shaped string field from a frozen registry object."""
+    value = entry.get(field)
+    if value is None and not required:
+        return ()
+    if not isinstance(value, tuple):
+        raise ConfigError(f"harness registry field {field!r} must be a string list")
+    strings: list[str] = []
+    for item in value:
+        if not isinstance(item, str):
+            raise ConfigError(f"harness registry field {field!r} must be a string list")
+        strings.append(item)
+    return tuple(strings)
+
+
+def _frozen_string(entry: FrozenJsonObject, field: str) -> str:
+    """Read one required string field from a frozen registry object."""
+    value = entry.get(field)
+    if not isinstance(value, str) or not value:
+        raise ConfigError(
+            f"harness registry field {field!r} must be a non-empty string"
+        )
+    return value
+
+
+def _frozen_string_object(entry: FrozenJsonObject, field: str) -> JsonObject:
+    """Read one optional object with string keys and values from a registry entry."""
+    value = entry.get(field)
+    if value is None:
+        return {}
+    object_value = _frozen_object(value, context=f"harness registry field {field!r}")
+    result: JsonObject = {}
+    for key, item in object_value.items():
+        if not isinstance(item, str):
+            raise ConfigError(f"harness registry field {field!r} must contain strings")
+        result[key] = item
+    return result
+
+
+def _launch_spec(entry: FrozenJsonObject) -> JsonObject:
     """Return the ACP-shape launch spec, stripped of registry-only metadata."""
-    return {k: _wire_value(entry[k]) for k in _LAUNCH_SPEC_KEYS if k in entry}
+    return {key: thaw_json(entry[key]) for key in _LAUNCH_SPEC_KEYS if key in entry}
 
 
 def is_known_harness_server(name: str) -> bool:
@@ -250,16 +294,10 @@ def declared_harness_tools(name: str) -> tuple[str, ...]:
     Raises:
         ConfigError: If *name* is not a known harness server.
     """
-    entry = _KNOWN_MCP_SERVERS.get(name)
-    if entry is None:
-        raise ConfigError(
-            f"unknown harness MCP server {name!r}; known servers are "
-            f"{sorted(_KNOWN_MCP_SERVERS)}"
-        )
-    return tuple(entry.get("tools", ()))
+    return _frozen_strings(_registry_entry(name), "tools")
 
 
-def _desktop_available(entry: Mapping[str, Any]) -> bool:
+def _desktop_available(entry: FrozenJsonObject) -> bool:
     """Return whether an entry explicitly proves offline desktop authority."""
     return (
         entry.get("desktop_available") is True
@@ -270,7 +308,7 @@ def _desktop_available(entry: Mapping[str, Any]) -> bool:
 def resolve_harness_mcp_capabilities(
     names: Sequence[str],
     *,
-    profile: HarnessMcpRuntimeProfile,
+    profile: object,
 ) -> HarnessMcpResolution:
     """Resolve declared names under one explicit runtime profile.
 
@@ -293,10 +331,11 @@ def resolve_harness_mcp_capabilities(
     unavailable: list[HarnessMcpCapabilityUnavailable] = []
     unknown: list[str] = []
     for name in names:
-        entry = _KNOWN_MCP_SERVERS.get(name)
-        if entry is None:
+        value = _KNOWN_MCP_SERVERS.get(name)
+        if value is None:
             unknown.append(name)
             continue
+        entry = _frozen_object(value, context=f"harness registry entry {name!r}")
         if profile is HarnessMcpRuntimeProfile.DESKTOP and not _desktop_available(
             entry
         ):
@@ -330,7 +369,7 @@ def resolve_harness_mcp_servers(
     names: Sequence[str],
     *,
     profile: HarnessMcpRuntimeProfile = HarnessMcpRuntimeProfile.NON_DESKTOP,
-) -> list[dict[str, Any]]:
+) -> list[JsonObject]:
     """Resolve declared harness MCP server names to their launch specs.
 
     Raises :class:`ConfigError` naming every unknown server plus the known set,
@@ -341,7 +380,7 @@ def resolve_harness_mcp_servers(
     """
     resolution = resolve_harness_mcp_capabilities(names, profile=profile)
     return [
-        _launch_spec(_KNOWN_MCP_SERVERS[name]) for name in resolution.available_servers
+        _launch_spec(_registry_entry(name)) for name in resolution.available_servers
     ]
 
 
@@ -363,8 +402,7 @@ def harness_allowed_tool_names(
     seen: set[str] = set()
     resolution = resolve_harness_mcp_capabilities(names, profile=profile)
     for name in resolution.available_servers:
-        entry = _KNOWN_MCP_SERVERS[name]
-        for tool in entry.get("tools", ()):
+        for tool in _frozen_strings(_registry_entry(name), "tools"):
             qualified = f"mcp__{name}__{tool}"
             if qualified not in seen:
                 seen.add(qualified)
@@ -373,10 +411,10 @@ def harness_allowed_tool_names(
 
 
 def config_home_mcp_servers(
-    mcp_servers: Sequence[dict[str, Any]],
+    mcp_servers: Sequence[JsonObject],
     *,
     profile: HarnessMcpRuntimeProfile = HarnessMcpRuntimeProfile.NON_DESKTOP,
-) -> dict[str, dict[str, Any]]:
+) -> dict[str, JsonObject]:
     """Select the registry-known harness servers and shape them for ``.claude.json``.
 
     Given the session's advertised ``mcp_servers`` (which may also carry the per-run
@@ -391,23 +429,47 @@ def config_home_mcp_servers(
     """
     reject_duplicate_identities(mcp_servers)
     known_names = [
-        str(spec.get("name"))
+        name
         for spec in mcp_servers
-        if spec.get("name") in _KNOWN_MCP_SERVERS
+        if isinstance(name := spec.get("name"), str) and name in _KNOWN_MCP_SERVERS
     ]
     resolution = resolve_harness_mcp_capabilities(known_names, profile=profile)
     available = set(resolution.available_servers)
-    home: dict[str, dict[str, Any]] = {}
+    home: dict[str, JsonObject] = {}
     for spec in mcp_servers:
         name = spec.get("name")
-        if name not in available:
+        if not isinstance(name, str) or name not in available:
             continue
         _require_trust_root(name)
-        entry: dict[str, Any] = {"type": "stdio", "command": spec["command"]}
-        if spec.get("args"):
-            entry["args"] = list(spec["args"])
-        if spec.get("env"):
-            entry["env"] = dict(spec["env"])
+        command = spec.get("command")
+        if not isinstance(command, str) or not command:
+            raise ConfigError(
+                f"harness MCP server {name!r} has no launch command for config home"
+            )
+        entry: JsonObject = {"type": "stdio", "command": command}
+        args = spec.get("args")
+        if args is not None:
+            if not isinstance(args, list) or not all(
+                isinstance(arg, str) for arg in args
+            ):
+                raise ConfigError(
+                    f"harness MCP server {name!r} has non-string launch args"
+                )
+            entry["args"] = list(args)
+        env = spec.get("env")
+        if env is not None:
+            if not isinstance(env, dict):
+                raise ConfigError(
+                    f"harness MCP server {name!r} has non-string environment values"
+                )
+            environment: JsonObject = {}
+            for key, value in env.items():
+                if not isinstance(value, str):
+                    raise ConfigError(
+                        f"harness MCP server {name!r} has non-string environment values"
+                    )
+                environment[key] = value
+            entry["env"] = environment
         home[name] = entry
     return home
 
@@ -437,7 +499,7 @@ def reject_duplicate_names(names: Sequence[str]) -> None:
         )
 
 
-def reject_duplicate_identities(mcp_servers: Sequence[dict[str, Any]]) -> None:
+def reject_duplicate_identities(mcp_servers: Sequence[JsonObject]) -> None:
     """Fail loud when two advertised servers claim the same identity.
 
     Composition is keyed by name, so a duplicate does not conflict - it
@@ -484,7 +546,7 @@ def _require_read_only(name: str) -> None:
     ``False`` and it fires immediately, with no change here and no weakening of the
     freeze. Compare :func:`_require_declared_egress`, which is genuinely redundant.
     """
-    if not _KNOWN_MCP_SERVERS[name].get("read_only"):
+    if _registry_entry(name).get("read_only") is not True:
         raise ConfigError(
             f"refusing to compose non-read-only harness server {name!r} into a "
             "surfacing config; only read-only servers may be composed"
@@ -510,7 +572,7 @@ def _require_declared_egress(name: str) -> None:
     ever happens this guard still fires; until then it can only pass. The
     enforcement of the declaration obligation is the constructor.
     """
-    if not isinstance(_KNOWN_MCP_SERVERS[name].get("network_egress"), bool):
+    if not isinstance(_registry_entry(name).get("network_egress"), bool):
         raise ConfigError(
             f"refusing to compose harness server {name!r} with no declared network "
             "egress axis into a surfacing config; local write and network reach are "
@@ -541,7 +603,7 @@ def codex_mcp_server_specs(
     names: Sequence[str],
     *,
     profile: HarnessMcpRuntimeProfile = HarnessMcpRuntimeProfile.NON_DESKTOP,
-) -> list[dict[str, Any]]:
+) -> list[JsonObject]:
     """Resolve declared harness names to full read-only registry specs for Codex.
 
     The registry's second serialization consumer (Codex ``config.toml`` vs the
@@ -555,17 +617,17 @@ def codex_mcp_server_specs(
     """
     reject_duplicate_names(names)
     resolution = resolve_harness_mcp_capabilities(names, profile=profile)
-    specs: list[dict[str, Any]] = []
+    specs: list[JsonObject] = []
     for name in resolution.available_servers:
-        entry = _KNOWN_MCP_SERVERS[name]
+        entry = _registry_entry(name)
         _require_trust_root(name)
         specs.append(
             {
                 "name": name,
-                "command": entry["command"],
-                "args": list(entry.get("args", ())),
-                "env": dict(entry.get("env", {})),
-                "tools": list(entry.get("tools", ())),
+                "command": _frozen_string(entry, "command"),
+                "args": list(_frozen_strings(entry, "args")),
+                "env": _frozen_string_object(entry, "env"),
+                "tools": list(_frozen_strings(entry, "tools")),
             }
         )
     return specs
@@ -576,7 +638,7 @@ def _resolve_harness_composition(
     names: Sequence[str],
     *,
     profile: HarnessMcpRuntimeProfile,
-) -> tuple[HarnessMcpResolution, set[str], list[dict[str, Any]]]:
+) -> tuple[HarnessMcpResolution, set[str], list[JsonObject]]:
     """Resolve and validate the declared names into specs and an unavailable set.
 
     The normalisation-and-validation stage, separated from projection. It
@@ -599,9 +661,9 @@ def _resolve_harness_composition(
     }
     if profile is HarnessMcpRuntimeProfile.DESKTOP:
         attached_names = {
-            str(spec.get("name"))
+            name
             for spec in (getattr(model, "mcp_servers", []) or [])
-            if spec.get("name") in _KNOWN_MCP_SERVERS
+            if isinstance(name := spec.get("name"), str) and name in _KNOWN_MCP_SERVERS
         }
         attached_names.update(
             name
@@ -618,7 +680,7 @@ def _resolve_harness_composition(
                 for unavailable in attached_resolution.unavailable
             )
     resolved = [
-        _launch_spec(_KNOWN_MCP_SERVERS[name]) for name in resolution.available_servers
+        _launch_spec(_registry_entry(name)) for name in resolution.available_servers
     ]
     return resolution, unavailable_names, resolved
 
@@ -682,7 +744,7 @@ def _project_composition_onto_model(
     model: BaseChatModel,
     resolution: HarnessMcpResolution,
     unavailable_names: set[str],
-    resolved: list[dict[str, Any]],
+    resolved: list[JsonObject],
     *,
     allowed_tools: Sequence[str] | None,
     profile: HarnessMcpRuntimeProfile,

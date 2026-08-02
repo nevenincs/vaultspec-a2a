@@ -48,7 +48,8 @@ from ._acp_mcp import declared_harness_tools, is_known_harness_server
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
-    from typing import Any
+
+    from ._json_contract import JsonValue
 
 __all__ = [
     "CONTRACT_PROBE_TIMEOUT_SECONDS",
@@ -119,6 +120,25 @@ def _stderr_tail(captured: TextIO) -> str:
 def _launch_description(command: str, args: Sequence[str]) -> str:
     """Return the probed launch command as a single readable string."""
     return " ".join([command, *args])
+
+
+def _launch_args(spec: Mapping[str, JsonValue], *, name: str) -> list[str]:
+    """Read an optional JSON array of string launch arguments or refuse it."""
+    value = spec.get("args")
+    if value is None:
+        return []
+    if not isinstance(value, list):
+        raise HarnessToolContractError(
+            f"harness MCP server {name!r} has non-list launch args to verify"
+        )
+    args: list[str] = []
+    for argument in value:
+        if not isinstance(argument, str):
+            raise HarnessToolContractError(
+                f"harness MCP server {name!r} has non-string launch args to verify"
+            )
+        args.append(argument)
+    return args
 
 
 async def _served_tool_names(
@@ -224,7 +244,7 @@ async def verify_declared_tool_contract(
 
 
 async def verify_harness_mcp_contract(
-    mcp_servers: Sequence[Mapping[str, Any]],
+    mcp_servers: Sequence[Mapping[str, JsonValue]],
     *,
     env: Mapping[str, str] | None = None,
     timeout: float = CONTRACT_PROBE_TIMEOUT_SECONDS,
@@ -254,7 +274,7 @@ async def verify_harness_mcp_contract(
         await verify_declared_tool_contract(
             name=name,
             command=command,
-            args=[str(arg) for arg in spec.get("args", ())],
+            args=_launch_args(spec, name=name),
             declared=declared_harness_tools(name),
             env=env,
             timeout=timeout,

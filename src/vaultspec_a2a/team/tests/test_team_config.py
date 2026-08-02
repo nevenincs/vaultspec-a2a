@@ -1017,30 +1017,43 @@ class TestModelProfiles:
         ), "every fast overlay must pin LOW, or the profile is not all-low"
 
     def test_bundled_adr_research_exposes_kimi_profile(self) -> None:
-        """The `kimi` provider-axis profile routes the four authoring roles to Kimi.
+        """The `kimi` profile routes authoring to Kimi while ceilinged everywhere.
 
-        Mirrors the `zai` precedent (P04.S14): the overlay sets only the per-role
-        provider for the researcher fan-out, synthesist, ADR author, and plan
-        author; the inner doc-reviewer is absent and keeps the team default
-        (claude). The skip-loudly credential gate is enforced at run-start
-        eligibility on ``KIMI_API_KEY`` readiness, not in the profile TOML. That the
-        TOML ``provider = "kimi"`` resolves to ``Provider.KIMI`` also confirms the
-        P01 enum member is present.
+        The two axes move independently, and this is what separates `kimi` from
+        its `kimi-all` sibling:
+
+        - **Capability** is a ceiling, so it must be TOTAL. Every declared role
+          carries LOW, the reviewer included. The reviewer was once omitted from
+          the overlay entirely, which let it fall through to its own capability
+          and bill above the ceiling the profile advertises.
+        - **Provider** is a routing choice, so it is SELECTIVE. The four
+          authoring roles pin Kimi; the reviewer holds ``None`` and keeps the
+          team default, which is precisely the "mixed" the display name promises.
+
+        Asserting only role membership would make this test pass for `kimi-all`
+        as well, so the reviewer's unset provider is the discriminating claim.
+        The credential gate lives in run-start eligibility, not the TOML.
         """
         cfg = load_team_config("vaultspec-adr-research")
         assert "kimi" in cfg.profiles
         kimi = cfg.profiles["kimi"]
         assert kimi.display_name == "Kimi (mixed)"
-        assert set(kimi.roles) == {
-            "vaultspec-researcher",
-            "vaultspec-synthesist",
-            "vaultspec-adr-author",
-            "vaultspec-plan-author",
-        }
-        for role in kimi.roles.values():
-            assert role.provider == Provider.KIMI
-        # The inner doc-reviewer is absent from the overlay - it keeps the team default.
-        assert "vaultspec-doc-reviewer" not in kimi.roles
+
+        declared_workers = {worker.agent_id for worker in cfg.workers}
+        assert set(kimi.roles) == declared_workers, (
+            "the capability ceiling must cover every declared role; one missing "
+            "here falls through and bills above the advertised floor"
+        )
+        assert all(overlay.capability == Model.LOW for overlay in kimi.roles.values())
+
+        authoring = set(declared_workers) - {"vaultspec-doc-reviewer"}
+        assert all(kimi.roles[role].provider == Provider.KIMI for role in authoring)
+        # The discriminator against `kimi-all`: routed by ceiling, not by lane.
+        assert kimi.roles["vaultspec-doc-reviewer"].provider is None
+        assert (
+            cfg.profiles["kimi-all"].roles["vaultspec-doc-reviewer"].provider
+            == Provider.KIMI
+        ), "kimi-all must differ from kimi, or one of the two is dead weight"
 
     def test_effective_profiles_injects_implicit_team_defaults(self) -> None:
         cfg = load_team_config("vaultspec-adr-research")

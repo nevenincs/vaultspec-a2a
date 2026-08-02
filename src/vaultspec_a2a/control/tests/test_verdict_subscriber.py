@@ -32,6 +32,7 @@ if TYPE_CHECKING:
 
 from ...authoring import AuthoringClient, LifecycleEvent, StreamError
 from ...control.circuit_breaker import WorkerCircuitBreaker
+from ...control.event_handlers import _handle_terminal_event
 from ...control.verdict_subscriber import (
     _RESUME_CLAIM_TTL_SECONDS,
     VerdictSubscriber,
@@ -211,6 +212,90 @@ async def test_resume_resolves_the_answered_document_gate_permission_row(
             assert thread.approval_status == "approved"
             assert thread.approval_request_id == f"{thread_id}:research-gate"
             assert thread.approval_reason == "Approve the research document"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("verdict", "terminal_status"),
+    [("approved", "completed"), ("rejected", "failed")],
+)
+async def test_terminal_event_clears_resolved_document_approval_metadata(
+    tmp_path,
+    session_factory: async_sessionmaker[AsyncSession],
+    verdict: str,
+    terminal_status: str,
+) -> None:
+    """A persisted document verdict leaves no approval metadata after termination."""
+    from starlette.applications import Starlette
+    from starlette.responses import JSONResponse
+    from starlette.routing import Route
+
+    async def _accept_dispatch(_request: object) -> JSONResponse:
+        return JSONResponse({"status": "dispatched"})
+
+    worker_app = Starlette(
+        routes=[Route("/dispatch", _accept_dispatch, methods=["POST"])]
+    )
+    thread_id = f"terminal-verdict-{verdict}"
+    request_id = f"{thread_id}:document-gate"
+    checkpoints = tmp_path / f"cp-terminal-verdict-{verdict}.db"
+    async with (
+        AsyncSqliteSaver.from_conn_string(str(checkpoints)) as checkpointer,
+        httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=worker_app),
+            base_url="http://worker",
+        ) as worker_client,
+    ):
+        await _seed_parked_thread(
+            session_factory,
+            checkpointer,
+            thread_id=thread_id,
+            proposal_ids=[f"proposal:{verdict}"],
+            changeset_ids=[f"changeset:{verdict}"],
+            gate_pending=f"proposal:{verdict}",
+        )
+        async with session_factory() as session:
+            await record_permission_request(
+                session,
+                request_id=request_id,
+                thread_id=thread_id,
+                pause_reason_type="document_approval_request",
+                description="Approve the document",
+                allowed_options=[
+                    {"option_id": "approve", "name": "Approve", "kind": "allow_once"},
+                    {"option_id": "reject", "name": "Reject", "kind": "reject_once"},
+                ],
+            )
+            await set_thread_approval_state(
+                session,
+                thread_id,
+                approval_status="pending",
+                approval_request_id=request_id,
+                approval_reason="Approve the document",
+            )
+            await session.commit()
+
+        subscriber = _make_subscriber(session_factory, checkpointer, worker_client)
+        await subscriber._resume_with_verdict(
+            thread_id, verdict, None, {f"proposal:{verdict}"}
+        )
+        await _handle_terminal_event(
+            thread_id,
+            {"event_type": "thread_terminal", "status": terminal_status},
+            session_factory=session_factory,
+        )
+
+    async with session_factory() as session:
+        permission = await get_permission_request(session, request_id)
+        assert permission is not None
+        assert permission.request_status == PermissionRequestStatus.APPLIED.value
+        thread = await get_thread(session, thread_id)
+        assert thread is not None
+        assert thread.status == terminal_status
+        assert thread.approval_status is None
+        assert thread.approval_request_id is None
+        assert thread.approval_reason is None
+        assert thread.approval_response_action_id is None
 
 
 @pytest.mark.asyncio

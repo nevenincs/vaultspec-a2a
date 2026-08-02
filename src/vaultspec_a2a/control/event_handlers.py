@@ -178,7 +178,6 @@ async def _handle_terminal_event(
             update_thread_status,
         )
         from ..thread.enums import (
-            ApprovalStatus,
             ControlActionType,
             InvalidTransitionError,
             ThreadStatus,
@@ -207,10 +206,7 @@ async def _handle_terminal_event(
                 failure_reason=failure_reason,
             )
             await expire_pending_permission_requests(db, thread_id=thread_id)
-            if (
-                thread is not None
-                and thread.approval_status == ApprovalStatus.PENDING.value
-            ):
+            if thread is not None:
                 await set_thread_approval_state(
                     db,
                     thread_id,

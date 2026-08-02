@@ -142,6 +142,19 @@ class ThreadModel(Base):
     # panel reads run-status alone, never the live stream, so without this
     # column it recovered a bare "failed" with no reason.
     failure_reason: Mapped[str | None] = mapped_column(Text, default=None)
+    # The machine-readable counterpart to failure_reason: WHY the run failed, as
+    # a closed vocabulary a client branches on, rather than prose it would have
+    # to parse. The reason text says what happened; this says what the reader
+    # should do about it, and the two are written together or not at all.
+    #
+    # Nullable with no default, deliberately. A run that failed before this
+    # column existed genuinely carries no classification, and back-filling one
+    # would assert we classified runs we never observed. The invariant that a
+    # NEW failure always carries a condition is enforced at the write sites, not
+    # by the schema: a NOT NULL constraint would turn a classification bug into
+    # a write crash that loses the run's outcome entirely, which is strictly
+    # worse than recording an honest floor value.
+    provider_condition: Mapped[str | None] = mapped_column(default=None)
     execution_readiness: Mapped[str] = mapped_column(default="healthy")
     approval_status: Mapped[str | None] = mapped_column(default=None)
     approval_request_id: Mapped[str | None] = mapped_column(default=None)

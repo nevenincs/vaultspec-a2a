@@ -4,7 +4,7 @@ tags:
   - '#provider-error-taxonomy'
 date: '2026-08-02'
 modified: '2026-08-02'
-body_hash: 'sha256:70baf2abd9351e4a6f8f911ed6d913c7cd84805938779f24e9f9408a704b152f'
+body_hash: 'sha256:33a5ee2aa948bf3169a38e1a6740669d1c36be23488551ab718416f7289a3c9a'
 tier: L3
 related:
   - '[[2026-08-02-provider-error-taxonomy-adr]]'
@@ -64,9 +64,9 @@ Carries the condition on the error frame, persists it beside the failure reason,
 
 - [ ] `W01.P03.S13` - Emit the resolved condition as the error frame code; `src/vaultspec_a2a/streaming/ingest.py`.
 - [ ] `W01.P03.S14` - Carry the condition on the terminal status payload; `src/vaultspec_a2a/worker/state_projection.py`.
-- [ ] `W01.P03.S15` - Declare the provider condition column on the thread model; `src/vaultspec_a2a/database/models.py`.
-- [ ] `W01.P03.S16` - Add the provider condition migration revision; `src/vaultspec_a2a/database/migrations/versions`.
-- [ ] `W01.P03.S17` - Persist the condition alongside the failure reason on the terminal write; `src/vaultspec_a2a/database/thread_repository.py`.
+- [x] `W01.P03.S15` - Declare the provider condition column on the thread model; `src/vaultspec_a2a/database/models.py`.
+- [x] `W01.P03.S16` - Add the provider condition migration revision; `src/vaultspec_a2a/database/migrations/versions`.
+- [x] `W01.P03.S17` - Persist the condition alongside the failure reason on the terminal write; `src/vaultspec_a2a/database/thread_repository.py`.
 - [ ] `W01.P03.S18` - Align the failure reason bound to the consumer byte limit; `src/vaultspec_a2a/database/thread_repository.py`.
 - [ ] `W01.P03.S19` - Thread the condition through the gateway terminal event handler; `src/vaultspec_a2a/control/event_handlers.py`.
 - [ ] `W01.P03.S20` - Read the condition into the thread state snapshot; `src/vaultspec_a2a/control/thread_state_service.py`.

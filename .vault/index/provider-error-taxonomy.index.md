@@ -6,7 +6,7 @@ tags:
 date: '2026-08-02'
 modified: '2026-08-02'
 body_schema: 'body-v1'
-body_hash: 'sha256:6f86caf3678ff062fe34bd303a83d89e33da2ea1ef60a0d44fcd93bce8bc61ea'
+body_hash: 'sha256:8cbb19900040018fdc11efe32b3b02fb284b51e6183b87bb2522f717bc3be16a'
 related:
   - '[[2026-08-02-provider-error-taxonomy-W01-P01-S01]]'
   - '[[2026-08-02-provider-error-taxonomy-W01-P01-S02]]'
@@ -20,6 +20,37 @@ related:
   - '[[2026-08-02-provider-error-taxonomy-W01-P02-S10]]'
   - '[[2026-08-02-provider-error-taxonomy-W01-P02-S11]]'
   - '[[2026-08-02-provider-error-taxonomy-W01-P02-S12]]'
+  - '[[2026-08-02-provider-error-taxonomy-W01-P03-S13]]'
+  - '[[2026-08-02-provider-error-taxonomy-W01-P03-S14]]'
+  - '[[2026-08-02-provider-error-taxonomy-W01-P03-S15]]'
+  - '[[2026-08-02-provider-error-taxonomy-W01-P03-S16]]'
+  - '[[2026-08-02-provider-error-taxonomy-W01-P03-S17]]'
+  - '[[2026-08-02-provider-error-taxonomy-W01-P03-S18]]'
+  - '[[2026-08-02-provider-error-taxonomy-W01-P03-S19]]'
+  - '[[2026-08-02-provider-error-taxonomy-W01-P03-S20]]'
+  - '[[2026-08-02-provider-error-taxonomy-W01-P03-S21]]'
+  - '[[2026-08-02-provider-error-taxonomy-W01-P03-S22]]'
+  - '[[2026-08-02-provider-error-taxonomy-W01-P03-S23]]'
+  - '[[2026-08-02-provider-error-taxonomy-W01-P03-S24]]'
+  - '[[2026-08-02-provider-error-taxonomy-W01-P04-S26]]'
+  - '[[2026-08-02-provider-error-taxonomy-W01-P04-S27]]'
+  - '[[2026-08-02-provider-error-taxonomy-W01-P04-S28]]'
+  - '[[2026-08-02-provider-error-taxonomy-W01-P05-S29]]'
+  - '[[2026-08-02-provider-error-taxonomy-W01-P05-S30]]'
+  - '[[2026-08-02-provider-error-taxonomy-W01-P05-S31]]'
+  - '[[2026-08-02-provider-error-taxonomy-W01-P05-S32]]'
+  - '[[2026-08-02-provider-error-taxonomy-W01-P05-S33]]'
+  - '[[2026-08-02-provider-error-taxonomy-W01-P05-S34]]'
+  - '[[2026-08-02-provider-error-taxonomy-W01-P05-S35]]'
+  - '[[2026-08-02-provider-error-taxonomy-W01-P05-S36]]'
+  - '[[2026-08-02-provider-error-taxonomy-W01-P05-S37]]'
+  - '[[2026-08-02-provider-error-taxonomy-W01-P05-S38]]'
+  - '[[2026-08-02-provider-error-taxonomy-W01-P05-S39]]'
+  - '[[2026-08-02-provider-error-taxonomy-W01-P05-S40]]'
+  - '[[2026-08-02-provider-error-taxonomy-W01-P06-S41]]'
+  - '[[2026-08-02-provider-error-taxonomy-W01-P06-S42]]'
+  - '[[2026-08-02-provider-error-taxonomy-W01-P06-S43]]'
+  - '[[2026-08-02-provider-error-taxonomy-W01-P06-S44]]'
   - '[[2026-08-02-provider-error-taxonomy-adr]]'
   - '[[2026-08-02-provider-error-taxonomy-plan]]'
   - '[[2026-08-02-provider-error-taxonomy-research]]'
@@ -49,6 +80,37 @@ Auto-generated index of all documents tagged with `#provider-error-taxonomy`.
 - `2026-08-02-provider-error-taxonomy-W01-P02-S10` - Attach the condition and the lane retry hint to the Codex error at raise
 - `2026-08-02-provider-error-taxonomy-W01-P02-S11` - Consume the populated Codex turn error instead of the bare status string
 - `2026-08-02-provider-error-taxonomy-W01-P02-S12` - Prove each lane mapper is total over its installed wire vocabulary
+- `2026-08-02-provider-error-taxonomy-W01-P03-S13` - Emit the resolved condition as the error frame code
+- `2026-08-02-provider-error-taxonomy-W01-P03-S14` - Carry the condition on the terminal status payload
+- `2026-08-02-provider-error-taxonomy-W01-P03-S15` - Declare the provider condition column on the thread model
+- `2026-08-02-provider-error-taxonomy-W01-P03-S16` - Add the provider condition migration revision
+- `2026-08-02-provider-error-taxonomy-W01-P03-S17` - Persist the condition alongside the failure reason on the terminal write
+- `2026-08-02-provider-error-taxonomy-W01-P03-S18` - Align the failure reason bound to the consumer byte limit
+- `2026-08-02-provider-error-taxonomy-W01-P03-S19` - Thread the condition through the gateway terminal event handler
+- `2026-08-02-provider-error-taxonomy-W01-P03-S20` - Read the condition into the thread state snapshot
+- `2026-08-02-provider-error-taxonomy-W01-P03-S21` - Declare the condition on the domain snapshot dataclass
+- `2026-08-02-provider-error-taxonomy-W01-P03-S22` - Declare the condition on the run-status response schema
+- `2026-08-02-provider-error-taxonomy-W01-P03-S23` - Project the condition onto the run-status response
+- `2026-08-02-provider-error-taxonomy-W01-P03-S24` - Prove the condition survives a reload through run-status alone
+- `2026-08-02-provider-error-taxonomy-W01-P04-S26` - Bind the condition to the node retry classifier
+- `2026-08-02-provider-error-taxonomy-W01-P04-S27` - Prefer a lane-supplied retry hint over inferred retryability
+- `2026-08-02-provider-error-taxonomy-W01-P04-S28` - Prove throttled and overloaded conditions retry under the existing backoff policy
+- `2026-08-02-provider-error-taxonomy-W01-P05-S29` - Record a condition and reason on the shared dispatch failure transition
+- `2026-08-02-provider-error-taxonomy-W01-P05-S30` - Pass the dispatch failure reason from run creation
+- `2026-08-02-provider-error-taxonomy-W01-P05-S31` - Record a durable reason where an undelivered follow-up settles
+- `2026-08-02-provider-error-taxonomy-W01-P05-S32` - Pass the dispatch failure reason from permission resume
+- `2026-08-02-provider-error-taxonomy-W01-P05-S33` - Record a durable reason when a clarification resume is not delivered
+- `2026-08-02-provider-error-taxonomy-W01-P05-S34` - Emit a terminal from the executor top-level dispatch handler
+- `2026-08-02-provider-error-taxonomy-W01-P05-S35` - Record a condition on the missing-graph rejection
+- `2026-08-02-provider-error-taxonomy-W01-P05-S36` - Record a condition on the ingest and resume catch-alls
+- `2026-08-02-provider-error-taxonomy-W01-P05-S37` - Emit an error frame on compile refusal
+- `2026-08-02-provider-error-taxonomy-W01-P05-S38` - Carry status and condition on the terminal replay frame
+- `2026-08-02-provider-error-taxonomy-W01-P05-S39` - Protect terminal and error frames from backpressure eviction
+- `2026-08-02-provider-error-taxonomy-W01-P05-S40` - Prove no failed run persists without a condition across dispatch and executor paths
+- `2026-08-02-provider-error-taxonomy-W01-P06-S41` - Remove the dead severity and recovery-action vocabulary
+- `2026-08-02-provider-error-taxonomy-W01-P06-S42` - Withdraw the removed vocabulary from the thread package surface
+- `2026-08-02-provider-error-taxonomy-W01-P06-S43` - Replace the usage-limit substring sniff with the typed condition
+- `2026-08-02-provider-error-taxonomy-W01-P06-S44` - Add a scripted failure scenario preset for the integration-verification ask
 
 ### plan
 

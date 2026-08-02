@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import shutil
+import tomllib
+from pathlib import Path
 from types import MappingProxyType
 
 from ...team.team_config import load_team_config
@@ -27,6 +30,35 @@ def _frozen_entry(entry: JsonObject) -> FrozenJsonObject:
     frozen = freeze_json(entry)
     assert isinstance(frozen, MappingProxyType)
     return frozen
+
+
+def _assert_home_acquires_no_uvx_runtime(model: CodexChatModel) -> None:
+    """Assert the desktop invariant: the home acquires no ``uvx`` runtime.
+
+    These assertions once read ``_build_codex_config_home() is None``, which
+    tested the IMPLEMENTATION that delivered the invariant rather than the
+    invariant itself. The builder no longer has a ``None`` branch: it now always
+    creates the home, because a Codex app-server started without ``CODEX_HOME``
+    reads the operator's ambient ``~/.codex/config.toml`` and inherits unowned
+    MCP servers - a strictly worse outcome than an empty owned home.
+
+    The property `de26a3cf` actually protected still holds, and is what is
+    asserted here: desktop must not ACQUIRE a runtime it cannot execute. An empty
+    home acquires nothing, so both concerns are satisfied at once. Asserting the
+    absent ``uvx`` spec rather than the absent home means a regression that
+    reintroduces a desktop-unusable server fails here, while a change to how the
+    home is built does not.
+    """
+    home = model._build_codex_config_home()
+    assert home is not None, "an owned home must exist, or ambient config leaks in"
+    config = Path(home) / "config.toml"
+    try:
+        assert config.exists()
+        blob = config.read_text(encoding="utf-8")
+        assert "uvx" not in blob, "desktop cannot execute a uvx runtime"
+        assert tomllib.loads(blob).get("mcp_servers", {}) == {}
+    finally:
+        shutil.rmtree(home, ignore_errors=True)
 
 
 def test_desktop_registry_admission_is_explicit_and_fail_closed() -> None:
@@ -147,7 +179,7 @@ def test_desktop_codex_composition_cannot_build_a_uvx_config_home() -> None:
 
     assert isinstance(composed, CodexChatModel)
     assert composed.harness_mcp_servers == []
-    assert composed._build_codex_config_home() is None
+    _assert_home_acquires_no_uvx_runtime(composed)
 
 
 def test_desktop_empty_declaration_scrubs_pre_attached_acp_uvx_state() -> None:
@@ -183,7 +215,7 @@ def test_desktop_empty_declaration_scrubs_pre_attached_codex_rag_state() -> None
 
     assert isinstance(composed, CodexChatModel)
     assert composed.harness_mcp_servers == []
-    assert composed._build_codex_config_home() is None
+    _assert_home_acquires_no_uvx_runtime(composed)
 
 
 def test_non_desktop_empty_declaration_remains_an_identity_noop() -> None:

@@ -5,7 +5,7 @@ tags:
 date: '2026-08-02'
 modified: '2026-08-02'
 body_schema: 'body-v1'
-body_hash: 'sha256:3363810e600fa945f17a7564838cb926bc845d7fbe49e2ad63e041f1f40ad0fe'
+body_hash: 'sha256:2b3da766b934ea5b3e2957e421e111de1a77adaddbb43156e9539a5bc37b0406'
 related:
   - "[[2026-02-25-llm-context-provider-abstraction-adr]]"
   - "[[2026-07-15-model-profiles-adr]]"
@@ -47,8 +47,10 @@ worktrees on 2026-08-02, including concurrent uncommitted A2A work.
 - Run-start replay conflict handling compares `profile_id` today and must cover
   the provider/model snapshot: `src/vaultspec_a2a/api/routes/gateway.py:888`.
 - The accepted provider-abstraction architecture assigns model catalog and auth
-  metadata to provider descriptors/registry, though the current factory has not
-  implemented it: `.vault/adr/2026-02-25-llm-context-provider-abstraction-adr.md:51`.
+  metadata to provider descriptors/registry. P01.S06 implements that boundary as
+  exact provider-and-execution-mode registrations in
+  `src/vaultspec_a2a/providers/factory.py`; an unverified lane remains registered
+  but unavailable rather than borrowing another lane's catalog.
 - ACP setup receives `configOptions`, locates the model-category option, and can
   set and verify a value before prompt:
   `src/vaultspec_a2a/providers/_acp_session.py:36-111`. This is an execution
@@ -63,9 +65,32 @@ worktrees on 2026-08-02, including concurrent uncommitted A2A work.
 | Claude API | authenticated `GET /v1/models` | ids, names, limits, capabilities, supported effort values | Claude Code subscription choices should come from its ACP/config picker |
 | Claude Code | ACP/config picker or `/model` | account-appropriate choices, aliases, default, managed restrictions | aliases move; preserve provider-issued values |
 | Gemini API | authenticated `models.list` / `models.get` | supported actions and extended metadata | filter only by explicit `generateContent`; do not infer tiers |
-| Kimi CLI | ACP model selection; `/model` refresh | configured-platform models and thinking support | catalog depends on configuration/authentication |
+| Kimi Code 0.28.1 | `kimi provider list --json` on the resolved executable, then exact `-m <alias> acp` selection | configured aliases; provider-defined thinking capability fields when present | current host persisted config is empty; discovery reports unavailable without inventing aliases |
 | OpenAI API | authenticated `GET /v1/models` | `object: list`; model `id`, `created`, `object: model`, `owned_by` | S05 maps only `id`; no capabilities, controls, reasoning tiers, or chat suitability |
 | Z.AI / Zhipu API | no verified official model-list contract in this pass | invocation docs list selected products | report catalog unavailable unless the endpoint or ACP advertises choices |
+
+P01.S06 registers the external execution lanes explicitly: `claude-agent-acp:{node|binary}`,
+`codex-app-server`, `gemini-cli-acp`, `kimi-code-acp`, `openai-api`,
+`zai-claude-agent-acp:{node|binary}`, and `zhipu-openai-compatible-api`.
+Claude, Codex, Gemini, Kimi, and OpenAI use their own prompt-free adapters. Z.AI
+and Zhipu have no independently proven enumeration surface in this pass, so their
+registrations return empty unavailable catalogs with unknown authentication.
+Internal mock and deterministic providers are not registered. Catalog success is
+never treated as completed-turn admission.
+
+Kimi Code configuration has two distinct modes. Persisted aliases live under the
+normal Kimi home, optionally relocated by `KIMI_CODE_HOME`. A temporary in-memory
+provider requires the complete current tuple `KIMI_MODEL_NAME`,
+`KIMI_MODEL_API_KEY`, and `KIMI_MODEL_BASE_URL`; optional
+`KIMI_MODEL_MAX_CONTEXT_SIZE` and `KIMI_MODEL_CAPABILITIES` remain provider-owned but are explicitly bounded: context size is a positive 32-bit integer serialized canonically, while capabilities are normalized as at most sixteen unique bounded provider tokens in first-seen order and serialized as the comma-separated form the CLI expects.
+Legacy KIMI_API_KEY and KIMI_BASE_URL are accepted only as settings migration
+inputs. A nonblank current value wins; blank or whitespace current input falls
+through to a nonblank legacy value. Legacy and current ambient values are
+scrubbed before the factory re-injects only the normalized Settings-owned current
+names. Discovery invokes the executable prefix only, never
+`kimi acp provider ...`, and exact execution selects the discovered alias with
+`-m`. No external model identifier is hard-coded.
+
 The OpenAI-compatible S05 adapter deliberately projects only each opaque `id`
 into `ModelCatalogEntry`. It discards `created` and `owned_by` because the
 normalized entry has no corresponding fields and never repurposes them as

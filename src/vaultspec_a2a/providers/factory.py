@@ -133,6 +133,8 @@ def _build_kimi_env(
     kimi_base_url: str | None = None,
     kimi_temporary_model_name: str | None = None,
     kimi_code_home: str | None = None,
+    kimi_temporary_model_max_context_size: int | None = None,
+    kimi_temporary_model_capabilities: str | None = None,
 ) -> dict[str, str]:
     """Return the explicit Kimi Code home and temporary-provider definition.
 
@@ -144,6 +146,8 @@ def _build_kimi_env(
         kimi_api_key=kimi_api_key,
         kimi_base_url=kimi_base_url,
         kimi_temporary_model_name=kimi_temporary_model_name,
+        kimi_temporary_model_max_context_size=kimi_temporary_model_max_context_size,
+        kimi_temporary_model_capabilities=kimi_temporary_model_capabilities,
     )
     if reason is not None:
         raise ValueError(reason)
@@ -154,6 +158,14 @@ def _build_kimi_env(
         env_vars["KIMI_MODEL_API_KEY"] = kimi_api_key.strip()
         env_vars["KIMI_MODEL_BASE_URL"] = kimi_base_url.strip()
         env_vars["KIMI_MODEL_NAME"] = kimi_temporary_model_name.strip()
+        if kimi_temporary_model_max_context_size is not None:
+            env_vars["KIMI_MODEL_MAX_CONTEXT_SIZE"] = str(
+                kimi_temporary_model_max_context_size
+            )
+        if kimi_temporary_model_capabilities:
+            env_vars["KIMI_MODEL_CAPABILITIES"] = (
+                kimi_temporary_model_capabilities.strip()
+            )
     return env_vars
 
 
@@ -162,11 +174,16 @@ def kimi_temporary_model_configuration_reason(
     kimi_api_key: str | None,
     kimi_base_url: str | None,
     kimi_temporary_model_name: str | None,
+    kimi_temporary_model_max_context_size: int | None = None,
+    kimi_temporary_model_capabilities: str | None = None,
 ) -> str | None:
     """Return a static reason when a temporary Kimi definition is partial."""
     values = (kimi_api_key, kimi_base_url, kimi_temporary_model_name)
     present = tuple(bool(value and value.strip()) for value in values)
-    if not any(present) or all(present):
+    optional_present = kimi_temporary_model_max_context_size is not None or bool(
+        kimi_temporary_model_capabilities and kimi_temporary_model_capabilities.strip()
+    )
+    if (not any(present) and not optional_present) or all(present):
         return None
     return (
         "incomplete Kimi temporary model definition; set KIMI_MODEL_NAME, "
@@ -681,6 +698,12 @@ async def _discover_kimi_catalog(key: ProviderCatalogKey) -> ProviderCatalogDisc
             kimi_base_url=settings.kimi_base_url,
             kimi_temporary_model_name=settings.kimi_temporary_model_name,
             kimi_code_home=settings.kimi_code_home,
+            kimi_temporary_model_max_context_size=(
+                settings.kimi_temporary_model_max_context_size
+            ),
+            kimi_temporary_model_capabilities=(
+                settings.kimi_temporary_model_capabilities
+            ),
         )
     except ValueError as exc:
         return _unavailable_catalog_discovery(key, reason=str(exc))
@@ -988,6 +1011,12 @@ class ProviderFactory:
                 kimi_base_url=settings.kimi_base_url,
                 kimi_temporary_model_name=settings.kimi_temporary_model_name,
                 kimi_code_home=settings.kimi_code_home,
+                kimi_temporary_model_max_context_size=(
+                    settings.kimi_temporary_model_max_context_size
+                ),
+                kimi_temporary_model_capabilities=(
+                    settings.kimi_temporary_model_capabilities
+                ),
             )
             logger.debug(
                 "[%s] Instantiating Kimi ACP agent. Temporary definition present: %s",

@@ -359,11 +359,29 @@ def test_complete_kimi_temporary_definition_uses_current_names() -> None:
         kimi_api_key="temporary-key",
         kimi_base_url="https://kimi.example.invalid/v1",
         kimi_temporary_model_name="configured-alias",
+        kimi_temporary_model_max_context_size=131072,
+        kimi_temporary_model_capabilities="thinking,image_in",
     ) == {
         "KIMI_MODEL_API_KEY": "temporary-key",
         "KIMI_MODEL_BASE_URL": "https://kimi.example.invalid/v1",
         "KIMI_MODEL_NAME": "configured-alias",
+        "KIMI_MODEL_MAX_CONTEXT_SIZE": "131072",
+        "KIMI_MODEL_CAPABILITIES": "thinking,image_in",
     }
+
+
+@pytest.mark.parametrize(
+    ("max_context_size", "capabilities"),
+    ((131072, None), (None, "thinking"), (131072, "thinking")),
+)
+def test_optional_kimi_attributes_require_a_complete_temporary_definition(
+    max_context_size: int | None, capabilities: str | None
+) -> None:
+    with pytest.raises(ValueError, match="incomplete Kimi temporary model"):
+        _build_kimi_env(
+            kimi_temporary_model_max_context_size=max_context_size,
+            kimi_temporary_model_capabilities=capabilities,
+        )
 
 
 @pytest.mark.parametrize(

@@ -264,20 +264,64 @@ class InfraConfig(BaseSettings):
         default=None,
         validation_alias="KIMI_CODE_HOME",
     )
-    kimi_api_key: SecretStr | None = Field(
+    kimi_model_api_key: SecretStr | None = Field(
         default=None,
         validation_alias="KIMI_MODEL_API_KEY",
+        exclude=True,
+        repr=False,
     )
-    kimi_base_url: str | None = Field(
+    kimi_legacy_api_key: SecretStr | None = Field(
+        default=None,
+        validation_alias="KIMI_API_KEY",
+        exclude=True,
+        repr=False,
+    )
+    kimi_model_base_url: str | None = Field(
         default=None,
         validation_alias="KIMI_MODEL_BASE_URL",
         description="Base URL in a complete temporary Kimi model definition.",
+    )
+    kimi_legacy_base_url: str | None = Field(
+        default=None,
+        validation_alias="KIMI_BASE_URL",
+        exclude=True,
+        repr=False,
     )
     kimi_temporary_model_name: str | None = Field(
         default=None,
         validation_alias="KIMI_MODEL_NAME",
         description="Alias in a complete temporary Kimi model definition.",
     )
+    kimi_temporary_model_max_context_size: int | None = Field(
+        default=None,
+        gt=0,
+        le=2_147_483_647,
+        validation_alias="KIMI_MODEL_MAX_CONTEXT_SIZE",
+        description="Provider-owned context-size value for a temporary Kimi model.",
+    )
+    kimi_temporary_model_capabilities: str | None = Field(
+        default=None,
+        max_length=512,
+        validation_alias="KIMI_MODEL_CAPABILITIES",
+        description="Provider-owned capability value for a temporary Kimi model.",
+    )
+
+    @property
+    def kimi_api_key(self) -> SecretStr | None:
+        """Return the nonblank current key, then the nonblank migration key."""
+        for candidate in (self.kimi_model_api_key, self.kimi_legacy_api_key):
+            if candidate is not None and candidate.get_secret_value().strip():
+                return candidate
+        return None
+
+    @property
+    def kimi_base_url(self) -> str | None:
+        """Return the normalized current base URL, then its migration fallback."""
+        for candidate in (self.kimi_model_base_url, self.kimi_legacy_base_url):
+            if candidate is not None and candidate.strip():
+                return candidate.strip()
+        return None
+
     host: str = Field(
         default="127.0.0.1",
         description="Bind host for the uvicorn server (VAULTSPEC_HOST).",
@@ -660,6 +704,40 @@ class InfraConfig(BaseSettings):
         if isinstance(value, str) and not value.strip():
             return None
         return value
+
+    @field_validator("kimi_temporary_model_max_context_size", mode="before")
+    @classmethod
+    def _blank_kimi_context_size_is_absent(cls, value: object) -> object:
+        if isinstance(value, str) and not value.strip():
+            return None
+        return value
+
+    @field_validator("kimi_temporary_model_capabilities", mode="before")
+    @classmethod
+    def _normalise_kimi_capabilities(cls, value: object) -> object:
+        if not isinstance(value, str):
+            return value
+        if not value.strip():
+            return None
+        tokens = tuple(part.strip() for part in value.split(","))
+        if any(not token for token in tokens):
+            raise ValueError("Kimi model capabilities must not contain blank tokens")
+        if len(tokens) > 16:
+            raise ValueError("Kimi model capabilities must contain at most 16 tokens")
+        ordered_unique = tuple(dict.fromkeys(tokens))
+        for token in ordered_unique:
+            if (
+                len(token) > 64
+                or not token[0].isascii()
+                or not token[0].isalnum()
+                or any(
+                    not character.isascii()
+                    or not (character.isalnum() or character in "_.:-")
+                    for character in token
+                )
+            ):
+                raise ValueError("Kimi model capability contains an invalid token")
+        return ",".join(ordered_unique)
 
     @field_validator("mcp_allowed_hosts", "mcp_allowed_origins", mode="before")
     @classmethod

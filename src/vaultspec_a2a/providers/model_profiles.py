@@ -400,6 +400,12 @@ def probe_provider_readiness(provider: Provider) -> ProviderReadiness:
             kimi_api_key=key,
             kimi_base_url=settings.kimi_base_url,
             kimi_temporary_model_name=settings.kimi_temporary_model_name,
+            kimi_temporary_model_max_context_size=(
+                settings.kimi_temporary_model_max_context_size
+            ),
+            kimi_temporary_model_capabilities=(
+                settings.kimi_temporary_model_capabilities
+            ),
         )
         if reason is not None:
             return ProviderReadiness(

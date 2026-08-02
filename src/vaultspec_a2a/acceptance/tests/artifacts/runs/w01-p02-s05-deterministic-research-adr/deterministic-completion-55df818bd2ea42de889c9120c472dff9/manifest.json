@@ -1,0 +1,16 @@
+{
+  "artifacts": {
+    "authored-adr.md": "0ebf7c0664668e81d0b236e6ade409bed8e13b42473f4aa221b9681185b35537",
+    "authored-research.md": "5a306df654c9c7d3013b67de30ca17960fe6a82b8d836358aaf9bcecfa1412b4",
+    "execution-evidence.json": "97e874533aad4f3568e1fe8f9cec5d3e3bd3fec4039eccab784e3dd87e3ce7fa",
+    "scenario.json": "c8deb8ac03aa88fc81f805c51210c7ab51d347fbf9590c00f2cd4645dff4e115",
+    "scripted-adr-output.md": "4313bc9b5e2d88ef4c0d7aebd89f682084812bf2408626f79a02085f600ba18b"
+  },
+  "bundle_id": "w01-p02-s05-deterministic-research-adr:deterministic-completion-55df818bd2ea42de889c9120c472dff9",
+  "review": {
+    "required_step": "W01.P02.S31",
+    "status": "pending"
+  },
+  "run_id": "deterministic-completion-55df818bd2ea42de889c9120c472dff9",
+  "scenario_id": "w01-p02-s05-deterministic-research-adr"
+}

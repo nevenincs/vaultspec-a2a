@@ -124,20 +124,24 @@ def _holder_description(path: Path) -> str:
     )
 
 
-def _write_marker_excl(path: Path, *, owner: str) -> bool:
-    """Create *path* exclusively with holder metadata; False when it exists."""
+def _write_marker_excl(path: Path, *, owner: str) -> str | None:
+    """Create *path* exclusively with holder metadata; ``None`` when it exists.
+
+    Returns the exact payload written - the holder's release token - so a
+    holder can later prove the marker is still its own before unlinking it.
+    """
     payload = json.dumps(
         {"pid": os.getpid(), "owner": owner, "acquired_at_ms": int(time.time() * 1000)}
     )
     try:
         fd = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644)
     except FileExistsError:
-        return False
+        return None
     try:
         os.write(fd, payload.encode("utf-8"))
     finally:
         os.close(fd)
-    return True
+    return payload
 
 
 def _reap_dead_marker(path: Path, *, now_ms: int) -> None:
@@ -163,15 +167,26 @@ class Lease:
     key: str
     shared: bool
     path: Path
+    _token: str
     _stop: threading.Event
     _refresher: threading.Thread
 
     def release(self) -> None:
-        """Stop the heartbeat and drop the marker (idempotent)."""
+        """Stop the heartbeat and drop the marker (idempotent).
+
+        Unlinks only while the marker still carries this holder's own token: a
+        holder whose marker was reclaimed (stalled refresher past the TTL) must
+        not delete its successor's claim.
+        """
         self._stop.set()
         self._refresher.join(timeout=5.0)
-        with contextlib.suppress(OSError):
-            self.path.unlink()
+        try:
+            current = self.path.read_text(encoding="utf-8")
+        except OSError:
+            return
+        if current == self._token:
+            with contextlib.suppress(OSError):
+                self.path.unlink()
 
 
 def _start_refresher(
@@ -191,7 +206,9 @@ def _start_refresher(
     return stop, thread
 
 
-def _try_acquire_exclusive(root: Path, key: str, *, owner: str) -> Path | None:
+def _try_acquire_exclusive(
+    root: Path, key: str, *, owner: str
+) -> tuple[Path, str] | None:
     now = int(time.time() * 1000)
     exclusive = root / f"{key}{_EXCLUSIVE_SUFFIX}"
     _reap_dead_marker(exclusive, now_ms=now)
@@ -199,7 +216,8 @@ def _try_acquire_exclusive(root: Path, key: str, *, owner: str) -> Path | None:
         return None
     if _live_shared_markers(root, key, now_ms=now):
         return None
-    if not _write_marker_excl(exclusive, owner=owner):
+    token = _write_marker_excl(exclusive, owner=owner)
+    if token is None:
         return None
     # Shared holders admitted between the check and our create lose the race
     # only if they observed no exclusive marker; our marker existed before
@@ -209,21 +227,23 @@ def _try_acquire_exclusive(root: Path, key: str, *, owner: str) -> Path | None:
         with contextlib.suppress(OSError):
             exclusive.unlink()
         return None
-    return exclusive
+    return exclusive, token
 
 
-def _try_acquire_shared(root: Path, key: str, *, owner: str) -> Path | None:
+def _try_acquire_shared(root: Path, key: str, *, owner: str) -> tuple[Path, str] | None:
     now = int(time.time() * 1000)
     exclusive = root / f"{key}{_EXCLUSIVE_SUFFIX}"
     _reap_dead_marker(exclusive, now_ms=now)
     if exclusive.exists():
         return None
     mine = root / f"{key}.{os.getpid()}{_SHARED_SUFFIX}"
-    if not _write_marker_excl(mine, owner=owner):
+    token = _write_marker_excl(mine, owner=owner)
+    if token is None:
         # A leftover marker from a previous same-pid holder: reclaim it.
         with contextlib.suppress(OSError):
             mine.unlink()
-        if not _write_marker_excl(mine, owner=owner):
+        token = _write_marker_excl(mine, owner=owner)
+        if token is None:
             return None
     # Re-check: if an exclusive claimant won concurrently, retreat so the
     # stronger claim proceeds alone.
@@ -232,7 +252,7 @@ def _try_acquire_shared(root: Path, key: str, *, owner: str) -> Path | None:
         with contextlib.suppress(OSError):
             mine.unlink()
         return None
-    return mine
+    return mine, token
 
 
 def _contention_detail(root: Path, key: str) -> str:
@@ -272,15 +292,21 @@ def acquire(
         time.monotonic() + acquire_timeout_s if acquire_timeout_s is not None else None
     )
     while True:
-        path = (
+        acquired = (
             _try_acquire_shared(root, key, owner=label)
             if shared
             else _try_acquire_exclusive(root, key, owner=label)
         )
-        if path is not None:
+        if acquired is not None:
+            path, token = acquired
             stop, refresher = _start_refresher(path, interval_s=refresh_interval_s)
             return Lease(
-                key=key, shared=shared, path=path, _stop=stop, _refresher=refresher
+                key=key,
+                shared=shared,
+                path=path,
+                _token=token,
+                _stop=stop,
+                _refresher=refresher,
             )
         if deadline is not None and time.monotonic() >= deadline:
             raise LeaseAcquisitionTimeoutError(

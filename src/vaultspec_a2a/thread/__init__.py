@@ -73,9 +73,6 @@ from .errors import (
     DatabaseError as DatabaseError,
 )
 from .errors import (
-    ErrorSeverity as ErrorSeverity,
-)
-from .errors import (
     EventAggregatorError as EventAggregatorError,
 )
 from .errors import (
@@ -89,9 +86,6 @@ from .errors import (
 )
 from .errors import (
     ProviderSessionError as ProviderSessionError,
-)
-from .errors import (
-    RecoveryAction as RecoveryAction,
 )
 from .errors import (
     TeamConfigNotFoundError as TeamConfigNotFoundError,
@@ -174,7 +168,6 @@ __all__ = [
     "ControlActionResultStatus",
     "ControlActionType",
     "DatabaseError",
-    "ErrorSeverity",
     "EventAggregatorError",
     "ExecutionStateProjection",
     "InvalidTransitionError",
@@ -186,7 +179,6 @@ __all__ = [
     "ProjectedInterrupt",
     "ProtocolError",
     "ProviderSessionError",
-    "RecoveryAction",
     "RepairStatus",
     "TeamConfigNotFoundError",
     "TeamState",

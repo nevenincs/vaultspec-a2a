@@ -198,7 +198,11 @@ exclude = [
 # --capture=sys: avoids pytest's fd-level dup2 which crashes silently under
 # Git Bash / MinTTY (the _windowsconsoleio_workaround path). sys-level capture
 # replaces sys.stdout/stderr in memory only — no CloseHandle, no silent death.
-addopts = ["--durations=10", "--showlocals", "-ra", "--capture=sys", "-m", "not service"]
+# -p vaultspec_a2a.testing.plugin: the resource-aware execution plugin
+# (declaration-derived xdist groups, machine-global leases, registry-backed
+# endpoints, progress deadlines). Loaded here because pytest forbids
+# pytest_plugins below the rootdir conftest.
+addopts = ["--durations=10", "--showlocals", "-ra", "--capture=sys", "-p", "vaultspec_a2a.testing.plugin", "-m", "not service"]
 # log_cli is opt-in, not a default: every module logger streaming live into
 # every run buries the pass/fail signal in noise, and failing-test log capture
 # (pytest's own default) already surfaces diagnostics without it. Opt in with
@@ -219,6 +223,7 @@ markers = [
   "middleware: marks middleware-layer tests — protocol adapters + infra services, no orchestration deps (run with '-m middleware')",
   "unit: marks pure unit tests across all layers — no I/O, no database, no HTTP (run with '-m unit')",
   "service: marks Layer 3 certification tests — most require Docker compose services, though some members are engine-free and run fully in-process. Run with pytest -m service.",
+  "resource(key, shared=False): declares a contended real resource this test uses; drives scheduling groups, machine-global leases, and timeout backstops (vaultspec_a2a.testing).",
 ]
 
 [tool.ruff]

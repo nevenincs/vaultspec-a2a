@@ -4,7 +4,7 @@ tags:
   - '#provider-model-catalog'
 date: '2026-08-02'
 modified: '2026-08-02'
-body_hash: 'sha256:212b6430e4f616cfb49e1360738718bd1530c3706caca0c960c699cb764a2f52'
+body_hash: 'sha256:c9affbedf93cf799ecf2fb296a06a944008361a14ec842f9616edf34db2e4137'
 tier: L2
 related:
   - '[[2026-08-02-provider-model-catalog-adr]]'
@@ -49,7 +49,7 @@ Add the bounded Rust edge, live catalog store, provider/model/control chooser, a
 - [x] `P02.S12` - Add the provider-catalog verb and validate bounded catalog, health, selection, control, fallback, and override shapes without hard-coded enums; `Y:/code/vaultspec-dashboard-worktrees/main/engine/crates/vaultspec-api/src/routes/ops/a2a.rs`.
 - [x] `P02.S13` - Directly migrate the Dashboard store, composer chooser, and obsolete profile fixtures to opaque provider catalogs, structured health, required selection, controls, and frozen assignments; `Y:/code/vaultspec-dashboard-worktrees/main/frontend/src/stores/server/agent/, frontend/src/app/agent/ComposerModelPicker.tsx, frontend/src/app/agent/Composer.tsx, frontend/dev/visual-review/specimens/agent.tsx`.
 - [x] `P02.S15` - Add bounded per-role model and control overrides and explicit served fallbacks without arbitrary role keys or model values; `Y:/code/vaultspec-dashboard-worktrees/main/frontend/src/app/agent/`.
-- [ ] `P02.S16` - Display configured, transport, authentication, catalog freshness, admission, and selectability states truthfully; `Y:/code/vaultspec-dashboard-worktrees/main/frontend/src/app/agent/`.
+- [x] `P02.S16` - Display configured, transport, authentication, catalog freshness, admission, and selectability states truthfully; `Y:/code/vaultspec-dashboard-worktrees/main/frontend/src/app/agent/`.
 - [ ] `P02.S17` - Render exact frozen provider, model, native controls, and provenance returned for active runs; `Y:/code/vaultspec-dashboard-worktrees/main/frontend/src/app/agent/TeamRunHeader.tsx`.
 
 ### Phase `P03` - Integrate, review, and reconcile the cross-project contract

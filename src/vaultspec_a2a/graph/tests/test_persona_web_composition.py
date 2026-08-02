@@ -200,7 +200,7 @@ def _prompt_text(prompt_file: Path) -> str:
     return _normalise(" ".join(blocks))
 
 
-@pytest.mark.parametrize("agent_id", ("vaultspec-researcher", "vaultspec-analyst"))
+@pytest.mark.parametrize("agent_id", ("vaultspec-researcher",))
 def test_the_research_presets_mark_the_spot_and_name_no_tool(agent_id: str) -> None:
     """Fixture precondition for the run below, and a rule in its own right.
 
@@ -459,8 +459,9 @@ def test_a_marked_non_document_persona_still_resolves_its_marker(
 ) -> None:
     """A marker is honoured whatever the role, because a leaked one is instruction.
 
-    The analyst is exactly this case in the shipped tree: its role is outside the
-    document set, and it marks the spot anyway.
+    No shipped persona occupies this case today, so the rule is pinned
+    synthetically: the next marked persona outside the document set arrives
+    already governed.
     """
     composed = _compose_persona_prompt(
         f"Body.\n{_WEB_GROUNDING_MARKER}",

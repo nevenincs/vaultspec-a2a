@@ -46,7 +46,6 @@ _ALL_AGENT_IDS = [
     "vaultspec-supervisor",
     "vaultspec-plan-author",
     "vaultspec-coder",
-    "vaultspec-analyst",
     "vaultspec-researcher",
     "vaultspec-synthesist",
     "vaultspec-adr-author",
@@ -101,11 +100,6 @@ class TestAgentConfigFromToml:
         """Coder preset declares at least one require_approval_for entry."""
         cfg = load_agent_config("vaultspec-coder")
         assert cfg.permissions.require_approval_for  # non-empty list
-
-    def test_analyst_capabilities(self) -> None:
-        """Analyst preset enables filesystem_read and filesystem_write."""
-        cfg = load_agent_config("vaultspec-analyst")
-        assert cfg.capabilities.filesystem_read is True
 
 
 # ---------------------------------------------------------------------------
@@ -995,17 +989,32 @@ class TestModelProfiles:
     """
 
     def test_bundled_adr_research_exposes_fast_profile(self) -> None:
-        """The reference `fast` profile lowers the two high-volume roles only."""
+        """The reference `fast` profile lowers EVERY role, not a subset.
+
+        This asserted a two-role partial overlay until the profile was made
+        total. The partial shape was the defect: `fast` is the profile a
+        cost-ceilinged live certification selects, and an authoring role absent
+        from the overlay fell through to its own configured capability - so a run
+        chosen for its explicit floor silently billed two roles at a higher tier.
+        A cost ceiling that only some roles observe is not a ceiling.
+
+        Every worker the team declares must therefore appear here, which is what
+        makes the profile's own description - all-low execution across every role
+        - true rather than aspirational.
+        """
         cfg = load_team_config("vaultspec-adr-research")
         assert "fast" in cfg.profiles
         fast = cfg.profiles["fast"]
         assert fast.display_name == "Fast"
-        assert set(fast.roles) == {"vaultspec-researcher", "vaultspec-doc-reviewer"}
-        assert fast.roles["vaultspec-researcher"].capability == Model.LOW
-        assert fast.roles["vaultspec-doc-reviewer"].capability == Model.LOW
-        # A partial overlay leaves the two authoring roles untouched (fall-through).
-        assert "vaultspec-synthesist" not in fast.roles
-        assert "vaultspec-adr-author" not in fast.roles
+
+        declared_workers = {worker.agent_id for worker in cfg.workers}
+        assert set(fast.roles) == declared_workers, (
+            "the fast profile must overlay every declared worker; a role missing "
+            "here falls through to its own capability and escapes the ceiling"
+        )
+        assert all(
+            overlay.capability == Model.LOW for overlay in fast.roles.values()
+        ), "every fast overlay must pin LOW, or the profile is not all-low"
 
     def test_bundled_adr_research_exposes_kimi_profile(self) -> None:
         """The `kimi` provider-axis profile routes the four authoring roles to Kimi.

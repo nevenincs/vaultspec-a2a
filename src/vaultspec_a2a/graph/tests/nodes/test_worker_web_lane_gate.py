@@ -162,7 +162,7 @@ async def test_an_unproven_lane_surfaces_no_web_tool_name(
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("agent_id", "role"),
-    (("vaultspec-researcher", "researcher"), ("vaultspec-analyst", "researcher")),
+    (("vaultspec-researcher", "researcher"),),
 )
 async def test_an_unproven_lane_adds_no_web_capability_text(
     tmp_path: Path, agent_id: str, role: str
@@ -205,7 +205,7 @@ async def test_a_shipped_capability_bound_reaches_the_model_intact(
 ) -> None:
     """A bound the persona actually states still reaches the spawn unaltered.
 
-    The analyst is the carrier, loaded from its preset rather than written here, so
+    The researcher is the carrier, loaded from its preset rather than written here, so
     this fails the moment the worker path starts rewriting persona text.
 
     The bound asserted is the terminal one, not an online-access one, and the
@@ -216,10 +216,10 @@ async def test_a_shipped_capability_bound_reaches_the_model_intact(
     (``graph/tests/test_persona_web_composition.py``).
     """
     prompt_file = tmp_path / "session_prompt.json"
-    persona = load_agent_config("vaultspec-analyst").persona.system_prompt
+    persona = load_agent_config("vaultspec-researcher").persona.system_prompt
     normalised_persona = " ".join(persona.split())
     assert "You have no terminal" in normalised_persona, (
-        "fixture precondition: the analyst preset is the capability-bound carrier"
+        "fixture precondition: the researcher preset is the capability-bound carrier"
     )
     assert "no online access" not in normalised_persona, (
         "a shipped persona may not deny web reach; every lane is built to search"
@@ -227,7 +227,7 @@ async def test_a_shipped_capability_bound_reaches_the_model_intact(
     node = create_worker_node(
         model=_model(tmp_path, provider="claude", session_prompt=prompt_file),
         system_prompt=persona,
-        name="vaultspec-analyst",
+        name="vaultspec-researcher",
         autonomous=True,
         role="researcher",
     )

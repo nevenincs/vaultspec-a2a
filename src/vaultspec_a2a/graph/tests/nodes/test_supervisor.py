@@ -362,14 +362,14 @@ def test_plan_rejection_prefers_plan_phase_worker_for_revision() -> None:
 
 def test_plan_rejection_falls_back_to_first_worker_without_plan_phase_map() -> None:
     worker = _select_revision_worker(
-        ["vaultspec-analyst", "vaultspec-doc-reviewer", "vaultspec-coder"],
+        ["vaultspec-researcher", "vaultspec-doc-reviewer", "vaultspec-coder"],
         {
-            "vaultspec-analyst": "research",
+            "vaultspec-researcher": "research",
             "vaultspec-doc-reviewer": "audit",
             "vaultspec-coder": "exec",
         },
     )
-    assert worker == "vaultspec-analyst"
+    assert worker == "vaultspec-researcher"
 
 
 def test_supervisor_prefers_worker_phase_over_vault_inference() -> None:

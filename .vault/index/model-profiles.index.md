@@ -3,9 +3,10 @@ generated: true
 tags:
   - '#index'
   - '#model-profiles'
-date: '2026-07-22'
-modified: '2026-07-22'
-body_hash: 'sha256:25b7861ea3df875659428c7b3f61673f9063f3f565aa8a763410811d5150b274'
+date: '2026-08-02'
+modified: '2026-08-02'
+body_schema: 'body-v1'
+body_hash: 'sha256:b909111f63d09bd7dde25d3660d26b5d132e34c8fa9455e56cfd498be91222df'
 related:
   - '[[2026-07-15-model-profiles-P01-S01]]'
   - '[[2026-07-15-model-profiles-P01-S02]]'
@@ -18,6 +19,19 @@ related:
   - '[[2026-07-15-model-profiles-adr]]'
   - '[[2026-07-15-model-profiles-plan]]'
   - '[[2026-07-15-model-profiles-research]]'
+  - '[[2026-08-02-model-profiles-S01]]'
+  - '[[2026-08-02-model-profiles-S02]]'
+  - '[[2026-08-02-model-profiles-S03]]'
+  - '[[2026-08-02-model-profiles-S04]]'
+  - '[[2026-08-02-model-profiles-S05]]'
+  - '[[2026-08-02-model-profiles-S06]]'
+  - '[[2026-08-02-model-profiles-S07]]'
+  - '[[2026-08-02-model-profiles-S08]]'
+  - '[[2026-08-02-model-profiles-S09]]'
+  - '[[2026-08-02-model-profiles-S10]]'
+  - '[[2026-08-02-model-profiles-acp-model-selection-research]]'
+  - '[[2026-08-02-model-profiles-model-tier-passthrough-audit]]'
+  - '[[2026-08-02-model-profiles-plan]]'
 ---
 
 # `model-profiles` feature index
@@ -30,6 +44,10 @@ Auto-generated index of all documents tagged with `#model-profiles`.
 
 - `2026-07-15-model-profiles-adr` - `model-profiles` adr: `named model profiles, shared resolution, and backend-served eligibility` | (**status:** `accepted`)
 
+### audit
+
+- `2026-08-02-model-profiles-model-tier-passthrough-audit` - `model-profiles` audit: `Model tier passthrough review`
+
 ### exec
 
 - `2026-07-15-model-profiles-P01-S01` - Add the team.profiles TOML schema (per-role provider/capability/fallback overlays, implicit team-defaults, workspace-over-bundled discovery, validation) to team_config
@@ -40,11 +58,23 @@ Auto-generated index of all documents tagged with `#model-profiles`.
 - `2026-07-15-model-profiles-P02-summary` - `model-profiles` `P02` summary
 - `2026-07-15-model-profiles-P03-S05` - Run the handover evidence battery live: bundled plus workspace discovery, mock marking, invalid-preset isolation, heterogeneous team-defaults disclosure, missing-credential unavailable profile, fallback eligibility, unknown-profile rejection, frozen assignment surviving restart and config drift, no secrets anywhere, and a real research-to-ADR run on the served assignments
 - `2026-07-15-model-profiles-P03-summary` - `model-profiles` `P03` summary
+- `2026-08-02-model-profiles-S01` - Add regression coverage for desired ACP model propagation and exact configuration RPC
+- `2026-08-02-model-profiles-S02` - Make every served fast profile resolve all roles to Model.LOW
+- `2026-08-02-model-profiles-S03` - Retain desired model and negotiated configuration options in ACP session state
+- `2026-08-02-model-profiles-S04` - Select the negotiated ACP model config with configId and fail closed before prompts
+- `2026-08-02-model-profiles-S05` - Remove obsolete ACP session set model transport and malformed setter
+- `2026-08-02-model-profiles-S06` - Pass frozen concrete model names through compiler and factory without Kimi override
+- `2026-08-02-model-profiles-S07` - Prove factory compiler and preset resolution preserve explicit low models
+- `2026-08-02-model-profiles-S08` - Route real provider tests through fast or direct Model.LOW with pre-spawn guards
+- `2026-08-02-model-profiles-S09` - Run a real ACP configuration handshake without prompting and reaping subprocesses
+- `2026-08-02-model-profiles-S10` - Run focused static and live verification then review findings and update audit
 
 ### plan
 
 - `2026-07-15-model-profiles-plan` - `model-profiles` plan
+- `2026-08-02-model-profiles-plan` - `model-profiles` plan
 
 ### research
 
 - `2026-07-15-model-profiles-research` - `model-profiles` research: `model profiles and team eligibility: triage of the dashboard discovery handover`
+- `2026-08-02-model-profiles-acp-model-selection-research` - `model-profiles` research: `ACP model selection and low-cost test profile`

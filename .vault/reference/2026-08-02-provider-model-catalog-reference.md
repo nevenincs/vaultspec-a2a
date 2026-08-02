@@ -1,0 +1,103 @@
+---
+tags:
+  - '#reference'
+  - '#provider-model-catalog'
+date: '2026-08-02'
+modified: '2026-08-02'
+body_schema: 'body-v1'
+body_hash: 'sha256:18edc712d56a2ae2c1040b11adea6e486c558fa1619573f604e3a17a779ef41b'
+related:
+  - "[[2026-02-25-llm-context-provider-abstraction-adr]]"
+  - "[[2026-07-15-model-profiles-adr]]"
+---
+
+# `provider-model-catalog` reference: `provider model catalog and health integration reference`
+
+This reference maps the current A2A and Dashboard selection path, provider
+catalog surfaces available to replace hard-coded model policy, and health facts
+that can be reported without spending a completion. It reflects the shared
+worktrees on 2026-08-02, including concurrent uncommitted A2A work.
+
+## Summary
+
+### Current cross-project path
+
+- A2A `RunStartRequest` forbids extra fields and accepts `profile_id`, not a
+  provider/catalog selection: `src/vaultspec_a2a/api/schemas/gateway.py:189,234`.
+- The Dashboard request and Rust pass-through likewise carry only
+  `profile_id`: `frontend/src/stores/server/agent/a2aTeam.ts:189` and
+  `engine/crates/vaultspec-api/src/routes/ops/a2a.rs:163,500` in the Dashboard
+  worktree.
+- The Dashboard composer renders backend-served profiles rather than provider
+  catalogs: `frontend/src/app/agent/Composer.tsx:758` and
+  `frontend/src/app/agent/ComposerModelPicker.tsx:1`.
+- Product preset TOMLs still encode provider lanes, and missing provider input
+  can fall back to Claude: `src/vaultspec_a2a/team/presets/teams/vaultspec-adr-research.toml:164`
+  and `src/vaultspec_a2a/providers/model_profiles.py:85,218`.
+- `Model` and every concrete provider mapping are static in
+  `src/vaultspec_a2a/graph/enums.py:202-294`; resolution consumes that map in
+  `src/vaultspec_a2a/providers/model_profiles.py:245`.
+
+### Existing durable and architectural primitives
+
+- Frozen assignments persist provider, capability, concrete `model_name`,
+  fallback, provenance, and digest:
+  `src/vaultspec_a2a/providers/model_profiles.py:610-666`. The compiler consumes
+  the frozen name at `src/vaultspec_a2a/graph/compiler.py:154,266`.
+- Run-start replay conflict handling compares `profile_id` today and must cover
+  the provider/model snapshot: `src/vaultspec_a2a/api/routes/gateway.py:888`.
+- The accepted provider-abstraction architecture assigns model catalog and auth
+  metadata to provider descriptors/registry, though the current factory has not
+  implemented it: `.vault/adr/2026-02-25-llm-context-provider-abstraction-adr.md:51`.
+- ACP setup receives `configOptions`, locates the model-category option, and can
+  set and verify a value before prompt:
+  `src/vaultspec_a2a/providers/_acp_session.py:36-111`. This is an execution
+  handshake for a preselected value, not yet a served catalog endpoint.
+
+### Provider discovery surfaces
+
+| Lane | Authoritative discovery surface | Metadata available | Boundary |
+|---|---|---|---|
+| Generic ACP | session `configOptions`: `model`, `thought_level`, `model_config` | ordered opaque values, labels, descriptions, current/default values, adjacent controls | session-scoped; absence must remain absence |
+| Codex CLI | app-server `model/list` and `modelProvider/capabilities/read` | models, ordered reasoning efforts, speed/service tiers, defaults, upgrade metadata | production A2A does not call it yet |
+| Claude API | authenticated `GET /v1/models` | ids, names, limits, capabilities, supported effort values | Claude Code subscription choices should come from its ACP/config picker |
+| Claude Code | ACP/config picker or `/model` | account-appropriate choices, aliases, default, managed restrictions | aliases move; preserve provider-issued values |
+| Gemini API | authenticated `models.list` / `models.get` | supported actions and extended metadata | filter only by explicit `generateContent`; do not infer tiers |
+| Kimi CLI | ACP model selection; `/model` refresh | configured-platform models and thinking support | catalog depends on configuration/authentication |
+| OpenAI API | authenticated `GET /v1/models` | id, owner, availability | does not state reasoning tiers or chat suitability |
+| Z.AI / Zhipu API | no verified official model-list contract in this pass | invocation docs list selected products | report catalog unavailable unless the endpoint or ACP advertises choices |
+
+LangChain is an invocation abstraction here. `ChatOpenAI` accepts a model
+string and exposes an underlying OpenAI client;
+`init_chat_model(..., configurable_fields=...)` makes application fields
+runtime-configurable. Neither is a cross-provider catalog. Discovery belongs
+in provider descriptors beside LangChain, not a hard-coded LangChain mapping.
+
+### Health currently served and required separation
+
+`ProviderReadiness` collapses executable and credential checks into `ready`
+plus reason at `src/vaultspec_a2a/providers/model_profiles.py:157,322-389`.
+Codex checks command resolution without proving its persisted account. Dashboard
+receives only `provider_ready` at
+`frontend/src/stores/server/agent/a2aTeam.ts:96`; service state exposes aggregate
+eligibility and names at `src/vaultspec_a2a/api/schemas/gateway.py:902`.
+
+A safe provider record needs separate `configured`, transport
+installation/resolution, `authenticated` (`true`, `false`, `unknown`, or
+`not_applicable`), `catalog_available`, completed-turn `admitted`, and derived
+`selectable` facts, plus bounded reasons, `checked_at`, catalog revision/freshness,
+and provider-issued options. Credential presence is configuration, not
+authentication; completed-turn admission is separate from both.
+
+### Authoritative external references
+
+- ACP config options: https://agentclientprotocol.com/rfds/session-config-options
+- ACP model config category: https://agentclientprotocol.com/rfds/model-config-category
+- Codex app-server: https://github.com/openai/codex/blob/main/codex-rs/app-server/README.md
+- Claude API models: https://platform.claude.com/docs/en/api/models/list
+- Claude Code model configuration: https://code.claude.com/docs/en/model-config
+- Gemini API models: https://ai.google.dev/api/models
+- Kimi model selector: https://moonshotai.github.io/kimi-cli/en/reference/slash-commands.html
+- OpenAI API models: https://platform.openai.com/docs/api-reference/models/object?lang=curl
+- LangChain OpenAI: https://reference.langchain.com/python/langchain-openai/langchain_openai
+- LangChain runtime configuration: https://reference.langchain.com/python/langchain/chat_models/base/init_chat_model

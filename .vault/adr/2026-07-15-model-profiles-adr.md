@@ -1,60 +1,65 @@
 ---
 tags:
-  - '#adr'
-  - '#model-profiles'
+  - "#adr"
+  - "#model-profiles"
 date: '2026-07-15'
-modified: '2026-07-15'
-body_hash: 'sha256:c3b1e37409e54d47555c8a26a1bb8a7906b84edfb362818cf4a62531aea6453d'
 related:
   - "[[2026-02-27-team-composition-topology-adr]]"
   - "[[2026-07-14-adr-authoring-orchestration-adr]]"
-  - '[[2026-07-15-model-profiles-research]]'
+  - "[[2026-07-15-model-profiles-research]]"
+  - "[[2026-08-02-llm-context-provider-abstraction-acp-v1-client-wire-adr]]"
+  - "[[2026-08-02-model-profiles-acp-model-selection-research]]"
+superseded_by: '2026-08-02-provider-model-catalog-adr'
+modified: '2026-08-02'
+body_hash: 'sha256:d5725d8aa61d2683428066f9bb32f82c5d1247c0e9b59f9d1e35d0fbc2efccfa'
 ---
-# `model-profiles` adr: `named model profiles, shared resolution, and backend-served eligibility` | (**status:** `accepted`)
+# `model-profiles` adr: `named model profiles, shared resolution, and backend-served eligibility` | (**status:** `superseded`)
 
 ## Problem Statement
 
-The dashboard's authoring surface needs two truthful controls - execution target and model profile - backed by A2A contracts, for heterogeneous teams whose roles run different providers and capability levels. The governing team-composition record prohibits per-request model overrides with a preset, and eligibility today is inferable only by actually instantiating providers. Grounding: `2026-07-15-model-profiles-research`.
+The dashboard's authoring surface needs truthful execution-target and model-profile controls for heterogeneous teams. Callers may select a declared profile but may not author a model map. The original decision established validation, eligibility, and frozen assignments; subsequent evidence shows that the Claude/Z.ai ACP path does not actually apply its resolved concrete model, that Kimi can override it from a global setting, and that the existing `fast` profile does not constrain every role to low cost. Grounding: `2026-07-15-model-profiles-research` and `2026-08-02-model-profiles-acp-model-selection-research`.
 
 ## Considerations
 
-- Precedence chain implemented with one natural insertion point (research, chain finding).
-- No pre-instantiation provider readiness exists; truthful eligibility requires a probe (research).
-- The truthful discovery record is already landing in the edge-conformance successor plan; this feature extends it (research).
-- Discovery truth and launch truth must come from one resolution function or the picker drifts from execution (handover requirement).
-- Dashboard intent: A2A serves operational truth; the Rust backend curates product labels and never recreates eligibility.
+- A soft edge selects only a bounded `profile_id`; profile policy stays server-owned.
+- Discovery, launch, compilation, restart, and the provider subprocess must observe the same frozen concrete model, or displayed model truth is not execution truth.
+- ACP configuration is negotiated per session. The advertised configuration identifier, not an assumed method or key, is the runtime authority.
+- Default pytest excludes service tests, but explicitly selected service tests can make real-provider calls; the selected model must be provable before a prompt.
+- The ACP v1 wire-conformance ADR remains governing for protocol-contract replacement and its direct-removal posture.
 
 ## Considered options
 
-- **Caller-authored per-role model maps on run-start.** Rejected: unbounded validation surface, reintroduces the exact drift the composition ADR prohibited, and leaks model policy ownership to clients.
-- **Frontend-static profile labels.** Rejected: the handover explicitly forbids untruthful controls; labels without backend eligibility are marketing, not contract.
-- **Named backend-defined profiles with shared resolution (chosen).** Callers select declared profile ids; A2A owns definition, resolution, eligibility, and freezing.
+- **Caller-authored per-role model maps on run-start.** Rejected: unbounded validation surface, reintroduces drift, and leaks model policy ownership to clients.
+- **Keep capability-only freezing and rely on provider defaults.** Rejected: a mapping change, global override, or provider default can make a frozen profile execute a different concrete model.
+- **Keep the `fast` profile as a partial cost reduction and add a hidden test profile.** Rejected: it does not provide a spend-control invariant and creates an unserved, unauditable selector.
+- **Retain `session/set_model` or accept both ACP configuration shapes.** Rejected: the former is obsolete and the latter manufactures an unsupported compatibility contract.
+- **Named backend-defined profiles, frozen concrete-model execution, negotiated ACP selection, and an all-low served `fast` profile.** Accepted.
 
 ## Constraints
 
-- Depends on plan-2 P01.S02 (truthful presets-list) landing first; the discovery record here is its superset.
-- Readiness is presence/resolvability (credentials configured, command resolvable, engine reachable), not quota headroom - stated in the served record so consumers do not over-trust it.
-- ADR-Research eligibility includes "production acceptance gate passed" (P04.S10), which is still open - discovery must report it honestly as an unavailable reason until then.
-- The a2a-edge contract stays v1-additive; profile fields are new optional-to-absent fields, never renames.
+- The A2A edge contract remains profile-id-only and v1-additive; arbitrary model-name and per-role maps remain forbidden.
+- A profile's safe disclosure, persisted assignment, compiler input, factory input, and selected provider setting must agree on its concrete model name.
+- ACP must select only a configuration option returned by that session. Missing option, malformed response, rejected selection, or no observed selected value must fail before `session/prompt`.
+- No aliases, fallbacks, compatibility flags, or legacy `session/set_model` transport may remain.
+- An all-low profile minimizes model tier, not provider billing, quotas, tokens, or rate limits; live tests still require explicit operator authorization and observable prerequisites.
 
 ## Implementation
 
-The decision, settling each question the handover poses:
-
-- **A profile is a named whole-team configuration**, declared as `[team.profiles.<id>]` blocks in team TOML with per-role assignment overlays. Profiles live wherever teams live: bundled and workspace, workspace-over-bundled, discovered by the existing config discovery order. `team-defaults` is implicit on every team as the empty overlay and is the default profile.
-- **Precedence**: a selected profile's per-role assignment is a fourth, topmost layer above the ADR-013 §2.3 chain (profile > worker override > agent TOML > team defaults); roles absent from the profile fall through unchanged. A profile may set provider, capability, and fallback order per role - full assignment control, but only from declared configuration.
-- **Caller-authored per-role overrides remain prohibited.** Callers select profile ids only. This amends the team-composition record's prohibition by narrowing it, not reversing it; that record's composition and topology decisions stand.
-- **Versioning and persistence**: run-start validates the profile belongs to the preset, resolves the complete effective per-role assignment through the shared resolver, and persists {profile_id, safe effective assignment, content digest} in run metadata before dispatch. Restart and recovery reuse the frozen record and never re-resolve; a pre-dispatch incompatible definition change returns a typed conflict; an unknown, unavailable, or ineligible profile is rejected - never silently replaced with team-defaults.
-- **Eligibility** is computed by one shared resolution-and-eligibility service consumed by discovery, run-start, and graph compilation alike (single source, no picker/execution drift). Provider readiness comes from a new no-instantiation probe (credential presence, command resolvability, engine reachability); an unavailable primary with an eligible declared fallback keeps the role eligible; every ineligibility carries a safe reason. TOML parsing alone never implies runnable.
-- **Exposure**: discovery serves per-profile effective role assignments limited to role id, agent id, provider id, capability, stable model name, ordered fallbacks, readiness, and assignment source (profile/worker/agent/team-default). Credentials, env values, tokens, and private paths never appear. Product naming (`ADR Research`, `Team defaults`) is the Rust backend's projection; A2A serves ids and truth.
+- **Profiles and precedence.** A profile remains a named whole-team configuration in team TOML. Selected profile assignment is the top layer above worker override, agent TOML, and team defaults. `team-defaults` remains the empty implicit profile. The dashboard and every other permitted edge may submit only an eligible declared profile id.
+- **Freeze concrete execution.** Run start resolves and persists per-role provider, capability, concrete model name, fallback order, and attribution before dispatch. Restart and compiler construction must consume the persisted concrete model name rather than resolve a name again from mutable mappings. A global provider setting is only a default when no profile-resolved name exists; it may never override a selected or frozen model.
+- **ACP model selection.** Claude and Z.ai factories pass the resolved concrete model as the ACP model's desired model. Session setup retains the negotiated `configOptions`, finds the advertised model-selection option, and invokes `session/set_config_option` using `{sessionId, configId, value}` before any prompt. The result must demonstrate the selected desired value. Failure is typed and terminal for the run before a provider prompt. The obsolete `session/set_model` request, its request id, and malformed generic setter are removed directly.
+- **Truthful low-cost profile.** The served `fast` profile means every role in the team resolves to `Model.LOW`. Its description and every provider-axis overlay must be explicit and truthful. The solo-coder preset provides the same low profile. There is no hidden test-only profile.
+- **Test enforcement.** Every real-provider or service test selects `fast` or passes `Model.LOW` directly where it bypasses profile creation, and asserts the resolved assignment is all-low before spawning a provider. ACP coverage includes a real adapter initialize/session/configuration exchange that reaps the subprocess before a prompt; a separate explicit live turn proves the selected low tier where credentials are deliberately present. Deterministic tests remain the broad cost-free floor.
 
 ## Rationale
 
-The knockout is the handover's own drift rule: discovery and launch must share one resolution function, which only a backend-owned named-profile design can satisfy - caller maps make every launch a bespoke resolution, and static labels make discovery a fiction. The design reuses every existing idiom (precedence chain insertion point, workspace-over-bundled discovery, run-metadata persistence) and adds exactly one new runtime capability (the readiness probe), keeping blast radius proportional to product value.
+Named profiles remain the correct configuration-owned selector. Making the frozen concrete name authoritative closes the gap between dashboard disclosure and execution, while the negotiated ACP path keeps model selection compatible with the actual adapter rather than a guessed RPC. An all-low served profile provides a visible, reviewable cost-control contract instead of a test bypass. Direct removal avoids carrying obsolete protocol surface into future providers.
 
 ## Consequences
 
-- Gains: truthful selectable controls; eligibility becomes a served contract instead of dashboard inference; the frozen-assignment record makes runs reproducible across restarts and config drift.
-- Difficulties: the readiness probe must stay honest about what it cannot see (quota, mid-run revocation); profile validation adds a schema surface to team TOML that the doc-authoring personas' presets must adopt; the acceptance-gate eligibility term keeps ADR Research reported unavailable until P04.S10 passes, which the dashboard must display honestly.
-- Opens: per-profile cost/latency annotation later; workspace-defined experimental profiles without code changes.
-- Supersession posture: amends `2026-02-27-team-composition-topology-adr` (§2.3 precedence gains the profile layer; the per-request-override prohibition narrows to caller-authored maps). That record otherwise stands; no supersession.
+- Dashboard and A2A profile disclosure becomes a runtime claim that every provider must either honour or refuse before prompting.
+- Claude and Z.ai gain an explicit model-configuration handshake; unsupported adapter versions fail closed instead of consuming their default model.
+- Kimi loses its ability to override a selected profile through a global model setting.
+- `fast` changes from partial latency reduction to a product-visible all-low contract; callers wanting higher quality must choose another profile intentionally.
+- Real-provider tests gain a pre-spawn low-tier assertion and a no-prompt ACP handshake proof, but provider billing and quota controls remain outside this ADR.
+- Supersession posture: this amends `2026-07-15-model-profiles-adr` in place and refines its freeze-and-persist and profile semantics. It relies on, but does not supersede, `2026-08-02-llm-context-provider-abstraction-acp-v1-client-wire-adr`.

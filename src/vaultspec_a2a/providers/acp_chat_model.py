@@ -86,6 +86,7 @@ from .acp_exceptions import (
     AcpErrorCode,
     AcpPromptError,
 )
+from .conditions import condition_from_acp_error
 from .gemini_auth import refresh_gemini_token
 
 __all__ = ["AcpChatModel"]
@@ -119,7 +120,14 @@ def _required_session_id(result: JsonObject, *, operation: str) -> str:
 
 
 def _raise_prompt_error(response: JsonObject) -> Never:
-    """Raise a typed prompt failure from one JSON-RPC error response."""
+    """Raise a typed prompt failure from one JSON-RPC error response.
+
+    The adapter attaches a categorical error kind to this frame precisely so a
+    client can dispatch on it rather than pattern-match the message, and this is
+    the one place that kind is still in hand. Resolving it here means the
+    condition travels with the exception to every reporting site, instead of
+    each of them re-deriving it from prose that has already been flattened.
+    """
     raw_error = response.get("error")
     error = _json_object(raw_error)
     code_value = error.get("code")
@@ -132,6 +140,7 @@ def _raise_prompt_error(response: JsonObject) -> Never:
         f"ACP prompt failed: {raw_error}",
         code=code,
         data=error.get("data"),
+        condition=condition_from_acp_error(error),
     )
 
 

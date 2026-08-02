@@ -5,6 +5,8 @@ Derived from Agent Client Protocol and JSON-RPC specifications.
 
 from enum import IntEnum
 
+from .conditions import ProviderCondition
+
 __all__ = [
     "AcpAuthError",
     "AcpError",
@@ -34,7 +36,7 @@ class AcpErrorCode(IntEnum):
 class AcpError(Exception):
     """Base exception for all ACP-related errors."""
 
-    __slots__ = ("code", "data", "message", "request_id")
+    __slots__ = ("code", "condition", "data", "message", "request_id")
 
     def __init__(
         self,
@@ -42,6 +44,8 @@ class AcpError(Exception):
         code: int = AcpErrorCode.INTERNAL_ERROR,
         data: object = None,
         request_id: str | int | None = None,
+        *,
+        condition: ProviderCondition = ProviderCondition.UNKNOWN,
     ) -> None:
         """Initialize the ACP error.
 
@@ -50,11 +54,17 @@ class AcpError(Exception):
             code: ACP or JSON-RPC error code.
             data: Optional structured data related to the error.
             request_id: Optional ID of the request that failed.
+            condition: The provider condition this failure resolves to. Carried
+                as a first-class field rather than left inside ``data`` so a
+                reporting site can classify without re-parsing a vendor-shaped
+                payload. Defaults to the unknown member, which is the honest
+                value for a failure raised where no wire discriminator exists.
         """
         self.message = message
         self.code = code
         self.data = data
         self.request_id = request_id
+        self.condition = condition
         super().__init__(self._format_message())
 
     def _format_message(self) -> str:
@@ -64,8 +74,6 @@ class AcpError(Exception):
         if self.data:
             msg += f" | Data: {self.data}"
         return msg
-
-    __slots__ = ()
 
 
 class AcpSessionError(AcpError):

@@ -4,7 +4,7 @@ tags:
   - '#provider-error-taxonomy'
 date: '2026-08-02'
 modified: '2026-08-02'
-body_hash: 'sha256:8ef18993ab0b1506e793fce6ff5b82f5b684eea477d1be8dea3b1b83e7bb9bf2'
+body_hash: 'sha256:ca9a6f0a26b98217532a2729280ad43a952451b1f012ee0ebe524bfefa611618'
 tier: L3
 related:
   - '[[2026-08-02-provider-error-taxonomy-adr]]'
@@ -53,7 +53,7 @@ Establishes the closed condition vocabulary, proves the ZAI lane's discriminator
 - [x] `W01.P02.S06` - Declare the closed provider condition vocabulary; `src/vaultspec_a2a/providers/conditions.py`.
 - [x] `W01.P02.S07` - Map the ACP error kind and JSON-RPC code onto the vocabulary; `src/vaultspec_a2a/providers/conditions.py`.
 - [x] `W01.P02.S08` - Map the Codex error info variants onto the vocabulary; `src/vaultspec_a2a/providers/conditions.py`.
-- [ ] `W01.P02.S09` - Attach the resolved condition to the ACP prompt error at raise; `src/vaultspec_a2a/providers/acp_chat_model.py`.
+- [x] `W01.P02.S09` - Attach the resolved condition to the ACP prompt error at raise; `src/vaultspec_a2a/providers/acp_chat_model.py`.
 - [ ] `W01.P02.S10` - Attach the condition and the lane retry hint to the Codex error at raise; `src/vaultspec_a2a/providers/codex_chat_model.py`.
 - [ ] `W01.P02.S11` - Consume the populated Codex turn error instead of the bare status string; `src/vaultspec_a2a/providers/codex_chat_model.py`.
 - [ ] `W01.P02.S12` - Prove each lane mapper is total over its installed wire vocabulary; `src/vaultspec_a2a/providers/tests/test_conditions.py`.

@@ -59,11 +59,17 @@ class _GuardWording:
     are one behaviour each, reached from two dispatch modes. Only the operator-
     facing wording and the slot-rejection log action differ between the modes, so
     they are data here and the guard itself has a single implementation.
+
+    ``graph_missing`` is the operator's log line and carries the thread id;
+    ``graph_missing_detail`` is the client's, and deliberately does not - the run
+    it describes is the one the reader is already looking at, and repeating the
+    identifier spends a capped reason on something the frame already carries.
     """
 
     runtime_mode: str
     compile_failure: str
     graph_missing: str
+    graph_missing_detail: str
     slot_held: str
     slot_held_action: str
 
@@ -72,6 +78,7 @@ _INGEST_GUARDS = _GuardWording(
     runtime_mode="ingest",
     compile_failure="Graph compilation failed for thread %s: %s",
     graph_missing="No graph for thread %s -- no team preset provided",
+    graph_missing_detail="No graph to run: the dispatch named no team preset",
     slot_held="Ingest already active for thread %s -- dropping",
     slot_held_action="ingest_rejected_active",
 )
@@ -80,6 +87,7 @@ _RESUME_GUARDS = _GuardWording(
     runtime_mode="resume",
     compile_failure="Graph recompile failed for thread %s: %s",
     graph_missing="No graph for thread %s -- cannot resume",
+    graph_missing_detail="No graph to resume: the run has no compiled graph",
     slot_held="Ingest already active for thread %s -- cannot resume",
     slot_held_action="resume_rejected_active",
 )
@@ -376,13 +384,45 @@ class Executor:
             req.thread_id, ThreadStatus.FAILED, error_detail=str(exc)
         )
 
+    async def _reject_with_condition(self, req: DispatchRequest, reason: str) -> None:
+        """Fail a run before it ran, on both the coded and the durable channel.
+
+        Every pre-run refusal knows why it refused, and a client needs that on
+        two channels for two different reasons: the error frame's code is the
+        machine-readable one a consumer branches on, and the terminal's detail is
+        what the gateway persists so a reload recovers it without the live
+        stream. Emitting only one leaves a consumer that keys on the other unable
+        to see the failure at all.
+
+        The condition is the vocabulary's floor at every one of these sites, and
+        that is a decision: the run was refused before any provider was engaged,
+        so there is no provider condition to report and inventing one would send
+        the reader after a remedy the failure never called for.
+        """
+        await self._aggregator.emit_error(
+            req.thread_id,
+            _EXECUTOR_CONDITION.value,
+            reason,
+            recoverable=False,
+        )
+        await self._state_projector.emit_terminal_status(
+            req.thread_id, ThreadStatus.FAILED, error_detail=reason
+        )
+
     async def _reject_missing_graph(
         self,
         req: DispatchRequest,
         span: Span,
         guards: _GuardWording,
     ) -> None:
-        """Journal a dispatch with no graph to run and drive the run to FAILED."""
+        """Journal a dispatch with no graph to run and drive the run to FAILED.
+
+        The cause is known here - the dispatch named no preset, or the run has no
+        graph to resume - yet the terminal used to carry no detail and no code at
+        all, so a client saw a bare ``failed`` for a refusal the worker could name
+        precisely. Both channels now carry it: the condition floor as the error
+        frame's code, and the mode's own wording as the terminal's detail.
+        """
         logger.warning(
             guards.graph_missing,
             req.thread_id,
@@ -394,9 +434,7 @@ class Executor:
         )
         span.set_attribute("error", True)
         span.set_attribute("error.message", "No team preset")
-        await self._state_projector.emit_terminal_status(
-            req.thread_id, ThreadStatus.FAILED
-        )
+        await self._reject_with_condition(req, guards.graph_missing_detail)
 
     def _reject_slot_held(
         self,
@@ -615,8 +653,10 @@ class Executor:
                     ),
                 )
                 span.set_attribute("pre_flight", "failed")
-                await self._state_projector.emit_terminal_status(
-                    req.thread_id, ThreadStatus.FAILED
+                await self._reject_with_condition(
+                    req,
+                    "The run's checkpoint records an unhandled error from an "
+                    "earlier attempt; it was not re-run",
                 )
                 return
             if pre_flight_outcome == "interrupted":

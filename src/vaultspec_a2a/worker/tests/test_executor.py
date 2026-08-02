@@ -1411,3 +1411,139 @@ class TestUnhandledDispatchTerminal:
             finally:
                 await bridge.close()
                 await executor.shutdown()
+
+
+class TestPreRunRefusalsCarryTheirReason:
+    """A run refused before it started says why, on both channels.
+
+    These refusals always knew their cause - no preset was named, or the run's
+    checkpoint already records an unhandled error - yet the terminal carried no
+    detail and no error frame preceded it, so a client saw a bare ``failed`` for
+    a refusal the worker could describe precisely. A consumer branching on the
+    frame's code could not see the failure at all.
+    """
+
+    @pytest.mark.asyncio(loop_scope="function")
+    async def test_a_dispatch_with_no_preset_names_the_missing_graph(self) -> None:
+        thread_id = "t-no-preset"
+        relayed: list[dict[str, Any]] = []
+        async with AsyncSqliteSaver.from_conn_string(":memory:") as cp:
+            await cp.setup()
+            bridge = _make_recording_bridge(relayed)
+            executor = Executor(checkpointer=cp, bridge=bridge)
+            try:
+                # No graph registered and no preset on the dispatch, so the
+                # missing-graph guard is reached through a real handle_dispatch.
+                await executor.handle_dispatch(
+                    DispatchRequest(
+                        action="ingest",
+                        thread_id=thread_id,
+                        content="build it",
+                        recursion_limit=10,
+                    )
+                )
+                await bridge.flush_events()
+
+                terminals = _frames_of(relayed, "thread_terminal")
+                assert len(terminals) == 1
+                assert terminals[0]["status"] == ThreadStatus.FAILED
+                assert terminals[0]["error_detail"] == (
+                    "No graph to run: the dispatch named no team preset"
+                )
+
+                errors = _frames_of(relayed, "error")
+                assert len(errors) == 1
+                assert errors[0]["code"] == ProviderCondition.UNKNOWN.value
+                assert errors[0]["recoverable"] is False
+            finally:
+                await bridge.close()
+                await executor.shutdown()
+
+    @pytest.mark.asyncio(loop_scope="function")
+    async def test_a_resume_with_no_graph_names_what_it_cannot_resume(self) -> None:
+        """The two modes keep distinct client wording, not one flattened line."""
+        thread_id = "t-no-graph-resume"
+        relayed: list[dict[str, Any]] = []
+        async with AsyncSqliteSaver.from_conn_string(":memory:") as cp:
+            await cp.setup()
+            bridge = _make_recording_bridge(relayed)
+            executor = Executor(checkpointer=cp, bridge=bridge)
+            try:
+                await executor.handle_dispatch(
+                    DispatchRequest(
+                        action="resume",
+                        thread_id=thread_id,
+                        option_id="allow_once",
+                        recursion_limit=10,
+                    )
+                )
+                await bridge.flush_events()
+
+                terminals = _frames_of(relayed, "thread_terminal")
+                assert len(terminals) == 1
+                assert terminals[0]["error_detail"] == (
+                    "No graph to resume: the run has no compiled graph"
+                )
+            finally:
+                await bridge.close()
+                await executor.shutdown()
+
+    @pytest.mark.asyncio(loop_scope="function")
+    async def test_a_checkpoint_that_already_failed_reports_why_it_is_not_rerun(
+        self,
+    ) -> None:
+        """The pre-flight failed arm shares the missing-graph blank shape.
+
+        The checkpoint is made to record an unhandled error the only honest way:
+        by running a real graph whose node raises, so LangGraph writes the error
+        channel itself. A hand-written checkpoint row would prove the pre-flight
+        reads a shape the framework may not produce.
+        """
+        thread_id = "t-preflight-failed"
+        relayed: list[dict[str, Any]] = []
+        async with AsyncSqliteSaver.from_conn_string(":memory:") as cp:
+            await cp.setup()
+            bridge = _make_recording_bridge(relayed)
+            executor = Executor(checkpointer=cp, bridge=bridge)
+            try:
+
+                def exploding_node(state: TeamState) -> dict[str, object]:
+                    del state
+                    raise RuntimeError("node exploded")
+
+                builder = new_state_graph()
+                builder.add_node("boom", exploding_node)
+                builder.add_edge("__start__", "boom")
+                builder.add_edge("boom", "__end__")
+                graph: RegisteredCompiledGraph = builder.compile(checkpointer=cp)
+                executor.register_compiled_graph(
+                    thread_id, ("boom-preset", None, False), graph
+                )
+
+                first = DispatchRequest(
+                    action="ingest",
+                    thread_id=thread_id,
+                    content="build it",
+                    team_preset="boom-preset",
+                    recursion_limit=10,
+                )
+                await executor.handle_dispatch(first)
+                await bridge.flush_events()
+                relayed.clear()
+
+                # A second dispatch: the pre-flight reads the error the failed
+                # run left in the checkpoint and refuses to re-run it.
+                await executor.handle_dispatch(first)
+                await bridge.flush_events()
+
+                terminals = _frames_of(relayed, "thread_terminal")
+                assert len(terminals) == 1
+                assert terminals[0]["status"] == ThreadStatus.FAILED
+                assert "earlier attempt" in terminals[0]["error_detail"]
+
+                errors = _frames_of(relayed, "error")
+                assert len(errors) == 1
+                assert errors[0]["code"] == ProviderCondition.UNKNOWN.value
+            finally:
+                await bridge.close()
+                await executor.shutdown()

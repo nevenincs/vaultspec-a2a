@@ -1,8 +1,10 @@
 """Tests for the EventAggregator central event bus."""
 
 import asyncio
+import sys
 from datetime import UTC, datetime
-from typing import ClassVar, cast
+from pathlib import Path
+from typing import Any, ClassVar, cast
 
 import pytest
 from langchain_core.messages import AIMessageChunk
@@ -1676,6 +1678,141 @@ class TestIngestExceptionCauseChain:
         assert "\n" not in summary
         assert summary.endswith("…")
         assert len(summary) <= len("Graph event stream failed unexpectedly: ") + 500
+
+
+# The ACP protocol simulator: a real subprocess speaking real JSON-RPC over
+# stdio, already used by the worker node's own integration tests. Driving the
+# failure through it rather than through an in-process stand-in is the point of
+# the test below - the loss this Phase repaired happened across the worker node,
+# the exception wrapper and the ingest summarizer, and only a real provider
+# exception travelling that whole path can show it is repaired.
+_ACP_SIMULATOR = (
+    Path(__file__).resolve().parent.parent.parent
+    / "graph"
+    / "tests"
+    / "acp_simulator.py"
+)
+
+# The vendor prose the simulated provider refuses with. It is the test's INPUT,
+# and every assertion below asks whether it - and the protocol facts around it -
+# survived to the reason a client is served.
+_PROVIDER_REFUSAL = "Your credit balance is too low to access the Anthropic API."
+
+# The JSON-RPC error code the simulator returns for a failed session/prompt.
+_PROVIDER_ERROR_CODE = -32000
+
+
+def _failing_provider_graph(lane: str) -> object:
+    """Compile a real one-worker graph whose provider refuses the prompt."""
+    from langgraph.checkpoint.memory import InMemorySaver
+    from langgraph.graph import END, StateGraph
+
+    from ...graph.nodes.worker import create_worker_node
+    from ...providers.acp_chat_model import AcpChatModel
+    from ...thread.state import TeamState
+
+    model = AcpChatModel(
+        command=[
+            sys.executable,
+            str(_ACP_SIMULATOR),
+            "--error",
+            _PROVIDER_REFUSAL,
+        ],
+        env_vars={},
+        provider=lane,
+    )
+    builder = StateGraph(cast("Any", TeamState))
+    builder.add_node("coder", create_worker_node(model, "You are a coder.", "coder"))
+    builder.set_entry_point("coder")
+    builder.add_edge("coder", END)
+    return builder.compile(checkpointer=InMemorySaver())
+
+
+class TestProviderFailureReachesTheReason:
+    """The end-to-end proof that a provider fault's identity survives to a client.
+
+    A provider fault used to reach a client as attribution alone - the worker
+    name, the model CLASS, and a message count - carrying none of the provider's
+    own type, message or protocol code. Every assertion here is on the reason
+    ingest actually produced from a real refusal travelling the real path.
+    """
+
+    @pytest.mark.asyncio
+    async def test_a_provider_refusal_names_itself_in_the_failure_reason(
+        self, aggregator: EventAggregator
+    ) -> None:
+        """The reason names the provider's type, code, message and lane."""
+        queue = aggregator.add_subscriber("client-1")
+        aggregator.subscribe("client-1", ["thread-provider-fail"])
+        config = {"configurable": {"thread_id": "thread-provider-fail"}}
+
+        outcome = await aggregator.ingest(
+            thread_id="thread-provider-fail",
+            agent_id="supervisor",
+            graph=cast("StreamableGraph", _failing_provider_graph("zai")),
+            graph_input={"messages": [], "thread_id": "thread-provider-fail"},
+            config=config,
+        )
+
+        assert outcome == "failed"
+
+        sequenced_all = []
+        while not queue.empty():
+            sequenced_all.append(queue.get_nowait())
+        error_events = [
+            s.event for s in sequenced_all if isinstance(s.event, ErrorOccurred)
+        ]
+        assert len(error_events) >= 1
+        reason = error_events[-1].message
+
+        assert error_events[-1].code == "INGEST_ERROR"
+        # The provider's own identity: which exception, which protocol code, and
+        # what the provider actually said. None of the three used to survive.
+        assert "AcpPromptError" in reason
+        assert str(_PROVIDER_ERROR_CODE) in reason
+        assert _PROVIDER_REFUSAL in reason
+        # The lane that was called, not the class that carried the call. One
+        # class serves every ACP lane, so the class name identified no vendor.
+        assert "model=zai" in reason
+        assert "AcpChatModel" not in reason
+        # Attribution is not lost in gaining the cause.
+        assert "worker='coder'" in reason
+
+    @pytest.mark.asyncio
+    async def test_the_same_reason_is_offered_for_the_durable_column(
+        self, aggregator: EventAggregator
+    ) -> None:
+        """A reloading client gets the same answer the live stream got.
+
+        The relay is droppable, so the reason the executor persists must be the
+        one the frame carried - not a second, poorer summary derived elsewhere.
+        """
+        queue = aggregator.add_subscriber("client-2")
+        aggregator.subscribe("client-2", ["thread-provider-durable"])
+        config = {"configurable": {"thread_id": "thread-provider-durable"}}
+
+        await aggregator.ingest(
+            thread_id="thread-provider-durable",
+            agent_id="supervisor",
+            graph=cast("StreamableGraph", _failing_provider_graph("claude")),
+            graph_input={"messages": [], "thread_id": "thread-provider-durable"},
+            config=config,
+        )
+
+        sequenced_all = []
+        while not queue.empty():
+            sequenced_all.append(queue.get_nowait())
+        error_events = [
+            s.event for s in sequenced_all if isinstance(s.event, ErrorOccurred)
+        ]
+        assert len(error_events) >= 1
+
+        reason = aggregator.take_failure_reason("thread-provider-durable")
+        assert reason == error_events[-1].message
+        assert _PROVIDER_REFUSAL in reason
+        # Bounded: the durable column and its cross-repo consumer both refuse an
+        # overlong reason, so the reason a provider fault produces must fit.
+        assert len(reason) <= len("Graph event stream failed unexpectedly: ") + 500
 
 
 class _StallingGraph:

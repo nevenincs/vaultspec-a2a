@@ -89,14 +89,16 @@ def enrich_snapshot_from_state(
     answered_tool_ids: set[str] = {
         m.tool_call_id
         for m in state.values.get("messages", [])
-        if isinstance(m, ToolMessage) and hasattr(m, "tool_call_id")
+        if isinstance(m, ToolMessage)
     }
     tool_call_data: list[ToolCallData] = []
     checkpoint_tc_ids: set[str] = set()
     for m in state.values.get("messages", []):
         if isinstance(m, AIMessage) and m.tool_calls:
             for tc in m.tool_calls:
-                tc_id = tc.get("id", "")
+                tc_id = tc.get("id")
+                if not isinstance(tc_id, str):
+                    continue
                 tc_name = tc.get("name", "unknown_tool")
                 checkpoint_tc_ids.add(tc_id)
                 tool_call_data.append(

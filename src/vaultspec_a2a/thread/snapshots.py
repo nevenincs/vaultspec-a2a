@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import contextlib
 import hashlib
-import json
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
@@ -236,7 +235,10 @@ def clarification_data_from_interrupt(
     """
     if interrupt.interrupt_type != CLARIFICATION_REQUEST_INTERRUPT_TYPE:
         return None
-    raw_questions = interrupt.payload.get("questions", [])
+    payload = interrupt.payload
+    if type(payload) is not dict:
+        return None
+    raw_questions = payload.get("questions", [])
     if not isinstance(raw_questions, list):
         return None
     questions: list[ClarificationQuestionData] = []
@@ -544,20 +546,6 @@ def _parse_checkpoint_created_at(value: object) -> datetime | None:
         return datetime.fromisoformat(value)
     except ValueError:
         return None
-
-
-def _load_json_list(raw: str | None, *, field_name: str) -> list[Any]:
-    if raw is None:
-        return []
-    try:
-        decoded = json.loads(raw)
-    except json.JSONDecodeError as exc:
-        msg = f"Could not decode {field_name}"
-        raise ValueError(msg) from exc
-    if not isinstance(decoded, list):
-        msg = f"{field_name} must decode to a list"
-        raise ValueError(msg)
-    return decoded
 
 
 def _extract_checkpoint_fields(

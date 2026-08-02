@@ -354,6 +354,7 @@ def test_iter_recovery_proposals_accepts_bare_list_and_skips_malformed() -> None
         "snapshot": {
             "proposals": [
                 {"changeset_id": "cs_ok", "status": "rejected"},
+                {1: "not-a-json-object"},
                 {"status": "approved"},  # no ids -> skipped
                 {"changeset_id": "cs_x"},  # no status -> skipped
                 "garbage",

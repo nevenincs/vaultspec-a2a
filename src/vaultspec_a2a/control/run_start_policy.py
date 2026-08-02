@@ -114,7 +114,9 @@ def _missing_role_tokens(
     its own token so one role's bridge or submitter can never route under
     another's principal.
     """
-    provided_roles = set(actor_tokens.tokens) if actor_tokens is not None else set()
+    provided_roles: set[str] = (
+        set(actor_tokens.tokens) if actor_tokens is not None else set()
+    )
     return [
         role for role in required_role_ids(team_config) if role not in provided_roles
     ]

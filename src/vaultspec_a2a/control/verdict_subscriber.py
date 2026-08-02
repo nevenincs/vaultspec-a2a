@@ -27,7 +27,8 @@ import asyncio
 import json
 import logging
 import time
-from typing import TYPE_CHECKING, Any
+from collections.abc import Mapping, Sequence
+from typing import TYPE_CHECKING, TypedDict, TypeGuard
 
 from ..authoring import (
     VERDICT_APPROVED,
@@ -58,6 +59,7 @@ from .dispatch import safe_dispatch
 if TYPE_CHECKING:
     from collections.abc import Callable
 
+    import httpx
     from langchain_core.runnables import RunnableConfig
     from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -106,21 +108,65 @@ _RESUME_CLAIM_FIELD = "resume_claim"
 _RESUME_CLAIM_TTL_SECONDS = 90.0
 
 
+class _RecoveryProposal(TypedDict):
+    """The recovery fields needed to reconcile one engine proposal."""
+
+    status: str
+    ids: set[str]
+    approval: Mapping[str, object] | None
+
+
+def _object_mapping(value: object) -> Mapping[str, object] | None:
+    """Return a string-keyed object mapping after validating an ingress value."""
+    return value if _is_string_object_mapping(value) else None
+
+
+def _is_object_mapping(value: object) -> TypeGuard[Mapping[object, object]]:
+    """Validate a mapping before inspecting its key type."""
+    return isinstance(value, Mapping)
+
+
+def _is_string_object_mapping(value: object) -> TypeGuard[Mapping[str, object]]:
+    """Validate a mapping-shaped decoded JSON or checkpoint payload."""
+    if not _is_object_mapping(value):
+        return False
+    return all(isinstance(key, str) for key in value)
+
+
+def _object_sequence(value: object) -> Sequence[object] | None:
+    """Return a non-text sequence after validating an ingress value."""
+    return value if _is_object_sequence(value) else None
+
+
+def _is_object_sequence(value: object) -> TypeGuard[Sequence[object]]:
+    """Validate a non-text sequence at an untyped payload boundary."""
+    return not isinstance(value, (str, bytes, bytearray)) and isinstance(
+        value, Sequence
+    )
+
+
+def _json_object_mapping(value: str) -> Mapping[str, object] | None:
+    """Decode JSON metadata only when it is a string-keyed object."""
+    loaded: object = json.loads(value)
+    return _object_mapping(loaded)
+
+
 def _read_resume_claim(thread_metadata: str | None) -> tuple[str, float] | None:
     """Return ``(claimed_proposal_id, claimed_ts)`` from a thread's metadata blob."""
     if not thread_metadata:
         return None
     try:
-        meta = json.loads(thread_metadata)
+        meta = _json_object_mapping(thread_metadata)
     except (json.JSONDecodeError, TypeError):
         return None
-    if not isinstance(meta, dict):
+    if meta is None:
         return None
     claim = meta.get(_RESUME_CLAIM_FIELD)
-    if not isinstance(claim, dict):
+    claim_mapping = _object_mapping(claim)
+    if claim_mapping is None:
         return None
-    proposal_id = claim.get("proposal_id")
-    ts = claim.get("ts")
+    proposal_id = claim_mapping.get("proposal_id")
+    ts = claim_mapping.get("ts")
     if isinstance(proposal_id, str) and proposal_id and isinstance(ts, (int, float)):
         return proposal_id, float(ts)
     return None
@@ -128,14 +174,14 @@ def _read_resume_claim(thread_metadata: str | None) -> tuple[str, float] | None:
 
 def _with_resume_claim(thread_metadata: str | None, proposal_id: str, ts: float) -> str:
     """Merge a resume claim into a metadata blob, preserving every other key."""
-    meta: dict[str, Any] = {}
+    meta: dict[str, object] = {}
     if thread_metadata:
         try:
-            loaded = json.loads(thread_metadata)
+            loaded = _json_object_mapping(thread_metadata)
         except (json.JSONDecodeError, TypeError):
             loaded = None
-        if isinstance(loaded, dict):
-            meta = loaded
+        if loaded is not None:
+            meta = dict(loaded)
     meta[_RESUME_CLAIM_FIELD] = {"proposal_id": proposal_id, "ts": ts}
     return json.dumps(meta)
 
@@ -159,7 +205,7 @@ def _gate_resume_verdict(status: str) -> str | None:
     return None
 
 
-def _proposal_reconcile_verdict(proposal: dict[str, Any]) -> str | None:
+def _proposal_reconcile_verdict(proposal: _RecoveryProposal) -> str | None:
     """The verdict to resume a run parked at ``proposal``'s gate, if any is decided.
 
     Two decision signals, in precedence order:
@@ -180,7 +226,7 @@ def _proposal_reconcile_verdict(proposal: dict[str, Any]) -> str | None:
     if verdict is not None:
         return verdict
     approval = proposal.get("approval")
-    if not isinstance(approval, dict):
+    if approval is None:
         return None
     if not approval.get("present") or approval.get("stale"):
         return None
@@ -198,7 +244,7 @@ class VerdictSubscriber:
         *,
         session_factory: async_sessionmaker[AsyncSession],
         checkpointer: Checkpointer,
-        worker_client: Any,
+        worker_client: httpx.AsyncClient,
         circuit_breaker: WorkerCircuitBreaker,
         worker_spawner: LazyWorkerSpawner,
         endpoint_provider: Callable[[], EngineEndpoint | None],
@@ -407,10 +453,15 @@ class VerdictSubscriber:
             return None
         if checkpoint_tuple is None:
             return None
-        checkpoint = getattr(checkpoint_tuple, "checkpoint", None)
-        values: dict[str, Any] = (
-            checkpoint.get("channel_values", {}) if isinstance(checkpoint, dict) else {}
+        checkpoint: object = getattr(checkpoint_tuple, "checkpoint", None)
+        checkpoint_mapping = _object_mapping(checkpoint)
+        values = (
+            _object_mapping(checkpoint_mapping.get("channel_values"))
+            if checkpoint_mapping is not None
+            else None
         )
+        if values is None:
+            return None
         pending = values.get(_GATE_PENDING_PROPOSAL_FIELD)
         return pending if isinstance(pending, str) and pending else None
 
@@ -500,7 +551,7 @@ class VerdictSubscriber:
         if high_water is not None:
             await self._advance_cursor(high_water)
 
-    async def _reconcile_recovery(self, snapshot_data: Any) -> None:
+    async def _reconcile_recovery(self, snapshot_data: object) -> None:
         """Resume parked runs for terminal-verdict proposals in a recovery snapshot.
 
         Pure over the decoded snapshot payload: every proposal now in a terminal
@@ -558,15 +609,21 @@ class VerdictSubscriber:
             return set()
         if checkpoint_tuple is None:
             return set()
-        checkpoint = getattr(checkpoint_tuple, "checkpoint", None)
-        values: dict[str, Any] = (
-            checkpoint.get("channel_values", {}) if isinstance(checkpoint, dict) else {}
+        checkpoint: object = getattr(checkpoint_tuple, "checkpoint", None)
+        checkpoint_mapping = _object_mapping(checkpoint)
+        values = (
+            _object_mapping(checkpoint_mapping.get("channel_values"))
+            if checkpoint_mapping is not None
+            else None
         )
+        if values is None:
+            return set()
         out: set[str] = set()
         for field in _STATE_ID_FIELDS:
             value = values.get(field)
-            if isinstance(value, list):
-                out.update(item for item in value if isinstance(item, str) and item)
+            items = _object_sequence(value)
+            if items is not None:
+                out.update(item for item in items if isinstance(item, str) and item)
         return out
 
     # ------------------------------------------------------------------
@@ -731,16 +788,16 @@ def _workspace_root(thread_metadata: str | None) -> str | None:
     if not thread_metadata:
         return None
     try:
-        meta = json.loads(thread_metadata)
+        meta = _json_object_mapping(thread_metadata)
     except (json.JSONDecodeError, TypeError):
         return None
-    if isinstance(meta, dict):
+    if meta is not None:
         root = meta.get("workspace_root")
         return root if isinstance(root, str) else None
     return None
 
 
-def _iter_recovery_proposals(data: Any) -> list[dict[str, Any]]:
+def _iter_recovery_proposals(data: object) -> list[_RecoveryProposal]:
     """Extract ``{status, ids, approval}`` per proposal from a recovery snapshot.
 
     Defensive against the engine's evolving projection shape: only the
@@ -751,32 +808,34 @@ def _iter_recovery_proposals(data: Any) -> list[dict[str, Any]]:
     absent) for `_proposal_reconcile_verdict` to read the reviewer decision the
     changeset status alone does not surface.
     """
-    out: list[dict[str, Any]] = []
-    if not isinstance(data, dict):
+    out: list[_RecoveryProposal] = []
+    payload = _object_mapping(data)
+    if payload is None:
         return out
-    snapshot = data.get("snapshot")
-    if not isinstance(snapshot, dict):
+    snapshot = _object_mapping(payload.get("snapshot"))
+    if snapshot is None:
         return out
     proposals = snapshot.get("proposals")
-    items: Any = None
-    if isinstance(proposals, dict):
-        items = proposals.get("items")
-    elif isinstance(proposals, list):
-        items = proposals
-    if not isinstance(items, list):
+    proposal_mapping = _object_mapping(proposals)
+    items = (
+        _object_sequence(proposal_mapping.get("items"))
+        if proposal_mapping is not None
+        else _object_sequence(proposals)
+    )
+    if items is None:
         return out
     for item in items:
-        if not isinstance(item, dict):
+        item_mapping = _object_mapping(item)
+        if item_mapping is None:
             continue
-        status = item.get("status")
+        status = item_mapping.get("status")
         if not isinstance(status, str):
             continue
         ids: set[str] = set()
-        changeset_id = item.get("changeset_id")
+        changeset_id = item_mapping.get("changeset_id")
         if isinstance(changeset_id, str) and changeset_id:
             ids.add(changeset_id)
-        approval = item.get("approval")
-        approval_obj = approval if isinstance(approval, dict) else None
+        approval_obj = _object_mapping(item_mapping.get("approval"))
         if approval_obj is not None:
             proposal_id = approval_obj.get("proposal_id")
             if isinstance(proposal_id, str) and proposal_id:
@@ -786,10 +845,11 @@ def _iter_recovery_proposals(data: Any) -> list[dict[str, Any]]:
     return out
 
 
-def _recovery_high_water(data: Any) -> int | None:
+def _recovery_high_water(data: object) -> int | None:
     """Read ``latest_outbox_seq`` from a recovery-snapshot payload, if present."""
-    if isinstance(data, dict):
-        value = data.get("latest_outbox_seq")
+    payload = _object_mapping(data)
+    if payload is not None:
+        value = payload.get("latest_outbox_seq")
         if isinstance(value, int) and not isinstance(value, bool):
             return value
     return None

@@ -3,10 +3,10 @@ generated: true
 tags:
   - '#index'
   - '#repository-tooling-hardening'
-date: '2026-08-01'
-modified: '2026-08-01'
+date: '2026-08-02'
+modified: '2026-08-02'
 body_schema: 'body-v1'
-body_hash: 'sha256:011944ae1b3d5e78085dbb3181ec48e3f8a1b4c80c8d6190d2585e717ca07610'
+body_hash: 'sha256:6287c741a481735d9178896c7ae7f6978666298bb201fb7d8ef43a56fb503953'
 related:
   - '[[2026-07-19-repository-tooling-hardening-W01-P01-S01]]'
   - '[[2026-07-19-repository-tooling-hardening-W01-P01-summary]]'
@@ -59,6 +59,9 @@ related:
   - '[[2026-08-01-repository-tooling-hardening-strict-s22-audit]]'
   - '[[2026-08-01-repository-tooling-hardening-strict-s23-audit]]'
   - '[[2026-08-01-repository-tooling-hardening-strict-s24-control-init-audit]]'
+  - '[[2026-08-02-repository-tooling-hardening-strict-s24-leaf-bundle-audit]]'
+  - '[[2026-08-02-repository-tooling-hardening-strict-s24-projection-audit]]'
+  - '[[2026-08-02-repository-tooling-hardening-strict-s24-verdict-subscriber-audit]]'
 ---
 
 # `repository-tooling-hardening` feature index
@@ -86,6 +89,9 @@ Auto-generated index of all documents tagged with `#repository-tooling-hardening
 - `2026-08-01-repository-tooling-hardening-strict-s22-audit` - `repository-tooling-hardening` audit: `Typed API endpoint partition review`
 - `2026-08-01-repository-tooling-hardening-strict-s23-audit` - `repository-tooling-hardening` audit: `Live gateway and clarification contract review`
 - `2026-08-01-repository-tooling-hardening-strict-s24-control-init-audit` - `repository-tooling-hardening` audit: `Control package export contract review`
+- `2026-08-02-repository-tooling-hardening-strict-s24-leaf-bundle-audit` - `repository-tooling-hardening` audit: `Control leaf type-boundary review`
+- `2026-08-02-repository-tooling-hardening-strict-s24-projection-audit` - `repository-tooling-hardening` audit: `Control projection type-boundary review`
+- `2026-08-02-repository-tooling-hardening-strict-s24-verdict-subscriber-audit` - `repository-tooling-hardening` audit: `Verdict subscriber type-boundary review`
 
 ### exec
 

@@ -24,7 +24,7 @@ import json
 import logging
 import pathlib
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, TypeIs
 
 from ...thread.enums import CleanupKind
 from ..repositories import (
@@ -47,6 +47,13 @@ __all__ = [
 logger = logging.getLogger(__name__)
 
 _MAX_DETAIL_LENGTH = 200
+
+
+def _is_json_object(value: object) -> TypeIs[dict[str, object]]:
+    """Return whether a decoded JSON value is a string-keyed object."""
+    # ``json.loads`` only constructs string-keyed object values; this helper is
+    # called only on its decoded result after it has been erased to ``object``.
+    return isinstance(value, dict)
 
 
 @dataclass(frozen=True, slots=True)
@@ -81,10 +88,10 @@ def _workspace_root_from_thread(thread: Any) -> pathlib.Path | None:
     if not metadata_json:
         return None
     try:
-        meta = json.loads(metadata_json)
+        meta: object = json.loads(metadata_json)
     except (json.JSONDecodeError, TypeError):
         return None
-    if not isinstance(meta, dict):
+    if not _is_json_object(meta):
         return None
     workspace_root_str = meta.get("workspace_root")
     if not workspace_root_str or not isinstance(workspace_root_str, str):

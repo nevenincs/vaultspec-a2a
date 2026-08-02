@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 from typing import TYPE_CHECKING
 
+from pydantic import TypeAdapter, ValidationError
+
 from ..database import (
     get_pending_permission_requests,
     get_thread_execution_state,
@@ -20,6 +22,7 @@ if TYPE_CHECKING:
     )
 
 from ..graph.enums import PermissionOptionKind, PermissionType
+from ..ipc.schemas import ExecutionTaskProjectionPayload
 from ..streaming.types import classify_tool_kind
 from ..thread.enums import TERMINAL_STATUSES, ApprovalStatus, RepairStatus
 from ..thread.snapshots import (
@@ -31,11 +34,44 @@ from ..thread.snapshots import (
     PermissionOptionData,
     ProjectedInterrupt,
     ThreadStateData,
-    _load_json_list,
     clarification_data_from_interrupt,
 )
 
 _PLAN_APPROVAL_PAUSE_CAUSES = PLAN_APPROVAL_PAUSE_CAUSES
+_JSON_LIST_ADAPTER = TypeAdapter(list[object])
+_JSON_OBJECT_ADAPTER = TypeAdapter(dict[str, object])
+
+
+def _decode_json_list(raw: str | None, *, field_name: str) -> list[object]:
+    """Decode a persisted JSON list at the projection trust boundary."""
+    if raw is None:
+        return []
+    try:
+        decoded = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        msg = f"Could not decode {field_name}"
+        raise ValueError(msg) from exc
+    try:
+        return _JSON_LIST_ADAPTER.validate_python(decoded)
+    except ValidationError as exc:
+        msg = f"{field_name} must decode to a list"
+        raise ValueError(msg) from exc
+
+
+def _json_object(value: object) -> dict[str, object] | None:
+    """Return a typed JSON object, or discard an unreadable sibling value."""
+    try:
+        return _JSON_OBJECT_ADAPTER.validate_python(value)
+    except ValidationError:
+        return None
+
+
+def _json_list(value: object) -> list[object] | None:
+    """Return a typed JSON list, or discard an unreadable sibling value."""
+    try:
+        return _JSON_LIST_ADAPTER.validate_python(value)
+    except ValidationError:
+        return None
 
 
 def _mark_execution_state_stale(snapshot: ThreadStateData) -> None:
@@ -108,22 +144,32 @@ def clear_permissions_without_checkpoint_truth(
 def _permission_data_from_model(
     permission: PermissionRequestModel,
 ) -> PermissionData:
-    raw_options = json.loads(permission.allowed_options_json)
+    raw_options = _decode_json_list(
+        permission.allowed_options_json,
+        field_name="allowed_options_json",
+    )
     tool_call = permission.tool_call
     if (
         tool_call in (None, "")
         and permission.pause_reason_type in _PLAN_APPROVAL_PAUSE_CAUSES
     ):
         tool_call = PermissionType.PLAN_APPROVAL.value
-    options = [
-        PermissionOptionData(
-            option_id=str(option.get("option_id", "")),
-            name=str(option.get("name", "")),
-            kind=str(PermissionOptionKind(str(option.get("kind", "allow_once")))),
+    options: list[PermissionOptionData] = []
+    for raw_option in raw_options:
+        option = _json_object(raw_option)
+        if option is None:
+            continue
+        options.append(
+            PermissionOptionData(
+                option_id=str(option.get("option_id", "")),
+                name=str(option.get("name", "")),
+                kind=str(
+                    _coerce_permission_kind(
+                        option.get("kind", PermissionOptionKind.ALLOW_ONCE.value)
+                    )
+                ),
+            )
         )
-        for option in raw_options
-        if isinstance(option, dict)
-    ]
     return PermissionData(
         request_id=permission.request_id,
         description=permission.description,
@@ -143,35 +189,38 @@ def _coerce_permission_kind(value: object) -> PermissionOptionKind:
 def _permission_data_from_interrupt(
     interrupt: ProjectedInterrupt,
 ) -> PermissionData | None:
-    payload = interrupt.payload
+    payload = _json_object(interrupt.payload)
+    if payload is None:
+        return None
     if interrupt.interrupt_type == "permission_request":
         tool_name = str(payload.get("tool_name", "unknown"))
-        raw_options = payload.get("options", [])
+        raw_options = _json_list(payload.get("options", []))
         options: list[PermissionOptionData] = []
-        if isinstance(raw_options, list):
+        if raw_options is not None:
             for option in raw_options:
-                if not isinstance(option, dict):
+                typed_option = _json_object(option)
+                if typed_option is None:
                     continue
                 options.append(
                     PermissionOptionData(
                         option_id=str(
-                            option.get(
+                            typed_option.get(
                                 "optionId",
-                                option.get("option_id", "allow_once"),
+                                typed_option.get("option_id", "allow_once"),
                             )
                         ),
                         name=str(
-                            option.get(
+                            typed_option.get(
                                 "name",
-                                option.get(
+                                typed_option.get(
                                     "label",
-                                    option.get("optionId", "allow_once"),
+                                    typed_option.get("optionId", "allow_once"),
                                 ),
                             )
                         ),
                         kind=str(
                             _coerce_permission_kind(
-                                option.get(
+                                typed_option.get(
                                     "kind", PermissionOptionKind.ALLOW_ONCE.value
                                 )
                             )
@@ -188,12 +237,10 @@ def _permission_data_from_interrupt(
 
     if interrupt.interrupt_type == "plan_approval_request":
         feature = str(payload.get("feature", "unknown"))
-        plan_paths = payload.get("plan_paths", [])
+        plan_paths = _json_list(payload.get("plan_paths", []))
         exec_worker = str(payload.get("exec_worker", "unknown"))
         plan_summary = (
-            f"{len(plan_paths)} plan document(s)"
-            if isinstance(plan_paths, list) and plan_paths
-            else "no plan documents"
+            f"{len(plan_paths)} plan document(s)" if plan_paths else "no plan documents"
         )
         return PermissionData(
             request_id=interrupt.interrupt_id,
@@ -334,52 +381,46 @@ def project_execution_state_model(
     """Project a durable execution-state row into normalized data."""
     next_nodes = [
         str(item)
-        for item in _load_json_list(model.next_nodes_json, field_name="next_nodes_json")
+        for item in _decode_json_list(
+            model.next_nodes_json,
+            field_name="next_nodes_json",
+        )
     ]
     interrupt_types = [
         str(item)
-        for item in _load_json_list(
+        for item in _decode_json_list(
             model.interrupt_types_json,
             field_name="interrupt_types_json",
         )
     ]
-    raw_tasks = _load_json_list(model.tasks_json, field_name="tasks_json")
+    raw_tasks = _decode_json_list(model.tasks_json, field_name="tasks_json")
     execution_tasks: list[ExecutionTaskData] = []
     for raw_task in raw_tasks:
-        if not isinstance(raw_task, dict):
+        task_data = _json_object(raw_task)
+        if task_data is None:
+            continue
+        try:
+            persisted_task = ExecutionTaskProjectionPayload.model_validate(
+                {"task_id": "", "name": "", **task_data}
+            )
+        except ValidationError:
             continue
         execution_tasks.append(
             ExecutionTaskData(
-                task_id=str(raw_task.get("task_id", "")),
-                name=str(raw_task.get("name", "")),
-                path=[
-                    str(item)
-                    for item in raw_task.get("path", [])
-                    if isinstance(item, str)
-                ],
-                has_error=bool(raw_task.get("has_error", False)),
-                error_type=(
-                    str(raw_task["error_type"])
-                    if raw_task.get("error_type") is not None
-                    else None
-                ),
-                interrupt_ids=[
-                    str(item)
-                    for item in raw_task.get("interrupt_ids", [])
-                    if isinstance(item, str)
-                ],
-                interrupt_types=[
-                    str(item)
-                    for item in raw_task.get("interrupt_types", [])
-                    if isinstance(item, str)
-                ],
-                has_nested_state=bool(raw_task.get("has_nested_state", False)),
-                has_result=bool(raw_task.get("has_result", False)),
+                task_id=persisted_task.task_id,
+                name=persisted_task.name,
+                path=persisted_task.path,
+                has_error=persisted_task.has_error,
+                error_type=persisted_task.error_type,
+                interrupt_ids=persisted_task.interrupt_ids,
+                interrupt_types=persisted_task.interrupt_types,
+                has_nested_state=persisted_task.has_nested_state,
+                has_result=persisted_task.has_result,
             )
         )
     degraded_reasons = [
         str(item)
-        for item in _load_json_list(
+        for item in _decode_json_list(
             model.degraded_reasons_json,
             field_name="degraded_reasons_json",
         )

@@ -11,11 +11,13 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from ...control.projection import (
     apply_checkpoint_projection,
     apply_execution_state_projection,
+    enrich_snapshot_from_durable_state,
     enrich_snapshot_from_execution_state,
     project_execution_state_model,
 )
 from ...database import (
     create_thread,
+    record_permission_request,
     record_thread_execution_state,
     set_thread_repair_state,
 )
@@ -28,6 +30,21 @@ from ...thread.snapshots import (
     ThreadStateData,
     project_checkpoint_tuple,
 )
+
+
+def _projected_interrupt_with_runtime_payload(
+    interrupt_id: str,
+    interrupt_type: str,
+    payload: object,
+) -> ProjectedInterrupt:
+    """Build a valid interrupt, then model the untrusted runtime payload boundary."""
+    interrupt = ProjectedInterrupt(
+        interrupt_id=interrupt_id,
+        interrupt_type=interrupt_type,
+        payload={},
+    )
+    object.__setattr__(interrupt, "payload", payload)
+    return interrupt
 
 
 def test_project_checkpoint_tuple_extracts_plan_approval_interrupt() -> None:
@@ -187,6 +204,46 @@ def test_apply_checkpoint_projection_merges_interrupt_permissions() -> None:
     ]
 
 
+@pytest.mark.parametrize(
+    "interrupt_type",
+    [
+        "permission_request",
+        "plan_approval_request",
+        "document_approval_request",
+        "clarification_request",
+        "unknown_interrupt",
+    ],
+)
+def test_apply_checkpoint_projection_discards_runtime_corrupt_interrupt_payload(
+    interrupt_type: str,
+) -> None:
+    """A corrupt checkpoint payload cannot surface an actionable interrupt."""
+    snapshot = ThreadStateData(
+        thread_id="thread-corrupt-interrupt",
+        status="input_required",
+        last_sequence=0,
+    )
+    projection = CheckpointProjection(
+        channel_values={},
+        config={"configurable": {"thread_id": "thread-corrupt-interrupt"}},
+        checkpoint_id="cp-corrupt-interrupt",
+        checkpoint_created_at=datetime(2026, 3, 9, 10, 20, tzinfo=UTC),
+        pending_interrupts=[
+            _projected_interrupt_with_runtime_payload(
+                interrupt_id="interrupt-corrupt",
+                interrupt_type=interrupt_type,
+                payload="runtime-corrupt-payload",
+            )
+        ],
+    )
+
+    projected = apply_checkpoint_projection(snapshot, projection)
+
+    assert projected.pending_permissions == []
+    assert projected.pending_clarification is None
+    assert projected.degraded_reasons == []
+
+
 def test_apply_checkpoint_projection_merges_clarification_request() -> None:
     """A clarification_request interrupt surfaces as pending_clarification.
 
@@ -240,6 +297,50 @@ def test_apply_checkpoint_projection_merges_clarification_request() -> None:
     assert projected.pending_permissions == []
 
 
+def test_apply_checkpoint_projection_uses_later_valid_clarification_sibling() -> None:
+    """A corrupt clarification interrupt must not hide a later valid sibling."""
+    snapshot = ThreadStateData(
+        thread_id="thread-corrupt-clarification-sibling",
+        status="input_required",
+        last_sequence=0,
+    )
+    projection = CheckpointProjection(
+        channel_values={},
+        config={"configurable": {"thread_id": "thread-corrupt-clarification-sibling"}},
+        checkpoint_id="cp-corrupt-clarification-sibling",
+        checkpoint_created_at=datetime(2026, 3, 9, 10, 20, tzinfo=UTC),
+        pending_interrupts=[
+            _projected_interrupt_with_runtime_payload(
+                interrupt_id="interrupt-corrupt-clarification",
+                interrupt_type="clarification_request",
+                payload="runtime-corrupt-payload",
+            ),
+            ProjectedInterrupt(
+                interrupt_id="interrupt-valid-clarification",
+                interrupt_type="clarification_request",
+                payload={
+                    "type": "clarification_request",
+                    "questions": [
+                        {
+                            "id": "provider",
+                            "prompt": "Which provider?",
+                            "kind": "choice",
+                            "options": ["codex", "zai"],
+                        }
+                    ],
+                },
+            ),
+        ],
+    )
+
+    projected = apply_checkpoint_projection(snapshot, projection)
+
+    assert projected.pending_permissions == []
+    assert projected.pending_clarification is not None
+    assert projected.pending_clarification.request_id == "interrupt-valid-clarification"
+    assert projected.degraded_reasons == []
+
+
 def test_project_execution_state_model_normalizes_latest_row() -> None:
     """Execution-state rows should deserialize into frontend-safe snapshots."""
     model = ThreadExecutionStateModel(
@@ -283,6 +384,83 @@ def test_project_execution_state_model_normalizes_latest_row() -> None:
             has_result=False,
         )
     ]
+
+
+def test_project_execution_state_model_recovers_valid_task_siblings() -> None:
+    """Durable task-list corruption drops only unreadable task siblings."""
+    model = ThreadExecutionStateModel(
+        thread_id="thread-task-siblings",
+        checkpoint_id="cp-task-siblings",
+        parent_checkpoint_id=None,
+        recovery_epoch=0,
+        task_count=2,
+        interrupt_count=0,
+        next_nodes_json="[]",
+        interrupt_types_json="[]",
+        tasks_json=(
+            '[{"task_id":"task-first","name":"first"},'
+            '"not-a-task",'
+            '{"task_id":"task-invalid","name":"invalid","path":42},'
+            '{"task_id":"task-second","name":"second"}]'
+        ),
+        degraded_reasons_json="[]",
+    )
+
+    projection = project_execution_state_model(model)
+
+    assert [task.task_id for task in projection.execution_tasks] == [
+        "task-first",
+        "task-second",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_enrich_snapshot_from_durable_state_recovers_valid_permission_siblings(
+    tmp_path: Path,
+) -> None:
+    """Durable permission-list corruption drops only unreadable option siblings."""
+    case_dir = tmp_path / "api-test-projection-permission-siblings"
+    case_dir.mkdir(parents=True, exist_ok=True)
+    db_file = case_dir / "test.db"
+    engine = create_async_engine(f"sqlite+aiosqlite:///{db_file}")
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    factory = async_sessionmaker(engine, expire_on_commit=False)
+    async with factory() as session:
+        thread = await create_thread(session, thread_id="thread-permission-siblings")
+        permission = await record_permission_request(
+            session,
+            request_id="permission-siblings",
+            thread_id=thread.id,
+            pause_reason_type="permission_request",
+            description="Choose an option",
+            allowed_options=[],
+            tool_call="bash",
+        )
+        permission.allowed_options_json = (
+            '[{"option_id":"allow_once","name":"Allow Once"},'
+            '"not-an-option",'
+            '{"option_id":"reject_once","name":"Reject Once","kind":"reject_once"}]'
+        )
+        await session.commit()
+
+        snapshot = ThreadStateData(
+            thread_id=thread.id,
+            status=thread.status,
+            last_sequence=0,
+        )
+        projected = await enrich_snapshot_from_durable_state(
+            session,
+            thread=thread,
+            snapshot=snapshot,
+        )
+
+    assert len(projected.pending_permissions) == 1
+    assert [
+        option.option_id for option in projected.pending_permissions[0].options
+    ] == ["allow_once", "reject_once"]
+
+    await engine.dispose()
 
 
 def test_apply_execution_state_projection_merges_normalized_fields() -> None:

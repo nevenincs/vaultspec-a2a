@@ -11,7 +11,7 @@ import hashlib
 import json
 import logging
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, TypeIs
 
 from ..database import (
     create_control_action,
@@ -68,6 +68,13 @@ __all__ = [
 logger = logging.getLogger(__name__)
 
 
+def _is_json_object(value: object) -> TypeIs[dict[str, object]]:
+    """Return whether a decoded JSON value is a string-keyed object."""
+    # ``json.loads`` only constructs string-keyed object values; this helper is
+    # called only on its decoded result after it has been erased to ``object``.
+    return isinstance(value, dict)
+
+
 def _allowed_option_ids(permission: object) -> set[str]:
     """Extract valid option ids from a durable permission request row."""
     raw_options = getattr(permission, "allowed_options_json", "[]")
@@ -121,10 +128,10 @@ def _existing_rejection_error(existing_action: object) -> str | None:
     if not isinstance(raw_payload, str) or not raw_payload:
         return None
     try:
-        payload = json.loads(raw_payload)
+        payload: object = json.loads(raw_payload)
     except json.JSONDecodeError:
         return None
-    if not isinstance(payload, dict):
+    if not _is_json_object(payload):
         return None
     error_detail = payload.get("error_detail")
     return error_detail if isinstance(error_detail, str) and error_detail else None
@@ -406,11 +413,9 @@ async def _authorize_permission_response(
             == ControlActionResultStatus.REJECTED_INVALID_STATE.value
         ):
             stored_error_detail = _existing_rejection_error(existing_action)
-            valid_option_ids = _allowed_option_ids(permission) if permission else set()
+            valid_option_ids = _allowed_option_ids(permission)
             error_detail, error_status_code = _rejected_permission_error(
-                permission_status=(
-                    permission.request_status if permission is not None else None
-                ),
+                permission_status=permission.request_status,
                 thread_terminal=thread_record.status in TERMINAL_STATUSES,
                 option_id=option_id,
                 valid_option_ids=valid_option_ids,

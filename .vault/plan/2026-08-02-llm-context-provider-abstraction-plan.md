@@ -4,13 +4,14 @@ tags:
   - '#llm-context-provider-abstraction'
 date: '2026-08-02'
 modified: '2026-08-02'
-body_hash: 'sha256:e6a14f0c40cbc257c7b066693294f75b11778538de71200971e3ddd907588c26'
+body_hash: 'sha256:66f97f66c98b0ffe1891b960b451b7d83b580b62c3344da83b3b22d0b312787a'
 tier: L2
 related:
   - '[[2026-08-02-llm-context-provider-abstraction-acp-v1-client-wire-adr]]'
   - '[[2026-08-02-llm-context-provider-abstraction-acp-v1-client-wire-research]]'
   - '[[2026-08-02-llm-context-provider-abstraction-acp-v1-client-wire-reference]]'
 ---
+
 # `llm-context-provider-abstraction` plan
 
 ACP v1 client-wire conformance.
@@ -27,7 +28,7 @@ Replace the divergent filesystem and terminal request, response, ownership, and 
 
 - [ ] `P01.S01` - Validate ACP v1 session ownership and replace byte-offset filesystem reads with one-based line pagination.; `src/vaultspec_a2a/providers/_acp_rpc_handlers.py`.
 - [ ] `P01.S02` - Bound terminal output retention by the requested byte limit without splitting UTF-8 characters.; `src/vaultspec_a2a/providers/_acp_rpc_handlers.py`.
-- [ ] `P01.S03` - Return ACP v1 exit-status objects and preserve killed terminal identity until explicit release.; `src/vaultspec_a2a/providers/_acp_rpc_handlers.py`.
+- [x] `P01.S03` - Return ACP v1 exit-status objects and preserve killed terminal identity until explicit release.; `src/vaultspec_a2a/providers/_acp_rpc_handlers.py`.
 
 ### Phase `P02` - real wire verification
 

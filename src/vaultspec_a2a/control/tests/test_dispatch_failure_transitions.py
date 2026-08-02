@@ -24,6 +24,7 @@ from ...database import (
 )
 from ...database.models import Base
 from ...providers.conditions import ProviderCondition
+from ...thread.dispatch_policy import FailureType
 from ...thread.enums import ThreadStatus
 
 if TYPE_CHECKING:
@@ -100,6 +101,82 @@ async def test_ambiguous_followup_failure_preserves_redrive_eligibility(
         assert updated is not None
         assert updated.status == "submitted"
         assert updated.last_requested_action == "message_followup_requested"
+        # Delivery is undecided here - the lease is retained precisely because
+        # the worker may have scheduled the task before the acknowledgement was
+        # lost - so no arm may record that the message did not arrive.
+        assert updated.repair_reason is None
+        assert updated.failure_reason is None
+        assert updated.provider_condition is None
+
+
+@pytest.mark.asyncio
+async def test_a_definitely_undelivered_followup_records_why_it_did_not_arrive(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    """A released follow-up claim leaves a durable account, not silence.
+
+    An open circuit is a definite non-delivery: the dispatch never left the
+    gateway, so the claim is released and the message certainly did not arrive.
+    That is a fact worth persisting, and the run is alive throughout, so it
+    persists where a live run can honestly carry it.
+    """
+    async with session_factory() as session:
+        thread = await create_thread(
+            session,
+            title="Definite non-delivery",
+            repair_status="healthy",
+            execution_readiness="healthy",
+        )
+        await session.commit()
+
+    spawner = LazyWorkerSpawner(
+        worker_url="http://127.0.0.1:9",
+        worker_port=9,
+        auto_spawn=False,
+    )
+    spawner.replace_process(None)
+    circuit_breaker = WorkerCircuitBreaker(
+        failure_threshold=1,
+        recovery_timeout=30.0,
+    )
+    circuit_breaker.force_open()
+
+    async with (
+        httpx.AsyncClient(base_url="http://127.0.0.1:9", timeout=0.2) as client,
+        session_factory() as session,
+    ):
+        result = await send_followup_message(
+            session,
+            thread_id=thread.id,
+            content="hello",
+            agent_id="vaultspec-supervisor",
+            idempotency_key=None,
+            circuit_breaker=circuit_breaker,
+            worker_spawner=spawner,
+            worker_client=client,
+            recursion_limit=1,
+            trace_headers=None,
+        )
+
+    assert result.dispatched is False
+    assert result.failure_type is FailureType.CIRCUIT_OPEN
+
+    async with session_factory() as session:
+        updated = await get_thread(session, thread.id)
+        assert updated is not None
+        # The run never changed state: a message that did not arrive did not
+        # fail the run, and neither failure column may claim otherwise.
+        assert updated.status == "submitted"
+        assert updated.failure_reason is None
+        assert updated.provider_condition is None
+        assert updated.repair_reason is not None
+        assert updated.repair_reason.startswith("Follow-up message not delivered:")
+        assert result.error_detail is not None
+        assert result.error_detail in updated.repair_reason
+        # The released claim stays redrivable, so the repair state must not have
+        # escalated to the terminal operator-intervention state.
+        assert updated.repair_status == "healthy"
+        assert updated.execution_readiness == "healthy"
 
 
 @pytest.mark.asyncio

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from ..database import set_thread_repair_state, update_thread_status
+from ..database import get_thread, set_thread_repair_state, update_thread_status
 from ..providers.conditions import ProviderCondition
 from ..thread.enums import ControlActionType, ThreadStatus
 from ..thread.repair_policy import DISPATCH_FAILED_TRANSITION, repair_state_for_action
@@ -60,6 +60,39 @@ async def apply_dispatch_failure(
     )
     return await mark_dispatch_failed(
         db, thread_id, reason=reason or "Worker dispatch failed"
+    )
+
+
+async def record_undelivered_dispatch(
+    db: AsyncSession,
+    thread_id: str,
+    *,
+    reason: str,
+) -> ThreadModel | None:
+    """Record why a control dispatch certainly never reached the worker.
+
+    For the callers whose lease design releases the claim on a definite
+    non-delivery: the follow-up or resume did not arrive, but the run itself is
+    untouched and still alive. ``failure_reason`` and ``provider_condition`` are
+    therefore both off limits here - they are defined as describing a run that
+    FAILED, and stamping either would make a reloading client report a failure
+    that never happened. The account lands on the repair reason, which is the
+    field a still-live run can honestly carry.
+
+    The repair status is left exactly as the caller's pre-dispatch transition
+    set it. A released claim stays redrivable, so declaring operator
+    intervention here would contradict the very design that released it, and the
+    record is self-clearing: every pre-dispatch transition rewrites the repair
+    state without a reason, so the next attempt erases the last one's account.
+    """
+    thread = await get_thread(db, thread_id)
+    if thread is None:
+        return None
+    return await set_thread_repair_state(
+        db,
+        thread_id,
+        repair_status=thread.repair_status,
+        repair_reason=reason,
     )
 
 

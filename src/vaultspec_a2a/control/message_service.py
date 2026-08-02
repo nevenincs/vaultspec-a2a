@@ -21,6 +21,7 @@ from ..control.action_lease import (
 from ..control.dispatch import safe_dispatch
 from ..control.repair_transitions import (
     mark_message_followup_requested,
+    record_undelivered_dispatch,
 )
 from ..database import (
     get_thread,
@@ -191,7 +192,21 @@ async def send_followup_message(
 
     if not outcome.success:
         policy, typed_failure = evaluate_dispatch_failure(outcome.failure_type)
-        await release_definite_non_delivery(db, claim, typed_failure)
+        detail = outcome.detail or "Worker dispatch failed"
+        released = await release_definite_non_delivery(db, claim, typed_failure)
+        if released:
+            # The lease is released only where the worker certainly scheduled no
+            # task, so this is the one arm that KNOWS the message never arrived,
+            # and the only one entitled to say so durably. An ambiguous failure
+            # keeps its lease for redrive precisely because delivery is
+            # undecided; recording a non-delivery there would assert something
+            # the gateway cannot observe. Neither arm touches the run's status:
+            # the run is alive, and the message is what failed.
+            await record_undelivered_dispatch(
+                db,
+                thread_id,
+                reason=f"Follow-up message not delivered: {detail}",
+            )
         await db.commit()
         return MessageResult(
             action_id=claim.action_id,
@@ -199,7 +214,7 @@ async def send_followup_message(
             thread_status=thread_status,
             dispatched=False,
             circuit_open=policy.is_circuit_open,
-            error_detail=outcome.detail or "Worker dispatch failed",
+            error_detail=detail,
             failure_type=typed_failure,
         )
 

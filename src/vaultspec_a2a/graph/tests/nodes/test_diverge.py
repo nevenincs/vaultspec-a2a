@@ -23,7 +23,7 @@ from langchain_core.messages import AIMessage, HumanMessage
 from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from langgraph.graph import END, START, StateGraph
-from langgraph.types import Command
+from langgraph.types import Command, Send
 
 from ....graph.compiler import _wire_diverge_stage
 from ....graph.nodes.diverge import (
@@ -113,8 +113,12 @@ async def test_dispatch_emits_one_send_per_researcher() -> None:
     node = create_research_dispatch_node(["r00", "r01", "r02"])
     command = await node(_base_state())
     assert isinstance(command, Command)
-    assert command.goto is not None
-    assert [send.node for send in command.goto] == ["r00", "r01", "r02"]
+    goto = command.goto
+    # A Command's goto is a single node name OR a list of Sends; only the
+    # list form fans out, and asserting the type is what this test means by
+    # "one Send per researcher".
+    assert isinstance(goto, list)
+    assert [cast("Send", send).node for send in goto] == ["r00", "r01", "r02"]
 
 
 @pytest.mark.asyncio
@@ -156,7 +160,7 @@ async def test_compiled_researcher_forwards_config_to_config_aware_producer() ->
             "source_thread": spec["thread_id"],
         }
 
-    builder = StateGraph(TeamState)
+    builder: StateGraph = StateGraph(cast("Any", TeamState))
     builder.add_node("researcher", create_researcher_node(spec, config_aware_producer))
     builder.add_edge(START, "researcher")
     builder.add_edge("researcher", END)
@@ -166,7 +170,7 @@ async def test_compiled_researcher_forwards_config_to_config_aware_producer() ->
         "configurable": {"thread_id": "config-aware-run"},
     }
 
-    result = await graph.ainvoke(_base_state(), config=config)
+    result = await graph.ainvoke(cast("Any", _base_state()), config=config)
 
     assert result["research_findings"][0]["source_thread"] == "config-aware"
     assert observed_configs

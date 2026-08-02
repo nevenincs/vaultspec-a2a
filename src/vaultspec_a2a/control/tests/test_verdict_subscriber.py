@@ -283,6 +283,9 @@ async def test_resume_resolves_the_answered_document_gate_permission_row(
             assert thread.status == ThreadStatus.INPUT_REQUIRED.value
             assert len(worker_app.state.dispatch_ids) == 1
 
+            # A dispatched control action always carries its dispatch id;
+            # the column is nullable for the pre-dispatch row only.
+            assert action.dispatch_id is not None
             receipt = await _wait_for_receipt(bridge, action.dispatch_id)
             await relay_event(
                 thread_id,

@@ -627,6 +627,9 @@ async def test_live_missed_reject_is_recovered_by_parked_reconcile(
             assert thread is not None
             assert thread.status == ThreadStatus.INPUT_REQUIRED.value
 
+            # A dispatched control action always carries its dispatch id;
+            # the column is nullable for the pre-dispatch row only.
+            assert action.dispatch_id is not None
             receipt = await _wait_for_receipt(bridge, dispatch_id=action.dispatch_id)
             await relay_event(thread_id, receipt, session_factory=session_factory)
 
@@ -744,6 +747,9 @@ async def test_live_running_clobbered_parked_run_is_recovered_by_parked_reconcil
                 )
             assert action is not None
             assert action.applied_at is None
+            # A dispatched control action always carries its dispatch id;
+            # the column is nullable for the pre-dispatch row only.
+            assert action.dispatch_id is not None
             receipt = await _wait_for_receipt(bridge, dispatch_id=action.dispatch_id)
             await relay_event(thread_id, receipt, session_factory=session_factory)
             async with session_factory() as db:

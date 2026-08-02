@@ -240,6 +240,44 @@ class _CodexAppServerClient:
         """Return the retained, redacted tail of the child's standard error."""
         return chr(10).join(self._stderr_tail)
 
+    async def _unexpected_eof_error(self) -> _CodexProtocolError:
+        """Describe an EOF after collecting bounded, safe child diagnostics.
+
+        A closed stdout pipe means a request can no longer complete. Give the
+        process and concurrent stderr drain bounded chances to finish, so startup
+        exits report both their exit code and their useful diagnostic tail. The
+        tail is redacted at capture time and line-bounded by
+        :data:`STDERR_TAIL_LINES`.
+        """
+        exit_code = self._process.returncode
+        if exit_code is None:
+            with suppress(TimeoutError):
+                exit_code = await asyncio.wait_for(
+                    self._process.wait(), timeout=CLEANUP_TIMEOUT_SECONDS
+                )
+
+        if self._stderr_task is not None:
+            with suppress(asyncio.CancelledError, TimeoutError, Exception):
+                await asyncio.wait_for(
+                    asyncio.shield(self._stderr_task), timeout=CLEANUP_TIMEOUT_SECONDS
+                )
+
+        exit_detail = (
+            f"exit code {exit_code}"
+            if exit_code is not None
+            else f"exit code unavailable after {CLEANUP_TIMEOUT_SECONDS:g}s"
+        )
+        tail = self.stderr_tail()
+        if tail:
+            return _CodexProtocolError(
+                f"codex app-server closed unexpectedly ({exit_detail}); "
+                f"redacted stderr tail:\n{tail}"
+            )
+        return _CodexProtocolError(
+            f"codex app-server closed unexpectedly ({exit_detail}); "
+            "redacted stderr tail: <empty>"
+        )
+
     async def _read_loop(self) -> None:
         """Parse newline-delimited JSON frames, routing responses vs. notifications."""
         try:
@@ -264,9 +302,11 @@ class _CodexAppServerClient:
         except Exception as exc:
             self._fail_pending(exc)
         finally:
-            self._fail_pending(
-                _CodexProtocolError("codex app-server connection closed")
-            )
+            # A reader EOF during a request is an early provider exit. Retain
+            # its actual status and already-redacted stderr rather than hiding
+            # the only startup diagnostic behind a generic connection error.
+            if self._pending:
+                self._fail_pending(await self._unexpected_eof_error())
 
     def _dispatch(self, message: JsonObject) -> None:
         raw_id = message.get("id")
@@ -441,16 +481,18 @@ class CodexChatModel(BaseChatModel):
         """
         return self.model_copy(update={"authoring_mcp_server": spec})
 
-    def _build_codex_config_home(self) -> Path | None:
-        """Build the per-run CODEX_HOME for the declared servers, or None.
+    def _build_codex_config_home(self) -> Path:
+        """Build the worker-owned per-run CODEX_HOME for this Codex turn.
 
         Returns the home path (whose ``config.toml`` carries the declared
         read-only harness servers PLUS, when armed, the run's own authoring
-        bridge, the run's web-grounding posture, and whose ``auth.json`` is
-        copied from the base home) when either server source is present; the
-        caller sets ``CODEX_HOME`` to it and cleans it up after reap. Extracted
-        from ``_astream`` so the composition-to-emission path is testable without
-        a live Codex turn.
+        bridge, its explicit web-grounding posture, and whose ``auth.json`` is
+        copied from the base home). The home is created even with no declared
+        servers: otherwise app-server would read the operator's ambient
+        ``~/.codex/config.toml`` and inherit unowned MCP servers. The caller
+        sets ``CODEX_HOME`` to it and cleans it up after reap. Extracted from
+        ``_astream`` so the composition-to-emission path is testable without a
+        live Codex turn.
 
         ADD-only union by name, mirroring the ACP lane's session-inject union in
         ``_project_composition_onto_model``: the harness registry's read-only
@@ -479,8 +521,6 @@ class CodexChatModel(BaseChatModel):
             )
             if authoring_name not in known:
                 specs = [*specs, self.authoring_mcp_server]
-        if not specs:
-            return None
         base = self.codex_home or settings.codex_home
         base_home = Path(base) if base else Path.home() / ".codex"
         configured = self.web_search_mode
@@ -563,10 +603,11 @@ class CodexChatModel(BaseChatModel):
         workspace = self._workspace()
         cwd = str(workspace)
         env = self._build_env(workspace)
-        # Per-run isolated CODEX_HOME: when harness servers are declared, emit a
-        # worker-owned config.toml carrying exactly those read-only servers and
-        # redirect CODEX_HOME to it, suppressing the operator's ambient
-        # [mcp_servers.*] config. Auth (auth.json) is copied from the base home.
+        # Per-run isolated CODEX_HOME: ALWAYS emit a worker-owned config.toml,
+        # carrying exactly the declared read-only servers when any are armed,
+        # and redirect CODEX_HOME to it. This suppresses the operator's ambient
+        # [mcp_servers.*] config even for an otherwise tool-free turn. Auth
+        # (auth.json) is copied from the base home.
         # The home is built INSIDE the try so a spawn failure cannot leak the
         # copied credential; it is cleaned up in the finally regardless of where
         # the turn fails.
@@ -585,8 +626,7 @@ class CodexChatModel(BaseChatModel):
         client: _CodexAppServerClient | None = None
         try:
             codex_config_home = self._build_codex_config_home()
-            if codex_config_home is not None:
-                env["CODEX_HOME"] = str(codex_config_home)
+            env["CODEX_HOME"] = str(codex_config_home)
             metadata = {
                 "provider": self.provider,
                 "command_executable": self.command_executable,

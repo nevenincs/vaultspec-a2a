@@ -11,8 +11,12 @@ from __future__ import annotations
 
 import shutil
 import sys
+from typing import TYPE_CHECKING
 
 import pytest
+
+if TYPE_CHECKING:
+    from pathlib import Path
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import (
     AIMessage,
@@ -24,6 +28,7 @@ from langchain_core.messages import (
 from ...graph.enums import MODEL_MAP, PROVIDER_DEFAULT_MODELS, Model, Provider
 from .._subprocess import spawn_acp_process
 from ..codex_chat_model import (
+    STDERR_TAIL_LINES,
     CodexChatModel,
     _CodexAppServerClient,
     _CodexProtocolError,
@@ -246,25 +251,52 @@ def test_codex_sync_generate_unsupported() -> None:
 
 @pytest.mark.service
 @pytest.mark.asyncio
-@pytest.mark.skipif(not _CODEX_PRESENT, reason="codex CLI not on PATH")
 async def test_codex_live_turn_returns_output() -> None:
-    """A real Codex turn streams assistant deltas and returns a real AIMessage.
+    """A real LOW-tier factory model returns one meaningful Codex response.
 
     Requires a logged-in Codex session (``codex login status``). Uses a trivial
     prompt to keep spend negligible.
     """
+    if not _CODEX_PRESENT:
+        pytest.fail("codex CLI unavailable; install Codex before service tests")
     model = ProviderFactory().create(Provider.CODEX, model=Model.LOW)
     messages = [
         SystemMessage(content="You are terse."),
-        HumanMessage(content="Reply with exactly the single word: pong"),
+        HumanMessage(content="Reply with exactly this word and no punctuation: pong"),
     ]
-
-    streamed = "".join([str(chunk.content) async for chunk in model.astream(messages)])
-    assert streamed.strip()
 
     result = await model.ainvoke(messages)
     assert isinstance(result, AIMessage)
-    assert str(result.content).strip()
+    assert str(result.content).strip().casefold() == "pong"
+
+
+@pytest.mark.asyncio
+async def test_early_app_server_exit_reports_redacted_bounded_stderr_tail(
+    tmp_path: Path,
+) -> None:
+    """A real early exit exposes its code and safe diagnostic tail to the caller."""
+    command = (
+        "import sys; "
+        "[print(f'startup-diagnostic-{index}', file=sys.stderr) "
+        f"for index in range({STDERR_TAIL_LINES})]; "
+        "print('API_KEY=provider-startup-secret', file=sys.stderr); "
+        "sys.stderr.flush(); raise SystemExit(17)"
+    )
+    model = CodexChatModel(
+        command=[sys.executable, "-c", command],
+        cwd=str(tmp_path),
+        timeout=10.0,
+    )
+
+    with pytest.raises(_CodexProtocolError) as raised:
+        await model.ainvoke([HumanMessage(content="start")])
+
+    message = str(raised.value)
+    assert "exit code 17" in message
+    assert f"startup-diagnostic-{STDERR_TAIL_LINES - 1}" in message
+    assert "startup-diagnostic-0" not in message
+    assert "provider-startup-secret" not in message
+    assert "API_KEY=<redacted>" in message
 
 
 @pytest.mark.asyncio

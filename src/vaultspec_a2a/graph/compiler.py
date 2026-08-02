@@ -96,6 +96,12 @@ class CompiledTeamGraph(Protocol):
     @property
     def interrupt_before_nodes(self) -> Sequence[str]: ...
 
+    # Not a property: this function SETS it on the compiled graph a few lines
+    # below, from the team's configured step budget, and the compiler's tests
+    # read back what was set. A protocol that omits it describes a graph this
+    # module does not actually produce.
+    step_timeout: float | None
+
     async def ainvoke(
         self,
         # A PARTIAL state mapping, which is what the graph actually accepts:
@@ -106,7 +112,12 @@ class CompiledTeamGraph(Protocol):
         # the state module is where that contract lives.
         input: Mapping[str, Any] | Command[str] | None,
         config: RunnableConfig | None = None,
-    ) -> TeamState: ...
+        # The final state, PLUS langgraph's own control keys - a parked run
+        # carries ``__interrupt__`` alongside the state fields. So this is a
+        # mapping rather than TeamState: TeamState would be the more useful
+        # promise and would be false, since ``__interrupt__`` is not one of its
+        # keys and reading it is exactly what a parked-run assertion does.
+    ) -> Mapping[str, Any]: ...
 
 
 # Maps AgentConfig.role -> pipeline phase for worker_phase_map derivation.

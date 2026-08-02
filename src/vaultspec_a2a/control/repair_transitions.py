@@ -32,21 +32,31 @@ async def apply_dispatch_failure(
     ``reason`` is the caller's own account of why the dispatch failed, and every
     caller has one - it was previously spent on an HTTP response body and then
     discarded, so a client that reloaded saw a failed run with no reason at all.
-    It is recorded durably here alongside the repair reason.
 
-    The provider condition recorded with it is always the floor, and that is a
-    decision rather than an omission: a dispatch that never reached the worker
-    engaged no provider, so there is no provider condition to report. Naming one
-    - unreachable, overloaded - would describe the LOCAL worker as though it were
-    the model vendor and send the reader after the wrong remedy. The dispatch
-    layer's own failure vocabulary stays where it already is, in the reason text.
+    Where it lands depends on where the run lands, and the distinction is not
+    cosmetic. ``failure_reason`` and ``provider_condition`` describe why a run
+    FAILED, so they are written only when this transition actually fails it. The
+    permission-resume caller passes ``INPUT_REQUIRED``: an undelivered resume
+    leaves the run parked on its question rather than dead, and stamping a
+    failure reason on a run that is still alive would make a reloading client
+    report a failure that never happened. That path carries its account on the
+    repair reason instead, which every arm writes.
+
+    The provider condition, when written, is always the floor - a decision rather
+    than an omission. A dispatch that never reached the worker engaged no
+    provider, so there is none to report; naming one would describe the LOCAL
+    worker as though it were the model vendor and send the reader after the wrong
+    remedy. The dispatch layer's own failure vocabulary stays in the reason text.
     """
+    run_actually_failed = failed_status is ThreadStatus.FAILED
     await update_thread_status(
         db,
         thread_id,
         failed_status,
-        failure_reason=reason,
-        provider_condition=ProviderCondition.UNKNOWN.value if reason else None,
+        failure_reason=reason if run_actually_failed else None,
+        provider_condition=(
+            ProviderCondition.UNKNOWN.value if run_actually_failed and reason else None
+        ),
     )
     return await mark_dispatch_failed(
         db, thread_id, reason=reason or "Worker dispatch failed"

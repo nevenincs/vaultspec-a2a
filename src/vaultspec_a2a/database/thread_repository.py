@@ -438,6 +438,8 @@ async def update_thread_status(
     thread.updated_at = _utcnow()
     if failure_reason:
         thread.failure_reason = _capped_single_line(failure_reason)
+    if provider_condition:
+        thread.provider_condition = provider_condition
     await session.flush()
     return thread
 

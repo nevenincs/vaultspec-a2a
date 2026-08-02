@@ -37,6 +37,7 @@ import os
 
 from opentelemetry import metrics, trace
 
+from ..control.config import DEFAULT_OTLP_ENDPOINT
 from ..utils.version import package_version
 
 __all__ = [
@@ -60,7 +61,7 @@ logger = logging.getLogger(__name__)
 # than monkeypatching the env var after import — the constant will not re-evaluate.
 _SERVICE_NAME = os.environ.get("OTEL_SERVICE_NAME", "vaultspec-a2a")
 _SERVICE_VERSION = os.environ.get("OTEL_SERVICE_VERSION", package_version())
-_OTLP_ENDPOINT = os.environ.get("OTEL_EXPORTER_OTLP_ENDPOINT", "http://localhost:4317")
+_OTLP_ENDPOINT = os.environ.get("OTEL_EXPORTER_OTLP_ENDPOINT", DEFAULT_OTLP_ENDPOINT)
 _SDK_DISABLED = os.environ.get("OTEL_SDK_DISABLED", "").lower() in (
     "1",
     "true",

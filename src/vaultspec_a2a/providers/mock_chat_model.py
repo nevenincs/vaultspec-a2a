@@ -23,7 +23,7 @@ from langchain_core.messages.tool import ToolCallChunk
 from langchain_core.outputs import ChatGeneration, ChatGenerationChunk, ChatResult
 from pydantic import Field, TypeAdapter, ValidationError
 
-from ..control.config import settings
+from ..control.config import DEFAULT_MOCK_API_BASE, settings
 from ..team.team_config import AgentConfig
 from ._json_contract import JsonObject, JsonValue
 
@@ -34,7 +34,6 @@ __all__ = ["MockChatModel"]
 _JSON_OBJECT: TypeAdapter[JsonObject] = TypeAdapter(JsonObject)
 _JSON_VALUE: TypeAdapter[JsonValue] = TypeAdapter(JsonValue)
 _DEFAULT_MODEL_NAME = "mock-success-single"
-_DEFAULT_LOCAL_BASE = "http://localhost:8100"
 
 
 def _validated_json_object(value: object, *, context: str) -> JsonObject:
@@ -206,7 +205,7 @@ class MockChatModel(BaseChatModel):
     """A ``BaseChatModel`` proxy to the local VidaiMock SSE service."""
 
     model_name: str = _DEFAULT_MODEL_NAME
-    base_url: str = f"{_DEFAULT_LOCAL_BASE}/{_DEFAULT_MODEL_NAME}/v1"
+    base_url: str = f"{DEFAULT_MOCK_API_BASE}/{_DEFAULT_MODEL_NAME}/v1"
     disable_streaming: bool | Literal["tool_calling"] = True
     agent_config: AgentConfig | None = Field(default=None, exclude=True)
     permission_callback: object | None = Field(default=None, exclude=True)
@@ -225,7 +224,7 @@ class MockChatModel(BaseChatModel):
             root = configured_base.rstrip("/").removesuffix("/v1")
             self.base_url = f"{root}/{agent_id}/v1"
         elif "base_url" not in fields_set:
-            self.base_url = f"{_DEFAULT_LOCAL_BASE}/{agent_id}/v1"
+            self.base_url = f"{DEFAULT_MOCK_API_BASE}/{agent_id}/v1"
 
     @property
     @override

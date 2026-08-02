@@ -41,6 +41,15 @@ INTERNAL_TOKEN_ENV = "VAULTSPEC_INTERNAL_TOKEN"
 GATEWAY_URL_ENV = "VAULTSPEC_GATEWAY_URL"
 WORKER_URL_ENV = "VAULTSPEC_WORKER_URL"
 
+# Canonical service-endpoint defaults. This module is the ONE home for every
+# production host:port literal; consumers import these rather than repeating
+# the value, and each remains environment-overridable at its point of use
+# (MOCK_API_BASE overrides the VidaiMock base through the mock_api_base field;
+# OTEL_EXPORTER_OTLP_ENDPOINT is read by the telemetry module at import time
+# per the standard OTel contract).
+DEFAULT_MOCK_API_BASE = "http://localhost:8100"
+DEFAULT_OTLP_ENDPOINT = "http://localhost:4317"
+
 
 class InfraConfig(BaseSettings):
     """Infrastructure fields — ports, hosts, URLs, keys, filesystem paths."""

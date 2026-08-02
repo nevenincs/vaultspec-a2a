@@ -92,6 +92,7 @@ from ..authoring.discovery import SERVICE_JSON_ENV, resolve_engine
 from ..control.run_start_policy import required_role_ids
 from ..graph.enums import PermissionOptionKind, ToolKind
 from ..team.team_config import load_team_config
+from ..testing import resolve_gateway_url
 
 # A doc-authoring role may only ever need read-only research tools; any other
 # tool-permission request (a write/execute/unclassified kind) is a real acceptance
@@ -136,8 +137,6 @@ def _option_id_for(options: Sequence[Mapping[str, object]], kind: str) -> str | 
 
 
 logger = logging.getLogger(__name__)
-
-_GATEWAY_URL = os.environ.get("VAULTSPEC_GATEWAY_URL", "http://127.0.0.1:18100")
 
 # The gateway fails closed on every /v1/ route (`api/auth.py`'s
 # `authenticate_request`) unless the app was built with the explicit test-only
@@ -983,7 +982,7 @@ class AcceptanceHarness:
     engine_base_url: str
     engine_bearer: str
     vault_root: Path
-    gateway_url: str = _GATEWAY_URL
+    gateway_url: str
     run_id: str = field(default_factory=lambda: f"pw7-{int(time.time())}")
     phases_seen: list[str] = field(default_factory=list)
     materializations: list[Materialization] = field(default_factory=list)
@@ -1649,25 +1648,30 @@ class AcceptanceHarness:
         return out
 
 
-def _reachable_stack() -> tuple[str, str, Path] | None:
-    """Resolve (engine_base_url, engine_bearer, vault_root) or None if unreachable."""
+def _reachable_stack() -> tuple[str, str, str, Path] | None:
+    """Resolve (gateway_url, engine_base_url, engine_bearer, vault_root) or None.
+
+    The gateway is resolved the way everything else on this machine is: the
+    explicit environment override first, else the dev-process registry's LIVE,
+    health-answering ``gateway-dev`` record - never a hardcoded band default,
+    which concluded "no stack" whenever the port had been allocated rather
+    than defaulted.
+    """
     endpoint = resolve_engine()
     if endpoint is None:
         return None
-    try:
-        health = httpx.get(f"{_GATEWAY_URL}/health", timeout=3.0)
-    except httpx.HTTPError:
-        return None
-    if health.status_code != 200:
+    gateway = resolve_gateway_url()
+    if gateway is None:
         return None
     service_json = os.environ.get("VAULTSPEC_ENGINE_SERVICE_JSON")
     if not service_json:
         return None
     vault_root = Path(service_json).parents[2]  # <ws>/.vault
-    return endpoint.base_url, endpoint.bearer_token, vault_root
+    return gateway.url, endpoint.base_url, endpoint.bearer_token, vault_root
 
 
 @pytest.mark.service
+@pytest.mark.resource("loopback-stack")
 @pytest.mark.asyncio
 @pytest.mark.parametrize("case", [_case_param(c) for c in _ALL_CASES])
 async def test_pw7_research_adr_materializes_two_documents(
@@ -1693,12 +1697,13 @@ async def test_pw7_research_adr_materializes_two_documents(
     stack = _reachable_stack()
     if stack is None:
         external_prerequisite.absent("loopback-stack")
-    engine_base_url, engine_bearer, vault_root = stack
+    gateway_url, engine_base_url, engine_bearer, vault_root = stack
     harness = AcceptanceHarness(
         case=case,
         engine_base_url=engine_base_url,
         engine_bearer=engine_bearer,
         vault_root=vault_root,
+        gateway_url=gateway_url,
     )
 
     gates_driven = await harness.run()

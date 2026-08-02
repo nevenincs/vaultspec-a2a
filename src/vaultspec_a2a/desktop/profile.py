@@ -159,9 +159,9 @@ def _capsule_asset_paths(capsule_root: Path) -> tuple[Path, Path]:
     for the manifest contract without pulling the provider/langchain stack, and
     the asset layout has exactly one definition.
     """
-    from ..providers.factory import _capsule_acp_entry, _capsule_node_executable
+    from ..providers.factory import capsule_acp_entry, capsule_node_executable
 
-    return _capsule_node_executable(capsule_root), _capsule_acp_entry(capsule_root)
+    return capsule_node_executable(capsule_root), capsule_acp_entry(capsule_root)
 
 
 def _validate_capsule_root(capsule_root: Path) -> Path:

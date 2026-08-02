@@ -235,17 +235,7 @@ def _classify_gemini_command(
     }
 
 
-def _build_gemini_command(
-    model_name: str,
-    *,
-    executable: str | None = None,
-) -> list[str]:
-    """Return the Gemini CLI ACP subprocess command."""
-    command, _ = _classify_gemini_command(model_name, executable=executable)
-    return command
-
-
-def _capsule_node_executable(capsule_assets_root: Path) -> Path:
+def capsule_node_executable(capsule_assets_root: Path) -> Path:
     """Return the capsule-owned Node.js executable path for this platform.
 
     Node's official distribution layout places the executable at ``node/node.exe``
@@ -255,7 +245,7 @@ def _capsule_node_executable(capsule_assets_root: Path) -> Path:
     return capsule_assets_root / _CAPSULE_NODE_RELATIVE_PATH
 
 
-def _capsule_acp_entry(capsule_assets_root: Path) -> Path:
+def capsule_acp_entry(capsule_assets_root: Path) -> Path:
     """Return the capsule-owned Claude ACP entry point path.
 
     Mirrors the checkout ``node_modules`` layout so the same installed adapter
@@ -416,12 +406,6 @@ def _classify_acp_command(
         "command_target": str(_CLAUDE_ACP_JS),
         "acp_backend": "node",
     }
-
-
-def _build_acp_command(backend: str) -> list[str]:
-    """Return the ACP gateway subprocess command for the given backend."""
-    command, _ = _classify_acp_command(backend)
-    return command
 
 
 def _classify_codex_command() -> tuple[list[str], dict[str, str]]:

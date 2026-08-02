@@ -35,15 +35,22 @@ References:
 
 import asyncio
 import contextlib
+import errno
 import json
 import logging
+import math
 import os
+import stat
 import time
+from collections.abc import Mapping
 from pathlib import Path
+from typing import NotRequired, TypedDict
 
 import httpx
+from pydantic import TypeAdapter, ValidationError
 
 from ..control.config import settings
+from ..desktop._platform_acl import harden_credential_file
 
 __all__ = ["gemini_uses_env_auth", "refresh_gemini_token"]
 
@@ -70,9 +77,115 @@ _HTTP_OK = 200
 _REPLACE_RETRY_SECONDS = 2.0
 _REPLACE_RETRY_INTERVAL = 0.01
 
+# A refresh can take a network round-trip, but it must not wait forever behind a
+# dead or wedged peer process.  The operating-system releases advisory locks
+# when the owning descriptor closes (including process exit).
+_LOCK_ACQUIRE_SECONDS = 15.0
+_LOCK_RETRY_INTERVAL = 0.05
+
 # Serialises concurrent refresh attempts so two graph executions that both
 # detect expired credentials do not race on the credentials file.
 _refresh_lock = asyncio.Lock()
+
+# Credential files belong to the Gemini CLI, so the untrusted JSON needs a
+# complete recursive shape before this module reads or republishes any value.
+type JsonScalar = str | int | float | bool | None
+type JsonValue = JsonScalar | list[JsonValue] | dict[str, JsonValue]
+type JsonObject = dict[str, JsonValue]
+_JSON_OBJECT: TypeAdapter[JsonObject] = TypeAdapter(JsonObject)
+
+
+class RefreshedToken(TypedDict):
+    """Validated fields that may change the Gemini CLI credential record."""
+
+    access_token: str
+    expires_in: int | float
+    token_type: NotRequired[str]
+    refresh_token: NotRequired[str]
+
+
+class _CredentialFileLock:
+    """One adjacent, persistent advisory lock for a credential file."""
+
+    def __init__(self, path: Path) -> None:
+        self._path = path.with_name(f"{path.name}.lock")
+        self._descriptor: int | None = None
+
+    def acquire(self) -> None:
+        """Acquire this file's cross-process lock within the bounded window."""
+        flags = os.O_RDWR | os.O_CREAT | getattr(os, "O_BINARY", 0)
+        descriptor = os.open(self._path, flags, 0o600)
+        try:
+            _require_regular_lock_file(self._path, descriptor)
+            if os.fstat(descriptor).st_size == 0:
+                os.write(descriptor, b"\x00")
+                os.fsync(descriptor)
+            deadline = time.monotonic() + _LOCK_ACQUIRE_SECONDS
+            while True:
+                try:
+                    _try_lock_descriptor(descriptor)
+                except OSError as exc:
+                    if exc.errno not in {errno.EACCES, errno.EAGAIN}:
+                        raise
+                    if time.monotonic() >= deadline:
+                        raise RuntimeError(
+                            "Timed out waiting for Gemini OAuth credential "
+                            "refresh lock."
+                        ) from None
+                    time.sleep(_LOCK_RETRY_INTERVAL)
+                else:
+                    self._descriptor = descriptor
+                    return
+        except BaseException:
+            os.close(descriptor)
+            raise
+
+    def release(self) -> None:
+        """Release the descriptor-held advisory lock without deleting its inode."""
+        descriptor = self._descriptor
+        if descriptor is None:
+            return
+        self._descriptor = None
+        try:
+            _unlock_descriptor(descriptor)
+        finally:
+            os.close(descriptor)
+
+
+def _require_regular_lock_file(path: Path, descriptor: int) -> None:
+    """Harden and verify the persistent non-secret lock file before locking it."""
+    opened = os.fstat(descriptor)
+    if not stat.S_ISREG(opened.st_mode):
+        raise OSError(f"Gemini OAuth lock path is not a regular file: {path}")
+    harden_credential_file(path)
+
+
+def _try_lock_descriptor(descriptor: int) -> None:
+    """Attempt one non-blocking platform advisory lock acquisition."""
+    if os.name == "nt":
+        import msvcrt
+
+        os.lseek(descriptor, 0, os.SEEK_SET)
+        msvcrt.locking(descriptor, msvcrt.LK_NBLCK, 1)
+        return
+
+    import fcntl
+
+    fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+
+
+def _unlock_descriptor(descriptor: int) -> None:
+    """Release one platform advisory lock held by *descriptor*."""
+    if os.name == "nt":
+        import msvcrt
+
+        os.lseek(descriptor, 0, os.SEEK_SET)
+        msvcrt.locking(descriptor, msvcrt.LK_UNLCK, 1)
+        return
+
+    import fcntl
+
+    fcntl.flock(descriptor, fcntl.LOCK_UN)
 
 
 def gemini_uses_env_auth(env: dict[str, str] | None = None) -> bool:
@@ -97,12 +210,81 @@ def _default_creds_path(env: dict[str, str] | None = None) -> Path:
     return Path.home() / _GEMINI_DIR_NAME / _CREDS_FILE_NAME
 
 
-def _is_expired(creds: dict) -> bool:
+def _is_expired(creds: Mapping[str, JsonValue]) -> bool:
     """Return True if the access token is missing or about to expire."""
     expiry_ms = creds.get("expiry_date")
-    if expiry_ms is None:
+    if (
+        isinstance(expiry_ms, bool)
+        or not isinstance(expiry_ms, int | float)
+        or not math.isfinite(expiry_ms)
+    ):
         return True
     return time.time() >= (expiry_ms / 1000.0) - settings.oauth_expiry_buffer_seconds
+
+
+def _parse_json_object(raw: bytes, *, source: str) -> JsonObject:
+    """Validate untrusted JSON bytes without exposing their contents in errors."""
+    try:
+        return _JSON_OBJECT.validate_json(raw)
+    except ValidationError:
+        raise RuntimeError(f"Invalid {source} JSON.") from None
+
+
+def _required_token_string(payload: Mapping[str, JsonValue], field: str) -> str:
+    """Read a required, non-empty token response string."""
+    value = payload.get(field)
+    if not isinstance(value, str) or not (normalized := value.strip()):
+        raise RuntimeError(f"Gemini token refresh response lacks a valid {field}.")
+    return normalized
+
+
+def _required_token_number(payload: Mapping[str, JsonValue], field: str) -> int | float:
+    """Read a finite credential lifetime beyond the proactive refresh window."""
+    value = payload.get(field)
+    if (
+        isinstance(value, bool)
+        or not isinstance(value, int | float)
+        or not math.isfinite(value)
+        or value <= settings.oauth_expiry_buffer_seconds
+    ):
+        raise RuntimeError(f"Gemini token refresh response lacks a valid {field}.")
+    return value
+
+
+def _optional_token_string(payload: Mapping[str, JsonValue], field: str) -> str | None:
+    """Read an optional token response string, rejecting malformed rotations."""
+    if field not in payload:
+        return None
+    value = payload[field]
+    if not isinstance(value, str) or not (normalized := value.strip()):
+        raise RuntimeError(f"Gemini token refresh response has an invalid {field}.")
+    return normalized
+
+
+def _stored_refresh_token(creds: Mapping[str, JsonValue]) -> str:
+    """Return the existing refresh token only when it is a non-blank string."""
+    value = creds.get("refresh_token")
+    if not isinstance(value, str) or not (normalized := value.strip()):
+        raise RuntimeError(
+            "No refresh_token in oauth_creds.json — cannot refresh headlessly. "
+            "Run `gemini` interactively to re-authenticate."
+        )
+    return normalized
+
+
+def _validated_refresh_token(payload: Mapping[str, JsonValue]) -> RefreshedToken:
+    """Validate every response field before mutating credentials on disk."""
+    token: RefreshedToken = {
+        "access_token": _required_token_string(payload, "access_token"),
+        "expires_in": _required_token_number(payload, "expires_in"),
+    }
+    token_type = _optional_token_string(payload, "token_type")
+    if token_type is not None:
+        token["token_type"] = token_type
+    refresh_token = _optional_token_string(payload, "refresh_token")
+    if refresh_token is not None:
+        token["refresh_token"] = refresh_token
+    return token
 
 
 def _publish_credentials(path: Path, payload: str) -> None:
@@ -209,62 +391,68 @@ async def refresh_gemini_token(
         )
 
     async with _refresh_lock:
-        # Offload blocking read_text via to_thread
-        raw = await asyncio.to_thread(creds_path.read_text, encoding="utf-8")
-        creds: dict = json.loads(raw)
+        # The persistent OS lock starts before the post-lock reread and ends only
+        # after fsync + atomic publication.  That prevents separate VaultSpec
+        # processes from racing a rotated refresh token over the same Gemini home.
+        file_lock = _CredentialFileLock(creds_path)
+        await asyncio.to_thread(file_lock.acquire)
+        try:
+            raw = await asyncio.to_thread(creds_path.read_bytes)
+            creds = _parse_json_object(raw, source="Gemini OAuth credentials")
 
-        # Double-check after lock acquisition (another coroutine may have
-        # refreshed while we were waiting for the lock).
-        if not _is_expired(creds):
-            logger.debug("Gemini OAuth token is valid; skipping refresh.")
-            return
+            # A peer process may have refreshed while this process waited for the
+            # OS lock.  Reread after acquisition and return without a second HTTP
+            # request when that publication is now fresh.
+            if not _is_expired(creds):
+                logger.debug("Gemini OAuth token is valid; skipping refresh.")
+                return
 
-        refresh_token = creds.get("refresh_token")
-        if not refresh_token:
-            raise RuntimeError(
-                "No refresh_token in oauth_creds.json — cannot refresh headlessly. "
-                "Run `gemini` interactively to re-authenticate."
+            refresh_token = _stored_refresh_token(creds)
+            logger.info("Gemini OAuth token expired; refreshing via token endpoint.")
+
+            async with httpx.AsyncClient() as client:
+                response = await client.post(
+                    _TOKEN_URI,
+                    data={
+                        "grant_type": "refresh_token",
+                        "refresh_token": refresh_token,
+                        "client_id": _CLIENT_ID,
+                        "client_secret": _CLIENT_SECRET,
+                    },
+                    headers={"Content-Type": "application/x-www-form-urlencoded"},
+                    timeout=15.0,
+                )
+
+            if response.status_code != _HTTP_OK:
+                raise RuntimeError(
+                    f"Gemini token refresh failed (HTTP {response.status_code}). "
+                    "Check ~/.gemini/oauth_creds.json or re-authenticate interactively."
+                ) from None
+
+            token_data = _validated_refresh_token(
+                _parse_json_object(
+                    response.content, source="Gemini token refresh response"
+                )
             )
 
-        logger.info("Gemini OAuth token expired; refreshing via token endpoint.")
+            creds["access_token"] = token_data["access_token"]
+            creds["expiry_date"] = int((time.time() + token_data["expires_in"]) * 1000)
+            if "token_type" in token_data:
+                creds["token_type"] = token_data["token_type"]
+            # Google may rotate the refresh token — preserve the new one if provided.
+            if "refresh_token" in token_data:
+                creds["refresh_token"] = token_data["refresh_token"]
 
-        async with httpx.AsyncClient() as client:
-            response = await client.post(
-                _TOKEN_URI,
-                data={
-                    "grant_type": "refresh_token",
-                    "refresh_token": refresh_token,
-                    "client_id": _CLIENT_ID,
-                    "client_secret": _CLIENT_SECRET,
-                },
-                headers={"Content-Type": "application/x-www-form-urlencoded"},
-                timeout=15.0,
+            # One offload for the whole publication: the write, the fsync that makes
+            # it durable before the rename, and the rename itself are all blocking
+            # filesystem work that must not run on the event loop.
+            await asyncio.to_thread(
+                _publish_credentials, creds_path, json.dumps(creds, indent=2)
             )
 
-        if response.status_code != _HTTP_OK:
-            raise RuntimeError(
-                f"Gemini token refresh failed (HTTP {response.status_code}). "
-                "Check ~/.gemini/oauth_creds.json or re-authenticate interactively."
-            ) from None
-
-        token_data = response.json()
-
-        creds["access_token"] = token_data["access_token"]
-        creds["expiry_date"] = int((time.time() + token_data["expires_in"]) * 1000)
-        if "token_type" in token_data:
-            creds["token_type"] = token_data["token_type"]
-        # Google may rotate the refresh token — preserve the new one if provided.
-        if "refresh_token" in token_data:
-            creds["refresh_token"] = token_data["refresh_token"]
-
-        # One offload for the whole publication: the write, the fsync that makes
-        # it durable before the rename, and the rename itself are all blocking
-        # filesystem work that must not run on the event loop.
-        await asyncio.to_thread(
-            _publish_credentials, creds_path, json.dumps(creds, indent=2)
-        )
-
-        logger.info(
-            "Gemini OAuth token refreshed; new expiry in %ds.",
-            token_data["expires_in"],
-        )
+            logger.info(
+                "Gemini OAuth token refreshed; new expiry in %ds.",
+                token_data["expires_in"],
+            )
+        finally:
+            await asyncio.to_thread(file_lock.release)

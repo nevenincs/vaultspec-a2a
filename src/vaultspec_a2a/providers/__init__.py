@@ -14,12 +14,18 @@ Providers implement :mod:`vaultspec_a2a.graph.protocols` for
 """
 
 import importlib
+from typing import TYPE_CHECKING
 
 from .acp_exceptions import AcpAuthError as AcpAuthError
 from .acp_exceptions import AcpError as AcpError
 from .acp_exceptions import AcpErrorCode as AcpErrorCode
 from .acp_exceptions import AcpPromptError as AcpPromptError
 from .acp_exceptions import AcpSessionError as AcpSessionError
+
+if TYPE_CHECKING:
+    from .acp_chat_model import AcpChatModel as AcpChatModel
+    from .factory import ProviderFactory as ProviderFactory
+    from .mock_chat_model import MockChatModel as MockChatModel
 
 # Lazy imports to break circular dependency:
 #   providers.acp_chat_model -> team.team_config -> graph.compiler

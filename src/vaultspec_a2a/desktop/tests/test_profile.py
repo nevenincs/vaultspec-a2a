@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-from ...providers.factory import _capsule_acp_entry, _capsule_node_executable
+from ...providers.factory import capsule_acp_entry, capsule_node_executable
 from ..profile import (
     DesktopProfile,
     DesktopProfileError,
@@ -26,8 +26,8 @@ def _build_capsule(root: Path) -> Path:
     Writes the two runtime assets the provider factory resolves — the bundled
     Node executable and the ACP adapter entry — at their production-owned paths.
     """
-    node = _capsule_node_executable(root)
-    acp = _capsule_acp_entry(root)
+    node = capsule_node_executable(root)
+    acp = capsule_acp_entry(root)
     for asset, content in ((node, "node runtime\n"), (acp, "// acp entry\n")):
         asset.parent.mkdir(parents=True, exist_ok=True)
         asset.write_text(content, encoding="utf-8")
@@ -111,7 +111,7 @@ def test_resolve_rejects_capsule_missing_runtime_assets(tmp_path: Path) -> None:
 def test_resolve_rejects_capsule_missing_acp_entry(tmp_path: Path) -> None:
     """A capsule with Node but no ACP adapter entry is refused, naming the gap."""
     capsule = tmp_path / "capsule"
-    node = _capsule_node_executable(capsule)
+    node = capsule_node_executable(capsule)
     node.parent.mkdir(parents=True, exist_ok=True)
     node.write_text("node runtime\n", encoding="utf-8")
     with pytest.raises(DesktopProfileError, match="ACP adapter entry point"):

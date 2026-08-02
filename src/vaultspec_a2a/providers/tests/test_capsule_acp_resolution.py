@@ -20,9 +20,9 @@ import pytest
 from ...thread.errors import ConfigError
 from ..factory import (
     _CLAUDE_ACP_JS,
-    _capsule_acp_entry,
-    _capsule_node_executable,
     _classify_acp_command,
+    capsule_acp_entry,
+    capsule_node_executable,
 )
 
 if TYPE_CHECKING:
@@ -38,8 +38,8 @@ def _write(path: Path, content: str) -> Path:
 def test_capsule_root_resolves_node_and_acp_only_from_capsule(tmp_path: Path) -> None:
     """An explicit capsule root binds the capsule Node executable and ACP entry."""
     root = tmp_path / "capsule"
-    node = _write(_capsule_node_executable(root), "node runtime\n")
-    acp = _write(_capsule_acp_entry(root), "// acp entry\n")
+    node = _write(capsule_node_executable(root), "node runtime\n")
+    acp = _write(capsule_acp_entry(root), "// acp entry\n")
 
     command, meta = _classify_acp_command("node", capsule_assets_root=root)
 
@@ -57,27 +57,27 @@ def test_capsule_root_resolves_node_and_acp_only_from_capsule(tmp_path: Path) ->
 def test_capsule_missing_node_fails_loud_naming_the_asset(tmp_path: Path) -> None:
     """A capsule without its Node executable raises, naming the missing path."""
     root = tmp_path / "capsule"
-    _write(_capsule_acp_entry(root), "// acp entry\n")
+    _write(capsule_acp_entry(root), "// acp entry\n")
 
     with pytest.raises(ConfigError) as excinfo:
         _classify_acp_command("node", capsule_assets_root=root)
 
     message = str(excinfo.value)
     assert "Node executable" in message
-    assert str(_capsule_node_executable(root.resolve())) in message
+    assert str(capsule_node_executable(root.resolve())) in message
 
 
 def test_capsule_missing_acp_entry_fails_loud_naming_the_asset(tmp_path: Path) -> None:
     """A capsule without its ACP adapter raises, naming the missing path."""
     root = tmp_path / "capsule"
-    _write(_capsule_node_executable(root), "node runtime\n")
+    _write(capsule_node_executable(root), "node runtime\n")
 
     with pytest.raises(ConfigError) as excinfo:
         _classify_acp_command("node", capsule_assets_root=root)
 
     message = str(excinfo.value)
     assert "ACP entry point" in message
-    assert str(_capsule_acp_entry(root.resolve())) in message
+    assert str(capsule_acp_entry(root.resolve())) in message
 
 
 def test_capsule_resolution_takes_no_path_or_checkout_fallback(tmp_path: Path) -> None:
@@ -105,8 +105,8 @@ def test_relative_capsule_root_returns_absolute_canonical_assets() -> None:
     with TemporaryDirectory(prefix="capsule-s09-", dir=Path.cwd()) as temp_dir:
         root = Path(temp_dir)
         relative_root = root.relative_to(Path.cwd())
-        node = _write(_capsule_node_executable(root), "node runtime\n")
-        acp = _write(_capsule_acp_entry(root), "// acp entry\n")
+        node = _write(capsule_node_executable(root), "node runtime\n")
+        acp = _write(capsule_acp_entry(root), "// acp entry\n")
 
         command, meta = _classify_acp_command("node", capsule_assets_root=relative_root)
 
@@ -118,8 +118,8 @@ def test_relative_capsule_root_returns_absolute_canonical_assets() -> None:
 @pytest.mark.parametrize(
     ("asset_path", "asset_name"),
     [
-        pytest.param(_capsule_node_executable, "Node executable", id="node"),
-        pytest.param(_capsule_acp_entry, "Claude ACP entry point", id="acp"),
+        pytest.param(capsule_node_executable, "Node executable", id="node"),
+        pytest.param(capsule_acp_entry, "Claude ACP entry point", id="acp"),
     ],
 )
 def test_capsule_rejects_asset_symlink_that_escapes_root(
@@ -129,8 +129,8 @@ def test_capsule_rejects_asset_symlink_that_escapes_root(
 ) -> None:
     """A required asset cannot transfer authority through an escaping link."""
     root = tmp_path / "capsule"
-    _write(_capsule_node_executable(root), "node runtime\n")
-    _write(_capsule_acp_entry(root), "// acp entry\n")
+    _write(capsule_node_executable(root), "node runtime\n")
+    _write(capsule_acp_entry(root), "// acp entry\n")
     escaped_asset = asset_path(root)
     escaped_asset.unlink()
     outside_asset = _write(

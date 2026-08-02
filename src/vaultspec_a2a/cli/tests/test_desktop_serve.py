@@ -21,7 +21,7 @@ import pytest
 
 from ...control.config import Settings
 from ...desktop.profile import DesktopProfileError, derive_state_paths
-from ...providers.factory import _capsule_acp_entry, _capsule_node_executable
+from ...providers.factory import capsule_acp_entry, capsule_node_executable
 from ..main import _DesktopServePlan, _prepare_desktop_serve
 
 if TYPE_CHECKING:
@@ -33,8 +33,8 @@ _MODULE = "vaultspec_a2a.cli.main"
 def _build_capsule(root: Path) -> Path:
     """Materialise a real capsule tree carrying the factory-resolved assets."""
     for asset, content in (
-        (_capsule_node_executable(root), "node runtime\n"),
-        (_capsule_acp_entry(root), "// acp entry\n"),
+        (capsule_node_executable(root), "node runtime\n"),
+        (capsule_acp_entry(root), "// acp entry\n"),
     ):
         asset.parent.mkdir(parents=True, exist_ok=True)
         asset.write_text(content, encoding="utf-8")

@@ -33,8 +33,8 @@ from ..desktop.profile import (
     derive_state_paths,
 )
 from ..providers.factory import (
-    _capsule_acp_entry,
-    _capsule_node_executable,
+    capsule_acp_entry,
+    capsule_node_executable,
 )
 
 if TYPE_CHECKING:
@@ -47,8 +47,8 @@ _CAPSULE_ENV = "VAULTSPEC_CAPSULE_ASSETS"
 def _build_capsule(root: Path) -> Path:
     """Write the factory-resolved runtime assets into a real capsule tree."""
     for asset, content in (
-        (_capsule_node_executable(root), "node runtime\n"),
-        (_capsule_acp_entry(root), "// acp entry\n"),
+        (capsule_node_executable(root), "node runtime\n"),
+        (capsule_acp_entry(root), "// acp entry\n"),
     ):
         asset.parent.mkdir(parents=True, exist_ok=True)
         asset.write_text(content, encoding="utf-8")

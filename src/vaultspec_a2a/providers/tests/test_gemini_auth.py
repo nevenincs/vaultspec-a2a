@@ -6,6 +6,8 @@ are marked @pytest.mark.live.
 
 import json
 import os
+import subprocess
+import sys
 import time
 from pathlib import Path
 
@@ -13,9 +15,12 @@ import pytest
 
 from ...control.config import settings
 from ..gemini_auth import (
+    JsonValue,
     _default_creds_path,
     _is_expired,
     _publish_credentials,
+    _stored_refresh_token,
+    _validated_refresh_token,
     gemini_uses_env_auth,
     refresh_gemini_token,
 )
@@ -186,6 +191,30 @@ class TestRefreshGeminiTokenOffline:
             await refresh_gemini_token(creds_path=creds_path)
 
     @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "malformed_refresh_token",
+        ["   ", 1, 1.5, True, [], {}],
+    )
+    async def test_malformed_stored_refresh_token_fails_before_network_or_mutation(
+        self, tmp_path: Path, malformed_refresh_token: object
+    ) -> None:
+        """Malformed local tokens fail locally and leave credential bytes intact."""
+        creds_path = tmp_path / "oauth_creds.json"
+        original = json.dumps(
+            {
+                "access_token": "expired-token",
+                "refresh_token": malformed_refresh_token,
+                "expiry_date": int((time.time() - 3600) * 1000),
+            }
+        ).encode()
+        creds_path.write_bytes(original)
+
+        with pytest.raises(RuntimeError, match="No refresh_token"):
+            await refresh_gemini_token(creds_path=creds_path)
+
+        assert creds_path.read_bytes() == original
+
+    @pytest.mark.asyncio
     async def test_creds_path_accepts_custom_path(self, tmp_path: Path) -> None:
         """The creds_path parameter routes to the correct file."""
         test_root = tmp_path / "custom"
@@ -203,7 +232,210 @@ class TestRefreshGeminiTokenOffline:
         await refresh_gemini_token(creds_path=custom_path)
 
 
+class TestRefreshTokenResponseValidation:
+    """The OAuth response must be safe before it can mutate local credentials."""
+
+    @pytest.mark.parametrize(
+        "expires_in",
+        [
+            False,
+            0,
+            -1,
+            settings.oauth_expiry_buffer_seconds,
+            settings.oauth_expiry_buffer_seconds - 0.5,
+            float("inf"),
+            float("nan"),
+        ],
+    )
+    def test_rejects_unusable_expires_in(self, expires_in: JsonValue) -> None:
+        """A response lifetime must exceed the proactive refresh buffer."""
+        with pytest.raises(RuntimeError, match="valid expires_in"):
+            _validated_refresh_token(
+                {
+                    "access_token": "fresh-token",
+                    "expires_in": expires_in,
+                }
+            )
+
+    def test_normalizes_all_response_token_strings(self) -> None:
+        """Whitespace around accepted response strings never reaches the file."""
+        token = _validated_refresh_token(
+            {
+                "access_token": " fresh-access-token ",
+                "expires_in": settings.oauth_expiry_buffer_seconds + 1,
+                "token_type": " Bearer ",
+                "refresh_token": " rotated-refresh-token ",
+            }
+        )
+
+        assert token == {
+            "access_token": "fresh-access-token",
+            "expires_in": settings.oauth_expiry_buffer_seconds + 1,
+            "token_type": "Bearer",
+            "refresh_token": "rotated-refresh-token",
+        }
+
+    def test_normalizes_stored_refresh_token_before_request_construction(self) -> None:
+        """A valid local token is stripped before it can cross the HTTP boundary."""
+        assert _stored_refresh_token({"refresh_token": " local-refresh-token "}) == (
+            "local-refresh-token"
+        )
+
+    @pytest.mark.parametrize("value", ["   ", 1, False, [], {}])
+    def test_rejects_malformed_required_response_access_token(
+        self, value: JsonValue
+    ) -> None:
+        """Required access-token strings reject blank and non-string responses."""
+        with pytest.raises(RuntimeError, match="valid access_token"):
+            _validated_refresh_token(
+                {
+                    "access_token": value,
+                    "expires_in": settings.oauth_expiry_buffer_seconds + 1,
+                }
+            )
+
+    @pytest.mark.parametrize("field", ["token_type", "refresh_token"])
+    @pytest.mark.parametrize("value", ["   ", 1, False, [], {}])
+    def test_rejects_malformed_optional_response_strings(
+        self, field: str, value: JsonValue
+    ) -> None:
+        """A malformed optional rotation is an error rather than file mutation."""
+        with pytest.raises(RuntimeError, match=f"invalid {field}"):
+            _validated_refresh_token(
+                {
+                    "access_token": "fresh-token",
+                    "expires_in": settings.oauth_expiry_buffer_seconds + 1,
+                    field: value,
+                }
+            )
+
+
 # ---------------------------------------------------------------------------
+# Cross-process locking — real fresh interpreters and real descriptor release
+# ---------------------------------------------------------------------------
+
+
+def _subprocess_environment() -> dict[str, str]:
+    """Return a process environment that cannot bypass OAuth via an API key."""
+    environment = os.environ.copy()
+    for key in (
+        "GEMINI_API_KEY",
+        "GOOGLE_API_KEY",
+        "GOOGLE_APPLICATION_CREDENTIALS",
+    ):
+        environment.pop(key, None)
+    return environment
+
+
+def _start_lock_holder(creds_path: Path, *, crash: bool) -> subprocess.Popen[str]:
+    """Start a fresh interpreter which acquires the production credential lock."""
+    completion = "os._exit(0)" if crash else "lock.release()"
+    script = (
+        "import json, os, sys, time\n"
+        "from pathlib import Path\n"
+        "from vaultspec_a2a.providers.gemini_auth import (\n"
+        "    _CredentialFileLock, _publish_credentials,\n"
+        ")\n"
+        "path = Path(sys.argv[1])\n"
+        "lock = _CredentialFileLock(path)\n"
+        "lock.acquire()\n"
+        "print('locked', flush=True)\n"
+        "time.sleep(0.25)\n"
+        "_publish_credentials(path, json.dumps({\n"
+        "    'access_token': 'fresh-token',\n"
+        "    'refresh_token': 'fresh-refresh-token',\n"
+        "    'expiry_date': int((time.time() + 7200) * 1000),\n"
+        "}))\n"
+        "time.sleep(0.25)\n"
+        f"{completion}\n"
+    )
+    return subprocess.Popen(
+        [sys.executable, "-c", script, str(creds_path)],
+        env=_subprocess_environment(),
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+
+
+def _run_refresh_in_fresh_process(creds_path: Path) -> subprocess.CompletedProcess[str]:
+    """Run the public refresh function in a fresh interpreter without API-key bypass."""
+    script = (
+        "import asyncio, sys\n"
+        "from pathlib import Path\n"
+        "from vaultspec_a2a.providers.gemini_auth import refresh_gemini_token\n"
+        "asyncio.run(refresh_gemini_token(Path(sys.argv[1])))\n"
+        "print('refresh-complete', flush=True)\n"
+    )
+    return subprocess.run(
+        [sys.executable, "-c", script, str(creds_path)],
+        env=_subprocess_environment(),
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=20,
+    )
+
+
+class TestCredentialRefreshProcessLock:
+    """The persistent advisory lock coordinates independent Python processes."""
+
+    def test_waiter_rereads_fresh_credentials_after_process_lock(
+        self, tmp_path: Path
+    ) -> None:
+        """A second process waits, rereads, and skips an already-fresh OAuth file."""
+        creds_path = tmp_path / "oauth_creds.json"
+        creds_path.write_text(
+            json.dumps(
+                {
+                    "access_token": "expired-token",
+                    "refresh_token": [],
+                    "expiry_date": int((time.time() - 3600) * 1000),
+                }
+            ),
+            encoding="utf-8",
+        )
+        holder = _start_lock_holder(creds_path, crash=False)
+        assert holder.stdout is not None
+        assert holder.stdout.readline().strip() == "locked"
+
+        started = time.monotonic()
+        waiter = _run_refresh_in_fresh_process(creds_path)
+        elapsed = time.monotonic() - started
+        holder_stderr = holder.communicate(timeout=20)[1]
+
+        assert holder.returncode == 0, holder_stderr
+        assert waiter.returncode == 0, waiter.stderr
+        assert waiter.stdout.strip() == "refresh-complete"
+        assert elapsed >= 0.2
+        assert json.loads(creds_path.read_text(encoding="utf-8"))["access_token"] == (
+            "fresh-token"
+        )
+
+    def test_crashed_holder_releases_its_descriptor_lock(self, tmp_path: Path) -> None:
+        """OS descriptor cleanup makes a persistent lock usable after a crash."""
+        creds_path = tmp_path / "oauth_creds.json"
+        creds_path.write_text(
+            json.dumps(
+                {
+                    "access_token": "valid-token",
+                    "refresh_token": "refresh-token",
+                    "expiry_date": int((time.time() + 7200) * 1000),
+                }
+            ),
+            encoding="utf-8",
+        )
+        holder = _start_lock_holder(creds_path, crash=True)
+        assert holder.stdout is not None
+        assert holder.stdout.readline().strip() == "locked"
+        holder_stderr = holder.communicate(timeout=20)[1]
+
+        assert holder.returncode == 0, holder_stderr
+        waiter = _run_refresh_in_fresh_process(creds_path)
+
+        assert waiter.returncode == 0, waiter.stderr
+        assert waiter.stdout.strip() == "refresh-complete"
+        assert (tmp_path / "oauth_creds.json.lock").is_file()
 
 
 # ---------------------------------------------------------------------------

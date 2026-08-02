@@ -6,7 +6,7 @@ tags:
 date: '2026-08-02'
 modified: '2026-08-02'
 body_schema: 'body-v1'
-body_hash: 'sha256:303d2d5ce382cf369d1f899a616838141dba186d326e9d0778d8735db595076d'
+body_hash: 'sha256:84f43044803919c70fdb75815fc1820edc3a918535b99ee545dcb36950a1d8ee'
 related:
   - '[[2026-07-19-repository-tooling-hardening-W01-P01-S01]]'
   - '[[2026-07-19-repository-tooling-hardening-W01-P01-summary]]'
@@ -67,6 +67,9 @@ related:
   - '[[2026-08-02-repository-tooling-hardening-strict-s24-thread-state-audit]]'
   - '[[2026-08-02-repository-tooling-hardening-strict-s24-verdict-subscriber-audit]]'
   - '[[2026-08-02-repository-tooling-hardening-strict-s24-worker-health-audit]]'
+  - '[[2026-08-02-repository-tooling-hardening-strict-s25-factory-audit]]'
+  - '[[2026-08-02-repository-tooling-hardening-strict-s25-gemini-auth-audit]]'
+  - '[[2026-08-02-repository-tooling-hardening-strict-s25-provider-lazy-exports-audit]]'
 ---
 
 # `repository-tooling-hardening` feature index
@@ -101,6 +104,9 @@ Auto-generated index of all documents tagged with `#repository-tooling-hardening
 - `2026-08-02-repository-tooling-hardening-strict-s24-thread-state-audit` - `repository-tooling-hardening` audit: `Control thread-state checkpoint boundary review`
 - `2026-08-02-repository-tooling-hardening-strict-s24-verdict-subscriber-audit` - `repository-tooling-hardening` audit: `Verdict subscriber type-boundary review`
 - `2026-08-02-repository-tooling-hardening-strict-s24-worker-health-audit` - `repository-tooling-hardening` audit: `Worker health public-contract review`
+- `2026-08-02-repository-tooling-hardening-strict-s25-factory-audit` - `repository-tooling-hardening` audit: `Provider factory canonical interface review`
+- `2026-08-02-repository-tooling-hardening-strict-s25-gemini-auth-audit` - `repository-tooling-hardening` audit: `Gemini credential boundary review`
+- `2026-08-02-repository-tooling-hardening-strict-s25-provider-lazy-exports-audit` - `repository-tooling-hardening` audit: `Provider lazy export contract review`
 
 ### exec
 

@@ -1,5 +1,6 @@
 """Tests for the provider factory."""
 
+from collections.abc import Callable
 from pathlib import Path
 from typing import cast
 
@@ -14,10 +15,9 @@ from ..factory import (
     _BIN_PATH,
     _CLAUDE_ACP_JS,
     ProviderFactory,
-    _build_acp_command,
-    _build_gemini_command,
     _build_gemini_env,
     _build_zai_env,
+    _classify_acp_command,
     _classify_gemini_command,
     classify_provider_command,
 )
@@ -29,34 +29,34 @@ def get_model_attr(model_obj: BaseChatModel) -> str | None:
     return getattr(model_obj, "model", getattr(model_obj, "model_name", None))
 
 
-def _assert_binary_backend_unavailable(action) -> None:
+def _assert_binary_backend_unavailable(action: Callable[[], object]) -> None:
     """Assert the real binary-backend failure contract when no binary exists."""
     with pytest.raises(ConfigError, match="no executable found in"):
         action()
 
 
 # ---------------------------------------------------------------------------
-# _build_acp_command: node and binary variants
+# _classify_acp_command: node and binary variants
 # ---------------------------------------------------------------------------
 
 
-def test_build_acp_command_binary_returns_bin_path() -> None:
+def test_classify_acp_command_binary_returns_bin_path() -> None:
     """binary backend returns a single-element list pointing to the binary."""
     if _BIN_PATH is None:
-        _assert_binary_backend_unavailable(lambda: _build_acp_command("binary"))
+        _assert_binary_backend_unavailable(lambda: _classify_acp_command("binary"))
         return
-    cmd = _build_acp_command("binary")
-    assert len(cmd) == 1
-    assert "claude-agent-acp" in cmd[0]
+    command, _ = _classify_acp_command("binary")
+    assert len(command) == 1
+    assert "claude-agent-acp" in command[0]
 
 
-def test_build_acp_command_binary_path_matches_bin_path() -> None:
+def test_classify_acp_command_binary_path_matches_bin_path() -> None:
     """binary backend command path matches the resolved _BIN_PATH."""
     if _BIN_PATH is None:
-        _assert_binary_backend_unavailable(lambda: _build_acp_command("binary"))
+        _assert_binary_backend_unavailable(lambda: _classify_acp_command("binary"))
         return
-    cmd = _build_acp_command("binary")
-    assert Path(cmd[0]) == _BIN_PATH
+    command, _ = _classify_acp_command("binary")
+    assert Path(command[0]) == _BIN_PATH
 
 
 def test_provider_factory_claude_binary_backend_injects_bun_flag() -> None:
@@ -118,19 +118,6 @@ def test_provider_factory_gemini_creates_acp() -> None:
     assert isinstance(model, AcpChatModel)
     expected_model = MODEL_MAP[Provider.GEMINI][Model.MID]
     assert model.command[1:] == ["--model", expected_model, "--experimental-acp"]
-
-
-def test_build_gemini_command_uses_explicit_executable() -> None:
-    """Gemini command builder preserves an already-resolved executable path."""
-    command = _build_gemini_command(
-        "gemini-test-model", executable="/usr/local/bin/gemini"
-    )
-    assert command == [
-        "/usr/local/bin/gemini",
-        "--model",
-        "gemini-test-model",
-        "--experimental-acp",
-    ]
 
 
 def test_classify_gemini_command_uses_explicit_executable_metadata() -> None:

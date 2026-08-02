@@ -205,7 +205,10 @@ def free_port() -> int:
 
     The result is still a CANDIDATE: nothing reserves it between this return and
     a child's bind, which is why :func:`spawn_until_ready` retries a child that
-    dies before readiness.
+    dies before readiness. A test that needs a port it will bind and HOLD takes
+    it through the canonical claim-holding acquisition instead
+    (``vaultspec_a2a.testing.ports.reserved_port``); this probe exists for
+    candidates and for negative tests that need a port with nothing on it.
     """
     return _allocate_candidates(1)[0]
 

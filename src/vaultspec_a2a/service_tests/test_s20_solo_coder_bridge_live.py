@@ -42,24 +42,21 @@ surfacing work), which is the honest state of the proof.
 from __future__ import annotations
 
 import json
-import os
 import time
 from typing import TYPE_CHECKING
 
 import httpx
 import pytest
+from pydantic import TypeAdapter, ValidationError
 
 from ..api.schemas.enums import ServerEventType
 from .test_pw7_acceptance import (
     _MODE_AUTONOMOUS,
     AcceptanceCase,
     AcceptanceHarness,
-    _dig,
-    _items,
     _reachable_stack,
 )
 from .test_tool_cores_floor_live import (
-    _message_content,
     _snapshot_vault,
     _vault_write_delta,
 )
@@ -74,7 +71,8 @@ _MESSAGE_FRAMES = frozenset(
 _OBSERVE_DEADLINE_SECONDS = 900.0
 # Cadence for polling the engine authoring plane for this run's changeset.
 _ENGINE_POLL_SECONDS = 4.0
-_PROFILE_ID = os.environ.get("S05_PROFILE", "team-defaults")
+# All real-provider service tests run only under the committed all-low profile.
+_PROFILE_ID = "fast"
 
 # The bridged authoring tools the solo-coder should reach. Any one invoked
 # mid-turn proves the surfacing->invocation path end to end.
@@ -83,6 +81,50 @@ _PROPOSE_TOOL = "mcp__vaultspec-authoring__propose_changeset"
 
 _CODER_ROLE = "vaultspec-coder"
 _SOLO_CODER_PRESET = "vaultspec-solo-coder"
+_JSON_OBJECT = TypeAdapter(dict[str, object])
+_JSON_OBJECT_LIST = TypeAdapter(list[dict[str, object]])
+
+
+def _json_object(value: object, *, at: str) -> dict[str, object]:
+    """Require an object wherever the live bridge contract promises one."""
+    try:
+        return _JSON_OBJECT.validate_python(value)
+    except ValidationError as exc:
+        raise AssertionError(f"expected a JSON object at {at}: {exc}") from exc
+
+
+def _items(value: object, *, at: str) -> list[dict[str, object]]:
+    body = _json_object(value, at=at)
+    items = body.get("items")
+    if items is None:
+        return []
+    try:
+        return _JSON_OBJECT_LIST.validate_python(items)
+    except ValidationError as exc:
+        raise AssertionError(f"expected proposal objects at {at}.items: {exc}") from exc
+
+
+def _dig(item: dict[str, object], field_name: str) -> str | None:
+    value = item.get(field_name)
+    if isinstance(value, str):
+        return value
+    for nested in item.values():
+        try:
+            nested_object = _JSON_OBJECT.validate_python(nested)
+        except ValidationError:
+            continue
+        else:
+            found = _dig(nested_object, field_name)
+            if found:
+                return found
+    return None
+
+
+def _message_content(payload: dict[str, object]) -> str | None:
+    if payload.get("type") not in _MESSAGE_FRAMES:
+        return None
+    content = payload.get("content")
+    return content if isinstance(content, str) else None
 
 
 def _solo_coder_case(feature: str) -> AcceptanceCase:
@@ -120,14 +162,15 @@ async def _run_changeset_ids(ec: AuthoringClient, run_id: str) -> set[str]:
     whatever verdict state it has reached.
     """
     resp = await ec.get("/v1/proposals", with_actor=False)
-    data = resp.data if isinstance(resp.data, dict) else {}
+    data = _json_object(resp.data, at="authoring proposals response")
     found: set[str] = set()
     lanes: list[object] = [data]
     applied = data.get("applied_under_policy")
-    if isinstance(applied, dict):
-        lanes.append(applied)
+    if applied is not None:
+        applied_object = _json_object(applied, at="authoring applied-under-policy lane")
+        lanes.append(applied_object)
     for lane in lanes:
-        for item in _items(lane):
+        for item in _items(lane, at="authoring proposal lane"):
             changeset = _dig(item, "changeset_id") or ""
             if run_id in changeset:
                 found.add(changeset)
@@ -217,14 +260,13 @@ async def test_solo_coder_invokes_bridged_authoring_tool_midturn(
                         terminal = False
                         if line.startswith("data:"):
                             payload = _parse_event(line[len("data:") :].strip())
-                            if payload is not None:
-                                content = _message_content(payload)
-                                if content:
-                                    output_parts.append(content)
-                                    narrated_bridge_names.update(
-                                        _extract_bridge_tools("".join(output_parts))
-                                    )
-                                terminal = payload.get("type") == "thread_terminal"
+                            content = _message_content(payload)
+                            if content:
+                                output_parts.append(content)
+                                narrated_bridge_names.update(
+                                    _extract_bridge_tools("".join(output_parts))
+                                )
+                            terminal = payload.get("type") == "thread_terminal"
                         now = time.monotonic()
                         # Poll the engine (not the narration) for this run's
                         # changeset - the unforgeable proof of a real invocation.
@@ -262,15 +304,19 @@ async def test_solo_coder_invokes_bridged_authoring_tool_midturn(
     )
 
 
-def _parse_event(body: str) -> dict | None:
-    """Parse one SSE ``data:`` payload into a dict, or None if not a JSON object."""
+def _parse_event(body: str) -> dict[str, object]:
+    """Parse one SSE data payload as the object the live stream promises."""
     if not body:
-        return None
+        raise AssertionError(
+            "received an empty SSE data payload from the live bridge run"
+        )
     try:
-        payload = json.loads(body)
-    except json.JSONDecodeError:
-        return None
-    return payload if isinstance(payload, dict) else None
+        payload: object = json.loads(body)
+    except json.JSONDecodeError as exc:
+        raise AssertionError(
+            f"received malformed SSE JSON from the live bridge run: {body!r}"
+        ) from exc
+    return _json_object(payload, at="live bridge SSE data payload")
 
 
 def _extract_bridge_tools(output: str) -> set[str]:

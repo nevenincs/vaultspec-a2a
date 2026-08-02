@@ -5,7 +5,7 @@ tags:
 date: '2026-08-02'
 modified: '2026-08-02'
 body_schema: 'body-v1'
-body_hash: 'sha256:b0a1db7ec970ed759f0e23338a50818f6994ca3fb0611bb7cee2b902b9a60085'
+body_hash: 'sha256:de9bff46fe323fd56ce8618b1c707185f6bdc53de92bfada774b0831a256d976'
 related:
   - "[[2026-07-19-repository-tooling-hardening-plan]]"
 ---
@@ -53,6 +53,14 @@ The permissions/resume test now narrows every real service payload at its bounda
 ### compose-cancellation-auth-proof | low | open validation boundary
 
 The cancellation, health, and Jaeger checks now decode their actual wire payloads through closed readers, and focused static gates plus independent review are clean. The real compose run reaches the stack but receives 401 at run creation before the first changed reader, leaving cancellation and tracing proof unexecuted. This is the same run-start authentication boundary already recorded for stream and permissions; retain the strict test and repair the harness owner rather than treating the pre-reader failure as coverage. `src/vaultspec_a2a/service_tests/harness.py:692`; `src/vaultspec_a2a/service_tests/test_cancel_health_trace.py`.
+
+### real-worker-run-evidence | low | resolved
+
+`test_real_worker_run_completion.py` now decodes its real run-status and thread-history payloads through closed readers. Independent review confirmed the 1/1, 25-second execution starts the certified gateway and worker, follows a real run, and asserts tape-derived assistant content through the configured deterministic backend. This is genuine production-path evidence, not an injected transport or worker substitute. `src/vaultspec_a2a/service_tests/test_real_worker_run_completion.py`.
+
+### solo-coder-malformed-payload | medium | resolved
+
+The prior fail-open decoder finding is corrected. Malformed proposal API objects, populated policy records, empty SSE data, malformed SSE JSON, and non-object SSE payloads now raise contextual assertions; the run-scoped changeset plus zero-`.vault`-write proof is unchanged. The live solo-coder bridge remains unverified locally only because its named loopback engine/gateway/worker prerequisite is absent. `src/vaultspec_a2a/service_tests/test_s20_solo_coder_bridge_live.py`.
 ## Recommendations
 
 - Provision a healthy loopback service-discovery record, then run the named engine-backed stdio service lane and append the outcome to this audit before declaring S26 fully runtime-proven.

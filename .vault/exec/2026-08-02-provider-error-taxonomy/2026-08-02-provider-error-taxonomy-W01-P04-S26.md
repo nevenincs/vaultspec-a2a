@@ -39,21 +39,41 @@ transient tuple. A 429 or a 502 was a one-shot terminal failure by omission
 rather than by decision.
 
 Retryability is now a consequence of the resolved condition. Three members are
-admitted, and they share the property that the provider refused BEFORE doing any
-work, so another attempt costs a request and nothing else:
+admitted, and what they share is that each is a statement about AVAILABILITY -
+the provider could not or would not serve this request now - rather than about
+the request, the credential or the account. Availability is the one thing that
+can differ on the next attempt:
 
 - Throttled - the wire states a rate refusal, and waiting is the remedy it names.
-  This is exactly what the configured backoff does.
+  This is exactly what the configured backoff does, and nothing was produced.
 - Provider overloaded - reserved by the vocabulary for a discriminator that names
-  overload specifically, so it is a stated "not now" rather than an inferred one.
+  overload specifically, so it is a stated "not now" rather than an inferred one,
+  and likewise nothing was produced.
 - Network unreachable - admitted for consistency with the type axis, which
   already retries the stdlib connection errors describing the same fault.
   Excluding it would have made the two axes contradict each other on one fact: a
   bare connection refusal retried, while the identical failure typed by a lane
-  did not. The member is reached only when no provider answer arrived - a
-  forwarded HTTP status outranks it at the mapper - so nothing was consumed
-  upstream, and a genuinely misconfigured endpoint costs two extra attempts
-  before failing with the same condition it would have failed with anyway.
+  did not.
+
+A correction belongs against that third member, raised in review and confirmed
+by measurement rather than accepted on assertion. This record originally claimed
+it is reached only where no provider answer arrived, because a forwarded HTTP
+status outranks it at the mapper. Only CLIENT-side statuses outrank: the status
+table holds 400, 401, 402, 403, 404, 413, 422 and 429, so a forwarded 5xx falls
+through and the member is reached WITH a provider answer in hand. The
+accompanying claim that all three refuse before the provider does any work is
+also false for the mid-turn stream disconnect variant, which the installed schema
+describes as the response stream dropping before completion - tokens were
+generated and billed, and a retry pays for them again.
+
+The decision is unchanged, because retrying a 5xx and retrying a dropped stream
+are both standard and the alternative is failing a run that would have succeeded
+on a second attempt. What was wrong was the justification, and a justification
+that overstates the safety of a decision is worth correcting even when the
+decision survives it. The duplicate cost of retrying a partially streamed turn is
+now stated as a price rather than denied, and the client-visible half of that
+cost - a retried turn re-emitting token chunks - is queued as its own finding
+rather than absorbed here.
 
 Five members are excluded by decision rather than by omission. Unauthenticated,
 credits exhausted and budget exhausted each need a credential, a payment or a

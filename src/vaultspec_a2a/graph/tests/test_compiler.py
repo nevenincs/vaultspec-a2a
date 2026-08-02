@@ -37,6 +37,7 @@ from ..compiler import (
     _build_supervisor_prompt,
     _loop_route,
     _make_research_producer,
+    _parse_catalog_preferences,
     _resolve_worker_model_preferences,
     _route_from_supervisor,
     _worker_retry_on,
@@ -687,6 +688,30 @@ def test_frozen_assignment_absent_worker_falls_through_to_resolution() -> None:
     assert with_frozen == without_frozen
 
 
+def test_catalog_preferences_preserve_exact_mode_model_and_controls() -> None:
+    from ...graph.enums import Provider
+
+    provider, model_name, execution_mode, controls = _parse_catalog_preferences(
+        {
+            "schema_version": 1,
+            "provider": "codex",
+            "execution_mode": "codex-app-server",
+            "model_name": "provider-model",
+            "controls": [
+                {
+                    "control_id": "reasoning_effort:entry",
+                    "option_id": "opaque-option",
+                    "provider_value": "brief",
+                }
+            ],
+        }
+    )
+    assert provider == Provider.CODEX
+    assert model_name == "provider-model"
+    assert execution_mode == "codex-app-server"
+    assert controls == {"reasoning_effort:entry": "brief"}
+
+
 # ---------------------------------------------------------------------------
 # T15 -- GraphRecursionError excluded from retry
 # ---------------------------------------------------------------------------
@@ -902,25 +927,122 @@ async def test_a_stated_lane_retry_hint_overrides_the_inferred_verdict() -> None
     assert len(abandoned) == 1
 
 
+#: Node-name shapes that legitimately carry no retry policy.
+#:
+#: Every one of them is pure control flow: a mount step, a human gate, a proposal
+#: submit, a fan-out dispatch. None invokes a model, so none can suffer a provider
+#: fault, and retrying one would repeat a routing decision rather than a request.
+#:
+#: The assertion below is written against this list INVERTED - every node that
+#: carries no policy must be named here - rather than against a list of the nodes
+#: that should carry one. The polarity is the point: a list of expected carriers
+#: is a second table that silently stops covering a node someone adds later,
+#: which is precisely how eight of the eleven attachment sites came to be
+#: unasserted. Inverted, a newly added model-backed node fails this test until
+#: someone decides which side of the line it is on.
+_POLICY_FREE_NODE_NAMES: frozenset[str] = frozenset(
+    {
+        "plan_approval",
+        "research_dispatch",
+        "clarification_request",
+        "clarification_gate",
+        "research_submit",
+        "research_gate",
+        "adr_submit",
+        "adr_gate",
+        "plan_submit",
+        "plan_gate",
+    }
+)
+
+
+def _policy_free_by_shape(name: str) -> bool:
+    """Whether *name* is a structural node rather than a model-backed one."""
+    return name.startswith("mount_") or name in _POLICY_FREE_NODE_NAMES
+
+
+async def _submitter(state: Any, phase: str) -> str:
+    """A proposal submitter, required to compile the document phase machine."""
+    return f"proposal-{phase}"
+
+
+def _retry_policy_partition(graph: Any) -> tuple[set[str], set[str]]:
+    """Split a compiled graph's nodes into policy-carrying and not."""
+    carrying: set[str] = set()
+    bare: set[str] = set()
+    for name, node in graph.nodes.items():
+        if name.startswith("__"):
+            continue
+        if _NODE_RETRY_POLICY in (getattr(node, "retry_policy", None) or ()):
+            carrying.add(name)
+        else:
+            bare.add(name)
+    return carrying, bare
+
+
 @pytest.mark.asyncio(loop_scope="function")
 async def test_every_model_backed_node_carries_the_production_retry_policy(
     pf: ProviderFactoryProtocol,
 ) -> None:
-    """The policy proven above is the one compilation attaches to real nodes.
+    """The policy proven above is the one compilation attaches to every real node.
 
     Without this the behavioural cases would describe a policy object that
     production might never reach a node with, which is the exact gap that let a
     configured retry sit inert for the whole life of the provider adapters.
-    """
-    team = _pipeline_team()
-    agent_configs = {w.agent_id: load_agent_config(w.agent_id) for w in team.workers}
-    graph = compile_team_graph(
-        team_config=team, agent_configs=agent_configs, provider_factory=pf
-    )
 
-    for agent_id in agent_configs:
-        node = graph.nodes[agent_id]
-        assert _NODE_RETRY_POLICY in (getattr(node, "retry_policy", None) or ())
+    All four topologies are compiled, because the attachment is repeated per
+    topology and a per-topology omission is invisible from any other one. An
+    earlier form of this test looked only at the nodes named in ``agent_configs``,
+    which covered three attachment sites out of eleven and would have passed with
+    the supervisor and the entire document phase machine silently detached.
+    """
+    star = _make_team(
+        topology=TopologyConfig(type=TopologyType.STAR),
+        worker_ids=["vaultspec-plan-author", "vaultspec-coder"],
+    )
+    loop = _make_team(
+        topology=TopologyConfig(
+            type=TopologyType.PIPELINE_LOOP,
+            order=["vaultspec-plan-author", "vaultspec-coder"],
+            loop_node="vaultspec-coder",
+        ),
+        worker_ids=["vaultspec-plan-author", "vaultspec-coder"],
+    )
+    research_adr = load_team_config("vaultspec-adr-research-mock")
+
+    cases: list[tuple[str, Any, dict[str, Any]]] = [
+        ("pipeline", _pipeline_team(), {}),
+        (
+            "star",
+            star,
+            {"supervisor_agent_config": load_agent_config("vaultspec-supervisor")},
+        ),
+        ("pipeline_loop", loop, {}),
+        ("research_adr", research_adr, {"proposal_submitter": _submitter}),
+    ]
+
+    for label, team, extra in cases:
+        agent_configs = {
+            w.agent_id: load_agent_config(w.agent_id) for w in team.workers
+        }
+        graph = compile_team_graph(
+            team_config=team,
+            agent_configs=agent_configs,
+            provider_factory=pf,
+            **extra,
+        )
+
+        carrying, bare = _retry_policy_partition(graph)
+
+        # Something model-backed compiled, so an empty graph cannot pass by
+        # having nothing to check.
+        assert carrying, f"{label} compiled no node carrying the retry policy"
+        unexplained = {name for name in bare if not _policy_free_by_shape(name)}
+        assert not unexplained, (
+            f"{label} compiled {sorted(unexplained)} with no retry policy; either "
+            "the attachment was missed or these are structural nodes that need "
+            "declaring as policy-free"
+        )
 
 
 @pytest.mark.asyncio

@@ -72,6 +72,19 @@ the retry policy was in for the whole life of the provider adapters. So
 compilation is driven for real and every model-backed node is checked to carry
 the same policy object the behavioural cases exercised.
 
+That fourth assertion shipped too narrow and was widened after review. It first
+iterated only the resolved agent configurations, which reached three of the
+eleven attachment sites; a review mutation that detached the other eight - the
+supervisor, the fan-out researcher, and the six document phase machine nodes -
+left the whole file green. It now compiles all four topologies and asserts the
+inverse property: every node carrying NO policy must be a declared structural
+node, a mount step, a human gate, a submit or a fan-out dispatch. The polarity is
+deliberate. A list of nodes that should carry the policy is a second table that
+silently stops covering whatever is added next, which is how eight sites came to
+be unasserted in the first place; stated inversely, a newly added model-backed
+node fails the assertion until someone decides which side of the line it is on.
+The same detach-the-non-worker-sites mutation now fails it.
+
 Bounding the backoff was a deliberate trade, and it is split rather than
 uniform. The sweep runs the production policy with its two timing fields replaced
 and nothing else - the classifier and the attempt ceiling are carried over

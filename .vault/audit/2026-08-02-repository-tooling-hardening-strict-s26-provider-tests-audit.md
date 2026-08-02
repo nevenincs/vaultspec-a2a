@@ -5,7 +5,7 @@ tags:
 date: '2026-08-02'
 modified: '2026-08-02'
 body_schema: 'body-v1'
-body_hash: 'sha256:2542da5ea35a1887ada0edd50a1e1fba161e4091910667adc4cb4840b1ee8048'
+body_hash: 'sha256:59542bc8970de86c6599492da77d91e9f56e13fb7ef85f24475122112eedb363'
 related:
   - "[[2026-07-19-repository-tooling-hardening-plan]]"
 ---
@@ -66,17 +66,18 @@ The prior fail-open decoder finding is corrected. Malformed proposal API objects
 
 PW7ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢s strict readers correctly narrow live run-status, authoring response, queue, marker, receipt, and permission-history payloads, but all eight live lanes that reach those readers are declared-prerequisite skips. The 12 passing non-live tests cover retry and callback behaviour only. Add stack-free malformed-payload regressions for non-object responses, malformed item lists, receipts, and permission history before claiming the boundary is fail closed. Do not stage the shared PW7 file with concurrent profile edits until this finding is resolved and the S26 hunks can be isolated safely. `src/vaultspec_a2a/service_tests/test_pw7_acceptance.py`.
 
-### receipt-role-callback-observability | medium | open production contract
+### receipt-role-callback-observability | medium | resolved in code; live proof open
 
-Receipt-role rules cannot be repaired as annotations only: the current recording model/factory and stub submitter violate the test rules, while direct compiled-node invocation propagates no LangChain callbacks. Sol approved a narrow callback-observability seam through real worker and research producer model calls, then a rewrite using the production deterministic provider, frozen assignment, real engine submitter, passive callback observer, and compiled-graph invocation. Defaults must preserve existing direct-node callers; no stub, unarmed submitter, or expected credential failure may replace the proof. `src/vaultspec_a2a/graph/nodes/worker.py`; `src/vaultspec_a2a/graph/nodes/diverge.py`; `src/vaultspec_a2a/graph/compiler.py`; `src/vaultspec_a2a/service_tests/test_receipt_role_rules.py`.
+Commit `d9c37bd8` propagates `RunnableConfig` through real worker and researcher model calls, preserves direct two-argument producers when config is absent, and proves public compiled-graph callback injection with a passive observer. The receipt-role test now uses the production deterministic provider/frozen assignment, real proposal submitter, live actor-token construction, and public `compile_team_graph().ainvoke`; no recording model, provider substitute, stub submitter, casts, patches, or suppressions remain. Independent post-commit review found no defect; `test_diverge.py` passes 23 cases. The receipt service lane remains unexecuted only because no loopback engine/A2A gateway/worker stack is available, so end-to-end delivery is still an explicit infrastructure validation boundary. `src/vaultspec_a2a/graph/nodes/worker.py`; `src/vaultspec_a2a/graph/nodes/diverge.py`; `src/vaultspec_a2a/graph/compiler.py`; `src/vaultspec_a2a/service_tests/test_receipt_role_rules.py`.
 
-### researcher-config-default | high | open compatibility regression
+### researcher-config-default | high | resolved
 
-The new researcher-node callback propagation always passed `config=None` to injected producers, breaking existing direct two-argument producers before any research finding is made. Restore the compatibility branch: omit the keyword when config is absent and forward it only when supplied. Prove this through the existing direct researcher-node regression before the callback-observability payload is reviewed or staged. `src/vaultspec_a2a/graph/nodes/diverge.py:305`.
+Commit `d9c37bd8` restores the legacy producer contract: a missing config calls the two-argument producer unchanged, while config-aware producers receive the callback configuration only when a compiled graph supplies it. The direct researcher-node regression and the full 23-case divergence suite pass; independent post-commit review found no compatibility regression. `src/vaultspec_a2a/graph/nodes/diverge.py`.
 
-### compiled-researcher-config-injection | high | open framework integration defect
+### compiled-researcher-config-injection | high | resolved
 
-`RunnableConfig` is imported only under `TYPE_CHECKING` in the researcher node, so LangGraph cannot resolve the postponed runtime annotation, warns during graph compilation, and fails to inject public graph callback configuration into the divergence node. Move the import to runtime scope and add a config-aware producer regression through the compiled public graph; source-level forwarding is insufficient. `src/vaultspec_a2a/graph/nodes/diverge.py`; `src/vaultspec_a2a/graph/tests/nodes/test_diverge.py`.
+Commit `d9c37bd8` imports `RunnableConfig` at runtime and adds a public compiled-`StateGraph` regression that proves the supplied callback is present in the injected `AsyncCallbackManager` at the config-aware producer. The focused divergence suite passes without LangGraph configuration warnings; independent post-commit review found no framework-integration defect. `src/vaultspec_a2a/graph/nodes/diverge.py`; `src/vaultspec_a2a/graph/tests/nodes/test_diverge.py`.
+
 ### complexity-state-projection | high | open structural defect
 
 The mandatory `just lint complexity` sentinel is now demonstrably blocking: `StateProjector.normalize_execution_state` scores 31, exceeding the configured 15-point limit. This is production complexity, not test-harness noise, and it prevents the strict Just/CI surface from becoming fully green. Decompose the normalization branches behind focused behavior-preserving tests, then rerun the complete complexity gate before promoting it from advisory to blocking CI. `src/vaultspec_a2a/worker/state_projection.py`.

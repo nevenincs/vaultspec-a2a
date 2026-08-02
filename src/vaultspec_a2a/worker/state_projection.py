@@ -9,8 +9,11 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections.abc import Collection, Mapping
 from datetime import datetime
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any, Protocol, TypeGuard
+
+from pydantic import TypeAdapter, ValidationError
 
 from ..domain_config import domain_config
 from ..ipc.schemas import (
@@ -20,7 +23,7 @@ from ..ipc.schemas import (
 from ..thread.enums import TERMINAL_STATUSES, ThreadStatus
 
 if TYPE_CHECKING:
-    from langgraph.types import StateSnapshot
+    from collections.abc import Iterable
 
     from ..database.checkpoints import Checkpointer
     from ..streaming.aggregator import StreamableGraph
@@ -29,6 +32,154 @@ if TYPE_CHECKING:
 __all__ = ["StateProjector"]
 
 logger = logging.getLogger(__name__)
+_OBJECT_MAPPING = TypeAdapter(dict[str, object])
+
+
+class _ExecutionStateSnapshot(Protocol):
+    """Read-only runtime fields consumed by execution-state normalization."""
+
+    @property
+    def next(self) -> Iterable[object]: ...
+
+    @property
+    def interrupts(self) -> Collection[object]: ...
+
+    @property
+    def tasks(self) -> Collection[object]: ...
+
+    @property
+    def created_at(self) -> object: ...
+
+    @property
+    def config(self) -> Mapping[str, object]: ...
+
+    @property
+    def parent_config(self) -> Mapping[str, object] | None: ...
+
+
+def _is_execution_state_snapshot(value: object) -> TypeGuard[_ExecutionStateSnapshot]:
+    """Validate the minimal projection boundary returned by a graph adapter."""
+    required_attributes = (
+        "next",
+        "interrupts",
+        "tasks",
+        "created_at",
+        "config",
+        "parent_config",
+    )
+    if not all(hasattr(value, attribute) for attribute in required_attributes):
+        return False
+    attributes = {
+        attribute: getattr(value, attribute) for attribute in required_attributes
+    }
+    return (
+        isinstance(attributes["interrupts"], Collection)
+        and isinstance(attributes["tasks"], Collection)
+        and isinstance(attributes["config"], Mapping)
+        and (
+            attributes["parent_config"] is None
+            or isinstance(attributes["parent_config"], Mapping)
+        )
+    )
+
+
+def _object_mapping(value: object) -> Mapping[str, object] | None:
+    """Narrow unstructured LangGraph metadata to an object-keyed mapping."""
+    try:
+        return _OBJECT_MAPPING.validate_python(value)
+    except ValidationError:
+        return None
+
+
+def _interrupt_type(interrupt: object) -> str | None:
+    """Return the declared interrupt type when LangGraph supplies one."""
+    payload = _object_mapping(getattr(interrupt, "value", interrupt))
+    if payload is None:
+        return None
+    raw_type = payload.get("type")
+    return str(raw_type) if raw_type is not None else None
+
+
+def _interrupt_details(interrupts: Iterable[object]) -> tuple[list[str], list[str]]:
+    """Project LangGraph interrupt objects to durable task metadata."""
+    interrupt_ids: list[str] = []
+    interrupt_types: list[str] = []
+    for interrupt in interrupts:
+        interrupt_id = getattr(interrupt, "id", None)
+        if interrupt_id is not None:
+            interrupt_ids.append(str(interrupt_id))
+        interrupt_type = _interrupt_type(interrupt)
+        if interrupt_type is not None:
+            interrupt_types.append(interrupt_type)
+    return interrupt_ids, interrupt_types
+
+
+def _task_projection(
+    task: object,
+) -> tuple[ExecutionTaskProjectionPayload, list[str]]:
+    """Project one pending LangGraph task and retain its interrupt types."""
+    interrupt_ids, interrupt_types = _interrupt_details(
+        getattr(task, "interrupts", ()) or ()
+    )
+    error = getattr(task, "error", None)
+    return (
+        ExecutionTaskProjectionPayload(
+            task_id=str(getattr(task, "id", "")),
+            name=str(getattr(task, "name", "")),
+            path=[str(item) for item in getattr(task, "path", ())],
+            has_error=error is not None,
+            error_type=type(error).__name__ if error is not None else None,
+            interrupt_ids=interrupt_ids,
+            interrupt_types=interrupt_types,
+            has_nested_state=getattr(task, "state", None) is not None,
+            has_result=getattr(task, "result", None) is not None,
+        ),
+        interrupt_types,
+    )
+
+
+def _task_projections(
+    state_tasks: Iterable[object],
+) -> tuple[list[ExecutionTaskProjectionPayload], list[str]]:
+    """Project every pending task while preserving first-seen interrupt order."""
+    tasks: list[ExecutionTaskProjectionPayload] = []
+    interrupt_types: list[str] = []
+    for task in state_tasks:
+        projection, task_interrupt_types = _task_projection(task)
+        tasks.append(projection)
+        for interrupt_type in task_interrupt_types:
+            if interrupt_type not in interrupt_types:
+                interrupt_types.append(interrupt_type)
+    return tasks, interrupt_types
+
+
+def _state_interrupt_types(interrupts: Iterable[object]) -> list[str]:
+    """Project state-level interrupts when tasks carry no type metadata."""
+    return [
+        interrupt_type
+        for interrupt in interrupts
+        if (interrupt_type := _interrupt_type(interrupt)) is not None
+    ]
+
+
+def _snapshot_created_at_value(created_at: object) -> str | None:
+    """Serialize LangGraph's timestamp variants for the wire payload."""
+    if isinstance(created_at, datetime):
+        return created_at.isoformat()
+    if isinstance(created_at, str):
+        return created_at
+    return None
+
+
+def _checkpoint_id(config: Mapping[str, object] | None) -> str | None:
+    """Read a checkpoint identifier from a LangGraph runnable config."""
+    if config is None:
+        return None
+    configurable = _object_mapping(config.get("configurable"))
+    if configurable is None:
+        return None
+    checkpoint_id = configurable.get("checkpoint_id")
+    return str(checkpoint_id) if checkpoint_id is not None else None
 
 
 class StateProjector:
@@ -152,69 +303,18 @@ class StateProjector:
 
     @staticmethod
     def normalize_execution_state(
-        state: StateSnapshot,
+        state: _ExecutionStateSnapshot,
     ) -> ExecutionStateProjectionPayload:
         """Normalize LangGraph runtime state into a durable worker payload."""
-        next_nodes = [str(node) for node in getattr(state, "next", ())]
-        state_interrupts = getattr(state, "interrupts", ()) or ()
-        interrupt_types: list[str] = []
-        tasks: list[ExecutionTaskProjectionPayload] = []
-
-        for task in getattr(state, "tasks", ()) or ():
-            task_interrupts = getattr(task, "interrupts", ()) or ()
-            interrupt_ids: list[str] = []
-            task_interrupt_types: list[str] = []
-            for interrupt in task_interrupts:
-                interrupt_id = getattr(interrupt, "id", None)
-                if interrupt_id is not None:
-                    interrupt_ids.append(str(interrupt_id))
-                payload = getattr(interrupt, "value", interrupt)
-                if isinstance(payload, dict) and payload.get("type") is not None:
-                    interrupt_type = str(payload["type"])
-                    task_interrupt_types.append(interrupt_type)
-                    if interrupt_type not in interrupt_types:
-                        interrupt_types.append(interrupt_type)
-            tasks.append(
-                ExecutionTaskProjectionPayload(
-                    task_id=str(getattr(task, "id", "")),
-                    name=str(getattr(task, "name", "")),
-                    path=[str(item) for item in getattr(task, "path", ())],
-                    has_error=getattr(task, "error", None) is not None,
-                    error_type=(
-                        type(task.error).__name__
-                        if getattr(task, "error", None) is not None
-                        else None
-                    ),
-                    interrupt_ids=interrupt_ids,
-                    interrupt_types=task_interrupt_types,
-                    has_nested_state=getattr(task, "state", None) is not None,
-                    has_result=getattr(task, "result", None) is not None,
-                )
-            )
-
+        state_interrupts = state.interrupts or ()
+        tasks, interrupt_types = _task_projections(state.tasks or ())
         if state_interrupts and not interrupt_types:
-            for interrupt in state_interrupts:
-                payload = getattr(interrupt, "value", interrupt)
-                if isinstance(payload, dict) and payload.get("type") is not None:
-                    interrupt_types.append(str(payload["type"]))
-
-        snapshot_created_at = getattr(state, "created_at", None)
-        if isinstance(snapshot_created_at, datetime):
-            snapshot_created_at_value: str | None = snapshot_created_at.isoformat()
-        elif isinstance(snapshot_created_at, str):
-            snapshot_created_at_value = snapshot_created_at
-        else:
-            snapshot_created_at_value = None
-
-        state_config = getattr(state, "config", None) or {}
-        parent_config = getattr(state, "parent_config", None) or {}
+            interrupt_types = _state_interrupt_types(state_interrupts)
         return ExecutionStateProjectionPayload(
-            checkpoint_id=state_config.get("configurable", {}).get("checkpoint_id"),
-            parent_checkpoint_id=parent_config.get("configurable", {}).get(
-                "checkpoint_id"
-            ),
-            snapshot_created_at=snapshot_created_at_value,
-            next_nodes=next_nodes,
+            checkpoint_id=_checkpoint_id(state.config),
+            parent_checkpoint_id=_checkpoint_id(state.parent_config),
+            snapshot_created_at=_snapshot_created_at_value(state.created_at),
+            next_nodes=[str(node) for node in state.next],
             interrupt_types=interrupt_types,
             interrupt_count=(
                 len(state_interrupts)
@@ -241,7 +341,9 @@ class StateProjector:
                 graph.aget_state(config),
                 timeout=domain_config.aget_state_timeout_seconds,
             )
-            payload = self.normalize_execution_state(cast("StateSnapshot", state))
+            if not _is_execution_state_snapshot(state):
+                raise TypeError("Graph returned an incomplete execution-state snapshot")
+            payload = self.normalize_execution_state(state)
         except TimeoutError:
             payload = ExecutionStateProjectionPayload(
                 degraded_reasons=["execution_state_projection_timeout"]

@@ -29,7 +29,10 @@ from enum import StrEnum
 __all__ = [
     "ProviderCondition",
     "acp_mapped_error_kinds",
+    "codex_mapped_error_infos",
     "condition_from_acp_error",
+    "condition_from_codex_error_info",
+    "condition_from_codex_turn_error",
 ]
 
 
@@ -228,3 +231,142 @@ def condition_from_acp_error(error: object) -> ProviderCondition:
     if isinstance(code, int) and not isinstance(code, bool):
         return _ACP_CODE_CONDITIONS.get(code, ProviderCondition.UNKNOWN)
     return ProviderCondition.UNKNOWN
+
+
+# --- Codex lane -------------------------------------------------------------
+#
+# The app-server's turn error carries a ``codexErrorInfo`` discriminator beside
+# its message. It takes two shapes: a bare string for the categorical failures,
+# and a single-key object for the ones that additionally forward an upstream
+# HTTP status. Both are handled, and the status is preferred where present
+# because it is the more specific statement about what the provider did.
+#
+# This lane separates an exhausted usage allowance from other refusals in its
+# own right, so the finer usage member is honest here in a way it is not on the
+# ACP lane. It also names a session budget and a connection failure, which are
+# the only routes to the budget and unreachable members anywhere in this tree.
+
+_CODEX_ERROR_INFO_CONDITIONS: Mapping[str, ProviderCondition] = {
+    "unauthorized": ProviderCondition.UNAUTHENTICATED,
+    # Named on the wire as an exhausted usage allowance, so the finer member is
+    # a report of what arrived rather than an inference.
+    "usageLimitExceeded": ProviderCondition.USAGE_EXHAUSTED,
+    # A ceiling the caller configured for the session, which is exactly what
+    # the budget member means and what separates it from the credits member.
+    "sessionBudgetExceeded": ProviderCondition.BUDGET_EXHAUSTED,
+    "serverOverloaded": ProviderCondition.PROVIDER_OVERLOADED,
+    "badRequest": ProviderCondition.INVALID_REQUEST,
+    # The prompt exceeded the model's context. Retrying it unchanged repeats
+    # the failure; the request has to get smaller.
+    "contextWindowExceeded": ProviderCondition.INVALID_REQUEST,
+    # A policy refusal: understood, and declined on the provider's own terms.
+    # No member describes a policy decision, and the invalid member is the one
+    # whose remedy - change the request - actually applies.
+    "cyberPolicy": ProviderCondition.INVALID_REQUEST,
+    # A server-side fault that does not claim overload, mapped to the floor for
+    # the same reason as the ACP lane's generic server fault.
+    "internalServerError": ProviderCondition.UNKNOWN,
+    # Local failures of the app-server's own machinery rather than statements
+    # about the provider, so neither has an honest member here.
+    "threadRollbackFailed": ProviderCondition.UNKNOWN,
+    "sandboxError": ProviderCondition.UNKNOWN,
+    "other": ProviderCondition.UNKNOWN,
+}
+
+_CODEX_OBJECT_INFO_CONDITIONS: Mapping[str, ProviderCondition] = {
+    # Each of these names a failure to reach or hold the provider connection,
+    # which is the one discriminator in this tree that supports the unreachable
+    # member. When one of them forwards an HTTP status the status wins, since a
+    # status means the provider answered.
+    "httpConnectionFailed": ProviderCondition.NETWORK_UNREACHABLE,
+    "responseStreamConnectionFailed": ProviderCondition.NETWORK_UNREACHABLE,
+    "responseStreamDisconnected": ProviderCondition.NETWORK_UNREACHABLE,
+    # Retries were exhausted. That says how the attempt ended, not why the
+    # provider refused, so without a forwarded status there is nothing to
+    # report beyond the floor.
+    "responseTooManyFailedAttempts": ProviderCondition.UNKNOWN,
+    # The turn could not accept this request in its current state - a rejection
+    # of what was asked, for reasons the caller can address.
+    "activeTurnNotSteerable": ProviderCondition.INVALID_REQUEST,
+}
+
+_CODEX_HTTP_STATUS_CONDITIONS: Mapping[int, ProviderCondition] = {
+    400: ProviderCondition.INVALID_REQUEST,
+    401: ProviderCondition.UNAUTHENTICATED,
+    # Payment required: the account cannot fund the request.
+    402: ProviderCondition.CREDITS_EXHAUSTED,
+    403: ProviderCondition.UNAUTHENTICATED,
+    404: ProviderCondition.INVALID_REQUEST,
+    413: ProviderCondition.INVALID_REQUEST,
+    422: ProviderCondition.INVALID_REQUEST,
+    # The one status that states a rate refusal outright. This is how the
+    # throttled member is reached on a lane whose categorical vocabulary has no
+    # rate member of its own.
+    429: ProviderCondition.THROTTLED,
+}
+# Server-side statuses are deliberately absent above. A 5xx says the provider
+# failed, not that it is over capacity, and this lane names overload explicitly
+# when it means it; inferring overload from a status would put a wait-and-retry
+# remedy in front of a client on evidence the wire never gave.
+
+
+def codex_mapped_error_infos() -> frozenset[str]:
+    """Return the Codex error-info variants this module resolves explicitly.
+
+    Covers both shapes the discriminator takes - the bare categorical strings
+    and the keys of the object variants - so coverage can assert that every
+    variant the INSTALLED app-server schema declares was decided here rather
+    than left to fall through to the floor.
+    """
+    return frozenset(_CODEX_ERROR_INFO_CONDITIONS) | frozenset(
+        _CODEX_OBJECT_INFO_CONDITIONS
+    )
+
+
+def _codex_http_status_condition(payload: object) -> ProviderCondition | None:
+    """Resolve an object variant's forwarded HTTP status, when it carries one."""
+    if not isinstance(payload, dict):
+        return None
+    status = payload.get("httpStatusCode")
+    if not isinstance(status, int) or isinstance(status, bool):
+        return None
+    return _CODEX_HTTP_STATUS_CONDITIONS.get(status)
+
+
+def condition_from_codex_error_info(info: object) -> ProviderCondition:
+    """Resolve one Codex ``codexErrorInfo`` value into a provider condition.
+
+    Total, on the same terms as the ACP resolver: a shape this function does not
+    recognise, a variant this vocabulary predates, and an absent discriminator
+    all yield the unknown member rather than raising.
+    """
+    if isinstance(info, str):
+        return _CODEX_ERROR_INFO_CONDITIONS.get(info, ProviderCondition.UNKNOWN)
+    if not isinstance(info, dict):
+        return ProviderCondition.UNKNOWN
+
+    # The variant is a single-key object, but the declared table is iterated
+    # rather than the payload so a malformed frame carrying several keys still
+    # resolves the same way every time.
+    named: dict[str, object] = {
+        key: value for key, value in info.items() if isinstance(key, str)
+    }
+    for variant, condition in _CODEX_OBJECT_INFO_CONDITIONS.items():
+        if variant not in named:
+            continue
+        from_status = _codex_http_status_condition(named[variant])
+        return from_status if from_status is not None else condition
+    return ProviderCondition.UNKNOWN
+
+
+def condition_from_codex_turn_error(error: object) -> ProviderCondition:
+    """Resolve one Codex turn error into a provider condition.
+
+    The turn error is the shape carried both by the app-server's error
+    notification and by a failed turn's own ``error`` field. Its message is
+    never consulted: the discriminator beside it is the whole point, and a
+    message that classified would break the moment the vendor reworded it.
+    """
+    if not isinstance(error, dict):
+        return ProviderCondition.UNKNOWN
+    return condition_from_codex_error_info(error.get("codexErrorInfo"))

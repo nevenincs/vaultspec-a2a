@@ -6,7 +6,7 @@ tags:
 date: '2026-08-02'
 modified: '2026-08-02'
 body_schema: 'body-v1'
-body_hash: 'sha256:fc394bf0f5a375d0ab5168efee620af3ed7768cffa39f37587c84280edb28ecc'
+body_hash: 'sha256:bc3bc4f2ff23bfaa234bab91c330871da2b38c31ac1917735f24333b55702429'
 related:
   - '[[2026-08-02-provider-error-taxonomy-W01-P01-S01]]'
   - '[[2026-08-02-provider-error-taxonomy-W01-P01-S02]]'
@@ -15,6 +15,7 @@ related:
   - '[[2026-08-02-provider-error-taxonomy-W01-P02-S05]]'
   - '[[2026-08-02-provider-error-taxonomy-W01-P02-S06]]'
   - '[[2026-08-02-provider-error-taxonomy-W01-P02-S07]]'
+  - '[[2026-08-02-provider-error-taxonomy-W01-P02-S08]]'
   - '[[2026-08-02-provider-error-taxonomy-adr]]'
   - '[[2026-08-02-provider-error-taxonomy-plan]]'
   - '[[2026-08-02-provider-error-taxonomy-research]]'
@@ -39,6 +40,7 @@ Auto-generated index of all documents tagged with `#provider-error-taxonomy`.
 - `2026-08-02-provider-error-taxonomy-W01-P02-S05` - Capture a live ZAI error payload and record the discriminator fidelity verdict
 - `2026-08-02-provider-error-taxonomy-W01-P02-S06` - Declare the closed provider condition vocabulary
 - `2026-08-02-provider-error-taxonomy-W01-P02-S07` - Map the ACP error kind and JSON-RPC code onto the vocabulary
+- `2026-08-02-provider-error-taxonomy-W01-P02-S08` - Map the Codex error info variants onto the vocabulary
 
 ### plan
 

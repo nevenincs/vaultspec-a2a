@@ -19,6 +19,7 @@ from typing import TYPE_CHECKING
 from pydantic import TypeAdapter, ValidationError
 
 from ..ipc.schemas import ExecutionStateProjectionPayload
+from ..providers import ProviderCondition
 from ..thread.enums import InvalidTransitionError, ThreadStatus
 from ..thread.permission_fsm import (
     compute_permission_request_effects,
@@ -103,6 +104,36 @@ def _object_mapping(value: object) -> dict[str, object] | None:
         return _JSON_OBJECT.validate_python(value)
     except ValidationError:
         return None
+
+
+def _durable_provider_condition(value: object, *, status: ThreadStatus) -> str | None:
+    """Resolve a relayed terminal's provider condition for the durable write.
+
+    Only a member of the closed vocabulary is admitted. The column is read by a
+    second repository that validates it against the same closed set, so relaying
+    an unrecognised string through would hand that consumer a value it must
+    reject - worse than the floor, which it can at least render.
+
+    A FAILED terminal always yields a condition, falling back to the floor when
+    the payload carried none or carried something unrecognised. That is the
+    invariant this campaign establishes: a null condition on a failed run is a
+    defect rather than a normal outcome, and enforcing it at the durable write
+    means it holds however the terminal reached here. Any other status yields
+    nothing at all, since the floor on a run that did not fail would read as a
+    provider failure nobody observed.
+    """
+    if status != ThreadStatus.FAILED:
+        return None
+    if isinstance(value, str):
+        try:
+            return ProviderCondition(value).value
+        except ValueError:
+            logger.warning(
+                "Discarding an unrecognised provider condition %r from a terminal"
+                " event; recording the floor instead",
+                value[:64],
+            )
+    return ProviderCondition.UNKNOWN.value
 
 
 def _schedule_terminal_settlement(
@@ -223,6 +254,15 @@ async def _handle_terminal_event(
         # other outcome (completed, cancelled) since failure_reason is falsy.
         error_detail = payload.get("error_detail")
         failure_reason = error_detail if isinstance(error_detail, str) else None
+        # The condition rides the same payload as the detail and is persisted
+        # beside it, because the reason answers what happened and the condition
+        # answers what the reader should do. A client that had to derive the
+        # second from the first would be back to matching vendor prose, which is
+        # the pattern this campaign exists to stop setting.
+        provider_condition = _durable_provider_condition(
+            payload.get("provider_condition"),
+            status=ThreadStatus(status_str),
+        )
 
         async with factory() as db:
             await update_thread_status(
@@ -230,6 +270,7 @@ async def _handle_terminal_event(
                 thread_id,
                 ThreadStatus(status_str),
                 failure_reason=failure_reason,
+                provider_condition=provider_condition,
             )
             await expire_pending_permission_requests(db, thread_id=thread_id)
             latest_cancel = await get_latest_control_action(

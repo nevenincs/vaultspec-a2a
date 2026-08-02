@@ -1069,3 +1069,141 @@ class TestTerminalEventFailureReasonPersistence:
             assert row is not None
             assert row.status == "failed"
             assert row.failure_reason is None
+
+
+class TestTerminalEventProviderConditionPersistence:
+    """The condition on a relayed terminal reaches the durable column.
+
+    The reason says what happened, the condition says what the reader should do
+    about it. A client left to derive the second from the first is back to
+    matching vendor prose, so both are persisted from the same terminal event.
+    """
+
+    @pytest.mark.asyncio(loop_scope="function")
+    async def test_a_relayed_condition_is_durably_recorded(
+        self,
+        session_factory,
+    ) -> None:
+        """The lane's own verdict survives the relay hop into the column."""
+        from ...control.event_handlers import _handle_terminal_event
+        from ...database.models import ThreadModel
+        from ...providers import ProviderCondition
+
+        async with session_factory() as session:
+            await create_thread(session, thread_id="t-failed-throttled")
+            await session.commit()
+
+        await _handle_terminal_event(
+            "t-failed-throttled",
+            {
+                "event_type": "thread_terminal",
+                "status": "failed",
+                "error_detail": "the provider refused for rate",
+                "provider_condition": ProviderCondition.THROTTLED.value,
+            },
+            session_factory=session_factory,
+        )
+
+        async with session_factory() as session:
+            row = await session.get(ThreadModel, "t-failed-throttled")
+            assert row is not None
+            assert row.status == "failed"
+            assert row.provider_condition == ProviderCondition.THROTTLED.value
+            assert row.failure_reason == "the provider refused for rate"
+
+    @pytest.mark.asyncio(loop_scope="function")
+    async def test_a_failed_terminal_with_no_condition_records_the_floor(
+        self,
+        session_factory,
+    ) -> None:
+        """A failed run never persists a null condition.
+
+        A run that fails without a classification is the blank terminal this
+        campaign removes; the floor says plainly that nothing classified it,
+        which a consumer can render and act on.
+        """
+        from ...control.event_handlers import _handle_terminal_event
+        from ...database.models import ThreadModel
+        from ...providers import ProviderCondition
+
+        async with session_factory() as session:
+            await create_thread(session, thread_id="t-failed-unclassified")
+            await session.commit()
+
+        await _handle_terminal_event(
+            "t-failed-unclassified",
+            {"event_type": "thread_terminal", "status": "failed"},
+            session_factory=session_factory,
+        )
+
+        async with session_factory() as session:
+            row = await session.get(ThreadModel, "t-failed-unclassified")
+            assert row is not None
+            assert row.provider_condition == ProviderCondition.UNKNOWN.value
+
+    @pytest.mark.asyncio(loop_scope="function")
+    async def test_an_unrecognised_condition_is_refused_for_the_floor(
+        self,
+        session_factory,
+    ) -> None:
+        """A value outside the closed vocabulary never reaches the column.
+
+        The column is read by a second repository that validates it against the
+        same closed set, so passing an unknown string through would hand that
+        consumer a value it must reject - strictly worse than the floor, which
+        it can at least render.
+        """
+        from ...control.event_handlers import _handle_terminal_event
+        from ...database.models import ThreadModel
+        from ...providers import ProviderCondition
+
+        async with session_factory() as session:
+            await create_thread(session, thread_id="t-failed-bogus-condition")
+            await session.commit()
+
+        await _handle_terminal_event(
+            "t-failed-bogus-condition",
+            {
+                "event_type": "thread_terminal",
+                "status": "failed",
+                "provider_condition": "teapot_overheated",
+            },
+            session_factory=session_factory,
+        )
+
+        async with session_factory() as session:
+            row = await session.get(ThreadModel, "t-failed-bogus-condition")
+            assert row is not None
+            assert row.provider_condition == ProviderCondition.UNKNOWN.value
+
+    @pytest.mark.asyncio(loop_scope="function")
+    async def test_a_completed_terminal_records_no_condition(
+        self,
+        session_factory,
+    ) -> None:
+        """A run that did not fail has no provider failure to classify."""
+        from ...control.event_handlers import _handle_terminal_event
+        from ...database import update_thread_status
+        from ...database.models import ThreadModel
+        from ...thread.enums import ThreadStatus
+
+        async with session_factory() as session:
+            thread = await create_thread(session, thread_id="t-completed-condition")
+            await update_thread_status(session, thread.id, ThreadStatus.RUNNING)
+            await session.commit()
+
+        await _handle_terminal_event(
+            "t-completed-condition",
+            {
+                "event_type": "thread_terminal",
+                "status": "completed",
+                "provider_condition": "throttled",
+            },
+            session_factory=session_factory,
+        )
+
+        async with session_factory() as session:
+            row = await session.get(ThreadModel, "t-completed-condition")
+            assert row is not None
+            assert row.status == "completed"
+            assert row.provider_condition is None

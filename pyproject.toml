@@ -368,6 +368,11 @@ reportIgnoreCommentWithoutRule = "error"
 # violation, and this is the non-underscore half of that boundary.
 reportPrivateLocalImportUsage = "error"
 
+executionEnvironments = [
+  { root = "src/vaultspec_a2a/providers/tests", reportPrivateUsage = false },
+  { root = "src/vaultspec_a2a/service_tests", reportPrivateUsage = false },
+]
+
 # ── Cognitive complexity ─────────────────────────────────────────────────────
 # The Sonar cognitive-complexity specification's own limit. This measures how
 # much state a reader must hold to follow a function, which is a different

@@ -1,0 +1,54 @@
+[team]
+id           = "deterministic-failure"
+display_name = "Deterministic Failure"
+description  = """
+Scripted failure scenario: this run always terminates FAILED, because its graph
+recursion budget is deliberately smaller than its two-stage pipeline needs. The
+first worker completes a real turn and streams real content, then the budget is
+exhausted and the graph raises, so a consumer sees genuine agent activity
+followed by a real terminal failure rather than a run that merely reports one.
+
+Runs on the in-process deterministic provider, so it needs no credential, no
+network, and no tape server, and it fails the same way on an unarmed host as on
+a fully provisioned one.
+
+The failure it produces is a GRAPH BUDGET failure and reports the recursion-limit
+error code. It is NOT a provider failure and produces no provider condition: no
+in-process lane can refuse work the way a real provider does, so a scenario
+claiming a provider condition here would be advertising what it cannot do. Use a
+served lane to exercise provider conditions.
+
+The small recursion limit below is the scenario, not a misconfiguration. Raising
+it turns this preset into a slower duplicate of the success presets.
+"""
+
+[team.defaults]
+provider   = "deterministic"
+capability = "mid"
+
+[team.topology]
+type  = "pipeline"
+order = ["vaultspec-researcher", "vaultspec-synthesist"]
+
+[team.permissions]
+auto_approve = true
+
+[team.persona]
+directive = """
+Scripted failure driver. The deterministic provider supplies each stage's turn
+from fixed role-keyed content; no instruction here changes the outcome, because
+the failure is structural - the pipeline needs more supersteps than the graph
+budget allows.
+"""
+
+[team.graph]
+step_timeout_seconds = 60
+recursion_limit      = 3
+
+[[team.workers]]
+agent_id = "vaultspec-researcher"
+model    = { provider = "deterministic" }
+
+[[team.workers]]
+agent_id = "vaultspec-synthesist"
+model    = { provider = "deterministic" }

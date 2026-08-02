@@ -509,6 +509,10 @@ class Executor:
         # reaching it leaves the entry for the next run reusing this thread id.
         # Whatever guarantees the drain has to sit outside this function.
         failure_reason = self._aggregator.take_failure_reason(req.thread_id)
+        # The condition ingest resolved from the failing lane. Both stashes are
+        # drained on every settle, not only on a failure, so a completed run
+        # cannot inherit a condition stranded by an earlier one on this key.
+        failure_condition = self._aggregator.take_failure_condition(req.thread_id)
         if failure_reason is None and fallback_reason is not None:
             # No stashed reason on a failure means ingest never classified it:
             # the exception escaped around its own reporting rather than through
@@ -517,14 +521,23 @@ class Executor:
             # terminal this campaign exists to remove. The condition is the
             # floor because nothing here observed a provider.
             failure_reason = fallback_reason
+            failure_condition = failure_condition or _EXECUTOR_CONDITION
             await self._aggregator.emit_error(
                 req.thread_id,
-                _EXECUTOR_CONDITION.value,
+                failure_condition.value,
                 fallback_reason,
                 recoverable=False,
             )
         await self._state_projector.emit_terminal_status(
-            req.thread_id, outcome, error_detail=failure_reason
+            req.thread_id,
+            outcome,
+            error_detail=failure_reason,
+            # Carrying the LANE's condition rather than the executor floor is the
+            # whole point: a rate limit, a revoked credential and an unclassified
+            # fault demand different actions, and the terminal is what the gateway
+            # persists. Left as None when ingest resolved nothing, so a completed
+            # or cancelled run is never stamped with a condition it never had.
+            provider_condition=failure_condition,
         )
         if outcome == ThreadStatus.COMPLETED:
             await self._close_authoring_session_best_effort(

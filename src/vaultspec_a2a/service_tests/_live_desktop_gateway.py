@@ -17,7 +17,7 @@ from ..tests.gateway_boot import (
 
 if TYPE_CHECKING:
     import subprocess
-    from collections.abc import Iterator
+    from collections.abc import Generator
     from pathlib import Path
 
 ATTACH_CREDENTIAL: Final = "attach-credential-cross-repo-1234567890abcdef"
@@ -29,7 +29,7 @@ _GATEWAY: Final = gateway_script(log_level="info")
 
 
 @contextlib.contextmanager
-def armed_gateway(tmp_path: Path, **extra_env: str) -> Iterator[tuple[str, str]]:
+def armed_gateway(tmp_path: Path, **extra_env: str) -> Generator[tuple[str, str]]:
     """Boot a migrated production desktop gateway and its real lazy worker."""
     app_home = tmp_path / "app-home"
     app_home.mkdir()

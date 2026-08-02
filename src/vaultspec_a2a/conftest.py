@@ -210,12 +210,12 @@ _SKIPPED_REASONS: dict[str, str] = {}
 
 # Resolved once at configure time; the rule is consulted from places that have
 # no access to the pytest config object.
-_DECLARED: frozenset[str] = frozenset()
+_declared: frozenset[str] = frozenset()
 
 
 def declared_prerequisites() -> frozenset[str]:
     """The prerequisite ids the caller of this session guarantees are present."""
-    return _DECLARED
+    return _declared
 
 
 class ExternalPrerequisiteRule:
@@ -299,9 +299,9 @@ def pytest_addoption(parser: pytest.Parser) -> None:
 
 def pytest_configure(config: pytest.Config) -> None:
     """Abort before collection when a declared prerequisite is not real."""
-    global _DECLARED
-    _DECLARED = frozenset(config.getoption("required_prerequisites") or [])
-    unknown = sorted(_DECLARED - _BY_ID.keys())
+    global _declared
+    _declared = frozenset(config.getoption("required_prerequisites") or [])
+    unknown = sorted(_declared - _BY_ID.keys())
     if unknown:
         raise pytest.UsageError(
             f"{DECLARE_OPTION} names unknown prerequisites: {', '.join(unknown)}. "
@@ -309,7 +309,7 @@ def pytest_configure(config: pytest.Config) -> None:
         )
     absent = sorted(
         pid
-        for pid in _DECLARED
+        for pid in _declared
         if (probe := _BY_ID[pid].probe) is not None and not probe()
     )
     if absent:

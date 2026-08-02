@@ -5,7 +5,7 @@ tags:
 date: '2026-08-02'
 modified: '2026-08-02'
 body_schema: 'body-v1'
-body_hash: 'sha256:8a96ea94a9b786161c3d0dd4be9a64983411caf9b9ff289ef4081490784b4c1c'
+body_hash: 'sha256:b58f8e5f1ab4d247c7ecd2bd21b6d381503be53318f800437c7040876e8f4f49'
 related:
   - "[[2026-07-19-repository-tooling-hardening-plan]]"
 ---
@@ -33,6 +33,10 @@ The reviewed provider-test partitions have no open static, formatting, forbidden
 
 `test_terminal_containment.py` still asserts the legacy terminal payload and lifetime: a top-level `exitCode`, scalar `exitStatus`, and a kill operation that removes the terminal identity. That contradicts the accepted ACP v1 wire decision, whose exit statuses are objects and whose killed terminal remains addressable until release. This is an S26 test-contract defect: it can reward obsolete behaviour and block the required production migration. `src/vaultspec_a2a/providers/tests/test_terminal_containment.py:225-245`; `2026-08-02-llm-context-provider-abstraction-acp-v1-client-wire-adr`.
 
+
+### dashboard-engine-lost-ack | low | open validation boundary
+
+The strict cleanup of the lost-ack relay, shared prerequisite registry, and live gateway helper has no review defect: scoped Basedpyright, Ty, Ruff, format, and prerequisite tests pass, and the relay forwards real traffic without manufacturing application responses. The actual dashboard-engine lost-ack proof remains unexecuted because `VAULTSPEC_ENGINE_SERVE_CMD` is absent; the named prerequisite intentionally skips by default and fails pre-collection when declared. Provision the engine command and rerun the named service probe before treating the cross-repository runtime contract as proven. `src/vaultspec_a2a/service_tests/test_engine_broker_lost_ack_live.py`.
 ## Recommendations
 
 - Provision a healthy loopback service-discovery record, then run the named engine-backed stdio service lane and append the outcome to this audit before declaring S26 fully runtime-proven.

@@ -29,9 +29,10 @@ import time
 from contextlib import contextmanager, suppress
 from http import HTTPStatus
 from importlib.resources import files
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, override
 
 import httpx
+from pydantic import TypeAdapter, ValidationError
 
 from ..desktop.profile import derive_state_paths
 from ..lifecycle.discovery import write_service_json
@@ -43,7 +44,7 @@ from ..tests.gateway_boot import free_port
 from ..utils.process import ProcessContainment
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
+    from collections.abc import Generator
     from pathlib import Path
 
     from ..conftest import ExternalPrerequisiteRule
@@ -51,6 +52,24 @@ if TYPE_CHECKING:
 _RUN_ID = "run-cross-repo-lost-ack"
 _ENGINE_COMMAND_ENV = "VAULTSPEC_ENGINE_SERVE_CMD"
 _MAX_RELAY_MESSAGE_BYTES = 4 * 1024 * 1024
+_JSON_OBJECT = TypeAdapter(dict[str, object])
+
+
+def _json_object(raw: str | bytes, *, source: str) -> dict[str, object]:
+    """Decode a relay payload as an object before inspecting its fields."""
+    try:
+        decoded: object = json.loads(raw)
+        return _JSON_OBJECT.validate_python(decoded)
+    except (json.JSONDecodeError, ValidationError) as exc:
+        raise ValueError(f"{source} is not a JSON object: {exc}") from exc
+
+
+def _optional_json_object(value: object) -> dict[str, object] | None:
+    """Return an object-shaped nested payload without accepting malformed data."""
+    try:
+        return _JSON_OBJECT.validate_python(value)
+    except ValidationError:
+        return None
 
 
 def _read_http_request(stream: socket.socket) -> bytes:
@@ -104,45 +123,58 @@ class _RelayServer(socketserver.ThreadingTCPServer):
 
 
 class _RelayHandler(socketserver.BaseRequestHandler):
-    server: _RelayServer
+    def _relay_server(self) -> _RelayServer:
+        """Narrow the base handler's server at the construction boundary."""
+        if not isinstance(self.server, _RelayServer):
+            raise TypeError("lost-ack relay handler requires a relay server")
+        return self.server
 
+    @override
     def handle(self) -> None:
+        relay = self._relay_server()
         try:
             request = _read_http_request(self.request)
             request_line = request.split(b"\r\n", 1)[0]
             is_run_start = request_line == b"POST /v1/runs HTTP/1.1"
             request_body = request.split(b"\r\n\r\n", 1)[1]
-            parsed_body = json.loads(request_body) if is_run_start else {}
-            stage = parsed_body.get("stage")
+            parsed_body = (
+                _json_object(request_body, source="run-start request")
+                if is_run_start
+                else {}
+            )
+            stage_value = parsed_body.get("stage")
+            stage = stage_value if isinstance(stage_value, str) else None
             drop = False
             if stage in {"prepare", "commit"}:
-                with self.server._lock:
+                with relay._lock:
                     if stage == "prepare":
-                        self.server.prepare_posts += 1
+                        relay.prepare_posts += 1
                     else:
-                        self.server.commit_posts += 1
-                        self.server.commit_digests.append(
+                        relay.commit_posts += 1
+                        relay.commit_digests.append(
                             hashlib.sha256(request_body).hexdigest()
                         )
-                        if self.server._actor_token is None:
-                            actor_tokens = parsed_body.get("actor_tokens")
+                        if relay._actor_token is None:
+                            actor_tokens = _optional_json_object(
+                                parsed_body.get("actor_tokens")
+                            )
                             tokens = (
-                                actor_tokens.get("tokens")
-                                if isinstance(actor_tokens, dict)
+                                _optional_json_object(actor_tokens.get("tokens"))
+                                if actor_tokens is not None
                                 else None
                             )
                             token = (
                                 tokens.get("vaultspec-coder")
-                                if isinstance(tokens, dict)
+                                if tokens is not None
                                 else None
                             )
                             if isinstance(token, str) and token:
-                                self.server._actor_token = token
-                        if self.server.dropped_commit_acknowledgements == 0:
-                            self.server.dropped_commit_acknowledgements = 1
+                                relay._actor_token = token
+                        if relay.dropped_commit_acknowledgements == 0:
+                            relay.dropped_commit_acknowledgements = 1
                             drop = True
             with socket.create_connection(
-                ("127.0.0.1", self.server.upstream_port), timeout=120
+                ("127.0.0.1", relay.upstream_port), timeout=120
             ) as upstream:
                 upstream.sendall(request)
                 if drop:
@@ -164,12 +196,12 @@ class _RelayHandler(socketserver.BaseRequestHandler):
             if not drop:
                 self.request.sendall(response)
         except Exception as exc:  # surfaced by the owning test after shutdown
-            with self.server._lock:
-                self.server.errors.append(repr(exc))
+            with relay._lock:
+                relay.errors.append(repr(exc))
 
 
 @contextmanager
-def _ack_dropping_relay(upstream_base: str) -> Iterator[_RelayServer]:
+def _ack_dropping_relay(upstream_base: str) -> Generator[_RelayServer]:
     upstream_port = int(upstream_base.rsplit(":", 1)[1])
     server = _RelayServer(upstream_port)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
@@ -274,7 +306,12 @@ def _wait_for_engine(
     while time.monotonic() < deadline:
         assert process.poll() is None, "dashboard engine exited during startup"
         try:
-            token = json.loads(discovery.read_text(encoding="utf-8"))["service_token"]
+            record = _json_object(
+                discovery.read_text(encoding="utf-8"), source="engine discovery record"
+            )
+            token = record.get("service_token")
+            if not isinstance(token, str):
+                raise KeyError("service_token")
             response = httpx.get(
                 f"{base_url}/status",
                 headers={"Authorization": f"Bearer {token}"},
@@ -388,7 +425,7 @@ def _await_exactly_one_worker_dispatch(app_home: Path) -> None:
                     for line in complete:
                         if not line.strip():
                             continue
-                        record = json.loads(line)
+                        record = _json_object(line, source="worker log record")
                         if (
                             record.get("thread_id") == _RUN_ID
                             and record.get("action") == "dispatch_accepted"

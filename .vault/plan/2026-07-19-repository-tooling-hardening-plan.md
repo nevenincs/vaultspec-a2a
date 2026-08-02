@@ -3,8 +3,8 @@ tags:
   - '#plan'
   - '#repository-tooling-hardening'
 date: '2026-07-19'
-modified: '2026-08-01'
-body_hash: 'sha256:94f0c894bcf6b8f4869c5ca6c9aac2e09e7494babb6811e200542fff56991da6'
+modified: '2026-08-02'
+body_hash: 'sha256:d42bb278a481881612db887388d5b4e5387371f70a6c337a2123584bc344e691'
 tier: L3
 related:
   - '[[2026-07-19-repository-tooling-hardening-adr]]'
@@ -134,7 +134,7 @@ Repair portable typing and shared test-helper contracts before fan-out consumers
 
 Repair production typing by bounded domain with no suppressions or compatibility shims.
 
-- [ ] `W06.P12.S24` - Repair strict types in the control and repository production domains.; `src/vaultspec_a2a/control, src/vaultspec_a2a/control/repositories`.
+- [x] `W06.P12.S24` - Repair strict types in the control and repository production domains.; `src/vaultspec_a2a/control, src/vaultspec_a2a/control/repositories, src/vaultspec_a2a/authoring/discovery.py, src/vaultspec_a2a/api/routes/gateway.py, src/vaultspec_a2a/desktop_tests/test_worker_health_decode_contract.py`.
 - [ ] `W06.P12.S25` - Repair strict types in the provider and ACP production domains.; `src/vaultspec_a2a/providers`.
 - [ ] `W06.P12.S26` - Repair strict types in the provider and service test domains after production contracts stabilize.; `src/vaultspec_a2a/providers/tests, src/vaultspec_a2a/service_tests`.
 - [ ] `W06.P12.S27` - Repair strict types in lifecycle test helpers and their production contracts.; `src/vaultspec_a2a/lifecycle, src/vaultspec_a2a/lifecycle/tests`.

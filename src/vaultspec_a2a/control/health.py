@@ -20,15 +20,19 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import math
 import time
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
+from pydantic import TypeAdapter, ValidationError
 from sqlalchemy import text
 
 from ..database.session import inspect_sqlite_database
 from .config import settings
+from .worker_management import LazyWorkerSpawner, WorkerState, probe_worker_health
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
     from pathlib import Path
 
     import httpx
@@ -36,7 +40,6 @@ if TYPE_CHECKING:
 
     from ..api.schemas.gateway import DesktopReadiness
     from .circuit_breaker import WorkerCircuitBreaker
-    from .worker_management import LazyWorkerSpawner, WorkerState
 
 __all__ = [
     "assemble_desktop_readiness",
@@ -47,6 +50,15 @@ __all__ = [
 ]
 
 logger = logging.getLogger(__name__)
+_OBJECT_MAPPING = TypeAdapter(dict[str, object])
+
+
+def _object_mapping(value: object) -> Mapping[str, object] | None:
+    """Narrow an unstructured app-state value to an object-keyed mapping."""
+    try:
+        return _OBJECT_MAPPING.validate_python(value)
+    except ValidationError:
+        return None
 
 
 def probe_engine_discovery_freshness() -> bool | None:
@@ -123,7 +135,7 @@ def build_sqlite_fallback_diagnostics(
     return diagnostics
 
 
-def _reported_str(body: dict[str, Any] | None, key: str) -> str | None:
+def _reported_str(body: Mapping[str, object] | None, key: str) -> str | None:
     """Return a string field a worker reported, or ``None`` when it reported none.
 
     ``None`` means "the worker did not answer, or carried no such field"; an empty
@@ -140,8 +152,8 @@ def _reported_str(body: dict[str, Any] | None, key: str) -> str | None:
 
 def assemble_health_status(
     *,
-    app_state: Any,
-) -> dict[str, Any]:
+    app_state: object,
+) -> dict[str, object]:
     """Assemble the shared health-status payload from app state.
 
     Reads circuit breaker, spawner, worker state, repair summary, and SQLite
@@ -159,27 +171,36 @@ def assemble_health_status(
     dict
         Shared health fields ready for inclusion in either endpoint's response.
     """
+    from .circuit_breaker import WorkerCircuitBreaker
+
     # --- Circuit breaker ---
-    cb: WorkerCircuitBreaker | None = getattr(app_state, "circuit_breaker", None)
+    cb_value: object = getattr(app_state, "circuit_breaker", None)
+    cb = cb_value if isinstance(cb_value, WorkerCircuitBreaker) else None
     cb_state = cb.state if cb is not None else "unknown"
 
     # --- Spawner ---
-    spawner: LazyWorkerSpawner | None = getattr(app_state, "worker_spawner", None)
+    spawner_value: object = getattr(app_state, "worker_spawner", None)
+    spawner = spawner_value if isinstance(spawner_value, LazyWorkerSpawner) else None
     worker_spawned = spawner.spawned if spawner is not None else False
     worker_pid = (
         spawner.process.pid if spawner is not None and spawner.process else None
     )
 
     # --- Worker heartbeat ---
-    last_hb = getattr(app_state, "worker_last_heartbeat_ts", None)
+    last_hb: object = getattr(app_state, "worker_last_heartbeat_ts", None)
     worker_connected = False
-    if last_hb is not None:
+    if (
+        not isinstance(last_hb, bool)
+        and isinstance(last_hb, (int, float))
+        and math.isfinite(last_hb)
+    ):
         worker_connected = (
             time.monotonic() - last_hb
         ) < settings.worker_heartbeat_timeout_seconds
 
     # --- Worker state ---
-    ws: WorkerState | None = getattr(app_state, "worker_state", None)
+    worker_state_value: object = getattr(app_state, "worker_state", None)
+    ws = worker_state_value if isinstance(worker_state_value, WorkerState) else None
     worker_status = ws.worker_status if ws is not None else "unknown"
     worker_restart_count = ws.worker_restart_count if ws is not None else 0
     worker_last_restart_reason = (
@@ -203,25 +224,26 @@ def assemble_health_status(
     worker_stderr_log_path = ws.worker_stderr_log_path if ws is not None else None
 
     # --- Repair summary ---
-    repair_summary: dict[str, int] = getattr(
-        app_state,
-        "repair_summary",
-        {
+    repair_summary_value: object = getattr(app_state, "repair_summary", None)
+    repair_summary = _object_mapping(repair_summary_value)
+    if repair_summary is None:
+        repair_summary = {
             "repair_backlog": 0,
             "paused_resumable": 0,
             "checkpoint_unavailable": 0,
-        },
-    )
+        }
 
     # --- SQLite fallback ---
-    sqlite_fallback_diagnostics = getattr(
+    sqlite_fallback_diagnostics: object = getattr(
         app_state, "sqlite_fallback_diagnostics", None
     )
 
     # A band gateway dispatching outside the worker-dev band with no band worker
     # present (the non-fatal half of the dispatch-pairing guard) surfaces here so an
     # operator sees the mis-target without reading logs.
-    dispatch_pairing_warning = getattr(app_state, "dispatch_pairing_warning", None)
+    dispatch_pairing_warning: object = getattr(
+        app_state, "dispatch_pairing_warning", None
+    )
 
     return {
         "circuit_breaker": cb_state,
@@ -280,7 +302,7 @@ def _eligible_provider_names() -> list[str]:
 
 def assemble_desktop_readiness(
     *,
-    app_state: Any,
+    app_state: object,
     database_ready: bool | None = None,
     worker_probe_ready: bool | None = None,
 ) -> DesktopReadiness:
@@ -399,11 +421,11 @@ async def build_full_health(
     *,
     db: AsyncSession,
     worker_client: httpx.AsyncClient,
-    circuit_breaker: Any,
-    worker_spawner: Any,
-    app_state: Any,
+    circuit_breaker: WorkerCircuitBreaker,
+    worker_spawner: LazyWorkerSpawner,
+    app_state: object,
     include_pairing: bool = False,
-) -> dict[str, Any]:
+) -> dict[str, object]:
     """Run all health probes and return the complete readiness payload.
 
     This is the service-layer orchestration ``/health`` serves unarmed.
@@ -478,12 +500,10 @@ async def build_full_health(
     # exact 200 for both this endpoint and the watchdog, so they cannot disagree.
     # The same round trip hands back what the worker REPORTED about its pairing, so
     # the readiness surface echoes that evidence without a second probe.
-    from .worker_management import _probe_worker_health
-
-    worker_healthy, worker_body = await _probe_worker_health(
+    worker_probe = await probe_worker_health(
         settings.worker_url, timeout=5.0, client=worker_client
     )
-    if worker_healthy:
+    if worker_probe.healthy:
         checks["worker"] = {"status": "ok"}
     else:
         logger.warning("Health check: worker probe failed")
@@ -493,14 +513,14 @@ async def build_full_health(
     # and which spawn attempt it was. Absent when the worker did not answer or did
     # not report them - a worker no gateway spawned reports them blank, which is
     # the honest answer and must not be dressed up as this gateway's own identity.
-    pairing: dict[str, Any] = {}
+    pairing: dict[str, object] = {}
     if include_pairing:
         pairing = {
             "worker_paired_gateway_lifetime": _reported_str(
-                worker_body, "paired_gateway_lifetime"
+                worker_probe.body, "paired_gateway_lifetime"
             ),
             "worker_reported_generation": _reported_str(
-                worker_body, "worker_generation"
+                worker_probe.body, "worker_generation"
             ),
         }
 

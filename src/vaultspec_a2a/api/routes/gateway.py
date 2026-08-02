@@ -35,7 +35,7 @@ from fastapi import (
     Response,
 )
 from fastapi.responses import JSONResponse, StreamingResponse
-from pydantic import ValidationError
+from pydantic import TypeAdapter, ValidationError
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -162,6 +162,36 @@ logger = logging.getLogger(__name__)
 _DEGRADED_CHECK_STATUSES: frozenset[str] = frozenset(
     {"error", "open", "down", "restarting", "half_open", "timeout"}
 )
+_JSON_OBJECT = TypeAdapter(dict[str, object])
+
+
+def _object_mapping(value: object) -> dict[str, object] | None:
+    """Narrow an unstructured value to an object-keyed mapping."""
+    try:
+        return _JSON_OBJECT.validate_python(value)
+    except ValidationError:
+        return None
+
+
+def _metadata_object(metadata_json: str | None) -> dict[str, object] | None:
+    """Decode durable metadata only when it is a JSON object."""
+    if not metadata_json:
+        return None
+    try:
+        decoded: object = json.loads(metadata_json)
+    except (json.JSONDecodeError, TypeError):
+        return None
+    return _object_mapping(decoded)
+
+
+def _string_field(record: dict[str, object], field: str) -> str | None:
+    value = record.get(field)
+    return value if isinstance(value, str) else None
+
+
+def _bool_field(record: dict[str, object], field: str) -> bool | None:
+    value = record.get(field)
+    return value if isinstance(value, bool) else None
 
 
 def admission_gate(app: FastAPI) -> DrainGate:
@@ -224,9 +254,11 @@ def _admission_readiness(
 async def _probe_admission_readiness(
     app_state: Any, worker_client: httpx.AsyncClient
 ) -> AdmissionReadiness:
-    from ...control.worker_management import _check_worker_health
+    from ...control.worker_management import probe_worker_health
 
-    reachable = await _check_worker_health(settings.worker_url, client=worker_client)
+    reachable = (
+        await probe_worker_health(settings.worker_url, client=worker_client)
+    ).healthy
     return _admission_readiness(app_state, worker_probe_ready=reachable)
 
 
@@ -674,11 +706,11 @@ async def _run_commit_locked(
     # after the runtime and provider are eligible). The worker reachability is
     # probed live so the verdict never lags behind the watchdog's status ladder; a
     # refusal releases the reservation so a failed commit leaks nothing.
-    from ...control.worker_management import _check_worker_health
+    from ...control.worker_management import probe_worker_health
 
-    worker_reachable = await _check_worker_health(
-        settings.worker_url, client=worker_client
-    )
+    worker_reachable = (
+        await probe_worker_health(settings.worker_url, client=worker_client)
+    ).healthy
     readiness = _admission_readiness(request.app.state)
     execution = evaluate_execution_eligibility(
         worker_reachable=worker_reachable,
@@ -691,8 +723,8 @@ async def _run_commit_locked(
         )
         raise HTTPException(status_code=503, detail=execution.reason)
 
-    presented_roles = (
-        set(body.actor_tokens.tokens) if body.actor_tokens is not None else set()
+    presented_roles: set[str] = (
+        set(body.actor_tokens.tokens.keys()) if body.actor_tokens is not None else set()
     )
     outcome = await broker.commit(
         reservation_id,
@@ -825,14 +857,7 @@ _REQUEST_DIGEST_METADATA_KEY = "run_request_digest"
 
 def _persist_request_digest(metadata_json: str | None, digest: str) -> str:
     """Embed the creating request's rule-stamped digest into run metadata."""
-    data: dict[str, Any] = {}
-    if metadata_json:
-        try:
-            loaded = json.loads(metadata_json)
-        except (json.JSONDecodeError, TypeError):
-            loaded = {}
-        if isinstance(loaded, dict):
-            data = loaded
+    data = _metadata_object(metadata_json) or {}
     data[_REQUEST_DIGEST_METADATA_KEY] = digest
     return json.dumps(data)
 
@@ -854,13 +879,8 @@ def _persisted_request_digest(metadata_json: str | None) -> str | None:
     none - and the later one that carries it would never match, and every such
     replay would be refused instead. Narrowing here is the deliberate trade.
     """
-    if not metadata_json:
-        return None
-    try:
-        data = json.loads(metadata_json)
-    except (json.JSONDecodeError, TypeError):
-        return None
-    digest = data.get(_REQUEST_DIGEST_METADATA_KEY) if isinstance(data, dict) else None
+    data = _metadata_object(metadata_json)
+    digest = data.get(_REQUEST_DIGEST_METADATA_KEY) if data is not None else None
     return digest if isinstance(digest, str) and digest else None
 
 
@@ -952,14 +972,7 @@ def _replay_identity_or_conflict(
 
 def _persist_lease(metadata_json: str | None, binding: _RunLeaseBinding) -> str:
     """Embed the non-secret lease and exact replay binding into run metadata."""
-    data: dict[str, Any] = {}
-    if metadata_json:
-        try:
-            loaded = json.loads(metadata_json)
-        except (json.JSONDecodeError, TypeError):
-            loaded = {}
-        if isinstance(loaded, dict):
-            data = loaded
+    data = _metadata_object(metadata_json) or {}
     data[_RUN_LEASE_METADATA_KEY] = {
         "lease_id": binding.lease_id,
         "reservation_id": binding.reservation_id,
@@ -973,14 +986,13 @@ def _persisted_lease_id(metadata_json: str | None) -> str | None:
     binding = _persisted_lease_binding(metadata_json)
     if binding is not None:
         return binding.lease_id
-    if not metadata_json:
-        return None
+    data = _metadata_object(metadata_json)
+    lease = data.get(_RUN_LEASE_METADATA_KEY) if data is not None else None
     try:
-        data = json.loads(metadata_json)
-    except (TypeError, json.JSONDecodeError):
+        lease_object = _JSON_OBJECT.validate_python(lease)
+    except ValidationError:
         return None
-    lease = data.get(_RUN_LEASE_METADATA_KEY) if isinstance(data, dict) else None
-    lease_id = lease.get("lease_id") if isinstance(lease, dict) else None
+    lease_id = lease_object.get("lease_id")
     if (
         not isinstance(lease_id, str)
         or not 1 <= len(lease_id) <= 128
@@ -996,23 +1008,23 @@ def _persisted_lease_id(metadata_json: str | None) -> str | None:
 
 def _persisted_lease_binding(metadata_json: str | None) -> _RunLeaseBinding | None:
     """Read the exact staged-commit replay binding from durable metadata."""
-    if not metadata_json:
+    data = _metadata_object(metadata_json)
+    if data is None:
         return None
     try:
-        data = json.loads(metadata_json)
-    except (TypeError, json.JSONDecodeError):
-        return None
-    if not isinstance(data, dict):
-        return None
-    lease = data.get(_RUN_LEASE_METADATA_KEY)
-    if not isinstance(lease, dict):
+        lease = _JSON_OBJECT.validate_python(data.get(_RUN_LEASE_METADATA_KEY))
+    except ValidationError:
         return None
     lease_id = lease.get("lease_id")
     reservation_id = lease.get("reservation_id")
     commit_digest = lease.get("commit_digest")
-    if not all(
-        isinstance(value, str) and value
-        for value in (lease_id, reservation_id, commit_digest)
+    if (
+        not isinstance(lease_id, str)
+        or not lease_id
+        or not isinstance(reservation_id, str)
+        or not reservation_id
+        or not isinstance(commit_digest, str)
+        or not commit_digest
     ):
         return None
     return _RunLeaseBinding(
@@ -1122,33 +1134,17 @@ def _resolve_and_freeze_profile_or_refuse(
 
 def _persist_frozen(metadata_json: str | None, frozen: Any) -> str:
     """Embed the frozen profile record into the thread metadata JSON for restart."""
-    import json
-
-    data: dict[str, Any] = {}
-    if metadata_json:
-        try:
-            loaded = json.loads(metadata_json)
-        except (json.JSONDecodeError, TypeError):
-            loaded = {}
-        if isinstance(loaded, dict):
-            data = loaded
+    data = _metadata_object(metadata_json) or {}
     data["model_profile"] = frozen.to_record()
     return json.dumps(data)
 
 
 def _read_persisted_frozen(metadata_json: str | None) -> Any:
     """Rebuild the persisted :class:`FrozenAssignment` from thread metadata, or None."""
-    import json
-
     from ...providers.model_profiles import frozen_from_record
 
-    if not metadata_json:
-        return None
-    try:
-        data = json.loads(metadata_json)
-    except (json.JSONDecodeError, TypeError):
-        return None
-    if not isinstance(data, dict):
+    data = _metadata_object(metadata_json)
+    if data is None:
         return None
     return frozen_from_record(data.get("model_profile"))
 
@@ -1909,13 +1905,8 @@ def _persisted_workspace_root(metadata_json: str | None) -> str | None:
     the value is recovered from the durable record rather than taken from the
     caller - an answer cannot relocate a run.
     """
-    if not metadata_json:
-        return None
-    try:
-        data = json.loads(metadata_json)
-    except (TypeError, json.JSONDecodeError):
-        return None
-    root = data.get("workspace_root") if isinstance(data, dict) else None
+    data = _metadata_object(metadata_json)
+    root = data.get("workspace_root") if data is not None else None
     return root if isinstance(root, str) and root else None
 
 
@@ -2264,10 +2255,13 @@ async def service_state_endpoint(
         # serves the same payload and must not carry it.
         include_pairing=True,
     )
-    checks: dict[str, Any] = full["checks"]
-    database_ready = checks.get("database", {}).get("status") == "ok"
-    checkpoint_ready = checks.get("checkpoint", {}).get("status") == "ok"
-    worker_ready = checks.get("worker", {}).get("status") == "ok"
+    checks = _object_mapping(full.get("checks")) or {}
+    database_check = _object_mapping(checks.get("database")) or {}
+    checkpoint_check = _object_mapping(checks.get("checkpoint")) or {}
+    worker_check = _object_mapping(checks.get("worker")) or {}
+    database_ready = _string_field(database_check, "status") == "ok"
+    checkpoint_ready = _string_field(checkpoint_check, "status") == "ok"
+    worker_ready = _string_field(worker_check, "status") == "ok"
     can_accept_run = full["status"] == "ok"
 
     if not database_ready:
@@ -2290,11 +2284,15 @@ async def service_state_endpoint(
     # Only genuine failure statuses degrade readiness; informational checks such
     # as worker_spawned ("yes"/"no") or worker_stderr_log ("configured") are not
     # degradation signals.
-    degraded_reasons = [
-        f"{name}: {check.get('detail', check.get('status'))}"
-        for name, check in checks.items()
-        if isinstance(check, dict) and check.get("status") in _DEGRADED_CHECK_STATUSES
-    ]
+    degraded_reasons: list[str] = []
+    for name, check_value in checks.items():
+        check = _object_mapping(check_value)
+        if check is None:
+            continue
+        status_value = _string_field(check, "status")
+        if status_value in _DEGRADED_CHECK_STATUSES:
+            detail = _string_field(check, "detail") or status_value
+            degraded_reasons.append(f"{name}: {detail}")
 
     return ServiceStateResponse(
         service_version=_service_version(),
@@ -2309,11 +2307,13 @@ async def service_state_endpoint(
         # means the worker belongs to another gateway; both blank mean it was
         # not gateway-spawned at all.
         gateway_lifetime_id=GATEWAY_LIFETIME_ID,
-        worker_paired_gateway_lifetime=full.get("worker_paired_gateway_lifetime"),
-        worker_generation=full.get("worker_reported_generation"),
-        worker_status=full.get("worker_status"),
-        worker_connected=full.get("worker_connected"),
-        circuit_breaker=full.get("circuit_breaker"),
+        worker_paired_gateway_lifetime=_string_field(
+            full, "worker_paired_gateway_lifetime"
+        ),
+        worker_generation=_string_field(full, "worker_reported_generation"),
+        worker_status=_string_field(full, "worker_status"),
+        worker_connected=_bool_field(full, "worker_connected"),
+        circuit_breaker=_string_field(full, "circuit_breaker"),
         database_backend=settings.resolved_database_backend,
         checkpoint_backend=settings.resolved_checkpoint_backend,
         database_ready=database_ready,

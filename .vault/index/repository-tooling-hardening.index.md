@@ -6,7 +6,7 @@ tags:
 date: '2026-08-02'
 modified: '2026-08-02'
 body_schema: 'body-v1'
-body_hash: 'sha256:f3994cb2cd81322dd3d1ac33171a9f3e6739f0cda65d9f3ba924335170de11f5'
+body_hash: 'sha256:303d2d5ce382cf369d1f899a616838141dba186d326e9d0778d8735db595076d'
 related:
   - '[[2026-07-19-repository-tooling-hardening-W01-P01-S01]]'
   - '[[2026-07-19-repository-tooling-hardening-W01-P01-summary]]'
@@ -39,6 +39,7 @@ related:
   - '[[2026-07-19-repository-tooling-hardening-W06-P11-S21]]'
   - '[[2026-07-19-repository-tooling-hardening-W06-P11-S22]]'
   - '[[2026-07-19-repository-tooling-hardening-W06-P11-S23]]'
+  - '[[2026-07-19-repository-tooling-hardening-W06-P12-S24]]'
   - '[[2026-07-19-repository-tooling-hardening-adr]]'
   - '[[2026-07-19-repository-tooling-hardening-audit]]'
   - '[[2026-07-19-repository-tooling-hardening-plan]]'
@@ -65,6 +66,7 @@ related:
   - '[[2026-08-02-repository-tooling-hardening-strict-s24-projection-audit]]'
   - '[[2026-08-02-repository-tooling-hardening-strict-s24-thread-state-audit]]'
   - '[[2026-08-02-repository-tooling-hardening-strict-s24-verdict-subscriber-audit]]'
+  - '[[2026-08-02-repository-tooling-hardening-strict-s24-worker-health-audit]]'
 ---
 
 # `repository-tooling-hardening` feature index
@@ -98,6 +100,7 @@ Auto-generated index of all documents tagged with `#repository-tooling-hardening
 - `2026-08-02-repository-tooling-hardening-strict-s24-projection-audit` - `repository-tooling-hardening` audit: `Control projection type-boundary review`
 - `2026-08-02-repository-tooling-hardening-strict-s24-thread-state-audit` - `repository-tooling-hardening` audit: `Control thread-state checkpoint boundary review`
 - `2026-08-02-repository-tooling-hardening-strict-s24-verdict-subscriber-audit` - `repository-tooling-hardening` audit: `Verdict subscriber type-boundary review`
+- `2026-08-02-repository-tooling-hardening-strict-s24-worker-health-audit` - `repository-tooling-hardening` audit: `Worker health public-contract review`
 
 ### exec
 
@@ -132,6 +135,7 @@ Auto-generated index of all documents tagged with `#repository-tooling-hardening
 - `2026-07-19-repository-tooling-hardening-W06-P11-S21` - Establish typed API test-fixture contracts before repairing dependent API tests.
 - `2026-07-19-repository-tooling-hardening-W06-P11-S22` - Repair the API endpoint test partition against the typed fixture contract.
 - `2026-07-19-repository-tooling-hardening-W06-P11-S23` - Repair the API live-gateway and clarification test partitions without overlapping peer work.
+- `2026-07-19-repository-tooling-hardening-W06-P12-S24` - Repair strict types in the control and repository production domains.
 
 ### plan
 

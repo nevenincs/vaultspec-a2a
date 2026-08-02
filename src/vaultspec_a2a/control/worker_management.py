@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+import math
 import os
 import re
 import subprocess
@@ -18,13 +19,17 @@ import time
 import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
+
+from pydantic import TypeAdapter, ValidationError
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Mapping, Sequence
     from pathlib import Path
 
     import httpx
+
+    from .circuit_breaker import WorkerCircuitBreaker
 
 from ..artifacts import ArtifactDeclaration, RetentionDisposition
 from ..lifecycle.pairing import (
@@ -39,14 +44,17 @@ from .config import GATEWAY_URL_ENV, INTERNAL_TOKEN_ENV, settings
 
 __all__ = [
     "LazyWorkerSpawner",
+    "WorkerHealthProbe",
     "WorkerState",
     "WorkerWatchdog",
+    "probe_worker_health",
     "sweep_orphan_worker_logs",
 ]
 
 logger = logging.getLogger(__name__)
 
 _WORKER_STDERR_TAIL_BYTES = 4096
+_JSON_OBJECT = TypeAdapter(dict[str, object])
 
 
 # ---------------------------------------------------------------------------
@@ -75,6 +83,20 @@ class WorkerState:
     worker_last_restart_succeeded: bool | None = None
     worker_last_restart_attempts: int = 0
     worker_stderr_log_path: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class WorkerHealthProbe:
+    """One authenticated worker health observation.
+
+    ``healthy`` is determined solely by an exact HTTP 200.  ``body`` is an
+    optional decoded object: it carries pairing evidence when readable, while
+    ``None`` deliberately distinguishes unreadable evidence from a healthy
+    occupant's absence only through ``healthy``.
+    """
+
+    healthy: bool
+    body: Mapping[str, object] | None
 
 
 # ---------------------------------------------------------------------------
@@ -153,7 +175,7 @@ def sweep_orphan_worker_logs(
     from ..lifecycle.registry import StalenessState, classify_record, list_records
 
     try:
-        live_ports = {
+        live_ports: set[int] = {
             record.port
             for record in list_records(registry_home)
             if classify_record(record, None) is StalenessState.LIVE
@@ -261,13 +283,13 @@ def _internal_auth_headers() -> dict[str, str] | None:
     return {"Authorization": f"Bearer {settings.internal_token}"}
 
 
-async def _probe_worker_health(
+async def probe_worker_health(
     url: str,
     timeout: float = 2.0,
     *,
     client: httpx.AsyncClient | None = None,
-) -> tuple[bool, dict[str, Any] | None]:
-    """Probe the worker's ``GET /health`` once, returning ``(healthy, body)``.
+) -> WorkerHealthProbe:
+    """Probe the worker's ``GET /health`` once.
 
     The single worker-health primitive for every caller - the boot/spawn paths,
     the watchdog's authoritative crash check, and ``/health``. Request-path
@@ -285,18 +307,19 @@ async def _probe_worker_health(
     """
     import httpx
 
-    async def _probe(
-        active: httpx.AsyncClient,
-    ) -> tuple[bool, dict[str, Any] | None]:
+    async def _probe(active: httpx.AsyncClient) -> WorkerHealthProbe:
         resp = await active.get(f"{url}/health", timeout=timeout)
-        healthy = resp.status_code == 200
-        if not healthy:
-            return False, None
+        if resp.status_code != 200:
+            return WorkerHealthProbe(healthy=False, body=None)
         try:
-            body = resp.json()
+            decoded: object = resp.json()
         except ValueError:
-            return True, None
-        return True, body if isinstance(body, dict) else None
+            return WorkerHealthProbe(healthy=True, body=None)
+        try:
+            body = _JSON_OBJECT.validate_python(decoded)
+        except ValidationError:
+            return WorkerHealthProbe(healthy=True, body=None)
+        return WorkerHealthProbe(healthy=True, body=body)
 
     try:
         if client is not None:
@@ -304,53 +327,7 @@ async def _probe_worker_health(
         async with httpx.AsyncClient(headers=_internal_auth_headers()) as owned:
             return await _probe(owned)
     except Exception:
-        return False, None
-
-
-async def _check_worker_health(
-    url: str,
-    timeout: float = 2.0,
-    *,
-    client: httpx.AsyncClient | None = None,
-) -> bool:
-    """Probe the worker's ``GET /health``; ``True`` only on an exact ``200``.
-
-    The boolean face of :func:`_probe_worker_health` for the callers that need
-    only the verdict. It delegates rather than restating the rule so the two can
-    never drift apart.
-    """
-    healthy, _body = await _probe_worker_health(url, timeout, client=client)
-    return healthy
-
-
-async def _fetch_worker_health(
-    url: str,
-    timeout: float = 2.0,
-) -> dict[str, Any] | None:
-    """Return a healthy worker's ``GET /health`` body, or ``None`` if none answered.
-
-    The body-returning face of :func:`_probe_worker_health`, delegating rather
-    than issuing its own request so the health verdict cannot diverge between
-    the two. Unlike :func:`_check_worker_health` this hands back what the worker
-    reported, so the spawn path can rule on whether the live worker belongs to
-    *this* gateway or is an orphan squatting the port.
-
-    ``None`` means ONLY that no healthy worker answered - unreachable, or any
-    status other than ``200``. It deliberately does NOT mean "answered
-    unreadably": a live worker whose body will not decode yields an EMPTY dict,
-    because those two are opposite instructions to every caller. Collapsing them
-    (the earlier behaviour, where ``resp.json()`` sat inside the request's own
-    ``except``) made a live worker with a malformed body indistinguishable from
-    an absent one, so the spawn path would spawn a competitor onto a port that
-    worker still holds - while the watchdog, reading the same worker through the
-    same primitive, saw it up. An empty body instead carries no pairing evidence,
-    which the classifier already fails closed on as ``UNIDENTIFIED``, and which
-    the legacy declared-target rule already treats as an occupant to leave alone.
-    """
-    healthy, body = await _probe_worker_health(url, timeout)
-    if not healthy:
-        return None
-    return body if body is not None else {}
+        return WorkerHealthProbe(healthy=False, body=None)
 
 
 def _same_gateway(worker_target: object, our_gateway: str) -> bool:
@@ -367,7 +344,7 @@ def _same_gateway(worker_target: object, our_gateway: str) -> bool:
 
 
 def _classify_worker_body(
-    body: dict[str, Any], *, current_generation: int
+    body: Mapping[str, object], *, current_generation: int
 ) -> WorkerPairingVerdict:
     """Classify a fetched worker health body against this gateway's identity.
 
@@ -414,8 +391,9 @@ async def _worker_ready_and_ours(
     evidence rather than a legacy worker's silence, so it is refused before the
     lenient rule can adopt it.
     """
-    body = await _fetch_worker_health(worker_url)
-    if not body:
+    probe = await probe_worker_health(worker_url)
+    body = probe.body
+    if not probe.healthy or body is None:
         return False
     if settings.desktop_profile_armed:
         verdict = _classify_worker_body(body, current_generation=current_generation)
@@ -527,9 +505,11 @@ async def _spawn_worker(
     # spawn loudly with no eviction - it may be serving someone else's runs,
     # and silence is not evidence of ownership.
     if settings.desktop_profile_armed:
-        occupant = await _fetch_worker_health(worker_url)
-        if occupant is not None:
-            verdict = _classify_worker_body(occupant, current_generation=generation)
+        occupant = await probe_worker_health(worker_url)
+        if occupant.healthy:
+            verdict = _classify_worker_body(
+                occupant.body or {}, current_generation=generation
+            )
             if verdict is WorkerPairingVerdict.OWNED:
                 logger.info(
                     "Worker already running at %s with an owned pairing "
@@ -568,9 +548,19 @@ async def _spawn_worker(
     # already-running same-gateway worker (adopt) or a stale foreign orphan
     # (evict) before spawning, using the legacy declared-gateway_url signal.
     if not settings.desktop_profile_armed:
-        existing = await _fetch_worker_health(worker_url)
-        if existing is not None:
-            if _same_gateway(existing.get("gateway_url"), settings.gateway_url):
+        existing = await probe_worker_health(worker_url)
+        if existing.healthy:
+            if existing.body is None:
+                logger.error(
+                    "Worker port %d is held by a healthy worker with unreadable "
+                    "pairing evidence — refusing to spawn or adopt",
+                    worker_port,
+                )
+                return None
+            if _same_gateway(
+                existing.body.get("gateway_url"),
+                settings.gateway_url,
+            ):
                 logger.info(
                     "Worker already running at %s targeting this gateway (%s)"
                     " — skipping auto-spawn",
@@ -586,7 +576,7 @@ async def _spawn_worker(
                 "Worker at %s targets a foreign gateway (%s != %s) — evicting the"
                 " stale orphan before spawning a fresh worker",
                 worker_url,
-                existing.get("gateway_url"),
+                existing.body.get("gateway_url"),
                 settings.gateway_url,
             )
             if not await _evict_stale_worker(worker_url, worker_port):
@@ -1150,9 +1140,9 @@ class WorkerWatchdog:
     def __init__(
         self,
         spawner: LazyWorkerSpawner,
-        circuit_breaker: Any,
+        circuit_breaker: WorkerCircuitBreaker,
         worker_state: WorkerState,
-        app_state: Any,
+        app_state: object,
     ) -> None:
         """Initialise watchdog with references to spawner, breaker, and worker state."""
         self._spawner = spawner
@@ -1200,7 +1190,11 @@ class WorkerWatchdog:
     def _heartbeat_stale(self) -> bool:
         """Check if the last heartbeat is older than the timeout threshold."""
         last_hb = getattr(self._app_state, "worker_last_heartbeat_ts", None)
-        if last_hb is None:
+        if (
+            isinstance(last_hb, bool)
+            or not isinstance(last_hb, (int, float))
+            or not math.isfinite(last_hb)
+        ):
             return False  # No heartbeat yet — not stale, just not started
         return (time.monotonic() - last_hb) > settings.worker_heartbeat_timeout_seconds
 
@@ -1211,7 +1205,7 @@ class WorkerWatchdog:
 
     async def _probe_worker_ready(self) -> bool:
         """Probe the worker HTTP health endpoint for status promotion checks."""
-        return await _check_worker_health(self._spawner.worker_url)
+        return (await probe_worker_health(self._spawner.worker_url)).healthy
 
     @staticmethod
     def _needs_recovery(*, crashed: bool, stale: bool, http_ready: bool) -> bool:
@@ -1346,7 +1340,7 @@ class WorkerWatchdog:
         reason = "process_exited" if crashed else "heartbeat_stale"
         proc = self._spawner.process
         detail = None
-        if crashed and proc is not None:
+        if crashed:
             detail = _build_worker_restart_detail(
                 returncode=proc.returncode,
                 stderr_log_path=self._spawner.stderr_log_path,

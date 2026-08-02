@@ -1,57 +1,45 @@
-"""Spawn-path provenance: a live worker on the port must be judged by which
-gateway it targets, not by liveness alone.
+"""Public spawn-path proof for worker provenance and held-port safety.
 
-Real loopback HTTP servers, no mocks. Pins the fix for the adoption defect where
-a resident gateway blindly adopted any healthy worker squatting the worker port -
-including a stale orphan still heartbeating a dead dev-band gateway - and never
-re-pointed or reaped it. ``/health`` now reports the worker's heartbeat target so
-the spawn path can tell a same-gateway worker (adopt) from a foreign orphan
-(evict + respawn).
+Real loopback HTTP servers, no mocks. A worker's health response is useful only
+when its declaration proves that it belongs to this gateway. These tests drive
+the public health probe and lazy spawner, rather than reaching into their
+classification and eviction helpers.
 """
 
 from __future__ import annotations
 
 import http.server
 import json
+import os
+import subprocess
+import sys
+import textwrap
 import threading
 from contextlib import contextmanager
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, TypedDict, override
 
 import pytest
 
-from ...control.config import settings
+from ...control.config import INTERNAL_TOKEN_ENV, settings
 from ...control.worker_management import (
     LazyWorkerSpawner,
-    _evict_stale_worker,
-    _fetch_worker_health,
-    _same_gateway,
-    _worker_ready_and_ours,
+    WorkerHealthProbe,
+    probe_worker_health,
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
+    from collections.abc import Generator
+    from pathlib import Path
 
 
-@contextmanager
-def _internal_token(value: str | None) -> Iterator[None]:
-    """Set ``settings.internal_token`` for the evictor's token-presenting path.
-
-    Mirrors the sanctioned ``_SettingsOverride`` seam used across the worker
-    suite - a real attribute swap on the live settings object, restored on exit,
-    not a mock.
-    """
-    original = settings.internal_token
-    settings.internal_token = value
-    try:
-        yield
-    finally:
-        settings.internal_token = original
+class _ShutdownObservation(TypedDict):
+    called: bool
+    authorization: str | None
 
 
 def _make_handler(
     body: dict[str, object] | None,
-    shutdown_flag: dict[str, bool],
-    expected_token: str | None,
+    shutdown_log: _ShutdownObservation,
 ) -> type[http.server.BaseHTTPRequestHandler]:
     class _Handler(http.server.BaseHTTPRequestHandler):
         def do_GET(self) -> None:
@@ -73,18 +61,13 @@ def _make_handler(
                 self.send_header("Content-Length", "0")
                 self.end_headers()
                 return
-            if expected_token is not None:
-                got = self.headers.get("Authorization")
-                if got != f"Bearer {expected_token}":
-                    self.send_response(401)
-                    self.send_header("Content-Length", "0")
-                    self.end_headers()
-                    return
-            shutdown_flag["called"] = True
+            shutdown_log["called"] = True
+            shutdown_log["authorization"] = self.headers.get("Authorization")
             self.send_response(202)
             self.send_header("Content-Length", "0")
             self.end_headers()
 
+        @override
         def log_message(self, format: str, *args: object) -> None:
             """Silence the default access log."""
 
@@ -94,166 +77,206 @@ def _make_handler(
 @contextmanager
 def _worker_like(
     body: dict[str, object] | None,
-    *,
-    expected_token: str | None = None,
-) -> Iterator[tuple[str, int, dict[str, bool]]]:
-    shutdown_flag: dict[str, bool] = {"called": False}
+) -> Generator[tuple[str, int, _ShutdownObservation]]:
+    shutdown_log: _ShutdownObservation = {"called": False, "authorization": None}
     server = http.server.ThreadingHTTPServer(
-        ("127.0.0.1", 0), _make_handler(body, shutdown_flag, expected_token)
+        ("127.0.0.1", 0), _make_handler(body, shutdown_log)
     )
     port = server.server_address[1]
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     try:
-        yield f"http://127.0.0.1:{port}", port, shutdown_flag
+        yield f"http://127.0.0.1:{port}", port, shutdown_log
     finally:
         server.shutdown()
         server.server_close()
 
 
-def test_same_gateway_matches_normalized_and_treats_missing_as_match() -> None:
-    ours = "http://127.0.0.1:8000"
-    assert _same_gateway("http://127.0.0.1:8000/", ours) is True
-    assert _same_gateway("http://127.0.0.1:8000", ours) is True
-    # A worker whose /health predates the gateway_url field must not be evicted.
-    assert _same_gateway(None, ours) is True
-    assert _same_gateway("", ours) is True
-    # A foreign / dead-gateway target is the orphan signature.
-    assert _same_gateway("http://127.0.0.1:50553", ours) is False
-
-
 @pytest.mark.asyncio
-async def test_fetch_worker_health_returns_body_with_gateway_target() -> None:
+async def test_probe_worker_health_returns_body_with_gateway_target() -> None:
     body: dict[str, object] = {
         "status": "ok",
         "service": "worker",
         "gateway_url": "http://127.0.0.1:8000",
     }
-    with _worker_like(body) as (url, _port, _flag):
-        got = await _fetch_worker_health(url)
-    assert got is not None
-    assert got["gateway_url"] == "http://127.0.0.1:8000"
+    with _worker_like(body) as (url, _port, _log):
+        probe = await probe_worker_health(url)
+    assert probe == WorkerHealthProbe(healthy=True, body=body)
 
 
 @pytest.mark.asyncio
-async def test_fetch_worker_health_none_when_unreachable() -> None:
-    assert await _fetch_worker_health("http://127.0.0.1:9") is None
+async def test_probe_worker_health_reports_unreachable_as_unhealthy_without_body() -> (
+    None
+):
+    assert await probe_worker_health("http://127.0.0.1:9") == WorkerHealthProbe(
+        healthy=False,
+        body=None,
+    )
 
 
 @pytest.mark.asyncio
-async def test_evict_stale_worker_posts_shutdown_and_waits_for_port_free() -> None:
-    body: dict[str, object] = {
-        "status": "ok",
-        "service": "worker",
-        "gateway_url": "http://127.0.0.1:1",
-    }
-    with _worker_like(body) as (url, port, flag):
-        # Server is still listening, so eviction cannot confirm the port freed.
-        freed = await _evict_stale_worker(url, port, timeout=1.0)
-        assert flag["called"] is True
-        assert freed is False
-    # Once the server is torn down the port is free; a fresh call confirms release.
-    assert await _evict_stale_worker(url, port, timeout=1.0) is True
-
-
-@pytest.mark.asyncio
-async def test_evict_presents_internal_token_and_is_accepted() -> None:
-    """The evictor must present the internal bearer so an authenticated worker
-    accepts the shutdown (the eviction path is now behind auth)."""
-    body: dict[str, object] = {"status": "ok", "gateway_url": "http://127.0.0.1:1"}
-    with (
-        _internal_token("evict-secret"),
-        _worker_like(body, expected_token="evict-secret") as (url, port, flag),
-    ):
-        await _evict_stale_worker(url, port, timeout=1.0)
-        assert flag["called"] is True
-
-
-@pytest.mark.asyncio
-async def test_tokenless_shutdown_is_rejected_by_authenticated_worker() -> None:
-    """A worker that requires the bearer must reject an evictor with no token,
-    leaving the process alive (no shutdown recorded)."""
-    body: dict[str, object] = {"status": "ok", "gateway_url": "http://127.0.0.1:1"}
-    with (
-        _internal_token(None),
-        _worker_like(body, expected_token="evict-secret") as (url, port, flag),
-    ):
-        await _evict_stale_worker(url, port, timeout=1.0)
-        assert flag["called"] is False
-
-
-@pytest.mark.asyncio
-async def test_worker_ready_and_ours_accepts_a_same_gateway_worker() -> None:
-    """A healthy worker declaring THIS gateway is ready and ours."""
+async def test_ensure_worker_attaches_to_a_same_gateway_worker() -> None:
+    """The public non-spawning path adopts the correctly targeted incumbent."""
     body: dict[str, object] = {
         "status": "ok",
         "service": "worker",
         "gateway_url": settings.gateway_url,
     }
-    with _worker_like(body) as (url, _port, _flag):
-        assert await _worker_ready_and_ours(url) is True
+    with _worker_like(body) as (url, port, _log):
+        spawner = LazyWorkerSpawner(worker_url=url, worker_port=port, auto_spawn=False)
+        await spawner.ensure_worker()
+    assert spawner.spawned is True
+    assert spawner.process is None
 
 
 @pytest.mark.asyncio
-async def test_worker_ready_and_ours_rejects_a_foreign_gateway_worker() -> None:
-    """The adoption guard: a healthy worker heartbeating a DIFFERENT gateway is not
-    ours, even though it answers /health on the port. This is the readiness signal
-    every adoption path now routes through, so a foreign orphan cannot be adopted.
-    """
-    foreign = "http://127.0.0.1:59999"
-    assert foreign.rstrip("/") != settings.gateway_url.rstrip("/")
+async def test_ensure_worker_adopts_legacy_missing_or_blank_target() -> None:
+    """The public attach path keeps both legacy target forms adoptable."""
+    legacy_without_target: dict[str, object] = {"status": "ok", "service": "worker"}
+    legacy_with_blank_target: dict[str, object] = {
+        "status": "ok",
+        "service": "worker",
+        "gateway_url": "",
+    }
+    for body in (legacy_without_target, legacy_with_blank_target):
+        with _worker_like(body) as (url, port, _log):
+            spawner = LazyWorkerSpawner(
+                worker_url=url,
+                worker_port=port,
+                auto_spawn=False,
+            )
+            await spawner.ensure_worker()
+        assert spawner.spawned is True
+        assert spawner.process is None
+
+
+@pytest.mark.asyncio
+async def test_ensure_worker_refuses_a_foreign_worker_without_auto_spawn() -> None:
+    """A public attach request never adopts a live foreign incumbent."""
     body: dict[str, object] = {
         "status": "ok",
         "service": "worker",
-        "gateway_url": foreign,
+        "gateway_url": "http://127.0.0.1:59999",
     }
-    with _worker_like(body) as (url, _port, _flag):
-        assert await _worker_ready_and_ours(url) is False
+    with _worker_like(body) as (url, port, _log):
+        spawner = LazyWorkerSpawner(worker_url=url, worker_port=port, auto_spawn=False)
+        await spawner.ensure_worker()
+    assert spawner.spawned is False
+    assert spawner.process is None
 
 
 @pytest.mark.asyncio
-async def test_worker_ready_and_ours_accepts_a_legacy_worker_without_a_target() -> None:
-    """A worker whose /health predates the gateway_url field is treated as ours, so
-    the provenance gate never disowns a correctly-wired legacy worker."""
-    body: dict[str, object] = {"status": "ok", "service": "worker"}
-    with _worker_like(body) as (url, _port, _flag):
-        assert await _worker_ready_and_ours(url) is True
+async def test_ensure_worker_refuses_an_unreachable_worker_without_auto_spawn() -> None:
+    spawner = LazyWorkerSpawner(
+        worker_url="http://127.0.0.1:9",
+        worker_port=9,
+        auto_spawn=False,
+    )
+    await spawner.ensure_worker()
+    assert spawner.spawned is False
+    assert spawner.process is None
 
 
 @pytest.mark.asyncio
-async def test_worker_ready_and_ours_false_when_no_worker_answers() -> None:
-    assert await _worker_ready_and_ours("http://127.0.0.1:9") is False
+async def test_auto_spawn_refuses_retained_foreign_worker() -> None:
+    """A failed foreign-worker eviction stays unpaired instead of competing.
 
-
-@pytest.mark.asyncio
-async def test_ensure_worker_does_not_adopt_a_foreign_worker() -> None:
-    """A non-auto-spawn gateway must not mark itself paired to a foreign worker.
-
-    Before the fix ensure_worker's fallback was a bare /health check, so a healthy
-    orphan targeting another gateway squatting the port was adopted and this gateway
-    dispatched to a worker emitting events elsewhere. The provenance-aware fallback
-    leaves the gateway unpaired instead.
+    The loopback worker accepts the gateway's normal authenticated shutdown
+    request but deliberately retains the port, reproducing the no-competitor
+    boundary through the public auto-spawn request.
     """
     body: dict[str, object] = {
         "status": "ok",
         "service": "worker",
         "gateway_url": "http://127.0.0.1:59999",
     }
-    with _worker_like(body) as (url, port, _flag):
-        spawner = LazyWorkerSpawner(worker_url=url, worker_port=port, auto_spawn=False)
+    with _worker_like(body) as (url, port, log):
+        spawner = LazyWorkerSpawner(worker_url=url, worker_port=port, auto_spawn=True)
         await spawner.ensure_worker()
-        assert spawner.spawned is False
+        still_healthy = await probe_worker_health(url)
+    expected_authorization = (
+        None if settings.internal_token is None else f"Bearer {settings.internal_token}"
+    )
+    assert log == {"called": True, "authorization": expected_authorization}
+    assert still_healthy == WorkerHealthProbe(healthy=True, body=body)
+    assert spawner.spawned is False
+    assert spawner.process is None
 
 
-@pytest.mark.asyncio
-async def test_ensure_worker_attaches_to_a_same_gateway_worker() -> None:
-    """The positive: a non-auto-spawn gateway attaches to a worker that targets it."""
+@pytest.mark.parametrize(
+    ("internal_token", "expected_authorization"),
+    [(None, None), ("evict-secret", "Bearer evict-secret")],
+)
+def test_subprocess_auto_spawn_sends_configured_shutdown_authorization(
+    tmp_path: Path,
+    internal_token: str | None,
+    expected_authorization: str | None,
+) -> None:
+    """A fresh gateway process presents precisely its configured IPC credential.
+
+    The parent owns the foreign worker's real loopback port. The child only uses
+    public worker-management APIs, attempts automatic foreign-worker eviction,
+    and proves that the retained foreign process was not adopted.
+    """
     body: dict[str, object] = {
         "status": "ok",
         "service": "worker",
-        "gateway_url": settings.gateway_url,
+        "gateway_url": "http://127.0.0.1:59999",
     }
-    with _worker_like(body) as (url, port, _flag):
-        spawner = LazyWorkerSpawner(worker_url=url, worker_port=port, auto_spawn=False)
-        await spawner.ensure_worker()
-        assert spawner.spawned is True
+    with _worker_like(body) as (url, port, observer):
+        child_environment = os.environ.copy()
+        child_environment.pop(INTERNAL_TOKEN_ENV, None)
+        child_environment["VAULTSPEC_ENVIRONMENT"] = "development"
+        if internal_token is not None:
+            child_environment[INTERNAL_TOKEN_ENV] = internal_token
+        child_program = textwrap.dedent(
+            f"""
+            import asyncio
+
+            from vaultspec_a2a.control.worker_management import (
+                LazyWorkerSpawner,
+                WorkerHealthProbe,
+                probe_worker_health,
+            )
+
+
+            async def main() -> None:
+                worker_url = {url!r}
+                worker_body = {{
+                    "status": "ok",
+                    "service": "worker",
+                    "gateway_url": "http://127.0.0.1:59999",
+                }}
+                spawner = LazyWorkerSpawner(
+                    worker_url=worker_url,
+                    worker_port={port},
+                    auto_spawn=True,
+                )
+                await spawner.ensure_worker()
+                assert spawner.spawned is False
+                assert spawner.process is None
+                assert await probe_worker_health(worker_url) == WorkerHealthProbe(
+                    healthy=True,
+                    body=worker_body,
+                )
+                print("WORKER_PROVENANCE_SUBPROCESS_OK")
+
+
+            asyncio.run(main())
+            """
+        )
+        child = subprocess.run(
+            [sys.executable, "-c", child_program],
+            capture_output=True,
+            check=False,
+            cwd=tmp_path,
+            env=child_environment,
+            text=True,
+            timeout=30,
+        )
+    assert child.returncode == 0, child.stderr
+    assert child.stdout == "WORKER_PROVENANCE_SUBPROCESS_OK\n"
+    assert observer == {
+        "called": True,
+        "authorization": expected_authorization,
+    }

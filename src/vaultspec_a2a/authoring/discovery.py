@@ -20,8 +20,13 @@ import time
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import TYPE_CHECKING, override
 
 import httpx
+from pydantic import TypeAdapter, ValidationError
+
+if TYPE_CHECKING:
+    from collections.abc import Mapping
 
 __all__ = [
     "DESKTOP_RECORD_VERSION",
@@ -51,9 +56,10 @@ _DESKTOP_PROFILE = "desktop"
 # not as an available service (mirrors the engine's HEARTBEAT_STALE_MS).
 HEARTBEAT_STALE_MS = 120_000
 _STALE_MS = HEARTBEAT_STALE_MS
+_JSON_OBJECT = TypeAdapter(dict[str, object])
 
 
-def read_service_json(path: Path) -> dict | None:
+def read_service_json(path: Path) -> dict[str, object] | None:
     """Read and parse a service.json, or ``None`` if unreadable or not an object.
 
     The shared reader half of the discovery contract: it never raises, so both
@@ -61,10 +67,13 @@ def read_service_json(path: Path) -> dict | None:
     can classify a candidate without guarding every failure mode.
     """
     try:
-        info = json.loads(path.read_text(encoding="utf-8"))
+        decoded: object = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return None
-    return info if isinstance(info, dict) else None
+    try:
+        return _JSON_OBJECT.validate_python(decoded)
+    except ValidationError:
+        return None
 
 
 def _parse_heartbeat_ms(value: object) -> int | None:
@@ -91,7 +100,7 @@ def _parse_heartbeat_ms(value: object) -> int | None:
     return None
 
 
-def heartbeat_is_fresh(info: dict, now_ms: int) -> bool:
+def heartbeat_is_fresh(info: Mapping[str, object], now_ms: int) -> bool:
     """Return whether the record's heartbeat licenses treating the peer as live.
 
     A record carrying no ``last_heartbeat`` is fresh: the field is optional per
@@ -146,7 +155,7 @@ def _coerce_port(value: object) -> int | None:
     return value
 
 
-def parse_discovery_record(info: dict) -> DiscoveryRecordView | None:
+def parse_discovery_record(info: Mapping[str, object]) -> DiscoveryRecordView | None:
     """Parse a discovery record dict into a view, preferring the versioned shape.
 
     A record carrying the known desktop ``version`` and ``desktop`` profile is
@@ -159,8 +168,10 @@ def parse_discovery_record(info: dict) -> DiscoveryRecordView | None:
         info.get("version") == DESKTOP_RECORD_VERSION
         and info.get("profile") == _DESKTOP_PROFILE
     ):
-        endpoint = info.get("endpoint")
-        if not isinstance(endpoint, dict):
+        endpoint_value = info.get("endpoint")
+        try:
+            endpoint = _JSON_OBJECT.validate_python(endpoint_value)
+        except ValidationError:
             return None
         port = _coerce_port(endpoint.get("port"))
         if port is None:
@@ -207,6 +218,7 @@ class EngineEndpoint:
     base_url: str
     bearer_token: str
 
+    @override
     def __repr__(self) -> str:
         """Redacted representation - never leaks the bearer token."""
         return f"EngineEndpoint(base_url={self.base_url!r}, bearer_token=<set>)"

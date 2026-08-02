@@ -34,17 +34,15 @@ from typing import TYPE_CHECKING
 import httpx
 import pytest
 
-from ..control.config import settings
 from ..control.worker_management import (
-    _check_worker_health,
-    _fetch_worker_health,
-    _probe_worker_health,
-    _worker_ready_and_ours,
+    LazyWorkerSpawner,
+    WorkerHealthProbe,
+    probe_worker_health,
 )
 from ..tests.gateway_boot import free_port
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
+    from collections.abc import Generator
     from pathlib import Path
 
 # A real server that answers 200 with a body that is emphatically not JSON.
@@ -52,21 +50,23 @@ if TYPE_CHECKING:
 _MALFORMED_WORKER = """
 import sys
 from http.server import BaseHTTPRequestHandler, HTTPServer
+from typing import override
 
 port = int(sys.argv[1])
 payload = b"<!doctype html><html><body>not json at all</body></html>"
 
 
 class Handler(BaseHTTPRequestHandler):
-    def do_GET(self):
+    def do_GET(self) -> None:
         self.send_response(200)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(payload)))
         self.end_headers()
         self.wfile.write(payload)
 
-    def log_message(self, *args):
-        pass
+    @override
+    def log_message(self, format: str, *args: object) -> None:
+        return None
 
 
 HTTPServer(("127.0.0.1", port), Handler).serve_forever()
@@ -74,7 +74,7 @@ HTTPServer(("127.0.0.1", port), Handler).serve_forever()
 
 
 @contextlib.contextmanager
-def _malformed_worker(tmp_path: Path) -> Iterator[str]:
+def _malformed_worker(tmp_path: Path) -> Generator[tuple[str, int]]:
     """Run a real HTTP server that answers /health 200 with undecodable bytes."""
     port = free_port()
     script = tmp_path / "malformed_worker.py"
@@ -98,7 +98,7 @@ def _malformed_worker(tmp_path: Path) -> Iterator[str]:
                 time.sleep(0.05)
         else:
             raise AssertionError("the malformed worker never came up")
-        yield url
+        yield url, port
     finally:
         with contextlib.suppress(Exception):
             proc.kill()
@@ -115,41 +115,26 @@ async def test_an_unreadable_worker_is_up_present_and_not_ours(
     occupant, which is what makes the set a split-brain proof rather than three
     unrelated checks.
 
-    Load-bearing: ``_fetch_worker_health`` must not return ``None``. That is the
-    value it returns for a dead worker, and returning it here is precisely the
-    defect - the spawn path reads ``None`` as "nothing holds this port" and
-    spawns a competitor onto a port this live server still owns. Restore the
-    decode into the request's own ``except`` and this assertion fails while the
-    health verdict above it still passes, which is exactly how the divergence
-    stayed invisible.
+    Load-bearing: the public result distinguishes a healthy but unreadable
+    occupant from a dead worker. Collapsing those states would let spawn compete
+    for a port a live process still holds.
     """
-    # This exercises the LEGACY declared-target branch, the one that reads a
-    # missing target as a match - so the refusal asserted last is the explicit
-    # guard doing the work, not the armed classifier.
-    assert settings.desktop_profile_armed is False, (
-        "this proof pins the unarmed lenient branch"
-    )
-
-    with _malformed_worker(tmp_path) as url:
+    with _malformed_worker(tmp_path) as (url, port):
         # The health verdict is the status code and nothing else: an unreadable
         # body cannot turn a healthy worker unhealthy.
-        healthy, body = await _probe_worker_health(url)
-        assert healthy is True, (healthy, body)
-        assert body is None, body
+        probe = await probe_worker_health(url)
+        assert probe == WorkerHealthProbe(healthy=True, body=None)
 
-        # The watchdog and /health agree, through the boolean face.
-        assert await _check_worker_health(url) is True
+        spawner = LazyWorkerSpawner(worker_url=url, worker_port=port, auto_spawn=True)
+        await spawner.ensure_worker()
+        async with httpx.AsyncClient() as client:
+            incumbent = await client.get(f"{url}/health")
+        second_probe = await probe_worker_health(url)
 
-        # LOAD-BEARING: something demonstrably holds this port. Not None - which
-        # is reserved for "no healthy worker answered" - so the spawn path
-        # cannot mistake a live occupant for a free port.
-        occupant = await _fetch_worker_health(url)
-        assert occupant is not None, "a live worker was reported as absent"
-        assert occupant == {}, occupant
-
-        # And it is still not provably ours: an unreadable body is no evidence,
-        # even under the lenient rule that adopts a worker declaring no target.
-        assert await _worker_ready_and_ours(url) is False
+    assert incumbent.status_code == 200
+    assert spawner.spawned is False
+    assert spawner.process is None
+    assert second_probe == WorkerHealthProbe(healthy=True, body=None)
 
 
 @pytest.mark.asyncio(loop_scope="function")
@@ -161,9 +146,5 @@ async def test_nothing_listening_is_reported_absent(tmp_path: Path) -> None:
     vacuous. Port 9 (discard) refuses the connection outright.
     """
     dead = "http://127.0.0.1:9"
-    healthy, body = await _probe_worker_health(dead)
-    assert healthy is False, (healthy, body)
-    assert body is None
-    assert await _check_worker_health(dead) is False
-    assert await _fetch_worker_health(dead) is None
-    assert await _worker_ready_and_ours(dead) is False
+    probe = await probe_worker_health(dead)
+    assert probe == WorkerHealthProbe(healthy=False, body=None)

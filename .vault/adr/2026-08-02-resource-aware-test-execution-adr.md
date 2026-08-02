@@ -5,7 +5,7 @@ tags:
 date: '2026-08-02'
 modified: '2026-08-02'
 body_schema: 'body-v1'
-body_hash: 'sha256:90b1403fcafe8f4751baf5a0998cb9d83d1a5f6bbaaeab00cca8f30ca077f95f'
+body_hash: 'sha256:a40b3095d0ed98438a5093c27a24a5e8968d9cfefbf6cdbc507d6bcf9fe0d4f8'
 related:
   - "[[2026-07-15-dev-process-registry-adr]]"
   - "[[2026-07-17-tool-cores-audit]]"
@@ -104,6 +104,25 @@ mode other than `loadgroup`, derives per-item timeout backstops from
 declarations, and exposes acquisition fixtures that fail loudly when the
 requesting test did not declare the resource it asks for.
 
+Amended 2026-08-02 (owner directive): safety is inverted from opt-in to
+default-on. The lease and reservation layers are moved INSIDE the shared
+spawning primitives, so an undeclared test cannot present a contention
+surface: the shared boot module's port allocation reserves scratch-band
+ports through the registry's allocate-and-claim (candidates from the OS
+ephemeral range remain only as the graceful fallback when the band is
+exhausted or the config is unavailable), reservations for ports a child has
+provably bound are released back to the band, and reservations for ports
+promised to a lazily-binding child are held for the process lifetime, where
+pid-death reclaim retires them if the run dies. Declarations remain what they
+were designed to be - an optimization hint that unlocks parallel placement -
+never the safety mechanism. Concurrent runs are ADMITTED rather than
+multiplied: every non-worker pytest session takes a shared machine-global
+session lease at configure time (which also makes live sessions countable),
+and a distributed run derives its worker count from observed capacity - the
+core count, a sampled machine load estimate or the operator's explicit
+budget, divided across live peer sessions - rather than assuming it owns the
+machine.
+
 ## Rationale
 
 The knockout criterion is the owner's: concurrency must be a consequence of
@@ -132,3 +151,11 @@ rule applies to provider lanes.
   registry, and the discipline that new live tests must declare resources.
 - Migration of every existing free-port helper call to leased acquisition is
   incremental; unmigrated callers stay correct but serial.
+- Amendment consequences: a second concurrent suite run proceeds DEGRADED
+  (reduced workers, leased resources serializing at acquisition) rather than
+  waiting. Waiting was rejected because it turns every scoped run launched
+  beside a long suite into an unbounded queue and reintroduces the starved-box
+  failure as a deadlock risk; degradation keeps both runs progressing while
+  the default-safe layer preserves correctness. The scratch band becomes a
+  genuinely shared machine resource; exhaustion degrades to the previous
+  ephemeral-candidate behaviour instead of failing a run.

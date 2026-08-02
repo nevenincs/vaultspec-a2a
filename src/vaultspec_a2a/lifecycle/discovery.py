@@ -45,6 +45,7 @@ from ..desktop._filesystem_authority import (
     create_anonymous_file,
     create_private_file,
     directory_lease,
+    open_shared_read_descriptor,
     path_is_link_like,
     publish_no_replace,
     resolve_directory_authority,
@@ -183,10 +184,10 @@ def _read_handoff_credential(discovery_path: Path, reference: object) -> str | N
                     "service.token", dir_fd=leased.dir_fd, follow_symlinks=False
                 )
             else:
-                descriptor = os.open(
-                    expected,
-                    os.O_RDONLY | getattr(os, "O_BINARY", 0),
-                )
+                # Shares DELETE: a plain `os.open` here would block the very
+                # publication this read is checking against, for as long as the
+                # read holds the file.
+                descriptor = open_shared_read_descriptor(expected)
                 named = expected.stat(follow_symlinks=False)
             try:
                 opened = os.fstat(descriptor)

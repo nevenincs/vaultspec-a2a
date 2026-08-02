@@ -28,22 +28,27 @@ _FILE_GENERIC_WRITE = 0x40000000
 _ERROR_SHARING_VIOLATION = 32
 #: How long the two publication paths - the directory lease and the rename that
 #: publishes a held handle - ride out a sharing violation before giving up.
-#: Long enough to outlast a peer's lease or a scanner's sample, short enough that
-#: a genuinely wedged holder still surfaces as an error rather than a stall.
+#: Sized like the atomic writer's replace window: long enough to outlast a peer's
+#: lease, short enough that a genuinely wedged holder still surfaces as an error.
 #:
-#: Sized at ten seconds because two was measured too short. The credential is
-#: created, written, fsynced and re-ACLed within microseconds, and re-ACLing goes
-#: through `SetNamedSecurityInfoW`, which opens the file BY NAME - so a real-time
-#: scanner is invited to sample a brand-new secret at exactly the moment the
-#: rename needs delete-class access to it. On a loaded CI runner that sample
-#: outlived a two-second budget on every Windows release attempt. Nothing here
-#: masks a wedged holder: one holds indefinitely and still fails loudly.
-_SHARING_RETRY_SECONDS = 10.0
+#: This budget was briefly raised to ten seconds chasing a Windows release
+#: failure, on the theory that a real-time scanner was sampling the new
+#: credential. It was not: a READER holding the file without DELETE sharing
+#: blocks the publication for as long as it reads, and no budget survives that.
+#: The reader was fixed instead (`open_shared_read_descriptor`), so this is back
+#: to the window it was sized for. A retry budget is for transient holders; it is
+#: not a remedy for a lock two processes hold against each other.
+_SHARING_RETRY_SECONDS = 2.0
 _SHARING_RETRY_INTERVAL_SECONDS = 0.02
 
 _DELETE = 0x00010000
 _FILE_SHARE_READ = 0x00000001
 _FILE_SHARE_WRITE = 0x00000002
+#: A reader that withholds this DENIES the publication rename, because a rename
+#: is a delete-class operation on the source. Python's `os.open` on Windows
+#: shares READ and WRITE but never DELETE, so any reader using it blocks a
+#: concurrent publish for as long as it holds the file.
+_FILE_SHARE_DELETE = 0x00000004
 _CREATE_NEW = 1
 _OPEN_EXISTING = 3
 _FILE_ATTRIBUTE_NORMAL = 0x00000080
@@ -444,6 +449,47 @@ def create_private_file(authority: DirectoryAuthority, name: str) -> BinaryIO:
         return os.fdopen(descriptor, "w+b", buffering=0, closefd=True)
     except BaseException:
         os.close(descriptor)
+        raise
+
+
+def open_shared_read_descriptor(path: Path) -> int:
+    """Open *path* read-only in a way that does not block a concurrent publish.
+
+    Returns an OS descriptor the caller owns and must close.
+
+    On Windows this exists because `os.open` cannot express the share mode. It
+    opens with FILE_SHARE_READ|WRITE only, so a reader holding the file DENIES
+    the rename that publishes a replacement — the publisher sees
+    ERROR_SHARING_VIOLATION for exactly as long as the reader keeps looking. That
+    is not a transient scanner: two processes doing their jobs correctly deadlock
+    on each other, and no retry budget fixes it. Granting DELETE sharing lets the
+    publication proceed while this reader still reads the file it opened.
+
+    Elsewhere `os.open` already behaves this way, so the POSIX path is unchanged.
+    """
+    if os.name != "nt":
+        return os.open(path, os.O_RDONLY | getattr(os, "O_BINARY", 0))
+    import msvcrt
+
+    library = _windows_library()
+    create_file = _create_file_w(library)
+    handle_value = create_file(
+        str(path),
+        _FILE_GENERIC_READ,
+        _FILE_SHARE_READ | _FILE_SHARE_WRITE | _FILE_SHARE_DELETE,
+        None,
+        _OPEN_EXISTING,
+        _FILE_ATTRIBUTE_NORMAL,
+        None,
+    )
+    invalid_handle = ctypes.c_void_p(-1).value
+    if handle_value in {None, invalid_handle}:
+        raise _last_windows_error(path)
+    handle = cast("int", handle_value)
+    try:
+        return msvcrt.open_osfhandle(handle, os.O_RDONLY | getattr(os, "O_BINARY", 0))
+    except BaseException:
+        _close_handle(library)(handle)
         raise
 
 

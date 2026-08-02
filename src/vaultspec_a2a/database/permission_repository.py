@@ -3,16 +3,18 @@
 from __future__ import annotations
 
 import json
-from typing import TYPE_CHECKING
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Any, cast
 from uuid import uuid4
 
-from sqlalchemy import select
+from sqlalchemy import or_, select, update
 from sqlalchemy.exc import IntegrityError
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
     from datetime import datetime
 
+    from sqlalchemy.engine import CursorResult
     from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..thread.enums import (
@@ -26,11 +28,15 @@ from ._helpers import (
     _coerce_permission_request_status,
     save_model,
 )
-from .models import ControlActionModel, PermissionRequestModel, _utcnow
+from .models import ControlActionModel, PermissionRequestModel, utcnow
 
 __all__ = [
+    "ControlActionReservation",
+    "acquire_control_action_lease",
+    "commit_control_action_lease",
     "create_control_action",
     "expire_pending_permission_requests",
+    "get_control_action_by_dispatch_id",
     "get_control_action_by_idempotency_key",
     "get_latest_control_action",
     "get_or_create_control_action",
@@ -42,9 +48,41 @@ __all__ = [
     "mark_permission_request_applied",
     "record_permission_request",
     "record_permission_response_submission",
+    "release_control_action_lease",
+    "reserve_control_action",
     "reset_permission_response_submission",
+    "settle_control_action_lease",
     "supersede_permission_requests",
 ]
+
+
+@dataclass(frozen=True, slots=True)
+class ControlActionReservation:
+    """Result of reserving one idempotent control intention.
+
+    ``payload_matches`` is false when the same idempotency key was already bound
+    to a competing action body.  Callers must surface that as conflict and must
+    never acquire or dispatch the returned row.
+    """
+
+    action: ControlActionModel
+    created: bool
+    payload_matches: bool
+
+
+def _encode_payload(payload: dict[str, object] | None) -> str | None:
+    if payload is None:
+        return None
+    return json.dumps(payload, sort_keys=True, separators=(",", ":"))
+
+
+def _payload_matches(stored: str | None, expected: dict[str, object] | None) -> bool:
+    if stored is None:
+        return expected is None
+    try:
+        return json.loads(stored) == expected
+    except json.JSONDecodeError:
+        return False
 
 
 async def record_permission_request(
@@ -125,7 +163,7 @@ async def record_permission_response_submission(
     permission.response_option_id = option_id
     permission.idempotency_key = idempotency_key
     permission.request_status = PermissionRequestStatus.ANSWERED_PENDING_APPLY.value
-    permission.responded_at = _utcnow()
+    permission.responded_at = utcnow()
     await session.flush()
     return permission
 
@@ -140,7 +178,7 @@ async def mark_permission_request_applied(
     if permission is None:
         return None
     permission.request_status = _coerce_permission_request_status(status).value
-    permission.applied_at = _utcnow()
+    permission.applied_at = utcnow()
     await session.flush()
     return permission
 
@@ -187,7 +225,7 @@ async def supersede_permission_requests(
         if permission.request_id == except_request_id:
             continue
         permission.request_status = PermissionRequestStatus.SUPERSEDED.value
-        permission.applied_at = permission.applied_at or _utcnow()
+        permission.applied_at = permission.applied_at or utcnow()
         updated += 1
     await session.flush()
     return updated
@@ -212,7 +250,7 @@ async def expire_pending_permission_requests(
         permission.request_status = (
             PermissionRequestStatus.EXPIRED_BY_TERMINAL_STATE.value
         )
-        permission.applied_at = permission.applied_at or _utcnow()
+        permission.applied_at = permission.applied_at or utcnow()
     await session.flush()
     return len(permissions)
 
@@ -229,6 +267,7 @@ async def create_control_action(
     result_status: ControlActionResultStatus | str = (
         ControlActionResultStatus.ACCEPTED_NOT_APPLIED
     ),
+    dispatch_id: str | None = None,
 ) -> ControlActionModel:
     """Append a durable control journal record."""
     model = ControlActionModel(
@@ -237,9 +276,10 @@ async def create_control_action(
         action_type=_coerce_control_action_type(action_type).value,
         request_id=request_id,
         idempotency_key=idempotency_key,
-        payload_json=json.dumps(payload) if payload is not None else None,
+        payload_json=_encode_payload(payload),
         worker_generation=worker_generation,
         result_status=_coerce_control_result(result_status).value,
+        dispatch_id=dispatch_id or uuid4().hex,
     )
     return await save_model(session, model)
 
@@ -256,6 +296,7 @@ async def get_or_create_control_action(
     result_status: ControlActionResultStatus | str = (
         ControlActionResultStatus.ACCEPTED_NOT_APPLIED
     ),
+    dispatch_id: str | None = None,
 ) -> tuple[ControlActionModel, bool]:
     """Return the journal record for ``(thread_id, idempotency_key)``, inserting it
     only when absent.
@@ -290,6 +331,7 @@ async def get_or_create_control_action(
                 payload=payload,
                 worker_generation=worker_generation,
                 result_status=result_status,
+                dispatch_id=dispatch_id,
             )
     except IntegrityError:
         conflicting = await get_control_action_by_idempotency_key(
@@ -303,6 +345,141 @@ async def get_or_create_control_action(
     return created, True
 
 
+async def reserve_control_action(
+    session: AsyncSession,
+    *,
+    thread_id: str,
+    action_type: ControlActionType | str,
+    idempotency_key: str,
+    request_id: str | None = None,
+    payload: dict[str, object] | None = None,
+    worker_generation: int = 0,
+    dispatch_id: str | None = None,
+) -> ControlActionReservation:
+    """Reserve one durable intention and compare any replay with its winner."""
+    resolved_type = _coerce_control_action_type(action_type).value
+    action, created = await get_or_create_control_action(
+        session,
+        thread_id=thread_id,
+        action_type=resolved_type,
+        idempotency_key=idempotency_key,
+        request_id=request_id,
+        payload=payload,
+        worker_generation=worker_generation,
+        dispatch_id=dispatch_id,
+    )
+    matches = (
+        action.action_type == resolved_type
+        and action.request_id == request_id
+        and _payload_matches(action.payload_json, payload)
+    )
+    return ControlActionReservation(
+        action=action, created=created, payload_matches=matches
+    )
+
+
+async def acquire_control_action_lease(
+    session: AsyncSession,
+    action_id: str,
+    *,
+    claim_token: str,
+    claim_expires_at: datetime,
+    now: datetime | None = None,
+) -> bool:
+    """Atomically acquire or renew one unapplied action lease."""
+    if not claim_token:
+        raise ValueError("claim_token must not be empty")
+    acquired_at = now or utcnow()
+    if claim_expires_at <= acquired_at:
+        raise ValueError("claim_expires_at must be later than now")
+    stmt = (
+        update(ControlActionModel)
+        .where(
+            ControlActionModel.id == action_id,
+            ControlActionModel.applied_at.is_(None),
+            or_(
+                ControlActionModel.claim_token.is_(None),
+                ControlActionModel.claim_expires_at.is_(None),
+                ControlActionModel.claim_expires_at <= acquired_at,
+                ControlActionModel.claim_token == claim_token,
+            ),
+        )
+        .values(claim_token=claim_token, claim_expires_at=claim_expires_at)
+    )
+    result = cast("CursorResult[Any]", await session.execute(stmt))
+    return result.rowcount == 1
+
+
+async def commit_control_action_lease(
+    session: AsyncSession,
+    action_id: str,
+    *,
+    claim_token: str,
+) -> ControlActionModel:
+    """Commit a verified lease before its owner performs network dispatch."""
+    action = await session.get(ControlActionModel, action_id, populate_existing=True)
+    if (
+        action is None
+        or action.claim_token != claim_token
+        or action.claim_expires_at is None
+        or action.applied_at is not None
+    ):
+        raise RuntimeError("control action lease is not owned by this dispatcher")
+    await session.commit()
+    return action
+
+
+async def release_control_action_lease(
+    session: AsyncSession,
+    action_id: str,
+    *,
+    claim_token: str,
+) -> bool:
+    """Release ownership only for a dispatch proven not to have been delivered."""
+    result = cast(
+        "CursorResult[Any]",
+        await session.execute(
+            update(ControlActionModel)
+            .where(
+                ControlActionModel.id == action_id,
+                ControlActionModel.applied_at.is_(None),
+                ControlActionModel.claim_token == claim_token,
+            )
+            .values(claim_token=None, claim_expires_at=None)
+        ),
+    )
+    return result.rowcount == 1
+
+
+async def settle_control_action_lease(
+    session: AsyncSession,
+    action_id: str,
+    *,
+    claim_token: str,
+    applied_at: datetime | None = None,
+    result_status: ControlActionResultStatus | str = ControlActionResultStatus.APPLIED,
+) -> bool:
+    """Settle application iff the caller still owns the durable lease."""
+    result = cast(
+        "CursorResult[Any]",
+        await session.execute(
+            update(ControlActionModel)
+            .where(
+                ControlActionModel.id == action_id,
+                ControlActionModel.applied_at.is_(None),
+                ControlActionModel.claim_token == claim_token,
+            )
+            .values(
+                applied_at=applied_at or utcnow(),
+                result_status=_coerce_control_result(result_status).value,
+                claim_token=None,
+                claim_expires_at=None,
+            )
+        ),
+    )
+    return result.rowcount == 1
+
+
 async def get_control_action_by_idempotency_key(
     session: AsyncSession,
     *,
@@ -312,6 +489,20 @@ async def get_control_action_by_idempotency_key(
     stmt = select(ControlActionModel).where(
         ControlActionModel.thread_id == thread_id,
         ControlActionModel.idempotency_key == idempotency_key,
+    )
+    return (await session.execute(stmt)).scalar_one_or_none()
+
+
+async def get_control_action_by_dispatch_id(
+    session: AsyncSession,
+    *,
+    thread_id: str,
+    dispatch_id: str,
+) -> ControlActionModel | None:
+    """Return the exact journal action named by a worker application receipt."""
+    stmt = select(ControlActionModel).where(
+        ControlActionModel.thread_id == thread_id,
+        ControlActionModel.dispatch_id == dispatch_id,
     )
     return (await session.execute(stmt)).scalar_one_or_none()
 
@@ -345,8 +536,10 @@ async def mark_control_action_applied(
     action = await session.get(ControlActionModel, action_id)
     if action is None:
         return None
-    action.applied_at = applied_at or _utcnow()
+    action.applied_at = applied_at or utcnow()
     action.result_status = _coerce_control_result(result_status).value
+    action.claim_token = None
+    action.claim_expires_at = None
     await session.flush()
     return action
 
@@ -371,6 +564,6 @@ async def mark_control_action_superseded(
     if action is None:
         return None
     action.result_status = ControlActionResultStatus.SUPERSEDED.value
-    action.superseded_at = _utcnow()
+    action.superseded_at = utcnow()
     await session.flush()
     return action

@@ -37,13 +37,15 @@ first.
 
 from __future__ import annotations
 
-import time
 import uuid
-from typing import Any
+from contextlib import asynccontextmanager
+from typing import TYPE_CHECKING, Any, cast
 
+import anyio
 import httpx
 import pytest
 import pytest_asyncio
+from langchain_core.messages import AIMessage
 from langgraph.checkpoint.base import empty_checkpoint
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from sqlalchemy.ext.asyncio import (
@@ -52,6 +54,7 @@ from sqlalchemy.ext.asyncio import (
     create_async_engine,
 )
 
+from ...api.tests.clarification_harness import new_state_graph
 from ...authoring import (
     AuthoringClient,
     AuthoringResponse,
@@ -61,23 +64,33 @@ from ...authoring import (
     mint_actor_token,
     verdict_from_event,
 )
+from ...control.action_lease import claim_control_action
 from ...control.circuit_breaker import WorkerCircuitBreaker
+from ...control.event_handlers import relay_event
 from ...control.verdict_subscriber import (
-    _RESUME_CLAIM_TTL_SECONDS,
     VerdictSubscriber,
-    _with_resume_claim,
+    _verdict_resume_idempotency_key,
+    _verdict_resume_payload,
 )
 from ...control.worker_management import LazyWorkerSpawner
 from ...database import (
     create_thread,
+    get_control_action_by_idempotency_key,
     get_permission_request,
     get_thread,
     record_permission_request,
-    update_thread_metadata,
     update_thread_status,
 )
 from ...database.models import Base
-from ...thread.enums import PermissionRequestStatus, ThreadStatus
+from ...thread.enums import ControlActionType, PermissionRequestStatus, ThreadStatus
+from ...worker.app import create_worker_app
+from ...worker.executor import Executor
+from ...worker.ipc import WorkerBridge
+
+if TYPE_CHECKING:
+    from collections.abc import AsyncGenerator
+
+    from fastapi import FastAPI
 
 
 @pytest_asyncio.fixture
@@ -390,6 +403,7 @@ async def _seed_parked_gate(
     proposal_id: str,
     changeset_id: str,
     status: ThreadStatus = ThreadStatus.INPUT_REQUIRED,
+    team_preset: str | None = None,
 ) -> None:
     """Seed a run parked at ``proposal_id``'s gate (with its durable row).
 
@@ -414,7 +428,11 @@ async def _seed_parked_gate(
         {},
     )
     async with session_factory() as session:
-        await create_thread(session, thread_id=thread_id)
+        await create_thread(
+            session,
+            thread_id=thread_id,
+            team_preset=team_preset,
+        )
         await update_thread_status(session, thread_id, status)
         await record_permission_request(
             session,
@@ -427,6 +445,73 @@ async def _seed_parked_gate(
             ],
         )
         await session.commit()
+
+
+def _install_receipt_graph(
+    executor: Executor,
+    checkpointer: AsyncSqliteSaver,
+    thread_id: str,
+) -> None:
+    async def complete(_state: Any) -> dict[str, Any]:
+        return {"messages": [AIMessage(content="resumed")], "next": "FINISH"}
+
+    builder = new_state_graph()
+    builder.add_node("worker", complete)
+    builder.add_edge("__start__", "worker")
+    builder.add_edge("worker", "__end__")
+    executor.register_compiled_graph(
+        thread_id,
+        ("verdict-receipt-preset", None, False),
+        builder.compile(checkpointer=checkpointer),
+    )
+
+
+@asynccontextmanager
+async def _worker_runtime(
+    checkpointer: AsyncSqliteSaver,
+    *,
+    receipt_threads: tuple[str, ...] = (),
+) -> AsyncGenerator[tuple[httpx.AsyncClient, FastAPI, WorkerBridge]]:
+    bridge = WorkerBridge("http://127.0.0.1:1", "verdict-live-receipt-test")
+    executor = Executor(checkpointer, bridge)
+    for thread_id in receipt_threads:
+        _install_receipt_graph(executor, checkpointer, thread_id)
+    app = create_worker_app()
+    app.state.executor = executor
+    async with anyio.create_task_group() as tasks:
+        app.state.task_group = tasks
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app),
+            base_url="http://worker",
+        ) as client:
+            yield client, app, bridge
+        tasks.cancel_scope.cancel()
+    await executor.shutdown()
+    await bridge.close()
+
+
+async def _wait_for_receipt(
+    bridge: WorkerBridge,
+    *,
+    dispatch_id: str,
+) -> dict[str, object]:
+    with anyio.fail_after(5.0):
+        while True:
+            buffered = cast(
+                "list[dict[str, object]]",
+                getattr(bridge, "_event_buffer", []),
+            )
+            for item in buffered:
+                candidate = item.get("payload")
+                if not isinstance(candidate, dict):
+                    continue
+                receipt = cast("dict[str, object]", candidate)
+                if (
+                    receipt.get("type") == "dispatch_applied"
+                    and receipt.get("dispatch_id") == dispatch_id
+                ):
+                    return receipt
+            await anyio.sleep(0.01)
 
 
 @pytest.mark.service
@@ -448,14 +533,10 @@ async def test_live_missed_reject_is_recovered_by_parked_reconcile(
     ``verdict=request_changes`` to the worker - routing the run back into its
     revision loop instead of stalling forever.
 
-    The worker is a REAL loopback Starlette app (real ASGI over httpx, no double)
-    that records the dispatch and returns success, so the resume lands: the answered
-    gate's durable row is resolved and the thread returns to RUNNING.
+    The worker is the real worker app with a real Executor, checkpointer, and bridge.
+    Its HTTP acknowledgement proves scheduling only; the exact application receipt
+    resolves the answered gate and returns the thread to RUNNING.
     """
-    from starlette.applications import Starlette
-    from starlette.responses import JSONResponse
-    from starlette.routing import Route
-
     # --- engine side: agent proposes, human rejects via edit (request_changes) ---
     run_id = f"mr-{uuid.uuid4().hex[:8]}"
     minted = await mint_actor_token(client, actor_id=f"agent:{run_id}", kind="agent")
@@ -496,23 +577,7 @@ async def test_live_missed_reject_is_recovered_by_parked_reconcile(
     checkpoints = tmp_path / "mr-cp.db"
     thread_id = f"thread-{run_id}"
 
-    recorded: list[dict[str, Any]] = []
-
-    async def _accept_dispatch(request: Any) -> JSONResponse:
-        recorded.append(await request.json())
-        return JSONResponse({"status": "dispatched"})
-
-    worker_app = Starlette(
-        routes=[Route("/dispatch", _accept_dispatch, methods=["POST"])]
-    )
-
-    async with (
-        AsyncSqliteSaver.from_conn_string(str(checkpoints)) as checkpointer,
-        httpx.AsyncClient(
-            transport=httpx.ASGITransport(app=worker_app),
-            base_url="http://worker",
-        ) as worker_client,
-    ):
+    async with AsyncSqliteSaver.from_conn_string(str(checkpoints)) as checkpointer:
         await checkpointer.setup()
         await _seed_parked_gate(
             session_factory,
@@ -520,39 +585,56 @@ async def test_live_missed_reject_is_recovered_by_parked_reconcile(
             thread_id=thread_id,
             proposal_id=info["proposal_id"],
             changeset_id=info["changeset_id"],
+            team_preset="verdict-receipt-preset",
         )
+        async with _worker_runtime(checkpointer, receipt_threads=(thread_id,)) as (
+            worker_client,
+            worker_app,
+            bridge,
+        ):
+            subscriber = VerdictSubscriber(
+                session_factory=session_factory,
+                checkpointer=checkpointer,
+                worker_client=worker_client,
+                circuit_breaker=WorkerCircuitBreaker(
+                    failure_threshold=3, recovery_timeout=30.0
+                ),
+                worker_spawner=LazyWorkerSpawner(
+                    worker_url="http://worker", worker_port=1, auto_spawn=False
+                ),
+                endpoint_provider=lambda: live_engine,
+                recursion_limit=25,
+            )
 
-        subscriber = VerdictSubscriber(
-            session_factory=session_factory,
-            checkpointer=checkpointer,
-            worker_client=worker_client,
-            circuit_breaker=WorkerCircuitBreaker(
-                failure_threshold=3, recovery_timeout=30.0
-            ),
-            worker_spawner=LazyWorkerSpawner(
-                worker_url="http://worker", worker_port=1, auto_spawn=False
-            ),
-            endpoint_provider=lambda: live_engine,
-            recursion_limit=25,
-        )
+            await subscriber._reconcile_parked_runs(live_engine)
 
-        await subscriber._reconcile_parked_runs(live_engine)
+            assert len(worker_app.state.dispatch_ids) == 1
+            async with session_factory() as db:
+                action = await get_control_action_by_idempotency_key(
+                    db,
+                    thread_id=thread_id,
+                    idempotency_key=_verdict_resume_idempotency_key(
+                        info["proposal_id"]
+                    ),
+                )
+                gate_row = await get_permission_request(db, f"{thread_id}:adr-gate")
+                thread = await get_thread(db, thread_id)
+            assert action is not None
+            assert action.dispatch_id in worker_app.state.dispatch_ids
+            assert action.applied_at is None
+            assert gate_row is not None
+            assert gate_row.request_status == PermissionRequestStatus.PENDING.value
+            assert thread is not None
+            assert thread.status == ThreadStatus.INPUT_REQUIRED.value
 
-        # The reconcile recovered the missed reject and re-dispatched exactly one
-        # resume carrying request_changes to the (real, recording) worker.
-        assert len(recorded) == 1, f"expected one resume dispatch, got {recorded}"
-        dispatch = recorded[0]
-        assert dispatch["action"] == "resume"
-        assert dispatch["thread_id"] == thread_id
-        assert dispatch["option_id"] == {"verdict": "request_changes", "notes": None}
+            receipt = await _wait_for_receipt(bridge, dispatch_id=action.dispatch_id)
+            await relay_event(thread_id, receipt, session_factory=session_factory)
 
-        # The resume landed: the answered gate row is resolved and the run
-        # left INPUT_REQUIRED for RUNNING, back into its revision loop.
-        async with session_factory() as db:
-            gate_row = await get_permission_request(db, f"{thread_id}:adr-gate")
+            async with session_factory() as db:
+                gate_row = await get_permission_request(db, f"{thread_id}:adr-gate")
+                thread = await get_thread(db, thread_id)
             assert gate_row is not None
             assert gate_row.request_status == PermissionRequestStatus.APPLIED.value
-            thread = await get_thread(db, thread_id)
             assert thread is not None
             assert thread.status == ThreadStatus.RUNNING.value
 
@@ -568,9 +650,9 @@ async def test_live_running_clobbered_parked_run_is_recovered_by_parked_reconcil
 
     The recovery_required wedge: a run's checkpoint is parked at a gate awaiting a
     verdict, but its thread status is RUNNING rather than INPUT_REQUIRED - because a
-    prior gate's verdict resume set RUNNING (``_resume_with_verdict``, optimistic)
-    and that write raced AFTER the next gate's permission event set INPUT_REQUIRED,
-    or that gate's permission event never landed. Keyed on ``thread.status`` alone
+    a prior receipt settlement set RUNNING and that write raced AFTER the next
+    gate's permission event set INPUT_REQUIRED, or that gate's permission event
+    never landed. Keyed on ``thread.status`` alone
     the reconcile would never see such a run, so its decided verdict is never
     delivered and NOTHING re-drives it - the run stalls forever while run-status
     projects ``recovery_required`` off the checkpoint-vs-durable gap.
@@ -581,10 +663,6 @@ async def test_live_running_clobbered_parked_run_is_recovered_by_parked_reconcil
     approval decision) rather than the derived status - must still correlate it and
     re-dispatch exactly one ``resume`` carrying the missed ``request_changes``.
     """
-    from starlette.applications import Starlette
-    from starlette.responses import JSONResponse
-    from starlette.routing import Route
-
     run_id = f"cl-{uuid.uuid4().hex[:8]}"
     minted = await mint_actor_token(client, actor_id=f"agent:{run_id}", kind="agent")
     assert isinstance(minted, AuthoringResponse)
@@ -622,23 +700,7 @@ async def test_live_running_clobbered_parked_run_is_recovered_by_parked_reconcil
     checkpoints = tmp_path / "cl-cp.db"
     thread_id = f"thread-{run_id}"
 
-    recorded: list[dict[str, Any]] = []
-
-    async def _accept_dispatch(request: Any) -> JSONResponse:
-        recorded.append(await request.json())
-        return JSONResponse({"status": "dispatched"})
-
-    worker_app = Starlette(
-        routes=[Route("/dispatch", _accept_dispatch, methods=["POST"])]
-    )
-
-    async with (
-        AsyncSqliteSaver.from_conn_string(str(checkpoints)) as checkpointer,
-        httpx.AsyncClient(
-            transport=httpx.ASGITransport(app=worker_app),
-            base_url="http://worker",
-        ) as worker_client,
-    ):
+    async with AsyncSqliteSaver.from_conn_string(str(checkpoints)) as checkpointer:
         await checkpointer.setup()
         # The distinguishing seed: parked in the checkpoint, but RUNNING in the DB.
         await _seed_parked_gate(
@@ -648,31 +710,52 @@ async def test_live_running_clobbered_parked_run_is_recovered_by_parked_reconcil
             proposal_id=info["proposal_id"],
             changeset_id=info["changeset_id"],
             status=ThreadStatus.RUNNING,
+            team_preset="verdict-receipt-preset",
         )
+        async with _worker_runtime(checkpointer, receipt_threads=(thread_id,)) as (
+            worker_client,
+            worker_app,
+            bridge,
+        ):
+            subscriber = VerdictSubscriber(
+                session_factory=session_factory,
+                checkpointer=checkpointer,
+                worker_client=worker_client,
+                circuit_breaker=WorkerCircuitBreaker(
+                    failure_threshold=3, recovery_timeout=30.0
+                ),
+                worker_spawner=LazyWorkerSpawner(
+                    worker_url="http://worker", worker_port=1, auto_spawn=False
+                ),
+                endpoint_provider=lambda: live_engine,
+                recursion_limit=25,
+            )
 
-        subscriber = VerdictSubscriber(
-            session_factory=session_factory,
-            checkpointer=checkpointer,
-            worker_client=worker_client,
-            circuit_breaker=WorkerCircuitBreaker(
-                failure_threshold=3, recovery_timeout=30.0
-            ),
-            worker_spawner=LazyWorkerSpawner(
-                worker_url="http://worker", worker_port=1, auto_spawn=False
-            ),
-            endpoint_provider=lambda: live_engine,
-            recursion_limit=25,
-        )
+            await subscriber._reconcile_parked_runs(live_engine)
 
-        await subscriber._reconcile_parked_runs(live_engine)
-
-        # The RUNNING-clobbered parked run was recovered by checkpoint truth: one
-        # resume carrying the missed request_changes was re-dispatched for it.
-        assert len(recorded) == 1, f"expected one resume dispatch, got {recorded}"
-        dispatch = recorded[0]
-        assert dispatch["action"] == "resume"
-        assert dispatch["thread_id"] == thread_id
-        assert dispatch["option_id"] == {"verdict": "request_changes", "notes": None}
+            assert len(worker_app.state.dispatch_ids) == 1
+            async with session_factory() as db:
+                action = await get_control_action_by_idempotency_key(
+                    db,
+                    thread_id=thread_id,
+                    idempotency_key=_verdict_resume_idempotency_key(
+                        info["proposal_id"]
+                    ),
+                )
+            assert action is not None
+            assert action.applied_at is None
+            receipt = await _wait_for_receipt(bridge, dispatch_id=action.dispatch_id)
+            await relay_event(thread_id, receipt, session_factory=session_factory)
+            async with session_factory() as db:
+                settled = await get_control_action_by_idempotency_key(
+                    db,
+                    thread_id=thread_id,
+                    idempotency_key=_verdict_resume_idempotency_key(
+                        info["proposal_id"]
+                    ),
+                )
+            assert settled is not None
+            assert settled.applied_at is not None
 
     await db_engine.dispose()
 
@@ -684,25 +767,22 @@ async def test_live_running_with_fresh_resume_claim_is_not_re_driven(
 ) -> None:
     """The broadened RUNNING candidacy does NOT false-re-drive an in-flight resume.
 
-    Guard: including RUNNING threads in the reconcile candidate set must
-    not double-drive a run whose resume is legitimately already in flight. The
-    durable resume claim (``_resume_with_verdict``) is the
-    observable proof-of-in-flight: a RUNNING run parked at a gate WITH a decided
-    verdict on the engine AND a FRESH claim on that exact gate is a run whose resume
+    Guard: including RUNNING threads in the reconcile candidate set must not
+    double-drive a run whose resume is legitimately already in flight. The
+    control-action lease taken by ``_resume_with_verdict`` is the observable
+    proof-of-in-flight: a RUNNING run parked at a gate WITH a decided verdict on the
+    engine AND a live lease on that exact gate's typed verdict is a run whose resume
     was just dispatched and has not yet advanced the checkpoint - re-dispatching
     would be the false re-drive. The reconcile must correlate it (RUNNING is now a
-    candidate) yet dispatch NOTHING, because the fresh claim short-circuits the
-    per-thread resume.
+    candidate) yet dispatch NOTHING, because losing the lease election
+    short-circuits the per-thread resume.
 
     Same real round-trip as the recovery tests (real engine decision, real DB, real
-    checkpointer, real recording worker), differing only in the seeded fresh claim
-    and the zero-dispatch assertion. A STALE claim is exercised by the sibling
-    recovery tests and the non-live ``test_stale_resume_claim_is_redriven``.
+    checkpointer, real worker app), differing only in the seeded live lease
+    and the zero-dispatch assertion. Lease EXPIRY - the re-drivable case that stops
+    a lost dispatch orphaning a run - is owned by the action-lease tests, which is
+    where the TTL itself lives.
     """
-    from starlette.applications import Starlette
-    from starlette.responses import JSONResponse
-    from starlette.routing import Route
-
     run_id = f"fc-{uuid.uuid4().hex[:8]}"
     minted = await mint_actor_token(client, actor_id=f"agent:{run_id}", kind="agent")
     assert isinstance(minted, AuthoringResponse)
@@ -729,23 +809,7 @@ async def test_live_running_with_fresh_resume_claim_is_not_re_driven(
     checkpoints = tmp_path / "fc-cp.db"
     thread_id = f"thread-{run_id}"
 
-    recorded: list[dict[str, Any]] = []
-
-    async def _accept_dispatch(request: Any) -> JSONResponse:
-        recorded.append(await request.json())
-        return JSONResponse({"status": "dispatched"})
-
-    worker_app = Starlette(
-        routes=[Route("/dispatch", _accept_dispatch, methods=["POST"])]
-    )
-
-    async with (
-        AsyncSqliteSaver.from_conn_string(str(checkpoints)) as checkpointer,
-        httpx.AsyncClient(
-            transport=httpx.ASGITransport(app=worker_app),
-            base_url="http://worker",
-        ) as worker_client,
-    ):
+    async with AsyncSqliteSaver.from_conn_string(str(checkpoints)) as checkpointer:
         await checkpointer.setup()
         await _seed_parked_gate(
             session_factory,
@@ -755,34 +819,46 @@ async def test_live_running_with_fresh_resume_claim_is_not_re_driven(
             changeset_id=info["changeset_id"],
             status=ThreadStatus.RUNNING,
         )
-        # A FRESH claim on the exact current gate: a resume is already in flight.
+        # A FRESH lease on the exact current gate: a resume is already in flight.
+        # Claimed through the production verb with the production key and payload,
+        # so this is the same journal row a real in-flight resume would hold - not
+        # a hand-shaped stand-in the subscriber might read differently.
         async with session_factory() as db:
-            await update_thread_metadata(
+            seeded = await claim_control_action(
                 db,
-                thread_id,
-                _with_resume_claim(None, info["proposal_id"], time.time()),
+                thread_id=thread_id,
+                action_type=ControlActionType.RESUME,
+                idempotency_key=_verdict_resume_idempotency_key(info["proposal_id"]),
+                request_id=info["proposal_id"],
+                payload=_verdict_resume_payload("request_changes", None),
             )
-            await db.commit()
-        # Sanity: the claim is well within its TTL (in flight, not stale).
-        assert _RESUME_CLAIM_TTL_SECONDS > 5.0
+        # Sanity: the seed genuinely OWNS the lease, so the subscriber's own claim
+        # loses to a live owner rather than to an already-applied or absent row.
+        assert seeded.acquired, "seeded lease did not acquire the in-flight resume"
+        assert seeded.claim_token is not None
 
-        subscriber = VerdictSubscriber(
-            session_factory=session_factory,
-            checkpointer=checkpointer,
-            worker_client=worker_client,
-            circuit_breaker=WorkerCircuitBreaker(
-                failure_threshold=3, recovery_timeout=30.0
-            ),
-            worker_spawner=LazyWorkerSpawner(
-                worker_url="http://worker", worker_port=1, auto_spawn=False
-            ),
-            endpoint_provider=lambda: live_engine,
-            recursion_limit=25,
-        )
+        async with _worker_runtime(checkpointer) as (
+            worker_client,
+            worker_app,
+            _bridge,
+        ):
+            subscriber = VerdictSubscriber(
+                session_factory=session_factory,
+                checkpointer=checkpointer,
+                worker_client=worker_client,
+                circuit_breaker=WorkerCircuitBreaker(
+                    failure_threshold=3, recovery_timeout=30.0
+                ),
+                worker_spawner=LazyWorkerSpawner(
+                    worker_url="http://worker", worker_port=1, auto_spawn=False
+                ),
+                endpoint_provider=lambda: live_engine,
+                recursion_limit=25,
+            )
 
-        await subscriber._reconcile_parked_runs(live_engine)
+            await subscriber._reconcile_parked_runs(live_engine)
 
-        # The fresh claim short-circuited the resume: NO false re-drive.
-        assert recorded == [], f"in-flight resume was falsely re-driven: {recorded}"
+            # The fresh claim short-circuited the resume: NO false re-drive.
+            assert len(worker_app.state.dispatch_ids) == 0
 
     await db_engine.dispose()

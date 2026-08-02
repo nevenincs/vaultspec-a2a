@@ -20,6 +20,7 @@ from ..lifecycle.reconciliation import (
     ThreadSnapshot,
     compute_reconciliation_actions,
 )
+from ..thread.clarification import pending_clarification
 from ..thread.enums import (
     ControlActionResultStatus,
     ControlActionType,
@@ -42,7 +43,7 @@ async def probe_checkpoints(
     thread_ids: list[str],
     *,
     timeout: float = 5.0,
-) -> tuple[dict[str, bool], dict[str, str | None]]:
+) -> tuple[dict[str, bool], dict[str, str | None], dict[str, bool]]:
     """Probe checkpoint availability for a batch of threads.
 
     Returns:
@@ -50,6 +51,7 @@ async def probe_checkpoints(
     """
     availability: dict[str, bool] = {}
     errors: dict[str, str | None] = {}
+    clarifications: dict[str, bool] = {}
 
     for tid in thread_ids:
         error: str | None = None
@@ -61,16 +63,20 @@ async def probe_checkpoints(
                 timeout=timeout,
             )
             available = checkpoint_tuple is not None
+            clarifications[tid] = (
+                pending_clarification(checkpoint_tuple, thread_id=tid) is not None
+            )
         except TimeoutError:
             available = False
             error = "checkpoint_timeout"
         except Exception:
             available = False
             error = "checkpoint_unavailable"
+        clarifications.setdefault(tid, False)
         availability[tid] = available
         errors[tid] = error
 
-    return availability, errors
+    return availability, errors, clarifications
 
 
 async def execute_reconciliation(
@@ -163,7 +169,11 @@ async def reconcile_threads_on_startup(
 
     thread_ids = [s.thread_id for s in snapshots]
 
-    checkpoint_results, checkpoint_errors = await probe_checkpoints(
+    (
+        checkpoint_results,
+        checkpoint_errors,
+        pending_clarifications,
+    ) = await probe_checkpoints(
         checkpointer,
         thread_ids,
     )
@@ -182,6 +192,7 @@ async def reconcile_threads_on_startup(
         checkpoint_results,
         checkpoint_errors,
         pending_map,
+        pending_clarifications=pending_clarifications,
         strategy=strategy,
     )
 

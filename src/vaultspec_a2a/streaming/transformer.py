@@ -11,6 +11,7 @@ references to perform side effects but hold no state of their own.
 import asyncio
 import logging
 from collections.abc import Mapping
+from dataclasses import dataclass
 from pathlib import PurePath
 from typing import Any, cast
 from uuid import uuid4
@@ -437,6 +438,27 @@ async def process_langgraph_event(
         )
 
 
+@dataclass(frozen=True)
+class _InterruptEmission:
+    """One recognized graph interrupt, ready for its wire projection."""
+
+    thread_id: str
+    agent_id: str
+    request_id: str
+    interrupt_type: str
+    payload: dict[str, Any]
+
+
+_INTERRUPT_TYPES = frozenset(
+    {
+        "permission_request",
+        "plan_approval_request",
+        "document_approval_request",
+        CLARIFICATION_INTERRUPT_TYPE,
+    }
+)
+
+
 async def emit_interrupt_events(
     thread_id: str,
     _agent_id: str,
@@ -444,219 +466,258 @@ async def emit_interrupt_events(
     config: dict[str, Any],
     emitters: EventEmitters,
 ) -> bool:
-    """Inspect graph state after astream_events ends; emit PermissionRequestEvents.
+    """Inspect graph state after streaming and project every known interrupt."""
+    state = await _read_graph_state(thread_id, graph, config)
+    if state is None:
+        return False
 
-    Returns True if interrupts were detected and emitted.
-    """
-    timeout = domain_config.aget_state_timeout_seconds
+    tasks = getattr(state, "tasks", None)
+    if not tasks or not any(task.interrupts for task in tasks):
+        return False
 
+    for emission in _interrupt_emissions(thread_id, tasks):
+        if emission.request_id not in emitters._pending_permissions:
+            await _emit_interrupt(emission, emitters)
+    return True
+
+
+async def _read_graph_state(
+    thread_id: str, graph: StreamableGraph, config: dict[str, Any]
+) -> object | None:
+    """Read the final graph state without letting a failed read change the run."""
     try:
-        state = await asyncio.wait_for(graph.aget_state(config), timeout=timeout)
+        return await asyncio.wait_for(
+            graph.aget_state(config), timeout=domain_config.aget_state_timeout_seconds
+        )
     except TimeoutError:
         logger.warning(
             "Timed out inspecting state for interrupt detection on thread %s",
             thread_id,
         )
-        return False
     except Exception:
         logger.exception(
             "Failed to inspect state for interrupt detection on thread %s",
             thread_id,
         )
-        return False
+    return None
 
-    tasks = getattr(state, "tasks", None)
-    if not state or not tasks or not any(t.interrupts for t in tasks):
-        return False
 
-    interrupt_detected = True
-    for task in tasks:
-        if not task.interrupts:
-            continue
-
-        for interrupt_obj in task.interrupts:
-            payload = getattr(interrupt_obj, "value", interrupt_obj)
-            if not isinstance(payload, dict):
+def _interrupt_emissions(
+    thread_id: str, tasks: list[object] | tuple[object, ...]
+) -> list[_InterruptEmission]:
+    """Normalize recognized task interrupts while retaining their graph position."""
+    emissions: list[_InterruptEmission] = []
+    for task_index, task in enumerate(tasks):
+        for interrupt_index, interrupt in enumerate(task.interrupts):
+            payload = _interrupt_payload(interrupt)
+            if payload is None:
                 continue
             interrupt_type = payload.get("type")
-            if interrupt_type not in (
-                "permission_request",
-                "plan_approval_request",
-                "document_approval_request",
-                CLARIFICATION_INTERRUPT_TYPE,
-            ):
+            if interrupt_type not in _INTERRUPT_TYPES:
                 continue
-
-            task_idx = tasks.index(task)
-            interrupt_idx = task.interrupts.index(interrupt_obj)
-            request_id = str(
-                payload.get("request_id")
-                or getattr(interrupt_obj, "id", None)
-                or f"{thread_id}:task{task_idx}:int{interrupt_idx}"
-            )
-
-            if request_id in emitters._pending_permissions:
-                continue
-
-            if interrupt_type == CLARIFICATION_INTERRUPT_TYPE:
-                # The nudge, and only the nudge: the payload sitting right here
-                # holds the prompts and options, and none of it is passed on.
-                # A consumer learns THAT a question is waiting from this frame
-                # and WHAT it asks from the run's status snapshot, so a dropped
-                # frame costs a prompt to re-read, never the question itself.
-                await emitters.emit_clarification_pending(
+            emissions.append(
+                _InterruptEmission(
                     thread_id=thread_id,
                     agent_id=task.name,
-                    request_id=request_id,
-                )
-                await emitters.emit_agent_status(
-                    thread_id=thread_id,
-                    agent_id=task.name,
-                    node_name=task.name,
-                    state=AgentLifecycleState.INPUT_REQUIRED,
-                    detail="Awaiting an answer to a clarifying question",
-                )
-            elif interrupt_type == "plan_approval_request":
-                feature: str = payload.get("feature") or "unknown"
-                plan_paths: list[str] = payload.get("plan_paths") or []
-                exec_worker: str = payload.get("exec_worker") or "unknown"
-                plan_summary = (
-                    f"{len(plan_paths)} plan document(s)"
-                    if plan_paths
-                    else "no plan documents"
-                )
-                description = (
-                    f"Approve plan for feature '{feature}' before "
-                    f"routing to {exec_worker} ({plan_summary})"
-                )
-                options: list[dict[str, Any]] = [
-                    {
-                        "option_id": "approve",
-                        "name": "Approve Plan",
-                        "kind": PermissionOptionKind.ALLOW_ONCE,
-                    },
-                    {
-                        "option_id": "reject",
-                        "name": "Reject — Revise Plan",
-                        "kind": PermissionOptionKind.REJECT_ONCE,
-                    },
-                ]
-                await emitters.emit_permission_request(
-                    thread_id=thread_id,
-                    agent_id=task.name,
-                    request_id=request_id,
-                    description=description,
-                    options=options,
-                    tool_call=PermissionType.PLAN_APPROVAL,
-                )
-                await emitters.emit_agent_status(
-                    thread_id=thread_id,
-                    agent_id=task.name,
-                    node_name=task.name,
-                    state=AgentLifecycleState.INPUT_REQUIRED,
-                    detail=f"Awaiting plan approval for feature '{feature}'",
-                )
-            elif interrupt_type == "document_approval_request":
-                doc_phase: str = payload.get("phase") or "document"
-                doc_feature: str = payload.get("feature") or "unknown"
-                description = (
-                    f"Approve the {doc_phase} document for feature "
-                    f"'{doc_feature}' before the run proceeds"
-                )
-                options = [
-                    {
-                        "option_id": "approve",
-                        "name": "Approve Document",
-                        "kind": PermissionOptionKind.ALLOW_ONCE,
-                    },
-                    {
-                        "option_id": "reject",
-                        "name": "Reject — Revise Document",
-                        "kind": PermissionOptionKind.REJECT_ONCE,
-                    },
-                ]
-                await emitters.emit_permission_request(
-                    thread_id=thread_id,
-                    agent_id=task.name,
-                    request_id=request_id,
-                    description=description,
-                    options=options,
-                    tool_call=PermissionType.PLAN_APPROVAL,
-                )
-                await emitters.emit_agent_status(
-                    thread_id=thread_id,
-                    agent_id=task.name,
-                    node_name=task.name,
-                    state=AgentLifecycleState.INPUT_REQUIRED,
-                    detail=(
-                        f"Awaiting {doc_phase} document approval for feature "
-                        f"'{doc_feature}'"
+                    request_id=_request_id(
+                        thread_id, task_index, interrupt_index, interrupt, payload
                     ),
+                    interrupt_type=interrupt_type,
+                    payload=payload,
                 )
-            else:
-                tool_name: str = payload.get("tool_name", "unknown")
-                acp_options: list[dict[str, Any]] = payload.get("options", [])
+            )
+    return emissions
 
-                # The ACP wire spells the identity ``optionId``; our snake_case
-                # surfaces spell it ``option_id``. Resolving it once through the
-                # canonical predicate keeps this projection from re-deriving the
-                # rule — and from forwarding a null id when the key is present
-                # but carries no usable string.
-                #
-                # The kind is read from the agent's own declaration, not guessed
-                # from the id: this projection feeds the durable options column, so
-                # a denial the agent declared under an unguessable id must survive
-                # to every later reader of the record.
-                options = []
-                for opt in acp_options:
-                    opt_fields = opt if isinstance(opt, dict) else {}
-                    opt_id = option_id_of(opt)
-                    declared_kind = opt_fields.get("kind")
-                    kind = resolve_acp_option_kind(declared_kind, opt_id or "")
-                    if declared_kind and kind != declared_kind:
-                        logger.warning(
-                            "Permission option %r declared unrecognised kind %r; "
-                            "derived %s from the option id instead",
-                            opt_id,
-                            declared_kind,
-                            kind.value,
-                        )
-                    options.append(
-                        {
-                            "option_id": opt_id or "allow_once",
-                            "name": opt_fields.get(
-                                "label", opt_fields.get("name", opt_id or "Allow")
-                            ),
-                            "kind": kind,
-                        }
-                    )
-                if not options:
-                    options = [
-                        {
-                            "option_id": "allow_once",
-                            "name": "Allow",
-                            "kind": PermissionOptionKind.ALLOW_ONCE,
-                        },
-                        {
-                            "option_id": "deny_once",
-                            "name": "Deny",
-                            "kind": PermissionOptionKind.REJECT_ONCE,
-                        },
-                    ]
 
-                await emitters.emit_permission_request(
-                    thread_id=thread_id,
-                    agent_id=task.name,
-                    request_id=request_id,
-                    description=f"Permission required: {tool_name}",
-                    options=options,
-                    tool_call=tool_name,
-                )
-                await emitters.emit_agent_status(
-                    thread_id=thread_id,
-                    agent_id=task.name,
-                    node_name=task.name,
-                    state=AgentLifecycleState.INPUT_REQUIRED,
-                    detail=f"Awaiting approval for {tool_name}",
-                )
-    return interrupt_detected
+def _interrupt_payload(interrupt: object) -> dict[str, Any] | None:
+    """Return a LangGraph interrupt payload when it has the expected mapping shape."""
+    payload = getattr(interrupt, "value", interrupt)
+    return payload if isinstance(payload, dict) else None
+
+
+def _request_id(
+    thread_id: str,
+    task_index: int,
+    interrupt_index: int,
+    interrupt: object,
+    payload: dict[str, Any],
+) -> str:
+    """Resolve the durable request identity in the established precedence order."""
+    return str(
+        payload.get("request_id")
+        or getattr(interrupt, "id", None)
+        or f"{thread_id}:task{task_index}:int{interrupt_index}"
+    )
+
+
+async def _emit_interrupt(
+    emission: _InterruptEmission, emitters: EventEmitters
+) -> None:
+    """Route one recognized interrupt to its explicit projection branch."""
+    if emission.interrupt_type == CLARIFICATION_INTERRUPT_TYPE:
+        await _emit_clarification(emission, emitters)
+    elif emission.interrupt_type == "plan_approval_request":
+        await _emit_plan_approval(emission, emitters)
+    elif emission.interrupt_type == "document_approval_request":
+        await _emit_document_approval(emission, emitters)
+    else:
+        await _emit_tool_permission(emission, emitters)
+
+
+async def _emit_clarification(
+    emission: _InterruptEmission, emitters: EventEmitters
+) -> None:
+    """Emit only a nudge: question material belongs to the durable snapshot."""
+    await emitters.emit_clarification_pending(
+        thread_id=emission.thread_id,
+        agent_id=emission.agent_id,
+        request_id=emission.request_id,
+    )
+    await _emit_input_required(
+        emission,
+        emitters,
+        "Awaiting an answer to a clarifying question",
+    )
+
+
+async def _emit_plan_approval(
+    emission: _InterruptEmission, emitters: EventEmitters
+) -> None:
+    """Project a plan approval interrupt into its durable permission frame."""
+    feature = emission.payload.get("feature") or "unknown"
+    plan_paths = emission.payload.get("plan_paths") or []
+    exec_worker = emission.payload.get("exec_worker") or "unknown"
+    plan_summary = f"{len(plan_paths)} plan document(s)" if plan_paths else "no plan documents"
+    await _emit_approval_request(
+        emission,
+        emitters,
+        f"Approve plan for feature '{feature}' before routing to {exec_worker} ({plan_summary})",
+        _approval_options("Plan"),
+        f"Awaiting plan approval for feature '{feature}'",
+    )
+
+
+async def _emit_document_approval(
+    emission: _InterruptEmission, emitters: EventEmitters
+) -> None:
+    """Project a document approval interrupt into its durable permission frame."""
+    phase = emission.payload.get("phase") or "document"
+    feature = emission.payload.get("feature") or "unknown"
+    await _emit_approval_request(
+        emission,
+        emitters,
+        f"Approve the {phase} document for feature '{feature}' before the run proceeds",
+        _approval_options("Document"),
+        f"Awaiting {phase} document approval for feature '{feature}'",
+    )
+
+
+async def _emit_approval_request(
+    emission: _InterruptEmission,
+    emitters: EventEmitters,
+    description: str,
+    options: list[dict[str, Any]],
+    status_detail: str,
+) -> None:
+    """Emit one approval request and its matching input-required status."""
+    await emitters.emit_permission_request(
+        thread_id=emission.thread_id,
+        agent_id=emission.agent_id,
+        request_id=emission.request_id,
+        description=description,
+        options=options,
+        tool_call=PermissionType.PLAN_APPROVAL,
+    )
+    await _emit_input_required(emission, emitters, status_detail)
+
+
+def _approval_options(subject: str) -> list[dict[str, Any]]:
+    """Return the stable approve/reject pair for a plan or document decision."""
+    return [
+        {
+            "option_id": "approve",
+            "name": f"Approve {subject}",
+            "kind": PermissionOptionKind.ALLOW_ONCE,
+        },
+        {
+            "option_id": "reject",
+            "name": f"Reject — Revise {subject}",
+            "kind": PermissionOptionKind.REJECT_ONCE,
+        },
+    ]
+
+
+async def _emit_tool_permission(
+    emission: _InterruptEmission, emitters: EventEmitters
+) -> None:
+    """Project a provider tool permission while retaining its declared option kinds."""
+    tool_name = emission.payload.get("tool_name", "unknown")
+    await emitters.emit_permission_request(
+        thread_id=emission.thread_id,
+        agent_id=emission.agent_id,
+        request_id=emission.request_id,
+        description=f"Permission required: {tool_name}",
+        options=_permission_options(emission.payload.get("options", [])),
+        tool_call=tool_name,
+    )
+    await _emit_input_required(
+        emission, emitters, f"Awaiting approval for {tool_name}"
+    )
+
+
+def _permission_options(raw_options: object) -> list[dict[str, Any]]:
+    """Normalize ACP option identities and honor valid declared permission kinds."""
+    options: list[dict[str, Any]] = []
+    if isinstance(raw_options, list):
+        for option in raw_options:
+            options.append(_permission_option(option))
+    return options or _default_permission_options()
+
+
+def _permission_option(option: object) -> dict[str, Any]:
+    """Project one ACP option, deriving a kind only for an invalid declaration."""
+    fields = option if isinstance(option, dict) else {}
+    option_id = option_id_of(option)
+    declared_kind = fields.get("kind")
+    kind = resolve_acp_option_kind(declared_kind, option_id or "")
+    if declared_kind and kind != declared_kind:
+        logger.warning(
+            "Permission option %r declared unrecognised kind %r; derived %s from the option id instead",
+            option_id,
+            declared_kind,
+            kind.value,
+        )
+    return {
+        "option_id": option_id or "allow_once",
+        "name": fields.get("label", fields.get("name", option_id or "Allow")),
+        "kind": kind,
+    }
+
+
+def _default_permission_options() -> list[dict[str, Any]]:
+    """Keep an omitted provider option list answerable."""
+    return [
+        {
+            "option_id": "allow_once",
+            "name": "Allow",
+            "kind": PermissionOptionKind.ALLOW_ONCE,
+        },
+        {
+            "option_id": "deny_once",
+            "name": "Deny",
+            "kind": PermissionOptionKind.REJECT_ONCE,
+        },
+    ]
+
+
+async def _emit_input_required(
+    emission: _InterruptEmission, emitters: EventEmitters, detail: str
+) -> None:
+    """Record that the task is parked until a human provides an answer."""
+    await emitters.emit_agent_status(
+        thread_id=emission.thread_id,
+        agent_id=emission.agent_id,
+        node_name=emission.agent_id,
+        state=AgentLifecycleState.INPUT_REQUIRED,
+        detail=detail,
+    )

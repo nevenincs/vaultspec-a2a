@@ -214,10 +214,10 @@ class Model(StrEnum):
 # Concrete model name mapping as of February 2026
 MODEL_MAP: dict[Provider, dict[Model, str]] = {
     Provider.CLAUDE: {
-        Model.LOW: "claude-4.5-haiku",
-        Model.MID: "claude-4.6-sonnet",
-        Model.HIGH: "claude-4.6-opus",
-        Model.MAX: "claude-4.6-opus",
+        Model.LOW: "haiku",
+        Model.MID: "sonnet",
+        Model.HIGH: "opus",
+        Model.MAX: "opus",
     },
     Provider.GEMINI: {
         Model.LOW: "gemini-2.5-flash",
@@ -265,14 +265,17 @@ MODEL_MAP: dict[Provider, dict[Model, str]] = {
     # endpoint consumed through the Claude ACP path; the model names mirror
     # Provider.ZHIPU.
     Provider.ZAI: {
-        Model.LOW: "glm-4.7-flash",
-        Model.MID: "glm-4.7-flagship",
-        Model.HIGH: "glm-5",
-        Model.MAX: "glm-5",
+        # Z.ai runs through the Claude ACP adapter, whose negotiated picker
+        # accepts Claude capability aliases and resolves them at the gateway.
+        Model.LOW: "haiku",
+        Model.MID: "sonnet",
+        Model.HIGH: "opus",
+        Model.MAX: "opus",
     },
-    # Kimi (Moonshot AI) drives its own `kimi acp` agent; KIMI_MODEL_NAME
-    # selects the model. The names are the kimi-k2 family the installed
-    # kimi-cli 1.49.0 recognizes (source guards on `startswith("kimi-k2")`),
+    # Kimi (Moonshot AI) drives its own `kimi acp` agent; the factory injects
+    # the profile-resolved model through KIMI_MODEL_NAME. The names are the
+    # kimi-k2 family the installed kimi-cli 1.49.0 recognizes (source guards on
+    # `startswith("kimi-k2")`),
     # with the thinking variant at the higher tiers. The account's exact
     # available ids are confirmed only on KIMI_API_KEY arrival (P05).
     Provider.KIMI: {

@@ -254,17 +254,20 @@ async def test_stdio_binding_wires_stdio_server_to_real_subprocess(
 
 
 @pytest.mark.asyncio
-async def test_stdio_binding_surfaces_bridge_into_isolated_home(
+async def test_stdio_binding_surfaces_bridge_into_workspace_projection(
     tmp_path: Path,
 ) -> None:
-    """The real spawn writes the bridge into the isolated home as placeholders (S18).
+    """The real spawn projects the bridge into the run workspace as placeholders.
 
-    Drives ``AcpChatModel`` through a real subprocess with env-carried auth, so the
-    ``should_isolate_config_home`` branch composes the authoring bridge into the
-    per-run ``CLAUDE_CONFIG_DIR``. The subprocess reports its OWN home file and
-    OWN environment: the ``.claude.json`` must surface the bridge with ${VAR}
-    placeholders and carry NO real token, while the real bearer must be present in
-    the spawn env (proving ``config_home_authoring_entry`` is wired live, not dead).
+    Drives ``AcpChatModel`` through a real subprocess so the armed-run branch
+    projects the authoring bridge into the run workspace's ``.mcp.json`` and
+    writes the confinement ``settings.local.json`` beside it - the config home
+    is never redirected (the child inherits the operator's real environment).
+    The subprocess reports its OWN cwd files and OWN environment: the projected
+    ``.mcp.json`` must surface the bridge with ${VAR} placeholders and carry NO
+    real token, the settings must enable exactly the declared name, and the real
+    bearer must be present in the spawn env (proving
+    ``config_home_authoring_entry`` is wired live, not dead).
     """
     from ....providers.acp_chat_model import AcpChatModel
 
@@ -278,7 +281,7 @@ async def test_stdio_binding_surfaces_bridge_into_isolated_home(
             "--record-config-home",
             str(record_file),
         ],
-        env_vars={"ANTHROPIC_AUTH_TOKEN": "env-auth-token"},
+        env_vars={},
         workspace_root=str(tmp_path),
     )
     node = create_worker_node(
@@ -292,21 +295,32 @@ async def test_stdio_binding_surfaces_bridge_into_isolated_home(
     await node(_make_state())
 
     recorded = json.loads(record_file.read_text(encoding="utf-8"))
-    claude_json = recorded["claude_json"]
-    assert claude_json is not None, "subprocess saw no CLAUDE_CONFIG_DIR/.claude.json"
-    cfg = json.loads(claude_json)
+    # No config-home redirect: the child resolves the operator's real login.
+    assert recorded["config_home"] is None
+    mcp_json = recorded["workspace_mcp_json"]
+    assert mcp_json is not None, "subprocess saw no projected .mcp.json in its cwd"
+    cfg = json.loads(mcp_json)
     bridge = cfg["mcpServers"]["vaultspec-authoring"]
     assert bridge["type"] == "stdio"
     assert bridge["args"] == ["-m", "vaultspec_a2a.protocols.mcp.authoring_stdio"]
     # On-disk env is placeholders only.
-    home_env = bridge["env"]
-    assert home_env["VAULTSPEC_AUTHORING_BEARER"] == "${VAULTSPEC_AUTHORING_BEARER}"
+    disk_env = bridge["env"]
+    assert disk_env["VAULTSPEC_AUTHORING_BEARER"] == "${VAULTSPEC_AUTHORING_BEARER}"
     # The real bearer NEVER appears on disk...
-    assert "machine-bearer-xyz" not in claude_json
+    assert "machine-bearer-xyz" not in mcp_json
     # ...but IS hoisted into the subprocess spawn env for the CLI to expand.
     spawn_env = recorded["authoring_env"]
     assert spawn_env["VAULTSPEC_AUTHORING_BEARER"] == "machine-bearer-xyz"
     assert spawn_env["VAULTSPEC_AUTHORING_RUN_ID"] == _THREAD_ID
+    # The confinement settings enable exactly the declared name.
+    settings_json = recorded["workspace_settings_json"]
+    assert settings_json is not None, "subprocess saw no confinement settings"
+    settings = json.loads(settings_json)
+    assert settings["enableAllProjectMcpServers"] is False
+    assert settings["enabledMcpjsonServers"] == ["vaultspec-authoring"]
+    # Both projections are inverted once the turn ends.
+    assert not (tmp_path / ".mcp.json").exists()
+    assert not (tmp_path / ".claude" / "settings.local.json").exists()
 
 
 @pytest.mark.asyncio

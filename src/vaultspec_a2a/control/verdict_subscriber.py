@@ -47,13 +47,15 @@ from ..database import (
     get_pending_permission_requests,
     get_thread,
     list_threads,
+    mark_control_action_applied,
     mark_permission_request_applied,
     set_authoring_cursor,
-    update_thread_metadata,
     update_thread_status,
 )
 from ..ipc.schemas import DispatchRequest, to_dispatch_action
+from ..thread.dispatch_policy import evaluate_dispatch_failure
 from ..thread.enums import ControlActionType, ThreadStatus
+from .action_lease import claim_control_action, release_definite_non_delivery
 from .dispatch import safe_dispatch
 
 if TYPE_CHECKING:
@@ -65,10 +67,11 @@ if TYPE_CHECKING:
 
     from ..authoring import EngineEndpoint
     from ..database.checkpoints import Checkpointer
+    from ..database.models import ControlActionModel
     from .circuit_breaker import WorkerCircuitBreaker
     from .worker_management import LazyWorkerSpawner
 
-__all__ = ["VerdictSubscriber"]
+__all__ = ["VerdictSubscriber", "settle_verdict_dispatch_receipt"]
 
 logger = logging.getLogger(__name__)
 
@@ -83,29 +86,6 @@ _GATE_PENDING_PROPOSAL_FIELD = "gate_pending_proposal_id"
 # verdict proposals (the AUTO submit-time race recovery). Bounded so a legitimately
 # parked HUMAN gate does not fetch a recovery snapshot every poll cycle.
 _PARKED_RECONCILE_INTERVAL_SECONDS = 10.0
-
-# The thread-metadata key holding the in-flight resume CLAIM: the gate proposal a
-# resume was last dispatched for, plus its wall-clock (``time.time()``) timestamp.
-# Wall clock, not monotonic: the claim is DURABLE and outlives the gateway process,
-# so its staleness must remain comparable across a restart (a monotonic stamp from a
-# dead process is meaningless to a fresh one and would misjudge a stale claim as
-# fresh, orphaning the run). It is the
-# durable "this gate's verdict is being resumed" marker written BEFORE dispatch so
-# a second trigger (SSE event / reconcile sweep / gap recovery) for the SAME gate
-# skips instead of double-dispatching. It is a lease, not a fire-once flag: a claim
-# older than the TTL is STALE, so a still-parked run whose dispatch was lost
-# (process died or dispatch failed in the claim->resume window) is legitimately
-# re-driven rather than orphaned. This is an ordering symmetry applied to resume:
-# durable first, liveness preserved.
-_RESUME_CLAIM_FIELD = "resume_claim"
-
-# A resume claim older than this is stale and re-drivable. Sized to cover the
-# projection-lag window between a resume's checkpoint write and its durable
-# side-tables landing (seconds), NOT a full re-authoring turn - a concurrent
-# re-dispatch during an ACTIVE resume is already blocked by the worker's
-# per-thread ingest-active lock, so the lease only guards the post-ingest window
-# where the run's parked state has not yet reflected the advance.
-_RESUME_CLAIM_TTL_SECONDS = 90.0
 
 
 class _RecoveryProposal(TypedDict):
@@ -151,39 +131,40 @@ def _json_object_mapping(value: str) -> Mapping[str, object] | None:
     return _object_mapping(loaded)
 
 
-def _read_resume_claim(thread_metadata: str | None) -> tuple[str, float] | None:
-    """Return ``(claimed_proposal_id, claimed_ts)`` from a thread's metadata blob."""
-    if not thread_metadata:
-        return None
-    try:
-        meta = _json_object_mapping(thread_metadata)
-    except (json.JSONDecodeError, TypeError):
-        return None
-    if meta is None:
-        return None
-    claim = meta.get(_RESUME_CLAIM_FIELD)
-    claim_mapping = _object_mapping(claim)
-    if claim_mapping is None:
-        return None
-    proposal_id = claim_mapping.get("proposal_id")
-    ts = claim_mapping.get("ts")
-    if isinstance(proposal_id, str) and proposal_id and isinstance(ts, (int, float)):
-        return proposal_id, float(ts)
-    return None
+def _verdict_resume_idempotency_key(proposal_id: str) -> str:
+    """Return the request-level journal key for one document-gate verdict."""
+    return f"authoring-verdict:{proposal_id}"
 
 
-def _with_resume_claim(thread_metadata: str | None, proposal_id: str, ts: float) -> str:
-    """Merge a resume claim into a metadata blob, preserving every other key."""
-    meta: dict[str, object] = {}
-    if thread_metadata:
-        try:
-            loaded = _json_object_mapping(thread_metadata)
-        except (json.JSONDecodeError, TypeError):
-            loaded = None
-        if loaded is not None:
-            meta = dict(loaded)
-    meta[_RESUME_CLAIM_FIELD] = {"proposal_id": proposal_id, "ts": ts}
-    return json.dumps(meta)
+def _verdict_resume_payload(verdict: str, notes: str | None) -> dict[str, object]:
+    """Return the typed durable payload dispatched for a verdict resume."""
+    return {"verdict": verdict, "notes": notes}
+
+
+async def settle_verdict_dispatch_receipt(
+    db: AsyncSession,
+    action: ControlActionModel,
+) -> bool:
+    """Apply an exact worker receipt for one authoring-verdict resume.
+
+    Stable dispatch identity selects the action before this helper is called. The
+    journal key then distinguishes verdict resumes from clarification and permission
+    resumes that share the same wire action but have different application owners.
+    The caller owns the transaction commit.
+    """
+    if (
+        action.action_type != ControlActionType.RESUME.value
+        or not action.idempotency_key.startswith("authoring-verdict:")
+        or action.applied_at is not None
+    ):
+        return False
+    await mark_control_action_applied(db, action.id)
+    pending = await get_pending_permission_requests(db, thread_id=action.thread_id)
+    for permission in pending:
+        if permission.pause_reason_type == "document_approval_request":
+            await mark_permission_request_applied(db, request_id=permission.request_id)
+    await update_thread_status(db, action.thread_id, ThreadStatus.RUNNING)
+    return True
 
 
 def _gate_resume_verdict(status: str) -> str | None:
@@ -370,8 +351,8 @@ class VerdictSubscriber:
             )
             # recovery_required wedge: a run whose checkpoint is parked at
             # a gate interrupt can be left mis-statused RUNNING rather than
-            # INPUT_REQUIRED - either because a prior gate's verdict resume set
-            # RUNNING (``_resume_with_verdict``, optimistic) and that write raced
+            # INPUT_REQUIRED - either because a prior gate's application receipt set
+            # RUNNING and that write raced
             # AFTER the next gate's permission event set INPUT_REQUIRED (a
             # cross-writer clobber), or because that gate's permission event never
             # landed. Such a run is parked-in-checkpoint but invisible to an
@@ -639,13 +620,9 @@ class VerdictSubscriber:
     ) -> None:
         """Dispatch ``Command(resume={"verdict", "notes"})`` to a parked run.
 
-        The verdict answers the document gate the run is parked at, so its durable
-        permission row is resolved on a successful resume - otherwise the row is
-        stranded pending while the checkpoint interrupt it belonged to is gone, and
-        run-status (the authoritative recovery read) asserts ``recovery_required``
-        and masks the real ``awaiting_adr_decision`` phase. Only the
-        rows that existed BEFORE this resume are resolved; the next gate parks with
-        its own fresh row after the run advances.
+        The worker HTTP response acknowledges scheduling only. The exact internal
+        ``dispatch_applied`` receipt owns journal, permission-row, and RUNNING
+        settlement after graph execution actually begins.
 
         Two ordering invariants close the intermittent request_changes-recovery
         race, both keyed on the run's CURRENT gate proposal:
@@ -658,12 +635,11 @@ class VerdictSubscriber:
           id set, so it is skipped rather than applied to the wrong gate's interrupt
           - a stale resume that corrupts the checkpoint's interrupt lineage and
           wedges the run at ``next_nodes=[]``.
-        - **Durable claim before dispatch.** A resume writes a durable claim on the
-          current gate proposal BEFORE dispatching, so a second trigger for the SAME
-          gate sees a fresh claim and skips instead of double-dispatching. The claim
-          is a lease, not a fire-once flag: a stale claim (dispatch lost in the
-          claim->resume window) is re-drivable, so a lost dispatch is retried, never
-          orphaned.
+        - **Durable lease before dispatch.** The shared control-action journal
+          reserves the current gate's typed verdict and atomically elects one lease
+          owner before dispatch. Identical fresh replays skip, competing verdict
+          payloads conflict without replacing the winner, and an expired lease is
+          re-drivable so a lost dispatch never permanently orphans the run.
         """
         async with self._session_factory() as db:
             thread = await get_thread(db, thread_id)
@@ -686,48 +662,36 @@ class VerdictSubscriber:
             )
             return
 
-        # Durable claim: skip a same-gate resume already in flight (fresh claim);
-        # re-drive a stale one (lost dispatch). Lease keyed on the current gate.
-        # Wall clock so the durable stamp stays comparable across a gateway restart.
-        now = time.time()
-        claim = _read_resume_claim(thread_metadata)
-        if (
-            claim is not None
-            and claim[0] == current_gate
-            and now - claim[1] < _RESUME_CLAIM_TTL_SECONDS
-        ):
-            logger.debug(
-                "Skipping resume for thread %s: fresh resume claim on gate %s "
-                "(age %.1fs < %.0fs TTL)",
-                thread_id,
-                current_gate,
-                now - claim[1],
-                _RESUME_CLAIM_TTL_SECONDS,
-            )
-            return
-        # This whole-blob read-modify-write (merge the claim into the
-        # ``thread_metadata`` read at the top of dispatch, write it all back) is
-        # lost-update-safe ONLY because the verdict subscriber is the sole writer
-        # of ``thread_metadata`` after thread creation. A second concurrent writer
-        # elsewhere would silently clobber this claim, reopening the
-        # claim->resume race the lease exists to close.
+        resume_value = _verdict_resume_payload(verdict, notes)
         async with self._session_factory() as db:
-            await update_thread_metadata(
-                db, thread_id, _with_resume_claim(thread_metadata, current_gate, now)
+            claim = await claim_control_action(
+                db,
+                thread_id=thread_id,
+                action_type=ControlActionType.RESUME,
+                idempotency_key=_verdict_resume_idempotency_key(current_gate),
+                request_id=current_gate,
+                payload=resume_value,
             )
-            await db.commit()
-
-        async with self._session_factory() as db:
-            parked_gate_request_ids = [
-                permission.request_id
-                for permission in await get_pending_permission_requests(
-                    db, thread_id=thread_id
+            if not claim.payload_matches:
+                logger.warning(
+                    "Skipping competing verdict resume for thread %s gate %s",
+                    thread_id,
+                    current_gate,
                 )
-                if permission.pause_reason_type == "document_approval_request"
-            ]
+                return
+            if not claim.acquired:
+                logger.debug(
+                    "Skipping verdict resume replay for thread %s gate %s (applied=%s)",
+                    thread_id,
+                    current_gate,
+                    claim.applied,
+                )
+                return
+        if claim.claim_token is None:
+            raise RuntimeError("acquired verdict lease has no claim token")
 
-        resume_value: dict[str, str | None] = {"verdict": verdict, "notes": notes}
         dispatch = DispatchRequest(
+            dispatch_id=claim.dispatch_id,
             action=to_dispatch_action(ControlActionType.RESUME),
             thread_id=thread_id,
             option_id=resume_value,
@@ -750,20 +714,19 @@ class VerdictSubscriber:
             trace_headers=trace_headers,
         )
         if not outcome.success:
+            _policy, failure_type = evaluate_dispatch_failure(outcome.failure_type)
+            async with self._session_factory() as db:
+                await release_definite_non_delivery(db, claim, failure_type)
             logger.warning(
                 "Verdict resume dispatch failed for thread %s: %s",
                 thread_id,
                 outcome.detail,
             )
             return
-        async with self._session_factory() as db:
-            # Resolve the answered gate's durable permission row(s) so run-status
-            # does not strand them as recovery_required drift once the run advances
-            # past the gate's checkpoint interrupt.
-            for request_id in parked_gate_request_ids:
-                await mark_permission_request_applied(db, request_id=request_id)
-            await update_thread_status(db, thread_id, ThreadStatus.RUNNING)
-            await db.commit()
+
+        # Receipt-driven settlement occurs in the worker-event handler. Keeping the
+        # lease fresh here prevents an HTTP acknowledgement from masquerading as
+        # graph application while preserving stable-ID replay suppression.
 
     # ------------------------------------------------------------------
     # Cursor persistence

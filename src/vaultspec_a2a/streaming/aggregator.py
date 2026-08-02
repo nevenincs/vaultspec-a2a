@@ -337,9 +337,16 @@ class EventAggregator:
         graph: StreamableGraph,
         graph_input: dict[str, Any] | Command | None,
         config: dict[str, Any],
+        *,
+        on_graph_started: Callable[[], Awaitable[None]] | None = None,
     ) -> str:
         return await self._ingest.ingest(
-            thread_id, agent_id, graph, graph_input, config
+            thread_id,
+            agent_id,
+            graph,
+            graph_input,
+            config,
+            on_graph_started=on_graph_started,
         )
 
     # -- Shutdown -------------------------------------------------------

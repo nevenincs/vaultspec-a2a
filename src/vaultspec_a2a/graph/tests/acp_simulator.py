@@ -12,18 +12,21 @@ import sys
 
 
 def _record_config_home(path: str) -> None:
-    """Dump the spawned subprocess's isolated CLI home and authoring env.
+    """Dump the spawned subprocess's config surfaces and authoring env.
 
-    Written for the S18 real-seam composition test: the subprocess reads its OWN
-    ``CLAUDE_CONFIG_DIR`` (what ``AcpChatModel`` actually wrote to disk) and its
-    OWN environment (what the model hoisted into the spawn env), so a test can
-    assert the placeholders live on disk while the real tokens live only in the
-    process environment.
+    Written for the real-seam composition tests: the subprocess reads its OWN
+    ``CLAUDE_CONFIG_DIR`` (when one is set), its OWN cwd's projected
+    ``.mcp.json`` and ``.claude/settings.local.json`` (what ``AcpChatModel``
+    actually wrote into the run workspace), and its OWN environment (what the
+    model hoisted into the spawn env), so a test can assert the placeholders
+    live on disk while the real tokens live only in the process environment.
     """
     home = os.environ.get("CLAUDE_CONFIG_DIR")
     payload: dict[str, object] = {
         "config_home": home,
         "claude_json": None,
+        "workspace_mcp_json": None,
+        "workspace_settings_json": None,
         "authoring_env": {
             k: v for k, v in os.environ.items() if k.startswith("VAULTSPEC_AUTHORING_")
         },
@@ -33,6 +36,14 @@ def _record_config_home(path: str) -> None:
         if os.path.exists(cfg):
             with open(cfg, encoding="utf-8") as fh:
                 payload["claude_json"] = fh.read()
+    for key, relative in (
+        ("workspace_mcp_json", ".mcp.json"),
+        ("workspace_settings_json", os.path.join(".claude", "settings.local.json")),
+    ):
+        candidate = os.path.join(os.getcwd(), relative)
+        if os.path.exists(candidate):
+            with open(candidate, encoding="utf-8") as fh:
+                payload[key] = fh.read()
     with open(path, "w", encoding="utf-8") as fh:
         json.dump(payload, fh)
 

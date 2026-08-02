@@ -193,6 +193,9 @@ capability = "low"
 provider = "codex"
 capability = "low"
 
+[team.profiles.codex.roles.vaultspec-doc-reviewer]
+capability = "low"
+
 # `codex-all` is the single-provider Codex lane: unlike the mixed `codex` profile
 # above, it also routes the inner doc-reviewer to `codex`, so no role falls back
 # to the team default (claude) and a run needs exactly one provider's auth. The
@@ -258,6 +261,9 @@ capability = "low"
 provider = "zai"
 capability = "low"
 
+[team.profiles.zai.roles.vaultspec-doc-reviewer]
+capability = "low"
+
 # `kimi` is the Kimi (Moonshot AI) provider-axis lane. Credential-gated on
 # KIMI_API_KEY: the harness skips this lane loudly (naming the missing key) when
 # the key is absent from the environment, and never fakes it. The four
@@ -286,6 +292,9 @@ capability = "low"
 
 [team.profiles.kimi.roles.vaultspec-plan-author]
 provider = "kimi"
+capability = "low"
+
+[team.profiles.kimi.roles.vaultspec-doc-reviewer]
 capability = "low"
 
 # `kimi-all` is the single-provider Kimi lane, the Kimi counterpart of

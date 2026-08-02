@@ -111,6 +111,7 @@ _SCRUB_SECRET_KEYS: list[str] = [
     "AZURE_OPENAI_API_KEY",
     "ZHIPU_API_KEY",
     "LANGCHAIN_API_KEY",
+    "LANGSMITH_API_KEY",
     "LANGCHAIN_TRACING_V2",
     # ANTHROPIC_LOG causes SDK debug text on stdout → JSON-RPC corruption.
     "ANTHROPIC_LOG",
@@ -184,6 +185,11 @@ class TestCredentialScrubbing:
     process boundary, never a monkeypatch of the running interpreter. A single
     module-scoped child spawn produces one resolved-env snapshot; each test asserts
     its own slice of the scrub/preserve contract against that shared real result.
+
+    The contract: a spawned agent is lower-trust than the service that spawns it,
+    so an ambient credential must not become a credential the agent can spend. The
+    provider layer re-injects the auth a lane intentionally supports; nothing here
+    is inherited by accident.
     """
 
     @pytest.mark.parametrize("secret_key", _SCRUB_SECRET_KEYS)

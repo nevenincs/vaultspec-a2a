@@ -292,17 +292,19 @@ async def test_dispatch_failure_that_marks_run_failed_releases_admission(
 
 
 @pytest.mark.asyncio(loop_scope="function")
-async def test_followup_dispatch_failure_that_marks_run_failed_releases_admission(
+async def test_followup_dispatch_failure_keeps_the_live_run_admitted(
     session_factory, checkpointer
 ) -> None:
-    """A follow-up dispatch failure that settles the run FAILED releases it.
+    """A follow-up whose acknowledgement is lost must not evict the live run.
 
     The run starts and dispatches normally against the in-process worker, then
     the worker client is swapped for one pointed at a closed loopback port, so
-    the follow-up message takes a real transport refusal and the message service
-    marks the thread FAILED. That is a terminal run whose worker never received
-    the follow-up, so no terminal event follows it: the messages route is the
-    only site that can release its admission.
+    the follow-up message takes a real transport refusal. That refusal is
+    ambiguous - the worker may have taken the follow-up before the reply was
+    lost - and the run itself is unquestionably still executing, so the failure
+    settles nothing: the run stays non-terminal and keeps its admission, and its
+    own terminal event remains the only thing that releases it. Releasing here
+    would let a drain declare quiescence over a run that is still working.
     """
     app, _agg, worker, _cp = make_app(session_factory, checkpointer)
     run_id = "run-drain-followup-failure"
@@ -331,8 +333,18 @@ async def test_followup_dispatch_failure_that_marks_run_failed_releases_admissio
         async with session_factory() as db:
             thread = await get_thread(db, run_id)
         assert thread is not None
-        assert thread.status == ThreadStatus.FAILED.value
+        assert thread.status not in TERMINAL_STATUSES
 
+        # Still admitted, and a drain genuinely cannot quiesce over it.
+        assert gate.is_active(run_id)
+        busy = await gate.wait_quiescent(timeout=0.2)
+        assert not busy.quiescent, busy
+        assert busy.active_runs == 1, busy
+
+        # The worker's terminal event is still the release, and the accounting
+        # the failed follow-up left behind is intact enough to take it.
+        app.state.worker_client = worker.client
+        await _relay_terminal(client, run_id)
         assert not gate.is_active(run_id)
         result = await gate.drain(timeout=1.0)
         assert result.quiescent and result.active_runs == 0, result

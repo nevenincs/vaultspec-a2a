@@ -48,6 +48,7 @@ def compute_reconciliation_actions(
     checkpoint_errors: dict[str, str | None],
     pending_permissions: dict[str, bool],
     *,
+    pending_clarifications: dict[str, bool] | None = None,
     strategy: Literal["conservative", "mark_repair_needed"] = "conservative",
 ) -> list[ReconciliationAction]:
     """Compute reconciliation actions for non-terminal threads.
@@ -66,11 +67,14 @@ def compute_reconciliation_actions(
 
     for thread in threads:
         tid = thread.thread_id
-        has_pending = pending_permissions.get(tid, False)
+        has_pending_permission = pending_permissions.get(tid, False)
+        has_pending_clarification = (pending_clarifications or {}).get(tid, False)
         checkpoint_available = checkpoint_results.get(tid, False)
         checkpoint_error = checkpoint_errors.get(tid)
 
-        if has_pending and checkpoint_available:
+        if (
+            has_pending_permission or has_pending_clarification
+        ) and checkpoint_available:
             new_status: str | None = None
             if thread.status not in (
                 ThreadStatus.INPUT_REQUIRED.value,
@@ -83,10 +87,16 @@ def compute_reconciliation_actions(
                     thread_id=tid,
                     new_thread_status=new_status,
                     repair_status=RepairStatus.PAUSED_RESUMABLE.value,
-                    repair_reason=("Pending permission request survived restart"),
+                    repair_reason=(
+                        "Pending clarification survived restart"
+                        if has_pending_clarification
+                        else "Pending permission request survived restart"
+                    ),
                     execution_readiness=RepairStatus.PAUSED_RESUMABLE.value,
                     last_applied_action=(
-                        ControlActionType.PERMISSION_REQUEST_CREATED.value
+                        None
+                        if has_pending_clarification
+                        else ControlActionType.PERMISSION_REQUEST_CREATED.value
                     ),
                     # Advance the recovery epoch like every other applied outcome:
                     # it seeds the startup-repair idempotency key, so leaving it at

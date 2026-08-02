@@ -61,8 +61,10 @@ the command that supplies it, never a pass.
 from __future__ import annotations
 
 import json
+import threading
 import time
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -72,16 +74,19 @@ from pydantic import TypeAdapter, ValidationError
 
 from ..acceptance import certified_gateway
 from ..authoring.discovery import SERVICE_JSON_ENV, resolve_engine_with_retry
+from ..graph.enums import MODEL_MAP, Model, Provider
 from ..team.team_config import load_team_config
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
 
     from ..acceptance import CertifiedGateway
+    from ..conftest import ExternalPrerequisiteRule
 
 # The preset that declares a questionnaire. Its questions are read from the
 # preset itself below, never restated here.
 _CLARIFY_PRESET = "vaultspec-adr-research-clarify"
+_CODEX_PROFILE = "codex-all"
 
 # Every role the document-authoring topology runs needs an actor token at
 # run-start; the roster is derived from the preset so a role added tomorrow is
@@ -201,6 +206,18 @@ def _require_substrates() -> None:
             "no reachable engine: a document-authoring preset builds its "
             "authoring submitter at graph-compile time and fails closed without "
             f"one, so this loop cannot run. To supply it: {_SUPPLY_ENGINE}"
+        )
+
+
+def _require_codex_substrates(rule: ExternalPrerequisiteRule) -> None:
+    """Require the engine plus an authenticated real Codex command lane."""
+    rule("codex-cli")
+    if not (Path.home() / ".codex" / "auth.json").is_file():
+        rule.absent("codex-cli", "no ~/.codex/auth.json; run 'codex login'")
+    if resolve_engine_with_retry(attempts=3, delay_seconds=2.0) is None:
+        rule.absent(
+            "loopback-stack",
+            "no discovery record resolved to a healthy authoring engine",
         )
 
 
@@ -405,28 +422,40 @@ def _read_frame(
     )
 
 
-def _start_document_run(gateway: CertifiedGateway, run_id: str) -> httpx.Response:
+def _start_document_run(
+    gateway: CertifiedGateway,
+    run_id: str,
+    *,
+    profile_id: str | None = None,
+) -> httpx.Response:
     """Start a run on the declaring preset with a token for every declared role."""
+    body: dict[str, object] = {
+        "team_preset": _CLARIFY_PRESET,
+        "stage": "start",
+        "run_id": run_id,
+        "message": "Plan a right-side monitor panel.",
+        "autonomous": True,
+        "feature_tag": _FEATURE_TAG,
+        "metadata": {
+            "feature_tag": _FEATURE_TAG,
+            "workspace_root": str(_WORKSPACE_ROOT),
+        },
+        "actor_tokens": {
+            "tokens": {role: f"tok-{role}" for role in _required_roles()},
+            "engine_bearer": _ENGINE_BEARER,
+        },
+    }
+    if profile_id is not None:
+        body["profile_id"] = profile_id
     with gateway.client(timeout=90.0) as client:
-        return client.post(
-            "/v1/runs",
-            json={
-                "team_preset": _CLARIFY_PRESET,
-                "stage": "start",
-                "run_id": run_id,
-                "message": "Plan a right-side monitor panel.",
-                "autonomous": True,
-                "feature_tag": _FEATURE_TAG,
-                "metadata": {
-                    "feature_tag": _FEATURE_TAG,
-                    "workspace_root": str(_WORKSPACE_ROOT),
-                },
-                "actor_tokens": {
-                    "tokens": {role: f"tok-{role}" for role in _required_roles()},
-                    "engine_bearer": _ENGINE_BEARER,
-                },
-            },
-        )
+        return client.post("/v1/runs", json=body)
+
+
+def _history_state(gateway: CertifiedGateway, run_id: str) -> dict[str, object]:
+    response = gateway.thread_state(run_id)
+    assert response.status_code == 200, response.text
+    history = _response_object(response, at="run history")
+    return _required_object(history, "state", at="run history")
 
 
 # ---------------------------------------------------------------------------
@@ -602,3 +631,138 @@ def test_answering_a_question_the_run_is_not_parked_on_is_refused(
         )
         == real_request_id
     )
+
+
+@pytest.mark.service
+def test_concurrent_continuations_elect_one_all_low_codex_winner(
+    tmp_path: Path,
+    external_prerequisite: ExternalPrerequisiteRule,
+) -> None:
+    """Distinct concurrent prompts resume once and drive one real Codex run.
+
+    The three submissions share a parked request but carry different durable
+    intentions and idempotency keys. Exactly one may win the leased election;
+    the other two conflict without dispatch. The winner is then replayed after
+    graph application to prove that a lost acknowledgement reads the durable
+    outcome instead of appending a second human turn.  The certification stops
+    at the first worker application receipt: full research fan-out and synthesis
+    are separately provider-behaviour concerns and can legitimately exceed the
+    suite watchdog when the researchers exercise their tools.
+
+    Spend is bounded before launch from the served frozen assignment: every
+    active role must report provider ``codex`` and capability ``low``. Losing
+    requests never start another run, and the winner is cancelled immediately
+    after the worker proves the continuation reached the real graph.  A separate
+    production-factory live turn certifies completed Codex output without
+    coupling this concurrency proof to five independent research turns.
+    """
+    _require_codex_substrates(external_prerequisite)
+
+    run_id = f"clarify-codex-load-{uuid.uuid4().hex[:12]}"
+    markers = [
+        f"continuation-winner-candidate-{index}-{uuid.uuid4().hex[:8]}"
+        for index in range(3)
+    ]
+    keys = [f"clarify-load-{run_id}-{index}" for index in range(len(markers))]
+
+    request_id: str
+    winning_marker: str
+    with certified_gateway(
+        tmp_path,
+        VAULTSPEC_WORKER_READY_TIMEOUT_SECONDS=_WORKER_READY_BUDGET_SECONDS,
+    ) as gateway:
+        started = _start_document_run(
+            gateway,
+            run_id,
+            profile_id=_CODEX_PROFILE,
+        )
+        assert started.status_code == 201, started.text
+
+        parked = _await_parked(gateway, run_id, budget=_PARK_BUDGET)
+        pending = _required_object(
+            parked, "pending_clarification", at="Codex load parked run-status"
+        )
+        request_id = _required_text(
+            pending, "request_id", at="Codex load pending clarification"
+        )
+
+        # This is the persisted assignment served by run-status, not the
+        # profile's display label or a test-side re-resolution of TOML.
+        assert parked.get("profile_id") == _CODEX_PROFILE
+        assignments = _json_object_list(
+            parked.get("assignments"), at="Codex load frozen assignments"
+        )
+        by_agent = {
+            _required_text(item, "agent_id", at="frozen role assignment"): item
+            for item in assignments
+        }
+        assert set(by_agent) == set(_required_roles())
+        assert all(item.get("provider_id") == "codex" for item in by_agent.values())
+        assert all(item.get("capability") == "low" for item in by_agent.values())
+        assert all(
+            item.get("model_name") == MODEL_MAP[Provider.CODEX][Model.LOW]
+            for item in by_agent.values()
+        )
+
+        barrier = threading.Barrier(len(markers))
+
+        def submit(candidate: tuple[str, str]) -> tuple[str, str, httpx.Response]:
+            marker, key = candidate
+            with gateway.client(timeout=90.0) as client:
+                barrier.wait(timeout=30.0)
+                response = client.post(
+                    f"/v1/runs/{run_id}/clarifications/{request_id}/respond",
+                    json={"prompt": marker},
+                    headers={"Idempotency-Key": key},
+                )
+            return marker, key, response
+
+        with ThreadPoolExecutor(max_workers=len(markers)) as pool:
+            outcomes = list(pool.map(submit, zip(markers, keys, strict=True)))
+
+        winners = [outcome for outcome in outcomes if outcome[2].status_code == 200]
+        conflicts = [outcome for outcome in outcomes if outcome[2].status_code == 409]
+        assert len(winners) == 1, [
+            (marker, response.status_code, response.text)
+            for marker, _key, response in outcomes
+        ]
+        assert len(conflicts) == len(markers) - 1, [
+            (marker, response.status_code, response.text)
+            for marker, _key, response in outcomes
+        ]
+        winning_marker, winning_key, accepted = winners[0]
+        accepted_body = _response_object(accepted, at="accepted Codex continuation")
+        assert accepted_body.get("accepted") is True
+        assert accepted_body.get("action_status") == "accepted_not_applied"
+
+        replay_body: dict[str, object] = {}
+        replay_deadline = time.monotonic() + 90.0
+        while time.monotonic() < replay_deadline:
+            with gateway.client(timeout=60.0) as client:
+                replay = client.post(
+                    f"/v1/runs/{run_id}/clarifications/{request_id}/respond",
+                    json={"prompt": winning_marker},
+                    headers={"Idempotency-Key": winning_key},
+                )
+            assert replay.status_code == 200, replay.text
+            replay_body = _response_object(replay, at="replayed Codex continuation")
+            if replay_body.get("applied") is True:
+                break
+            time.sleep(0.5)
+        assert replay_body.get("applied") is True, replay_body
+        assert replay_body.get("action_status") == "applied"
+
+        state = _history_state(gateway, run_id)
+        messages = _json_object_list(
+            state.get("messages"), at="Codex continuation transcript"
+        )
+        contents = [str(message.get("content") or "") for message in messages]
+        assert contents.count(winning_marker) == 1
+        assert all(contents.count(marker) == 0 for marker, _key, _resp in conflicts)
+        assert replay_body.get("accepted") is True
+
+        cancelled = gateway.cancel(
+            run_id,
+            idempotency_key=f"cancel-{run_id}",
+        )
+        assert cancelled.status_code == 200, cancelled.text

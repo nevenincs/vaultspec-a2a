@@ -211,6 +211,7 @@ async def test_answers_reach_the_worker_as_the_typed_resume_value(
         "accepted": True,
         "applied": False,
         "action_status": "accepted_not_applied",
+        "idempotency_key": "clarification-response:clarify-answer",
     }
 
     assert len(worker.dispatches) == 1

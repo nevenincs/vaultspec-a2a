@@ -8,12 +8,14 @@ from sqlalchemy import select
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
+from ...control.action_lease import claim_control_action
 from ...control.drain import DrainGate
 from ...control.event_handlers import (
     _handle_permission_event,
     _handle_progress_event,
     _handle_terminal_event,
 )
+from ...control.permission_service import permission_response_action_key
 from ...database import (
     create_thread,
     get_permission_request,
@@ -23,6 +25,59 @@ from ...database import (
 )
 from ...database.models import Base, ControlActionModel, ThreadModel
 from ...streaming.aggregator import EventAggregator
+from ...thread.enums import ControlActionType
+
+
+@pytest.mark.asyncio
+async def test_dispatch_application_receipt_settles_exact_message_action(
+    session_factory,
+) -> None:
+    """A worker receipt settles its named follow-up, never another action."""
+    async with session_factory() as session:
+        thread = await create_thread(
+            session,
+            thread_id="message-receipt-thread",
+            status="running",
+        )
+        expected = await claim_control_action(
+            session,
+            thread_id=thread.id,
+            action_type=ControlActionType.MESSAGE_FOLLOWUP_REQUESTED,
+            idempotency_key="message:expected",
+            payload={"content": "continue", "agent_id": "supervisor"},
+        )
+        other = await claim_control_action(
+            session,
+            thread_id=thread.id,
+            action_type=ControlActionType.MESSAGE_FOLLOWUP_REQUESTED,
+            idempotency_key="message:other",
+            payload={"content": "different", "agent_id": "supervisor"},
+        )
+        await session.commit()
+
+    await _handle_progress_event(
+        thread.id,
+        {
+            "type": "dispatch_applied",
+            "dispatch_id": expected.dispatch_id,
+            "action": "ingest",
+        },
+        session_factory=session_factory,
+    )
+
+    async with session_factory() as session:
+        expected_row = await session.get(ControlActionModel, expected.action_id)
+        other_row = await session.get(ControlActionModel, other.action_id)
+        stored_thread = await session.get(ThreadModel, thread.id)
+
+    assert expected_row is not None
+    assert expected_row.applied_at is not None
+    assert expected_row.claim_token is None
+    assert other_row is not None
+    assert other_row.applied_at is None
+    assert other_row.claim_token is not None
+    assert stored_thread is not None
+    assert stored_thread.last_applied_action == "message_followup_applied"
 
 
 @pytest_asyncio.fixture
@@ -49,7 +104,9 @@ async def test_replayed_permission_resolved_is_ignored_after_progress_apply(
 ) -> None:
     """A replayed permission_resolved event must not append a second applied action."""
     async with session_factory() as session:
-        thread = await create_thread(session, title="Replay Guard")
+        thread = await create_thread(
+            session, title="Replay Guard", status="input_required"
+        )
         request_id = f"{thread.id}:perm-1"
         await record_permission_request(
             session,
@@ -72,11 +129,23 @@ async def test_replayed_permission_resolved_is_ignored_after_progress_apply(
             option_id="allow_once",
             idempotency_key="response-1",
         )
+        submitted = await claim_control_action(
+            session,
+            thread_id=thread.id,
+            action_type=ControlActionType.PERMISSION_RESPONSE_SUBMITTED,
+            idempotency_key=permission_response_action_key(request_id),
+            request_id=request_id,
+            payload={"option_id": "allow_once", "notes": None},
+        )
         await session.commit()
 
     await _handle_progress_event(
         thread.id,
-        {"type": "message_chunk", "content": "worker resumed"},
+        {
+            "type": "dispatch_applied",
+            "dispatch_id": submitted.dispatch_id,
+            "action": "resume",
+        },
         session_factory=session_factory,
     )
 
@@ -98,8 +167,12 @@ async def test_replayed_permission_resolved_is_ignored_after_progress_apply(
         )
         assert len(actions) == 1
         assert actions[0].idempotency_key == (
-            f"permission-response-progress-applied:{request_id}"
+            f"permission-response-applied:{request_id}"
         )
+        submitted_action = await session.get(ControlActionModel, submitted.action_id)
+        assert submitted_action is not None
+        assert submitted_action.applied_at is not None
+        assert submitted_action.claim_token is None
 
     await _handle_permission_event(
         thread.id,
@@ -220,7 +293,7 @@ async def _answered_rejection(
     pause_reason_type: str,
     options: list[dict[str, object]],
     stamp_thread_rejected: bool,
-) -> tuple[str, str]:
+) -> tuple[str, str, str]:
     """Park a thread on a permission the human denied, awaiting settlement.
 
     Reproduces the real pre-settlement state: the response has been submitted
@@ -229,7 +302,7 @@ async def _answered_rejection(
     ``(thread_id, request_id)``.
     """
     async with session_factory() as session:
-        thread = await create_thread(session, title=title)
+        thread = await create_thread(session, title=title, status="input_required")
         request_id = f"{thread.id}:perm-reject"
         await record_permission_request(
             session,
@@ -245,6 +318,14 @@ async def _answered_rejection(
             request_id=request_id,
             option_id="reject",
             idempotency_key="response-reject-1",
+        )
+        submitted = await claim_control_action(
+            session,
+            thread_id=thread.id,
+            action_type=ControlActionType.PERMISSION_RESPONSE_SUBMITTED,
+            idempotency_key=permission_response_action_key(request_id),
+            request_id=request_id,
+            payload={"option_id": "reject", "notes": None},
         )
         if stamp_thread_rejected:
             await set_thread_approval_state(
@@ -263,7 +344,7 @@ async def _answered_rejection(
         assert permission.request_status == "answered_pending_apply"
         assert permission.response_option_id == "reject"
 
-    return thread_id, request_id
+    return thread_id, request_id, submitted.dispatch_id
 
 
 _PLAN_OPTIONS: list[dict[str, object]] = [
@@ -291,7 +372,7 @@ async def test_plan_rejection_survives_the_resolution_projection(
     *id* -- so the bare ``"reject"`` the plan gate mints read as an approval and was
     written straight over the correct state.
     """
-    thread_id, request_id = await _answered_rejection(
+    thread_id, request_id, _dispatch_id = await _answered_rejection(
         session_factory,
         title="Plan rejection",
         pause_reason_type="plan_approval_request",
@@ -316,17 +397,11 @@ async def test_plan_rejection_survives_the_resolution_projection(
 
 
 @pytest.mark.asyncio
-async def test_plan_rejection_inferred_from_progress_settles_as_rejected(
+async def test_generic_progress_does_not_settle_an_answered_permission(
     session_factory,
 ) -> None:
-    """The progress fallback must reach the same verdict as the primary path.
-
-    Progress only says the worker moved on. It used to settle every answered
-    permission as APPLIED unconditionally, passing no status at all so the
-    repository default decided -- which silently converted a denial into an
-    applied approval.
-    """
-    thread_id, request_id = await _answered_rejection(
+    """Uncorrelated progress must not settle any answered permission."""
+    thread_id, request_id, _dispatch_id = await _answered_rejection(
         session_factory,
         title="Plan rejection via progress",
         pause_reason_type="plan_approval_request",
@@ -343,7 +418,7 @@ async def test_plan_rejection_inferred_from_progress_settles_as_rejected(
     async with session_factory() as session:
         permission = await get_permission_request(session, request_id)
         assert permission is not None
-        assert permission.request_status == "rejected"
+        assert permission.request_status == "answered_pending_apply"
 
         thread = await session.get(ThreadModel, thread_id)
         assert thread is not None
@@ -361,7 +436,7 @@ async def test_a_kimi_tool_denial_settles_as_rejected_on_both_paths(
     the ACP agent does receive ``"reject"`` and the tool is refused, so recording
     it as applied corrupts the journal rather than authorising anything.
     """
-    resolved_thread, resolved_request = await _answered_rejection(
+    resolved_thread, resolved_request, _resolved_dispatch = await _answered_rejection(
         session_factory,
         title="Kimi denial via resolution",
         pause_reason_type="bash",
@@ -374,7 +449,7 @@ async def test_a_kimi_tool_denial_settles_as_rejected_on_both_paths(
         session_factory=session_factory,
     )
 
-    progress_thread, progress_request = await _answered_rejection(
+    progress_thread, progress_request, progress_dispatch = await _answered_rejection(
         session_factory,
         title="Kimi denial via progress",
         pause_reason_type="bash",
@@ -383,7 +458,11 @@ async def test_a_kimi_tool_denial_settles_as_rejected_on_both_paths(
     )
     await _handle_progress_event(
         progress_thread,
-        {"type": "message_chunk", "content": "worker resumed"},
+        {
+            "type": "dispatch_applied",
+            "dispatch_id": progress_dispatch,
+            "action": "resume",
+        },
         session_factory=session_factory,
     )
 

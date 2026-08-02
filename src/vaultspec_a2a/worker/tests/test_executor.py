@@ -922,6 +922,8 @@ def _make_observing_bridge(
             observations.append(
                 {
                     "kind": payload.get("type") or payload.get("event_type"),
+                    "dispatch_id": payload.get("dispatch_id"),
+                    "dispatch_action": payload.get("action"),
                     "status": payload.get("status"),
                     "tokens_held": (
                         executor.token_store.has(thread_id)
@@ -996,6 +998,50 @@ class TestSettleOrdering:
     strand the close, and one that dropped the thread's tracking before the
     terminal event would relay the terminal for an untracked thread.
     """
+
+    @pytest.mark.asyncio(loop_scope="function")
+    async def test_ingest_emits_one_application_receipt_for_stable_dispatch(
+        self,
+    ) -> None:
+        thread_id = "message-application-receipt"
+        observations: list[dict[str, Any]] = []
+        holder: dict[str, Any] = {"thread_id": thread_id, "executor": None}
+        async with AsyncSqliteSaver.from_conn_string(":memory:") as cp:
+            await cp.setup()
+            bridge = _make_observing_bridge(observations, holder)
+            executor = Executor(checkpointer=cp, bridge=bridge)
+            holder["executor"] = executor
+            try:
+                _install_completing_graph(executor, thread_id)
+                await executor.handle_dispatch(
+                    DispatchRequest(
+                        dispatch_id="stable-message-dispatch",
+                        action="ingest",
+                        thread_id=thread_id,
+                        content="continue",
+                        team_preset="settle-preset",
+                        recursion_limit=10,
+                    )
+                )
+
+                receipts = [
+                    observation
+                    for observation in observations
+                    if observation["kind"] == "dispatch_applied"
+                ]
+                assert receipts == [
+                    {
+                        "kind": "dispatch_applied",
+                        "dispatch_id": "stable-message-dispatch",
+                        "dispatch_action": "ingest",
+                        "status": None,
+                        "tokens_held": False,
+                        "tracked": True,
+                    }
+                ]
+            finally:
+                await bridge.close()
+                await executor.shutdown()
 
     @pytest.mark.asyncio(loop_scope="function")
     async def test_ingest_settle_lands_terminal_before_dropping_tokens(self) -> None:

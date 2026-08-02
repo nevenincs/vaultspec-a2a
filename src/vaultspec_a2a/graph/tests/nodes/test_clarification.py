@@ -42,11 +42,13 @@ from ....thread.clarification import (
     MAX_PROMPT_CHARS,
     MAX_QUESTIONS_PER_REQUEST,
     ClarificationAnswers,
+    ClarificationContinuation,
     ClarificationKind,
     ClarificationQuestion,
     ClarificationRequest,
     OptionLabel,
     PromptText,
+    clarification_resolution_fingerprint,
     pending_clarification,
 )
 from ....thread.state import TeamState
@@ -192,9 +194,45 @@ async def test_answers_resume_the_run_and_are_recorded_under_the_request_id() ->
     assert resumed["clarification_answers"] == {
         "clarify-1": {"scope": "right", "constraints": "must survive a reload"}
     }
+    expected = clarification_resolution_fingerprint(
+        ClarificationAnswers(
+            request_id="clarify-1",
+            answers={"scope": "right", "constraints": "must survive a reload"},
+        )
+    )
+    assert resumed["clarification_resolution_receipts"] == {"clarify-1": expected}
     # The questionnaire is answered, so a later status read must not re-offer it.
     assert resumed.get("clarification_request") is None
     assert resumed.get("clarification_request_id") is None
+
+
+@pytest.mark.asyncio
+async def test_continuation_records_a_receipt_without_copying_prompt_state() -> None:
+    """The prompt lives in messages; its receipt persists only the fingerprint."""
+    graph = _clarify_graph(_CountingProducer(_request()))
+    config = {"configurable": {"thread_id": "clarify-continuation-receipt"}}
+    initial = _base_state()
+
+    await graph.ainvoke(initial, config=config)
+    resolution = ClarificationContinuation(
+        request_id="clarify-1", prompt="Compare both surfaces before choosing."
+    )
+    resumed = await graph.ainvoke(
+        Command(resume=resolution.as_resume_value()),
+        config=config,
+    )
+
+    assert resumed["clarification_resolution_receipts"] == {
+        "clarify-1": clarification_resolution_fingerprint(resolution)
+    }
+    assert resumed["messages"][-1].content == resolution.prompt
+    assert [message.content for message in resumed["messages"]].count(
+        resolution.prompt
+    ) == 1
+    assert resumed.get("clarification_answers", {}) == {}
+    assert (
+        resolution.prompt not in resumed["clarification_resolution_receipts"].values()
+    )
 
 
 @pytest.mark.asyncio
@@ -412,6 +450,14 @@ async def test_second_questionnaire_does_not_erase_the_first_answers() -> None:
     assert final["clarification_answers"] == {
         "clarify-a": {"scope": "right"},
         "clarify-b": {"scope": "left"},
+    }
+    assert final["clarification_resolution_receipts"] == {
+        "clarify-a": clarification_resolution_fingerprint(
+            ClarificationAnswers(request_id="clarify-a", answers={"scope": "right"})
+        ),
+        "clarify-b": clarification_resolution_fingerprint(
+            ClarificationAnswers(request_id="clarify-b", answers={"scope": "left"})
+        ),
     }
 
 

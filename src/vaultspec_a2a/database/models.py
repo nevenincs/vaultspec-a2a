@@ -36,12 +36,16 @@ __all__ = [
     "ThreadDeletionSagaModel",
     "ThreadExecutionStateModel",
     "ThreadModel",
+    "utcnow",
 ]
 
 
-def _utcnow() -> datetime:
+def utcnow() -> datetime:
     """Return timezone-aware UTC now."""
     return datetime.now(UTC)
+
+
+_utcnow = utcnow
 
 
 class UTCDateTime(TypeDecorator[datetime]):
@@ -274,6 +278,7 @@ class ControlActionModel(Base):
     __table_args__ = (
         Index("ix_control_actions_thread_id", "thread_id"),
         Index("ix_control_actions_request_id", "request_id"),
+        Index("ux_control_actions_dispatch_id", "dispatch_id", unique=True),
         UniqueConstraint(
             "thread_id",
             "idempotency_key",
@@ -292,6 +297,15 @@ class ControlActionModel(Base):
     result_status: Mapped[str] = mapped_column(default="accepted_not_applied")
     payload_json: Mapped[str | None] = mapped_column(Text, default=None)
     worker_generation: Mapped[int] = mapped_column(default=0)
+    # Stable identity reused for every redelivery of this accepted intention.
+    # Existing pre-0012 journal rows legitimately carry NULL until reconciled.
+    dispatch_id: Mapped[str | None] = mapped_column(default=None)
+    # Renewable cross-process ownership.  The token is secret only in the sense
+    # that another dispatcher must not guess it; it never crosses the worker wire.
+    claim_token: Mapped[str | None] = mapped_column(default=None)
+    claim_expires_at: Mapped[datetime | None] = mapped_column(
+        UTCDateTime(), default=None
+    )
 
     thread: Mapped["ThreadModel"] = relationship(
         back_populates="control_actions", lazy="raise"

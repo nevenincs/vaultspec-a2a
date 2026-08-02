@@ -151,6 +151,7 @@ class _InProcessWorker:
         self.dispatch_received = asyncio.Event()
         self.release_dispatch = asyncio.Event()
         self.release_dispatch.set()
+        self._at_capacity = False
 
         _app = FastAPI()
 
@@ -168,6 +169,16 @@ class _InProcessWorker:
             self.dispatches.append(body)
             self.dispatch_received.set()
             await self.release_dispatch.wait()
+            if self._at_capacity:
+                # Byte-for-byte the refusal the real worker returns once its
+                # concurrent-thread cap is reached, so the gateway classifies a
+                # genuine definite non-delivery from a genuine HTTP response.
+                return JSONResponse(
+                    status_code=429,
+                    content={
+                        "detail": "Worker at capacity — too many concurrent threads"
+                    },
+                )
             thread_id = body.get("thread_id", "")
             if not isinstance(thread_id, str):
                 thread_id = ""
@@ -207,6 +218,10 @@ class _InProcessWorker:
         """Pause a real dispatch response after its request has been recorded."""
         self.dispatch_received.clear()
         self.release_dispatch.clear()
+
+    def refuse_at_capacity(self) -> None:
+        """Answer every further dispatch with the worker's real 429 refusal."""
+        self._at_capacity = True
 
 
 # ---------------------------------------------------------------------------

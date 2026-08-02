@@ -173,11 +173,12 @@ class InfraConfig(BaseSettings):
     # API Keys — bare ecosystem names only; no VAULTSPEC_ prefix aliases.
     # ANTHROPIC_API_KEY is deliberately absent. The Claude lane authenticates with
     # claude_code_oauth_token, and every agent subprocess has ANTHROPIC_API_KEY
-    # actively stripped from its environment (workspace/environment.py scrubs it;
-    # providers/acp_chat_model.py pops it again whenever an OAuth token is present,
-    # because the pair together silently downgrades a flat-rate subscription to
-    # pay-as-you-go billing). Declaring it here would advertise a credential the
-    # code exists to remove.
+    # stripped from its environment by the workspace scrub
+    # (workspace/environment.py), because the key alongside an OAuth token
+    # silently downgrades a flat-rate subscription to pay-as-you-go billing.
+    # The scrub is the single removal site: the ACP layer re-injects only the
+    # auth a lane intentionally supports and strips nothing itself. Declaring
+    # the key here would advertise a credential the code exists to remove.
     gemini_api_key: str | None = Field(
         default=None,
         validation_alias="GEMINI_API_KEY",
@@ -245,9 +246,8 @@ class InfraConfig(BaseSettings):
     # unprefixed names from its own environment (the Z.ai ANTHROPIC_* passthrough
     # precedent), so the factory injects them verbatim: KIMI_API_KEY authenticates,
     # KIMI_BASE_URL retargets the Moonshot endpoint (unset = the CLI's own default),
-    # KIMI_MODEL_NAME overrides the resolved model. The key is a SecretStr so its
-    # value never reaches a repr, log, or model_dump; the factory expands it via
-    # get_secret_value only into the subprocess env.
+    # Model selection is profile-owned. The factory injects the resolved model
+    # into the subprocess and does not expose a global model override.
     kimi_api_key: SecretStr | None = Field(
         default=None,
         validation_alias="KIMI_API_KEY",
@@ -257,12 +257,6 @@ class InfraConfig(BaseSettings):
         validation_alias="KIMI_BASE_URL",
         description="Override base URL for the Kimi/Moonshot endpoint.",
     )
-    kimi_model_name: str | None = Field(
-        default=None,
-        validation_alias="KIMI_MODEL_NAME",
-        description="Override model id passed to the Kimi CLI as KIMI_MODEL_NAME.",
-    )
-
     host: str = Field(
         default="127.0.0.1",
         description="Bind host for the uvicorn server (VAULTSPEC_HOST).",
@@ -567,7 +561,7 @@ class InfraConfig(BaseSettings):
         alias="VAULTSPEC_ACP_RPC_TIMEOUT_SECONDS",
         description=(
             "Seconds to wait for a quick ACP management RPC response"
-            " (list_sessions, set_mode, set_model, set_config_option, authenticate)."
+            " (list_sessions, set_mode, authenticate)."
         ),
     )
     acp_interactive_auth_timeout_seconds: float = Field(

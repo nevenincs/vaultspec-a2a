@@ -14,8 +14,8 @@ helper in `conftest.py` so tests never touch the production `vaultspec.db`.
 """
 
 import asyncio
-import hashlib
 import logging
+from datetime import datetime
 from pathlib import Path
 from typing import cast
 
@@ -25,14 +25,16 @@ from fastapi.testclient import TestClient
 from langchain_core.runnables import RunnableConfig
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from langgraph.types import Interrupt
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from ...control.config import settings
+from ...control.permission_service import permission_response_action_key
 from ...database import (
     create_artifact,
     create_control_action,
     create_thread,
+    get_control_action_by_dispatch_id,
+    get_control_action_by_idempotency_key,
     record_permission_request,
     record_permission_response_submission,
 )
@@ -42,7 +44,7 @@ from ...database.models import (
     ThreadModel,
 )
 from ...streaming.aggregator import EventAggregator
-from ...thread.enums import ControlActionResultStatus, ControlActionType
+from ...thread.enums import ControlActionResultStatus, ControlActionType, ThreadStatus
 from .conftest import make_app
 
 type SessionFactory = async_sessionmaker[AsyncSession]
@@ -1306,8 +1308,33 @@ class TestSendMessage:
     def test_followup_dispatch_marks_message_followup_as_applied(
         self, session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
     ) -> None:
-        """Successful follow-up dispatch must stamp the applied action correctly."""
+        """The worker's application receipt - not its acknowledgement - stamps applied.
+
+        A 202 only proves the worker accepted the dispatch for scheduling; the
+        turn is applied when the graph actually starts consuming it, which the
+        worker reports by returning the dispatch identity on the private
+        ``dispatch_applied`` receipt. The receipt travels the production relay
+        (``/internal/events`` -> ``relay_event`` -> the progress handler), so
+        this drives both halves of the settlement rather than asserting the
+        acknowledgement alone.
+        """
         app, _agg, worker, _cp = make_app(session_factory, checkpointer)
+
+        async def _applied_action() -> tuple[str | None, datetime | None]:
+            async with session_factory() as session:
+                thread = await session.get(ThreadModel, thread_id)
+                assert thread is not None
+                assert thread.repair_status == "healthy"
+                assert thread.execution_readiness == "healthy"
+                assert (
+                    thread.last_requested_action
+                    == ControlActionType.MESSAGE_FOLLOWUP_REQUESTED.value
+                )
+                action = await get_control_action_by_dispatch_id(
+                    session, thread_id=thread_id, dispatch_id=dispatch_id
+                )
+                assert action is not None
+                return thread.last_applied_action, action.applied_at
 
         with TestClient(app, raise_server_exceptions=True) as client:
             create_resp = client.post(
@@ -1322,26 +1349,32 @@ class TestSendMessage:
                 f"/v1/runs/{thread_id}/messages",
                 json={"content": "Follow-up message"},
             )
+            assert resp.status_code == 202
+            assert len(worker.dispatches) == 1
+            dispatch_id = cast("str", worker.dispatches[0]["dispatch_id"])
 
-        assert resp.status_code == 202
-        assert len(worker.dispatches) == 1
+            # Accepted is not applied: the acknowledgement leaves the journal
+            # action unsettled, so nothing may claim the follow-up was applied.
+            before_applied, before_stamp = asyncio.run(_applied_action())
+            assert before_applied != ControlActionType.MESSAGE_FOLLOWUP_APPLIED.value
+            assert before_stamp is None
 
-        async def _assert_state() -> None:
-            async with session_factory() as session:
-                thread = await session.get(ThreadModel, thread_id)
-                assert thread is not None
-                assert thread.repair_status == "healthy"
-                assert thread.execution_readiness == "healthy"
-                assert (
-                    thread.last_requested_action
-                    == ControlActionType.MESSAGE_FOLLOWUP_REQUESTED.value
-                )
-                assert (
-                    thread.last_applied_action
-                    == ControlActionType.MESSAGE_FOLLOWUP_APPLIED.value
-                )
+            receipt = client.post(
+                "/internal/events",
+                json={
+                    "thread_id": thread_id,
+                    "payload": {
+                        "type": "dispatch_applied",
+                        "dispatch_id": dispatch_id,
+                        "action": "ingest",
+                    },
+                },
+            )
+            assert receipt.status_code == 200
 
-        asyncio.run(_assert_state())
+        after_applied, after_stamp = asyncio.run(_applied_action())
+        assert after_applied == ControlActionType.MESSAGE_FOLLOWUP_APPLIED.value
+        assert after_stamp is not None
 
     def test_dispatch_includes_team_preset(
         self, session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
@@ -2585,7 +2618,13 @@ class TestDeleteThread:
     def test_rejects_stale_second_response_after_submission(
         self, session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
     ) -> None:
-        """A second non-idempotent response must fail once the request is answered."""
+        """A second, differing response must fail once the request is answered.
+
+        The accepted body belongs to the REQUEST, not to a caller-chosen retry
+        label: presenting a fresh ``Idempotency-Key`` does not buy a second
+        answer, and the refusal names the reason - the request already carries a
+        different response - rather than reporting only that it left ``pending``.
+        """
         app, _agg, worker, _cp = make_app(session_factory, checkpointer)
 
         async def _seed_permission() -> None:
@@ -2635,17 +2674,23 @@ class TestDeleteThread:
 
         assert first.status_code == 200
         assert second.status_code == 409
-        assert second.json()["detail"] == "Permission request is no longer pending"
+        assert (
+            second.json()["detail"]
+            == "Permission request already has a different response"
+        )
         assert len(worker.dispatches) == 1
         assert worker.dispatches[0]["option_id"] == "allow_once"
 
-    def test_failed_resume_dispatch_restores_permission_to_pending(
-        self, session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
+    def _seed_bash_permission(
+        self,
+        session_factory: SessionFactory,
+        *,
+        thread_id: str,
+        request_id: str,
     ) -> None:
-        """Failed resume dispatch must leave the durable permission re-actionable."""
-        app, _agg, worker, _cp = make_app(session_factory, checkpointer)
+        """Record one durable single-option bash permission for *thread_id*."""
 
-        async def _seed_permission() -> None:
+        async def _seed() -> None:
             async with session_factory() as session:
                 await record_permission_request(
                     session,
@@ -2664,8 +2709,20 @@ class TestDeleteThread:
                 )
                 await session.commit()
 
-        failing_client = httpx.AsyncClient(base_url="http://127.0.0.1:9")
-        original_client = app.state.worker_client
+        asyncio.run(_seed())
+
+    def test_definite_resume_dispatch_failure_restores_permission_to_pending(
+        self, session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
+    ) -> None:
+        """A resume the worker certainly never got leaves the permission re-actionable.
+
+        An open circuit is refused inside the gateway, so no dispatch is even
+        attempted and the non-delivery is DEFINITE. That is the only class of
+        failure allowed to hand the question back: the durable answer is undone,
+        the journal action releases its ownership while keeping its stable
+        identity, and the caller can answer again for real.
+        """
+        app, _agg, worker, _cp = make_app(session_factory, checkpointer)
 
         with TestClient(app, raise_server_exceptions=True) as client:
             create_resp = client.post(
@@ -2678,10 +2735,93 @@ class TestDeleteThread:
             assert create_resp.status_code == 201
             thread_id = create_resp.json()["run_id"]
             request_id = f"{thread_id}:req-dispatch-fail"
-            expected_idempotency_key = hashlib.sha256(
-                f"{request_id}:allow_once".encode()
-            ).hexdigest()
-            asyncio.run(_seed_permission())
+            self._seed_bash_permission(
+                session_factory, thread_id=thread_id, request_id=request_id
+            )
+
+            async def _thread_status() -> str:
+                async with session_factory() as session:
+                    thread = await session.get(ThreadModel, thread_id)
+                    assert thread is not None
+                    return thread.status
+
+            # Captured rather than hardcoded: a definite non-delivery moves the
+            # run nowhere, so the property is that the status is the one it held.
+            status_before = asyncio.run(_thread_status())
+
+            worker.dispatches.clear()
+            # A real breaker in its real open state - the production trip the
+            # watchdog performs - so safe_dispatch refuses before any transport.
+            app.state.circuit_breaker.force_open()
+            first = client.post(
+                f"/v1/runs/{thread_id}/permissions/{request_id}/respond",
+                json={"option_id": "allow_once"},
+            )
+            assert first.status_code == 503
+            assert worker.dispatches == []
+
+            async def _assert_reset() -> None:
+                async with session_factory() as session:
+                    permission = await session.get(PermissionRequestModel, request_id)
+                    thread = await session.get(ThreadModel, thread_id)
+                    assert permission is not None
+                    assert thread is not None
+                    assert thread.status == status_before
+                    assert permission.request_status == "pending"
+                    assert permission.response_option_id is None
+                    assert permission.idempotency_key is None
+                    # Identity is stable across the retry; only OWNERSHIP was
+                    # released, which is what makes the request answerable again.
+                    action = await get_control_action_by_idempotency_key(
+                        session,
+                        thread_id=thread_id,
+                        idempotency_key=permission_response_action_key(request_id),
+                    )
+                    assert action is not None
+                    assert action.claim_token is None
+                    assert action.applied_at is None
+
+            asyncio.run(_assert_reset())
+
+            app.state.circuit_breaker.record_success()
+            second = client.post(
+                f"/v1/runs/{thread_id}/permissions/{request_id}/respond",
+                json={"option_id": "allow_once"},
+            )
+
+        assert second.status_code == 200
+        assert len(worker.dispatches) == 1
+        assert worker.dispatches[0]["option_id"] == "allow_once"
+
+    def test_ambiguous_resume_dispatch_keeps_the_answer_and_replays(
+        self, session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
+    ) -> None:
+        """A lost resume acknowledgement must not hand the question back.
+
+        A refused connection is AMBIGUOUS: the worker may have scheduled the
+        resume before the acknowledgement was lost. Undoing the answer here
+        would let a second, different answer race a resume that is already
+        running, so the submitted response and its lease are kept and an
+        identical retry replays the stored outcome instead of dispatching again.
+        """
+        app, _agg, worker, _cp = make_app(session_factory, checkpointer)
+        failing_client = httpx.AsyncClient(base_url="http://127.0.0.1:9")
+        original_client = app.state.worker_client
+
+        with TestClient(app, raise_server_exceptions=True) as client:
+            create_resp = client.post(
+                "/v1/runs",
+                json={
+                    "team_preset": _BUNDLE_FREE_PRESET,
+                    "message": "permission dispatch ambiguity",
+                },
+            )
+            assert create_resp.status_code == 201
+            thread_id = create_resp.json()["run_id"]
+            request_id = f"{thread_id}:req-dispatch-lost"
+            self._seed_bash_permission(
+                session_factory, thread_id=thread_id, request_id=request_id
+            )
 
             worker.dispatches.clear()
             app.state.worker_client = failing_client
@@ -2689,35 +2829,27 @@ class TestDeleteThread:
                 f"/v1/runs/{thread_id}/permissions/{request_id}/respond",
                 json={"option_id": "allow_once"},
             )
+            assert first.status_code == 502
 
-            async def _assert_reset() -> None:
-                from ...database.models import (
-                    ControlActionModel,
-                    PermissionRequestModel,
-                    ThreadModel,
-                )
-
+            async def _assert_retained() -> None:
                 async with session_factory() as session:
                     permission = await session.get(PermissionRequestModel, request_id)
-                    thread = await session.get(ThreadModel, thread_id)
                     assert permission is not None
-                    assert thread is not None
-                    assert thread.status == "input_required"
-                    assert permission.request_status == "pending"
-                    assert permission.response_option_id is None
-                    assert permission.idempotency_key is None
-                    action = (
-                        await session.execute(
-                            select(ControlActionModel).where(
-                                ControlActionModel.request_id == request_id
-                            )
-                        )
-                    ).scalar_one()
-                    assert action.idempotency_key != expected_idempotency_key
-                    assert ":dispatch-failed:" in action.idempotency_key
+                    assert permission.request_status == "answered_pending_apply"
+                    assert permission.response_option_id == "allow_once"
+                    action = await get_control_action_by_idempotency_key(
+                        session,
+                        thread_id=thread_id,
+                        idempotency_key=permission_response_action_key(request_id),
+                    )
+                    assert action is not None
+                    assert action.claim_token is not None
+                    assert action.claim_expires_at is not None
 
-            asyncio.run(_assert_reset())
+            asyncio.run(_assert_retained())
 
+            # The worker is reachable again, yet the identical retry must still
+            # not produce a second resume for the same accepted answer.
             app.state.worker_client = original_client
             second = client.post(
                 f"/v1/runs/{thread_id}/permissions/{request_id}/respond",
@@ -2726,10 +2858,10 @@ class TestDeleteThread:
 
         asyncio.run(failing_client.aclose())
 
-        assert first.status_code == 502
         assert second.status_code == 200
-        assert len(worker.dispatches) == 1
-        assert worker.dispatches[0]["option_id"] == "allow_once"
+        assert second.json()["accepted"] is True
+        assert second.json()["applied"] is False
+        assert worker.dispatches == []
 
     def test_rejects_permission_request_without_valid_durable_options(
         self, session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
@@ -2927,10 +3059,15 @@ class TestCancelThread:
     def test_failed_cancel_dispatch_restores_repair_state(
         self, session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
     ) -> None:
-        """A failed cancel dispatch must not leave a ghost cancel_pending state."""
-        app, _agg, _worker, _cp = make_app(session_factory, checkpointer)
-        failing_client = httpx.AsyncClient(base_url="http://127.0.0.1:9")
-        original_client = app.state.worker_client
+        """A definitely-undelivered cancel must not leave a ghost cancel_pending state.
+
+        A saturated worker answers the cancel with its real 429, which is a
+        DEFINITE non-delivery: the dispatch was received and refused outright, so
+        the run is provably still whatever it was. Only that certainty licenses
+        rolling the cancel-requested repair state back; the ambiguous case is the
+        sibling test below.
+        """
+        app, _agg, worker, _cp = make_app(session_factory, checkpointer)
 
         with TestClient(app, raise_server_exceptions=True) as client:
             create_resp = client.post(
@@ -2955,7 +3092,8 @@ class TestCancelThread:
             # holds any particular one.
             status_before = asyncio.run(_status_before())
 
-            app.state.worker_client = failing_client
+            worker.dispatches.clear()
+            worker.refuse_at_capacity()
             cancel_resp = client.post(f"/v1/runs/{thread_id}/cancel")
 
             async def _assert_reset() -> None:
@@ -2969,9 +3107,50 @@ class TestCancelThread:
                     assert thread.last_requested_action == "ingest"
 
             asyncio.run(_assert_reset())
-            app.state.worker_client = original_client
+
+        # The refusal really crossed the wire; this is not a pre-flight rejection.
+        assert len(worker.dispatches) == 1
+        assert worker.dispatches[0]["action"] == "cancel"
+        assert cancel_resp.status_code == 502
+        assert cancel_resp.json()["detail"] == "Cancel dispatch failed"
+
+    def test_ambiguous_cancel_dispatch_keeps_the_accepted_cancellation(
+        self, session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
+    ) -> None:
+        """A lost cancel acknowledgement must not un-cancel the run.
+
+        A refused connection cannot distinguish a cancel the worker never
+        received from one it scheduled before the acknowledgement was lost.
+        Rolling back here would contradict a journal entry the worker may be
+        acting on, so the accepted cancellation stands and the caller is told it
+        was accepted rather than being invited to submit a competing action.
+        """
+        app, _agg, _worker, _cp = make_app(session_factory, checkpointer)
+        failing_client = httpx.AsyncClient(base_url="http://127.0.0.1:9")
+
+        with TestClient(app, raise_server_exceptions=True) as client:
+            create_resp = client.post(
+                "/v1/runs",
+                json={
+                    "team_preset": _BUNDLE_FREE_PRESET,
+                    "message": "cancel dispatch ambiguity",
+                },
+            )
+            assert create_resp.status_code == 201
+            thread_id = create_resp.json()["run_id"]
+
+            app.state.worker_client = failing_client
+            cancel_resp = client.post(f"/v1/runs/{thread_id}/cancel")
+
+            async def _assert_cancelling() -> None:
+                async with session_factory() as session:
+                    thread = await session.get(ThreadModel, thread_id)
+                    assert thread is not None
+                    assert thread.status == ThreadStatus.CANCELLING.value
+
+            asyncio.run(_assert_cancelling())
 
         asyncio.run(failing_client.aclose())
 
-        assert cancel_resp.status_code == 502
-        assert cancel_resp.json()["detail"] == "Cancel dispatch failed"
+        assert cancel_resp.status_code == 200
+        assert cancel_resp.json()["status"] == ThreadStatus.CANCELLING.value

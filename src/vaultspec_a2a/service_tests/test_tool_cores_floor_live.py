@@ -41,23 +41,22 @@ provider is not ready (credential/usage gated), the test skips with a runbook po
 naming the missing resource. When the stack IS present the assertions are fail-loud - a
 run that never cites the ADR or never reproduces its interior FAILS, never passes.
 
-Profile: the committed default is the Claude lane (S05's target), gated on the Claude
-weekly usage window. The identical harness was validated on the Z.ai lane, which rides
-the same ``AcpChatModel``/adapter (``factory.py``), by setting ``S05_PROFILE`` to an
-all-Z.ai profile - the same run cited above. The Claude-lane evidence is a parameter
-swap once Claude usage is unblocked.
+Profile: this cost-bearing live proof is fixed to the committed ``fast`` profile.
+That profile assigns every participating role to the low capability tier.  An
+environment override is deliberately not accepted: changing a test's model tier must
+be a reviewed source change, not an ambient shell setting.
 """
 
 from __future__ import annotations
 
 import json
-import os
 import re
 import time
 from typing import TYPE_CHECKING
 
 import httpx
 import pytest
+from pydantic import TypeAdapter, ValidationError
 
 from ..api.schemas.enums import ServerEventType
 from ..control.run_start_policy import required_role_ids
@@ -84,9 +83,10 @@ _MESSAGE_FRAMES = frozenset(
 # rather than hanging. The document agents read early, mid-Diverge/Synthesize.
 _OBSERVE_DEADLINE_SECONDS = 900.0
 
-# The model profile the run launches under. Default is the Claude lane (S05's target);
-# override with S05_PROFILE=<all-Z.ai profile> to reproduce the Z.ai validation run.
-_PROFILE_ID = os.environ.get("S05_PROFILE", "team-defaults")
+# All real-provider service tests run only under the committed all-low profile.
+_PROFILE_ID = "fast"
+
+_JSON_OBJECT = TypeAdapter(dict[str, object])
 
 
 def _pick_named_adr(vault_root: Path) -> Path | None:
@@ -177,7 +177,15 @@ def _vault_write_delta(
     return {"created": created, "modified": modified, "deleted": deleted}
 
 
-def _message_content(payload: dict) -> str | None:
+def _json_object(value: object, *, at: str) -> dict[str, object]:
+    """Return an SSE JSON object or fail with its observation boundary."""
+    try:
+        return _JSON_OBJECT.validate_python(value)
+    except ValidationError as exc:
+        raise AssertionError(f"expected JSON object at {at}: {exc}") from exc
+
+
+def _message_content(payload: dict[str, object]) -> str | None:
     """Return the content of a message/thought chunk frame, else None."""
     if payload.get("type") not in _MESSAGE_FRAMES:
         return None
@@ -286,11 +294,13 @@ async def test_document_agent_reads_named_adr_midturn_and_cites(
                         if not body:
                             continue
                         try:
-                            payload = json.loads(body)
-                        except json.JSONDecodeError:
-                            continue
-                        if not isinstance(payload, dict):
-                            continue
+                            decoded: object = json.loads(body)
+                        except json.JSONDecodeError as exc:
+                            raise AssertionError(
+                                "malformed SSE JSON at grounding floor stream: "
+                                f"{body!r}"
+                            ) from exc
+                        payload = _json_object(decoded, at="grounding floor SSE stream")
                         content = _message_content(payload)
                         if content:
                             output_parts.append(content)
@@ -382,7 +392,7 @@ async def test_document_agent_invokes_rag_search_midturn_and_cites(
 ) -> None:
     """Live: a document agent invokes vaultspec-rag search mid-turn; citations resolve.
 
-    The semantic-tier proof (P03.S16 Claude / S17 Z.ai, selected by ``S05_PROFILE``).
+    The semantic-tier proof runs under the committed all-low ``fast`` profile.
     The agent invokes the surfaced ``mcp__vaultspec-rag__search_*`` tools, receives REAL
     results (never the "service not running" error), and its cited file:line locations
     resolve to real files in the engine-scoped, rag-indexed workspace. Zero document-dir
@@ -449,11 +459,12 @@ async def test_document_agent_invokes_rag_search_midturn_and_cites(
                         if not body:
                             continue
                         try:
-                            payload = json.loads(body)
-                        except json.JSONDecodeError:
-                            continue
-                        if not isinstance(payload, dict):
-                            continue
+                            decoded: object = json.loads(body)
+                        except json.JSONDecodeError as exc:
+                            raise AssertionError(
+                                f"malformed SSE JSON at semantic tool stream: {body!r}"
+                            ) from exc
+                        payload = _json_object(decoded, at="semantic tool SSE stream")
                         content = _message_content(payload)
                         if content:
                             output_parts.append(content)

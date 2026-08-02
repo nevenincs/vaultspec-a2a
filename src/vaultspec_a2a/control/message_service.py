@@ -14,17 +14,16 @@ import logging
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from ..control.action_lease import (
+    claim_control_action,
+    release_definite_non_delivery,
+)
 from ..control.dispatch import safe_dispatch
 from ..control.repair_transitions import (
-    apply_dispatch_failure,
-    mark_message_followup_applied,
     mark_message_followup_requested,
 )
 from ..database import (
-    create_control_action,
-    get_control_action_by_idempotency_key,
     get_thread,
-    update_thread_status,
 )
 from ..ipc.schemas import DispatchRequest, to_dispatch_action
 from ..thread.dispatch_policy import FailureType, evaluate_dispatch_failure
@@ -111,45 +110,56 @@ async def send_followup_message(
         len(content),
     )
 
-    # -- Idempotency deduplication ---------------------------------------
+    # The losing claim path rolls its transaction back, which expires ORM state.
+    # Snapshot every value needed after election before entering the shared lease
+    # primitive so a concurrent replay/conflict never triggers implicit async I/O.
+    thread_status = thread.status
+    team_preset = thread.team_preset
+    thread_metadata = thread.thread_metadata
+
+    # -- Durable reservation and dispatch election -----------------------
     resolved_idempotency_key = idempotency_key or default_message_key(
         thread_id, agent_id, content
     )
-    existing_action = await get_control_action_by_idempotency_key(
-        db, thread_id=thread_id, idempotency_key=resolved_idempotency_key
-    )
-    if existing_action is not None:
-        return MessageResult(
-            action_id=existing_action.id,
-            thread_id=thread_id,
-            thread_status=thread.status,
-            dispatched=False,
-        )
-
-    # -- Control action creation -----------------------------------------
-    action = await create_control_action(
+    claim = await claim_control_action(
         db,
         thread_id=thread_id,
         action_type=ControlActionType.MESSAGE_FOLLOWUP_REQUESTED,
         idempotency_key=resolved_idempotency_key,
         payload={"content": content, "agent_id": agent_id},
     )
+    if not claim.payload_matches:
+        return MessageResult(
+            action_id=claim.action_id,
+            thread_id=thread_id,
+            thread_status=thread_status,
+            dispatched=False,
+            error_detail="Idempotency key is already bound to a different message",
+            failure_type=FailureType.CONFLICT,
+        )
+    if not claim.acquired:
+        return MessageResult(
+            action_id=claim.action_id,
+            thread_id=thread_id,
+            thread_status=thread_status,
+            dispatched=False,
+        )
+
     await mark_message_followup_requested(db, thread_id)
+    await db.commit()
 
     # -- Metadata extraction ---------------------------------------------
-    team_preset: str | None = None
     workspace_root: str | None = None
-    if thread.team_preset:
-        team_preset = thread.team_preset
-    if thread.thread_metadata:
+    if thread_metadata:
         try:
-            meta = json.loads(thread.thread_metadata)
+            meta = json.loads(thread_metadata)
             workspace_root = meta.get("workspace_root")
         except (json.JSONDecodeError, AttributeError):
             pass
 
     # -- Dispatch construction & send ------------------------------------
     dispatch = DispatchRequest(
+        dispatch_id=claim.dispatch_id,
         action=to_dispatch_action(ControlActionType.INGEST),
         thread_id=thread_id,
         agent_id=agent_id,
@@ -181,33 +191,23 @@ async def send_followup_message(
 
     if not outcome.success:
         policy, typed_failure = evaluate_dispatch_failure(outcome.failure_type)
-        if policy.should_mark_failed:
-            await apply_dispatch_failure(
-                db, thread_id, failed_status=ThreadStatus.FAILED
-            )
+        await release_definite_non_delivery(db, claim, typed_failure)
         await db.commit()
         return MessageResult(
-            action_id=action.id,
+            action_id=claim.action_id,
             thread_id=thread_id,
-            thread_status=(
-                ThreadStatus.FAILED.value
-                if policy.should_mark_failed
-                else thread.status
-            ),
+            thread_status=thread_status,
             dispatched=False,
             circuit_open=policy.is_circuit_open,
             error_detail=outcome.detail or "Worker dispatch failed",
             failure_type=typed_failure,
         )
 
-    # -- Success: transition to RUNNING ----------------------------------
-    await update_thread_status(db, thread_id, ThreadStatus.RUNNING)
-    await mark_message_followup_applied(db, thread_id)
-    await db.commit()
-
+    # Worker acknowledgement proves scheduling only. The exact internal
+    # ``dispatch_applied`` receipt settles the journal action and repair state.
     return MessageResult(
-        action_id=action.id,
+        action_id=claim.action_id,
         thread_id=thread_id,
-        thread_status=ThreadStatus.RUNNING.value,
+        thread_status=thread_status,
         dispatched=True,
     )

@@ -28,7 +28,7 @@ from ...database import (
     get_permission_request,
     record_permission_request,
 )
-from ...database.models import Base
+from ...database.models import Base, ControlActionModel
 from ...streaming.aggregator import EventAggregator
 from ...thread.enums import ControlActionResultStatus, ThreadStatus
 
@@ -106,16 +106,13 @@ async def _seed_thread(session_factory) -> str:
 async def _assert_journalled(
     session_factory,
     *,
-    thread_id: str,
-    idempotency_key: str,
+    action_id: str,
     expected_option_id: str,
     expected_error_detail: str,
 ) -> None:
     """The rejection row must be readable from a session that never wrote it."""
     async with session_factory() as reader:
-        stored = await get_control_action_by_idempotency_key(
-            reader, thread_id=thread_id, idempotency_key=idempotency_key
-        )
+        stored = await reader.get(ControlActionModel, action_id)
     assert stored is not None, "the rejection was reported but never committed"
     assert (
         stored.result_status == ControlActionResultStatus.REJECTED_INVALID_STATE.value
@@ -164,8 +161,7 @@ async def test_unknown_option_is_journalled_and_committed(session_factory) -> No
 
     await _assert_journalled(
         session_factory,
-        thread_id=thread_id,
-        idempotency_key=result.idempotency_key,
+        action_id=result.action_id,
         expected_option_id="not-an-option",
         expected_error_detail="Unknown permission option for this request",
     )
@@ -202,11 +198,11 @@ async def test_superseded_request_is_journalled_and_committed(session_factory) -
     assert result.error_detail == "Permission request is no longer pending"
     assert result.error_status_code == _CONFLICT
     assert result.idempotency_key is not None
+    assert result.action_id is not None
 
     await _assert_journalled(
         session_factory,
-        thread_id=thread_id,
-        idempotency_key=result.idempotency_key,
+        action_id=result.action_id,
         expected_option_id="allow_once",
         expected_error_detail="Permission request is no longer pending",
     )
@@ -236,11 +232,11 @@ async def test_optionless_request_is_journalled_and_committed(session_factory) -
     assert result.error_detail == "Permission request has no valid options"
     assert result.error_status_code == _CONFLICT
     assert result.idempotency_key is not None
+    assert result.action_id is not None
 
     await _assert_journalled(
         session_factory,
-        thread_id=thread_id,
-        idempotency_key=result.idempotency_key,
+        action_id=result.action_id,
         expected_option_id="allow_once",
         expected_error_detail="Permission request has no valid options",
     )

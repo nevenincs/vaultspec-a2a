@@ -2,10 +2,17 @@
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 import httpx
 import pytest
 import pytest_asyncio
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.ext.asyncio import (
+    AsyncEngine,
+    AsyncSession,
+    async_sessionmaker,
+    create_async_engine,
+)
 
 from ...control.circuit_breaker import WorkerCircuitBreaker
 from ...control.message_service import send_followup_message
@@ -16,9 +23,14 @@ from ...database import (
 )
 from ...database.models import Base
 
+if TYPE_CHECKING:
+    from collections.abc import AsyncIterator
+
 
 @pytest_asyncio.fixture
-async def engine(tmp_path_factory: pytest.TempPathFactory):
+async def engine(
+    tmp_path_factory: pytest.TempPathFactory,
+) -> AsyncIterator[AsyncEngine]:
     """Create a file-backed engine for dispatch-failure tests."""
     case_dir = tmp_path_factory.mktemp("dispatch-failure-db")
     db_file = case_dir / "test.db"
@@ -30,16 +42,18 @@ async def engine(tmp_path_factory: pytest.TempPathFactory):
 
 
 @pytest_asyncio.fixture
-async def session_factory(engine):
+async def session_factory(
+    engine: AsyncEngine,
+) -> async_sessionmaker[AsyncSession]:
     """Provide an async session factory bound to the test engine."""
     return async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
 
 @pytest.mark.asyncio
-async def test_send_followup_message_dispatch_failure_degrades_readiness(
-    session_factory,
+async def test_ambiguous_followup_failure_preserves_redrive_eligibility(
+    session_factory: async_sessionmaker[AsyncSession],
 ) -> None:
-    """A dispatch-marked failure must also degrade repair/readiness metadata."""
+    """Unreachable delivery retains ownership without terminalizing the run."""
     async with session_factory() as session:
         thread = await create_thread(
             session,
@@ -76,12 +90,10 @@ async def test_send_followup_message_dispatch_failure_degrades_readiness(
             )
 
         assert result.dispatched is False
-        assert result.thread_status == "failed"
+        assert result.thread_status == "submitted"
 
     async with session_factory() as session:
         updated = await get_thread(session, thread.id)
         assert updated is not None
-        assert updated.status == "failed"
-        assert updated.repair_status == "operator_intervention_required"
-        assert updated.execution_readiness == "operator_intervention_required"
-        assert updated.repair_reason == "Worker dispatch failed"
+        assert updated.status == "submitted"
+        assert updated.last_requested_action == "message_followup_requested"

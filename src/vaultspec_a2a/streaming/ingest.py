@@ -8,6 +8,7 @@ during the aggregator decomposition.
 import asyncio
 import logging
 import time
+from collections.abc import Awaitable, Callable
 from typing import Any
 
 from langgraph.types import Command
@@ -158,6 +159,8 @@ class IngestManager:
         graph: StreamableGraph,
         graph_input: dict[str, Any] | Command | None,
         config: dict[str, Any],
+        *,
+        on_graph_started: Callable[[], Awaitable[None]] | None = None,
     ) -> str:
         """Start consuming ``astream_events`` from a compiled graph.
 
@@ -200,6 +203,9 @@ class IngestManager:
                             f"Ingest stalled: no event from the graph for over "
                             f"{stall_timeout:.0f}s"
                         ) from exc
+                    if on_graph_started is not None:
+                        await on_graph_started()
+                        on_graph_started = None
                     if cancel_event.is_set():
                         logger.info("Ingest cancelled for thread %s", thread_id)
                         _outcome = ThreadStatus.CANCELLED

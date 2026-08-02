@@ -106,6 +106,17 @@ async def _relay_single_event(
             thread_id, payload, session_factory=session_factory
         )
         return
+    if payload.get("type") == "dispatch_applied":
+        # Application receipts are a private worker->gateway settlement signal.
+        # They deliberately bypass the public aggregator/SSE projection so the
+        # stable dispatch identity never becomes a progress-frame field.
+        await relay_event(
+            thread_id,
+            payload,
+            session_factory=session_factory,
+            drain_gate=drain_gate,
+        )
+        return
 
     if agg is not None:
         agg.relay_payload(thread_id, payload)

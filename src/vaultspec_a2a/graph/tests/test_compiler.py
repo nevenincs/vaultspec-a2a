@@ -620,14 +620,19 @@ def test_resolve_worker_model_preferences_honors_worker_override_precedence() ->
         }
     )
 
-    provider, capability, fallback_chain = _resolve_worker_model_preferences(
-        worker_ref,
-        agent_cfg,
-        team,
+    provider, capability, fallback_chain, model_name = (
+        _resolve_worker_model_preferences(
+            worker_ref,
+            agent_cfg,
+            team,
+        )
     )
     assert provider == Provider.GEMINI
     assert capability == Model.MID
     assert fallback_chain == [Provider.OPENAI, Provider.ZHIPU]
+    # Unfrozen resolution carries no concrete model name; the launch-time mapping
+    # picks it. Only a frozen assignment pins one.
+    assert model_name is None
 
 
 def test_resolve_worker_model_preferences_consumes_frozen_assignment() -> None:
@@ -645,14 +650,20 @@ def test_resolve_worker_model_preferences_consumes_frozen_assignment() -> None:
             "provider": "mock",
             "capability": "low",
             "fallback": ["openai"],
+            "model_name": "mock-frozen-1",
         }
     }
-    provider, capability, fallback_chain = _resolve_worker_model_preferences(
-        worker_ref, agent_cfg, team, frozen_assignment=frozen
+    provider, capability, fallback_chain, model_name = (
+        _resolve_worker_model_preferences(
+            worker_ref, agent_cfg, team, frozen_assignment=frozen
+        )
     )
     assert provider == Provider.MOCK
     assert capability == Model.LOW
     assert fallback_chain == [Provider.OPENAI]
+    # The whole point of freezing: the concrete model name is reproduced verbatim
+    # across a restart rather than re-resolved from a possibly-newer mapping.
+    assert model_name == "mock-frozen-1"
 
 
 def test_frozen_assignment_absent_worker_falls_through_to_resolution() -> None:

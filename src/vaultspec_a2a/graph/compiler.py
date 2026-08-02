@@ -162,11 +162,13 @@ def _resolve_model_for_worker(
     re-deriving it.
     """
     factory = provider_factory
-    primary_provider, capability, fallback_chain = _resolve_worker_model_preferences(
-        worker_ref,
-        agent_config,
-        team_config,
-        frozen_assignment=frozen_assignment,
+    primary_provider, capability, fallback_chain, frozen_model_name = (
+        _resolve_worker_model_preferences(
+            worker_ref,
+            agent_config,
+            team_config,
+            frozen_assignment=frozen_assignment,
+        )
     )
     providers_to_try = [primary_provider, *fallback_chain]
     last_exc: Exception | None = None
@@ -174,7 +176,7 @@ def _resolve_model_for_worker(
         try:
             model = factory.create(
                 p,
-                model=capability,
+                model=(frozen_model_name if p == primary_provider else capability),
                 agent_config=agent_config,
                 workspace_root=workspace_root,
             )
@@ -211,12 +213,12 @@ def _resolve_worker_model_preferences(
     agent_config: Any,
     team_config: Any,
     frozen_assignment: dict[str, dict[str, Any]] | None = None,
-) -> tuple[Provider, Model | None, list[Provider]]:
+) -> tuple[Provider, Model | None, list[Provider], str | None]:
     """Resolve provider + capability following the standard precedence.
 
-    A ``frozen_assignment`` entry for this worker wins outright and is applied
-    verbatim (model-profiles: the run's frozen effective assignment is
-    reproduced exactly across restarts, never re-resolved). Absent a frozen entry,
+    A ``frozen_assignment`` entry for this worker wins outright and preserves
+    its concrete model name (model-profiles: the run's frozen effective assignment
+    is reproduced exactly across restarts, never re-resolved). Absent a frozen entry,
     delegates to the shared model-profile resolver (the single source discovery,
     launch, and compilation all consume) with no profile overlay - byte-identical
     to the historical chain: [[team.workers]] override > agent TOML [agent.model]
@@ -232,36 +234,50 @@ def _resolve_worker_model_preferences(
     assignment = resolve_role_assignment(
         worker_ref, agent_config, team_config, profile_overlay=None
     )
-    return assignment.provider, assignment.capability, assignment.fallback_providers
+    return (
+        assignment.provider,
+        assignment.capability,
+        assignment.fallback_providers,
+        None,
+    )
 
 
 def _parse_frozen_preferences(
     frozen: dict[str, Any],
-) -> tuple[Provider, Model | None, list[Provider]]:
+) -> tuple[Provider, Model | None, list[Provider], str]:
     """Parse a persisted frozen assignment entry into resolved model preferences.
 
-    Tolerant of an unknown provider/capability string (config drift): an
-    unrecognised value falls back to the historical default rather than raising,
-    keeping a restarted run runnable.
+    A missing concrete model is invalid. Restart must refuse it rather than
+    silently selecting a newer mapping or provider default.
     """
+    raw_provider = frozen.get("provider")
     try:
-        provider = Provider(frozen["provider"])
-    except (KeyError, ValueError):
-        provider = Provider.CLAUDE
+        provider = Provider(raw_provider)
+    except ValueError as exc:
+        raise ValueError(
+            f"Frozen assignment has an invalid provider {raw_provider!r}"
+        ) from exc
     capability: Model | None = None
     raw_capability = frozen.get("capability")
     if raw_capability:
         try:
             capability = Model(raw_capability)
-        except ValueError:
-            capability = None
+        except ValueError as exc:
+            raise ValueError(
+                f"Frozen assignment has an invalid capability {raw_capability!r}"
+            ) from exc
     fallback: list[Provider] = []
     for raw in frozen.get("fallback", []):
         try:
             fallback.append(Provider(raw))
-        except ValueError:
-            continue
-    return provider, capability, fallback
+        except ValueError as exc:
+            raise ValueError(
+                f"Frozen assignment has an invalid fallback provider {raw!r}"
+            ) from exc
+    model_name = frozen.get("model_name")
+    if not isinstance(model_name, str) or not model_name.strip():
+        raise ValueError("Frozen assignment is missing its concrete model_name")
+    return provider, capability, fallback, model_name
 
 
 def _resolve_supervisor_model(

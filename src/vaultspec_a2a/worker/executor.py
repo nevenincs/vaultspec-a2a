@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING, Any
 from langgraph.types import Command
 
 from ..domain_config import domain_config
+from ..ipc.schemas import DispatchApplicationReceiptPayload
 from ..ipc.serializers import sequenced_to_dict
 from ..streaming.aggregator import EventAggregator, SequencedEvent, StreamableGraph
 from ..team.team_config import load_team_config
@@ -207,6 +208,31 @@ class Executor:
             autonomous=req.autonomous,
             **fields,
         )
+
+    async def _emit_dispatch_application_receipt(self, req: DispatchRequest) -> None:
+        """Queue private proof that an ingest or resume entered graph execution."""
+        if req.action not in {"ingest", "resume"}:
+            return
+        try:
+            await self._bridge.send_event(
+                req.thread_id,
+                DispatchApplicationReceiptPayload(
+                    dispatch_id=req.dispatch_id,
+                    action=req.action,
+                ).model_dump(mode="json"),
+            )
+        except Exception:
+            # The journal lease and worker dispatch-ID admission retain recovery
+            # authority. Receipt transport must never abort graph execution after
+            # the graph already began.
+            logger.warning(
+                "Could not queue dispatch application receipt",
+                exc_info=True,
+                extra=self._dispatch_log_extra(
+                    req,
+                    action="dispatch_application_receipt_failed",
+                ),
+            )
 
     async def _mark_ingest_active(self, thread_id: str) -> bool:
         """Acquire the ingest slot for *thread_id*; ``False`` if already held."""
@@ -578,6 +604,9 @@ class Executor:
                     graph,
                     graph_input,
                     config,
+                    on_graph_started=lambda: self._emit_dispatch_application_receipt(
+                        req
+                    ),
                 )
                 span.set_attribute("outcome", outcome)
             except Exception:
@@ -663,6 +692,9 @@ class Executor:
                     graph,
                     Command(resume=req.option_id),
                     config,
+                    on_graph_started=lambda: self._emit_dispatch_application_receipt(
+                        req
+                    ),
                 )
                 span.set_attribute("outcome", outcome)
             except Exception:

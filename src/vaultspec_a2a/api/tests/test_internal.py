@@ -8,6 +8,7 @@ Uses a real EventAggregator as the relay target (no fakes or mocks).
 
 from __future__ import annotations
 
+import asyncio
 import logging
 
 import pytest
@@ -89,6 +90,41 @@ class TestInternalHealth:
 # ---------------------------------------------------------------------------
 # /internal/heartbeat
 # ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio(loop_scope="function")
+async def test_dispatch_application_receipt_is_not_broadcast_to_progress(
+    session_factory,
+) -> None:
+    """The private stable dispatch identity must stop at the gateway DB edge."""
+    app = _make_test_app(with_aggregator=True, session_factory=session_factory)
+    aggregator = app.state.aggregator
+    queue = aggregator.add_subscriber("receipt-observer")
+    aggregator.subscribe("receipt-observer", ["receipt-thread"])
+
+    async with session_factory() as session:
+        await create_thread(session, thread_id="receipt-thread", status="running")
+        await session.commit()
+
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        response = await client.post(
+            "/internal/events",
+            json={
+                "type": "event",
+                "thread_id": "receipt-thread",
+                "payload": {
+                    "type": "dispatch_applied",
+                    "dispatch_id": "private-stable-id",
+                    "action": "ingest",
+                },
+            },
+        )
+
+    assert response.status_code == 200
+    with pytest.raises(TimeoutError):
+        await asyncio.wait_for(queue.get(), timeout=0.05)
 
 
 class TestInternalHeartbeat:

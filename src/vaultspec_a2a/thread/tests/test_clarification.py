@@ -16,10 +16,14 @@ from ..clarification import (
     MAX_ANSWER_CHARS,
     MAX_OPTION_CHARS,
     MAX_PROMPT_CHARS,
+    MAX_RUN_MESSAGE_CHARS,
     ClarificationAnswers,
+    ClarificationContinuation,
     ClarificationKind,
     ClarificationQuestion,
     ClarificationRequest,
+    clarification_resolution_fingerprint,
+    parse_clarification_resolution,
     pending_clarification,
     strip_control_characters,
     validate_clarification_answers,
@@ -118,6 +122,76 @@ def test_a_string_of_exactly_the_cap_is_admitted() -> None:
         request_id="clarify-1", answers={"scope": "x" * MAX_ANSWER_CHARS}
     )
     assert len(answers.answers["scope"]) == MAX_ANSWER_CHARS
+
+
+def test_a_continuation_prompt_uses_the_run_message_character_ceiling() -> None:
+    """The alternate outcome has the same inclusive text budget as a new turn."""
+    prompt = "世" * MAX_RUN_MESSAGE_CHARS
+    continuation = ClarificationContinuation(request_id="clarify-1", prompt=prompt)
+
+    assert continuation.prompt == prompt
+    assert len(continuation.prompt.encode("utf-8")) > MAX_RUN_MESSAGE_CHARS
+    assert continuation.as_resume_value() == {
+        "type": "clarification_continuation",
+        "request_id": "clarify-1",
+        "prompt": prompt,
+    }
+
+    with pytest.raises(ValidationError):
+        ClarificationContinuation(request_id="clarify-1", prompt=prompt + "x")
+
+
+@pytest.mark.parametrize("prompt", ["", " ", "\t\r\n"])
+def test_a_continuation_requires_real_prompt_content(prompt: str) -> None:
+    """Switching composer mode is local; only submitted text is a resume value."""
+    with pytest.raises(ValidationError):
+        ClarificationContinuation(request_id="clarify-1", prompt=prompt)
+
+
+def test_resolution_parser_binds_the_resume_to_the_committed_request() -> None:
+    """A stale typed resume cannot be consumed by a later clarification gate."""
+    continuation = ClarificationContinuation(
+        request_id="clarify-old", prompt="Take a different approach."
+    )
+
+    with pytest.raises(ValueError, match="does not match"):
+        parse_clarification_resolution(
+            continuation.as_resume_value(), request_id="clarify-current"
+        )
+
+    with pytest.raises(ValueError, match="discriminator"):
+        parse_clarification_resolution(
+            {
+                "type": "document_approval_request",
+                "request_id": "clarify-current",
+            },
+            request_id="clarify-current",
+        )
+
+
+def test_resolution_fingerprint_is_canonical_and_outcome_sensitive() -> None:
+    """Answer insertion order is noise, while resolution content is identity."""
+    first = ClarificationAnswers(
+        request_id="clarify-1",
+        answers={"scope": "backend", "constraints": "keep it small"},
+    )
+    reordered = ClarificationAnswers(
+        request_id="clarify-1",
+        answers={"constraints": "keep it small", "scope": "backend"},
+    )
+    changed_answer = ClarificationAnswers(
+        request_id="clarify-1",
+        answers={"scope": "frontend", "constraints": "keep it small"},
+    )
+    continuation = ClarificationContinuation(
+        request_id="clarify-1", prompt="Discuss the trade-off first."
+    )
+
+    fingerprint = clarification_resolution_fingerprint(first)
+    assert fingerprint.startswith("sha256:")
+    assert fingerprint == clarification_resolution_fingerprint(reordered)
+    assert fingerprint != clarification_resolution_fingerprint(changed_answer)
+    assert fingerprint != clarification_resolution_fingerprint(continuation)
 
 
 @pytest.mark.parametrize(

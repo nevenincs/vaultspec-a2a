@@ -193,6 +193,27 @@ class TestPendingPermissions:
         assert action.repair_status == "needs_reconciliation"
 
 
+class TestPendingClarifications:
+    """A checkpointed questionnaire remains a resumable typed interrupt."""
+
+    def test_pending_clarification_survives_restart_as_resumable(self) -> None:
+        thread = ThreadSnapshot(thread_id="t1", status="running", recovery_epoch=0)
+        actions = compute_reconciliation_actions(
+            threads=[thread],
+            checkpoint_results={"t1": True},
+            checkpoint_errors={},
+            pending_permissions={},
+            pending_clarifications={"t1": True},
+        )
+
+        assert len(actions) == 1
+        action = actions[0]
+        assert action.new_thread_status == "input_required"
+        assert action.repair_status == "paused_resumable"
+        assert action.repair_reason == "Pending clarification survived restart"
+        assert action.last_applied_action is None
+
+
 class TestHealthyThreadConservative:
     """Healthy threads with checkpoint available get reconciling action."""
 

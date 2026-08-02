@@ -16,6 +16,7 @@ from ..thread.constants import DEFAULT_SUPERVISOR_ID
 from ..thread.enums import ControlActionType
 
 __all__ = [
+    "DispatchApplicationReceiptPayload",
     "DispatchRequest",
     "DispatchResponse",
     "ExecutionStateProjectionPayload",
@@ -100,6 +101,18 @@ class DispatchResponse(BaseModel):
 
     status: str = "dispatched"
     thread_id: str
+
+
+class DispatchApplicationReceiptPayload(BaseModel):
+    """Private worker receipt proving that a dispatch entered graph execution.
+
+    The gateway consumes this payload for journal settlement.  It is intentionally
+    absent from the public progress catalog, whose projection drops ``dispatch_id``.
+    """
+
+    type: Literal["dispatch_applied"] = "dispatch_applied"
+    dispatch_id: str
+    action: Literal["ingest", "resume"]
 
 
 class ExecutionTaskProjectionPayload(BaseModel):

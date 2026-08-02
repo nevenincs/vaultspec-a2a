@@ -18,7 +18,10 @@ from pathlib import Path
 import pytest
 from alembic import command
 from alembic.config import Config
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
+from ...control.action_lease import ControlActionClaim, claim_control_action
+from ...thread.enums import ControlActionType
 from .. import migrations as _migrations_package
 from ..migrate import (
     build_migration_config,
@@ -34,6 +37,8 @@ _APP_TABLES = {
     "thread_execution_state",
     "task_queue_entries",
     "thread_deletion_saga",
+    "permission_requests",
+    "control_actions",
 }
 _LANGGRAPH_TABLES = {"checkpoints", "writes"}
 _ALEMBIC_INI = (
@@ -60,6 +65,115 @@ def _get_tables(db_path: Path) -> set[str]:
 
 
 class TestAlembicUpgradeDowngrade:
+    def test_pre_0012_action_is_backfilled_and_claimable(
+        self, runtime_dir: Path
+    ) -> None:
+        """A historical action upgrades to a stable receipt and acquires a lease."""
+        db = runtime_dir / "historical-control-action.db"
+        cfg = _make_config(db)
+        command.upgrade(cfg, "0011")
+        payload: dict[str, object] = {
+            "content": "historical follow-up",
+            "agent_id": "supervisor",
+        }
+        conn = sqlite3.connect(str(db))
+        conn.execute(
+            """
+            INSERT INTO threads (id, created_at, updated_at, status)
+            VALUES (?, ?, ?, ?)
+            """,
+            (
+                "historical-thread",
+                "2026-08-01 00:00:00",
+                "2026-08-01 00:00:00",
+                "running",
+            ),
+        )
+        conn.execute(
+            """
+            INSERT INTO control_actions (
+                id, thread_id, action_type, idempotency_key, requested_at,
+                result_status, payload_json, worker_generation
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "historical-action-id",
+                "historical-thread",
+                "message_followup_requested",
+                "historical-message",
+                "2026-08-01 00:00:00",
+                "accepted_not_applied",
+                json.dumps(payload, sort_keys=True, separators=(",", ":")),
+                0,
+            ),
+        )
+        conn.commit()
+        conn.close()
+
+        command.upgrade(cfg, "0012")
+        conn = sqlite3.connect(str(db))
+        row = conn.execute(
+            "SELECT dispatch_id FROM control_actions WHERE id = ?",
+            ("historical-action-id",),
+        ).fetchone()
+        conn.close()
+        assert row == ("historical-action-id",)
+
+        async def claim_upgraded_action() -> ControlActionClaim:
+            engine = create_async_engine(f"sqlite+aiosqlite:///{db}")
+            sessions = async_sessionmaker(
+                engine, class_=AsyncSession, expire_on_commit=False
+            )
+            async with sessions() as session:
+                claim = await claim_control_action(
+                    session,
+                    thread_id="historical-thread",
+                    action_type=ControlActionType.MESSAGE_FOLLOWUP_REQUESTED,
+                    idempotency_key="historical-message",
+                    payload=payload,
+                )
+            await engine.dispose()
+            return claim
+
+        claim = asyncio.run(claim_upgraded_action())
+        assert claim.created is False
+        assert claim.payload_matches is True
+        assert claim.acquired is True
+        assert claim.dispatch_id == "historical-action-id"
+
+    def test_control_action_lease_columns_upgrade_and_downgrade(
+        self, runtime_dir: Path
+    ) -> None:
+        """0012 is additive over historical rows and fully reversible."""
+        db = runtime_dir / "control-action-leases.db"
+        cfg = _make_config(db)
+        command.upgrade(cfg, "0011")
+        conn = sqlite3.connect(str(db))
+        before = {row[1] for row in conn.execute("PRAGMA table_info(control_actions)")}
+        conn.close()
+        assert not {"dispatch_id", "claim_token", "claim_expires_at"} & before
+
+        command.upgrade(cfg, "0012")
+        conn = sqlite3.connect(str(db))
+        upgraded = {
+            row[1] for row in conn.execute("PRAGMA table_info(control_actions)")
+        }
+        indexes = {
+            row[1]: bool(row[2])
+            for row in conn.execute("PRAGMA index_list(control_actions)")
+        }
+        conn.close()
+        assert {"dispatch_id", "claim_token", "claim_expires_at"} <= upgraded
+        assert indexes["ux_control_actions_dispatch_id"] is True
+
+        command.downgrade(cfg, "0011")
+        conn = sqlite3.connect(str(db))
+        downgraded = {
+            row[1] for row in conn.execute("PRAGMA table_info(control_actions)")
+        }
+        conn.close()
+        assert not {"dispatch_id", "claim_token", "claim_expires_at"} & downgraded
+
     def test_upgrade_head_creates_all_app_tables(self, runtime_dir: Path) -> None:
         db = runtime_dir / "test.db"
         cfg = _make_config(db)
@@ -129,7 +243,7 @@ class TestAlembicUpgradeDowngrade:
         row = conn.execute("SELECT version_num FROM alembic_version").fetchone()
         conn.close()
         assert row is not None
-        assert row[0] == "0011"
+        assert row[0] == "0012"
 
     def test_upgrade_head_rewrites_legacy_created_status(
         self, runtime_dir: Path
@@ -409,7 +523,7 @@ class TestRunMigrations:
             conn.close()
 
         assert version is not None
-        assert version[0] == "0011"
+        assert version[0] == "0012"
 
     @pytest.mark.asyncio
     async def test_run_migrations_with_percent_directory_reaches_head(
@@ -429,7 +543,7 @@ class TestRunMigrations:
             conn.close()
 
         assert version is not None
-        assert version[0] == "0011"
+        assert version[0] == "0012"
 
     @pytest.mark.asyncio
     async def test_concurrent_run_migrations_upgrades_both_databases(
@@ -455,5 +569,5 @@ class TestRunMigrations:
                 conn.close()
 
             assert version is not None
-            assert version[0] == "0011"
+            assert version[0] == "0012"
             assert _get_tables(database) >= _APP_TABLES

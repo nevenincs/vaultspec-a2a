@@ -61,10 +61,11 @@ import logging
 import re
 import time
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 import httpx
 import pytest
+from pydantic import TypeAdapter, ValidationError
 
 from ..control.run_start_policy import required_role_ids
 from ..graph.nodes.diverge import WEB_LOCATOR_KIND
@@ -80,6 +81,8 @@ from .test_pw7_acceptance import (
 from .test_tool_cores_floor_live import _snapshot_vault, _vault_write_delta
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping, Sequence
+
     from ..conftest import ExternalPrerequisiteRule
 
 logger = logging.getLogger(__name__)
@@ -126,6 +129,48 @@ _POLL_SECONDS = 15.0
 #: rate-limit vocabulary matches, so an ordinary provider error still fails loud.
 _USAGE_LIMIT_MARKERS = ("rate_limit", "usage limit", "weekly limit")
 
+JsonObject = dict[str, object]
+_JSON_OBJECT = TypeAdapter(JsonObject)
+_JSON_OBJECT_LIST = TypeAdapter(list[JsonObject])
+_OBJECT_LIST = TypeAdapter(list[object])
+
+
+@runtime_checkable
+class _WriterMessage(Protocol):
+    """The writer-message shape persisted by the production checkpointer."""
+
+    @property
+    def name(self) -> str | None: ...
+
+    @property
+    def content(self) -> object: ...
+
+
+def _json_object(value: object, *, at: str) -> JsonObject:
+    """Read an observed object or fail at the service/checkpoint boundary."""
+    try:
+        return _JSON_OBJECT.validate_python(value)
+    except ValidationError as exc:
+        raise AssertionError(f"expected JSON object at {at}: {exc}") from exc
+
+
+def _json_object_list(value: object, *, at: str) -> list[JsonObject]:
+    """Read an observed object list or fail at the service/checkpoint boundary."""
+    try:
+        return _JSON_OBJECT_LIST.validate_python(value)
+    except ValidationError as exc:
+        raise AssertionError(f"expected JSON object list at {at}: {exc}") from exc
+
+
+def _object_list(value: object, *, at: str) -> list[object]:
+    """Read an optional heterogeneous checkpoint list without widening its values."""
+    if value is None:
+        return []
+    try:
+        return _OBJECT_LIST.validate_python(value)
+    except ValidationError as exc:
+        raise AssertionError(f"expected list at {at}: {exc}") from exc
+
 
 def _fetch_live_commit_shas() -> set[str]:
     """Return the commit SHAs currently published for the proof repository.
@@ -146,15 +191,13 @@ def _fetch_live_commit_shas() -> set[str]:
     except (httpx.HTTPError, json.JSONDecodeError, ValueError):
         logger.warning("could not resolve live commit SHAs from %s", _LIVE_SHA_URL)
         return set()
-    if not isinstance(payload, list):
-        return set()
-    return {
-        item["sha"]
-        for item in payload
-        if isinstance(item, dict)
-        and isinstance(item.get("sha"), str)
-        and _SHA_RE.fullmatch(item["sha"])
-    }
+    entries = _json_object_list(payload, at="live GitHub commit response")
+    shas: set[str] = set()
+    for entry in entries:
+        sha = entry.get("sha")
+        if isinstance(sha, str) and _SHA_RE.fullmatch(sha):
+            shas.add(sha)
+    return shas
 
 
 def _web_grounding_case(feature: str) -> AcceptanceCase:
@@ -192,7 +235,7 @@ def _web_grounding_case(feature: str) -> AcceptanceCase:
     )
 
 
-def _web_locator_urls(findings: list[Any]) -> list[str]:
+def _web_locator_urls(findings: Sequence[Mapping[str, object]]) -> list[str]:
     """Return the distinct typed web-locator URLs in *findings*, first-seen order.
 
     Reads the finding contract's shape directly - ``{claim, locators, source_thread}``
@@ -201,29 +244,30 @@ def _web_locator_urls(findings: list[Any]) -> list[str]:
     """
     urls: list[str] = []
     for finding in findings:
-        if not isinstance(finding, dict):
+        locators: object = finding.get("locators")
+        if locators is None:
             continue
-        locators = finding.get("locators")
-        if not isinstance(locators, list):
-            continue
-        for locator in locators:
-            if not isinstance(locator, dict):
+        for locator in _object_list(locators, at="finding locators"):
+            try:
+                fields = _JSON_OBJECT.validate_python(locator)
+            except ValidationError:
                 continue
-            if locator.get("kind") != WEB_LOCATOR_KIND:
+            if fields.get("kind") != WEB_LOCATOR_KIND:
                 continue
-            url = locator.get("url")
+            url = fields.get("url")
             if isinstance(url, str) and url and url not in urls:
                 urls.append(url)
     return urls
 
 
-def _finding_claims(findings: list[Any]) -> str:
+def _finding_claims(findings: Sequence[Mapping[str, object]]) -> str:
     """Concatenate every finding's claim prose - the researchers' own turn output."""
-    return "\n".join(
-        finding["claim"]
-        for finding in findings
-        if isinstance(finding, dict) and isinstance(finding.get("claim"), str)
-    )
+    claims: list[str] = []
+    for finding in findings:
+        claim = finding.get("claim")
+        if isinstance(claim, str):
+            claims.append(claim)
+    return "\n".join(claims)
 
 
 def _sources_section(body: str) -> str:
@@ -236,7 +280,7 @@ def _sources_section(body: str) -> str:
     return body[match.start() :] if match else ""
 
 
-def _writer_body(messages: list[Any], writer_name: str) -> str:
+def _writer_body(messages: Sequence[_WriterMessage], writer_name: str) -> str:
     """Return the last document body the research writer produced, or an empty string.
 
     The submitter proposes exactly this message's content (its last one, sentinel
@@ -252,7 +296,7 @@ def _writer_body(messages: list[Any], writer_name: str) -> str:
     return bodies[-1] if bodies else ""
 
 
-async def _read_checkpointed_state(run_id: str) -> dict[str, Any]:
+async def _read_checkpointed_state(run_id: str) -> JsonObject:
     """Return the run's checkpointed channel values through the production checkpointer.
 
     Opened with :func:`..database.checkpoints.open_checkpointer`, so this reads the
@@ -266,8 +310,11 @@ async def _read_checkpointed_state(run_id: str) -> dict[str, Any]:
         tuple_ = await checkpointer.aget_tuple({"configurable": {"thread_id": run_id}})
     if tuple_ is None:
         return {}
-    values = tuple_.checkpoint.get("channel_values")
-    return values if isinstance(values, dict) else {}
+    # ``channel_values`` is declared on the checkpoint contract, so an invalid shape
+    # is a broken checkpoint rather than an empty observation to silently tolerate.
+    return _json_object(
+        tuple_.checkpoint.get("channel_values"), at="checkpoint channels"
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -292,10 +339,17 @@ class _Evidence:
 async def _read_evidence(run_id: str) -> _Evidence:
     """Project the run's checkpointed state onto the two citation channels."""
     state = await _read_checkpointed_state(run_id)
-    findings = state.get("research_findings")
-    findings = findings if isinstance(findings, list) else []
-    messages = state.get("messages")
-    messages = messages if isinstance(messages, list) else []
+    raw_findings = state.get("research_findings")
+    findings = (
+        []
+        if raw_findings is None
+        else _json_object_list(raw_findings, at="checkpoint research findings")
+    )
+    messages = [
+        message
+        for message in _object_list(state.get("messages"), at="checkpoint messages")
+        if isinstance(message, _WriterMessage)
+    ]
     return _Evidence(
         claims=_finding_claims(findings),
         locator_urls=_web_locator_urls(findings),
@@ -534,6 +588,39 @@ def test_web_locator_urls_reads_the_finding_contract_shape() -> None:
         "https://example.test/b",
     ]
     assert _web_locator_urls([]) == []
+
+
+def test_json_reader_rejects_a_non_object_github_commit_payload() -> None:
+    """The live GitHub response must be an object list, never a scalar object."""
+    with pytest.raises(AssertionError, match="live GitHub commit response"):
+        _json_object_list({"sha": "not a list"}, at="live GitHub commit response")
+
+
+def test_json_reader_rejects_malformed_checkpoint_channels() -> None:
+    """Checkpoint channels must remain an object before evidence is projected."""
+    with pytest.raises(AssertionError, match="checkpoint channels"):
+        _json_object(["not checkpoint channels"], at="checkpoint channels")
+
+
+def test_json_reader_rejects_malformed_checkpoint_findings() -> None:
+    """Research findings must remain a list of objects at the checkpoint boundary."""
+    with pytest.raises(AssertionError, match="checkpoint research findings"):
+        _json_object_list(["not a research finding"], at="checkpoint research findings")
+
+
+def test_json_reader_rejects_malformed_checkpoint_messages() -> None:
+    """The heterogeneous message channel must still be a list."""
+    with pytest.raises(AssertionError, match="checkpoint messages"):
+        _object_list({"content": "not a message list"}, at="checkpoint messages")
+
+
+def test_web_locator_urls_rejects_a_non_list_locator_collection() -> None:
+    """Only individual malformed locators are tolerant; their collection is not."""
+    findings: list[dict[str, object]] = [
+        {"claim": "grounded", "locators": {"url": PROOF_URL}}
+    ]
+    with pytest.raises(AssertionError, match="finding locators"):
+        _web_locator_urls(findings)
 
 
 def test_sources_section_is_scoped_to_the_sources_heading() -> None:

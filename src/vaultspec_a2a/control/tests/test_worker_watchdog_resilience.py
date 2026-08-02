@@ -40,6 +40,7 @@ from ...tests.gateway_boot import free_port
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
+    from pathlib import Path
 
 _POLL = 0.05
 """A poll interval short enough that several ticks fit in a test's patience."""
@@ -88,6 +89,44 @@ def _fast_polling() -> Iterator[None]:
         yield
     finally:
         settings.watchdog_poll_interval_seconds = original
+
+
+@contextlib.contextmanager
+def _runtime_home(home: Path) -> Iterator[None]:
+    """Point the machine-global runtime directory at *home*; a real swap, restored.
+
+    The watchdog derives the worker's stderr log path from this setting, so a
+    test that needs to fault that real path does it inside its own tree instead
+    of the developer's A2A home.
+    """
+    original = settings.a2a_home
+    settings.a2a_home = home
+    try:
+        yield
+    finally:
+        settings.a2a_home = original
+
+
+def _crashed_owned_watchdog() -> tuple[WorkerWatchdog, WorkerState, LazyWorkerSpawner]:
+    """A watchdog over an OWNED worker process that has already exited.
+
+    The shape that sends a tick down the recovery path: the gateway holds the
+    process handle and may restart it, and the handle's process is really dead,
+    so ``_process_crashed`` is true from the first tick without any simulation.
+    """
+    crashed = subprocess.Popen([sys.executable, "-c", "raise SystemExit(3)"])
+    crashed.wait(timeout=30)
+    port = free_port()
+    spawner = LazyWorkerSpawner(
+        worker_url=f"http://127.0.0.1:{port}", worker_port=port, auto_spawn=True
+    )
+    spawner.replace_process(crashed)
+    worker_state = WorkerState()
+    breaker = WorkerCircuitBreaker(failure_threshold=3, recovery_timeout=30)
+    watchdog = WorkerWatchdog(
+        spawner, breaker, worker_state, SimpleNamespace(worker_last_heartbeat_ts=None)
+    )
+    return watchdog, worker_state, spawner
 
 
 def _unsupervised_watchdog(
@@ -143,38 +182,52 @@ async def _await_status(state: WorkerState, expected: str, *, timeout: float) ->
 
 
 @pytest.mark.asyncio
-async def test_a_raising_tick_does_not_end_the_watchdog() -> None:
+async def test_a_raising_tick_does_not_end_the_watchdog(tmp_path: Path) -> None:
     """The defect: one raising tick used to be the last tick.
 
-    A wrong-typed heartbeat makes every tick raise before it can reconcile
-    anything, so the status stays where the constructor left it. Repairing the
-    state mid-flight is the discriminating step - only a watchdog that is still
-    polling can notice, so the later transition proves the loop outlived the
-    failures rather than merely that the task object still exists.
+    The fault is injected where the docstring above says a tick is most likely
+    to suffer one - on the recovery path - and by a real filesystem condition
+    rather than by replacing a tick with something that raises. A crashed owned
+    worker sends the tick to read its stderr log for the crash diagnostic; with
+    a DIRECTORY sitting at that exact production path the read raises a genuine
+    ``OSError`` every tick, before anything is reconciled, so the status stays
+    where the constructor left it.
+
+    Clearing the fault mid-flight is the discriminating step - only a watchdog
+    that is still polling can notice, so the later transition proves the loop
+    outlived the failures rather than merely that the task object still exists.
     """
-    watchdog, worker_state, app_state = _unsupervised_watchdog("not-a-timestamp")
+    with _runtime_home(tmp_path):
+        watchdog, worker_state, spawner = _crashed_owned_watchdog()
+        stderr_log = spawner.stderr_log_path
+        assert stderr_log is not None, "an auto-spawning spawner owns a stderr log"
+        stderr_log.mkdir(parents=True)
 
-    with _captured() as records, _fast_polling():
-        task = asyncio.create_task(watchdog.run())
-        try:
-            # Wait for a tick to actually fail before asserting anything about
-            # what surviving one means.
-            failures = await _await_record(
-                records, "watchdog tick failed", timeout=15.0
-            )
-            assert failures, "no tick raised, so this test proved nothing"
-            assert not task.done(), "the watchdog ended on a raising tick"
-            assert worker_state.worker_status == "pending", (
-                "a tick reconciled status despite raising"
-            )
+        with _captured() as records, _fast_polling():
+            task = asyncio.create_task(watchdog.run())
+            try:
+                # Wait for a tick to actually fail before asserting anything
+                # about what surviving one means.
+                failures = await _await_record(
+                    records, "watchdog tick failed", timeout=15.0
+                )
+                assert failures, "no tick raised, so this test proved nothing"
+                assert not task.done(), "the watchdog ended on a raising tick"
+                assert worker_state.worker_status == "pending", (
+                    "a tick reconciled status despite raising"
+                )
 
-            # Repair the fault. A live watchdog reconciles on its next poll.
-            app_state.worker_last_heartbeat_ts = None
-            reconciled = await _await_status(worker_state, "down", timeout=15.0)
-        finally:
-            task.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await task
+                # Repair the fault. A live watchdog reaches its recovery path on
+                # the next poll and announces the restart cycle it could not
+                # reach while the diagnostic read was raising.
+                stderr_log.rmdir()
+                reconciled = await _await_status(
+                    worker_state, "restarting", timeout=15.0
+                )
+            finally:
+                task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await task
 
     assert reconciled, (
         "the watchdog never reconciled after the fault cleared; it stopped "

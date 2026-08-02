@@ -31,8 +31,10 @@ from ...context.metadata import ThreadMetadata
 from ...thread.actor_tokens import ActorTokenBundle
 from ...thread.clarification import (
     MAX_QUESTIONS_PER_REQUEST,
+    MAX_RUN_MESSAGE_CHARS,
     AnswerText,
     ClarificationRequest,
+    ContinuationPrompt,
     QuestionId,
 )
 from ...thread.enums import CleanupKind, ThreadStatus
@@ -75,12 +77,6 @@ __all__ = [
 ]
 
 _API_VERSION = "v1"
-
-# Character bound on a run's opening prompt, exported because it is half of a
-# cross-repo contract rather than this schema's private business: a consumer that
-# re-checks the prompt must apply the same UNIT, and the unit is characters. See
-# ``RunStartRequest.message`` for the byte budget that follows from it.
-MAX_RUN_MESSAGE_CHARS = 65536
 
 _PATH_SAFE_RUN_ID = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9_-]{0,127}$")
 PathSafeRunId = Annotated[
@@ -682,39 +678,45 @@ class RunPermissionRespondResponse(BaseModel):
 
 
 class RunClarificationRespondRequest(BaseModel):
-    """Answer the bounded questionnaire a run is parked on.
+    """Resolve a parked questionnaire with answers or a new prompt.
 
-    Carries only the answers, keyed by question id. The questions themselves were
-    disclosed authoritatively by ``run-status`` (and the run id and request id
-    address the questionnaire from the path), so the answer names what it answers
-    rather than restating what was asked.
+    Carries exactly one outcome: legacy answers keyed by question id, or a new
+    prompt that continues the same run. The questions themselves were disclosed
+    authoritatively by ``run-status``; the run id and request id address the
+    questionnaire from the path, so neither outcome restates what was asked.
 
-    The bounds here are the same ones the question set was built under - they are
-    imported from the one module that owns them rather than restated - so an
-    over-long answer or an over-full answer sheet is refused at the wire, before
-    any run state is touched. The checks that need the parked questions in hand
-    (an id nobody asked about, a required question left blank, a choice outside
-    its declared options) are applied by the route against the checkpoint.
+    All bounds are imported from the domain contract rather than restated. The
+    checks that need the parked questions in hand (an id nobody asked about, a
+    required question left blank, a choice outside its declared options) are
+    applied only to the answer outcome by the route against the checkpoint.
     """
 
     model_config = ConfigDict(extra="forbid")
 
-    answers: dict[QuestionId, AnswerText] = Field(max_length=MAX_QUESTIONS_PER_REQUEST)
+    answers: dict[QuestionId, AnswerText] | None = Field(
+        default=None, max_length=MAX_QUESTIONS_PER_REQUEST
+    )
+    prompt: ContinuationPrompt | None = None
+
+    @model_validator(mode="after")
+    def _require_one_resolution(self) -> RunClarificationRespondRequest:
+        """Require exactly one unambiguous clarification outcome."""
+        if (self.answers is None) == (self.prompt is None):
+            msg = "exactly one of answers or prompt is required"
+            raise ValueError(msg)
+        if self.prompt is not None and not self.prompt.strip():
+            msg = "prompt must not be blank"
+            raise ValueError(msg)
+        return self
 
 
 class RunClarificationRespondResponse(BaseModel):
-    """Report that a questionnaire's answers were taken and the run resumed.
+    """Report the durable outcome of a questionnaire resolution.
 
-    ``accepted`` says the answers were admitted and the resume dispatched;
-    ``applied`` is false on the accepting call, because the graph resumes
-    asynchronously and this response is assembled before it has advanced. A
-    caller reconciles the outcome from ``run-status``, exactly as it does for a
-    permission answer.
-
-    There is no duplicate-replay reading here, and deliberately so: the parked
-    interrupt in the run's checkpoint IS the at-most-once guard. Once the run
-    resumes, the questionnaire is no longer pending, so a second answer finds
-    nothing to answer and is refused as not-found rather than re-dispatched.
+    Identical retries replay the journal outcome without dispatch while a lease
+    is fresh. ``applied`` becomes true only after the request-scoped checkpoint
+    receipt matches the accepted resolution fingerprint, including when a retry
+    follows a lost response after the graph already advanced.
     """
 
     api_version: Literal["v1"] = _API_VERSION
@@ -723,6 +725,7 @@ class RunClarificationRespondResponse(BaseModel):
     accepted: bool
     applied: bool = False
     action_status: str
+    idempotency_key: str | None = None
 
 
 class RoleAssignmentSummary(BaseModel):

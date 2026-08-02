@@ -28,8 +28,11 @@ from opentelemetry.sdk.trace import TracerProvider as SdkTracerProvider
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..authoring import resolve_engine
+from ..control.action_lease import CONTROL_ACTION_LEASE_TTL
 from ..control.circuit_breaker import WorkerCircuitBreaker
+from ..control.clarification_service import redrive_clarification_actions
 from ..control.config import settings
+from ..control.direct_control_recovery import redrive_direct_control_actions
 from ..control.dispatch import redispatch_reconciling_threads
 from ..control.health import (
     assemble_desktop_readiness,
@@ -378,6 +381,18 @@ async def _lifespan(app: FastAPI) -> AsyncGenerator[None]:
 
         async def _deferred_reconcile() -> None:
             await worker_demand_ready.wait()
+            await _redispatch_recovery()
+
+        async def _redispatch_recovery() -> None:
+            direct_summary = await redrive_direct_control_actions(
+                get_session_factory(),
+                worker_client=worker_client,
+                circuit_breaker=circuit_breaker,
+                worker_spawner=worker_spawner,
+                recursion_limit=domain_config.graph_recursion_limit,
+                trace_headers=trace_headers(),
+            )
+            app.state.direct_control_recovery_summary = direct_summary
             await redispatch_reconciling_threads(
                 worker_client,
                 circuit_breaker,
@@ -385,6 +400,29 @@ async def _lifespan(app: FastAPI) -> AsyncGenerator[None]:
                 record_worker_contact=record_worker_contact,
                 trace_headers_fn=trace_headers,
             )
+            app.state.clarification_recovery_summary = (
+                await redrive_clarification_actions(
+                    get_session_factory(),
+                    checkpointer=checkpointer,
+                    worker_client=worker_client,
+                    circuit_breaker=circuit_breaker,
+                    worker_spawner=worker_spawner,
+                    recursion_limit=domain_config.graph_recursion_limit,
+                    trace_headers=trace_headers(),
+                )
+            )
+            if direct_summary.deferred:
+                await asyncio.sleep(CONTROL_ACTION_LEASE_TTL.total_seconds())
+                app.state.direct_control_recovery_summary = (
+                    await redrive_direct_control_actions(
+                        get_session_factory(),
+                        worker_client=worker_client,
+                        circuit_breaker=circuit_breaker,
+                        worker_spawner=worker_spawner,
+                        recursion_limit=domain_config.graph_recursion_limit,
+                        trace_headers=trace_headers(),
+                    )
+                )
 
         if armed:
             # Hand the spawner the event it fires once the first demand-driven
@@ -393,15 +431,7 @@ async def _lifespan(app: FastAPI) -> AsyncGenerator[None]:
             worker_spawner.demand_ready_event = worker_demand_ready
             reconcile_task = asyncio.create_task(_deferred_reconcile())
         else:
-            reconcile_task = asyncio.create_task(
-                redispatch_reconciling_threads(
-                    worker_client,
-                    circuit_breaker,
-                    worker_spawner,
-                    record_worker_contact=record_worker_contact,
-                    trace_headers_fn=trace_headers,
-                )
-            )
+            reconcile_task = asyncio.create_task(_redispatch_recovery())
 
         # Publish and heartbeat the machine-global discovery file so the
         # engine can attach-never-own. A crashed/stale prior record is reclaimed;

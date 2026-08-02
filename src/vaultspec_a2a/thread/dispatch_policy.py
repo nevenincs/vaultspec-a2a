@@ -35,6 +35,7 @@ class FailureType(StrEnum):
     NOT_FOUND = "not_found"
     TERMINAL = "terminal"
     INPUT_REQUIRED = "input_required"
+    CONFLICT = "conflict"
 
 
 @dataclass(frozen=True, slots=True)

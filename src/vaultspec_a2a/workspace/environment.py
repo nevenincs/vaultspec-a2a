@@ -59,14 +59,37 @@ def resolve_env_vars(workspace_path: Path) -> dict[str, str]:
     - ``VIRTUAL_ENV``: points to the resolved venv
     - ``PATH``: prepends the venv's ``Scripts`` (Windows) or ``bin``
       directory
-    - ``CWD``: set to *workspace_path* for clarity
+    - ``PWD``: set to *workspace_path* for clarity
 
-    Credential injection (``CLAUDE_CODE_OAUTH_TOKEN`` etc.)
-    is handled by the provider layer, never by the workspace module.
+    The base environment is scrubbed, never inherited wholesale. A spawned agent
+    is a lower-trust process than the service that spawns it, so a credential the
+    operator happens to carry must not become a credential the agent can spend.
+    Four removal families:
+
+    - Known provider secrets by name. The provider layer re-injects only the auth
+      a lane intentionally supports (``_build_gemini_env``, ``_build_zai_env``),
+      so removing them here costs nothing a supported lane depends on. Two
+      concrete hazards this closes: the Z.ai lane retargets
+      ``ANTHROPIC_BASE_URL`` at a third-party gateway, and an inherited
+      ``ANTHROPIC_API_KEY`` would then be presented to that gateway; and an
+      ``ANTHROPIC_API_KEY`` alongside a Claude OAuth token silently downgrades a
+      flat-rate subscription to metered API billing.
+    - ``CLAUDE_CODE_*`` except a narrow allowlist. Anything outside it (internal
+      session markers set by a parent Claude Code process, auth-helper hooks)
+      would hand a nested ACP subprocess the parent session's identity.
+    - ``VAULTSPEC_*``: this service's OWN infrastructure state (gateway/internal
+      bearer tokens, port wiring). Handing agents the tokens that authenticate
+      the control plane would let a spawned agent impersonate the
+      infrastructure. Additive ``VAULTSPEC_AUTHORING_*`` bridge values are
+      re-injected explicitly by the provider layer after this base.
+    - ``ANTHROPIC_LOG``: ``debug`` makes the Anthropic SDK emit debug text to
+      stdout, corrupting the ACP JSON-RPC stream (-32603 parse errors). The
+      probe re-injects it explicitly only when debug=True via run_probe().
+
+    ``ANTHROPIC_BASE_URL``/``ANTHROPIC_AUTH_TOKEN`` are deliberately NOT scrubbed:
+    they are endpoint/token names the Z.ai lane rides, distinct from
+    ``ANTHROPIC_API_KEY``.
     """
-    # scrub known secret env vars to prevent credential leakage to
-    # agents. Credential injection is handled by the provider
-    # layer.  VAULTSPEC_* prefixed keys are scrubbed via a prefix check below.
     scrub_keys = frozenset(
         {
             "ANTHROPIC_API_KEY",
@@ -75,31 +98,18 @@ def resolve_env_vars(workspace_path: Path) -> dict[str, str]:
             "GOOGLE_API_KEY",
             "AWS_SECRET_ACCESS_KEY",
             "AZURE_OPENAI_API_KEY",
-            # additional API key providers
             "ZHIPU_API_KEY",
             "LANGCHAIN_API_KEY",
             "LANGSMITH_API_KEY",
             "LANGCHAIN_TRACING_V2",
-            # ANTHROPIC_LOG=debug causes the Anthropic SDK to emit
-            # debug text to stdout, corrupting the ACP JSON-RPC stream and
-            # triggering -32603 parse errors. Strip it unconditionally — the probe
-            # re-injects it explicitly only when debug=True via run_probe().
             "ANTHROPIC_LOG",
         }
     )
-    # scrub all CLAUDE_CODE_* keys except those the provider layer
-    # deliberately injects into the child process: OAUTH_TOKEN (auth),
-    # EXECUTABLE (binary override), and the two DISABLE_* keys that
-    # suppress interactive prompts in non-interactive subprocesses.  Any other
-    # CLAUDE_CODE_* key (e.g. CLAUDE_CODE_SKIP_BROWSER_AUTH, internal session
-    # markers set by a parent Claude Code process) must be stripped so that a
-    # nested ACP subprocess does not inherit the parent session identity.
-    _claude_code_allowlist = frozenset(
+    claude_code_allowlist = frozenset(
         {
             "CLAUDE_CODE_OAUTH_TOKEN",
             "CLAUDE_CODE_EXECUTABLE",
-            # suppress interactive prompts in
-            # non-interactive ACP subprocesses.
+            # suppress interactive prompts in non-interactive ACP subprocesses.
             "CLAUDE_CODE_DISABLE_FEEDBACK_SURVEY",
             "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC",
         }
@@ -107,11 +117,9 @@ def resolve_env_vars(workspace_path: Path) -> dict[str, str]:
     env = {
         k: v
         for k, v in os.environ.items()
-        # Scrub explicit keys, VAULTSPEC_ secrets,
-        # and wildcard CLAUDE_CODE_* except allowlist
         if k not in scrub_keys
         and not k.startswith("VAULTSPEC_")
-        and not (k.startswith("CLAUDE_CODE_") and k not in _claude_code_allowlist)
+        and not (k.startswith("CLAUDE_CODE_") and k not in claude_code_allowlist)
     }
     # use PWD (POSIX standard) instead of the non-standard CWD variable
     env["PWD"] = str(workspace_path)

@@ -49,9 +49,21 @@ from .models import PermissionLogModel as PermissionLogModel
 from .models import TaskQueueEntryModel as TaskQueueEntryModel
 from .models import ThreadDeletionSagaModel as ThreadDeletionSagaModel
 from .models import ThreadModel as ThreadModel
+from .permission_repository import (
+    ControlActionReservation as ControlActionReservation,
+)
+from .permission_repository import (
+    acquire_control_action_lease as acquire_control_action_lease,
+)
+from .permission_repository import (
+    commit_control_action_lease as commit_control_action_lease,
+)
 from .permission_repository import create_control_action as create_control_action
 from .permission_repository import (
     expire_pending_permission_requests as expire_pending_permission_requests,
+)
+from .permission_repository import (
+    get_control_action_by_dispatch_id as get_control_action_by_dispatch_id,
 )
 from .permission_repository import (
     get_control_action_by_idempotency_key as get_control_action_by_idempotency_key,
@@ -82,7 +94,16 @@ from .permission_repository import (
     record_permission_response_submission as record_permission_response_submission,
 )
 from .permission_repository import (
+    release_control_action_lease as release_control_action_lease,
+)
+from .permission_repository import (
+    reserve_control_action as reserve_control_action,
+)
+from .permission_repository import (
     reset_permission_response_submission as reset_permission_response_submission,
+)
+from .permission_repository import (
+    settle_control_action_lease as settle_control_action_lease,
 )
 from .permission_repository import (
     supersede_permission_requests as supersede_permission_requests,
@@ -127,6 +148,7 @@ __all__ = [
     "ArtifactModel",
     "AuthoringEventCursorModel",
     "Base",
+    "ControlActionReservation",
     "CostTrackingModel",
     "MarkCompleteResult",
     "PermissionLogModel",
@@ -134,11 +156,13 @@ __all__ = [
     "TaskQueueEntryModel",
     "ThreadDeletionSagaModel",
     "ThreadModel",
+    "acquire_control_action_lease",
     "append_cost_record",
     "append_permission_log",
     "backfill_teamstate_sdd_fields",
     "build_migration_config",
     "close_db",
+    "commit_control_action_lease",
     "count_pending_sdd_backfill",
     "create_artifact",
     "create_control_action",
@@ -149,6 +173,7 @@ __all__ = [
     "get_artifact",
     "get_artifacts_by_thread",
     "get_authoring_cursor",
+    "get_control_action_by_dispatch_id",
     "get_control_action_by_idempotency_key",
     "get_db",
     "get_engine",
@@ -174,6 +199,8 @@ __all__ = [
     "record_permission_request",
     "record_permission_response_submission",
     "record_thread_execution_state",
+    "release_control_action_lease",
+    "reserve_control_action",
     "reset_permission_response_submission",
     "run_migrations",
     "save_model",
@@ -181,6 +208,7 @@ __all__ = [
     "set_authoring_cursor",
     "set_thread_approval_state",
     "set_thread_repair_state",
+    "settle_control_action_lease",
     "sum_cost_by_agent",
     "sum_cost_by_thread",
     "supersede_permission_requests",

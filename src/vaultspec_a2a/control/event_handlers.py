@@ -21,16 +21,13 @@ from pydantic import TypeAdapter, ValidationError
 from ..ipc.schemas import ExecutionStateProjectionPayload
 from ..thread.enums import InvalidTransitionError, ThreadStatus
 from ..thread.permission_fsm import (
-    PROGRESS_BATCH_EFFECTS,
     compute_permission_request_effects,
     compute_permission_resolution_effects,
-    compute_progress_applied_effects,
 )
 from ..thread.snapshots import (
     TERMINAL_STATUS_MAP,
     classify_permission_pause_reason,
     is_permission_event,
-    is_progress_event,
     is_terminal_event,
 )
 from ..thread.terminal_effects import compute_terminal_effects
@@ -211,6 +208,7 @@ async def _handle_terminal_event(
         from ..database import (
             expire_pending_permission_requests,
             get_latest_control_action,
+            mark_control_action_applied,
             set_thread_repair_state,
             update_thread_status,
         )
@@ -242,8 +240,9 @@ async def _handle_terminal_event(
                 has_cancel_action=latest_cancel is not None,
             )
             if effects.should_finalize_cancel and latest_cancel is not None:
-                latest_cancel.result_status = "applied"
-                latest_cancel.applied_at = latest_cancel.applied_at or _time_now_utc()
+                await mark_control_action_applied(
+                    db, latest_cancel.id, applied_at=_time_now_utc()
+                )
             await set_thread_repair_state(
                 db,
                 thread_id,
@@ -408,12 +407,15 @@ async def _apply_permission_resolution(
     """
     from ..database import (
         create_control_action,
+        get_control_action_by_idempotency_key,
         get_permission_request,
+        mark_control_action_applied,
         mark_permission_request_applied,
         set_thread_approval_state,
         set_thread_repair_state,
     )
     from ..thread.enums import ControlActionResultStatus
+    from .permission_service import permission_response_action_key
 
     request_value = payload.get("request_id")
     request_id = request_value if isinstance(request_value, str) else ""
@@ -428,6 +430,13 @@ async def _apply_permission_resolution(
     await mark_permission_request_applied(
         db, request_id=request_id, status=fx_res.target_status
     )
+    submitted = await get_control_action_by_idempotency_key(
+        db,
+        thread_id=thread_id,
+        idempotency_key=permission_response_action_key(request_id),
+    )
+    if submitted is not None and submitted.applied_at is None:
+        await mark_control_action_applied(db, submitted.id)
     await create_control_action(
         db,
         thread_id=thread_id,
@@ -486,79 +495,51 @@ async def _handle_progress_event(
     payload: dict[str, object],
     *,
     session_factory: async_sessionmaker[AsyncSession] | None = None,
-) -> None:
-    """Infer permission application from post-resume worker progress."""
-    if not is_progress_event(payload):
+) -> str | None:
+    """Settle one exact control action from a private worker receipt."""
+    if payload.get("type") != "dispatch_applied":
         return
-    event_value = payload.get("type")
-    event_type = event_value if isinstance(event_value, str) else ""
-
     from ..database import (
-        create_control_action,
-        get_pending_permission_requests,
-        mark_permission_request_applied,
-        set_thread_approval_state,
-        set_thread_repair_state,
+        get_control_action_by_dispatch_id,
+        mark_control_action_applied,
         update_thread_status,
     )
-    from ..thread.enums import (
-        ControlActionResultStatus,
-    )
+    from ..thread.enums import ControlActionType
+    from .repair_transitions import mark_message_followup_applied
 
     factory = _session_factory(session_factory)
     async with factory() as db:
-        pending = await get_pending_permission_requests(db, thread_id=thread_id)
-        answered = [
-            permission
-            for permission in pending
-            if permission.request_status == "answered_pending_apply"
-        ]
-        for permission in answered:
-            fx = compute_progress_applied_effects(
-                permission.response_option_id,
-                permission.pause_reason_type,
-                permission.allowed_options_json,
-            )
-            await mark_permission_request_applied(
-                db, request_id=permission.request_id, status=fx.target_status
-            )
-            await create_control_action(
-                db,
-                thread_id=thread_id,
-                action_type=fx.last_applied_action,
-                request_id=permission.request_id,
-                idempotency_key=(
-                    f"permission-response-progress-applied:{permission.request_id}"
-                ),
-                payload={"event_type": event_type},
-                result_status=ControlActionResultStatus.APPLIED,
-            )
-            if fx.is_plan_approval:
-                await set_thread_approval_state(
-                    db,
-                    thread_id,
-                    approval_status=fx.approval_status,
-                    approval_request_id=permission.request_id,
-                    approval_reason=permission.description,
-                )
-        if answered:
-            batch = PROGRESS_BATCH_EFFECTS
-            try:
-                await update_thread_status(db, thread_id, batch.thread_status)
-            except InvalidTransitionError:
-                logger.info(
-                    "Thread %s progress status already terminal",
-                    thread_id,
-                    extra={"thread_id": thread_id, "action": "progress_status_skipped"},
-                )
-            await set_thread_repair_state(
+        dispatch_value = payload.get("dispatch_id")
+        dispatch_id = dispatch_value if isinstance(dispatch_value, str) else ""
+        if not dispatch_id:
+            return
+        action = await get_control_action_by_dispatch_id(
+            db,
+            thread_id=thread_id,
+            dispatch_id=dispatch_id,
+        )
+        if action is None or action.applied_at is not None:
+            return
+        if action.action_type == ControlActionType.MESSAGE_FOLLOWUP_REQUESTED.value:
+            await mark_control_action_applied(db, action.id)
+            await mark_message_followup_applied(db, thread_id)
+            await db.commit()
+            return
+        if (
+            action.action_type == ControlActionType.PERMISSION_RESPONSE_SUBMITTED.value
+            and action.request_id is not None
+        ):
+            await _apply_permission_resolution(
                 db,
                 thread_id,
-                repair_status=batch.repair_status,
-                repair_reason=batch.repair_reason,
-                execution_readiness=batch.repair_status.value,
-                last_applied_action=batch.last_applied_action,
+                {"request_id": action.request_id},
             )
+            await update_thread_status(db, thread_id, ThreadStatus.RUNNING)
+            await db.commit()
+            return action.request_id
+        from .verdict_subscriber import settle_verdict_dispatch_receipt
+
+        if await settle_verdict_dispatch_receipt(db, action):
             await db.commit()
 
 
@@ -632,11 +613,13 @@ async def relay_event(
         payload,
         session_factory=session_factory,
     )
-    await _handle_progress_event(
+    applied_permission_id = await _handle_progress_event(
         thread_id,
         payload,
         session_factory=session_factory,
     )
+    if applied_permission_id is not None and aggregator is not None:
+        aggregator.resolve_permission(applied_permission_id)
     # Terminal status update + aggregator GC + drain-gate release.
     await _handle_terminal_event(
         thread_id,

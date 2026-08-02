@@ -165,7 +165,6 @@ class TestAcpRequestId:
             "SESSION_FORK",
             "SESSION_LIST",
             "SESSION_SET_MODE",
-            "SESSION_SET_MODEL",
             "SESSION_SET_CONFIG_OPTION",
             "SESSION_CANCEL",
         }

@@ -22,9 +22,9 @@ nor guaranteed stable. The split gives:
   parks for a question nobody asked.
 - The gate node (:func:`create_clarification_gate_node`) is pure: it re-reads the
   committed question set, raises the ``interrupt()``, and on resume records the
-  answers. Because the resume restarts here, the producer is NOT consulted twice
-  and the question a human sees after a reload is byte-identical to the one they
-  saw before it.
+  answers or appends the submitted continuation prompt. Because the resume
+  restarts here, the producer is NOT consulted twice and the question a human
+  sees after a reload is byte-identical to the one they saw before it.
 
 Committing before parking is also what makes the question READABLE while the run
 is parked: the interrupt payload sits in the checkpoint, which is exactly where
@@ -33,10 +33,10 @@ the recovery snapshot reads it from.
 Wire contract: the interrupt payload is a
 :class:`~vaultspec_a2a.thread.clarification.ClarificationRequest` rendered as
 JSON (``{"type": "clarification_request", "request_id", "questions": [...]}``)
-and the resume payload is a
-:class:`~vaultspec_a2a.thread.clarification.ClarificationAnswers`
-(``{"type": "clarification_response", "request_id", "answers": {question_id:
-answer}}``). Both shapes, and every bound on them, are owned by
+and the resume payload is either a
+:class:`~vaultspec_a2a.thread.clarification.ClarificationAnswers` or a
+:class:`~vaultspec_a2a.thread.clarification.ClarificationContinuation`. These
+shapes, and every bound on them, are owned by
 :mod:`vaultspec_a2a.thread.clarification` so the node, the wire, and the
 snapshot cannot disagree about what was asked.
 
@@ -58,18 +58,22 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any, Protocol, get_args
 
 from annotated_types import MaxLen
+from langchain_core.messages import HumanMessage
 from langgraph.types import Command, interrupt
 from pydantic import ValidationError
 
 from ...thread.clarification import (
     MAX_OPTIONS_PER_QUESTION,
     MAX_QUESTIONS_PER_REQUEST,
+    ClarificationAnswers,
     ClarificationKind,
     ClarificationQuestion,
     ClarificationRequest,
     OptionLabel,
     PromptText,
     QuestionId,
+    clarification_resolution_fingerprint,
+    parse_clarification_resolution,
     strip_control_characters,
 )
 
@@ -232,29 +236,15 @@ def _committed_request(state: TeamState) -> ClarificationRequest | None:
     return ClarificationRequest.from_payload(state.get("clarification_request"))
 
 
-def _parse_answers(
-    resume_value: object,
+def _declared_answers(
+    resolution: ClarificationAnswers,
     request: ClarificationRequest,
 ) -> dict[str, str]:
-    """Extract the answers a resume carries, keyed by declared question id.
-
-    Defensive rather than authoritative: the answering verb validates a
-    questionnaire at the boundary, so this only guards against a resume that
-    never went through it. An entry whose key is not a declared question, or
-    whose value is not a string, is dropped - it could not be routed to a
-    question anyway - and everything else is taken as given.
-    """
-    if not isinstance(resume_value, dict):
-        return {}
-    raw = resume_value.get("answers")
-    if not isinstance(raw, dict):
-        return {}
+    """Keep only answers addressed to questions in the committed request."""
     return {
         key: value
-        for key, value in raw.items()
-        if isinstance(key, str)
-        and isinstance(value, str)
-        and request.question(key) is not None
+        for key, value in resolution.answers.items()
+        if request.question(key) is not None
     }
 
 
@@ -321,12 +311,12 @@ def create_clarification_request_node(
 
 
 def create_clarification_gate_node(*, proceed_target: str) -> WorkerNode:
-    """Create the pure "park on the question, record the answers" node.
+    """Create the pure gate that resolves the committed question request.
 
     Its only acts are the ``interrupt()`` on the committed question set and the
-    recording of the answers the resume carries. Nothing is produced here, so a
-    resumed run replays this node alone and the human sees the same question set
-    it was shown before any restart.
+    typed resolution of the resume it carries. Nothing is produced before the
+    interrupt, so a resumed run replays this node alone and the human sees the
+    same question set it was shown before any restart.
 
     An unreadable or absent committed request routes on rather than parking: a
     run must not be stranded at an interrupt whose question nobody can render.
@@ -335,9 +325,9 @@ def create_clarification_gate_node(*, proceed_target: str) -> WorkerNode:
         proceed_target: The stage the run continues to once answered.
 
     Returns:
-        An async node that interrupts for the answers and on resume routes via
-        ``Command.goto`` with the answers recorded under their request id and the
-        pending question cleared.
+        An async node that interrupts and then routes via ``Command.goto`` with
+        either an answer reducer delta or one appended human prompt, while the
+        pending question is cleared.
     """
 
     async def clarification_gate_node(state: TeamState) -> Command:
@@ -354,12 +344,10 @@ def create_clarification_gate_node(*, proceed_target: str) -> WorkerNode:
             )
 
         resume_value = interrupt(request.as_interrupt_payload())
-        answers = _parse_answers(resume_value, request)
-        recorded_answers = state.get("clarification_answers")
-        all_answers = (
-            dict(recorded_answers) if isinstance(recorded_answers, dict) else {}
+        resolution = parse_clarification_resolution(
+            resume_value,
+            request_id=request.request_id,
         )
-        all_answers[request.request_id] = answers
 
         update: dict[str, Any] = {
             "next": proceed_target,
@@ -368,8 +356,16 @@ def create_clarification_gate_node(*, proceed_target: str) -> WorkerNode:
             # questionnaire the human already filled in.
             "clarification_request": None,
             "clarification_request_id": None,
-            "clarification_answers": all_answers,
+            "clarification_resolution_receipts": {
+                request.request_id: clarification_resolution_fingerprint(resolution)
+            },
         }
+        if isinstance(resolution, ClarificationAnswers):
+            update["clarification_answers"] = {
+                request.request_id: _declared_answers(resolution, request)
+            }
+        else:
+            update["messages"] = [HumanMessage(content=resolution.prompt)]
         return Command(goto=proceed_target, update=update)
 
     clarification_gate_node.__name__ = "clarification_gate"

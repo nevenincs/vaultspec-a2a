@@ -13,7 +13,11 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
-from ..gateway import MAX_RUN_MESSAGE_CHARS, RunStartRequest
+from ..gateway import (
+    MAX_RUN_MESSAGE_CHARS,
+    RunClarificationRespondRequest,
+    RunStartRequest,
+)
 
 # Genuine multibyte samples: CJK at three UTF-8 bytes, an astral-plane emoji at
 # four, and a combining sequence whose character count differs from its visible
@@ -105,6 +109,40 @@ def test_documented_byte_budget_covers_the_character_bound() -> None:
     accepted = RunStartRequest(team_preset="preset", message=widest).message
 
     assert len(accepted.encode("utf-8")) == _CONTRACT_MESSAGE_BYTE_BUDGET
+
+
+def test_clarification_response_requires_exactly_one_resolution_shape() -> None:
+    """Legacy answers and a new prompt are alternatives, never an ambiguous merge."""
+    answers = RunClarificationRespondRequest(answers={"scope": "backend"})
+    continuation = RunClarificationRespondRequest(prompt="Use your own judgement.")
+
+    assert answers.answers == {"scope": "backend"}
+    assert answers.prompt is None
+    assert continuation.prompt == "Use your own judgement."
+    assert continuation.answers is None
+
+    with pytest.raises(ValidationError):
+        RunClarificationRespondRequest()
+    with pytest.raises(ValidationError):
+        RunClarificationRespondRequest(
+            answers={"scope": "backend"}, prompt="Ignore that answer."
+        )
+
+
+@pytest.mark.parametrize("prompt", ["", " ", "\t\r\n"])
+def test_clarification_continuation_rejects_blank_wire_prompts(prompt: str) -> None:
+    """The HTTP contract cannot turn a local composer switch into a resume."""
+    with pytest.raises(ValidationError):
+        RunClarificationRespondRequest(prompt=prompt)
+
+
+def test_clarification_continuation_enforces_the_wire_character_ceiling() -> None:
+    """The continuation alternative shares the inclusive new-turn text budget."""
+    prompt = "世" * MAX_RUN_MESSAGE_CHARS
+
+    assert RunClarificationRespondRequest(prompt=prompt).prompt == prompt
+    with pytest.raises(ValidationError):
+        RunClarificationRespondRequest(prompt=prompt + "x")
 
 
 @pytest.mark.parametrize(("filler", "utf8_width"), _MULTIBYTE)

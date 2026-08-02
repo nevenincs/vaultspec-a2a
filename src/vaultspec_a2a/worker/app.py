@@ -53,6 +53,7 @@ from ..utils import (
     verify_internal_bearer,
 )
 from ..utils.asyncio_compat import configure_asyncio_runtime
+from .dispatch_ids import DispatchIdAdmission
 from .executor import Executor
 from .ipc import WorkerBridge
 
@@ -208,6 +209,9 @@ def create_worker_app(lifespan: Any | None = None) -> FastAPI:
         version=package_version(),
         lifespan=lifespan or _lifespan,
     )
+    # One process-local, restart-cleared suppression window.  Endpoint admission
+    # is synchronous, so duplicate IDs cannot both cross into the task group.
+    app.state.dispatch_ids = DispatchIdAdmission()
 
     # Instrument incoming requests so the worker's spans participate
     # in distributed traces started by the gateway (W3C traceparent extraction).
@@ -227,12 +231,30 @@ def create_worker_app(lifespan: Any | None = None) -> FastAPI:
         executor: Executor = app.state.executor
         tg = app.state.task_group
 
+        dispatch_ids: DispatchIdAdmission = app.state.dispatch_ids
+        if req.dispatch_id in dispatch_ids:
+            logger.info(
+                "Worker duplicate dispatch suppressed",
+                extra={
+                    "action": "dispatch_duplicate_suppressed",
+                    "dispatch_id": req.dispatch_id,
+                    "dispatch_action": req.action,
+                    "thread_id": req.thread_id,
+                },
+            )
+            return DispatchResponse(status="dispatched", thread_id=req.thread_id)
+
         # Reject dispatch when concurrent thread cap is reached.
         if executor.at_capacity():
             raise HTTPException(
                 status_code=429,
                 detail="Worker at capacity — too many concurrent threads",
             )
+
+        # No await may be inserted between this admission and scheduling: this is
+        # the worker's synchronous duplicate-dispatch boundary.
+        if not dispatch_ids.admit(req.dispatch_id):
+            return DispatchResponse(status="dispatched", thread_id=req.thread_id)
 
         # Fire-and-forget: the task group keeps the task alive even after
         # this endpoint handler returns.

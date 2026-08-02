@@ -120,6 +120,20 @@ def _merge_clarification_answers(
     return merged
 
 
+def _merge_clarification_resolution_receipts(
+    existing: dict[str, str],
+    new: dict[str, str],
+) -> dict[str, str]:
+    """Merge application receipts keyed by clarification request id.
+
+    Nodes emit one-request deltas so earlier receipts survive later
+    questionnaires. A repeated request id replaces only its own fingerprint;
+    control-action leasing is responsible for ensuring competing resolutions do
+    not both reach the graph.
+    """
+    return {**existing, **new}
+
+
 def _append_research_findings(
     existing: list[dict[str, Any]],
     new: list[dict[str, Any]],
@@ -241,6 +255,12 @@ class TeamState(TypedDict):
     # it answered, so a later stage can read what the human said at an earlier one.
     clarification_answers: NotRequired[
         Annotated[dict[str, dict[str, str]], _merge_clarification_answers]
+    ]
+    # Application proof for the durable control journal. The fingerprint is
+    # computed from the typed resolution and keyed by the request it resolved;
+    # prompt text remains solely in messages rather than being persisted twice.
+    clarification_resolution_receipts: NotRequired[
+        Annotated[dict[str, str], _merge_clarification_resolution_receipts]
     ]
 
     # gate_pending_proposal_id: the proposal id the phase-submit node committed

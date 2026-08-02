@@ -1,19 +1,19 @@
 """The typed, bounded mid-run clarification contract.
 
-A run that needs a structured answer from the human pauses on a checkpointed
-LangGraph ``interrupt()`` carrying a *clarification request*, and resumes only
-through the typed ``Command(resume=...)`` that answers it. This module owns the
-shape of both halves, and owns them once: the graph node builds its interrupt
-payload from these models, the gateway validates an inbound answer against them,
-and the recovery snapshot re-reads a parked question through them. A second
+A run that needs human direction pauses on a checkpointed LangGraph
+``interrupt()`` carrying a *clarification request*, and resumes only through a
+typed ``Command(resume=...)`` that either answers it or supplies a new prompt.
+This module owns the request and both resolution shapes once: the graph node
+builds and resolves these models, the gateway validates inbound resolution, and
+the recovery snapshot re-reads a parked question through them. A second
 declaration of the same shape at any of those layers is what lets a question the
 graph asked and a question the wire renders drift apart.
 
 Bounds are the contract, not advice, so they live in the type system rather than
-in prose: at most :data:`MAX_QUESTIONS_PER_REQUEST` questions per request, at most
-:data:`MAX_OPTIONS_PER_QUESTION` options per choice, and every string capped and
-free of control characters. A producer that exceeds a bound fails construction
-where it is written, not silently at the wire.
+in prose: at most :data:`MAX_QUESTIONS_PER_REQUEST` questions per request and at
+most :data:`MAX_OPTIONS_PER_QUESTION` options per choice. Question and answer
+strings are capped and line-safe; continuation prompts share the ordinary run
+message ceiling and retain normal multiline prompt semantics.
 
 Two rules shape the design beyond the bounds:
 
@@ -32,11 +32,20 @@ Two rules shape the design beyond the bounds:
 
 from __future__ import annotations
 
+import hashlib
+import json
 import unicodedata
 from enum import StrEnum
-from typing import TYPE_CHECKING, Annotated, Any, Literal, Self
+from typing import TYPE_CHECKING, Annotated, Any, Literal, Self, cast
 
-from pydantic import AfterValidator, BaseModel, ConfigDict, Field, model_validator
+from pydantic import (
+    AfterValidator,
+    BaseModel,
+    ConfigDict,
+    Field,
+    ValidationError,
+    model_validator,
+)
 
 from .snapshots import project_checkpoint_tuple
 
@@ -44,6 +53,7 @@ if TYPE_CHECKING:
     from collections.abc import Mapping
 
 __all__ = [
+    "CLARIFICATION_CONTINUATION_TYPE",
     "CLARIFICATION_INTERRUPT_TYPE",
     "CLARIFICATION_RESUME_TYPE",
     "CLARIFICATION_TOPOLOGIES",
@@ -53,21 +63,28 @@ __all__ = [
     "MAX_OPTION_CHARS",
     "MAX_PROMPT_CHARS",
     "MAX_QUESTIONS_PER_REQUEST",
+    "MAX_RUN_MESSAGE_CHARS",
     "ClarificationAnswers",
+    "ClarificationContinuation",
     "ClarificationKind",
     "ClarificationQuestion",
     "ClarificationRequest",
+    "ClarificationResolution",
+    "ContinuationPrompt",
+    "clarification_resolution_fingerprint",
+    "parse_clarification_resolution",
     "pending_clarification",
     "strip_control_characters",
     "topology_honours_clarification",
     "validate_clarification_answers",
 ]
 
-# The interrupt discriminator the parked node raises, and the discriminator the
-# answering resume carries back. Both are matched by string at the checkpoint and
-# dispatch boundaries, so they are named once here.
+# The interrupt discriminator the parked node raises and the two resolution
+# discriminators a resume may carry back. They are matched by string at the
+# checkpoint and dispatch boundaries, so they are named once here.
 CLARIFICATION_INTERRUPT_TYPE = "clarification_request"
 CLARIFICATION_RESUME_TYPE = "clarification_response"
+CLARIFICATION_CONTINUATION_TYPE = "clarification_continuation"
 
 # The topologies whose compiled graph actually MOUNTS the clarification stage,
 # named once so the layer that accepts a declaration and the layer that honours it
@@ -106,6 +123,9 @@ MAX_REQUEST_ID_CHARS = 128
 MAX_PROMPT_CHARS = 512
 MAX_OPTION_CHARS = 128
 MAX_ANSWER_CHARS = 2048
+# A continuation is a new human turn in the existing run, so it carries the
+# same character budget as the opening run message.
+MAX_RUN_MESSAGE_CHARS = 65536
 
 # Question and request identifiers are correlation handles that travel in a URL
 # path and in JSON object keys, so they are restricted to a path- and key-safe
@@ -189,6 +209,9 @@ LineSafeText = Annotated[str, AfterValidator(_refuse_control_characters)]
 OptionLabel = Annotated[LineSafeText, Field(min_length=1, max_length=MAX_OPTION_CHARS)]
 PromptText = Annotated[LineSafeText, Field(min_length=1, max_length=MAX_PROMPT_CHARS)]
 AnswerText = Annotated[LineSafeText, Field(max_length=MAX_ANSWER_CHARS)]
+ContinuationPrompt = Annotated[
+    str, Field(min_length=1, max_length=MAX_RUN_MESSAGE_CHARS)
+]
 
 
 class ClarificationKind(StrEnum):
@@ -325,6 +348,94 @@ class ClarificationAnswers(BaseModel):
     def as_resume_value(self) -> dict[str, Any]:
         """Render the answers as the JSON-safe value handed to ``Command(resume=)``."""
         return self.model_dump(mode="json")
+
+
+class ClarificationContinuation(BaseModel):
+    """The typed resume payload that continues with a new human prompt."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    type: Literal["clarification_continuation"] = CLARIFICATION_CONTINUATION_TYPE
+    request_id: ClarificationRequestId
+    prompt: ContinuationPrompt
+
+    @model_validator(mode="after")
+    def _prompt_has_content(self) -> Self:
+        """Require a submitted human turn, not an empty composer transition."""
+        if not self.prompt.strip():
+            msg = "clarification continuation prompt must not be blank"
+            raise ValueError(msg)
+        return self
+
+    def as_resume_value(self) -> dict[str, Any]:
+        """Render the continuation as the value handed to ``Command(resume=)``."""
+        return self.model_dump(mode="json")
+
+
+type ClarificationResolution = ClarificationAnswers | ClarificationContinuation
+
+
+def clarification_resolution_fingerprint(
+    resolution: ClarificationResolution,
+) -> str:
+    """Return the canonical digest of one typed clarification resolution.
+
+    This is the single fingerprint owner shared by the graph receipt and the
+    control service that journals the winning payload.  Sorting JSON object keys
+    makes answer-map insertion order irrelevant, while hashing the typed model's
+    JSON form preserves the existing discriminator and request identity.  Prompt
+    text is consumed here transiently and is not stored in the receipt.
+    """
+    canonical = json.dumps(
+        resolution.as_resume_value(),
+        ensure_ascii=True,
+        separators=(",", ":"),
+        sort_keys=True,
+    ).encode("utf-8")
+    return f"sha256:{hashlib.sha256(canonical).hexdigest()}"
+
+
+def parse_clarification_resolution(
+    payload: object,
+    *,
+    request_id: str,
+) -> ClarificationAnswers | ClarificationContinuation:
+    """Parse a resume outcome and bind it to the committed request identity."""
+    if not isinstance(payload, dict):
+        msg = "invalid clarification resume payload"
+        raise ValueError(msg)
+    candidate = cast("dict[str, object]", payload)
+    try:
+        if candidate.get("type") == CLARIFICATION_RESUME_TYPE:
+            raw_answers = candidate.get("answers")
+            if isinstance(raw_answers, dict):
+                raw_items = cast("dict[object, object]", raw_answers)
+                candidate = {
+                    **candidate,
+                    "answers": {
+                        key: value
+                        for key, value in raw_items.items()
+                        if isinstance(key, str) and isinstance(value, str)
+                    },
+                }
+            resolution: ClarificationResolution = ClarificationAnswers.model_validate(
+                candidate
+            )
+        elif candidate.get("type") == CLARIFICATION_CONTINUATION_TYPE:
+            resolution = ClarificationContinuation.model_validate(candidate)
+        else:
+            msg = "invalid clarification resume discriminator"
+            raise ValueError(msg)
+    except ValidationError as exc:
+        msg = "invalid clarification resume payload"
+        raise ValueError(msg) from exc
+    if resolution.request_id != request_id:
+        msg = (
+            "clarification resume request id does not match the committed request: "
+            f"{resolution.request_id!r} != {request_id!r}"
+        )
+        raise ValueError(msg)
+    return resolution
 
 
 def validate_clarification_answers(

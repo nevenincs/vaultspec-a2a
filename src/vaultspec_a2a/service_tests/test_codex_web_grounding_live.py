@@ -67,7 +67,7 @@ import tomllib
 from contextlib import suppress
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 from urllib.parse import urlsplit
 
 import httpx
@@ -75,7 +75,7 @@ import pytest
 from langchain_core.messages import HumanMessage
 
 from ..graph.compiler import _make_research_producer
-from ..graph.enums import Provider
+from ..graph.enums import MODEL_MAP, Model, Provider
 from ..graph.nodes.diverge import WEB_LOCATOR_KIND, create_researcher_node
 from ..providers._acp_mcp import codex_mcp_server_specs
 from ..providers._codex_config_home import (
@@ -84,7 +84,7 @@ from ..providers._codex_config_home import (
     cleanup_codex_config_home,
     resolve_codex_web_search_mode,
 )
-from ..providers._json_contract import json_list, json_object, json_text
+from ..providers._json_contract import JsonObject, json_list, json_object, json_text
 from ..providers._subprocess import spawn_acp_process
 from ..providers.codex_chat_model import (
     _CAPABILITIES,
@@ -152,7 +152,7 @@ class _TurnObservation:
     """Everything one observed Codex turn said, plus the config it ran under."""
 
     config_toml: str
-    frames: list[dict[str, Any]] = field(default_factory=list)
+    frames: list[JsonObject] = field(default_factory=list)
     text: str = ""
     status: str = ""
     # The values the index was serving around this turn - read live, never
@@ -160,18 +160,19 @@ class _TurnObservation:
     # compares against what was true while the turn ran.
     current_versions: set[str] = field(default_factory=set)
 
-    def web_searches(self) -> list[dict[str, Any]]:
+    def web_searches(self) -> list[JsonObject]:
         """The completed ``webSearch`` items the server reported for this turn.
 
         Server-emitted, not model prose: the item carries the query the tool ran,
         the action it took, and the results it got back. This is the frame class
         that distinguishes a retrieval from a claim of one.
         """
-        items = []
+        items: list[JsonObject] = []
         for frame in self.frames:
             if frame.get("method") != "item/completed":
                 continue
-            item = (frame.get("params") or {}).get("item") or {}
+            params = json_object(frame.get("params"), at="item-completed params")
+            item = json_object(params.get("item"), at="item-completed item")
             if item.get("type") == "webSearch":
                 items.append(item)
         return items
@@ -186,15 +187,22 @@ class _TurnObservation:
         ]
 
 
-def _urls_of(item: dict[str, Any]) -> list[str]:
+def _urls_of(item: JsonObject) -> list[str]:
     """Every URL a completed ``webSearch`` item reports having reached."""
     urls: list[str] = []
-    action = item.get("action") or {}
-    if isinstance(action.get("url"), str):
-        urls.append(action["url"])
-    for result in item.get("results") or []:
-        if isinstance(result, dict) and isinstance(result.get("url"), str):
-            urls.append(result["url"])
+    action_value = item.get("action")
+    if action_value is not None:
+        action = json_object(action_value, at="web-search action")
+        action_url = action.get("url")
+        if isinstance(action_url, str):
+            urls.append(action_url)
+    results_value = item.get("results")
+    if results_value is not None:
+        for raw_result in json_list(results_value, at="web-search results"):
+            result = json_object(raw_result, at="web-search result")
+            result_url = result.get("url")
+            if isinstance(result_url, str):
+                urls.append(result_url)
     return urls
 
 
@@ -213,10 +221,100 @@ def _published_version() -> str:
     """
     response = httpx.get(_SOURCE_URL, timeout=30.0, headers={"Accept": "*/*"})
     response.raise_for_status()
-    version = response.json()["info"]["version"]
-    if not isinstance(version, str) or not version.strip():
+    payload = json_object(response.json(), at="package index response")
+    info = json_object(payload.get("info"), at="package index response.info")
+    version = json_text(info.get("version"), at="package index response.info.version")
+    if not version.strip():
         raise ValueError(f"{_SOURCE_URL} served no usable info.version")
     return version
+
+
+def test_package_index_reader_rejects_a_non_object_payload() -> None:
+    """The live index reader must not reinterpret an array as package metadata."""
+    with pytest.raises(TypeError, match="package index response"):
+        json_object([], at="package index response")
+
+
+def test_completed_web_search_reader_rejects_non_object_params() -> None:
+    """A completed-item notification needs an object params envelope."""
+    observation = _TurnObservation(
+        config_toml="",
+        frames=[{"method": "item/completed", "params": []}],
+    )
+    with pytest.raises(TypeError, match="item-completed params"):
+        observation.web_searches()
+
+
+def test_web_search_url_reader_rejects_a_non_list_results_field() -> None:
+    """A web-search result collection must remain a JSON array."""
+    with pytest.raises(TypeError, match="web-search results"):
+        _urls_of({"results": {"url": _SOURCE_URL}})
+
+
+def _record_observation_frame(observation: _TurnObservation, frame: JsonObject) -> bool:
+    """Record one app-server notification; return whether it ends the observation."""
+    observation.frames.append(frame)
+    method = frame.get("method")
+    params = json_object(frame.get("params"), at="frame.params")
+    if method == "item/agentMessage/delta":
+        delta = params.get("delta")
+        if isinstance(delta, str):
+            observation.text += delta
+        return False
+    if method == "turn/completed":
+        turn = json_object(params.get("turn"), at="params.turn")
+        observation.status = str(turn.get("status"))
+        for raw in json_list(turn.get("items"), at="turn.items"):
+            item = json_object(raw, at="turn.items[]")
+            if item.get("type") == "agentMessage" and item.get("text"):
+                observation.text += f"\n{json_text(item['text'])}"
+        return True
+    if method == "error":
+        observation.status = "error"
+        return True
+    return False
+
+
+def test_observation_reader_rejects_a_missing_or_falsy_frame_params() -> None:
+    """Every app-server notification must carry an object ``params`` envelope."""
+    frames: list[JsonObject] = [
+        {"method": "item/agentMessage/delta"},
+        {"method": "item/agentMessage/delta", "params": []},
+    ]
+    for frame in frames:
+        with pytest.raises(TypeError, match=r"frame\.params"):
+            _record_observation_frame(_TurnObservation(config_toml=""), frame)
+
+
+def test_observation_reader_rejects_a_missing_or_falsy_completed_turn() -> None:
+    """A terminal turn notification must carry its object result."""
+    frames: list[JsonObject] = [
+        {"method": "turn/completed", "params": {}},
+        {"method": "turn/completed", "params": {"turn": []}},
+    ]
+    for frame in frames:
+        with pytest.raises(TypeError, match=r"params\.turn"):
+            _record_observation_frame(
+                _TurnObservation(config_toml=""),
+                frame,
+            )
+
+
+def test_observation_reader_rejects_a_missing_or_falsy_completed_items() -> None:
+    """A completed turn must carry the item list used for final text evidence."""
+    frames: list[JsonObject] = [
+        {"method": "turn/completed", "params": {"turn": {"status": "completed"}}},
+        {
+            "method": "turn/completed",
+            "params": {"turn": {"status": "completed", "items": {}}},
+        },
+    ]
+    for frame in frames:
+        with pytest.raises(TypeError, match=r"turn\.items"):
+            _record_observation_frame(
+                _TurnObservation(config_toml=""),
+                frame,
+            )
 
 
 async def _observe_turn(
@@ -266,7 +364,7 @@ async def _observe_turn(
                 "thread/start",
                 {
                     "cwd": str(cwd),
-                    "model": None,
+                    "model": MODEL_MAP[Provider.CODEX][Model.LOW],
                     "approvalPolicy": approval_policy,
                     "sandbox": sandbox,
                     "ephemeral": True,
@@ -284,7 +382,7 @@ async def _observe_turn(
                 {
                     "threadId": thread_id,
                     "input": [{"type": "text", "text": prompt, "text_elements": []}],
-                    "model": None,
+                    "model": MODEL_MAP[Provider.CODEX][Model.LOW],
                     "effort": None,
                     "outputSchema": None,
                 },
@@ -295,23 +393,7 @@ async def _observe_turn(
             frame = await asyncio.wait_for(
                 client.notifications.get(), timeout=_TURN_DEADLINE_SECONDS
             )
-            observation.frames.append(frame)
-            method = frame.get("method")
-            params = json_object(frame.get("params") or {}, at="frame.params")
-            if method == "item/agentMessage/delta":
-                delta = params.get("delta")
-                if isinstance(delta, str):
-                    observation.text += delta
-            elif method == "turn/completed":
-                turn = json_object(params.get("turn") or {}, at="params.turn")
-                observation.status = str(turn.get("status"))
-                for raw in json_list(turn.get("items") or [], at="turn.items"):
-                    item = json_object(raw, at="turn.items[]")
-                    if item.get("type") == "agentMessage" and item.get("text"):
-                        observation.text += f"\n{json_text(item['text'])}"
-                return observation
-            elif method == "error":
-                observation.status = "error"
+            if _record_observation_frame(observation, frame):
                 return observation
     finally:
         if client is not None:
@@ -494,7 +576,9 @@ def test_proven_lane_resolves_the_served_live_posture(
         is SERVED_WEB_SEARCH_MODE
     )
 
-    model = ProviderFactory().create(Provider.CODEX, workspace_root=tmp_path)
+    model = ProviderFactory().create(
+        Provider.CODEX, model=Model.LOW, workspace_root=tmp_path
+    )
     assert isinstance(model, CodexChatModel)
     composed = model.with_harness_mcp_servers(list(_HARNESS_SERVERS))
     home = composed._build_codex_config_home()
@@ -527,7 +611,9 @@ async def test_production_research_chain_lands_a_typed_web_locator(
     search disabled and reaches nothing to cite.
     """
     _require_codex(external_prerequisite)
-    model = ProviderFactory().create(Provider.CODEX, workspace_root=tmp_path)
+    model = ProviderFactory().create(
+        Provider.CODEX, model=Model.LOW, workspace_root=tmp_path
+    )
     producer = _make_research_producer(
         model,
         "You are a researcher. Cite every external source by its full URL.",
@@ -559,20 +645,25 @@ async def test_production_research_chain_lands_a_typed_web_locator(
 
     findings = update["research_findings"]
     assert len(findings) == 1
-    finding = findings[0]
-    web_locators = [
-        locator
-        for locator in finding["locators"]
-        if isinstance(locator, dict) and locator.get("kind") == WEB_LOCATOR_KIND
-    ]
+    finding = json_object(findings[0], at="research finding")
+    web_locators: list[JsonObject] = []
+    for raw_locator in json_list(
+        finding.get("locators"), at="research finding locators"
+    ):
+        locator = json_object(raw_locator, at="research finding locator")
+        if locator.get("kind") == WEB_LOCATOR_KIND:
+            web_locators.append(locator)
     assert web_locators, (
         "the research chain produced no typed web locator; the turn cited no "
-        f"retrievable source. Claim was: {finding['claim'][:400]!r}"
+        f"retrievable source. Claim was: {finding.get('claim')!s:.400}"
     )
-    assert any(_host_matches(locator["url"]) for locator in web_locators), (
-        f"no web locator names {_SOURCE_HOST}: "
-        f"{[locator['url'] for locator in web_locators]!r}"
+    locator_urls = [
+        json_text(locator.get("url"), at="research finding locator.url")
+        for locator in web_locators
+    ]
+    assert any(_host_matches(url) for url in locator_urls), (
+        f"no web locator names {_SOURCE_HOST}: {locator_urls!r}"
     )
-    for locator in web_locators:
+    for locator, locator_url in zip(web_locators, locator_urls, strict=True):
         assert locator["retrieved_at"]
-        assert urlsplit(locator["url"]).scheme in {"http", "https"}
+        assert urlsplit(locator_url).scheme in {"http", "https"}

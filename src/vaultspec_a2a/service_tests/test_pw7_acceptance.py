@@ -72,13 +72,14 @@ import random
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, override
 
 import httpx
 import pytest
+from pydantic import TypeAdapter, ValidationError
 
 if TYPE_CHECKING:
-    from collections.abc import Awaitable, Callable
+    from collections.abc import Awaitable, Callable, Mapping, Sequence
 
     from _pytest.mark.structures import ParameterSet
 
@@ -101,7 +102,30 @@ _READ_ONLY_TOOL_KINDS = frozenset(
 )
 
 
-def _option_id_for(options: list[dict], kind: str) -> str | None:
+JsonObject = dict[str, object]
+_JSON_OBJECT = TypeAdapter(JsonObject)
+_JSON_OBJECT_LIST = TypeAdapter(list[JsonObject])
+
+
+def _json_object(value: object, *, at: str) -> JsonObject:
+    """Read one service JSON object or fail at the observed wire boundary."""
+    try:
+        return _JSON_OBJECT.validate_python(value)
+    except ValidationError as exc:
+        raise AssertionError(f"expected JSON object at {at}: {exc}") from exc
+
+
+def _json_object_list(value: object, *, at: str) -> list[JsonObject]:
+    """Read an optional service object-list, rejecting malformed present values."""
+    if value is None:
+        return []
+    try:
+        return _JSON_OBJECT_LIST.validate_python(value)
+    except ValidationError as exc:
+        raise AssertionError(f"expected JSON object list at {at}: {exc}") from exc
+
+
+def _option_id_for(options: Sequence[Mapping[str, object]], kind: str) -> str | None:
     """Return the option_id of the first permission option of *kind*, or None."""
     for option in options:
         if option.get("kind") == kind:
@@ -280,6 +304,7 @@ CASE_LIVE_MIXED = _research_adr_case(
     "pw7-acceptance-live",
     {"research": POLICY_AUTO, "adr": POLICY_HUMAN},
     preset=_PRESET_LIVE,
+    profile_id="fast",
 )
 # The headless-autonomous live lane: AUTO at both gates AND autonomous dispatch,
 # so the worker never wires the permission-interrupt callback and a live model's
@@ -290,6 +315,7 @@ CASE_LIVE_AUTO = _research_adr_case(
     "pw7-acceptance-liveauto",
     {"research": POLICY_AUTO, "adr": POLICY_AUTO},
     preset=_PRESET_LIVE,
+    profile_id="fast",
     autonomous=True,
 )
 # The provider-axis lanes. Both use the live preset with a mixed-provider
@@ -451,24 +477,55 @@ def test_option_id_for_selects_the_option_of_the_requested_kind() -> None:
     assert _runtime_budget_for(CASE_MIXED) == pytest.approx(1020.0)
 
 
-def _dig(item: dict, field_name: str) -> str | None:
+def test_json_reader_rejects_a_non_object_gateway_response() -> None:
+    """A gateway response array cannot silently enter the polling state machine."""
+    with pytest.raises(AssertionError, match="gateway run-status response"):
+        _json_object(["not a run status"], at="gateway run-status response")
+
+
+def test_items_reader_rejects_a_malformed_review_queue_item_list() -> None:
+    """A present queue ``items`` field must contain objects, never scalars."""
+    with pytest.raises(AssertionError, match=r"review-queue response\.items"):
+        _items({"items": ["not a review item"]}, at="review-queue response")
+
+
+def test_json_reader_rejects_a_malformed_apply_receipt() -> None:
+    """A successful apply response still requires an object receipt boundary."""
+    apply_response = _json_object(
+        {"receipt": ["not an apply receipt"]}, at="research apply response"
+    )
+    with pytest.raises(AssertionError, match="research apply receipt"):
+        _json_object(apply_response.get("receipt"), at="research apply receipt")
+
+
+def test_json_reader_rejects_a_malformed_permission_history_state() -> None:
+    """History must contain an object state before permission polling may continue."""
+    history = _json_object(
+        {"state": ["not a permission state"]}, at="gateway history response"
+    )
+    with pytest.raises(AssertionError, match="gateway history state"):
+        _json_object(history.get("state"), at="gateway history state")
+
+
+def _dig(item: JsonObject, field_name: str) -> str | None:
     """Return the first string value for *field_name* nested anywhere in *item*."""
     value = item.get(field_name)
     if isinstance(value, str):
         return value
     for nested in item.values():
-        if isinstance(nested, dict):
-            found = _dig(nested, field_name)
-            if found:
-                return found
+        try:
+            nested_object = _JSON_OBJECT.validate_python(nested)
+        except ValidationError:
+            continue
+        found = _dig(nested_object, field_name)
+        if found:
+            return found
     return None
 
 
-def _items(data: object) -> list[dict]:
-    if not isinstance(data, dict):
-        return []
-    items = data.get("items")
-    return [x for x in items if isinstance(x, dict)] if isinstance(items, list) else []
+def _items(data: object, *, at: str) -> list[JsonObject]:
+    """Read the optional ``items`` list from one service response object."""
+    return _json_object_list(_json_object(data, at=at).get("items"), at=f"{at}.items")
 
 
 @dataclass(slots=True)
@@ -501,13 +558,13 @@ _ENGINE_RETRY_MAX_INTERVAL = 8.0
 _ENGINE_RETRY_PER_ATTEMPT_TIMEOUT = 20.0
 
 
-async def _retry_transient(
-    op: Callable[[], Awaitable[Any]],
+async def _retry_transient[T](
+    op: Callable[[], Awaitable[T]],
     *,
     name: str,
     is_transient: Callable[[BaseException], bool],
     before_retry: Callable[[BaseException], Awaitable[bool]] | None = None,
-) -> Any:
+) -> T:
     """Run ``op`` under the harness's bounded transient-retry policy.
 
     The single home of the retry loop for both harness clients. A failure that
@@ -592,9 +649,9 @@ class _ResilientAuthoringClient(AuthoringClient):
             base_url=self._base_url, timeout=httpx.Timeout(30.0, connect=5.0)
         )
 
-    async def _call_resilient(
-        self, method: Callable[..., Awaitable[Any]], *args: Any, **kwargs: Any
-    ) -> Any:
+    async def _call_resilient[T](
+        self, op: Callable[[], Awaitable[T]], *, operation: str
+    ) -> T:
         """Invoke a base-class call under bearer-refresh + bounded transient retry.
 
         A 401 triggers a single bearer re-resolve then an immediate retry (no
@@ -626,22 +683,73 @@ class _ResilientAuthoringClient(AuthoringClient):
             return isinstance(exc, (httpx.TransportError, TimeoutError))
 
         return await _retry_transient(
-            lambda: method(self, *args, **kwargs),
-            name=f"engine call {getattr(method, '__name__', method)!r}",
+            op,
+            name=f"engine call {operation!r}",
             is_transient=is_transient,
             before_retry=before_retry,
         )
 
-    async def get(self, *args: Any, **kwargs: Any) -> AuthoringResponse:
-        return await self._call_resilient(AuthoringClient.get, *args, **kwargs)
+    @override
+    async def get(
+        self,
+        path: str,
+        *,
+        params: JsonObject | None = None,
+        with_actor: bool = False,
+        actor_token: str | None = None,
+    ) -> AuthoringResponse:
+        return await self._call_resilient(
+            lambda: AuthoringClient.get(
+                self,
+                path,
+                params=params,
+                with_actor=with_actor,
+                actor_token=actor_token,
+            ),
+            operation="get",
+        )
 
+    @override
     async def post_command(
-        self, *args: Any, **kwargs: Any
+        self,
+        path: str,
+        command: str,
+        payload: JsonObject,
+        *,
+        idempotency_key: str,
+        actor_token: str | None = None,
     ) -> AuthoringResponse | Denial:
-        return await self._call_resilient(AuthoringClient.post_command, *args, **kwargs)
+        return await self._call_resilient(
+            lambda: AuthoringClient.post_command(
+                self,
+                path,
+                command,
+                payload,
+                idempotency_key=idempotency_key,
+                actor_token=actor_token,
+            ),
+            operation="post_command",
+        )
 
-    async def post_bare(self, *args: Any, **kwargs: Any) -> AuthoringResponse | Denial:
-        return await self._call_resilient(AuthoringClient.post_bare, *args, **kwargs)
+    @override
+    async def post_bare(
+        self,
+        path: str,
+        payload: JsonObject,
+        *,
+        with_actor: bool = False,
+        actor_token: str | None = None,
+    ) -> AuthoringResponse | Denial:
+        return await self._call_resilient(
+            lambda: AuthoringClient.post_bare(
+                self,
+                path,
+                payload,
+                with_actor=with_actor,
+                actor_token=actor_token,
+            ),
+            operation="post_bare",
+        )
 
 
 # Stack-free tests of the engine client's retry state machine. They feed the
@@ -664,7 +772,9 @@ async def test_engine_client_retries_transient_then_succeeds() -> None:
 
     client = _ResilientAuthoringClient("http://127.0.0.1:1", "tok")
     async with client:
-        result = await client._call_resilient(flaky, "ok")
+        result = await client._call_resilient(
+            lambda: flaky(client, "ok"), operation="flaky"
+        )
     assert result == "ok"
     # First attempt + (max_attempts - 1) transient retries, all inside budget.
     assert calls == _ENGINE_RETRY_MAX_ATTEMPTS
@@ -687,7 +797,7 @@ async def test_engine_client_does_not_retry_terminal_4xx() -> None:
     client = _ResilientAuthoringClient("http://127.0.0.1:1", "tok")
     async with client:
         with pytest.raises(AuthoringTransportError) as excinfo:
-            await client._call_resilient(denied)
+            await client._call_resilient(lambda: denied(client), operation="denied")
     assert excinfo.value.status_code == 409
     assert calls == 1
 
@@ -705,7 +815,9 @@ async def test_engine_client_fails_loud_on_transient_exhaustion() -> None:
     client = _ResilientAuthoringClient("http://127.0.0.1:1", "tok")
     async with client:
         with pytest.raises(AssertionError) as excinfo:
-            await client._call_resilient(always_stalls)
+            await client._call_resilient(
+                lambda: always_stalls(client), operation="always_stalls"
+            )
     assert calls == _ENGINE_RETRY_MAX_ATTEMPTS
     assert "transient class exhausted" in str(excinfo.value)
 
@@ -731,7 +843,8 @@ async def test_engine_client_reresolves_bearer_once_on_401(
             self.end_headers()
             self.wfile.write(b"{}")
 
-        def log_message(self, format: str, *args: Any) -> None:
+        @override
+        def log_message(self, format: str, *args: object) -> None:
             pass
 
     server = ThreadingHTTPServer(("127.0.0.1", 0), _Health)
@@ -767,7 +880,9 @@ async def test_engine_client_reresolves_bearer_once_on_401(
 
         client = _ResilientAuthoringClient("http://127.0.0.1:1", "stale-tok")
         async with client:
-            result = await client._call_resilient(denied_once)
+            result = await client._call_resilient(
+                lambda: denied_once(client), operation="denied_once"
+            )
             assert result == "ok"
             assert calls == 2  # 401 consumed one attempt, immediate retry
             assert client._bearer_token == "rotated-tok"  # rotation really ran
@@ -805,7 +920,7 @@ async def test_gateway_poll_retries_dropped_connection_then_succeeds() -> None:
         httpx.ReadTimeout("gateway stalled"),
     ]
 
-    async def flaky() -> dict:
+    async def flaky() -> JsonObject:
         nonlocal calls
         calls += 1
         if transients:
@@ -824,7 +939,7 @@ async def test_gateway_poll_does_not_retry_terminal_4xx() -> None:
     """A 4xx from the gateway is a real denial/routing error - never retried."""
     calls = 0
 
-    async def not_found() -> dict:
+    async def not_found() -> JsonObject:
         nonlocal calls
         calls += 1
         raise _http_status_error(404)
@@ -844,7 +959,7 @@ async def test_gateway_poll_retries_5xx_and_fails_loud_on_exhaustion() -> None:
     """5xx is transient; persistent 5xx exhausts the budget and fails loud."""
     calls = 0
 
-    async def always_500() -> dict:
+    async def always_500() -> JsonObject:
         nonlocal calls
         calls += 1
         raise _http_status_error(500)
@@ -873,7 +988,7 @@ class AcceptanceHarness:
     phases_seen: list[str] = field(default_factory=list)
     materializations: list[Materialization] = field(default_factory=list)
     feature: str = ""
-    _idk_counter: itertools.count = field(default_factory=lambda: itertools.count())
+    _idk_counter: itertools.count[int] = field(default_factory=itertools.count)
     _current_mode: str | None = None
     _answered_permissions: set[str] = field(default_factory=set)
     _permission_violations: list[str] = field(default_factory=list)
@@ -898,7 +1013,7 @@ class AcceptanceHarness:
     async def _mint(self, ec: AuthoringClient, actor_id: str, kind: str) -> str:
         minted = await mint_actor_token(ec, actor_id=actor_id, kind=kind)
         assert isinstance(minted, AuthoringResponse), f"mint denied: {minted}"
-        token = minted.data.get("raw_token")
+        token = _json_object(minted.data, at="actor-token response").get("raw_token")
         assert isinstance(token, str) and token
         return token
 
@@ -911,10 +1026,13 @@ class AcceptanceHarness:
         feature: str | None,
         expect: int,
     ) -> httpx.Response:
-        meta: dict = {"workspace_root": str(self.vault_root.parent), "nickname": run_id}
+        meta: JsonObject = {
+            "workspace_root": str(self.vault_root.parent),
+            "nickname": run_id,
+        }
         if feature is not None:
             meta["feature_tag"] = feature
-        body: dict = {
+        body: JsonObject = {
             "team_preset": self.case.preset,
             "message": self.case.prompt,
             "run_id": run_id,
@@ -932,7 +1050,7 @@ class AcceptanceHarness:
         )
         return resp
 
-    async def _run_status(self, hc: httpx.AsyncClient) -> dict:
+    async def _run_status(self, hc: httpx.AsyncClient) -> JsonObject:
         """Poll the run record under the shared bounded transient-retry policy.
 
         A single dropped connection or read timeout on the gateway during a
@@ -942,12 +1060,12 @@ class AcceptanceHarness:
         immediately as a real routing/identity error.
         """
 
-        async def attempt() -> dict:
+        async def attempt() -> JsonObject:
             resp = await hc.get(
                 f"{self.gateway_url}/v1/runs/{self.run_id}", timeout=30.0
             )
             resp.raise_for_status()
-            return resp.json()
+            return _json_object(resp.json(), at="gateway run-status response")
 
         return await _retry_transient(
             attempt,
@@ -958,7 +1076,9 @@ class AcceptanceHarness:
     async def _assert_not_terminal(self, hc: httpx.AsyncClient) -> None:
         status = await self._run_status(hc)
         phase = status.get("semantic_phase")
-        if phase and (not self.phases_seen or self.phases_seen[-1] != phase):
+        if isinstance(phase, str) and (
+            not self.phases_seen or self.phases_seen[-1] != phase
+        ):
             self.phases_seen.append(phase)
         if status.get("status") in {"failed", "cancelled"}:
             raise AssertionError(f"run terminal failure: {json.dumps(status)[:800]}")
@@ -999,12 +1119,13 @@ class AcceptanceHarness:
             raise AssertionError(
                 f"set mode {mode} denied ({result.denial_kind}): {result.reason}"
             )
-        assert result.data.get("status") in {"recorded", "replayed"}, (
-            f"unexpected mode-set status: {result.data}"
+        data = _json_object(result.data, at="mode-set response")
+        assert data.get("status") in {"recorded", "replayed"}, (
+            f"unexpected mode-set status: {data}"
         )
-        assert result.data.get("mode") == mode, f"mode not applied: {result.data}"
+        assert data.get("mode") == mode, f"mode not applied: {data}"
         self._current_mode = mode
-        requeued = result.data.get("requeued_approvals")
+        requeued = data.get("requeued_approvals")
         return requeued if isinstance(requeued, int) else 0
 
     async def _ensure_mode(
@@ -1025,10 +1146,10 @@ class AcceptanceHarness:
 
     async def _find_queue_item(
         self, ec: AuthoringClient, handled: set[str]
-    ) -> dict | None:
+    ) -> JsonObject | None:
         """A needs-review queue item for this run whose proposal is unhandled."""
         resp = await ec.get("/v1/review-queue", with_actor=False)
-        for item in _items(resp.data):
+        for item in _items(resp.data, at="review-queue response"):
             changeset = _dig(item, "changeset_id") or ""
             proposal = _dig(item, "proposal_id")
             if self.run_id in changeset and proposal and proposal not in handled:
@@ -1037,12 +1158,12 @@ class AcceptanceHarness:
 
     async def _find_policy_marker(
         self, ec: AuthoringClient, handled: set[str]
-    ) -> dict | None:
+    ) -> JsonObject | None:
         """An applied-under-policy (system-auto-approved) marker for this run."""
         resp = await ec.get("/v1/proposals", with_actor=False)
-        data = resp.data if isinstance(resp.data, dict) else {}
+        data = _json_object(resp.data, at="proposals response")
         lane = data.get("applied_under_policy")
-        for item in _items(lane):
+        for item in _items(lane, at="applied-under-policy lane"):
             changeset = _dig(item, "changeset_id") or ""
             if self.run_id in changeset and changeset not in handled:
                 return item
@@ -1051,12 +1172,18 @@ class AcceptanceHarness:
     async def _marker_applied(self, ec: AuthoringClient, changeset_id: str) -> bool:
         """True if *changeset_id* still holds an applied system-policy marker."""
         resp = await ec.get("/v1/proposals", with_actor=False)
-        data = resp.data if isinstance(resp.data, dict) else {}
-        for item in _items(data.get("applied_under_policy")):
+        data = _json_object(resp.data, at="proposals response")
+        for item in _items(
+            data.get("applied_under_policy"), at="applied-under-policy lane"
+        ):
             if (_dig(item, "changeset_id") or "") != changeset_id:
                 continue
             proposal = item.get("proposal")
-            return isinstance(proposal, dict) and proposal.get("status") == "applied"
+            try:
+                proposal_object = _JSON_OBJECT.validate_python(proposal)
+            except ValidationError:
+                return False
+            return proposal_object.get("status") == "applied"
         return False
 
     # ------------------------------------------------------------------
@@ -1066,7 +1193,7 @@ class AcceptanceHarness:
     async def _decide(
         self,
         ec: AuthoringClient,
-        item: dict,
+        item: JsonObject,
         *,
         decision: str,
         reviewer_token: str,
@@ -1096,12 +1223,13 @@ class AcceptanceHarness:
             raise AssertionError(
                 f"{gate} {decision} denied ({result.denial_kind}): {result.reason}"
             )
-        assert result.data.get("status") in {"decided", "replayed"}, (
-            f"{gate} {decision} unexpected status: {result.data}"
+        data = _json_object(result.data, at=f"{gate} decision response")
+        assert data.get("status") in {"decided", "replayed"}, (
+            f"{gate} {decision} unexpected status: {data}"
         )
 
     async def _assert_reviewed_revision_fence(
-        self, ec: AuthoringClient, item: dict, *, reviewer_token: str, gate: str
+        self, ec: AuthoringClient, item: JsonObject, *, reviewer_token: str, gate: str
     ) -> None:
         """A decision attesting a STALE reviewed_revision must be a typed 409.
 
@@ -1137,7 +1265,7 @@ class AcceptanceHarness:
         )
 
     async def _apply(
-        self, ec: AuthoringClient, item: dict, *, reviewer_token: str, gate: str
+        self, ec: AuthoringClient, item: JsonObject, *, reviewer_token: str, gate: str
     ) -> Materialization:
         """Apply an approved changeset and return its materialization receipt."""
         changeset_id = _dig(item, "changeset_id")
@@ -1154,19 +1282,29 @@ class AcceptanceHarness:
             raise AssertionError(
                 f"{gate} apply denied ({result.denial_kind}): {result.reason}"
             )
-        assert result.data.get("status") in {"recorded", "replayed"}, (
-            f"{gate} apply unexpected status: {result.data}"
+        data = _json_object(result.data, at=f"{gate} apply response")
+        assert data.get("status") in {"recorded", "replayed"}, (
+            f"{gate} apply unexpected status: {data}"
         )
-        assert result.data.get("child_outcome") == "applied", (
-            f"{gate} apply did not materialize: {result.data}"
+        assert data.get("child_outcome") == "applied", (
+            f"{gate} apply did not materialize: {data}"
         )
-        child = ((result.data.get("receipt") or {}).get("child")) or {}
+        receipt = _json_object(data.get("receipt"), at=f"{gate} apply receipt")
+        child = _json_object(receipt.get("child"), at=f"{gate} apply receipt child")
         return Materialization(
             gate=gate,
             source="human",
             changeset_id=changeset_id,
-            document_path=child.get("document_path"),
-            result_stem=child.get("result_stem"),
+            document_path=(
+                document_path
+                if isinstance(document_path := child.get("document_path"), str)
+                else None
+            ),
+            result_stem=(
+                result_stem
+                if isinstance(result_stem := child.get("result_stem"), str)
+                else None
+            ),
         )
 
     async def _drive_human_gate(
@@ -1248,8 +1386,9 @@ class AcceptanceHarness:
         # The anti-bypass invariant: a SystemPolicyApprovalRecord under the
         # system:operation-modes actor, DISTINCT from any human decision record -
         # never merely "the run finished".
-        system_actor = marker.get("system_actor")
-        assert isinstance(system_actor, dict), f"marker has no system_actor: {marker}"
+        system_actor = _json_object(
+            marker.get("system_actor"), at=f"{gate} policy marker system actor"
+        )
         assert system_actor.get("id") == _SYSTEM_AUTO_APPROVER_ID, (
             f"{gate} auto-approval was not the operation-modes actor: {system_actor}"
         )
@@ -1262,8 +1401,10 @@ class AcceptanceHarness:
         assert marker.get("policy_id") == _MODE_POLICY_ID, (
             f"{gate} marker policy id mismatch: {marker.get('policy_id')}"
         )
-        proposal = marker.get("proposal")
-        assert isinstance(proposal, dict) and proposal.get("status") == "applied", (
+        proposal = _json_object(
+            marker.get("proposal"), at=f"{gate} policy marker proposal"
+        )
+        assert proposal.get("status") == "applied", (
             f"{gate} system-approved proposal did not apply: {proposal}"
         )
         changeset_id = _dig(marker, "changeset_id") or ""
@@ -1303,17 +1444,20 @@ class AcceptanceHarness:
         if resp.status_code != 200:
             return
         # The history verb embeds the state snapshot rather than restating it.
-        snapshot = resp.json().get("state") or {}
-        for perm in snapshot.get("pending_permissions", []):
+        history = _json_object(resp.json(), at="gateway history response")
+        snapshot = _json_object(history.get("state"), at="gateway history state")
+        for perm in _json_object_list(
+            snapshot.get("pending_permissions"), at="gateway pending permissions"
+        ):
             request_id = perm.get("request_id")
             if not isinstance(request_id, str):
                 continue
             if request_id in self._answered_permissions:
                 continue
             self._answered_permissions.add(request_id)
-            options = perm.get("options", [])
+            options = _json_object_list(perm.get("options"), at="permission options")
             tool_kind = perm.get("tool_kind")
-            if tool_kind in _READ_ONLY_TOOL_KINDS:
+            if isinstance(tool_kind, str) and tool_kind in _READ_ONLY_TOOL_KINDS:
                 option_id = _option_id_for(options, PermissionOptionKind.ALLOW_ALWAYS)
                 if option_id is not None:
                     await self._respond_permission(hc, request_id, option_id)
@@ -1327,13 +1471,13 @@ class AcceptanceHarness:
 
     async def _await(
         self,
-        find,
+        find: Callable[[], Awaitable[JsonObject | None]],
         hc: httpx.AsyncClient,
         deadline: float,
         poll_seconds: float,
         *,
         what: str,
-    ) -> dict:
+    ) -> JsonObject:
         """Poll *find* until it yields an item, watching for a terminal run."""
         started = time.monotonic()
         # A non-autonomous live run can interrupt on a tool-permission request while

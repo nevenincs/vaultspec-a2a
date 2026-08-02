@@ -56,6 +56,7 @@ from ._codex_config_home import (
 from ._json_contract import JsonObject, JsonValue
 from ._mcp_contract import verify_harness_mcp_contract
 from ._subprocess import kill_process_tree, spawn_acp_process
+from .conditions import ProviderCondition, condition_from_codex_turn_error
 from .lane_admission import is_web_lane_proven
 
 logger = logging.getLogger(__name__)
@@ -164,6 +165,32 @@ def _messages_to_prompt(messages: list[BaseMessage]) -> str:
 class _CodexProtocolError(RuntimeError):
     """A JSON-RPC error frame or an unexpected turn failure from the app-server."""
 
+    def __init__(
+        self,
+        message: str,
+        *,
+        condition: ProviderCondition = ProviderCondition.UNKNOWN,
+        will_retry: bool | None = None,
+    ) -> None:
+        """Initialize the protocol failure.
+
+        Args:
+            message: Human-safe description of what failed.
+            condition: The provider condition this failure resolves to, carried
+                as a field so a reporting site classifies without re-parsing a
+                vendor-shaped payload. Defaults to the unknown member for the
+                failures raised where no discriminator exists.
+            will_retry: Whether the lane itself said it would retry. ``None``
+                means the lane said nothing, which is deliberately distinct from
+                a stated ``False``: only the notification that carries the flag
+                can answer, and inferring it elsewhere is exactly the guess this
+                field exists to replace.
+        """
+        super().__init__(message)
+        self.message = message
+        self.condition = condition
+        self.will_retry = will_retry
+
 
 def _response_error_message(error: JsonValue) -> str:
     """Return the human-safe message from one JSON-RPC error payload."""
@@ -172,6 +199,32 @@ def _response_error_message(error: JsonValue) -> str:
         if isinstance(message, str) and message:
             return message
     return "codex app-server request failed"
+
+
+def _turn_error_message(error: JsonValue) -> str:
+    """Return the human-safe message from one Codex turn error."""
+    if isinstance(error, dict):
+        message = error.get("message")
+        if isinstance(message, str) and message:
+            return message
+    return "codex app-server reported an error"
+
+
+def _turn_failure(
+    error: JsonValue, *, message: str | None = None, will_retry: JsonValue = None
+) -> _CodexProtocolError:
+    """Build a protocol failure from one Codex turn error.
+
+    The turn error carries a categorical discriminator beside its message, and
+    the notification that delivers it additionally states whether the lane will
+    retry. Both were previously dropped in favour of the message alone, which is
+    what left a client with prose it had to pattern-match to learn anything.
+    """
+    return _CodexProtocolError(
+        message if message is not None else _turn_error_message(error),
+        condition=condition_from_codex_turn_error(error),
+        will_retry=will_retry if isinstance(will_retry, bool) else None,
+    )
 
 
 def _required_object_field(
@@ -738,11 +791,8 @@ class CodexChatModel(BaseChatModel):
                 if isinstance(delta, str) and delta:
                     yield ChatGenerationChunk(message=AIMessageChunk(content=delta))
             elif method == "error":
-                error = params.get("error")
-                raise _CodexProtocolError(
-                    _response_error_message(error)
-                    if error is not None
-                    else "codex app-server reported an error"
+                raise _turn_failure(
+                    params.get("error"), will_retry=params.get("willRetry")
                 )
             elif method == "turn/completed":
                 if params.get("threadId") not in (None, thread_id):

@@ -6,7 +6,7 @@ tags:
 date: '2026-08-02'
 modified: '2026-08-02'
 body_schema: 'body-v1'
-body_hash: 'sha256:710475ca9338911da59312f0bef7a454b97d817d6b046c9bf15348d0eb973307'
+body_hash: 'sha256:4bfdedcd8428e9fab2ee8e8b05805ac9170f37336e9f92143b4d5daff93194bd'
 related:
   - '[[2026-08-02-provider-error-taxonomy-W01-P01-S01]]'
   - '[[2026-08-02-provider-error-taxonomy-W01-P01-S02]]'
@@ -17,6 +17,7 @@ related:
   - '[[2026-08-02-provider-error-taxonomy-W01-P02-S07]]'
   - '[[2026-08-02-provider-error-taxonomy-W01-P02-S08]]'
   - '[[2026-08-02-provider-error-taxonomy-W01-P02-S09]]'
+  - '[[2026-08-02-provider-error-taxonomy-W01-P02-S10]]'
   - '[[2026-08-02-provider-error-taxonomy-adr]]'
   - '[[2026-08-02-provider-error-taxonomy-plan]]'
   - '[[2026-08-02-provider-error-taxonomy-research]]'
@@ -43,6 +44,7 @@ Auto-generated index of all documents tagged with `#provider-error-taxonomy`.
 - `2026-08-02-provider-error-taxonomy-W01-P02-S07` - Map the ACP error kind and JSON-RPC code onto the vocabulary
 - `2026-08-02-provider-error-taxonomy-W01-P02-S08` - Map the Codex error info variants onto the vocabulary
 - `2026-08-02-provider-error-taxonomy-W01-P02-S09` - Attach the resolved condition to the ACP prompt error at raise
+- `2026-08-02-provider-error-taxonomy-W01-P02-S10` - Attach the condition and the lane retry hint to the Codex error at raise
 
 ### plan
 

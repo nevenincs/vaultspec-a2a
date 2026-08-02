@@ -81,8 +81,12 @@ def test_authoring_bridge_is_a_provider_child_launch_spec_not_self_spawned() -> 
 
     entry = build_authoring_stdio_mcp_servers(_stdio_binding())[0]
     # A child-launch spec the provider spawns: a command + args, no live process.
-    assert entry["command"] == sys.executable
-    assert entry["args"][:1] == ["-m"]
+    command = entry["command"]
+    args = entry["args"]
+    assert isinstance(command, str)
+    assert isinstance(args, list)
+    assert command == sys.executable
+    assert args[:1] == ["-m"]
     # No process-spawn primitive is reachable from this spec-builder's namespace.
     for banned in (
         "subprocess",
@@ -98,7 +102,16 @@ def test_authoring_bridge_is_a_provider_child_launch_spec_not_self_spawned() -> 
 
 def test_stdio_entry_carries_engine_facts_in_env() -> None:
     entry = build_authoring_stdio_mcp_servers(_stdio_binding())[0]
-    env = {item["name"]: item["value"] for item in entry["env"]}
+    raw_env = entry["env"]
+    assert isinstance(raw_env, list)
+    env: dict[str, str] = {}
+    for item in raw_env:
+        assert isinstance(item, dict)
+        name = item.get("name")
+        value = item.get("value")
+        assert isinstance(name, str)
+        assert isinstance(value, str)
+        env[name] = value
     assert env[ENV_BASE_URL] == _ENGINE
     assert env[ENV_BEARER] == _BEARER
     assert env[ENV_ACTOR_TOKEN] == _ACTOR
@@ -109,7 +122,15 @@ def test_stdio_tokens_never_appear_in_argv() -> None:
     # R7: tokens travel by env only; a process listing (command + args) must
     # never expose the bearer or actor token.
     entry = build_authoring_stdio_mcp_servers(_stdio_binding())[0]
-    argv_blob = " ".join([entry["command"], *entry["args"]])
+    command = entry["command"]
+    args = entry["args"]
+    assert isinstance(command, str)
+    assert isinstance(args, list)
+    command_line = [command]
+    for arg in args:
+        assert isinstance(arg, str)
+        command_line.append(arg)
+    argv_blob = " ".join(command_line)
     assert _BEARER not in argv_blob
     assert _ACTOR not in argv_blob
 

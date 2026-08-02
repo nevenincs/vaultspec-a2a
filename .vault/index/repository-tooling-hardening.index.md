@@ -6,7 +6,7 @@ tags:
 date: '2026-08-02'
 modified: '2026-08-02'
 body_schema: 'body-v1'
-body_hash: 'sha256:e018f31e84bc5ac73c07905d7872661b5e9209f3e1e520d222b1ba20bf079dd7'
+body_hash: 'sha256:94800b1e6d5aeca54faff71ae62756d662b69dc96279b51b5ea1b2da4f6b4c89'
 related:
   - '[[2026-07-19-repository-tooling-hardening-W01-P01-S01]]'
   - '[[2026-07-19-repository-tooling-hardening-W01-P01-summary]]'
@@ -78,6 +78,7 @@ related:
   - '[[2026-08-02-repository-tooling-hardening-strict-s25-project-mcp-audit]]'
   - '[[2026-08-02-repository-tooling-hardening-strict-s25-provider-lazy-exports-audit]]'
   - '[[2026-08-02-repository-tooling-hardening-strict-s26-friend-tests-audit]]'
+  - '[[2026-08-02-repository-tooling-hardening-strict-s26-provider-tests-audit]]'
 ---
 
 # `repository-tooling-hardening` feature index
@@ -122,6 +123,7 @@ Auto-generated index of all documents tagged with `#repository-tooling-hardening
 - `2026-08-02-repository-tooling-hardening-strict-s25-project-mcp-audit` - `repository-tooling-hardening` audit: `ACP project MCP trust boundary review`
 - `2026-08-02-repository-tooling-hardening-strict-s25-provider-lazy-exports-audit` - `repository-tooling-hardening` audit: `Provider lazy export contract review`
 - `2026-08-02-repository-tooling-hardening-strict-s26-friend-tests-audit` - `repository-tooling-hardening` audit: `Provider and service friend-test policy review`
+- `2026-08-02-repository-tooling-hardening-strict-s26-provider-tests-audit` - `repository-tooling-hardening` audit: `S26 provider and service test typing`
 
 ### exec
 

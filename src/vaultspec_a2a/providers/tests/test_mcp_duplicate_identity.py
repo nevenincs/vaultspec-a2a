@@ -12,10 +12,10 @@ refusal is proven at the boundary that actually emits configuration.
 
 from __future__ import annotations
 
-import json
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 import pytest
+from pydantic import TypeAdapter
 
 from ...thread.errors import ConfigError
 from .._acp_config_home import create_isolated_config_home
@@ -24,14 +24,16 @@ from .._acp_mcp import (
     config_home_mcp_servers,
     reject_duplicate_identities,
 )
+from .._json_contract import JsonObject
 
 if TYPE_CHECKING:
     from pathlib import Path
 
 _KNOWN = "vaultspec-rag"
+_JSON_OBJECT: TypeAdapter[JsonObject] = TypeAdapter(JsonObject)
 
 
-def _spec(command: str) -> dict[str, Any]:
+def _spec(command: str) -> JsonObject:
     return {"name": _KNOWN, "command": command, "args": ["serve"]}
 
 
@@ -50,7 +52,7 @@ def test_a_repeated_identity_is_refused_rather_than_overwritten() -> None:
 
 def test_the_refusal_names_every_duplicated_identity() -> None:
     """Naming only the first would leave the operator fixing them one run at a time."""
-    servers = [
+    servers: list[JsonObject] = [
         {"name": "alpha", "command": "a"},
         {"name": "alpha", "command": "a2"},
         {"name": "beta", "command": "b"},
@@ -87,9 +89,14 @@ def test_the_written_config_home_carries_the_reviewed_command(
         workspace_root=tmp_path,
     )
 
-    written = json.loads((home / ".claude.json").read_text(encoding="utf-8"))
-
-    assert written["mcpServers"][_KNOWN]["command"] == "reviewed-command"
+    written = _JSON_OBJECT.validate_json(
+        (home / ".claude.json").read_text(encoding="utf-8")
+    )
+    servers = written["mcpServers"]
+    assert isinstance(servers, dict)
+    reviewed = servers[_KNOWN]
+    assert isinstance(reviewed, dict)
+    assert reviewed["command"] == "reviewed-command"
 
 
 def test_a_duplicate_never_reaches_the_config_home_writer(tmp_path: Path) -> None:

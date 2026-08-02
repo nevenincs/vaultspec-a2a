@@ -35,6 +35,7 @@ import pytest
 
 from ...control.config import settings
 from ...workspace.environment import resolve_env_vars
+from .._json_contract import JsonObject, JsonValue
 from .._subprocess import kill_process_tree, spawn_acp_process
 from ..factory import _CLAUDE_ACP_JS, _classify_acp_command
 from ._acp_frames import read_acp_frame
@@ -44,7 +45,7 @@ from ._acp_frames import read_acp_frame
 @pytest.mark.asyncio
 async def test_migrated_adapter_preserves_handshake_surface() -> None:
     if settings.acp_backend != "binary" and not _CLAUDE_ACP_JS.exists():
-        pytest.skip(
+        pytest.fail(
             "migrated ACP node entry not installed; run 'npm install' "
             "(@agentclientprotocol/claude-agent-acp) per the ACP runbook"
         )
@@ -66,7 +67,7 @@ async def test_migrated_adapter_preserves_handshake_surface() -> None:
     )
     assert proc.stdin is not None and proc.stdout is not None
     try:
-        init = {
+        init: JsonObject = {
             "jsonrpc": "2.0",
             "id": 0,
             "method": "initialize",
@@ -83,6 +84,7 @@ async def test_migrated_adapter_preserves_handshake_surface() -> None:
         init_frame = await read_acp_frame(proc.stdout, 0, 30.0)
         assert "result" in init_frame, init_frame.get("error")
         init_res = init_frame["result"]
+        assert isinstance(init_res, dict)
 
         # protocolVersion our request pins and our fs/terminal RPC names are keyed to.
         assert init_res.get("protocolVersion") == 1, init_res.get("protocolVersion")
@@ -93,13 +95,13 @@ async def test_migrated_adapter_preserves_handshake_surface() -> None:
         assert isinstance(init_res.get("authMethods"), list)
 
         # session/new with the headless allowedTools auto-permit meta our layer emits.
-        new = {
+        new: JsonObject = {
             "jsonrpc": "2.0",
             "id": 1,
             "method": "session/new",
             "params": {
                 "cwd": workspace,
-                "mcpServers": [],
+                "mcpServers": list[JsonValue](),
                 "_meta": {
                     "claudeCode": {
                         "options": {"allowedTools": ["mcp__vaultspec-rag__search"]}
@@ -112,6 +114,7 @@ async def test_migrated_adapter_preserves_handshake_surface() -> None:
         new_frame = await read_acp_frame(proc.stdout, 1, 40.0)
         assert "result" in new_frame, new_frame.get("error")
         new_res = new_frame["result"]
+        assert isinstance(new_res, dict)
 
         # The shape SessionSetupResult parses.
         assert isinstance(new_res.get("sessionId"), str) and new_res["sessionId"]
@@ -120,6 +123,6 @@ async def test_migrated_adapter_preserves_handshake_surface() -> None:
         assert modes.get("currentModeId")
         available = modes.get("availableModes")
         assert isinstance(available, list) and available
-        assert all("id" in m for m in available)
+        assert all(isinstance(mode, dict) and "id" in mode for mode in available)
     finally:
         await kill_process_tree(proc, metadata=meta)

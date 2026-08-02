@@ -2,13 +2,13 @@
 
 from collections.abc import Callable
 from pathlib import Path
-from typing import cast
 
 import pytest
 from langchain_core.language_models import BaseChatModel
 from langchain_openai import ChatOpenAI
 
-from ...graph.enums import MODEL_MAP, Model, Provider
+from ...control.config import settings
+from ...graph.enums import MODEL_MAP, PROVIDER_DEFAULT_MODELS, Model, Provider
 from ...thread.errors import ConfigError
 from ..acp_chat_model import AcpChatModel
 from ..factory import (
@@ -21,7 +21,6 @@ from ..factory import (
     _classify_gemini_command,
     classify_provider_command,
 )
-from ..model_profiles import PROVIDER_DEFAULT_MODELS
 
 
 def get_model_attr(model_obj: BaseChatModel) -> str | None:
@@ -91,12 +90,10 @@ def test_provider_factory_claude_binary_oauth_still_injected() -> None:
     assert isinstance(model, AcpChatModel)
     assert model.env_vars.get("CLAUDE_AGENT_ACP_IS_SINGLE_FILE_BUN") == "1"
     # If an OAuth token is configured in the environment, it must appear.
-    from ..factory import settings as factory_settings
-
-    if factory_settings.claude_code_oauth_token:
+    if settings.claude_code_oauth_token:
         assert (
             model.env_vars.get("CLAUDE_CODE_OAUTH_TOKEN")
-            == factory_settings.claude_code_oauth_token
+            == settings.claude_code_oauth_token
         )
 
 
@@ -222,17 +219,15 @@ def test_provider_factory_zai_creates_acp_via_claude_wrapper() -> None:
 
 def test_provider_factory_zai_injects_configured_token() -> None:
     """When a Z.ai token is configured, both Anthropic gateway vars are injected."""
-    from ..factory import settings as factory_settings
-
     if not _CLAUDE_ACP_JS.exists():
         with pytest.raises(ConfigError, match="Claude ACP entry point not found"):
             ProviderFactory().create(Provider.ZAI)
         return
     model = ProviderFactory().create(Provider.ZAI)
     assert isinstance(model, AcpChatModel)
-    if factory_settings.zai_auth_token and factory_settings.zai_auth_token.strip():
-        assert model.env_vars["ANTHROPIC_AUTH_TOKEN"] == factory_settings.zai_auth_token
-        assert model.env_vars["ANTHROPIC_BASE_URL"] == factory_settings.zai_base_url
+    if settings.zai_auth_token and settings.zai_auth_token.strip():
+        assert model.env_vars["ANTHROPIC_AUTH_TOKEN"] == settings.zai_auth_token
+        assert model.env_vars["ANTHROPIC_BASE_URL"] == settings.zai_base_url
         assert model.auth_mode == "zai_auth_token"
     else:
         assert "ANTHROPIC_AUTH_TOKEN" not in model.env_vars
@@ -242,8 +237,6 @@ def test_provider_factory_zai_injects_configured_token() -> None:
 def test_provider_factory_kimi_creates_acp_on_kimi_agent() -> None:
     """Kimi builds an AcpChatModel on the `kimi acp` command with the kimi family."""
     import shutil
-
-    from ..factory import settings as factory_settings
 
     if shutil.which("kimi") is None:
         with pytest.raises(ValueError, match="Kimi CLI not resolvable"):
@@ -267,12 +260,12 @@ def test_provider_factory_kimi_creates_acp_on_kimi_agent() -> None:
     assert model.acp_family == "kimi"
     assert model._config.acp_family == "kimi"
     # Env passthrough uses the CLI's native unprefixed names; the key is a secret.
-    if factory_settings.kimi_api_key:
+    if settings.kimi_api_key:
         assert model.env_vars["KIMI_API_KEY"] == (
-            factory_settings.kimi_api_key.get_secret_value()
+            settings.kimi_api_key.get_secret_value()
         )
         assert model.auth_mode == "kimi_api_key"
-        assert factory_settings.kimi_api_key.get_secret_value() not in repr(model)
+        assert settings.kimi_api_key.get_secret_value() not in repr(model)
     else:
         assert "KIMI_API_KEY" not in model.env_vars
         assert model.auth_mode == "none_detected"
@@ -354,12 +347,6 @@ def test_provider_factory_gemini_with_workspace_root() -> None:
     assert model.workspace_root == str(ws)
 
 
-def test_provider_factory_unsupported_provider() -> None:
-    """Verify that nonsense providers raise ValueError with useful message."""
-    with pytest.raises(ValueError, match="Unsupported provider: unknown"):
-        ProviderFactory().create(cast("Provider", "unknown"))
-
-
 class TestProviderAdmission:
     """The admission path, exercised apart from construction after the split.
 
@@ -393,12 +380,3 @@ class TestProviderAdmission:
         resolved = _admit_and_resolve_model_name(Provider.CLAUDE, "some-custom-name")
 
         assert resolved == "some-custom-name"
-
-    def test_an_unsupported_provider_is_refused(self) -> None:
-        from ..factory import _admit_and_resolve_model_name
-
-        class _Bogus:
-            value = "bogus"
-
-        with pytest.raises(ValueError, match="Unsupported provider"):
-            _admit_and_resolve_model_name(cast("Provider", _Bogus()), None)

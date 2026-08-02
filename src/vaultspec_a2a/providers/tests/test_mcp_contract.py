@@ -10,6 +10,7 @@ exercised against the same real server the passing one uses.
 from __future__ import annotations
 
 import os
+from typing import TYPE_CHECKING
 
 import pytest
 
@@ -24,8 +25,11 @@ from .._mcp_contract import (
     verify_harness_mcp_contract,
 )
 
+if TYPE_CHECKING:
+    from .._json_contract import JsonObject
 
-def _rag_spec() -> dict:
+
+def _rag_spec() -> JsonObject:
     return resolve_harness_mcp_servers(["vaultspec-rag"])[0]
 
 
@@ -62,10 +66,18 @@ async def test_production_launch_spec_serves_every_declared_tool() -> None:
     leaving an agent advertising grounding tools it can never call.
     """
     spec = _rag_spec()
+    command = spec["command"]
+    raw_args = spec["args"]
+    assert isinstance(command, str)
+    assert isinstance(raw_args, list)
+    args: list[str] = []
+    for arg in raw_args:
+        assert isinstance(arg, str)
+        args.append(arg)
     await verify_declared_tool_contract(
         name="vaultspec-rag",
-        command=spec["command"],
-        args=spec["args"],
+        command=command,
+        args=args,
         declared=declared_harness_tools("vaultspec-rag"),
         env=dict(os.environ),
     )
@@ -79,7 +91,7 @@ async def test_session_shaped_verification_skips_the_authoring_bridge() -> None:
     beside the harness servers. The bridge entry names a command that does not
     exist, so were it probed the call would raise - passing proves it is skipped.
     """
-    session = [
+    session: list[JsonObject] = [
         {
             "name": "vaultspec-authoring",
             "command": "no-such-authoring-bridge-executable",
@@ -99,11 +111,19 @@ async def test_missing_declared_tool_is_refused_and_named() -> None:
     server has renamed or dropped.
     """
     spec = _rag_spec()
+    command = spec["command"]
+    raw_args = spec["args"]
+    assert isinstance(command, str)
+    assert isinstance(raw_args, list)
+    args: list[str] = []
+    for arg in raw_args:
+        assert isinstance(arg, str)
+        args.append(arg)
     with pytest.raises(HarnessToolContractError) as excinfo:
         await verify_declared_tool_contract(
             name="vaultspec-rag",
-            command=spec["command"],
-            args=spec["args"],
+            command=command,
+            args=args,
             declared=("search_vault", "tool_that_no_release_serves"),
             env=dict(os.environ),
         )
@@ -136,10 +156,13 @@ async def test_unlaunchable_server_is_refused_rather_than_assumed_good() -> None
 @pytest.mark.asyncio
 async def test_probe_deadline_is_refused_rather_than_hanging_the_run() -> None:
     """A server that never completes the handshake fails on the deadline."""
+    spec = _rag_spec()
+    command = spec["command"]
+    assert isinstance(command, str)
     with pytest.raises(HarnessToolContractError) as excinfo:
         await verify_declared_tool_contract(
             name="vaultspec-rag",
-            command=_rag_spec()["command"],
+            command=command,
             args=["--from", "vaultspec-rag[mcp]", "vaultspec-search-mcp"],
             declared=("search_vault",),
             env=dict(os.environ),

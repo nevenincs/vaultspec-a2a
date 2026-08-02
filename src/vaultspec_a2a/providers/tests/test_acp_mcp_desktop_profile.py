@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import asdict
+from types import MappingProxyType
 
 from ...team.team_config import load_team_config
 from .. import _acp_mcp
@@ -15,6 +15,7 @@ from .._acp_mcp import (
     resolve_harness_mcp_capabilities,
     resolve_harness_mcp_servers,
 )
+from .._json_contract import FrozenJsonObject, JsonObject, freeze_json
 from ..acp_chat_model import AcpChatModel
 from ..codex_chat_model import CodexChatModel
 
@@ -22,22 +23,32 @@ RAG_SERVER = "vaultspec-rag"
 RAG_NAMES = [RAG_SERVER]
 
 
+def _frozen_entry(entry: JsonObject) -> FrozenJsonObject:
+    frozen = freeze_json(entry)
+    assert isinstance(frozen, MappingProxyType)
+    return frozen
+
+
 def test_desktop_registry_admission_is_explicit_and_fail_closed() -> None:
-    assert _acp_mcp._desktop_available({}) is False
+    assert _acp_mcp._desktop_available(_frozen_entry({})) is False
     assert (
         _acp_mcp._desktop_available(
-            {"desktop_available": True, "runtime_acquisition": True}
+            _frozen_entry({"desktop_available": True, "runtime_acquisition": True})
         )
         is False
     )
-    assert _acp_mcp._desktop_available({"desktop_available": True}) is False
+    assert (
+        _acp_mcp._desktop_available(_frozen_entry({"desktop_available": True})) is False
+    )
     assert (
         _acp_mcp._desktop_available(
-            {"desktop_available": True, "runtime_acquisition": False}
+            _frozen_entry({"desktop_available": True, "runtime_acquisition": False})
         )
         is True
     )
-    assert _acp_mcp._desktop_available(_acp_mcp._KNOWN_MCP_SERVERS[RAG_SERVER]) is False
+    registry_entry = _acp_mcp._KNOWN_MCP_SERVERS[RAG_SERVER]
+    assert isinstance(registry_entry, MappingProxyType)
+    assert _acp_mcp._desktop_available(registry_entry) is False
 
 
 def test_desktop_resolution_returns_actionable_path_free_unavailability() -> None:
@@ -49,16 +60,13 @@ def test_desktop_resolution_returns_actionable_path_free_unavailability() -> Non
     assert resolution.profile is HarnessMcpRuntimeProfile.DESKTOP
     assert resolution.available_servers == ()
     assert len(resolution.unavailable) == 1
-    result = asdict(resolution.unavailable[0])
-    assert result == {
-        "code": "capability_unavailable",
-        "capability": RAG_SERVER,
-        "reason": "runtime acquisition is disabled for the desktop profile",
-        "action": (
-            "Install the separately packaged vaultspec-rag desktop capability, "
-            "then retry."
-        ),
-    }
+    result = resolution.unavailable[0]
+    assert result.code == "capability_unavailable"
+    assert result.capability == RAG_SERVER
+    assert result.reason == "runtime acquisition is disabled for the desktop profile"
+    assert result.action == (
+        "Install the separately packaged vaultspec-rag desktop capability, then retry."
+    )
     assert "uvx" not in repr(result)
     assert "/" not in repr(result)
     assert "\\" not in repr(result)
@@ -101,11 +109,12 @@ def test_desktop_serializers_emit_no_runtime_acquisition_material() -> None:
 def test_desktop_acp_composition_scrubs_stale_launch_and_allowlist_entries() -> None:
     stale_specs = resolve_harness_mcp_servers(RAG_NAMES)
     stale_allowlist = harness_allowed_tool_names(RAG_NAMES)
+    authoring: JsonObject = {"name": "vaultspec-authoring", "command": "python"}
     model = AcpChatModel(
         command=["echo"],
         env_vars={},
         mcp_servers=[
-            {"name": "vaultspec-authoring", "command": "python"},
+            authoring,
             *stale_specs,
         ],
         allowed_tools=["mcp__vaultspec-authoring__read", *stale_allowlist],
@@ -119,9 +128,7 @@ def test_desktop_acp_composition_scrubs_stale_launch_and_allowlist_entries() -> 
     )
 
     assert isinstance(composed, AcpChatModel)
-    assert composed.mcp_servers == [
-        {"name": "vaultspec-authoring", "command": "python"}
-    ]
+    assert composed.mcp_servers == [authoring]
     assert composed.allowed_tools == ["mcp__vaultspec-authoring__read"]
     assert "uvx" not in repr(composed.mcp_servers)
 

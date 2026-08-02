@@ -9,9 +9,10 @@ from __future__ import annotations
 
 import asyncio
 import json
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING
 
 import pytest
+from pydantic import SecretStr, TypeAdapter
 
 from ...authoring import ACTOR_TOKEN_HEADER, BEARER_HEADER, AgentTool, CatalogSnapshot
 from ...authoring.catalog import parse_catalog, snapshot_to_catalog_payload
@@ -37,6 +38,7 @@ from .._acp_authoring import (
 )
 from .._acp_rpc_handlers import on_fs_write_text_file
 from .._acp_types import AcpModelConfig, AcpSessionContext
+from .._json_contract import JsonObject
 from ..acp_chat_model import AcpChatModel
 
 if TYPE_CHECKING:
@@ -44,6 +46,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 _LOOPBACK_URL = "http://127.0.0.1:8200/mcp"
+_JSON_OBJECT: TypeAdapter[JsonObject] = TypeAdapter(JsonObject)
 
 
 def _tool(name: str, *, risk_tier: str = "read_only") -> AgentTool:
@@ -171,7 +174,16 @@ class TestBuildMcpServers:
     def test_headers_carry_both_auth_layers(self) -> None:
         binding = _binding(bearer="mb", actor="at")
         entry = build_authoring_mcp_servers(binding)[0]
-        headers = {h["name"]: h["value"] for h in entry["headers"]}
+        raw_headers = entry["headers"]
+        assert isinstance(raw_headers, list)
+        headers: dict[str, str] = {}
+        for header in raw_headers:
+            assert isinstance(header, dict)
+            name = header.get("name")
+            value = header.get("value")
+            assert isinstance(name, str)
+            assert isinstance(value, str)
+            headers[name] = value
         assert headers[BEARER_HEADER] == "Bearer mb"
         assert headers[ACTOR_TOKEN_HEADER] == "at"
 
@@ -230,7 +242,9 @@ class TestConfigHomeAuthoringEntry:
         # Every home env value is a ${VAR} placeholder keyed by its own name,
         # never a real value.
         home_env = entry["env"]
+        assert isinstance(home_env, dict)
         for name, value in home_env.items():
+            assert isinstance(value, str)
             assert value == f"${{{name}}}"
 
         # Each bridge env name carries a placeholder, and the spawn env carries the
@@ -249,7 +263,9 @@ class TestConfigHomeAuthoringEntry:
         assert spawn_env == expected_values
         # The handed catalog round-trips back to the run's snapshot.
         assert (
-            parse_catalog(json.loads(spawn_env[ENV_CATALOG_JSON])).tool_names()
+            parse_catalog(
+                _JSON_OBJECT.validate_json(spawn_env[ENV_CATALOG_JSON])
+            ).tool_names()
             == binding.snapshot.tool_names()
         )
 
@@ -258,7 +274,7 @@ class TestConfigHomeAuthoringEntry:
         assert "SECRET-ACTOR" not in json.dumps(home_env)
 
     def test_no_bridge_spec_is_noop(self) -> None:
-        rag = {
+        rag: JsonObject = {
             "name": "vaultspec-rag",
             "command": "uvx",
             "args": ["--from", "vaultspec-rag", "vaultspec-search-mcp"],
@@ -277,7 +293,7 @@ class TestConfigHomeAuthoringEntry:
     def test_foreign_module_under_bridge_name_raises(self) -> None:
         # A spec claiming the bridge name but pointing at a foreign module is not
         # the guarded per-run bridge and must be refused.
-        foreign = {
+        foreign: JsonObject = {
             "name": AUTHORING_MCP_SERVER_NAME,
             "command": "python",
             "args": ["-m", "attacker.module"],
@@ -287,7 +303,7 @@ class TestConfigHomeAuthoringEntry:
             config_home_authoring_entry([foreign])
 
     def test_missing_env_under_bridge_name_raises(self) -> None:
-        no_env = {
+        no_env: JsonObject = {
             "name": AUTHORING_MCP_SERVER_NAME,
             "command": "python",
             "args": ["-m", AUTHORING_STDIO_MODULE],
@@ -331,7 +347,7 @@ class TestAuthoringVisibleButVaultWriteDenied:
 
     @pytest.mark.asyncio
     async def test_vault_write_denied_with_authoring_wired(
-        self, tmp_path: Path
+        self, tmp_path: Path, acp_session_context: AcpSessionContext
     ) -> None:
         config = _config_with_authoring(str(tmp_path))
         # The authoring tools are surfaced to the session.
@@ -340,10 +356,11 @@ class TestAuthoringVisibleButVaultWriteDenied:
         result = await on_fs_write_text_file(
             1,
             {"path": ".vault/plan/x.md", "content": "SHOULD NOT LAND"},
-            cast("AcpSessionContext", None),
+            acp_session_context,
             config,
         )
-        payload = cast("dict", result["result"])
+        payload = result["result"]
+        assert isinstance(payload, dict)
         assert payload["status"] == "denied"
         assert payload["denial_kind"] == "forbidden_actor"
         assert "error" not in result
@@ -383,7 +400,10 @@ class TestAcpWriteGitSerialization:
 
     @pytest.mark.asyncio
     async def test_acp_write_is_serialized_behind_a_held_git_mutex(
-        self, tmp_path: Path, loop_bound_mutex: asyncio.Lock
+        self,
+        tmp_path: Path,
+        loop_bound_mutex: asyncio.Lock,
+        acp_session_context: AcpSessionContext,
     ) -> None:
         """A concurrent ACP write cannot proceed while the shared mutex is held.
 
@@ -406,7 +426,7 @@ class TestAcpWriteGitSerialization:
                         "path": "serialized.txt",
                         "content": "written after the lock frees",
                     },
-                    cast("AcpSessionContext", None),
+                    acp_session_context,
                     config,
                 )
             )
@@ -421,7 +441,9 @@ class TestAcpWriteGitSerialization:
         order.append("write-completed")
 
         assert order == ["holder-acquired", "holder-still-holding", "write-completed"]
-        assert cast("dict", result["result"]) == {}
+        payload = result["result"]
+        assert isinstance(payload, dict)
+        assert payload == {}
         assert (tmp_path / "serialized.txt").read_text(encoding="utf-8") == (
             "written after the lock frees"
         )
@@ -491,7 +513,7 @@ class TestAttachAuthoringTools:
         """
         from langchain_openai import ChatOpenAI
 
-        model = ChatOpenAI(api_key="test-key", model="gpt-4o")
+        model = ChatOpenAI(api_key=SecretStr("test-key"), model="gpt-4o")
         with pytest.raises(ConfigError, match="no surface to mount the bridge"):
             attach_authoring_tools(model, _binding(), autonomous=True)
 
@@ -508,7 +530,7 @@ class TestAttachAuthoringTools:
         """
         from langchain_openai import ChatOpenAI
 
-        model = ChatOpenAI(api_key="test-key", model="gpt-4o")
+        model = ChatOpenAI(api_key=SecretStr("test-key"), model="gpt-4o")
         assert getattr(model, "with_mcp_servers", None) is None
         assert getattr(model, "with_authoring_mcp_server", None) is None
         assert attach_authoring_tools(model, None, autonomous=True) is model

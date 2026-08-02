@@ -13,7 +13,7 @@ from __future__ import annotations
 import os
 import subprocess
 import sys
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING
 
 import pytest
 
@@ -22,6 +22,8 @@ from .._acp_types import AcpModelConfig, AcpSessionContext
 
 if TYPE_CHECKING:
     from pathlib import Path
+
+    from .._json_contract import JsonObject
 
 
 def _make_config(workspace_root: str) -> AcpModelConfig:
@@ -46,21 +48,21 @@ def _make_config(workspace_root: str) -> AcpModelConfig:
     )
 
 
-# The write handler never touches ctx (it is the ``_ctx`` throwaway param).
-_NO_CTX = cast("AcpSessionContext", None)
-
-
-async def _write(config: AcpModelConfig, path: str) -> dict:
+async def _write(
+    config: AcpModelConfig, ctx: AcpSessionContext, path: str
+) -> JsonObject:
     return await on_fs_write_text_file(
-        1, {"path": path, "content": "SHOULD NOT LAND"}, _NO_CTX, config
+        1, {"path": path, "content": "SHOULD NOT LAND"}, ctx, config
     )
 
 
-def _assert_denied(result: dict) -> None:
-    payload = cast("dict", result["result"])
+def _assert_denied(result: JsonObject) -> None:
+    payload = result.get("result")
+    assert isinstance(payload, dict)
     assert payload["status"] == "denied"
     assert payload["denial_kind"] == "forbidden_actor"
-    eligibility = cast("dict", payload["eligibility"])
+    eligibility = payload.get("eligibility")
+    assert isinstance(eligibility, dict)
     assert eligibility["allowed"] is False
     # The reason must steer the agent to the authoring tools.
     assert "propose" in str(eligibility["reason"]).lower()
@@ -72,43 +74,53 @@ class TestVaultWriteDeny:
     """Every write path into .vault/ is denied and lands nothing."""
 
     @pytest.mark.asyncio
-    async def test_denies_direct_vault_write(self, tmp_path: Path) -> None:
+    async def test_denies_direct_vault_write(
+        self, tmp_path: Path, acp_session_context: AcpSessionContext
+    ) -> None:
         config = _make_config(str(tmp_path))
-        result = await _write(config, ".vault/plan/x.md")
+        result = await _write(config, acp_session_context, ".vault/plan/x.md")
         _assert_denied(result)
         assert not (tmp_path / ".vault" / "plan" / "x.md").exists()
 
     @pytest.mark.asyncio
-    async def test_denies_deeply_nested_vault_write(self, tmp_path: Path) -> None:
+    async def test_denies_deeply_nested_vault_write(
+        self, tmp_path: Path, acp_session_context: AcpSessionContext
+    ) -> None:
         config = _make_config(str(tmp_path))
-        result = await _write(config, ".vault/adr/deep/nested/y.md")
+        result = await _write(
+            config, acp_session_context, ".vault/adr/deep/nested/y.md"
+        )
         _assert_denied(result)
 
     @pytest.mark.asyncio
-    async def test_denies_traversal_back_into_vault(self, tmp_path: Path) -> None:
+    async def test_denies_traversal_back_into_vault(
+        self, tmp_path: Path, acp_session_context: AcpSessionContext
+    ) -> None:
         config = _make_config(str(tmp_path))
         # Resolves to <ws>/.vault/x.md — inside the sandbox, still a vault write.
-        result = await _write(config, "sub/dir/../../.vault/x.md")
+        result = await _write(config, acp_session_context, "sub/dir/../../.vault/x.md")
         _assert_denied(result)
 
     @pytest.mark.asyncio
-    async def test_denies_relative_dot_prefixed_vault(self, tmp_path: Path) -> None:
+    async def test_denies_relative_dot_prefixed_vault(
+        self, tmp_path: Path, acp_session_context: AcpSessionContext
+    ) -> None:
         config = _make_config(str(tmp_path))
-        result = await _write(config, "./.vault/./notes.md")
+        result = await _write(config, acp_session_context, "./.vault/./notes.md")
         _assert_denied(result)
 
     @pytest.mark.parametrize("variant", [".VAULT", ".Vault", ".vAuLt"])
     @pytest.mark.asyncio
     async def test_denies_case_variant_vault(
-        self, tmp_path: Path, variant: str
+        self, tmp_path: Path, variant: str, acp_session_context: AcpSessionContext
     ) -> None:
         config = _make_config(str(tmp_path))
-        result = await _write(config, f"{variant}/x.md")
+        result = await _write(config, acp_session_context, f"{variant}/x.md")
         _assert_denied(result)
 
     @pytest.mark.asyncio
     async def test_denies_write_through_symlink_or_junction(
-        self, tmp_path: Path
+        self, tmp_path: Path, acp_session_context: AcpSessionContext
     ) -> None:
         """A link that resolves to .vault is denied — .resolve() collapses it."""
         real_vault = tmp_path / ".vault"
@@ -117,7 +129,7 @@ class TestVaultWriteDeny:
         _link_dir(link, real_vault)
 
         config = _make_config(str(tmp_path))
-        result = await _write(config, "sneaky-link/x.md")
+        result = await _write(config, acp_session_context, "sneaky-link/x.md")
         _assert_denied(result)
         assert not (real_vault / "x.md").exists()
 
@@ -129,20 +141,20 @@ class TestWorkspaceRootedInsideVault:
 
     @pytest.mark.asyncio
     async def test_denies_write_when_workspace_root_is_inside_vault(
-        self, tmp_path: Path
+        self, tmp_path: Path, acp_session_context: AcpSessionContext
     ) -> None:
         ws = tmp_path / ".vault" / "run-workspace"
         ws.mkdir(parents=True)
         config = _make_config(str(ws))
         # "notes/output.md" has NO .vault component relative to the workspace
         # root; the old workspace-relative check would have wrongly allowed it.
-        result = await _write(config, "notes/output.md")
+        result = await _write(config, acp_session_context, "notes/output.md")
         _assert_denied(result)
         assert not (ws / "notes" / "output.md").exists()
 
     @pytest.mark.asyncio
     async def test_permits_write_when_workspace_root_outside_vault(
-        self, tmp_path: Path
+        self, tmp_path: Path, acp_session_context: AcpSessionContext
     ) -> None:
         # Contrast: a normal workspace root (no .vault ancestor) still permits
         # ordinary writes — the hardening does not over-deny.
@@ -150,7 +162,10 @@ class TestWorkspaceRootedInsideVault:
         ws.mkdir()
         config = _make_config(str(ws))
         result = await on_fs_write_text_file(
-            1, {"path": "notes/output.md", "content": "ok"}, _NO_CTX, config
+            1,
+            {"path": "notes/output.md", "content": "ok"},
+            acp_session_context,
+            config,
         )
         assert result["result"] == {}
         assert (ws / "notes" / "output.md").read_text(encoding="utf-8") == "ok"
@@ -160,16 +175,23 @@ class TestNonVaultAndReadsPermitted:
     """The policy is surgical: non-vault writes and vault reads still work."""
 
     @pytest.mark.asyncio
-    async def test_permits_non_vault_write(self, tmp_path: Path) -> None:
+    async def test_permits_non_vault_write(
+        self, tmp_path: Path, acp_session_context: AcpSessionContext
+    ) -> None:
         config = _make_config(str(tmp_path))
         result = await on_fs_write_text_file(
-            1, {"path": "notes/ok.md", "content": "landed"}, _NO_CTX, config
+            1,
+            {"path": "notes/ok.md", "content": "landed"},
+            acp_session_context,
+            config,
         )
         assert result["result"] == {}
         assert (tmp_path / "notes" / "ok.md").read_text(encoding="utf-8") == "landed"
 
     @pytest.mark.asyncio
-    async def test_permits_vault_read(self, tmp_path: Path) -> None:
+    async def test_permits_vault_read(
+        self, tmp_path: Path, acp_session_context: AcpSessionContext
+    ) -> None:
         """Reads through the ACP fs surface stay permitted (dashboard D4)."""
         vault_doc = tmp_path / ".vault" / "research" / "doc.md"
         vault_doc.parent.mkdir(parents=True)
@@ -177,9 +199,14 @@ class TestNonVaultAndReadsPermitted:
 
         config = _make_config(str(tmp_path))
         result = await on_fs_read_text_file(
-            1, {"path": ".vault/research/doc.md"}, _NO_CTX, config
+            1,
+            {"path": ".vault/research/doc.md"},
+            acp_session_context,
+            config,
         )
-        assert cast("dict", result["result"])["content"] == "corpus context"
+        payload = result.get("result")
+        assert isinstance(payload, dict)
+        assert payload["content"] == "corpus context"
         assert "error" not in result
 
 

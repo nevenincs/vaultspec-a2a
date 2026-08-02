@@ -7,27 +7,27 @@ touch the session context, so a lightweight stand-in is passed for it.
 
 from __future__ import annotations
 
-from types import SimpleNamespace
-from typing import Any, cast
-
 import pytest
 
 from .._acp_rpc_handlers import _kimi_autonomous_option_id, on_request_permission
-from .._acp_types import AcpModelConfig, AcpSessionContext
+from .._acp_types import AcpModelConfig, AcpSessionContext, PermissionCallback
+from .._json_contract import JsonObject, JsonValue
 
-_RAG_READS = [
+_RAG_READS: list[str] = [
     "mcp__vaultspec-rag__search_vault",
     "mcp__vaultspec-rag__search_codebase",
     "mcp__vaultspec-rag__get_code_file",
 ]
-_OPTIONS = [
+_OPTIONS: list[JsonObject] = [
     {"optionId": "approve", "kind": "allow_once"},
     {"optionId": "approve_for_session", "kind": "allow_always"},
     {"optionId": "reject", "kind": "reject_once"},
 ]
 
 
-def _config(*, acp_family: str, permission_callback=None) -> AcpModelConfig:
+def _config(
+    *, acp_family: str, permission_callback: PermissionCallback | None = None
+) -> AcpModelConfig:
     return AcpModelConfig(
         agent_config=None,
         permission_callback=permission_callback,
@@ -51,16 +51,19 @@ def _config(*, acp_family: str, permission_callback=None) -> AcpModelConfig:
     )
 
 
-def _ctx() -> AcpSessionContext:
-    # The autonomous and normal-callback-return paths never touch the context.
-    return cast("AcpSessionContext", SimpleNamespace())
-
-
-async def _decide(name: str, config: AcpModelConfig) -> str:
-    params = {"toolCall": {"title": name, "rawInput": {}}, "options": _OPTIONS}
-    raw = await on_request_permission(1, params, _ctx(), config)
-    resp = cast("dict[str, Any]", raw)
-    return resp["result"]["outcome"]["optionId"]
+async def _decide(name: str, config: AcpModelConfig, ctx: AcpSessionContext) -> str:
+    params: JsonObject = {
+        "toolCall": {"title": name, "rawInput": {}},
+        "options": list[JsonValue](_OPTIONS),
+    }
+    response = await on_request_permission(1, params, ctx, config)
+    result = response.get("result")
+    assert isinstance(result, dict)
+    outcome = result.get("outcome")
+    assert isinstance(outcome, dict)
+    option_id = outcome.get("optionId")
+    assert isinstance(option_id, str)
+    return option_id
 
 
 @pytest.mark.parametrize(
@@ -100,25 +103,29 @@ def test_autonomous_kimi_rejects_everything_else(title: str) -> None:
 
 
 @pytest.mark.asyncio
-async def test_handler_autonomous_kimi_approves_read_rejects_write() -> None:
+async def test_handler_autonomous_kimi_approves_read_rejects_write(
+    acp_session_context: AcpSessionContext,
+) -> None:
     cfg = _config(acp_family="kimi")
-    assert await _decide("ReadFile: src/a.py", cfg) == "approve"
-    assert await _decide("WriteFile: src/a.py", cfg) == "reject"
+    assert await _decide("ReadFile: src/a.py", cfg, acp_session_context) == "approve"
+    assert await _decide("WriteFile: src/a.py", cfg, acp_session_context) == "reject"
 
 
 @pytest.mark.asyncio
-async def test_handler_supervised_kimi_uses_callback_not_auto_approve() -> None:
+async def test_handler_supervised_kimi_uses_callback_not_auto_approve(
+    acp_session_context: AcpSessionContext,
+) -> None:
     """A supervised Kimi run (permission_callback present) keeps its prompt: the
     callback decides, the auto-approve set is NOT consulted."""
     calls: list[str] = []
 
-    async def callback(name, args, options):
+    async def callback(name: str, _args: JsonObject, _options: list[JsonObject]) -> str:
         calls.append(name)
         return "reject"  # a human would reject this read
 
     cfg = _config(acp_family="kimi", permission_callback=callback)
     # ReadFile is in the auto-approve set, but the callback rejects it — proving
     # supervised mode does not fall through to the autonomous auto-approve branch.
-    option = await _decide("ReadFile: src/a.py", cfg)
+    option = await _decide("ReadFile: src/a.py", cfg, acp_session_context)
     assert option == "reject"
     assert calls == ["ReadFile: src/a.py"]

@@ -27,6 +27,8 @@ from .._acp_mcp import config_home_mcp_servers
 if TYPE_CHECKING:
     from pathlib import Path
 
+    from .._json_contract import JsonObject
+
 _CLAUDE_NODE_CMD = [
     "node",
     "/x/node_modules/@agentclientprotocol/claude-agent-acp/dist/index.js",
@@ -100,7 +102,7 @@ def test_created_home_surfaces_given_servers() -> None:
         cleanup_isolated_config_home(home)
 
 
-def _stdio_bridge_specs(*, bearer: str, actor: str) -> list[dict]:
+def _stdio_bridge_specs(*, bearer: str, actor: str) -> list[JsonObject]:
     """Real authoring stdio bridge specs via the production builder seam."""
     binding = AuthoringToolBinding(
         snapshot=CatalogSnapshot(

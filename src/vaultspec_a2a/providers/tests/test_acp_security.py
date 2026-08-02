@@ -4,10 +4,7 @@ Tests sandbox path validation and terminal creation security without
 requiring a live ACP subprocess.
 """
 
-import asyncio
-import dataclasses
 from pathlib import Path
-from typing import Any, ClassVar, cast
 
 import pytest
 
@@ -208,84 +205,72 @@ class TestOnTerminalCreateValidation:
     subprocess.
     """
 
-    def _make_ctx(self) -> object:
-        """Create a minimal session context for on_terminal_create calls.
-
-        Policy exception: _MinimalSessionContext satisfies the structural
-        subset of AcpSessionContext used by on_terminal_create's validation
-        paths (allowlist check, metachar check, sandbox check). This is pure
-        logic that runs before any subprocess is spawned. The project's
-        no-mocks mandate targets mocking out network/LLM/subprocess calls;
-        this helper tests pure validation logic.
-        """
-
-        class _MinimalSessionContext:
-            stdin_lock = asyncio.Lock()
-            terminals: ClassVar[dict] = {}
-
-        # Structural guard: verify real type has the attrs we shadow
-        _ctx_fields = {f.name for f in dataclasses.fields(AcpSessionContext)}
-        assert "stdin_lock" in _ctx_fields, "ctx interface drift"
-        assert "terminals" in _ctx_fields, "ctx interface drift"
-
-        return _MinimalSessionContext()
-
     @pytest.mark.asyncio
-    async def test_rejects_command_not_in_allowlist(self, tmp_path: Path) -> None:
+    async def test_rejects_command_not_in_allowlist(
+        self, tmp_path: Path, acp_session_context: AcpSessionContext
+    ) -> None:
         """Commands not in the allowlist return an error response."""
         config = _make_config(workspace_root=str(tmp_path))
-        ctx = self._make_ctx()
         resp = await on_terminal_create(
             rpc_id=1,
             params={"command": "curl", "args": ["http://example.com"]},
-            ctx=cast("Any", ctx),
+            ctx=acp_session_context,
             config=config,
         )
-        resp_dict = cast("dict[str, Any]", resp)
-        assert "error" in resp_dict
-        error_obj = cast("dict[str, Any]", resp_dict["error"])
+        assert "error" in resp
+        error_obj = resp["error"]
+        assert isinstance(error_obj, dict)
         assert error_obj["code"] == -32603
-        assert "allowlist" in error_obj["message"]
+        message = error_obj["message"]
+        assert isinstance(message, str)
+        assert "allowlist" in message
 
     @pytest.mark.asyncio
-    async def test_rejects_metachar_in_command(self, tmp_path: Path) -> None:
+    async def test_rejects_metachar_in_command(
+        self, tmp_path: Path, acp_session_context: AcpSessionContext
+    ) -> None:
         """Commands with shell metacharacters return an error response."""
         config = _make_config(workspace_root=str(tmp_path))
-        ctx = self._make_ctx()
         resp = await on_terminal_create(
             rpc_id=1,
             params={"command": "python", "args": ["script.py; rm -rf /"]},
-            ctx=cast("Any", ctx),
+            ctx=acp_session_context,
             config=config,
         )
-        resp_dict = cast("dict[str, Any]", resp)
-        assert "error" in resp_dict
-        error_obj = cast("dict[str, Any]", resp_dict["error"])
+        assert "error" in resp
+        error_obj = resp["error"]
+        assert isinstance(error_obj, dict)
         assert error_obj["code"] == -32603
-        assert "metacharacter" in error_obj["message"]
+        message = error_obj["message"]
+        assert isinstance(message, str)
+        assert "metacharacter" in message
 
     @pytest.mark.asyncio
-    async def test_rejects_cwd_outside_sandbox(self, tmp_path: Path) -> None:
+    async def test_rejects_cwd_outside_sandbox(
+        self, tmp_path: Path, acp_session_context: AcpSessionContext
+    ) -> None:
         """A cwd outside the workspace root returns an error response."""
         config = _make_config(workspace_root=str(tmp_path))
-        ctx = self._make_ctx()
         resp = await on_terminal_create(
             rpc_id=1,
             params={"command": "python", "args": [], "cwd": "/etc"},
-            ctx=cast("Any", ctx),
+            ctx=acp_session_context,
             config=config,
         )
-        resp_dict = cast("dict[str, Any]", resp)
-        assert "error" in resp_dict
-        error_obj = cast("dict[str, Any]", resp_dict["error"])
+        assert "error" in resp
+        error_obj = resp["error"]
+        assert isinstance(error_obj, dict)
         assert error_obj["code"] == -32603
-        assert "sandbox" in error_obj["message"]
+        message = error_obj["message"]
+        assert isinstance(message, str)
+        assert "sandbox" in message
 
     @pytest.mark.asyncio
-    async def test_rejects_invalid_env_var_name(self, tmp_path: Path) -> None:
+    async def test_rejects_invalid_env_var_name(
+        self, tmp_path: Path, acp_session_context: AcpSessionContext
+    ) -> None:
         """Invalid env variable names return an error response."""
         config = _make_config(workspace_root=str(tmp_path))
-        ctx = self._make_ctx()
         resp = await on_terminal_create(
             rpc_id=1,
             params={
@@ -293,11 +278,13 @@ class TestOnTerminalCreateValidation:
                 "args": [],
                 "env": [{"name": "1INVALID", "value": "x"}],
             },
-            ctx=cast("Any", ctx),
+            ctx=acp_session_context,
             config=config,
         )
-        resp_dict = cast("dict[str, Any]", resp)
-        assert "error" in resp_dict
-        error_obj = cast("dict[str, Any]", resp_dict["error"])
+        assert "error" in resp
+        error_obj = resp["error"]
+        assert isinstance(error_obj, dict)
         assert error_obj["code"] == -32603
-        assert "Invalid environment variable" in error_obj["message"]
+        message = error_obj["message"]
+        assert isinstance(message, str)
+        assert "Invalid environment variable" in message

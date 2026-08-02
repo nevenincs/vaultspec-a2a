@@ -9,13 +9,14 @@ stays unconditional for BOTH families.
 
 from __future__ import annotations
 
-import json
 import sys
 from pathlib import Path
 
 import pytest
 from langchain_core.messages import HumanMessage
+from pydantic import TypeAdapter
 
+from .._json_contract import JsonObject
 from ..acp_chat_model import AcpChatModel
 
 _SIMULATOR = (
@@ -25,7 +26,9 @@ _SIMULATOR = (
 _ALLOWED = ["mcp__vaultspec-rag__search_vault"]
 
 
-async def _drive_and_record(tmp_path: Path, acp_family: str) -> tuple[dict, dict]:
+async def _drive_and_record(
+    tmp_path: Path, acp_family: str
+) -> tuple[JsonObject, JsonObject]:
     """Run one turn on the simulator and return (initialize, session_new) params."""
     init_file = tmp_path / f"init_{acp_family}.json"
     new_file = tmp_path / f"new_{acp_family}.json"
@@ -47,17 +50,31 @@ async def _drive_and_record(tmp_path: Path, acp_family: str) -> tuple[dict, dict
     )
     async for _ in model.astream([HumanMessage(content="hi")]):
         pass
-    return (
-        json.loads(init_file.read_text(encoding="utf-8")),
-        json.loads(new_file.read_text(encoding="utf-8")),
-    )
+    json_object = TypeAdapter[JsonObject](JsonObject)
+    init_data = json_object.validate_json(init_file.read_text(encoding="utf-8"))
+    new_data = json_object.validate_json(new_file.read_text(encoding="utf-8"))
+    return init_data, new_data
 
 
-def _allowed_tools_meta(session_new: dict) -> list[str] | None:
+def _allowed_tools_meta(session_new: JsonObject) -> list[str] | None:
     meta = session_new.get("_meta")
-    if not meta:
+    if not isinstance(meta, dict):
         return None
-    return meta.get("claudeCode", {}).get("options", {}).get("allowedTools")
+    claude_code = meta.get("claudeCode")
+    if not isinstance(claude_code, dict):
+        return None
+    options = claude_code.get("options")
+    if not isinstance(options, dict):
+        return None
+    allowed_tools = options.get("allowedTools")
+    if not isinstance(allowed_tools, list):
+        return None
+    result: list[str] = []
+    for tool in allowed_tools:
+        if not isinstance(tool, str):
+            return None
+        result.append(tool)
+    return result
 
 
 @pytest.mark.asyncio
@@ -87,5 +104,8 @@ async def test_terminal_auth_handshake_is_unconditional_across_families(
     """The clientCapabilities._meta.terminal-auth handshake is family-independent."""
     for family in ("claude", "kimi"):
         initialize, _ = await _drive_and_record(tmp_path, family)
-        term_meta = initialize.get("clientCapabilities", {}).get("_meta", {})
+        client_capabilities = initialize.get("clientCapabilities")
+        assert isinstance(client_capabilities, dict)
+        term_meta = client_capabilities.get("_meta")
+        assert isinstance(term_meta, dict)
         assert term_meta.get("terminal-auth") is True, family

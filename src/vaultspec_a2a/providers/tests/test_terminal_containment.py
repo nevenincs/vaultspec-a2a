@@ -19,7 +19,7 @@ from __future__ import annotations
 import asyncio
 import sys
 import time
-from typing import Any, cast
+from typing import TYPE_CHECKING
 
 import pytest
 
@@ -33,7 +33,13 @@ from .._acp_rpc_handlers import (
     on_terminal_wait_for_exit,
 )
 from .._acp_types import AcpModelConfig, AcpSessionContext
+from .._subprocess import process_containment
 from ..acp_exceptions import AcpErrorCode
+
+if TYPE_CHECKING:
+    from pathlib import Path
+
+    from .._json_contract import JsonObject
 
 # A script (run by path, so the terminal args carry no shell metacharacters the
 # allowlist guard rejects) that spawns a long-lived grandchild, prints its pid,
@@ -68,35 +74,30 @@ def _make_config(workspace_root: str) -> AcpModelConfig:
     )
 
 
-class _Ctx:
-    def __init__(self) -> None:
-        self.stdin_lock = asyncio.Lock()
-        self.terminals: dict[str, Any] = {}
-        self.interrupt_exc: list[Any] = []
-        self.chunk_queue: asyncio.Queue[Any] = asyncio.Queue()
-
-
 @pytest.mark.service
 @pytest.mark.asyncio
-async def test_terminal_child_contained_and_reaped_whole(tmp_path) -> None:
+async def test_terminal_child_contained_and_reaped_whole(
+    tmp_path: Path, acp_session_context: AcpSessionContext
+) -> None:
     config = _make_config(str(tmp_path))
-    ctx = _Ctx()
 
     script = tmp_path / "spawn_grandchild.py"
     script.write_text(_GRANDCHILD_SCRIPT, encoding="utf-8")
 
-    session_ctx = cast("AcpSessionContext", ctx)
     resp = await on_terminal_create(
         1,
         {"command": sys.executable, "args": [str(script)]},
-        session_ctx,
+        acp_session_context,
         config,
     )
-    terminal_id = cast("dict[str, Any]", resp["result"])["terminalId"]
-    process = ctx.terminals[terminal_id]
+    response_result = resp.get("result")
+    assert isinstance(response_result, dict)
+    terminal_id = response_result.get("terminalId")
+    assert isinstance(terminal_id, str)
+    process = acp_session_context.terminals[terminal_id]
 
     # The terminal child is seated in its own containment before it runs.
-    containment = getattr(process, "_vaultspec_containment", None)
+    containment = process_containment(process)
     assert isinstance(containment, ProcessContainment)
     assert containment.assigned is True
 
@@ -107,11 +108,13 @@ async def test_terminal_child_contained_and_reaped_whole(tmp_path) -> None:
         assert is_pid_alive(grandchild_pid)
 
         # terminal/kill reaps the whole terminal subtree via the containment.
-        await on_terminal_kill(2, {"terminalId": terminal_id}, session_ctx, config)
+        await on_terminal_kill(
+            2, {"terminalId": terminal_id}, acp_session_context, config
+        )
 
         deadline = time.monotonic() + 10.0
         while time.monotonic() < deadline and is_pid_alive(grandchild_pid):
-            time.sleep(0.05)
+            await asyncio.sleep(0.05)
         assert not is_pid_alive(grandchild_pid)
     finally:
         if is_pid_alive(grandchild_pid):
@@ -120,44 +123,9 @@ async def test_terminal_child_contained_and_reaped_whole(tmp_path) -> None:
             await kill_pid_tree_async(grandchild_pid)
 
 
-async def _real_session_context() -> AcpSessionContext:
-    """Build a genuine session context around a real, idle ACP-shaped child.
-
-    The context is the production dataclass wired to a real subprocess's own
-    ``stdin``/``stdout`` stream objects, so the handlers under test read the same
-    ``terminals`` map through the same type production hands them.
-    """
-    child = await asyncio.create_subprocess_exec(
-        sys.executable,
-        "-c",
-        "import sys; sys.stdin.read()",
-        stdin=asyncio.subprocess.PIPE,
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
-    )
-    assert child.stdin is not None
-    assert child.stdout is not None
-    return AcpSessionContext(
-        process=child,
-        stdin=child.stdin,
-        stdout=child.stdout,
-        response_futures={},
-        chunk_queue=asyncio.Queue(),
-        prompt_done=asyncio.Event(),
-        prompt_id_ref=[0],
-        interrupt_exc=[],
-    )
-
-
-async def _close_session_context(ctx: AcpSessionContext) -> None:
-    assert ctx.process.stdin is not None
-    ctx.process.stdin.close()
-    await ctx.process.wait()
-
-
 @pytest.mark.asyncio
 async def test_unknown_terminal_refusal_is_one_contract_across_handlers(
-    tmp_path,
+    tmp_path: Path, acp_session_context: AcpSessionContext
 ) -> None:
     """All three id-addressing handlers owe an unknown terminal one answer.
 
@@ -166,69 +134,67 @@ async def test_unknown_terminal_refusal_is_one_contract_across_handlers(
     to each other - not each to a hand-copied literal - is what makes a future
     correction that lands in only one handler fail here.
     """
-    ctx = await _real_session_context()
     config = _make_config(str(tmp_path))
-    try:
-        assert ctx.terminals == {}
-        params = {"terminalId": "ghost-7f3a"}
+    assert acp_session_context.terminals == {}
+    params: JsonObject = {"terminalId": "ghost-7f3a"}
 
-        kill = await on_terminal_kill(11, params, ctx, config)
-        output = await on_terminal_output(12, params, ctx, config)
-        waited = await on_terminal_wait_for_exit(13, params, ctx, config)
+    kill = await on_terminal_kill(11, params, acp_session_context, config)
+    output = await on_terminal_output(12, params, acp_session_context, config)
+    waited = await on_terminal_wait_for_exit(13, params, acp_session_context, config)
 
-        assert kill == {
-            "jsonrpc": "2.0",
-            "id": 11,
-            "error": {
-                "code": AcpErrorCode.INVALID_PARAMS,
-                "message": "Unknown terminal: ghost-7f3a",
-            },
-        }
-        # The wire value is -32602 whatever the enum is named.
-        assert cast("dict[str, Any]", kill["error"])["code"] == -32602
-        assert output == {**kill, "id": 12}
-        assert waited == {**kill, "id": 13}
-    finally:
-        await _close_session_context(ctx)
+    assert kill == {
+        "jsonrpc": "2.0",
+        "id": 11,
+        "error": {
+            "code": AcpErrorCode.INVALID_PARAMS,
+            "message": "Unknown terminal: ghost-7f3a",
+        },
+    }
+    # The wire value is -32602 whatever the enum is named.
+    error = kill.get("error")
+    assert isinstance(error, dict)
+    assert error["code"] == -32602
+    assert output == {**kill, "id": 12}
+    assert waited == {**kill, "id": 13}
 
 
 @pytest.mark.asyncio
-async def test_missing_terminal_id_param_is_refused_not_raised(tmp_path) -> None:
+async def test_missing_terminal_id_param_is_refused_not_raised(
+    tmp_path: Path, acp_session_context: AcpSessionContext
+) -> None:
     """A request carrying no ``terminalId`` at all is refused on the same path."""
-    ctx = await _real_session_context()
     config = _make_config(str(tmp_path))
-    try:
-        response = await on_terminal_output(21, {}, ctx, config)
-        assert response == {
-            "jsonrpc": "2.0",
-            "id": 21,
-            "error": {
-                "code": AcpErrorCode.INVALID_PARAMS,
-                "message": "Unknown terminal: ",
-            },
-        }
-    finally:
-        await _close_session_context(ctx)
+    response = await on_terminal_output(21, {}, acp_session_context, config)
+    assert response == {
+        "jsonrpc": "2.0",
+        "id": 21,
+        "error": {
+            "code": AcpErrorCode.INVALID_PARAMS,
+            "message": "Unknown terminal: ",
+        },
+    }
 
 
 @pytest.mark.asyncio
-async def test_release_of_an_unknown_terminal_stays_idempotent(tmp_path) -> None:
+async def test_release_of_an_unknown_terminal_stays_idempotent(
+    tmp_path: Path, acp_session_context: AcpSessionContext
+) -> None:
     """``terminal/release`` is exempt: releasing what is already gone succeeds.
 
     Guards the resolver's blast radius - folding release into the shared refusal
     would turn a benign double-release into a protocol error.
     """
-    ctx = await _real_session_context()
     config = _make_config(str(tmp_path))
-    try:
-        response = await on_terminal_release(31, {"terminalId": "ghost"}, ctx, config)
-        assert response == {"jsonrpc": "2.0", "id": 31, "result": {}}
-    finally:
-        await _close_session_context(ctx)
+    response = await on_terminal_release(
+        31, {"terminalId": "ghost"}, acp_session_context, config
+    )
+    assert response == {"jsonrpc": "2.0", "id": 31, "result": {}}
 
 
 @pytest.mark.asyncio
-async def test_known_terminal_still_resolves_to_its_live_process(tmp_path) -> None:
+async def test_known_terminal_still_resolves_to_its_live_process(
+    tmp_path: Path, acp_session_context: AcpSessionContext
+) -> None:
     """The hit path is unchanged: a real created terminal is still addressable.
 
     Spawns a genuine allowlisted terminal child that writes a known marker and
@@ -236,36 +202,47 @@ async def test_known_terminal_still_resolves_to_its_live_process(tmp_path) -> No
     its real id - proving the resolver returns the live process rather than a
     refusal, and that the handlers' own result shapes survived the extraction.
     """
-    ctx = await _real_session_context()
     config = _make_config(str(tmp_path))
     script = tmp_path / "emit.py"
     script.write_text("import sys\nsys.stdout.write('resolved-marker')\n", "utf-8")
-    try:
-        created = await on_terminal_create(
-            41,
-            {"command": sys.executable, "args": [str(script)]},
-            ctx,
-            config,
-        )
-        terminal_id = cast("dict[str, Any]", created["result"])["terminalId"]
-        assert terminal_id in ctx.terminals
+    created = await on_terminal_create(
+        41,
+        {"command": sys.executable, "args": [str(script)]},
+        acp_session_context,
+        config,
+    )
+    created_result = created.get("result")
+    assert isinstance(created_result, dict)
+    terminal_id = created_result.get("terminalId")
+    assert isinstance(terminal_id, str)
+    assert terminal_id in acp_session_context.terminals
 
-        exited = await on_terminal_wait_for_exit(
-            42, {"terminalId": terminal_id}, ctx, config
-        )
-        exit_result = cast("dict[str, Any]", exited["result"])
-        assert exit_result["exitCode"] == 0
+    exited = await on_terminal_wait_for_exit(
+        42, {"terminalId": terminal_id}, acp_session_context, config
+    )
+    exit_result = exited.get("result")
+    assert isinstance(exit_result, dict)
+    assert exit_result["exitCode"] == 0
 
-        output = await on_terminal_output(43, {"terminalId": terminal_id}, ctx, config)
-        output_result = cast("dict[str, Any]", output["result"])
-        assert "resolved-marker" in output_result["output"]
-        assert output_result["exitStatus"] == 0
+    output = await on_terminal_output(
+        43, {"terminalId": terminal_id}, acp_session_context, config
+    )
+    output_result = output.get("result")
+    assert isinstance(output_result, dict)
+    terminal_output = output_result.get("output")
+    assert isinstance(terminal_output, str)
+    assert "resolved-marker" in terminal_output
+    assert output_result["exitStatus"] == 0
 
-        killed = await on_terminal_kill(44, {"terminalId": terminal_id}, ctx, config)
-        assert killed == {"jsonrpc": "2.0", "id": 44, "result": {}}
-        # kill retires the id, so the next address of it takes the refusal path.
-        assert terminal_id not in ctx.terminals
-        again = await on_terminal_kill(45, {"terminalId": terminal_id}, ctx, config)
-        assert cast("dict[str, Any]", again["error"])["code"] == -32602
-    finally:
-        await _close_session_context(ctx)
+    killed = await on_terminal_kill(
+        44, {"terminalId": terminal_id}, acp_session_context, config
+    )
+    assert killed == {"jsonrpc": "2.0", "id": 44, "result": {}}
+    # kill retires the id, so the next address of it takes the refusal path.
+    assert terminal_id not in acp_session_context.terminals
+    again = await on_terminal_kill(
+        45, {"terminalId": terminal_id}, acp_session_context, config
+    )
+    error = again.get("error")
+    assert isinstance(error, dict)
+    assert error["code"] == -32602

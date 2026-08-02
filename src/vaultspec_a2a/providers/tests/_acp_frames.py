@@ -11,12 +11,18 @@ from __future__ import annotations
 import asyncio
 import json
 
+from pydantic import TypeAdapter, ValidationError
+
+from .._json_contract import JsonObject
+
 __all__ = ["read_acp_frame"]
+
+_JSON_OBJECT = TypeAdapter[JsonObject](JsonObject)
 
 
 async def read_acp_frame(
     stdout: asyncio.StreamReader, want_id: int, timeout: float, *, max_frames: int = 60
-) -> dict:
+) -> JsonObject:
     """Return the first JSON-RPC frame from *stdout* whose ``id`` is *want_id*.
 
     Skips interleaved notifications and malformed lines. Raises
@@ -28,8 +34,8 @@ async def read_acp_frame(
         if not raw:
             break
         try:
-            frame = json.loads(raw.decode("utf-8").strip())
-        except json.JSONDecodeError:
+            frame = _JSON_OBJECT.validate_json(raw.decode("utf-8").strip())
+        except (json.JSONDecodeError, ValidationError):
             continue
         if frame.get("id") == want_id:
             return frame

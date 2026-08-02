@@ -27,4 +27,6 @@ def test_extract_tool_calls_accepts_string_wrapped_json_arrays() -> None:
     tool_calls = _extract_tool_calls(chunk)
 
     assert len(tool_calls) == 1
-    assert tool_calls[0]["function"]["name"] == "session_request_permission"
+    function = tool_calls[0].get("function")
+    assert isinstance(function, dict)
+    assert function["name"] == "session_request_permission"

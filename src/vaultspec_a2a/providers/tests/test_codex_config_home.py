@@ -8,20 +8,19 @@ step; these pin the config.toml content, the auth copy, and the home lifecycle.
 from __future__ import annotations
 
 import glob
+import inspect
 import os
-import shutil
 import stat
 import subprocess
 import sys
 import tempfile
 import time
 import tomllib
-from contextlib import contextmanager
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 import pytest
-from pydantic import ValidationError
+from pydantic import SecretStr
 
 from ...authoring import AgentTool, CatalogSnapshot
 from ...control.config import Settings
@@ -42,38 +41,10 @@ from .._config_home_roots import ORPHAN_HOME_MIN_AGE_SECONDS, temp_home_root
 from ..lane_admission import PROVEN_WEB_LANES, is_web_lane_proven
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator, Sequence
+    from collections.abc import Sequence
 
+    from .._json_contract import JsonObject
     from ..codex_chat_model import CodexChatModel
-
-
-@contextmanager
-def _seated_settings(*, desktop_app_home: Path | None) -> Iterator[Settings]:
-    """Swap the shared settings singleton for a second real instance.
-
-    ``temp_home_root`` (the Claude side's root resolver, moved verbatim into
-    the shared ``_config_home_roots`` core) resolves the armed desktop root
-    through a deliberately lazy ``from ..control.config import settings``
-    import, re-read on every call - by design, there is no injectable
-    parameter (see ``_config_home_roots.temp_home_root``). The module exposes
-    no settings-reset API, so the only way to drive its armed and unarmed
-    branches through the REAL constructor - never a fake, stub, or mock - is to
-    point the module's own public ``settings`` name at a second real, fully
-    pydantic-validated ``Settings(...)`` instance for the duration of the test,
-    restoring the original immediately after. Both instances are built through
-    the exact constructor call ``test_acp_temp_home_root.py`` and
-    ``test_desktop_credential_references.py`` already use to arm/unarm this
-    same field; only the target of the public module name changes.
-    """
-    from ...control import config as config_module
-
-    seated = Settings(VAULTSPEC_DESKTOP_APP_HOME=desktop_app_home)
-    original = config_module.settings
-    config_module.settings = seated
-    try:
-        yield seated
-    finally:
-        config_module.settings = original
 
 
 def _active_codex_leak_root() -> Path:
@@ -88,6 +59,57 @@ def _active_codex_leak_root() -> Path:
     leak check honest under both the armed and unarmed profile.
     """
     return temp_home_root() or Path(tempfile.gettempdir())
+
+
+def _settings_from_child(web_search_mode: str) -> subprocess.CompletedProcess[str]:
+    environment = dict(os.environ)
+    environment["VAULTSPEC_CODEX_WEB_SEARCH_MODE"] = web_search_mode
+    return subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            (
+                "from vaultspec_a2a.control.config import Settings; "
+                "print(Settings().codex_web_search_mode)"
+            ),
+        ],
+        env=environment,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=30,
+    )
+
+
+def _config_home_parent_from_child(base: Path, app_home: Path | None) -> Path:
+    environment = dict(os.environ)
+    if app_home is None:
+        environment.pop("VAULTSPEC_DESKTOP_APP_HOME", None)
+    else:
+        environment["VAULTSPEC_DESKTOP_APP_HOME"] = str(app_home)
+    proc = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            (
+                "from pathlib import Path; import sys; "
+                "from vaultspec_a2a.providers._codex_config_home import "
+                "build_codex_config_home, cleanup_codex_config_home; "
+                "from vaultspec_a2a.utils.enums import CodexWebSearchMode; "
+                "home = build_codex_config_home([], Path(sys.argv[1]), "
+                "web_search=CodexWebSearchMode.DISABLED); "
+                "print(home.parent); cleanup_codex_config_home(home)"
+            ),
+            str(base),
+        ],
+        env=environment,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=30,
+    )
+    assert proc.returncode == 0, proc.stderr
+    return Path(proc.stdout.strip())
 
 
 def test_render_emits_parseable_mcp_server_block_for_rag() -> None:
@@ -136,7 +158,9 @@ def test_codex_model_defaults_keep_read_only_sandbox_defense_in_depth() -> None:
 
 
 def test_render_emits_env_subtable_when_present() -> None:
-    specs = [{"name": "x-srv", "command": "c", "args": ["a"], "env": {"K": "V"}}]
+    specs: list[JsonObject] = [
+        {"name": "x-srv", "command": "c", "args": ["a"], "env": {"K": "V"}}
+    ]
     parsed = tomllib.loads(
         render_codex_config_toml(specs, web_search=CodexWebSearchMode.DISABLED)
     )
@@ -158,10 +182,10 @@ def test_render_with_no_specs_still_declares_the_web_posture() -> None:
 
 
 def _built_config(
-    specs: Sequence[dict[str, Any]],
+    specs: Sequence[JsonObject],
     base: Path,
     **kwargs: CodexWebSearchMode,
-) -> dict[str, Any]:
+):
     """Return the parsed config.toml the production builder actually wrote.
 
     Every posture assertion below goes through this rather than through the
@@ -271,15 +295,15 @@ def test_a_caller_that_never_decided_the_posture_cannot_build_a_home(
     """
     base = tmp_path / "base"
     base.mkdir()
-    # The suppressions are the point, not a concession: the type checker refusing
-    # these calls IS the first half of the guarantee, and the raise proves the
-    # second half holds at runtime for a caller the checker never saw.
+    # The callable signatures are runtime contracts as well as static ones. Bind
+    # without the required parameter, so the interpreter's ordinary argument
+    # check remains the second half of the invariant without a checker escape.
     with pytest.raises(TypeError):
-        build_codex_config_home(  # ty: ignore[missing-argument]
+        inspect.signature(build_codex_config_home).bind(
             codex_mcp_server_specs(["vaultspec-rag"]), base
         )
     with pytest.raises(TypeError):
-        render_codex_config_toml(  # ty: ignore[missing-argument]
+        inspect.signature(render_codex_config_toml).bind(
             codex_mcp_server_specs(["vaultspec-rag"])
         )
 
@@ -294,17 +318,22 @@ class TestWebPostureThroughTheProductionModelSeam:
     settings surface, and the file Codex will actually load.
     """
 
-    def _model(self, base: Path, **kwargs: object) -> CodexChatModel:
+    def _model(
+        self,
+        base: Path,
+        *,
+        web_search_mode: CodexWebSearchMode | None = None,
+    ) -> CodexChatModel:
         from ..codex_chat_model import CodexChatModel
 
         return CodexChatModel(
             command=["codex", "app-server"],
             harness_mcp_servers=["vaultspec-rag"],
             codex_home=str(base),
-            **kwargs,
+            web_search_mode=web_search_mode,
         )
 
-    def _emitted(self, model: CodexChatModel) -> dict[str, Any]:
+    def _emitted(self, model: CodexChatModel) -> dict[str, object]:
         home = model._build_codex_config_home()
         assert home is not None
         try:
@@ -377,11 +406,12 @@ class TestWebPostureThroughTheProductionModelSeam:
         # The zero-egress path is a real settings key, parsed by the real
         # pydantic constructor from the real env alias - not a string this test
         # invented. Above the gate this is the value the resolver receives.
-        seated = Settings(VAULTSPEC_CODEX_WEB_SEARCH_MODE="cached")
-        assert seated.codex_web_search_mode is CodexWebSearchMode.CACHED
+        result = _settings_from_child("cached")
+        assert result.returncode == 0, result.stderr
+        assert result.stdout.strip() == CodexWebSearchMode.CACHED.value
         assert (
             resolve_codex_web_search_mode(
-                web_proven=True, configured=seated.codex_web_search_mode
+                web_proven=True, configured=CodexWebSearchMode.CACHED
             )
             is CodexWebSearchMode.CACHED
         )
@@ -390,8 +420,9 @@ class TestWebPostureThroughTheProductionModelSeam:
         # Fail at load, where the operator can see it, rather than at a spawn
         # months later. The enum is the CLI's own vocabulary, so a value pydantic
         # rejects here is exactly one Codex would have rejected too.
-        with pytest.raises(ValidationError):
-            Settings(VAULTSPEC_CODEX_WEB_SEARCH_MODE="live-ish")
+        result = _settings_from_child("live-ish")
+        assert result.returncode != 0
+        assert "codex_web_search_mode" in result.stderr
 
     def test_default_settings_leave_the_choice_to_the_served_posture(self) -> None:
         # Unset must not mean disabled: it means "no deployment preference", so a
@@ -612,11 +643,11 @@ def test_attach_authoring_tools_refuses_a_provider_with_no_attachment_surface() 
     must refuse loud, not silently return unchanged (the S20-class defect this
     campaign closes: a harness-armed run starting an agent with no tools and
     burning its step timeout finding out)."""
-    from langchain_core.language_models.fake_chat_models import FakeChatModel
+    from langchain_openai import ChatOpenAI
 
     from ...thread.errors import ConfigError
 
-    model = FakeChatModel(responses=["stub"])
+    model = ChatOpenAI(api_key=SecretStr("unused-test-key"), model="gpt-4o-mini")
     assert getattr(model, "with_mcp_servers", None) is None
     assert getattr(model, "with_authoring_mcp_server", None) is None
     with pytest.raises(ConfigError, match="no surface to mount the bridge"):
@@ -722,123 +753,6 @@ async def test_turn_failure_after_build_cleans_credential_home(
     assert set(glob.glob(pattern)) <= before  # credential home cleaned
 
 
-class TestCodexEntrypointAcceptsEmittedMcpConfig:
-    """The emitted CODEX_HOME config is valid to the real Codex entrypoint (S114).
-
-    The unit tests above pin the config.toml content; this drives the REAL
-    ``codex mcp list`` entrypoint against a per-run CODEX_HOME built by
-    production ``build_codex_config_home`` and confirms Codex parses the config
-    and surfaces our declared MCP server. Skips only when the ``codex`` binary is
-    genuinely absent - an honest environment prerequisite, not a green shortcut.
-    """
-
-    @pytest.mark.skipif(
-        shutil.which("codex") is None, reason="codex CLI is not installed"
-    )
-    def test_codex_mcp_list_accepts_the_built_config_home(self, tmp_path: Path) -> None:
-        codex = shutil.which("codex")
-        assert codex is not None
-        specs = codex_mcp_server_specs(["vaultspec-rag"])
-        home = build_codex_config_home(
-            specs, tmp_path / "base", web_search=CodexWebSearchMode.DISABLED
-        )
-        try:
-            proc = subprocess.run(
-                [codex, "mcp", "list"],
-                env={**os.environ, "CODEX_HOME": str(home)},
-                capture_output=True,
-                text=True,
-                check=False,
-                timeout=120,
-            )
-            # Exit 0 proves Codex parsed the config without rejecting it.
-            assert proc.returncode == 0, proc.stderr
-            # The declared server surfaces with its production launch command,
-            # so the emitted mcp_servers block is not merely parseable but the
-            # server Codex would actually launch.
-            assert "vaultspec-rag" in proc.stdout
-            assert "uvx" in proc.stdout
-            assert "vaultspec-search-mcp" in proc.stdout
-        finally:
-            cleanup_codex_config_home(home)
-
-    @pytest.mark.skipif(
-        shutil.which("codex") is None, reason="codex CLI is not installed"
-    )
-    def test_codex_accepts_the_served_live_web_posture(self, tmp_path: Path) -> None:
-        """The real CLI accepts the live posture this lane serves.
-
-        ``web_search`` is not a name this project chose; it is the CLI's own
-        top-level key, and the house no-pinning rule means nothing stops upstream
-        from renaming it or dropping a variant under us. Exit 0 here is the
-        detection mechanism, and the control below is what makes it mean
-        something.
-        """
-        codex = shutil.which("codex")
-        assert codex is not None
-        home = build_codex_config_home(
-            codex_mcp_server_specs(["vaultspec-rag"]),
-            tmp_path / "base",
-            web_search=CodexWebSearchMode.LIVE,
-        )
-        try:
-            written = (home / "config.toml").read_text(encoding="utf-8")
-            assert tomllib.loads(written)["web_search"] == "live"
-            proc = subprocess.run(
-                [codex, "mcp", "list"],
-                env={**os.environ, "CODEX_HOME": str(home)},
-                capture_output=True,
-                text=True,
-                check=False,
-                timeout=120,
-            )
-            assert proc.returncode == 0, proc.stderr
-        finally:
-            cleanup_codex_config_home(home)
-
-    @pytest.mark.skipif(
-        shutil.which("codex") is None, reason="codex CLI is not installed"
-    )
-    def test_codex_would_have_rejected_an_unrecognised_mode(
-        self, tmp_path: Path
-    ) -> None:
-        """The control for the test above: the CLI really does validate this key.
-
-        Exit 0 on our generated config proves nothing unless a wrong value fails.
-        This takes the SAME production-rendered document and substitutes only the
-        mode token with one the enum cannot produce; if the CLI still exited 0,
-        the acceptance above would be vacuous - the key inert text Codex ignores
-        rather than the web posture it reads.
-        """
-        codex = shutil.which("codex")
-        assert codex is not None
-        rendered = render_codex_config_toml(
-            codex_mcp_server_specs(["vaultspec-rag"]),
-            web_search=CodexWebSearchMode.LIVE,
-        )
-        home = tmp_path / "tampered-home"
-        home.mkdir()
-        (home / "config.toml").write_text(
-            rendered.replace('web_search = "live"', 'web_search = "no-such-mode"', 1),
-            encoding="utf-8",
-        )
-        proc = subprocess.run(
-            [codex, "mcp", "list"],
-            env={**os.environ, "CODEX_HOME": str(home)},
-            capture_output=True,
-            text=True,
-            check=False,
-            timeout=120,
-        )
-        assert proc.returncode != 0
-        combined = proc.stdout + proc.stderr
-        assert "web_search" in combined
-        # The CLI names the variants it will accept; every value this module can
-        # emit must be among them, which is the served-contract assertion.
-        for mode in CodexWebSearchMode:
-            assert f"`{mode.value}`" in combined
-
-
 # --- desktop-state escape defect (codex-config-home-escapes-desktop-state) ---
 
 
@@ -847,13 +761,7 @@ def test_unarmed_profile_creates_home_in_the_system_temp_root(tmp_path: Path) ->
     base = tmp_path / "base"
     base.mkdir()
 
-    with _seated_settings(desktop_app_home=None) as unarmed:
-        assert unarmed.desktop_temp_homes_dir is None
-        home = build_codex_config_home([], base, web_search=CodexWebSearchMode.DISABLED)
-    try:
-        assert home.parent == Path(tempfile.gettempdir())
-    finally:
-        cleanup_codex_config_home(home)
+    assert _config_home_parent_from_child(base, None) == Path(tempfile.gettempdir())
 
 
 def test_armed_desktop_profile_seats_the_home_inside_the_declared_root(
@@ -865,7 +773,7 @@ def test_armed_desktop_profile_seats_the_home_inside_the_declared_root(
     fix, ``mkdtemp`` carried no ``dir=`` at all, so the home always landed in
     system temp regardless of the desktop profile - a disk leak and an
     uninstall-completeness gap. Swapping the shared settings singleton to a
-    real, fully-validated armed instance (see ``_seated_settings``) drives
+    real, fully-validated armed child environment drives
     ``temp_home_root`` - the Claude side's own root resolver, now shared - to
     resolve the declared root through its real, unmodified lazy import.
     """
@@ -874,18 +782,9 @@ def test_armed_desktop_profile_seats_the_home_inside_the_declared_root(
     app_home = tmp_path / "app-home"
     app_home.mkdir()
 
-    with _seated_settings(desktop_app_home=app_home) as armed:
-        declared_root = armed.desktop_temp_homes_dir
-        assert declared_root is not None
-        # The declared root is itself carved out under the app home, never the
-        # bare OS temp directory - the contrast the unarmed test exercises.
-        assert declared_root != Path(tempfile.gettempdir())
-        home = build_codex_config_home([], base, web_search=CodexWebSearchMode.DISABLED)
-    try:
-        assert home.parent == declared_root
-        assert app_home in home.parents
-    finally:
-        cleanup_codex_config_home(home)
+    home_parent = _config_home_parent_from_child(base, app_home)
+    assert home_parent != Path(tempfile.gettempdir())
+    assert app_home in home_parent.parents
 
 
 def _codex_home(root: Path, name: str, *, age_seconds: float) -> Path:

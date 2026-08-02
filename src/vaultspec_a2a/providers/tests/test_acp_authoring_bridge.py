@@ -20,35 +20,31 @@ import asyncio
 import json
 import shutil
 import threading
-from collections.abc import AsyncIterator
+from collections.abc import AsyncGenerator
 from pathlib import Path
+from typing import Any
 
 import pytest
 import pytest_asyncio
 import uvicorn
+from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
+from pydantic import TypeAdapter
 from starlette.applications import Starlette
 from starlette.routing import Mount
 from starlette.types import Receive, Scope, Send
 
 from ...authoring.catalog import CATALOG_SCHEMA_VERSION, parse_catalog
 from ...control.config import settings
+from ...protocols.mcp.tools.authoring_bridge import build_authoring_mcp_server
 from ...tests.gateway_boot import free_port
 from ...workspace.environment import resolve_env_vars
+from .._acp_authoring import AuthoringToolBinding, build_authoring_mcp_servers
+from .._json_contract import JsonObject, JsonValue
 from .._subprocess import kill_process_tree, spawn_acp_process
 from ..factory import _classify_acp_command
 from ._acp_frames import read_acp_frame
 
-try:
-    from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
-
-    from ...protocols.mcp.tools.authoring_bridge import build_authoring_mcp_server
-    from .._acp_authoring import AuthoringToolBinding, build_authoring_mcp_servers
-
-    _MCP_AVAILABLE = True
-except ImportError:  # pragma: no cover - mcp is a hard dep, defensive only
-    _MCP_AVAILABLE = False
-
-_CATALOG = {
+_CATALOG: JsonObject = {
     "schema_version": CATALOG_SCHEMA_VERSION,
     "tools": [
         {
@@ -81,8 +77,13 @@ class _AuthoringHttpServer:
         return f"http://127.0.0.1:{self.port}/mcp"
 
     def _app(self) -> Starlette:
-        async def _dispatch(name: str, arguments: dict) -> dict:
-            return {"tool": name, "arguments": arguments}
+        async def _dispatch(name: str, arguments: dict[str, Any]) -> dict[str, Any]:
+            # The MCP SDK exposes an Any-valued dict here. Revalidate it before
+            # it crosses into the closed provider JSON envelope.
+            validated_arguments = TypeAdapter[JsonObject](JsonObject).validate_python(
+                arguments
+            )
+            return {"tool": name, "arguments": validated_arguments}
 
         server = build_authoring_mcp_server(parse_catalog(_CATALOG), _dispatch)
         manager = StreamableHTTPSessionManager(app=server, stateless=True)
@@ -90,7 +91,7 @@ class _AuthoringHttpServer:
         from contextlib import asynccontextmanager
 
         @asynccontextmanager
-        async def lifespan(_app: Starlette) -> AsyncIterator[None]:
+        async def lifespan(_app: Starlette) -> AsyncGenerator[None]:
             async with manager.run():
                 yield
 
@@ -121,7 +122,7 @@ class _AuthoringHttpServer:
 
 
 @pytest_asyncio.fixture
-async def authoring_http() -> AsyncIterator[_AuthoringHttpServer]:
+async def authoring_http() -> AsyncGenerator[_AuthoringHttpServer]:
     server = _AuthoringHttpServer()
     await server.start()
     try:
@@ -131,13 +132,12 @@ async def authoring_http() -> AsyncIterator[_AuthoringHttpServer]:
 
 
 @pytest.mark.service
-@pytest.mark.skipif(not _MCP_AVAILABLE, reason="mcp streamable-http unavailable")
 @pytest.mark.asyncio
 async def test_real_agent_connects_to_authoring_bridge(
     authoring_http: _AuthoringHttpServer,
 ) -> None:
     if shutil.which("claude") is None:
-        pytest.skip("claude CLI unavailable; start it per the ACP runbook")
+        pytest.fail("claude CLI unavailable; start it per the ACP runbook")
 
     command, meta = _classify_acp_command(settings.acp_backend)
     workspace = str(Path.cwd())
@@ -156,7 +156,7 @@ async def test_real_agent_connects_to_authoring_bridge(
     )
     assert proc.stdin is not None and proc.stdout is not None
     try:
-        init = {
+        init: JsonObject = {
             "jsonrpc": "2.0",
             "id": 0,
             "method": "initialize",
@@ -177,13 +177,13 @@ async def test_real_agent_connects_to_authoring_bridge(
             bearer_token="test-bearer",
             actor_token="test-actor",
         )
-        new = {
+        new: JsonObject = {
             "jsonrpc": "2.0",
             "id": 1,
             "method": "session/new",
             "params": {
                 "cwd": workspace,
-                "mcpServers": build_authoring_mcp_servers(binding),
+                "mcpServers": list[JsonValue](build_authoring_mcp_servers(binding)),
             },
         }
         proc.stdin.write(json.dumps(new).encode("utf-8") + b"\n")

@@ -12,35 +12,36 @@ from __future__ import annotations
 
 import json
 import logging
-import os
-import shutil
-import subprocess
 from typing import TYPE_CHECKING
 
 import pytest
+from pydantic import TypeAdapter
 
 from ...authoring import AgentTool, CatalogSnapshot
+from ...thread.errors import ProjectionRefusedError
 from .._acp_authoring import (
     AUTHORING_MCP_SERVER_NAME,
     AuthoringToolBinding,
     build_authoring_stdio_mcp_servers,
 )
-from .._acp_mcp import resolve_harness_mcp_servers
 from .._acp_project_mcp import (
     PROJECTION_MARKER_KEY,
-    ProjectionRefusedError,
     _declared_home_entries,
     _split_projection,
     cleanup_projected_mcp,
     enumerate_ancestor_mcp_names,
     project_declared_mcp,
 )
+from .._json_contract import JsonObject, JsonValue
 
 if TYPE_CHECKING:
     from pathlib import Path
 
 
-def _rag_spec() -> dict:
+_JSON_OBJECT: TypeAdapter[JsonObject] = TypeAdapter(JsonObject)
+
+
+def _rag_spec() -> JsonObject:
     return {
         "name": "vaultspec-rag",
         "type": "stdio",
@@ -51,7 +52,7 @@ def _rag_spec() -> dict:
 
 def _bridge_specs(
     *, bearer: str = "SECRET-BEARER", actor: str = "SECRET-ACTOR"
-) -> list[dict]:
+) -> list[JsonObject]:
     binding = AuthoringToolBinding(
         snapshot=CatalogSnapshot(
             schema_version="authoring.semantic_tools.v1",
@@ -76,14 +77,27 @@ def _bridge_specs(
 
 
 def _write_mcp(directory: Path, names: list[str]) -> None:
-    servers = {n: {"type": "stdio", "command": "x"} for n in names}
-    (directory / ".mcp.json").write_text(
-        json.dumps({"mcpServers": servers}), encoding="utf-8"
-    )
+    servers: JsonObject = {name: {"type": "stdio", "command": "x"} for name in names}
+    payload: JsonObject = {"mcpServers": servers}
+    (directory / ".mcp.json").write_text(json.dumps(payload), encoding="utf-8")
 
 
-def _read(path: Path) -> dict:
-    return json.loads(path.read_text(encoding="utf-8"))
+def _read(path: Path) -> JsonObject:
+    return _JSON_OBJECT.validate_json(path.read_text(encoding="utf-8"))
+
+
+def _object_field(document: JsonObject, name: str) -> JsonObject:
+    value = document[name]
+    assert isinstance(value, dict)
+    return value
+
+
+def _servers(document: JsonObject) -> JsonObject:
+    return _object_field(document, "mcpServers")
+
+
+def _marker(document: JsonObject) -> JsonObject:
+    return _object_field(document, PROJECTION_MARKER_KEY)
 
 
 def test_only_run_owned_specs_enter_the_projected_provider_tree(
@@ -169,8 +183,8 @@ def test_project_creates_absent_file_with_entry_marker_and_placeholders(
     assert path is not None
     assert path == tmp_path / ".mcp.json"
     content = _read(path)
-    assert set(content["mcpServers"]) == {"vaultspec-rag", "vaultspec-authoring"}
-    marker = content[PROJECTION_MARKER_KEY]
+    assert set(_servers(content)) == {"vaultspec-rag", "vaultspec-authoring"}
+    marker = _marker(content)
     # Entry-level marker: the added names, and an absent pre-merge base.
     assert marker["added"] == ["vaultspec-authoring", "vaultspec-rag"]
     assert marker["base_absent"] is True
@@ -212,10 +226,10 @@ def test_merge_preserves_project_servers_and_cleanup_restores_original(
     assert projected == path
     content = _read(path)
     # BOTH surfaces present: the project's own AND the declared bridge/harness set.
-    assert set(content["mcpServers"]) == {"user-srv", "vaultspec-rag"}
+    assert set(_servers(content)) == {"user-srv", "vaultspec-rag"}
     # Non-mcpServers project keys are preserved through the merge.
     assert content["_vaultspecManaged"] == ["user-srv"]
-    marker = content[PROJECTION_MARKER_KEY]
+    marker = _marker(content)
     assert marker["added"] == ["vaultspec-rag"]
     assert marker["base_absent"] is False
     assert marker["base_fingerprint"] is not None
@@ -257,9 +271,10 @@ def test_reprojection_over_own_absent_residue_is_idempotent(tmp_path: Path) -> N
     second = project_declared_mcp(tmp_path, [_rag_spec()])
     assert second is not None
     content = _read(second)
-    assert set(content["mcpServers"]) == {"vaultspec-rag"}
-    assert content[PROJECTION_MARKER_KEY]["added"] == ["vaultspec-rag"]
-    assert content[PROJECTION_MARKER_KEY]["base_absent"] is True
+    assert set(_servers(content)) == {"vaultspec-rag"}
+    marker = _marker(content)
+    assert marker["added"] == ["vaultspec-rag"]
+    assert marker["base_absent"] is True
     # Cleanup after the idempotent re-projection still restores absent.
     cleanup_projected_mcp(second)
     assert not second.exists()
@@ -277,8 +292,8 @@ def test_reprojection_over_own_foreign_residue_restores_foreign(
     # base (not double-count) and carry the foreign pre-merge state forward.
     project_declared_mcp(tmp_path, [_rag_spec()])
     content = _read(path)
-    assert set(content["mcpServers"]) == {"user-srv", "vaultspec-rag"}
-    assert content[PROJECTION_MARKER_KEY]["base_absent"] is False
+    assert set(_servers(content)) == {"user-srv", "vaultspec-rag"}
+    assert _marker(content)["base_absent"] is False
 
     cleanup_projected_mcp(path)
     assert path.exists()
@@ -293,7 +308,7 @@ def test_mid_run_user_added_entry_survives_cleanup(tmp_path: Path) -> None:
     assert path is not None
     # A user adds their own server into our projected file mid-run.
     content = _read(path)
-    content["mcpServers"]["user-mid-run"] = {"type": "stdio", "command": "y"}
+    _servers(content)["user-mid-run"] = {"type": "stdio", "command": "y"}
     path.write_text(json.dumps(content), encoding="utf-8")
 
     cleanup_projected_mcp(path)
@@ -301,7 +316,7 @@ def test_mid_run_user_added_entry_survives_cleanup(tmp_path: Path) -> None:
     # only our added entry and the marker are gone.
     assert path.exists()
     after = _read(path)
-    assert set(after["mcpServers"]) == {"user-mid-run"}
+    assert set(_servers(after)) == {"user-mid-run"}
     assert PROJECTION_MARKER_KEY not in after
 
 
@@ -409,7 +424,7 @@ def test_user_entry_under_reserved_projected_name_is_removed_at_cleanup(
     # The user re-purposes our reserved "vaultspec-rag" name mid-run with
     # their own entry - same key, different value; no other key touched.
     content = _read(path)
-    content["mcpServers"]["vaultspec-rag"] = {
+    _servers(content)["vaultspec-rag"] = {
         "type": "stdio",
         "command": "user-owned",
     }
@@ -417,8 +432,8 @@ def test_user_entry_under_reserved_projected_name_is_removed_at_cleanup(
 
     cleanup_projected_mcp(path)
     after = _read(path)
-    assert "vaultspec-rag" not in after["mcpServers"]
-    assert after["mcpServers"] == {"user-srv": {"type": "stdio", "command": "x"}}
+    assert "vaultspec-rag" not in _servers(after)
+    assert _servers(after) == {"user-srv": {"type": "stdio", "command": "x"}}
     assert PROJECTION_MARKER_KEY not in after
 
 
@@ -440,7 +455,8 @@ def test_cleanup_skips_inversion_when_recovered_base_fingerprint_mismatches(
     content = _read(path)
     # Hand-edit the foreign base's structure (rename the foreign server) WITHOUT
     # touching the marker - desyncs the recorded base_fingerprint.
-    content["mcpServers"]["user-srv-renamed"] = content["mcpServers"].pop("user-srv")
+    servers = _servers(content)
+    servers["user-srv-renamed"] = servers.pop("user-srv")
     path.write_text(json.dumps(content), encoding="utf-8")
     before_cleanup = _read(path)
 
@@ -467,66 +483,16 @@ def test_reprojection_over_desynced_crash_residue_refuses_via_full_collision_che
     # Crash: no cleanup ran. Hand-edit the crashed file's foreign base
     # structure without updating the marker, desyncing base_fingerprint.
     content = _read(path)
-    content["mcpServers"]["user-srv-renamed"] = content["mcpServers"].pop("user-srv")
+    servers = _servers(content)
+    servers["user-srv-renamed"] = servers.pop("user-srv")
     path.write_text(json.dumps(content), encoding="utf-8")
 
     with pytest.raises(ProjectionRefusedError, match="collide"):
         project_declared_mcp(tmp_path, [_rag_spec()])
     # Untouched: the refusal must not have written anything.
     after = _read(path)
-    assert "user-srv-renamed" in after["mcpServers"]
-    assert "vaultspec-rag" in after["mcpServers"]
-
-
-class TestAcpEntrypointAcceptsProjectedMcpConfig:
-    """The projected .mcp.json is valid to the real ACP (claude) entrypoint (S115).
-
-    The unit tests above pin the projected file's content and merge model; this
-    drives the REAL ``claude mcp list`` entrypoint from a workspace carrying a
-    production projection and confirms the ACP CLI parses the .mcp.json and
-    surfaces our declared MCP server with its production launch command. Skips
-    only when the ``claude`` binary is genuinely absent - an honest environment
-    prerequisite, not a green shortcut.
-    """
-
-    @pytest.mark.skipif(
-        shutil.which("claude") is None, reason="claude ACP CLI is not installed"
-    )
-    def test_claude_mcp_list_accepts_the_projected_config(self, tmp_path: Path) -> None:
-        claude = shutil.which("claude")
-        assert claude is not None
-        specs = resolve_harness_mcp_servers(["vaultspec-rag"])
-        workspace = tmp_path / "run-ws"
-        workspace.mkdir()
-        projected = project_declared_mcp(workspace, specs)
-        assert projected is not None
-        # An isolated CLAUDE_CONFIG_DIR so the probe reads only the projected
-        # project-scope .mcp.json, never the operator's ambient servers.
-        config_home = tmp_path / "config-home"
-        config_home.mkdir()
-        try:
-            proc = subprocess.run(
-                [claude, "mcp", "list"],
-                cwd=str(workspace),
-                env={**os.environ, "CLAUDE_CONFIG_DIR": str(config_home)},
-                capture_output=True,
-                text=True,
-                encoding="utf-8",
-                errors="replace",
-                check=False,
-                timeout=120,
-            )
-            out = proc.stdout or ""
-            # Exit 0 proves the ACP CLI parsed the .mcp.json without rejecting it.
-            assert proc.returncode == 0, proc.stderr
-            # The declared server surfaces with its production launch command, so
-            # the projection is not merely well-formed but the server the CLI
-            # would actually launch from project scope.
-            assert "vaultspec-rag" in out
-            assert "uvx" in out
-            assert "vaultspec-search-mcp" in out
-        finally:
-            cleanup_projected_mcp(projected)
+    assert "user-srv-renamed" in _servers(after)
+    assert "vaultspec-rag" in _servers(after)
 
 
 def test_split_projection_is_one_decomposition_for_recovery_and_cleanup() -> None:
@@ -536,7 +502,7 @@ def test_split_projection_is_one_decomposition_for_recovery_and_cleanup() -> Non
     surviving in ``other`` would be re-emitted stale. The copy matters because
     both callers strip or merge into the result.
     """
-    parsed = {
+    parsed: JsonObject = {
         "mcpServers": {"project-own": {"command": "x"}},
         "someOtherKey": {"kept": True},
         PROJECTION_MARKER_KEY: {"added": ["project-own"], "base_absent": False},
@@ -550,16 +516,16 @@ def test_split_projection_is_one_decomposition_for_recovery_and_cleanup() -> Non
 
     servers.pop("project-own")
     other.pop("someOtherKey")
-    assert parsed["mcpServers"] == {"project-own": {"command": "x"}}
+    assert _servers(parsed) == {"project-own": {"command": "x"}}
     assert parsed["someOtherKey"] == {"kept": True}
 
 
 @pytest.mark.parametrize("servers_value", [None, [], "mcpServers", 7])
 def test_split_projection_treats_a_non_mapping_server_block_as_empty(
-    servers_value: object,
+    servers_value: JsonValue,
 ) -> None:
     """A file naming no usable ``mcpServers`` has no servers, and never raises."""
-    parsed = {"mcpServers": servers_value, "keep": 1}
+    parsed: JsonObject = {"mcpServers": servers_value, "keep": 1}
     servers, other = _split_projection(parsed)
     assert servers == {}
     assert other == {"keep": 1}

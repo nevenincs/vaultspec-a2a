@@ -16,10 +16,12 @@ written against that entry, never against a placeholder.
 from __future__ import annotations
 
 import subprocess
-import typing
+from types import MappingProxyType
+from typing import TYPE_CHECKING
 
 import pytest
 from langchain_openai import ChatOpenAI
+from pydantic import SecretStr
 
 from ...thread.errors import ConfigError
 from .._acp_mcp import (
@@ -33,6 +35,9 @@ from .._acp_mcp import (
     resolve_harness_mcp_servers,
 )
 from ..acp_chat_model import AcpChatModel
+
+if TYPE_CHECKING:
+    from .._json_contract import JsonObject
 
 
 def test_resolve_known_server_returns_stdio_spec() -> None:
@@ -86,17 +91,29 @@ def test_no_registry_launch_spec_constrains_a_version() -> None:
     from .._acp_mcp import _KNOWN_MCP_SERVERS
 
     for name, entry in _KNOWN_MCP_SERVERS.items():
-        for arg in entry.get("args", ()):
+        assert isinstance(entry, MappingProxyType)
+        args = entry.get("args")
+        assert isinstance(args, tuple)
+        for arg in args:
+            assert isinstance(arg, str)
             assert not any(
-                operator in str(arg) for operator in ("==", ">=", "<=", "~=", "!=")
+                operator in arg for operator in ("==", ">=", "<=", "~=", "!=")
             ), f"{name} launch spec constrains a version: {arg!r}"
 
 
 def test_rag_runtime_acquisition_executes_the_published_cli() -> None:
     """The resolved production launch command acquires a runnable MCP CLI."""
     spec = resolve_harness_mcp_servers(["vaultspec-rag"])[0]
+    command = spec["command"]
+    args = spec["args"]
+    assert isinstance(command, str)
+    assert isinstance(args, list)
+    command_line = [command]
+    for arg in args:
+        assert isinstance(arg, str)
+        command_line.append(arg)
     proc = subprocess.run(
-        [spec["command"], *spec["args"], "--help"],
+        [*command_line, "--help"],
         capture_output=True,
         text=True,
         check=False,
@@ -158,7 +175,7 @@ def test_compose_on_non_acp_model_returns_it_unchanged() -> None:
     # Construction is network-free; the model is never invoked. A production
     # hosted model has no local MCP delivery surface, so composition must remain
     # an identity-preserving pass-through.
-    model = ChatOpenAI(model="gpt-4o-mini", api_key="unused-test-key")
+    model = ChatOpenAI(model="gpt-4o-mini", api_key=SecretStr("unused-test-key"))
     assert compose_harness_mcp_servers(model, ["vaultspec-rag"]) is model
 
 
@@ -262,7 +279,7 @@ def test_compose_allowlist_union_does_not_duplicate() -> None:
 def test_config_home_servers_selects_registry_known_shapes_for_claude_json() -> None:
     # From a mixed session set (authoring bridge + harness rag), only the
     # registry-known harness server is selected and shaped for .claude.json.
-    session = [
+    session: list[JsonObject] = [
         {"name": "vaultspec-authoring", "command": "node", "args": ["bridge.js"]},
         {
             "name": "vaultspec-rag",
@@ -288,7 +305,7 @@ def test_config_home_servers_selects_registry_known_shapes_for_claude_json() -> 
 
 
 def test_config_home_servers_preserves_env_when_present() -> None:
-    session = [
+    session: list[JsonObject] = [
         {"name": "vaultspec-rag", "command": "uvx", "args": ["x"], "env": {"K": "V"}},
     ]
     home = config_home_mcp_servers(session)
@@ -334,10 +351,16 @@ def test_live_preset_harness_drives_read_only_rag_composition() -> None:
     model = AcpChatModel(command=["echo"], env_vars={})
     composed = compose_harness_mcp_servers(model, names, allowed_tools=allow)
     assert isinstance(composed, AcpChatModel)
-    advertised = {s.get("name") for s in composed.mcp_servers}
+    advertised: set[str] = set()
+    for spec in composed.mcp_servers:
+        name = spec.get("name")
+        assert isinstance(name, str)
+        advertised.add(name)
     assert advertised == set(names)
     for server_name in names:
-        spec = next(s for s in composed.mcp_servers if s.get("name") == server_name)
+        spec = next(
+            spec for spec in composed.mcp_servers if spec.get("name") == server_name
+        )
         assert spec["command"] == "uvx"
         # Registry-only ``tools`` metadata is stripped from the session launch spec.
         assert "tools" not in spec
@@ -346,7 +369,7 @@ def test_live_preset_harness_drives_read_only_rag_composition() -> None:
 
 
 def test_config_home_servers_empty_when_none_registry_known() -> None:
-    session = [{"name": "vaultspec-authoring", "command": "node"}]
+    session: list[JsonObject] = [{"name": "vaultspec-authoring", "command": "node"}]
     assert config_home_mcp_servers(session) == {}
 
 
@@ -362,6 +385,7 @@ def test_every_registry_entry_is_marked_read_only() -> None:
     assert "vaultspec-rag" in _KNOWN_MCP_SERVERS, sorted(_KNOWN_MCP_SERVERS)
 
     for name, entry in _KNOWN_MCP_SERVERS.items():
+        assert isinstance(entry, MappingProxyType)
         assert entry.get("read_only") is True, name
 
 
@@ -395,7 +419,7 @@ def test_compose_unknown_name_raises_even_on_non_acp_model() -> None:
     # An unknown declared name is a configuration error even when composition is
     # inapplicable: the loud refusal is uniform across model types, not swallowed
     # by the non-ACP pass-through.
-    model = ChatOpenAI(model="gpt-4o-mini", api_key="unused-test-key")
+    model = ChatOpenAI(model="gpt-4o-mini", api_key=SecretStr("unused-test-key"))
     with pytest.raises(ConfigError):
         compose_harness_mcp_servers(model, ["totally-unknown"])
 
@@ -412,13 +436,10 @@ class TestHarnessCompositionStages:
     def test_resolve_refuses_an_unknown_name_before_projection(self) -> None:
         from .._acp_mcp import HarnessMcpRuntimeProfile, _resolve_harness_composition
 
-        class _Bare:
-            """A model with no delivery mechanism at all."""
-
-        bare: typing.Any = _Bare()
+        model = ChatOpenAI(model="gpt-4o-mini", api_key=SecretStr("unused-test-key"))
         with pytest.raises(ConfigError):
             _resolve_harness_composition(
-                bare,
+                model,
                 ["not-a-real-server"],
                 profile=HarnessMcpRuntimeProfile.NON_DESKTOP,
             )
@@ -426,12 +447,9 @@ class TestHarnessCompositionStages:
     def test_resolve_returns_specs_for_a_known_name(self) -> None:
         from .._acp_mcp import HarnessMcpRuntimeProfile, _resolve_harness_composition
 
-        class _Bare:
-            mcp_servers: typing.ClassVar[list] = []
-
-        bare: typing.Any = _Bare()
+        model = AcpChatModel(command=["echo"], env_vars={})
         resolution, unavailable, resolved = _resolve_harness_composition(
-            bare, ["vaultspec-rag"], profile=HarnessMcpRuntimeProfile.NON_DESKTOP
+            model, ["vaultspec-rag"], profile=HarnessMcpRuntimeProfile.NON_DESKTOP
         )
 
         assert "vaultspec-rag" in resolution.available_servers
@@ -485,6 +503,6 @@ class TestComposeNativeReadTools:
 
     def test_model_without_acp_surface_is_returned_unchanged(self) -> None:
         """A hosted model exposing no with_mcp_servers is passed through as-is."""
-        model = ChatOpenAI(api_key="test-key", model="gpt-4o")
+        model = ChatOpenAI(api_key=SecretStr("test-key"), model="gpt-4o")
         wired = compose_native_read_tools(model, autonomous=True, role="researcher")
         assert wired is model

@@ -35,13 +35,17 @@ from ...protocols.mcp.authoring_stdio import (
 from .._acp_authoring import AUTHORING_MCP_SERVER_NAME
 
 if TYPE_CHECKING:
+    from collections.abc import AsyncGenerator
+
     from ...authoring.discovery import EngineEndpoint
 
 _STDIO_MODULE = "vaultspec_a2a.protocols.mcp.authoring_stdio"
 
+type RunContext = tuple[str, str, str, str]
+
 
 @pytest_asyncio.fixture
-async def run_context(live_engine: EngineEndpoint):
+async def run_context(live_engine: EngineEndpoint) -> AsyncGenerator[RunContext]:
     """Mint an actor token and open a real run, yielding the bridge env."""
     base_url, bearer = live_engine.base_url, live_engine.bearer_token
     async with AuthoringClient(base_url, bearer) as client:
@@ -79,7 +83,7 @@ def _bridge_params(
 
 @pytest.mark.service
 @pytest.mark.asyncio
-async def test_stdio_bridge_lists_live_catalog(run_context) -> None:
+async def test_stdio_bridge_lists_live_catalog(run_context: RunContext) -> None:
     """The spawned bridge completes the handshake and advertises the catalog."""
     base_url, bearer, actor_token, run_id = run_context
     async with AuthoringClient(base_url, bearer) as client:
@@ -99,7 +103,9 @@ async def test_stdio_bridge_lists_live_catalog(run_context) -> None:
 
 @pytest.mark.service
 @pytest.mark.asyncio
-async def test_stdio_bridge_executes_read_through_engine(run_context) -> None:
+async def test_stdio_bridge_executes_read_through_engine(
+    run_context: RunContext,
+) -> None:
     """A read tool routes through the bridge to the engine and returns a value.
 
     ``read_context`` is read-only (no state change), so this proves the full

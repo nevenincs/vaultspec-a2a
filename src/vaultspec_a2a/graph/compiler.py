@@ -31,7 +31,7 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.types import Command, RetryPolicy
 
 from ..authoring.contract import RESEARCH_ADR_ROLES, is_document_authoring_role
-from ..providers.conditions import ProviderCondition
+from ..providers.conditions import ProviderCondition, condition_is_retryable
 from ..thread.clarification import (
     CLARIFICATION_TOPOLOGIES,
     ClarificationRequest,
@@ -148,39 +148,6 @@ _NO_RETRY_EXCEPTIONS: tuple[type[BaseException], ...] = (
     ProviderSessionError,
 )
 
-#: The provider conditions another attempt can actually help.
-#:
-#: Retryability is a consequence of the resolved condition rather than of the
-#: exception's Python type. The three admitted here share one property: the work
-#: was refused BEFORE the provider did any, so a further attempt costs a request
-#: and nothing else.
-#:
-#: - ``THROTTLED`` and ``PROVIDER_OVERLOADED`` are the two canonically transient
-#:   refusals. Both say "not now" and neither says "not ever"; waiting a moment
-#:   is the remedy each names, which is exactly what the backoff already
-#:   configured on this policy does.
-#: - ``NETWORK_UNREACHABLE`` is admitted for consistency with the type axis
-#:   below, which already retries the stdlib connection errors that describe the
-#:   same fault. It is reached only when NO provider answer arrived - a forwarded
-#:   HTTP status outranks it at the mapper - so nothing was consumed upstream and
-#:   a misconfigured endpoint costs at most the two extra attempts before failing
-#:   with the identical condition.
-#:
-#: Everything else is excluded by decision, not by omission. ``UNAUTHENTICATED``,
-#: ``CREDITS_EXHAUSTED`` and ``BUDGET_EXHAUSTED`` need a credential, a payment or
-#: a raised ceiling, none of which a retry supplies. ``INVALID_REQUEST`` means
-#: the same request cannot succeed as sent. ``USAGE_EXHAUSTED`` clears only when
-#: an allowance window rolls over, which no bounded backoff outlives. And
-#: ``UNKNOWN`` is the floor, reached when the wire said nothing: retrying an
-#: unclassified failure turns one unexplained failure into a slow one.
-_RETRYABLE_CONDITIONS: frozenset[ProviderCondition] = frozenset(
-    {
-        ProviderCondition.THROTTLED,
-        ProviderCondition.PROVIDER_OVERLOADED,
-        ProviderCondition.NETWORK_UNREACHABLE,
-    }
-)
-
 
 def _resolved_condition(exc: BaseException) -> ProviderCondition | None:
     """Return the provider condition *exc* carries, or ``None`` when it carries none.
@@ -237,6 +204,11 @@ def _retry_verdict(exc: BaseException) -> bool:
     type match is an inference from the exception's base class. That ordering also
     leaves the stdlib types untouched: they carry neither hint nor condition, so
     they still reach the type axis exactly as before.
+
+    Which conditions are retryable is NOT decided here. It is one judgement,
+    declared beside the vocabulary and read both by this policy and by the flag a
+    client is served, so what the graph does and what the client is told cannot
+    drift apart.
     """
     hint = _lane_retry_hint(exc)
     if hint is not None:
@@ -244,7 +216,7 @@ def _retry_verdict(exc: BaseException) -> bool:
 
     condition = _resolved_condition(exc)
     if condition is not None:
-        return condition in _RETRYABLE_CONDITIONS
+        return condition_is_retryable(condition)
     return isinstance(exc, _TRANSIENT_EXCEPTIONS)
 
 
@@ -300,6 +272,43 @@ def _resolve_model_for_worker(
     re-deriving it.
     """
     factory = provider_factory
+    if frozen_assignment:
+        frozen = frozen_assignment.get(worker_ref.agent_id)
+        if frozen is not None and frozen.get("schema_version") == 1:
+            candidates = [frozen, *_catalog_fallbacks(frozen)]
+            catalog_exc: Exception | None = None
+            for candidate in candidates:
+                provider, model_name, execution_mode, native_controls = (
+                    _parse_catalog_preferences(candidate)
+                )
+                try:
+                    model = factory.create(
+                        provider,
+                        model=model_name,
+                        agent_config=agent_config,
+                        workspace_root=workspace_root,
+                        execution_mode=execution_mode,
+                        native_controls=native_controls,
+                    )
+                    logger.info(
+                        "worker=%r resolved frozen catalog provider=%s mode=%s",
+                        agent_config.id,
+                        provider.value,
+                        execution_mode,
+                    )
+                    return model, provider, None
+                except ValueError as exc:
+                    logger.warning(
+                        "Frozen provider lane %s/%s unavailable for worker %s: %s",
+                        provider.value,
+                        execution_mode,
+                        agent_config.id,
+                        exc,
+                    )
+                    catalog_exc = exc
+            raise ValueError(
+                f"All frozen provider lanes exhausted for worker {agent_config.id!r}"
+            ) from catalog_exc
     primary_provider, capability, fallback_chain, frozen_model_name = (
         _resolve_worker_model_preferences(
             worker_ref,
@@ -344,6 +353,58 @@ def _resolve_model_for_worker(
         f"All providers exhausted for worker {agent_config.id!r}: "
         f"tried {[p.value for p in providers_to_try]}"
     ) from last_exc
+
+
+def _catalog_fallbacks(frozen: dict[str, Any]) -> list[dict[str, Any]]:
+    raw_value: object = frozen.get("fallbacks")
+    if not isinstance(raw_value, list) or len(raw_value) > 8:
+        raise ValueError("Frozen catalog assignment has invalid fallbacks")
+    raw = cast("list[object]", raw_value)
+    if not all(isinstance(item, dict) for item in raw):
+        raise ValueError("Frozen catalog assignment has invalid fallbacks")
+    return [cast("dict[str, Any]", item) for item in raw]
+
+
+def _parse_catalog_preferences(
+    frozen: dict[str, Any],
+) -> tuple[Provider, str, str, dict[str, str]]:
+    """Parse one exact schema-v1 lane without consulting current catalogs."""
+    if frozen.get("schema_version") != 1:
+        raise ValueError("Frozen catalog assignment has an invalid schema_version")
+    raw_provider = frozen.get("provider") or frozen.get("provider_id")
+    try:
+        provider = Provider(raw_provider)
+    except ValueError as exc:
+        raise ValueError(
+            f"Frozen catalog assignment has an invalid provider {raw_provider!r}"
+        ) from exc
+    model_name = frozen.get("model_name")
+    execution_mode = frozen.get("execution_mode")
+    if not isinstance(model_name, str) or not model_name.strip():
+        raise ValueError("Frozen catalog assignment is missing its concrete model_name")
+    if not isinstance(execution_mode, str) or not execution_mode.strip():
+        raise ValueError("Frozen catalog assignment is missing its execution_mode")
+    raw_controls_value: object = frozen.get("controls")
+    if not isinstance(raw_controls_value, list) or len(raw_controls_value) > 32:
+        raise ValueError("Frozen catalog assignment has invalid native controls")
+    raw_controls = cast("list[object]", raw_controls_value)
+    controls: dict[str, str] = {}
+    for raw_control in raw_controls:
+        if not isinstance(raw_control, dict):
+            raise ValueError("Frozen catalog assignment has invalid native controls")
+        control = cast("dict[str, object]", raw_control)
+        control_id = control.get("control_id")
+        provider_value = control.get("provider_value")
+        if (
+            not isinstance(control_id, str)
+            or not control_id
+            or not isinstance(provider_value, str)
+            or not provider_value
+            or control_id in controls
+        ):
+            raise ValueError("Frozen catalog assignment has invalid native controls")
+        controls[control_id] = provider_value
+    return provider, model_name, execution_mode, controls
 
 
 def _resolve_worker_model_preferences(

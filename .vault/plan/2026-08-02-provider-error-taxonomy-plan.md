@@ -4,7 +4,7 @@ tags:
   - '#provider-error-taxonomy'
 date: '2026-08-02'
 modified: '2026-08-02'
-body_hash: 'sha256:546e5ee7e5e670709d0855b95bc7c40f1937b786bde0c837751b8a448fcd7c5f'
+body_hash: 'sha256:058c4deec053918e1c1e7be5787df67acbd9301034027895790b181d7174d408'
 tier: L3
 related:
   - '[[2026-08-02-provider-error-taxonomy-adr]]'
@@ -80,7 +80,7 @@ Carries the condition on the error frame, persists it beside the failure reason,
 
 Derives the recoverable flag from the condition rather than the catch site and binds the same classification to the node retry policy.
 
-- [ ] `W01.P04.S25` - Derive the recoverable flag from the condition instead of the catch branch; `src/vaultspec_a2a/streaming/ingest.py`.
+- [x] `W01.P04.S25` - Derive the recoverable flag from the condition instead of the catch branch; `src/vaultspec_a2a/streaming/ingest.py`.
 - [x] `W01.P04.S26` - Bind the condition to the node retry classifier; `src/vaultspec_a2a/graph/compiler.py`.
 - [x] `W01.P04.S27` - Prefer a lane-supplied retry hint over inferred retryability; `src/vaultspec_a2a/graph/compiler.py`.
 - [x] `W01.P04.S28` - Prove throttled and overloaded conditions retry under the existing backoff policy; `src/vaultspec_a2a/graph/tests/test_compiler.py`.
@@ -109,7 +109,7 @@ Removes the superseded dead vocabulary and proves a real provider failure surfac
 
 - [x] `W01.P06.S41` - Remove the dead severity and recovery-action vocabulary; `src/vaultspec_a2a/thread/errors.py`.
 - [x] `W01.P06.S42` - Withdraw the removed vocabulary from the thread package surface; `src/vaultspec_a2a/thread/__init__.py`.
-- [ ] `W01.P06.S43` - Replace the usage-limit substring sniff with the typed condition; `src/vaultspec_a2a/service_tests/test_claude_web_grounding_live.py`.
+- [x] `W01.P06.S43` - Replace the usage-limit substring sniff with the typed condition; `src/vaultspec_a2a/service_tests/test_claude_web_grounding_live.py`.
 - [x] `W01.P06.S44` - Add a scripted failure scenario preset for the integration-verification ask; `src/vaultspec_a2a/team/presets/teams`.
 - [ ] `W01.P06.S45` - Prove a live provider failure surfaces a typed condition end to end; `src/vaultspec_a2a/service_tests/test_provider_condition_live.py`.
 

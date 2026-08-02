@@ -28,7 +28,7 @@ from ...graph.events import (
     ToolCallStart,
     ToolCallUpdate,
 )
-from ...providers import ProviderCondition
+from ...providers import AcpPromptError, ProviderCondition
 from ...thread.errors import EventAggregatorError
 from .. import EventAggregator as CoreAggregator
 from .. import aggregator as agg_module
@@ -1705,8 +1705,14 @@ _PROVIDER_REFUSAL = "Your credit balance is too low to access the Anthropic API.
 _PROVIDER_ERROR_CODE = -32000
 
 
-def _failing_provider_graph(lane: str) -> object:
-    """Compile a real one-worker graph whose provider refuses the prompt."""
+def _failing_provider_graph(lane: str, *, error_kind: str | None = None) -> object:
+    """Compile a real one-worker graph whose provider refuses the prompt.
+
+    ``error_kind`` attaches the adapter's categorical discriminator to the
+    refusal, which is how a lane names anything other than the credential
+    failure a bare refusal defaults to. It rides the internal-error code because
+    that is the code the real adapter's kind-bearing frames carry.
+    """
     from langgraph.checkpoint.memory import InMemorySaver
     from langgraph.graph import END, StateGraph
 
@@ -1714,13 +1720,16 @@ def _failing_provider_graph(lane: str) -> object:
     from ...providers.acp_chat_model import AcpChatModel
     from ...thread.state import TeamState
 
+    command = [
+        sys.executable,
+        str(_ACP_SIMULATOR),
+        "--error",
+        _PROVIDER_REFUSAL,
+    ]
+    if error_kind is not None:
+        command += ["--error-kind", error_kind, "--error-code", "-32603"]
     model = AcpChatModel(
-        command=[
-            sys.executable,
-            str(_ACP_SIMULATOR),
-            "--error",
-            _PROVIDER_REFUSAL,
-        ],
+        command=command,
         env_vars={},
         provider=lane,
     )
@@ -1832,6 +1841,133 @@ class TestProviderFailureReachesTheReason:
         # Popped, never re-served: a later run on this thread must not inherit
         # the classification of the one before it.
         assert aggregator.take_failure_condition("thread-provider-durable") is None
+
+
+class TestRecoverabilityFollowsTheCondition:
+    """The recoverable flag reports the failure, not the handler that caught it.
+
+    It used to be hardcoded false on the catch-all, which is where EVERY provider
+    fault lands. So a transient overload and a revoked credential were served to a
+    client identically unrecoverable, while a step timeout - a graph-infrastructure
+    fact - was served recoverable. The flag classified which ``except`` branch ran.
+
+    Both cases below are driven through the real ACP simulator subprocess, so the
+    condition is resolved by the lane from a real wire frame and the flag is read
+    off the frame a consumer actually receives. Asserting the predicate directly
+    would prove the table and skip the wiring between it and the frame, which is
+    exactly the span that was broken.
+    """
+
+    @staticmethod
+    async def _error_frame(
+        aggregator: EventAggregator,
+        *,
+        thread_id: str,
+        client_id: str,
+        error_kind: str | None,
+    ) -> ErrorOccurred:
+        """Drive one real provider refusal and return the error frame it emitted."""
+        queue = aggregator.add_subscriber(client_id)
+        aggregator.subscribe(client_id, [thread_id])
+
+        await aggregator.ingest(
+            thread_id=thread_id,
+            agent_id="supervisor",
+            graph=cast(
+                "StreamableGraph",
+                _failing_provider_graph("claude", error_kind=error_kind),
+            ),
+            graph_input={"messages": [], "thread_id": thread_id},
+            config={"configurable": {"thread_id": thread_id}},
+        )
+
+        sequenced_all = []
+        while not queue.empty():
+            sequenced_all.append(queue.get_nowait())
+        error_events = [
+            s.event for s in sequenced_all if isinstance(s.event, ErrorOccurred)
+        ]
+        assert len(error_events) >= 1
+        return error_events[-1]
+
+    @pytest.mark.asyncio
+    async def test_a_transient_refusal_is_served_as_recoverable(
+        self, aggregator: EventAggregator
+    ) -> None:
+        """A rate refusal reaches the client as recoverable, because it is.
+
+        This is the case that used to be impossible: the branch hardcoded false,
+        so no provider failure of any kind could ever be reported recoverable.
+        """
+        err = await self._error_frame(
+            aggregator,
+            thread_id="thread-recoverable-throttled",
+            client_id="client-throttled",
+            error_kind="rate_limit",
+        )
+
+        assert err.code == ProviderCondition.THROTTLED.value
+        assert err.recoverable is True
+
+    @pytest.mark.asyncio
+    async def test_a_credential_refusal_is_served_as_unrecoverable(
+        self, aggregator: EventAggregator
+    ) -> None:
+        """A credential failure stays unrecoverable, and for a stated reason.
+
+        The negative half is what makes the positive one mean anything: without
+        it the flag could have been flipped to a constant true and still passed.
+        """
+        err = await self._error_frame(
+            aggregator,
+            thread_id="thread-recoverable-unauth",
+            client_id="client-unauth",
+            error_kind="authentication_failed",
+        )
+
+        assert err.code == ProviderCondition.UNAUTHENTICATED.value
+        assert err.recoverable is False
+
+    @pytest.mark.asyncio
+    async def test_the_graph_and_the_client_read_one_retryability_judgement(
+        self, aggregator: EventAggregator
+    ) -> None:
+        """What the client is told matches what the retry policy would do.
+
+        The two consumers of retryability sit in different packages, and the
+        failure mode this guards is drift: a client told a failure is permanent
+        while the graph quietly retries it, or the reverse. Driving the real
+        frame and the real node predicate over the SAME real provider failure is
+        what makes their agreement observable rather than assumed.
+        """
+        from ...graph.compiler import _worker_retry_on
+        from ...thread.errors import WorkerExecutionError
+
+        for kind, thread_id, client_id in (
+            ("rate_limit", "thread-agree-throttled", "client-agree-throttled"),
+            ("billing_error", "thread-agree-billing", "client-agree-billing"),
+        ):
+            err = await self._error_frame(
+                aggregator,
+                thread_id=thread_id,
+                client_id=client_id,
+                error_kind=kind,
+            )
+
+            # The same condition, presented to the retry policy in the shape a
+            # worker node hands it: a wrapper chaining the provider failure.
+            cause = AcpPromptError(
+                _PROVIDER_REFUSAL,
+                code=-32603,
+                data={"errorKind": kind},
+                condition=ProviderCondition(err.code),
+            )
+            wrapper = WorkerExecutionError(
+                worker="coder", model="acp:claude", message_count=1, cause=cause
+            )
+            wrapper.__cause__ = cause
+
+            assert _worker_retry_on(wrapper) is err.recoverable
 
 
 class _StallingGraph:

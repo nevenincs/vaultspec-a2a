@@ -17,6 +17,7 @@ from ..domain_config import domain_config
 from ..graph.enums import AgentLifecycleState
 from ..graph.protocols import NullTelemetryHook, TelemetryHook
 from ..providers import ProviderCondition
+from ..providers.conditions import condition_is_retryable
 from ..thread.enums import ThreadStatus
 from ..thread.errors import describe_exception_chain
 from .buffering import BufferingManager
@@ -363,11 +364,22 @@ class IngestManager:
                     # branches above never do: a recursion limit, a stalled
                     # stream and a step timeout are facts about the graph
                     # infrastructure, not statements a provider made, so their
-                    # codes stay as they are. Here the code becomes the resolved
-                    # condition - the catalogued field a consumer already
-                    # branches on, now carrying the one classification that
-                    # tells it which remedy to offer, in place of a constant
-                    # that told it only which handler caught the failure.
+                    # codes and recoverability stay as they are. Here the code
+                    # becomes the resolved condition - the catalogued field a
+                    # consumer already branches on, now carrying the one
+                    # classification that tells it which remedy to offer, in
+                    # place of a constant that told it only which handler caught
+                    # the failure.
+                    #
+                    # Recoverability comes from that same condition, through the
+                    # one predicate the node retry policy also consults. It used
+                    # to be a hardcoded false, which made the flag a statement
+                    # about WHICH except-branch caught the exception rather than
+                    # about the failure: a transient overload and a revoked
+                    # credential were reported identically unrecoverable, while
+                    # a step timeout was reported recoverable. Reading the shared
+                    # predicate is also what stops the graph quietly retrying a
+                    # failure the client was told was permanent.
                     _condition = _resolve_provider_condition(exc)
                     self._failure_conditions[thread_id] = _condition
                     logger.exception(
@@ -380,7 +392,7 @@ class IngestManager:
                         agent_id=agent_id,
                         code=_condition.value,
                         message=_reason,
-                        recoverable=False,
+                        recoverable=condition_is_retryable(_condition),
                     )
                 if _reason is not None:
                     self._failure_reasons[thread_id] = _reason

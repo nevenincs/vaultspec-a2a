@@ -33,6 +33,7 @@ __all__ = [
     "condition_from_acp_error",
     "condition_from_codex_error_info",
     "condition_from_codex_turn_error",
+    "condition_is_retryable",
 ]
 
 
@@ -125,6 +126,68 @@ class ProviderCondition(StrEnum):
     an unrecognised or absent discriminator resolves to, which is what keeps a
     mapper total when a provider adds a discriminator this vocabulary predates.
     """
+
+
+#: The members another attempt can actually help.
+#:
+#: What admits all three is that the failure is a statement about AVAILABILITY -
+#: the provider could not or would not serve this request now - rather than about
+#: the request, the credential or the account. Availability is the one thing that
+#: can differ on the next attempt.
+#:
+#: - :attr:`ProviderCondition.THROTTLED` and
+#:   :attr:`ProviderCondition.PROVIDER_OVERLOADED` are the two canonically
+#:   transient refusals. Both say "not now" and neither says "not ever", so
+#:   waiting is the remedy each of them names, and both refuse before the
+#:   provider produces anything.
+#: - :attr:`ProviderCondition.NETWORK_UNREACHABLE` covers three shapes and they
+#:   do NOT cost the same. A connection never established and a forwarded
+#:   server-side status both leave nothing produced: only client-side statuses
+#:   outrank this member at the mapper, so a 5xx arrives here rather than at a
+#:   finer one. A stream that dropped mid-turn is different - tokens were
+#:   generated and billed, and a retry pays for them again. It is admitted
+#:   anyway, because a dropped stream is the canonical transient fault and the
+#:   alternative is failing a run that would succeed on a second attempt; the
+#:   duplicate cost is the stated price, not an oversight.
+#:
+#: The rest are excluded by decision rather than by omission.
+#: :attr:`ProviderCondition.UNAUTHENTICATED`,
+#: :attr:`ProviderCondition.CREDITS_EXHAUSTED` and
+#: :attr:`ProviderCondition.BUDGET_EXHAUSTED` need a credential, a payment or a
+#: raised ceiling, and repeating the request supplies none of them while spending
+#: the caller's quota or money. :attr:`ProviderCondition.INVALID_REQUEST` means
+#: the same request cannot succeed as sent. :attr:`ProviderCondition.USAGE_EXHAUSTED`
+#: clears only when an allowance window rolls over, which no bounded backoff
+#: outlives - so it stays out even though it is the near neighbour of a member
+#: that is in. And :attr:`ProviderCondition.UNKNOWN` is the floor, reached when
+#: the wire said nothing: repeating an unclassified failure turns one unexplained
+#: failure into a slow one.
+_RETRYABLE_CONDITIONS: frozenset[ProviderCondition] = frozenset(
+    {
+        ProviderCondition.THROTTLED,
+        ProviderCondition.PROVIDER_OVERLOADED,
+        ProviderCondition.NETWORK_UNREACHABLE,
+    }
+)
+
+
+def condition_is_retryable(condition: ProviderCondition) -> bool:
+    """Return whether repeating the request could plausibly succeed.
+
+    The single answer to "is this worth another attempt", declared beside the
+    vocabulary it judges rather than inside either consumer. Two consumers ask
+    it - the orchestrator's node retry policy, which acts on the answer, and the
+    failure frame's recoverable flag, which reports it - and they must agree.
+    Two tables would agree on the day they were written and drift on the day one
+    of them was edited, at which point a client would be told a failure was
+    permanent while the graph quietly retried it, or the reverse.
+
+    Retryability is a property of the CONDITION, so it is settled once here from
+    what each member means. It is deliberately not a property of the exception's
+    Python type, nor of which handler caught it; both of those describe how a
+    failure was routed rather than what the provider refused.
+    """
+    return condition in _RETRYABLE_CONDITIONS
 
 
 # --- ACP lane (Claude and Z.ai over the same adapter) ------------------------

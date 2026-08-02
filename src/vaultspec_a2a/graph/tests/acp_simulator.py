@@ -67,6 +67,22 @@ def main() -> None:
         "--error", help="If set, return this error message for session/prompt"
     )
     parser.add_argument(
+        "--error-kind",
+        help="If set with --error, attach this adapter error kind to the error "
+        "frame's data. The real adapter puts a categorical kind there precisely "
+        "so a client can dispatch on it, and it is the discriminator a condition "
+        "is resolved from; without it a simulated refusal can only ever exercise "
+        "the code fallback.",
+    )
+    parser.add_argument(
+        "--error-code",
+        type=int,
+        default=-32000,
+        help="JSON-RPC code for the --error frame. Defaults to the adapter's "
+        "authentication-required code, which is what a bare --error has always "
+        "returned.",
+    )
+    parser.add_argument(
         "--record-session-new",
         help="If set, write the received session/new params to this JSON file",
     )
@@ -132,10 +148,13 @@ def main() -> None:
                 with open(args.record_session_prompt, "w", encoding="utf-8") as fh:
                     json.dump(req.get("params", {}), fh)
             if args.error:
+                error_body = {"code": args.error_code, "message": args.error}
+                if args.error_kind:
+                    error_body["data"] = {"errorKind": args.error_kind}
                 resp = {
                     "jsonrpc": "2.0",
                     "id": msg_id,
-                    "error": {"code": -32000, "message": args.error},
+                    "error": error_body,
                 }
             else:
                 # Send a chunk notification first

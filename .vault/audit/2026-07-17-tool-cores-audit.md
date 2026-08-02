@@ -458,3 +458,53 @@ does not depend on a writer still running. Recommend a stale record be reaped or
 refused at the well-known path rather than left to shadow a healthy peer. Both
 are cheaper than the standing cost, which is that no live proof on this host can
 be trusted to have run at all.
+
+### live-stack-wiring-is-functional-and-was-never-the-defect | resolved
+
+The harness, gateway, worker, graph, ACP transport, and provider CLI form a chain
+that WORKS end to end. This is asserted from a run, not from reading.
+
+A gateway was booted on an explicitly chosen free port against the one live
+engine, with a distinct internal token and gateway service token. It reached
+`ok`, auto-spawned its worker, and the worker reported ready in 11.6 s. The
+subscriber immediately transacted with the engine - `/authoring/v1/events`,
+`/authoring/v1/recovery`, and `/health` all answering 200. The proof then ran for
+18 s, resolved the stack, minted per-role tokens, started a run, drove the graph
+into the researcher's ACP session, and reached Anthropic - which refused with
+`ACP Error [-32603] ... errorKind: rate_limit`, naming a weekly window that
+resets 2026-08-04.
+
+Every link in the chain is therefore proven live except the model's reply. The
+long-standing reading that this wiring was broken or dead was WRONG: the wiring
+was fine and the discovery layer was pointing at a corpse, per the finding above.
+
+Two operational notes worth keeping. The worker spawns LAZILY on first dispatch,
+not at gateway boot, so a health check taken before then truthfully reports
+`worker_connected: false` and must not be read as a failed boot - wait for it. And
+the verdict subscriber emitted 264 `/authoring/v1/recovery` calls while idle,
+logging `cursor_ahead_of_high_water (latest_outbox_seq=0)` each time: a busy
+retry loop against a healthy engine whose outbox is simply empty. It is not
+fatal and did not affect the run, but it is unbounded polling on an idle system
+and is queued here rather than lost.
+
+### claude-web-lane-admitted-on-a-proof-that-cannot-yet-run | high | open
+
+`PROVEN_WEB_LANES` admits the claude lane citing
+`test_claude_web_grounding_live.py::test_claude_lane_completes_a_real_web_retrieval`.
+With the infrastructure now proven (above), that test has been driven as far as
+the provider and STILL has never returned a pass: the account's weekly window is
+spent until 2026-08-04. The skip is truthful and correctly refuses to mask the
+gap, so the lane's `tool_names=("WebFetch",)` activation rests on no passing run.
+
+This is a live violation of the project's own admission rule, which requires a
+completed real turn - not a handshake, not a construction, not an infrastructure
+proof - before a lane may be named where profiles are served. The infrastructure
+finding above does NOT discharge it: reaching the provider proves the transport,
+not the retrieval.
+
+Deliberately not withdrawn unilaterally. Withdrawal leaves three composition
+tests with no proven-web subject and would be reversed within days, so the
+choice between withdrawing now and re-running on 2026-08-04 belongs to the
+owner. What must not happen is the gap being forgotten because the wiring
+finally works - a proof that cannot run and a proof that fails are the same
+evidence, which is precisely why this entry stays open.

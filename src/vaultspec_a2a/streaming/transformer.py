@@ -10,10 +10,10 @@ references to perform side effects but hold no state of their own.
 
 import asyncio
 import logging
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import PurePath
-from typing import Any, cast
+from typing import Any, Protocol, TypeGuard, cast
 from uuid import uuid4
 
 from ..domain_config import domain_config
@@ -449,6 +449,13 @@ class _InterruptEmission:
     payload: dict[str, Any]
 
 
+class _InterruptTask(Protocol):
+    """The task fields exposed by LangGraph state snapshots."""
+
+    name: str
+    interrupts: Sequence[object]
+
+
 _INTERRUPT_TYPES = frozenset(
     {
         "permission_request",
@@ -471,7 +478,7 @@ async def emit_interrupt_events(
     if state is None:
         return False
 
-    tasks = getattr(state, "tasks", None)
+    tasks = _interrupted_tasks(state)
     if not tasks or not any(task.interrupts for task in tasks):
         return False
 
@@ -503,7 +510,7 @@ async def _read_graph_state(
 
 
 def _interrupt_emissions(
-    thread_id: str, tasks: list[object] | tuple[object, ...]
+    thread_id: str, tasks: Sequence[_InterruptTask]
 ) -> list[_InterruptEmission]:
     """Normalize recognized task interrupts while retaining their graph position."""
     emissions: list[_InterruptEmission] = []
@@ -531,8 +538,24 @@ def _interrupt_emissions(
 
 def _interrupt_payload(interrupt: object) -> dict[str, Any] | None:
     """Return a LangGraph interrupt payload when it has the expected mapping shape."""
-    payload = getattr(interrupt, "value", interrupt)
-    return payload if isinstance(payload, dict) else None
+    payload: object = getattr(interrupt, "value", interrupt)
+    return payload if _is_payload(payload) else None
+
+
+def _interrupted_tasks(state: object) -> Sequence[_InterruptTask]:
+    """Return the sequence of pending LangGraph tasks, if a snapshot supplies one."""
+    tasks: object = getattr(state, "tasks", None)
+    return tasks if _is_task_sequence(tasks) else ()
+
+
+def _is_task_sequence(value: object) -> TypeGuard[Sequence[_InterruptTask]]:
+    """Recognize the list/tuple task collection used by graph state snapshots."""
+    return isinstance(value, list | tuple)
+
+
+def _is_payload(value: object) -> TypeGuard[dict[str, Any]]:
+    """Narrow an untrusted graph payload to the mapping shape we project."""
+    return isinstance(value, dict)
 
 
 def _request_id(
@@ -584,14 +607,20 @@ async def _emit_plan_approval(
     emission: _InterruptEmission, emitters: EventEmitters
 ) -> None:
     """Project a plan approval interrupt into its durable permission frame."""
-    feature = emission.payload.get("feature") or "unknown"
-    plan_paths = emission.payload.get("plan_paths") or []
-    exec_worker = emission.payload.get("exec_worker") or "unknown"
-    plan_summary = f"{len(plan_paths)} plan document(s)" if plan_paths else "no plan documents"
+    feature = _payload_text(emission.payload, "feature", "unknown")
+    raw_plan_paths: object = emission.payload.get("plan_paths")
+    plan_paths = raw_plan_paths if _is_object_list(raw_plan_paths) else []
+    exec_worker = _payload_text(emission.payload, "exec_worker", "unknown")
+    plan_summary = (
+        f"{len(plan_paths)} plan document(s)" if plan_paths else "no plan documents"
+    )
     await _emit_approval_request(
         emission,
         emitters,
-        f"Approve plan for feature '{feature}' before routing to {exec_worker} ({plan_summary})",
+        (
+            f"Approve plan for feature '{feature}' before routing to {exec_worker} "
+            f"({plan_summary})"
+        ),
         _approval_options("Plan"),
         f"Awaiting plan approval for feature '{feature}'",
     )
@@ -601,8 +630,8 @@ async def _emit_document_approval(
     emission: _InterruptEmission, emitters: EventEmitters
 ) -> None:
     """Project a document approval interrupt into its durable permission frame."""
-    phase = emission.payload.get("phase") or "document"
-    feature = emission.payload.get("feature") or "unknown"
+    phase = _payload_text(emission.payload, "phase", "document")
+    feature = _payload_text(emission.payload, "feature", "unknown")
     await _emit_approval_request(
         emission,
         emitters,
@@ -651,7 +680,7 @@ async def _emit_tool_permission(
     emission: _InterruptEmission, emitters: EventEmitters
 ) -> None:
     """Project a provider tool permission while retaining its declared option kinds."""
-    tool_name = emission.payload.get("tool_name", "unknown")
+    tool_name = _payload_text(emission.payload, "tool_name", "unknown")
     await emitters.emit_permission_request(
         thread_id=emission.thread_id,
         agent_id=emission.agent_id,
@@ -660,29 +689,33 @@ async def _emit_tool_permission(
         options=_permission_options(emission.payload.get("options", [])),
         tool_call=tool_name,
     )
-    await _emit_input_required(
-        emission, emitters, f"Awaiting approval for {tool_name}"
-    )
+    await _emit_input_required(emission, emitters, f"Awaiting approval for {tool_name}")
 
 
 def _permission_options(raw_options: object) -> list[dict[str, Any]]:
     """Normalize ACP option identities and honor valid declared permission kinds."""
     options: list[dict[str, Any]] = []
-    if isinstance(raw_options, list):
+    if _is_object_list(raw_options):
         for option in raw_options:
             options.append(_permission_option(option))
     return options or _default_permission_options()
 
 
+def _is_object_list(value: object) -> TypeGuard[list[object]]:
+    """Narrow a provider option collection to an iterable list of raw entries."""
+    return isinstance(value, list)
+
+
 def _permission_option(option: object) -> dict[str, Any]:
     """Project one ACP option, deriving a kind only for an invalid declaration."""
-    fields = option if isinstance(option, dict) else {}
+    fields: dict[str, Any] = option if _is_payload(option) else {}
     option_id = option_id_of(option)
     declared_kind = fields.get("kind")
     kind = resolve_acp_option_kind(declared_kind, option_id or "")
     if declared_kind and kind != declared_kind:
         logger.warning(
-            "Permission option %r declared unrecognised kind %r; derived %s from the option id instead",
+            "Permission option %r declared unrecognised kind %r; "
+            "derived %s from the option id instead",
             option_id,
             declared_kind,
             kind.value,
@@ -708,6 +741,12 @@ def _default_permission_options() -> list[dict[str, Any]]:
             "kind": PermissionOptionKind.REJECT_ONCE,
         },
     ]
+
+
+def _payload_text(payload: dict[str, Any], key: str, default: str) -> str:
+    """Read a text payload field without forwarding a malformed value to emitters."""
+    value: object = payload.get(key)
+    return value if isinstance(value, str) and value else default
 
 
 async def _emit_input_required(

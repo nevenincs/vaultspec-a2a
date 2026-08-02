@@ -4,7 +4,7 @@ tags:
   - '#provider-error-taxonomy'
 date: '2026-08-02'
 modified: '2026-08-02'
-body_hash: 'sha256:f792696de6ffa869177c990aadd0fbd5f3b3d0774fe52d24ec5e1a8f42cbc539'
+body_hash: 'sha256:3fa58d551e6b2efc7954efb77703d9dd46904a5cce45f86afc91a273cbcaf8a4'
 tier: L3
 related:
   - '[[2026-08-02-provider-error-taxonomy-adr]]'
@@ -83,7 +83,7 @@ Derives the recoverable flag from the condition rather than the catch site and b
 - [ ] `W01.P04.S25` - Derive the recoverable flag from the condition instead of the catch branch; `src/vaultspec_a2a/streaming/ingest.py`.
 - [x] `W01.P04.S26` - Bind the condition to the node retry classifier; `src/vaultspec_a2a/graph/compiler.py`.
 - [x] `W01.P04.S27` - Prefer a lane-supplied retry hint over inferred retryability; `src/vaultspec_a2a/graph/compiler.py`.
-- [ ] `W01.P04.S28` - Prove throttled and overloaded conditions retry under the existing backoff policy; `src/vaultspec_a2a/graph/tests/test_compiler.py`.
+- [x] `W01.P04.S28` - Prove throttled and overloaded conditions retry under the existing backoff policy; `src/vaultspec_a2a/graph/tests/test_compiler.py`.
 
 ### Phase `W01.P05` - close the blank terminals
 

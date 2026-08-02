@@ -2,20 +2,26 @@
 
 from __future__ import annotations
 
+import time
 from pathlib import Path
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, Any, cast
 
 import pytest
 import pytest_asyncio
 from langchain_core.language_models.fake_chat_models import FakeChatModel
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
+from langgraph.graph import END, START, StateGraph
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncGenerator
+    from collections.abc import AsyncGenerator, Callable
 
-    from ...thread.state import TeamState
+    from langgraph.types import RetryPolicy
+
     from ..protocols import ProviderFactoryProtocol
 
+from ...providers import AcpPromptError, ProviderCondition
+from ...providers.codex_chat_model import _turn_failure
+from ...providers.conditions import condition_from_acp_error
 from ...team.team_config import (
     TeamConfig,
     TopologyConfig,
@@ -25,7 +31,9 @@ from ...team.team_config import (
     load_team_config,
 )
 from ...thread.errors import ConfigError
+from ...thread.state import TeamState
 from ..compiler import (
+    _NODE_RETRY_POLICY,
     _build_supervisor_prompt,
     _loop_route,
     _make_research_producer,
@@ -692,6 +700,229 @@ def test_worker_retry_on_graph_recursion_error_not_retried() -> None:
     assert _worker_retry_on(exc) is False
 
 
+# ---------------------------------------------------------------------------
+# Provider conditions under the real node retry policy
+# ---------------------------------------------------------------------------
+#
+# These drive a real compiled graph and count the attempts its node body actually
+# made. Asserting on the classifier in isolation would prove the predicate and
+# nothing else: it would still pass with the policy detached from every node, so
+# it cannot tell "retries correctly" from "never retries at all". The counter is
+# incremented by the node body itself, which is the only instrument that observes
+# the retry rather than the intent to retry.
+
+
+def _acp_failure(kind: str) -> AcpPromptError:
+    """Raise-shaped ACP failure carrying the condition its own mapper resolves.
+
+    The condition is derived from a wire-shaped frame through the lane's real
+    mapper rather than named directly, so a mapping change moves these cases with
+    it instead of leaving them asserting a member the lane stopped emitting.
+    """
+    frame: dict[str, object] = {
+        "code": -32603,
+        "message": f"acp failure: {kind}",
+        "data": {"errorKind": kind},
+    }
+    return AcpPromptError(
+        f"acp failure: {kind}",
+        code=-32603,
+        data=frame["data"],
+        condition=condition_from_acp_error(frame),
+    )
+
+
+def _codex_failure(info: object, *, will_retry: object = None) -> Exception:
+    """Raise-shaped Codex failure built by the lane's own turn-error builder.
+
+    Used for the members only this lane's wire can name, and for the retry hint,
+    which no other served lane carries.
+    """
+    return _turn_failure(
+        cast("Any", {"message": "codex failure", "codexErrorInfo": info}),
+        will_retry=cast("Any", will_retry),
+    )
+
+
+#: One real provider failure per condition member, each built from the wire shape
+#: of the lane that actually emits that member.
+_FAILURE_BY_CONDITION: dict[ProviderCondition, Callable[[], Exception]] = {
+    ProviderCondition.THROTTLED: lambda: _acp_failure("rate_limit"),
+    ProviderCondition.PROVIDER_OVERLOADED: lambda: _acp_failure("overloaded"),
+    ProviderCondition.UNAUTHENTICATED: lambda: _acp_failure("authentication_failed"),
+    ProviderCondition.CREDITS_EXHAUSTED: lambda: _acp_failure("billing_error"),
+    ProviderCondition.INVALID_REQUEST: lambda: _acp_failure("invalid_request"),
+    ProviderCondition.UNKNOWN: lambda: _acp_failure("server_error"),
+    ProviderCondition.NETWORK_UNREACHABLE: lambda: _codex_failure(
+        {"httpConnectionFailed": {}}
+    ),
+    ProviderCondition.USAGE_EXHAUSTED: lambda: _codex_failure("usageLimitExceeded"),
+    ProviderCondition.BUDGET_EXHAUSTED: lambda: _codex_failure("sessionBudgetExceeded"),
+}
+
+#: What each member is SPECIFIED to do, written out rather than read back from the
+#: production set. Reading the set would make this table agree with the code by
+#: construction and pass however the code was mutated; spelled out, it fails the
+#: moment production and the decision disagree.
+#:
+#: Retry: the two canonically transient refusals, plus the transport failure whose
+#: stdlib equivalents this policy has always retried. Do not retry: the three that
+#: need a credential, a payment or a raised ceiling; the request that cannot
+#: succeed as sent; the allowance window no bounded backoff outlives; and the
+#: floor, where the wire said nothing at all.
+_EXPECTED_ATTEMPTS: dict[ProviderCondition, int] = {
+    ProviderCondition.THROTTLED: 3,
+    ProviderCondition.PROVIDER_OVERLOADED: 3,
+    ProviderCondition.NETWORK_UNREACHABLE: 3,
+    ProviderCondition.UNAUTHENTICATED: 1,
+    ProviderCondition.CREDITS_EXHAUSTED: 1,
+    ProviderCondition.BUDGET_EXHAUSTED: 1,
+    ProviderCondition.USAGE_EXHAUSTED: 1,
+    ProviderCondition.INVALID_REQUEST: 1,
+    ProviderCondition.UNKNOWN: 1,
+}
+
+#: The production policy with its sleep collapsed and nothing else touched.
+#:
+#: ``retry_on`` - the classifier under test - and ``max_attempts`` are carried
+#: over verbatim from the shipped object; only the timing fields are replaced, so
+#: the exhaustive sweep below costs milliseconds instead of sleeping through
+#: 0.5s + 1.0s of real backoff nine times over. The shipped intervals are not left
+#: unproven: one case below runs the untouched production object and asserts that
+#: its real first interval actually elapsed.
+_FAST_RETRY_POLICY = _NODE_RETRY_POLICY._replace(
+    initial_interval=0.001, max_interval=0.001, jitter=False
+)
+
+
+def _counting_failure_graph(
+    make_failure: Callable[[], Exception],
+    *,
+    policy: RetryPolicy,
+    attempts: list[int],
+) -> Any:
+    """Compile a real one-node graph whose node fails the way a worker fails.
+
+    The node wraps its provider failure in ``WorkerExecutionError`` and chains it,
+    which is the shape the worker node produces in production and therefore the
+    shape the classifier has to unwrap. Every entered attempt appends to
+    *attempts* before raising, so the list length is the count of real executions.
+    """
+    from ...thread.errors import WorkerExecutionError
+
+    async def failing_node(state: Any) -> dict[str, Any]:
+        attempts.append(len(attempts) + 1)
+        cause = make_failure()
+        raise WorkerExecutionError(
+            worker="coder", model="acp:test", message_count=1, cause=cause
+        ) from cause
+
+    builder: StateGraph = StateGraph(cast("Any", TeamState))
+    builder.add_node("coder", failing_node, retry_policy=policy)
+    builder.add_edge(START, "coder")
+    builder.add_edge("coder", END)
+    return builder.compile()
+
+
+async def _attempts_for(
+    make_failure: Callable[[], Exception], *, policy: RetryPolicy
+) -> list[int]:
+    """Run a real graph to exhaustion and return the attempts its node made."""
+    from ...thread.errors import WorkerExecutionError
+
+    attempts: list[int] = []
+    graph = _counting_failure_graph(make_failure, policy=policy, attempts=attempts)
+    with pytest.raises(WorkerExecutionError):
+        await graph.ainvoke({"messages": []})
+    return attempts
+
+
+@pytest.mark.asyncio(loop_scope="function")
+@pytest.mark.parametrize("condition", sorted(_EXPECTED_ATTEMPTS, key=str))
+async def test_a_condition_retries_exactly_as_the_taxonomy_says_it_should(
+    condition: ProviderCondition,
+) -> None:
+    """Every member's real attempt count matches what the taxonomy specifies.
+
+    Both halves are load-bearing. Without the retrying members this cannot show
+    the policy fires at all; without the refusing ones it cannot distinguish a
+    classifier from a policy that retries everything, which would spend a user's
+    quota on failures no retry can fix.
+    """
+    failure = _FAILURE_BY_CONDITION[condition]
+    # The failure really does carry the member this case is about, so a mapping
+    # change cannot leave the sweep silently exercising one condition nine times.
+    assert getattr(failure(), "condition", None) is condition
+
+    attempts = await _attempts_for(failure, policy=_FAST_RETRY_POLICY)
+    assert len(attempts) == _EXPECTED_ATTEMPTS[condition]
+
+
+@pytest.mark.asyncio(loop_scope="function")
+async def test_a_throttled_failure_retries_under_the_shipped_backoff() -> None:
+    """The untouched production policy retries, and its real interval elapses.
+
+    The sweep above collapses the sleep to keep nine cases cheap, which leaves the
+    shipped intervals unexercised. This case runs the object the compiler actually
+    attaches, so the wait a throttled provider gets is the configured one rather
+    than a value only this test ever sees.
+    """
+    started = time.monotonic()
+    attempts = await _attempts_for(
+        _FAILURE_BY_CONDITION[ProviderCondition.THROTTLED],
+        policy=_NODE_RETRY_POLICY,
+    )
+    elapsed = time.monotonic() - started
+
+    assert len(attempts) == _NODE_RETRY_POLICY.max_attempts
+    # Two sleeps separate three attempts; the first alone is at least the
+    # configured initial interval, so anything shorter means no real backoff ran.
+    assert elapsed >= _NODE_RETRY_POLICY.initial_interval
+
+
+@pytest.mark.asyncio(loop_scope="function")
+async def test_a_stated_lane_retry_hint_overrides_the_inferred_verdict() -> None:
+    """A verdict the lane sent wins over the one this classifier would derive.
+
+    Driven in both directions on purpose: a hint that only agreed with the
+    inference would be indistinguishable from not being read at all.
+    """
+    # The lane says it would have tried again, on a condition inference refuses.
+    retried = await _attempts_for(
+        lambda: _codex_failure("unauthorized", will_retry=True),
+        policy=_FAST_RETRY_POLICY,
+    )
+    assert len(retried) == _FAST_RETRY_POLICY.max_attempts
+
+    # The lane says it is done, on a condition inference would have retried.
+    abandoned = await _attempts_for(
+        lambda: _codex_failure("serverOverloaded", will_retry=False),
+        policy=_FAST_RETRY_POLICY,
+    )
+    assert len(abandoned) == 1
+
+
+@pytest.mark.asyncio(loop_scope="function")
+async def test_every_model_backed_node_carries_the_production_retry_policy(
+    pf: ProviderFactoryProtocol,
+) -> None:
+    """The policy proven above is the one compilation attaches to real nodes.
+
+    Without this the behavioural cases would describe a policy object that
+    production might never reach a node with, which is the exact gap that let a
+    configured retry sit inert for the whole life of the provider adapters.
+    """
+    team = _pipeline_team()
+    agent_configs = {w.agent_id: load_agent_config(w.agent_id) for w in team.workers}
+    graph = compile_team_graph(
+        team_config=team, agent_configs=agent_configs, provider_factory=pf
+    )
+
+    for agent_id in agent_configs:
+        node = graph.nodes[agent_id]
+        assert _NODE_RETRY_POLICY in (getattr(node, "retry_policy", None) or ())
+
+
 @pytest.mark.asyncio
 async def test_research_producer_injects_scoped_conventions(tmp_path) -> None:
     """The researcher's model turn receives the role-scoped bundled conventions.
@@ -701,7 +932,7 @@ async def test_research_producer_injects_scoped_conventions(tmp_path) -> None:
     behavior that wires the scoped document-authoring conventions into its turn so
     it is not conventions-blind.
     """
-    from typing import Any, cast
+    from typing import cast
 
     from langchain_core.messages import AIMessage
     from langchain_core.outputs import ChatGeneration, ChatResult

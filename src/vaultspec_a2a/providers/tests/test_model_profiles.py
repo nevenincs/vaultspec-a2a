@@ -133,19 +133,32 @@ class TestResolution:
         assert by_agent["vaultspec-doc-reviewer"].provider == Provider.CLAUDE
         assert by_agent["vaultspec-researcher"].provider == Provider.CLAUDE
 
-    def test_bundled_fast_profile_lowers_two_roles_only(self) -> None:
+    def test_bundled_fast_profile_lowers_every_role(self) -> None:
         team = load_team_config("vaultspec-adr-research")
         assignment = resolve_effective_assignment(team, "fast")
         by_agent = {r.agent_id: r for r in assignment.roles}
-        assert by_agent["vaultspec-researcher"].capability == Model.LOW
-        assert by_agent["vaultspec-researcher"].capability_source == (
-            AssignmentSource.PROFILE
+        assert set(by_agent) == {
+            "vaultspec-researcher",
+            "vaultspec-synthesist",
+            "vaultspec-adr-author",
+            "vaultspec-plan-author",
+            "vaultspec-doc-reviewer",
+        }
+        assert all(role.capability == Model.LOW for role in by_agent.values())
+        assert all(
+            role.capability_source == AssignmentSource.PROFILE
+            for role in by_agent.values()
         )
-        assert by_agent["vaultspec-doc-reviewer"].capability == Model.LOW
-        # The two authoring roles are untouched (fall through to agent config).
-        assert by_agent["vaultspec-synthesist"].capability_source != (
-            AssignmentSource.PROFILE
-        )
+
+    def test_live_provider_profiles_set_every_role_to_low(self) -> None:
+        """Every served provider-axis profile is safe for a live certification run."""
+        team = load_team_config("vaultspec-adr-research")
+        for profile_id in ("fast", "codex", "codex-all", "zai", "kimi", "kimi-all"):
+            assignment = resolve_effective_assignment(team, profile_id)
+            assert assignment.roles, profile_id
+            assert all(role.capability == Model.LOW for role in assignment.roles), (
+                profile_id
+            )
 
     def test_unknown_profile_raises_config_error(self) -> None:
         team = load_team_config("vaultspec-adr-research")
@@ -290,7 +303,7 @@ class TestEligibility:
         readiness = {
             Provider.MOCK: ProviderReadiness(Provider.MOCK, True),
             Provider.CLAUDE: ProviderReadiness(
-                Provider.CLAUDE, False, "no Claude OAuth token configured"
+                Provider.CLAUDE, False, "no authenticated Claude CLI session found"
             ),
         }
         elig = evaluate_profile_eligibility(
@@ -387,11 +400,12 @@ class TestFreeze:
         frozen = freeze_assignment(assignment)
         assert frozen.profile_id == "fast"
         assert frozen.digest  # non-empty sha256
-        # The compiler map is the provider/capability/fallback subset per role.
+        # The compiler map is a complete frozen execution assignment per role.
         cmap = frozen.compiler_map()
         r = cmap["vaultspec-researcher"]
         assert r["provider"] == "claude"
         assert r["capability"] == "low"
+        assert r["model_name"] == MODEL_MAP[Provider.CLAUDE][Model.LOW]
         assert "fallback" in r
         # The disclosure roles carry role_id + model_name + source too.
         assert frozen.roles["vaultspec-researcher"]["role_id"] == "researcher"

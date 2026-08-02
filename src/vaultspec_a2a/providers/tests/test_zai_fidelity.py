@@ -26,7 +26,7 @@ import pytest
 from langchain_core.messages import HumanMessage, SystemMessage
 
 from ...control.config import settings
-from ...graph.enums import Provider
+from ...graph.enums import Model, Provider
 from ..acp_chat_model import AcpChatModel
 from ..factory import ProviderFactory
 
@@ -45,7 +45,9 @@ async def test_zai_streaming_shape_is_faithful(tmp_path: Path) -> None:
     Proves the streaming-chunk shape the reused AcpChatModel path depends on
     survives Z.ai's gateway: multiple ChatGenerationChunks with real text content.
     """
-    model = ProviderFactory().create(Provider.ZAI, workspace_root=tmp_path)
+    model = ProviderFactory().create(
+        Provider.ZAI, model=Model.LOW, workspace_root=tmp_path
+    )
     assert isinstance(model, AcpChatModel)
     # The gateway vars are injected; the token itself is never surfaced here.
     assert model.env_vars.get("ANTHROPIC_BASE_URL") == settings.zai_base_url
@@ -72,7 +74,9 @@ async def test_zai_tool_calling_is_faithful(tmp_path: Path) -> None:
     executed. ``allowed_tools`` auto-permits the Write tool so the headless turn
     does not stall on a permission prompt.
     """
-    model = ProviderFactory().create(Provider.ZAI, workspace_root=tmp_path)
+    model = ProviderFactory().create(
+        Provider.ZAI, model=Model.LOW, workspace_root=tmp_path
+    )
     assert isinstance(model, AcpChatModel)
     model.allowed_tools = ["Write"]
 

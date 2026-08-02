@@ -49,6 +49,8 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import os
+from contextlib import suppress
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -64,8 +66,11 @@ if TYPE_CHECKING:
 
 __all__ = [
     "PROJECTION_MARKER_KEY",
+    "ambient_user_mcp_names",
+    "cleanup_confinement_settings",
     "cleanup_projected_mcp",
     "enumerate_ancestor_mcp_names",
+    "project_confinement_settings",
     "project_declared_mcp",
 ]
 
@@ -352,6 +357,168 @@ def project_declared_mcp(
         base_absent,
     )
     return path
+
+
+def ambient_user_mcp_names(config_file: Path | None = None) -> list[str]:
+    """Return the operator's user-global MCP server names, sorted.
+
+    Read from the CLI's own ambient user config (``$CLAUDE_CONFIG_DIR/.claude.json``
+    when the override is set, else ``~/.claude.json``) - configuration, never a
+    credential. The spawned CLI inherits the operator's real config home (the
+    no-auth contract: the child sees exactly what an interactive invocation
+    sees), so the operator's user-global servers WILL surface unless the run's
+    confinement settings deny them by name; this enumeration feeds that deny
+    set. Best-effort: a missing or malformed file contributes nothing.
+    """
+    if config_file is None:
+        override = os.environ.get("CLAUDE_CONFIG_DIR", "").strip()
+        base = Path(override).expanduser() if override else Path.home()
+        config_file = base / ".claude.json"
+    return sorted(_mcp_names(config_file))
+
+
+def project_confinement_settings(
+    run_workspace: Path | str,
+    mcp_servers: Sequence[JsonObject],
+) -> Path | None:
+    """Write the run workspace's MCP-confinement ``settings.local.json``.
+
+    The declared-surface invariant (agent-harness-provisioning) without any env
+    manipulation or config-home redirect: the child inherits the operator's real
+    environment and config home, and the confinement rides project-scope
+    settings in the RUN WORKSPACE instead - the highest-precedence file the CLI
+    reads from its cwd. Written only for an armed run (declared servers or a
+    bridge); a plain run leaves the workspace untouched and surfaces whatever
+    the operator ambiently has, exactly like an interactive session.
+
+    The written policy:
+
+    - ``enableAllProjectMcpServers`` false - nothing project-scoped auto-enables;
+    - ``enabledMcpjsonServers`` - exactly the declared, projected names;
+    - every OTHER known server (ancestor ``.mcp.json`` names plus the operator's
+      user-global names, minus the declared set) is disabled by name AND
+      tool-denied (``mcp__<name>`` denies the whole server), closing both the
+      S20 ancestor leak and the ambient user-global surface.
+
+    A real workspace routinely carries its OWN ``settings.local.json`` (e.g. a
+    WebFetch domain allowlist the run's web grounding depends on), so the
+    policy is MERGED over the existing settings rather than replacing them:
+    foreign keys survive, foreign ``permissions`` entries survive, and our deny
+    names are unioned into any existing deny list. Ownership is marker-based
+    (:data:`PROJECTION_MARKER_KEY` carrying a ``{"base": ...}`` snapshot of the
+    pre-merge document, or ``None`` when the file was absent): cleanup restores
+    exactly that base, and a file already carrying our marker is crash residue
+    whose recorded base is carried forward. Only an unparseable file refuses.
+    """
+    surfacing = _declared_home_entries(mcp_servers)
+    if not surfacing:
+        return None
+    declared = sorted(surfacing)
+    declared_set = set(declared)
+    denied = sorted(
+        (
+            set(enumerate_ancestor_mcp_names(run_workspace))
+            | set(ambient_user_mcp_names())
+        )
+        - declared_set
+    )
+    path = Path(run_workspace) / ".claude" / "settings.local.json"
+
+    base: JsonObject | None = None
+    if path.exists():
+        try:
+            parsed = _JSON_VALUE.validate_json(path.read_text(encoding="utf-8"))
+        except (OSError, ValidationError) as exc:
+            raise ProjectionRefusedError(
+                f"refusing to write confinement settings over an unparseable "
+                f"{path}: {exc}. Repair or remove the file, or use a clean run "
+                "workspace."
+            ) from exc
+        if not isinstance(parsed, dict):
+            raise ProjectionRefusedError(
+                f"refusing to write confinement settings over {path}: top-level "
+                "JSON is not an object."
+            )
+        marker = parsed.get(PROJECTION_MARKER_KEY)
+        if isinstance(marker, dict) and "base" in marker:
+            # Crash residue from a prior run: carry ITS pre-merge base forward
+            # so a later cleanup still restores the original document.
+            recorded = marker.get("base")
+            base = recorded if isinstance(recorded, dict) else None
+        else:
+            base = parsed
+
+    merged: JsonObject = dict(base or {})
+    merged["enableAllProjectMcpServers"] = False
+    merged["enabledMcpjsonServers"] = list(declared)
+    if denied:
+        base_disabled = merged.get("disabledMcpjsonServers")
+        disabled = (
+            [name for name in base_disabled if isinstance(name, str)]
+            if isinstance(base_disabled, list)
+            else []
+        )
+        merged["disabledMcpjsonServers"] = disabled + [
+            name for name in denied if name not in disabled
+        ]
+        base_permissions = merged.get("permissions")
+        permissions: JsonObject = (
+            dict(base_permissions) if isinstance(base_permissions, dict) else {}
+        )
+        base_deny = permissions.get("deny")
+        deny = (
+            [entry for entry in base_deny if isinstance(entry, str)]
+            if isinstance(base_deny, list)
+            else []
+        )
+        permissions["deny"] = deny + [
+            f"mcp__{name}" for name in denied if f"mcp__{name}" not in deny
+        ]
+        merged["permissions"] = permissions
+    merged[PROJECTION_MARKER_KEY] = {"base": base}
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(merged, indent=2), encoding="utf-8")
+    logger.debug(
+        "merged MCP confinement settings into %s (enabling %d declared, "
+        "denying %d, base_absent=%s)",
+        path,
+        len(declared),
+        len(denied),
+        base is None,
+    )
+    return path
+
+
+def cleanup_confinement_settings(path: Path | None) -> None:
+    """Restore the pre-merge settings :func:`project_confinement_settings` saw.
+
+    Restores the marker's recorded base document exactly - the workspace's own
+    settings come back byte-equivalent in content, and a file we created from
+    nothing is removed (with its ``.claude`` directory when that leaves it
+    empty). A file without our marker is foreign and never touched. Never
+    raises.
+    """
+    if path is None or not path.exists():
+        return
+    try:
+        parsed = _JSON_VALUE.validate_json(path.read_text(encoding="utf-8"))
+    except (OSError, ValidationError):
+        return
+    if not isinstance(parsed, dict):
+        return
+    marker = parsed.get(PROJECTION_MARKER_KEY)
+    if not (isinstance(marker, dict) and "base" in marker):
+        return
+    base = marker.get("base")
+    if isinstance(base, dict):
+        try:
+            path.write_text(json.dumps(base, indent=2), encoding="utf-8")
+        except OSError:
+            logger.warning("failed to restore pre-merge settings at %s", path)
+        return
+    _safe_unlink(path)
+    with suppress(OSError):
+        path.parent.rmdir()
 
 
 def cleanup_projected_mcp(path: Path | None) -> None:

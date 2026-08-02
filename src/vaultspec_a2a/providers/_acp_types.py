@@ -64,6 +64,9 @@ class AcpModelConfig:
     # the permission-RPC handler instead. Defaults to the incumbent claude family
     # so existing constructions are unchanged.
     acp_family: str = "claude"
+    # Concrete model resolved by the profile layer. Claude-family ACP adapters
+    # select it through the session's negotiated configuration surface.
+    desired_model: str | None = None
 
 
 @dataclass
@@ -89,6 +92,7 @@ class AcpSessionContext:
     # Session-scoped mutables (moved from AcpChatModel PrivateAttrs)
     tool_calls: dict[str, JsonObject] = field(default_factory=dict)
     agent_modes: JsonObject = field(default_factory=dict)
+    config_options: list[JsonObject] = field(default_factory=list)
     last_auth_url: str | None = None
     # Monotonic stamp of the last frame read from the subprocess. The turn loop
     # measures silence against this, so any protocol traffic - streamed content,
@@ -119,6 +123,7 @@ class SessionSetupResult:
 
     session_id: str
     agent_modes: JsonObject
+    config_options: list[JsonObject]
 
 
 type AcpRpcHandler = Callable[

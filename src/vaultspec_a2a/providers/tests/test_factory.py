@@ -73,28 +73,30 @@ def test_provider_factory_claude_binary_backend_injects_bun_flag() -> None:
     assert model.command_origin == "package_bin"
     assert model.command_kind == "bun_binary"
     assert model.acp_backend == "binary"
-    assert model.auth_mode in {"oauth_token", "none_detected"}
+    assert model.auth_mode in {"cli_session", "none_detected"}
 
 
-def test_provider_factory_claude_binary_oauth_still_injected() -> None:
-    """binary backend still injects CLAUDE_CODE_OAUTH_TOKEN when present."""
+def test_provider_factory_claude_never_injects_an_env_token() -> None:
+    """The Claude lane's identity is the operator's CLI session, never a token.
+
+    A configured ``CLAUDE_CODE_OAUTH_TOKEN`` (settings/.env) is a SEPARATE
+    credential window from the account the operator is logged in as; injecting
+    it would silently redirect every run onto that other identity. The factory
+    must therefore construct the model with no token in ``env_vars`` regardless
+    of what settings carry, and stamp the lane from the CLI session credential's
+    presence alone.
+    """
     if _BIN_PATH is None:
         _assert_binary_backend_unavailable(
             lambda: ProviderFactory().create(Provider.CLAUDE, backend="binary")
         )
         return
-    # We can only assert this when the environment actually has an OAuth token.
-    # The factory reads it from settings; we pass backend explicitly and let
-    # the real settings supply the token if one is configured.
     model = ProviderFactory().create(Provider.CLAUDE, backend="binary")
     assert isinstance(model, AcpChatModel)
     assert model.env_vars.get("CLAUDE_AGENT_ACP_IS_SINGLE_FILE_BUN") == "1"
-    # If an OAuth token is configured in the environment, it must appear.
-    if settings.claude_code_oauth_token:
-        assert (
-            model.env_vars.get("CLAUDE_CODE_OAUTH_TOKEN")
-            == settings.claude_code_oauth_token
-        )
+    assert "CLAUDE_CODE_OAUTH_TOKEN" not in model.env_vars
+    assert "ANTHROPIC_API_KEY" not in model.env_vars
+    assert model.auth_mode in {"cli_session", "none_detected"}
 
 
 def test_provider_factory_claude_binary_sets_use_exec() -> None:
@@ -107,6 +109,22 @@ def test_provider_factory_claude_binary_sets_use_exec() -> None:
     model = ProviderFactory().create(Provider.CLAUDE, backend="binary")
     assert isinstance(model, AcpChatModel)
     assert model.use_exec is True
+
+
+def test_provider_factory_claude_retains_requested_model_for_acp_selection() -> None:
+    """A profile-resolved Claude tier must survive factory construction."""
+    if _BIN_PATH is None:
+        _assert_binary_backend_unavailable(
+            lambda: ProviderFactory().create(
+                Provider.CLAUDE, model=Model.LOW, backend="binary"
+            )
+        )
+        return
+    model = ProviderFactory().create(Provider.CLAUDE, model=Model.LOW, backend="binary")
+    assert isinstance(model, AcpChatModel)
+    expected = MODEL_MAP[Provider.CLAUDE][Model.LOW]
+    assert model.desired_model == expected
+    assert model._config.desired_model == expected
 
 
 def test_provider_factory_gemini_creates_acp() -> None:
@@ -215,6 +233,19 @@ def test_provider_factory_zai_creates_acp_via_claude_wrapper() -> None:
     assert model.acp_backend == "node"
     assert model.use_exec is False
     assert model.auth_mode in {"zai_auth_token", "none_detected"}
+
+
+def test_provider_factory_zai_retains_requested_model_for_acp_selection() -> None:
+    """A profile-resolved Z.ai tier must reach the shared Claude ACP model."""
+    if not _CLAUDE_ACP_JS.exists():
+        with pytest.raises(ConfigError, match="Claude ACP entry point not found"):
+            ProviderFactory().create(Provider.ZAI, model=Model.LOW)
+        return
+    model = ProviderFactory().create(Provider.ZAI, model=Model.LOW)
+    assert isinstance(model, AcpChatModel)
+    expected = MODEL_MAP[Provider.ZAI][Model.LOW]
+    assert model.desired_model == expected
+    assert model._config.desired_model == expected
 
 
 def test_provider_factory_zai_injects_configured_token() -> None:

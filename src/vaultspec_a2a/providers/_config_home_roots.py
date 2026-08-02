@@ -1,21 +1,19 @@
 """Shared per-run config-home root resolution and orphan sweep.
 
-Both the Claude/Z.ai ACP path (``_acp_config_home``) and the Codex path
-(``_codex_config_home``) build a fresh, per-run CLI configuration directory for
-every spawn. They diverge in everything that is genuinely CLI-specific - Claude
-carries auth via an env token and writes JSON, Codex carries auth via a copied
-``auth.json`` and writes TOML - so those two builders stay separate modules on
-purpose.
+The Codex path (``_codex_config_home``) builds a fresh, per-run CLI
+configuration directory for every spawn. (The Claude/Z.ai ACP lane once carried
+a sibling isolated home; it now runs in the operator's real config home under
+the no-auth ambient-environment contract, and its MCP confinement rides
+run-workspace projections instead.)
 
-What they do NOT diverge on is WHERE that per-run directory lives and HOW an
-abandoned one gets reclaimed: an armed desktop install keeps every ephemeral
-home under its own accounted application state directory (so an uninstall can
-find them all, and a system-wide temp sweep cannot delete a live run's home out
-from under it), and a home left behind by a crashed run is reclaimed once it is
-stale enough that liveness can no longer plausibly be assumed. One root, one
-sweep, two CLI-specific homes: this module is the single implementation of
-those two shared concerns, parameterized only by the caller's own naming
-prefix so a sweep for one CLI never collects a home belonging to the other.
+Two concerns stay shared here rather than in the CLI-specific builder: WHERE a
+per-run directory lives and HOW an abandoned one gets reclaimed. An armed
+desktop install keeps every ephemeral home under its own accounted application
+state directory (so an uninstall can find them all, and a system-wide temp
+sweep cannot delete a live run's home out from under it), and a home left
+behind by a crashed run is reclaimed once it is stale enough that liveness can
+no longer plausibly be assumed. The sweep is parameterized by the caller's own
+naming prefix so it never collects a directory belonging to another product.
 """
 
 from __future__ import annotations

@@ -30,7 +30,6 @@ from pydantic import SecretStr, TypeAdapter
 
 from ...thread.errors import ConfigError
 from ...utils.enums import CodexWebSearchMode
-from .._acp_config_home import cleanup_isolated_config_home, create_isolated_config_home
 from .._acp_mcp import (
     _KNOWN_MCP_SERVERS,
     NATIVE_READ_TOOL_NAMES,
@@ -48,6 +47,7 @@ from .._acp_mcp import (
     harness_allowed_tool_names,
     resolve_harness_mcp_servers,
 )
+from .._acp_project_mcp import project_declared_mcp
 from .._codex_config_home import build_codex_config_home, cleanup_codex_config_home
 from .._json_contract import JsonObject
 from ..acp_chat_model import AcpChatModel
@@ -234,18 +234,20 @@ class TestSpawnCompositionRefusesUndeclaredNativeTools:
 
 
 class TestConfigHomeCarriesTheDeclaredAxis:
-    """The real config-home writers surface only entries that declared the axis."""
+    """The real surfacing writers emit only entries that declared the axis."""
 
-    def test_claude_config_home_written_from_the_composed_session(self) -> None:
-        """Walks worker spawn composition -> config home -> the real .claude.json.
+    def test_claude_projection_written_from_the_composed_session(
+        self, tmp_path: Path
+    ) -> None:
+        """Walks worker spawn composition -> projection -> the real ``.mcp.json``.
 
         The production chain: the worker composes the declared harness servers and
-        the native read floor onto the model, ``AcpChatModel`` then selects the
-        registry-known servers for the isolated home, and the home is written to
-        disk. Every name that survives to the file passed the two-axis trust root.
+        the native read floor onto the model, ``AcpChatModel`` then projects the
+        registry-known servers into the run workspace's ``.mcp.json``. Every name
+        that survives to the file passed the two-axis trust root.
         """
         model = compose_harness_mcp_servers(
-            AcpChatModel(command=["echo"], env_vars={}, workspace_root="/tmp/ws"),
+            AcpChatModel(command=["echo"], env_vars={}, workspace_root=str(tmp_path)),
             [_RAG],
             allowed_tools=harness_allowed_tool_names([_RAG]),
         )
@@ -254,11 +256,9 @@ class TestConfigHomeCarriesTheDeclaredAxis:
         assert isinstance(model, AcpChatModel)
 
         surfacing = config_home_mcp_servers(model.mcp_servers)
-        home = create_isolated_config_home(surfacing)
-        try:
-            rendered = (home / ".claude.json").read_text(encoding="utf-8")
-        finally:
-            cleanup_isolated_config_home(home)
+        path = project_declared_mcp(tmp_path, model.mcp_servers)
+        assert path is not None
+        rendered = path.read_text(encoding="utf-8")
 
         written = _JSON_OBJECT.validate_json(rendered)
         written_servers = written["mcpServers"]

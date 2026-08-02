@@ -28,8 +28,11 @@ from .._acp_project_mcp import (
     PROJECTION_MARKER_KEY,
     _declared_home_entries,
     _split_projection,
+    ambient_user_mcp_names,
+    cleanup_confinement_settings,
     cleanup_projected_mcp,
     enumerate_ancestor_mcp_names,
+    project_confinement_settings,
     project_declared_mcp,
 )
 from .._json_contract import JsonObject, JsonValue
@@ -548,3 +551,129 @@ def test_cleanup_preserves_other_top_level_keys_through_the_shared_split(
     cleanup_projected_mcp(written)
     restored = json.loads(path.read_text(encoding="utf-8"))
     assert restored == {"$schema": "https://example.invalid/mcp", "mcpServers": {}}
+
+
+# ---------------------------------------------------------------------------
+# Confinement settings (run-workspace .claude/settings.local.json)
+# ---------------------------------------------------------------------------
+
+
+def test_confinement_settings_enable_declared_and_deny_the_rest(
+    tmp_path: Path,
+) -> None:
+    """Declared names are enabled; ancestor and ambient names are pinned out."""
+    _write_mcp(tmp_path, ["ancestor-server"])
+    run_ws = tmp_path / "run"
+    run_ws.mkdir()
+    ambient = tmp_path / ".claude.json"
+    ambient.write_text(
+        json.dumps({"mcpServers": {"operator-global": {"command": "x"}}}),
+        encoding="utf-8",
+    )
+
+    path = project_confinement_settings(run_ws, [_rag_spec()])
+    assert path is not None
+    settings = json.loads(path.read_text(encoding="utf-8"))
+    assert settings["enableAllProjectMcpServers"] is False
+    assert settings["enabledMcpjsonServers"] == ["vaultspec-rag"]
+    assert "ancestor-server" in settings["disabledMcpjsonServers"]
+    assert "mcp__ancestor-server" in settings["permissions"]["deny"]
+    # The declared name is never denied.
+    assert "vaultspec-rag" not in settings.get("disabledMcpjsonServers", [])
+    assert "mcp__vaultspec-rag" not in settings["permissions"]["deny"]
+    # The ambient user-global enumeration is injectable and feeds the deny set.
+    assert ambient_user_mcp_names(ambient) == ["operator-global"]
+
+
+def test_confinement_settings_deny_the_ambient_user_global_names(
+    tmp_path: Path,
+) -> None:
+    """The ambient user-global surface reaches the deny set via the enumerator."""
+    names = ambient_user_mcp_names(tmp_path / "missing.json")
+    assert names == []  # absent file contributes nothing
+    ambient = tmp_path / ".claude.json"
+    ambient.write_text(
+        json.dumps({"mcpServers": {"writable-global": {}, "another": {}}}),
+        encoding="utf-8",
+    )
+    assert ambient_user_mcp_names(ambient) == ["another", "writable-global"]
+
+
+def test_confinement_settings_written_only_for_an_armed_run(tmp_path: Path) -> None:
+    """A run with nothing declared leaves the workspace untouched."""
+    assert project_confinement_settings(tmp_path, []) is None
+    assert not (tmp_path / ".claude").exists()
+
+
+def test_confinement_settings_merge_over_the_workspace_own_settings(
+    tmp_path: Path,
+) -> None:
+    """A workspace's own settings survive the merge and are restored at cleanup.
+
+    Observed live: a real run workspace carries its own ``settings.local.json``
+    with a WebFetch domain allowlist the run's web grounding depends on.
+    Replacing it would break the run; refusing would refuse the normative case.
+    The confinement policy merges OVER it and cleanup restores it exactly.
+    """
+    _write_mcp(tmp_path, ["ancestor-server"])
+    settings_dir = tmp_path / ".claude"
+    settings_dir.mkdir()
+    own = settings_dir / "settings.local.json"
+    original = {
+        "permissions": {
+            "allow": ["WebFetch(domain:api.github.com)", "WebSearch"],
+            "deny": ["Bash"],
+        },
+        "someForeignKey": True,
+    }
+    own.write_text(json.dumps(original), encoding="utf-8")
+
+    path = project_confinement_settings(tmp_path, [_rag_spec()])
+    assert path == own
+    merged = json.loads(own.read_text(encoding="utf-8"))
+    # The workspace's own policy survives the merge...
+    assert merged["someForeignKey"] is True
+    assert "WebSearch" in merged["permissions"]["allow"]
+    assert "Bash" in merged["permissions"]["deny"]
+    # ...with the confinement policy layered on top.
+    assert merged["enableAllProjectMcpServers"] is False
+    assert merged["enabledMcpjsonServers"] == ["vaultspec-rag"]
+    assert "mcp__ancestor-server" in merged["permissions"]["deny"]
+
+    cleanup_confinement_settings(path)
+    assert json.loads(own.read_text(encoding="utf-8")) == original
+
+
+def test_confinement_cleanup_never_touches_a_markerless_file(tmp_path: Path) -> None:
+    """A settings file without our marker is foreign and is left untouched."""
+    settings_dir = tmp_path / ".claude"
+    settings_dir.mkdir()
+    foreign = settings_dir / "settings.local.json"
+    foreign.write_text(
+        json.dumps({"permissions": {"deny": ["Bash"]}}), encoding="utf-8"
+    )
+    cleanup_confinement_settings(foreign)
+    assert json.loads(foreign.read_text(encoding="utf-8")) == {
+        "permissions": {"deny": ["Bash"]}
+    }
+
+
+def test_confinement_settings_overwrite_own_crash_residue(tmp_path: Path) -> None:
+    """A marker-carrying file from a crashed run is ours to rewrite."""
+    first = project_confinement_settings(tmp_path, [_rag_spec()])
+    assert first is not None  # crash here: no cleanup runs
+    second = project_confinement_settings(tmp_path, [_rag_spec()])
+    assert second == first
+    settings = json.loads(second.read_text(encoding="utf-8"))
+    assert settings["enabledMcpjsonServers"] == ["vaultspec-rag"]
+
+
+def test_confinement_cleanup_removes_file_and_empty_dir(tmp_path: Path) -> None:
+    """Cleanup restores the workspace to its pre-run shape."""
+    path = project_confinement_settings(tmp_path, [_rag_spec()])
+    assert path is not None
+    cleanup_confinement_settings(path)
+    assert not path.exists()
+    assert not (tmp_path / ".claude").exists()
+    cleanup_confinement_settings(path)  # idempotent, None-safe below
+    cleanup_confinement_settings(None)

@@ -45,21 +45,17 @@ from pydantic import Field, PrivateAttr
 
 from ..control.config import settings
 from ..team.team_config import AgentConfig
-from ..thread.errors import IsolationRequiredError, ProjectionRefusedError
+from ..thread.errors import ProjectionRefusedError
 from ..utils.enums import AcpRequestId
 from ..workspace.environment import resolve_env_vars
 from ._acp_auth import authenticate_rpc, runtime_log_extra
 from ._acp_authoring import config_home_authoring_entry
-from ._acp_config_home import (
-    cleanup_isolated_config_home,
-    create_isolated_config_home,
-    isolation_required_but_absent,
-    preserve_session_record,
-    preserved_session_root,
-    should_isolate_config_home,
+from ._acp_project_mcp import (
+    cleanup_confinement_settings,
+    cleanup_projected_mcp,
+    project_confinement_settings,
+    project_declared_mcp,
 )
-from ._acp_mcp import config_home_mcp_servers
-from ._acp_project_mcp import cleanup_projected_mcp, project_declared_mcp
 from ._acp_protocol import process_stdout_loop
 from ._acp_rpc_handlers import (
     on_fs_read_text_file,
@@ -241,6 +237,13 @@ class AcpChatModel(BaseChatModel):
         default=None,
         description="Bounded authentication mode classification for the ACP runtime.",
     )
+    desired_model: str | None = Field(
+        default=None,
+        description=(
+            "Concrete model selected by the resolved profile. Claude-family ACP "
+            "sessions negotiate this value before any prompt is sent."
+        ),
+    )
 
     # --- Runtime state (private, not model fields) ---
     _config: AcpModelConfig = PrivateAttr()
@@ -253,6 +256,7 @@ class AcpChatModel(BaseChatModel):
     _active_session_id: str | None = PrivateAttr(default=None)
     _response_futures: AcpResponseFutures | None = PrivateAttr(default=None)
     _auth_methods: list[JsonObject] = PrivateAttr(default_factory=list)
+    _session_config_options: list[JsonObject] = PrivateAttr(default_factory=list)
 
     @override
     def model_post_init(self, __context: object) -> None:
@@ -277,8 +281,10 @@ class AcpChatModel(BaseChatModel):
             command_executable=self.command_executable,
             command_target=self.command_target,
             auth_mode=self.auth_mode,
+            desired_model=self.desired_model,
         )
         self._auth_methods = []
+        self._session_config_options = []
 
     @property
     @override
@@ -324,24 +330,29 @@ class AcpChatModel(BaseChatModel):
             ):
                 prompt_blocks.append({"type": "text", "text": str(msg.content)})
 
-        # Use resolve_env_vars() as base so API credentials are scrubbed
-        # from the subprocess environment.  Provider-specific keys (e.g.
-        # CLAUDE_CODE_OAUTH_TOKEN) are re-injected explicitly via self.env_vars,
-        # which is set by ProviderFactory with only the required token.
+        # The child inherits the ambient environment (resolve_env_vars passes it
+        # through, minus this service's own infra tokens) so the spawned CLI
+        # authenticates however the operator ambiently does - a logged-in CLI
+        # session, an API key in the environment, either. This layer implements
+        # NO authentication: it expresses no preference, reads no credential,
+        # and strips none. Provider-specific config (e.g. Z.ai's
+        # ANTHROPIC_BASE_URL/ANTHROPIC_AUTH_TOKEN retarget) rides self.env_vars
+        # as an additive overlay from ProviderFactory.
         _ws_path = Path(self.workspace_root or self.cwd or str(Path.cwd()))
         env = resolve_env_vars(_ws_path)
         env.update(self.env_vars)
-        # When using CLAUDE_CODE_OAUTH_TOKEN (flat-rate subscription),
-        # ANTHROPIC_API_KEY must be explicitly removed. If both are present,
-        # claude-agent-acp will use pay-as-you-go billing instead of the OAuth
-        # subscription, causing auth/billing failures.
-        if "CLAUDE_CODE_OAUTH_TOKEN" in env:
-            env.pop("ANTHROPIC_API_KEY", None)
-        # Bypass bundled cli.js — use system
-        # claude binary (native PE32+ Bun exe)
+        # Bypass the adapter's bundled cli.js — drive the same installed claude
+        # binary an interactive invocation runs, so the lane's behaviour (and
+        # credential resolution) matches the operator's own CLI exactly. Only
+        # for the claude-family adapter; Gemini/Kimi run their own CLIs.
         _system_claude = shutil.which("claude")
-        if "CLAUDE_CODE_OAUTH_TOKEN" in env and _system_claude:
-            env["CLAUDE_CODE_EXECUTABLE"] = _system_claude
+        if (
+            _system_claude
+            and self._config.acp_family == "claude"
+            and self.command
+            and Path(self.command[0]).stem.lower() != "gemini"
+        ):
+            env.setdefault("CLAUDE_CODE_EXECUTABLE", _system_claude)
         env.pop("CLAUDECODE", None)  # Prevent nested session abort
         # Suppress interactive prompts that
         # stall non-interactive ACP subprocesses.
@@ -372,79 +383,45 @@ class AcpChatModel(BaseChatModel):
         # and memoized per launch identity so the cost lands once per process.
         await verify_harness_mcp_contract(self._config.mcp_servers, env=env)
 
-        # Redirect the Claude/Z.ai CLI to a per-run isolated config home so the
-        # worker's MCP surface is exactly the declared set: the operator's
-        # user-global mcpServers and connected account remote MCP are suppressed
-        # (agent-harness-provisioning ambient-MCP invariant). Auth rides the env
-        # token, so no credential file is written into the home. Cleaned up in the
-        # finally once the subprocess is reaped.
-        config_home: Path | None = None
+        # Armed runs: the CLI runs in the operator's REAL config home (no
+        # redirect - the no-auth contract requires the child to resolve exactly
+        # the login an interactive `claude` resolves), so the declared-surface
+        # invariant rides the RUN WORKSPACE instead, over the two project-scope
+        # channels the pinned CLI actually reads from its cwd:
+        #   - .mcp.json (project_declared_mcp): the declared harness servers plus
+        #     the run's authoring bridge, merged marker-owned alongside anything
+        #     the workspace already carries. The bridge entry holds only
+        #     ``${VAULTSPEC_AUTHORING_*}`` placeholders; the real values are
+        #     hoisted into the spawn env below and expanded by the CLI at parse
+        #     time, keeping secrets off disk.
+        #   - .claude/settings.local.json (project_confinement_settings): enables
+        #     exactly the declared names and disables/tool-denies every OTHER
+        #     known server - ancestor .mcp.json names (the S20 leak) and the
+        #     operator's user-global servers - so the surfaced set stays the
+        #     declared set (agent-harness-provisioning ambient-MCP invariant)
+        #     without touching the child environment or the config home.
+        # The session-injected copy in ``mcp_servers`` is deliberately kept, not
+        # trimmed (P05.S22): it is the SOURCE the projections read, and the
+        # honest upstream re-arm channel if a future CLI surfaces
+        # session-injected servers. Both writes are inverted in the finally.
         projected_mcp: Path | None = None
-        if should_isolate_config_home(self.command, env):
-            # Two admission channels populate the isolated home, which is the only
-            # surface the pinned CLI actually surfaces to the model:
-            #   P03.S14 — the declared read-only harness servers
-            #     (``config_home_mcp_servers``), and
-            #   S18 — the run's own per-run authoring bridge
-            #     (``config_home_authoring_entry``), whose home ``env`` carries only
-            #     ``${VAULTSPEC_AUTHORING_*}`` placeholders while the real token
-            #     values ride the CLI spawn env (``bridge_env``) and are expanded by
-            #     the CLI at parse time, keeping secrets off disk.
-            # The session-injected copy in ``mcp_servers`` is deliberately kept, not
-            # trimmed (P05.S22): it is the SOURCE both selectors read to populate the
-            # home, and it is the honest upstream re-arm channel — if a future CLI
-            # surfaces session-injected servers, that path lights up with no code
-            # change here. Its only cost is a redundant connect the CLI ignores.
-            surfacing_servers = config_home_mcp_servers(self._config.mcp_servers)
-            bridge_entry, bridge_env = config_home_authoring_entry(
+        confinement_settings: Path | None = None
+        if self._config.mcp_servers:
+            _bridge_entry, bridge_env = config_home_authoring_entry(
                 self._config.mcp_servers
             )
-            surfacing_servers.update(bridge_entry)
             env.update(bridge_env)
-            config_home = create_isolated_config_home(
-                surfacing_servers,
-                workspace_root=_ws_path,
-            )
-            env["CLAUDE_CONFIG_DIR"] = str(config_home)
-            # Surfacing channel (S20): the adapter path does NOT surface the home's
-            # user-scope mcpServers to the model, but it DOES surface a PROJECT-scope
-            # .mcp.json. Merge the declared set INTO the run workspace's .mcp.json so
-            # it actually reaches the model alongside the project's own servers; the
-            # home's enabledMcpjsonServers pins it ON and the ancestor-walking deny
-            # keys pin everything else OFF. The bridge env placeholders were already
-            # hoisted above, so the projected entries carry only ${VAR} references.
-            # Raises ProjectionRefusedError (fail loud) only on a server-name
-            # collision with a non-projected entry or an unparseable file - clean the
-            # home we just created on that path so the refusal does not leak it; a
-            # successful projection is inverted in the finally with the home.
+            projected_mcp = project_declared_mcp(_ws_path, self._config.mcp_servers)
             try:
-                projected_mcp = project_declared_mcp(_ws_path, self._config.mcp_servers)
+                confinement_settings = project_confinement_settings(
+                    _ws_path, self._config.mcp_servers
+                )
             except ProjectionRefusedError:
-                cleanup_isolated_config_home(config_home)
+                cleanup_projected_mcp(projected_mcp)
                 raise
 
         if self.command and Path(self.command[0]).stem.lower() == "gemini":
             await refresh_gemini_token(env=env)
-
-        # Fail loud: a harness-armed run on the Claude/Z.ai config-home path MUST
-        # spawn with an isolated CLI config home. Reaching spawn armed but without
-        # one means the isolation was never applied - almost always because
-        # auth_mode == "none_detected" (no env token, so should_isolate_config_home
-        # declined) - and the agent would inherit the operator's ambient user-global
-        # MCP and auto-load the workspace's project .mcp.json, the exact
-        # declared-surface leak the agent-harness-provisioning ADR forbids. Refuse
-        # here rather than launch an agent with an unbounded MCP surface.
-        if isolation_required_but_absent(
-            acp_family=self._config.acp_family,
-            command=self.command,
-            mcp_servers=self._config.mcp_servers,
-            config_home=config_home,
-        ):
-            raise IsolationRequiredError(
-                f"harness-armed {self._config.provider!r} run reached spawn without "
-                f"an isolated CLI config home (auth_mode={self._config.auth_mode!r}); "
-                "refusing to launch with an unbounded MCP surface"
-            )
 
         # The spawn and session setup run INSIDE the try so the finally below is
         # the single cleanup path for BOTH the isolated config home and the
@@ -508,6 +485,7 @@ class AcpChatModel(BaseChatModel):
                 init_result.auth_methods,
             )
             self._active_session_id = result.session_id
+            self._session_config_options = result.config_options
             self._process = ctx.process
             self._stdin = ctx.stdin
             self._stdin_lock = ctx.stdin_lock
@@ -523,10 +501,11 @@ class AcpChatModel(BaseChatModel):
                 yield chunk
         finally:
             # Independent cleanup: a failure in any one release must not skip the
-            # rest. In particular, reaping the session must not skip destroying the
-            # isolated config home (which holds the copied credential), and the
-            # transcript is carried out BEFORE that home is destroyed. Each step
-            # runs regardless of earlier failures, which are aggregated.
+            # rest. The two workspace projections are inverted regardless of how
+            # the session ended; the CLI's own transcript lives in the operator's
+            # real config home (like any interactive session) and is not ours to
+            # move. Each step runs regardless of earlier failures, which are
+            # aggregated.
             cleanup_steps: list[CleanupStep] = []
             if ctx is not None and stdout_task is not None and stderr_task is not None:
                 session_ctx, out_task, err_task = ctx, stdout_task, stderr_task
@@ -537,18 +516,13 @@ class AcpChatModel(BaseChatModel):
                     )
                 )
             cleanup_steps.append(
-                (
-                    "acp-preserve-session-record",
-                    lambda: preserve_session_record(
-                        config_home, destination_root=preserved_session_root()
-                    ),
-                )
-            )
-            cleanup_steps.append(
-                ("acp-config-home", lambda: cleanup_isolated_config_home(config_home))
-            )
-            cleanup_steps.append(
                 ("acp-projected-mcp", lambda: cleanup_projected_mcp(projected_mcp))
+            )
+            cleanup_steps.append(
+                (
+                    "acp-confinement-settings",
+                    lambda: cleanup_confinement_settings(confinement_settings),
+                )
             )
             await run_independent_cleanups(*cleanup_steps)
 
@@ -877,48 +851,6 @@ class AcpChatModel(BaseChatModel):
             "id": rpc_id,
             "method": "session/set_mode",
             "params": {"sessionId": sid, "modeId": mode_id},
-        }
-        stdin = self._require_stdin()
-        async with self._stdin_lock:
-            stdin.write(json.dumps(req).encode("utf-8") + b"\n")
-            await stdin.drain()
-        resp = await asyncio.wait_for(
-            futures[rpc_id], timeout=settings.acp_rpc_timeout_seconds
-        )
-        return _json_object(resp.get("result"))
-
-    async def set_model(self, model_id: str) -> JsonObject:
-        """Set LLM model."""
-        sid = self._require_session()
-        rpc_id = AcpRequestId.SESSION_SET_MODEL
-        futures = self._require_response_futures()
-        futures[rpc_id] = asyncio.get_running_loop().create_future()
-        req: JsonObject = {
-            "jsonrpc": "2.0",
-            "id": rpc_id,
-            "method": "session/set_model",
-            "params": {"sessionId": sid, "modelId": model_id},
-        }
-        stdin = self._require_stdin()
-        async with self._stdin_lock:
-            stdin.write(json.dumps(req).encode("utf-8") + b"\n")
-            await stdin.drain()
-        resp = await asyncio.wait_for(
-            futures[rpc_id], timeout=settings.acp_rpc_timeout_seconds
-        )
-        return _json_object(resp.get("result"))
-
-    async def set_config_option(self, key: str, value: JsonValue) -> JsonObject:
-        """Set config option."""
-        sid = self._require_session()
-        rpc_id = AcpRequestId.SESSION_SET_CONFIG_OPTION
-        futures = self._require_response_futures()
-        futures[rpc_id] = asyncio.get_running_loop().create_future()
-        req: JsonObject = {
-            "jsonrpc": "2.0",
-            "id": rpc_id,
-            "method": "session/set_config_option",
-            "params": {"sessionId": sid, "key": key, "value": value},
         }
         stdin = self._require_stdin()
         async with self._stdin_lock:

@@ -33,6 +33,132 @@ __all__: list[str] = []
 logger = logging.getLogger(__name__)
 
 
+def _config_options(result: JsonObject, *, operation: str) -> list[JsonObject]:
+    """Return advertised session configuration options, tolerating absence.
+
+    ``configOptions`` is an optional part of the session surface: an agent that
+    advertises none simply offers nothing to configure, so absence maps to an
+    empty list rather than a refusal. What IS refused is malformed data - a
+    non-dict entry means the surface cannot be trusted. The strictness that
+    matters (a lane that REQUESTS a model but cannot verify its selection)
+    lives in :func:`_select_desired_model`, which still fails loud when a
+    desired model is set and no model option is advertised.
+    """
+    raw_options = result.get("configOptions")
+    if raw_options is None:
+        return []
+    if not isinstance(raw_options, list):
+        raise AcpSessionError(
+            f"ACP {operation} returned malformed configuration options",
+            code=AcpErrorCode.INTERNAL_ERROR,
+        )
+    options: list[JsonObject] = []
+    for option in raw_options:
+        if not isinstance(option, dict):
+            raise AcpSessionError(
+                f"ACP {operation} returned a malformed configuration option",
+                code=AcpErrorCode.INTERNAL_ERROR,
+            )
+        options.append(option)
+    return options
+
+
+def _model_config_id(config_options: list[JsonObject]) -> str:
+    """Read the model option identifier from the adapter's negotiated surface."""
+    for option in config_options:
+        if option.get("category") != "model":
+            continue
+        config_id = option.get("id")
+        if isinstance(config_id, str) and config_id:
+            return config_id
+        break
+    raise AcpSessionError(
+        "ACP session does not advertise a selectable model configuration option",
+        code=AcpErrorCode.INVALID_PARAMS,
+    )
+
+
+def _selected_model(
+    config_options: list[JsonObject], config_id: str, *, operation: str
+) -> str:
+    """Read the adapter-confirmed current value for the negotiated model option."""
+    for option in config_options:
+        if option.get("id") != config_id:
+            continue
+        current_value = option.get("currentValue")
+        if isinstance(current_value, str) and current_value:
+            return current_value
+        break
+    raise AcpSessionError(
+        f"ACP {operation} did not report a current selected model",
+        code=AcpErrorCode.INTERNAL_ERROR,
+    )
+
+
+async def _select_desired_model(
+    ctx: AcpSessionContext,
+    config: AcpModelConfig,
+    session_id: str,
+    config_options: list[JsonObject],
+) -> list[JsonObject]:
+    """Apply and verify the profile-resolved ACP model before any prompt."""
+    desired_model = config.desired_model
+    if not desired_model:
+        return config_options
+
+    config_id = _model_config_id(config_options)
+    rpc_id = AcpRequestId.SESSION_SET_CONFIG_OPTION
+    ctx.response_futures[rpc_id] = asyncio.get_running_loop().create_future()
+    request: JsonObject = {
+        "jsonrpc": "2.0",
+        "id": rpc_id,
+        "method": "session/set_config_option",
+        "params": {
+            "sessionId": session_id,
+            "configId": config_id,
+            "value": desired_model,
+        },
+    }
+    async with ctx.stdin_lock:
+        ctx.stdin.write(json.dumps(request).encode("utf-8") + b"\n")
+        await ctx.stdin.drain()
+    response = await asyncio.wait_for(
+        ctx.response_futures[rpc_id], timeout=settings.acp_startup_timeout_seconds
+    )
+    if "error" in response:
+        error = _json_object(response["error"])
+        message = str(error.get("message", response["error"]))
+        raise AcpSessionError(
+            f"ACP session/set_config_option failed: {message}",
+            code=_error_code(response["error"]),
+        )
+    result = response.get("result")
+    if not isinstance(result, dict):
+        raise AcpSessionError(
+            "ACP session/set_config_option succeeded without an object result",
+            code=AcpErrorCode.INTERNAL_ERROR,
+        )
+    confirmed_options = _config_options(result, operation="session/set_config_option")
+    selected_model = _selected_model(
+        confirmed_options, config_id, operation="session/set_config_option"
+    )
+    # The adapter ACCEPTED the request (no error above), so the confirmed value
+    # is its canonical form of what was asked for - which may be a variant of
+    # the requested id rather than the id verbatim. Observed live on the Claude
+    # CLI: requesting 'opus' is confirmed as 'opus[1m]', the bracketed
+    # context-window variant of the same model. Accept the exact id or a
+    # bracketed variant of it; anything else means the adapter selected a
+    # DIFFERENT model than requested, which stays a loud failure.
+    is_variant_of_desired = selected_model.startswith(f"{desired_model}[")
+    if selected_model != desired_model and not is_variant_of_desired:
+        raise AcpSessionError(
+            "ACP session/set_config_option did not select the requested model "
+            f"{desired_model!r}; adapter reported {selected_model!r}",
+            code=AcpErrorCode.INVALID_PARAMS,
+        )
+    return confirmed_options
+
+
 def _json_object(value: JsonValue | None) -> JsonObject:
     """Return one protocol object or an empty object for malformed data."""
     return value if isinstance(value, dict) else {}
@@ -273,6 +399,10 @@ async def setup_session(
             f"ACP {method} succeeded without a sessionId",
             code=AcpErrorCode.INTERNAL_ERROR,
         )
+    config_options = _config_options(result, operation=method)
+    config_options = await _select_desired_model(
+        ctx, config, session_id, config_options
+    )
     agent_modes: JsonObject = {}
     if modes := result.get("modes"):
         if not isinstance(modes, dict):
@@ -283,9 +413,11 @@ async def setup_session(
         }
     ctx.tool_calls = {}
     ctx.agent_modes = agent_modes
+    ctx.config_options = config_options
     return SessionSetupResult(
         session_id=session_id,
         agent_modes=agent_modes,
+        config_options=config_options,
     )
 
 

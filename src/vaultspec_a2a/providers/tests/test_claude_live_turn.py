@@ -13,10 +13,11 @@ is. Both channels are asserted here — the streamed deltas and the final
 aggregated result — because a provider can stream nothing and still return a
 result object, or stream and then lose the aggregation.
 
-The Claude lane authenticates with a flat-rate ``CLAUDE_CODE_OAUTH_TOKEN``
-subscription, not metered API billing (``ANTHROPIC_API_KEY`` is actively
-scrubbed from every agent subprocess), so a turn costs no per-token spend. The
-prompt is trivial regardless, to keep the turn short.
+The Claude lane implements no authentication of its own: the spawned CLI
+inherits the ambient environment and the operator's real config home, and
+authenticates however the operator ambiently does - on this project's dev hosts,
+a flat-rate subscription login. The prompt is trivial regardless, to keep the
+turn short.
 
 Re-arm (one command, once the prerequisites exist):
 
@@ -36,7 +37,7 @@ import pytest
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
 from ...control.config import settings
-from ...graph.enums import Provider
+from ...graph.enums import Model, Provider
 from .._subprocess import kill_process_tree
 from ..acp_chat_model import AcpChatModel
 from ..factory import _CLAUDE_ACP_JS, ProviderFactory, _classify_acp_command
@@ -44,23 +45,18 @@ from ..factory import _CLAUDE_ACP_JS, ProviderFactory, _classify_acp_command
 if TYPE_CHECKING:
     from pathlib import Path
 
-_CLAUDE_TOKEN_PRESENT = bool((settings.claude_code_oauth_token or "").strip())
-
 
 @pytest.mark.service
 @pytest.mark.asyncio
-@pytest.mark.skipif(
-    not _CLAUDE_TOKEN_PRESENT,
-    reason="no CLAUDE_CODE_OAUTH_TOKEN configured; run 'claude setup-token' "
-    "and set it per the ACP runbook",
-)
 async def test_claude_live_turn_completes_and_returns_content(tmp_path: Path) -> None:
     """A real Claude turn streams assistant text and returns a real AIMessage.
 
     Proves the provider tier end to end: the production factory resolves the ACP
-    command and injects only the OAuth token, the real subprocess runs a real
+    command with no auth of its own (the subprocess inherits the ambient
+    environment and authenticates itself), the real subprocess runs a real
     ``session/prompt``, assistant deltas arrive as streamed chunks, and the
-    aggregated result carries the same completed content.
+    aggregated result carries the same completed content. An unauthenticated
+    host fails with the provider's own auth error, which is the contract.
     """
     if settings.acp_backend != "binary" and not _CLAUDE_ACP_JS.exists():
         pytest.skip(
@@ -68,12 +64,15 @@ async def test_claude_live_turn_completes_and_returns_content(tmp_path: Path) ->
             "(@agentclientprotocol/claude-agent-acp) per the ACP runbook"
         )
 
-    model = ProviderFactory().create(Provider.CLAUDE, workspace_root=tmp_path)
+    model = ProviderFactory().create(
+        Provider.CLAUDE, model=Model.LOW, workspace_root=tmp_path
+    )
     assert isinstance(model, AcpChatModel)
-    # The production chain authenticated by subscription token, not API billing:
-    # the token itself is never surfaced here, only the fact of the lane.
-    assert model.auth_mode == "oauth_token"
-    assert "CLAUDE_CODE_OAUTH_TOKEN" in model.env_vars
+    # The production chain injects NO credential of its own: the lane is
+    # ambient-auth by contract, and the subprocess resolves whatever the
+    # operator's environment carries.
+    assert model.auth_mode == "ambient"
+    assert "CLAUDE_CODE_OAUTH_TOKEN" not in model.env_vars
     assert "ANTHROPIC_API_KEY" not in model.env_vars
 
     messages = [

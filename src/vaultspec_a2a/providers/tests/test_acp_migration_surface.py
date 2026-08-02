@@ -34,6 +34,7 @@ from pathlib import Path
 import pytest
 
 from ...control.config import settings
+from ...graph.enums import MODEL_MAP, Model, Provider
 from ...workspace.environment import resolve_env_vars
 from .._json_contract import JsonObject, JsonValue
 from .._subprocess import kill_process_tree, spawn_acp_process
@@ -124,5 +125,44 @@ async def test_migrated_adapter_preserves_handshake_surface() -> None:
         available = modes.get("availableModes")
         assert isinstance(available, list) and available
         assert all(isinstance(mode, dict) and "id" in mode for mode in available)
+
+        config_options = new_res.get("configOptions")
+        assert isinstance(config_options, list) and config_options
+        model_options = [
+            option
+            for option in config_options
+            if isinstance(option, dict) and option.get("category") == "model"
+        ]
+        assert len(model_options) == 1
+        model_option = model_options[0]
+        config_id = model_option.get("id")
+        assert isinstance(config_id, str) and config_id
+
+        desired_model = MODEL_MAP[Provider.CLAUDE][Model.LOW]
+        select_model: JsonObject = {
+            "jsonrpc": "2.0",
+            "id": 2,
+            "method": "session/set_config_option",
+            "params": {
+                "sessionId": new_res["sessionId"],
+                "configId": config_id,
+                "value": desired_model,
+            },
+        }
+        proc.stdin.write(json.dumps(select_model).encode("utf-8") + b"\n")
+        await proc.stdin.drain()
+        selected_frame = await read_acp_frame(proc.stdout, 2, 40.0)
+        assert "result" in selected_frame, selected_frame.get("error")
+        selected_result = selected_frame["result"]
+        assert isinstance(selected_result, dict)
+        selected_options = selected_result.get("configOptions")
+        assert isinstance(selected_options, list)
+        selected_model_options = [
+            option
+            for option in selected_options
+            if isinstance(option, dict) and option.get("id") == config_id
+        ]
+        assert len(selected_model_options) == 1
+        assert selected_model_options[0].get("currentValue") == desired_model
     finally:
         await kill_process_tree(proc, metadata=meta)

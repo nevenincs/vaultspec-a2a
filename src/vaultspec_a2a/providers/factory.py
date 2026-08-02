@@ -697,25 +697,20 @@ class ProviderFactory:
             )
 
         if provider == Provider.CLAUDE:
-            oauth_token = settings.claude_code_oauth_token
             backend = backend if backend is not None else settings.acp_backend
             logger.debug(
-                "[%s] Instantiating ACP Wrapper. OAuth Token present: %s, backend=%s",
-                provider,
-                bool(oauth_token),
-                backend,
+                "[%s] Instantiating ACP Wrapper. backend=%s", provider, backend
             )
 
             command, command_meta = _classify_acp_command(backend)
 
-            # Only inject CLAUDE_CODE_OAUTH_TOKEN. ANTHROPIC_API_KEY
-            # is explicitly stripped in _astream() to prevent pay-as-you-go billing
-            # from overriding the OAuth subscription.
-            env_vars: dict[str, str] = (
-                {"CLAUDE_CODE_OAUTH_TOKEN": oauth_token}
-                if oauth_token and oauth_token.strip()
-                else {}
-            )
+            # No authentication is implemented for this lane: the spawned CLI
+            # inherits the ambient environment and the operator's real config
+            # home, and resolves whatever auth the operator ambiently has - a
+            # logged-in CLI session, an API key in the environment, either -
+            # exactly as an interactive `claude` invocation would. This layer
+            # injects nothing, reads no credential, and expresses no preference.
+            env_vars: dict[str, str] = {}
             # Binary Bun executable requires this flag so acp-agent.ts can detect
             # it is running as a single-file Bun bundle (not via node + index.js).
             if backend == "binary":
@@ -724,6 +719,7 @@ class ProviderFactory:
             return AcpChatModel(
                 command=command,
                 env_vars=env_vars,
+                desired_model=model_name,
                 agent_config=agent_config,
                 workspace_root=str(workspace_root) if workspace_root else None,
                 # Native PE32+ binary bypasses cmd.exe shim — use exec directly.
@@ -735,7 +731,7 @@ class ProviderFactory:
                 command_executable=command_meta["command_executable"],
                 command_target=command_meta["command_target"],
                 acp_backend=command_meta["acp_backend"],
-                auth_mode="oauth_token" if env_vars else "none_detected",
+                auth_mode="ambient",
             )
 
         if provider == Provider.ZAI:
@@ -765,6 +761,7 @@ class ProviderFactory:
             return AcpChatModel(
                 command=command,
                 env_vars=env_vars,
+                desired_model=model_name,
                 agent_config=agent_config,
                 workspace_root=str(workspace_root) if workspace_root else None,
                 use_exec=(backend == "binary"),
@@ -812,7 +809,7 @@ class ProviderFactory:
             env_vars = _build_kimi_env(
                 kimi_api_key=api_key,
                 kimi_base_url=settings.kimi_base_url,
-                kimi_model_name=settings.kimi_model_name or model_name,
+                kimi_model_name=model_name,
             )
             logger.debug(
                 "[%s] Instantiating Kimi ACP agent. API key present: %s",

@@ -1,26 +1,27 @@
 """Per-run isolated CODEX_HOME carrying the declared read-only MCP servers.
 
-The structural analog of the Claude isolated config home (``_acp_config_home``),
-expressed in Codex's native config shape. Codex resolves its MCP servers and
-approval/sandbox config from ``CODEX_HOME`` (default ``~/.codex``); left on the
-operator's home, a worker inherits every ambient ``[mcp_servers.*]`` block the
-operator has (e.g. ``node_repl``, ``computer-use``), violating the harness
-invariant that the agent's MCP surface be exactly the declared set.
+Codex resolves its MCP servers and approval/sandbox config from ``CODEX_HOME``
+(default ``~/.codex``); left on the operator's home, a worker inherits every
+ambient ``[mcp_servers.*]`` block the operator has (e.g. ``node_repl``,
+``computer-use``), violating the harness invariant that the agent's MCP surface
+be exactly the declared set. (The Claude/Z.ai ACP lane enforces the same
+invariant differently: it runs in the operator's real config home and confines
+the surface via run-workspace projections, per the no-auth
+ambient-environment contract.)
 
 This module builds a per-run, worker-owned ``CODEX_HOME`` whose ``config.toml``
 carries EXACTLY the declared read-only harness servers as ``[mcp_servers.<name>]``
-blocks. Codex auth is file-based (``auth.json``), so - unlike the Claude token-env
-path - the base home's ``auth.json`` is copied in to preserve authentication;
-nothing else is carried, so the operator's ambient MCP config is suppressed.
+blocks. Codex auth is file-based (``auth.json``), so the base home's
+``auth.json`` is copied in to preserve authentication; nothing else is carried,
+so the operator's ambient MCP config is suppressed.
 
 One registry (``_KNOWN_MCP_SERVERS``), two serializations: this is the Codex
-transport for the same read-only servers the Claude home surfaces. Root
-resolution and the orphan-home sweep are likewise shared with the Claude side
-via ``_config_home_roots`` (one root, one sweep, two CLI-specific homes): on an
-armed desktop install the Codex home is created inside the same accounted
-application-state root as the Claude home, and a crashed run's home is
-reclaimed by the same age-gated sweep, scoped to this module's own prefix so it
-never collects a Claude home (or vice versa).
+transport for the same read-only servers the Claude lane projects. Root
+resolution and the orphan-home sweep live in ``_config_home_roots``: on an
+armed desktop install the Codex home is created inside the accounted
+application-state root, and a crashed run's home is reclaimed by the age-gated
+sweep, scoped to this module's own prefix so it never collects a directory
+belonging to another product.
 
 The same ``config.toml`` also carries the run's web-grounding posture. Codex
 does not expose web search as an allowlistable tool name the way the Claude

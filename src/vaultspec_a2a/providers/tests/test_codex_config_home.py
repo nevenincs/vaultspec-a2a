@@ -27,7 +27,6 @@ from ...control.config import Settings
 from ...graph.enums import Provider
 from ...utils.enums import CodexWebSearchMode
 from .._acp_authoring import AuthoringToolBinding, attach_authoring_tools
-from .._acp_config_home import sweep_orphan_config_homes
 from .._acp_mcp import codex_mcp_server_specs
 from .._codex_config_home import (
     SERVED_WEB_SEARCH_MODE,
@@ -820,19 +819,23 @@ def test_codex_sweep_reclaims_stale_orphan_and_spares_fresh_and_keep(
     assert mine.exists()
 
 
-def test_codex_and_claude_sweeps_never_cross_collect(tmp_path: Path) -> None:
-    """A Codex sweep must never collect a Claude home, and vice versa."""
+def test_codex_sweep_is_prefix_bound_and_never_collects_foreign_homes(
+    tmp_path: Path,
+) -> None:
+    """The Codex sweep collects only its own prefix, never a foreign directory.
+
+    A stale directory under another product's prefix (here the retired Claude
+    ACP home prefix, which real hosts may still carry as residue) must survive a
+    Codex sweep untouched - the sweep's scope is its prefix, not its age gate.
+    """
     aged = ORPHAN_HOME_MIN_AGE_SECONDS + 3600
     stale_codex = _codex_home(tmp_path, "vaultspec-codex-home-stale", age_seconds=aged)
-    stale_claude = tmp_path / "vaultspec-acp-home-stale"
-    stale_claude.mkdir()
-    (stale_claude / ".claude.json").write_text("{}", encoding="utf-8")
+    foreign = tmp_path / "vaultspec-acp-home-stale"
+    foreign.mkdir()
+    (foreign / ".claude.json").write_text("{}", encoding="utf-8")
     stamp = time.time() - aged
-    os.utime(stale_claude, (stamp, stamp))
+    os.utime(foreign, (stamp, stamp))
 
     codex_removed = sweep_orphan_codex_homes(root=tmp_path)
     assert codex_removed == [stale_codex]
-    assert stale_claude.exists()  # untouched by the Codex-prefixed sweep
-
-    claude_removed = sweep_orphan_config_homes(root=tmp_path)
-    assert claude_removed == [stale_claude]
+    assert foreign.exists()  # untouched by the Codex-prefixed sweep

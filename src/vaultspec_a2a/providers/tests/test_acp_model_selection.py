@@ -241,5 +241,31 @@ async def test_malformed_confirmation_fails_closed(
     )
     _resolve(echo_context, {"result": {"configOptions": "not-a-list"}})
 
-    with pytest.raises(AcpSessionError, match="without configuration options"):
+    with pytest.raises(AcpSessionError, match="malformed configuration options"):
         await task
+
+
+@pytest.mark.asyncio
+async def test_variant_confirmation_of_the_requested_model_is_accepted(
+    echo_context: AcpSessionContext,
+) -> None:
+    """An accepted request confirmed as a bracketed VARIANT of the id passes.
+
+    Observed live on the Claude CLI: requesting ``opus`` is confirmed as
+    ``opus[1m]`` - the adapter's canonical context-window variant of the same
+    model, not a different model. Refusing it failed every real run whose
+    profile named the bare id, so the acceptance is pinned here; an unrelated
+    id is still refused (``test_unconfirmed_selection_fails_closed``).
+    """
+    task = asyncio.create_task(
+        _select_desired_model(
+            echo_context, _config(_DESIRED), _SESSION_ID, _advertised()
+        )
+    )
+    await read_acp_frame(
+        echo_context.stdout, AcpRequestId.SESSION_SET_CONFIG_OPTION, timeout=_TIMEOUT
+    )
+    _resolve(echo_context, {"result": _confirmation(f"{_DESIRED}[1m]")})
+
+    confirmed = await task
+    assert confirmed == _confirmation(f"{_DESIRED}[1m]")["configOptions"]

@@ -6,8 +6,8 @@ agent's MCP surface is exactly the declared set, and a name that can be
 redeclared with a different command breaks it: the surviving entry is no longer
 the one that was reviewed.
 
-These drive the real composition functions and the real config-home writer, so a
-refusal is proven at the boundary that actually emits configuration.
+These drive the real composition functions and the real workspace projection
+writer, so a refusal is proven at the boundary that actually emits configuration.
 """
 
 from __future__ import annotations
@@ -18,12 +18,12 @@ import pytest
 from pydantic import TypeAdapter
 
 from ...thread.errors import ConfigError
-from .._acp_config_home import create_isolated_config_home
 from .._acp_mcp import (
     codex_mcp_server_specs,
     config_home_mcp_servers,
     reject_duplicate_identities,
 )
+from .._acp_project_mcp import project_declared_mcp
 from .._json_contract import JsonObject
 
 if TYPE_CHECKING:
@@ -80,18 +80,14 @@ def test_unknown_and_unnamed_specs_do_not_trigger_a_false_refusal() -> None:
     )
 
 
-def test_the_written_config_home_carries_the_reviewed_command(
+def test_the_written_projection_carries_the_reviewed_command(
     tmp_path: Path,
 ) -> None:
     """Proven through the real writer: what lands on disk is the declared entry."""
-    home = create_isolated_config_home(
-        config_home_mcp_servers([_spec("reviewed-command")]),
-        workspace_root=tmp_path,
-    )
+    path = project_declared_mcp(tmp_path, [_spec("reviewed-command")])
 
-    written = _JSON_OBJECT.validate_json(
-        (home / ".claude.json").read_text(encoding="utf-8")
-    )
+    assert path is not None
+    written = _JSON_OBJECT.validate_json(path.read_text(encoding="utf-8"))
     servers = written["mcpServers"]
     assert isinstance(servers, dict)
     reviewed = servers[_KNOWN]
@@ -99,15 +95,12 @@ def test_the_written_config_home_carries_the_reviewed_command(
     assert reviewed["command"] == "reviewed-command"
 
 
-def test_a_duplicate_never_reaches_the_config_home_writer(tmp_path: Path) -> None:
-    """The refusal happens before anything is written, so no home is left behind."""
+def test_a_duplicate_never_reaches_the_projection_writer(tmp_path: Path) -> None:
+    """The refusal happens before anything is written, so no file is left behind."""
     before = sorted(tmp_path.iterdir())
 
     with pytest.raises(ConfigError):
-        create_isolated_config_home(
-            config_home_mcp_servers([_spec("first"), _spec("second")]),
-            workspace_root=tmp_path,
-        )
+        project_declared_mcp(tmp_path, [_spec("first"), _spec("second")])
 
     assert sorted(tmp_path.iterdir()) == before
 

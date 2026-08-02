@@ -334,12 +334,12 @@ def probe_provider_readiness(provider: Provider) -> ProviderReadiness:
         return ProviderReadiness(provider=provider, ready=True)
 
     if provider == Provider.CLAUDE:
-        if not _has_text(settings.claude_code_oauth_token):
-            return ProviderReadiness(
-                provider=provider,
-                ready=False,
-                reason="no Claude OAuth token configured",
-            )
+        # No credential term, by contract: this layer implements no
+        # authentication and reads no credential. The spawned CLI inherits the
+        # ambient environment and resolves whatever auth the operator has (a
+        # logged-in session, a key in the env); if nothing authenticates it, the
+        # provider itself says so at run time. Readiness is therefore command
+        # resolvability only, the same shape as Codex.
         return _command_readiness(provider)
 
     if provider == Provider.GEMINI:
@@ -622,11 +622,12 @@ class FrozenAssignment:
     roles: dict[str, JsonObject]
 
     def compiler_map(self) -> dict[str, JsonObject]:
-        """The provider/capability/fallback subset the compiler consumes."""
+        """The complete frozen execution assignment consumed by the compiler."""
         return {
             agent_id: {
                 "provider": role["provider"],
                 "capability": role.get("capability"),
+                "model_name": role["model_name"],
                 "fallback": role.get("fallback", []),
             }
             for agent_id, role in self.roles.items()

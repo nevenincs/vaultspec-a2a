@@ -253,7 +253,7 @@ async def test_codex_live_turn_returns_output() -> None:
     Requires a logged-in Codex session (``codex login status``). Uses a trivial
     prompt to keep spend negligible.
     """
-    model = ProviderFactory().create(Provider.CODEX, model=Model.HIGH)
+    model = ProviderFactory().create(Provider.CODEX, model=Model.LOW)
     messages = [
         SystemMessage(content="You are terse."),
         HumanMessage(content="Reply with exactly the single word: pong"),

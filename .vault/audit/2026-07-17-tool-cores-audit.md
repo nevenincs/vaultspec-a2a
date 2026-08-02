@@ -400,3 +400,61 @@ The repair is not to relax the gate. It is to let the harness resolve the
 gateway the same way everything else does - through the registry that already
 records it - and to make the out-of-band credential an explicit, named
 prerequisite rather than an environment variable a caller is assumed to know.
+
+### stale-service-record-outlives-its-engine | high | open
+
+A service record can outlive the process it describes and keep answering, so
+discovery refuses a stack that looks alive by every casual check. This sits
+BENEATH the registry finding above: that one explained why a harness looks in
+the wrong place, this one explains why looking in the right place still fails.
+
+Measured directly rather than inferred. The record at `~/.vaultspec/service.json`
+named port 18767 and pid 56188. Three facts held at once: `GET /health` on that
+port returned 200; `last_heartbeat` advanced by exactly 0 ms across 8 s of wall
+clock; and pid 56188 did not exist. A live server, a frozen heartbeat, and a dead
+owner - the port had been inherited by an unrelated engine while the record went
+on describing a corpse.
+
+`resolve_engine` is right to refuse this, and does: it requires a fresh heartbeat
+before it will trust a record, so an 8.4 h age disqualified it. The refusal is
+correct and its report is misleading. `_reachable_stack` returns `None`, the
+prerequisite rule skips naming an absent engine, and the operator reads "no stack"
+while a healthy engine serves two ports away. Liveness was asserted by three
+independent signals that disagreed, and the only one discovery consults was the
+one that had silently stopped.
+
+The population makes it a class, not an incident. Sweeping every engine record on
+the host: exactly ONE was live (`_s08ws`, port 18767, pid 93632, heartbeat ~9 s).
+Every other record named a dead pid with a heartbeat frozen ~8.5 h earlier,
+including the engine that the one REGISTERED gateway is paired to - that gateway
+is orphaned from an engine that no longer exists, while the healthy gateway
+serving alongside it appears in no registry record at all. Two gateways, and
+the registry describes the broken one.
+
+Consequences worth separating, because they have different fixes:
+
+- **A frozen heartbeat is indistinguishable from a slow one.** The writer stops
+  while the server continues, so the failure is silent on the serving side. This
+  is the same shape as the Windows directory-lease defect already fixed in
+  `desktop/_filesystem_authority.py`, where a transient sharing violation
+  permanently killed a heartbeat writer that nothing restarted. Fixing the lease
+  removed one cause; nothing yet detects the effect.
+- **A stale record is never reaped.** It persists at the well-known path,
+  shadowing any healthy engine, because `_candidates` prefers it and nothing
+  invalidates it when its pid dies. A liveness check that consulted the pid
+  would have rejected it instantly and for free.
+- **The skip reason names the wrong prerequisite.** "engine unavailable" was
+  false; the engine was available and its record was stale. An operator who
+  trusts that message boots a second engine and makes the contention worse.
+
+Verified reachable once the env var was pointed at the live record: the proof
+resolved the stack, minted per-role tokens, and reached run-start before failing
+on the separately-tracked service-token gap above. So the two findings compose -
+this one hid the other, and neither is a defect in the test.
+
+Recommend the record carry, and discovery check, an owner-pid liveness test
+alongside the heartbeat, since a dead pid is a cheap, unambiguous disproof that
+does not depend on a writer still running. Recommend a stale record be reaped or
+refused at the well-known path rather than left to shadow a healthy peer. Both
+are cheaper than the standing cost, which is that no live proof on this host can
+be trusted to have run at all.

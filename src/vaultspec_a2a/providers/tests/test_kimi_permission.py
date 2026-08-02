@@ -1,6 +1,6 @@
 """Deterministic tests for the Kimi read-only permission-RPC enforcement (P03.S11).
 
-Real objects, no mocks: the frozen ``_AcpModelConfig`` and the real
+Real objects, no mocks: the frozen ``AcpModelConfig`` and the real
 ``on_request_permission`` handler. The autonomous/normal-callback paths do not
 touch the session context, so a lightweight stand-in is passed for it.
 """
@@ -13,7 +13,7 @@ from typing import Any, cast
 import pytest
 
 from .._acp_rpc_handlers import _kimi_autonomous_option_id, on_request_permission
-from .._acp_types import _AcpModelConfig, _AcpSessionContext
+from .._acp_types import AcpModelConfig, AcpSessionContext
 
 _RAG_READS = [
     "mcp__vaultspec-rag__search_vault",
@@ -27,8 +27,8 @@ _OPTIONS = [
 ]
 
 
-def _config(*, acp_family: str, permission_callback=None) -> _AcpModelConfig:
-    return _AcpModelConfig(
+def _config(*, acp_family: str, permission_callback=None) -> AcpModelConfig:
+    return AcpModelConfig(
         agent_config=None,
         permission_callback=permission_callback,
         workspace_root=None,
@@ -51,12 +51,12 @@ def _config(*, acp_family: str, permission_callback=None) -> _AcpModelConfig:
     )
 
 
-def _ctx() -> _AcpSessionContext:
+def _ctx() -> AcpSessionContext:
     # The autonomous and normal-callback-return paths never touch the context.
-    return cast("_AcpSessionContext", SimpleNamespace())
+    return cast("AcpSessionContext", SimpleNamespace())
 
 
-async def _decide(name: str, config: _AcpModelConfig) -> str:
+async def _decide(name: str, config: AcpModelConfig) -> str:
     params = {"toolCall": {"title": name, "rawInput": {}}, "options": _OPTIONS}
     raw = await on_request_permission(1, params, _ctx(), config)
     resp = cast("dict[str, Any]", raw)

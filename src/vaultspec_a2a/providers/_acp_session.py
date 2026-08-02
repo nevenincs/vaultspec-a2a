@@ -8,7 +8,6 @@ import asyncio
 import json
 import logging
 from pathlib import Path
-from typing import Any
 
 from ..control.config import settings
 from ..utils.enums import AcpRequestId
@@ -20,11 +19,13 @@ from ._acp_auth import (
     runtime_log_extra,
 )
 from ._acp_types import (
+    AcpModelConfig,
+    AcpResponseFuture,
+    AcpSessionContext,
     InitializeResult,
     SessionSetupResult,
-    _AcpModelConfig,
-    _AcpSessionContext,
 )
+from ._json_contract import JsonObject, JsonValue
 from .acp_exceptions import AcpErrorCode, AcpSessionError
 
 __all__: list[str] = []
@@ -32,14 +33,29 @@ __all__: list[str] = []
 logger = logging.getLogger(__name__)
 
 
+def _json_object(value: JsonValue | None) -> JsonObject:
+    """Return one protocol object or an empty object for malformed data."""
+    return value if isinstance(value, dict) else {}
+
+
+def _error_code(value: JsonValue | None) -> int:
+    """Read one numeric JSON-RPC error code with the standard fallback."""
+    code = _json_object(value).get("code")
+    return (
+        code
+        if isinstance(code, int) and not isinstance(code, bool)
+        else AcpErrorCode.INTERNAL_ERROR
+    )
+
+
 async def initialize_session(
-    ctx: _AcpSessionContext,
-    config: _AcpModelConfig,
+    ctx: AcpSessionContext,
+    config: AcpModelConfig,
 ) -> InitializeResult:
     """Send ACP initialize request and return capabilities + auth methods."""
     rpc_id = AcpRequestId.INITIALIZE
     ctx.response_futures[rpc_id] = asyncio.get_running_loop().create_future()
-    req = {
+    req: JsonObject = {
         "jsonrpc": "2.0",
         "id": rpc_id,
         "method": "initialize",
@@ -110,22 +126,25 @@ async def initialize_session(
         )
         raise AcpSessionError(
             f"ACP initialize failed: {resp['error']}",
-            code=resp["error"].get("code", AcpErrorCode.INTERNAL_ERROR)
-            if isinstance(resp.get("error"), dict)
-            else AcpErrorCode.INTERNAL_ERROR,
+            code=_error_code(resp.get("error")),
         )
-    res = resp.get("result", {})
+    res = resp.get("result")
+    result = _json_object(res)
+    capabilities = result.get("agentCapabilities")
+    auth_methods = result.get("authMethods")
     return InitializeResult(
-        agent_capabilities=res.get("agentCapabilities", {}),
-        auth_methods=res.get("authMethods", []),
+        agent_capabilities=capabilities if isinstance(capabilities, dict) else {},
+        auth_methods=[method for method in auth_methods if isinstance(method, dict)]
+        if isinstance(auth_methods, list)
+        else [],
     )
 
 
 async def setup_session(
-    ctx: _AcpSessionContext,
-    config: _AcpModelConfig,
-    agent_capabilities: dict[str, Any],
-    auth_methods: list[dict[str, Any]],
+    ctx: AcpSessionContext,
+    config: AcpModelConfig,
+    agent_capabilities: JsonObject,
+    auth_methods: list[JsonObject],
 ) -> SessionSetupResult:
     """Create or load an ACP session.
 
@@ -135,7 +154,8 @@ async def setup_session(
     """
     working_dir = config.workspace_root or config.cwd or str(Path.cwd())
     method = "session/new"
-    params: dict[str, object] = {"cwd": working_dir, "mcpServers": config.mcp_servers}
+    mcp_servers = list[JsonValue](config.mcp_servers)
+    params: JsonObject = {"cwd": working_dir, "mcpServers": mcp_servers}
     if config.allowed_tools and config.acp_family == "claude":
         # Claude family only (Claude/Z.ai): serialize the headless auto-permit
         # allowlist into the Claude-CLI-specific claudeCode namespace so the CLI
@@ -147,15 +167,14 @@ async def setup_session(
         # analogue, so the SAME composed names (still carried in
         # config.allowed_tools) are enforced at our session/request_permission
         # handler as an exact-name auto-approve set (P03.S10) instead.
-        params["_meta"] = {
-            "claudeCode": {"options": {"allowedTools": list(config.allowed_tools)}}
-        }
+        allowed_tools = list[JsonValue](config.allowed_tools)
+        params["_meta"] = {"claudeCode": {"options": {"allowedTools": allowed_tools}}}
         logger.info(
             "ACP auto-permitting bridged authoring tools (headless): %s",
             config.allowed_tools,
             extra=runtime_log_extra(config, process=ctx.process),
         )
-    if config.session_id and agent_capabilities.get("loadSession"):
+    if config.session_id and agent_capabilities.get("loadSession") is True:
         method = "session/load"
         params["sessionId"] = config.session_id
 
@@ -165,7 +184,12 @@ async def setup_session(
     while True:
         rpc_id = AcpRequestId.SESSION_SETUP
         ctx.response_futures[rpc_id] = asyncio.get_running_loop().create_future()
-        req = {"jsonrpc": "2.0", "id": rpc_id, "method": method, "params": params}
+        req: JsonObject = {
+            "jsonrpc": "2.0",
+            "id": rpc_id,
+            "method": method,
+            "params": params,
+        }
         async with ctx.stdin_lock:
             ctx.stdin.write(json.dumps(req).encode("utf-8") + b"\n")
             await ctx.stdin.drain()
@@ -189,12 +213,9 @@ async def setup_session(
         if "error" not in resp:
             break
         err = resp["error"]
-        err_code = (
-            err.get("code", AcpErrorCode.INTERNAL_ERROR)
-            if isinstance(err, dict)
-            else AcpErrorCode.INTERNAL_ERROR
-        )
-        err_msg = str(err.get("message", err)) if isinstance(err, dict) else str(err)
+        err_code = _error_code(err)
+        error = _json_object(err)
+        err_msg = str(error.get("message", err)) if error else str(err)
         if not attempted_auth and auth_methods and is_auth_required_error(err):
             attempted_auth = True
             await authenticate_rpc(
@@ -240,10 +261,22 @@ async def setup_session(
             f"ACP {method} failed: {err_msg}",
             code=err_code,
         )
-    res = resp["result"]
-    session_id = res["sessionId"]
-    agent_modes: dict[str, Any] = {}
-    if modes := res.get("modes"):
+    result = resp.get("result")
+    if not isinstance(result, dict):
+        raise AcpSessionError(
+            f"ACP {method} succeeded without an object result",
+            code=AcpErrorCode.INTERNAL_ERROR,
+        )
+    session_id = result.get("sessionId")
+    if not isinstance(session_id, str) or not session_id:
+        raise AcpSessionError(
+            f"ACP {method} succeeded without a sessionId",
+            code=AcpErrorCode.INTERNAL_ERROR,
+        )
+    agent_modes: JsonObject = {}
+    if modes := result.get("modes"):
+        if not isinstance(modes, dict):
+            modes = {}
         agent_modes = {
             "currentModeId": modes.get("currentModeId"),
             "availableModes": modes.get("availableModes", []),
@@ -257,19 +290,20 @@ async def setup_session(
 
 
 async def setup_prompt(
-    ctx: _AcpSessionContext,
-    _config: _AcpModelConfig,
-    blocks: list[dict],
+    ctx: AcpSessionContext,
+    _config: AcpModelConfig,
+    blocks: list[JsonObject],
     active_session_id: str,
-) -> asyncio.Future:
+) -> AcpResponseFuture:
     """Send the initial prompt."""
     rpc_id = AcpRequestId.SESSION_PROMPT
     ctx.response_futures[rpc_id] = asyncio.get_running_loop().create_future()
-    req = {
+    prompt = list[JsonValue](blocks)
+    req: JsonObject = {
         "jsonrpc": "2.0",
         "id": rpc_id,
         "method": "session/prompt",
-        "params": {"sessionId": active_session_id, "prompt": blocks},
+        "params": {"sessionId": active_session_id, "prompt": prompt},
     }
     async with ctx.stdin_lock:
         ctx.stdin.write(json.dumps(req).encode("utf-8") + b"\n")

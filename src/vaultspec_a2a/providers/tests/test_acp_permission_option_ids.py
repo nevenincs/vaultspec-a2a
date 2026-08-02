@@ -1,6 +1,6 @@
 """Option-id validity at the ACP ``session/request_permission`` RPC handler.
 
-Real objects, no mocks: the frozen ``_AcpModelConfig`` and the real
+Real objects, no mocks: the frozen ``AcpModelConfig`` and the real
 ``on_request_permission``. The permission callback is a genuine collaborator
 supplied by the caller (the graph's interrupt gate in production), so a real
 async function stands in that slot exactly as production wires it.
@@ -17,15 +17,15 @@ from typing import Any, cast
 import pytest
 
 from .._acp_rpc_handlers import _kimi_autonomous_option_id, on_request_permission
-from .._acp_types import _AcpModelConfig, _AcpSessionContext
+from .._acp_types import AcpModelConfig, AcpSessionContext
 
 # An option dict with no identity field at all — exactly what the unfiltered set
 # comprehension turned into a ``None`` member of the "valid" ids.
 _MALFORMED = {"label": "Nameless option", "kind": "allow_once"}
 
 
-def _config(*, permission_callback=None, acp_family: str = "claude") -> _AcpModelConfig:
-    return _AcpModelConfig(
+def _config(*, permission_callback=None, acp_family: str = "claude") -> AcpModelConfig:
+    return AcpModelConfig(
         agent_config=None,
         permission_callback=permission_callback,
         workspace_root=None,
@@ -48,12 +48,12 @@ def _config(*, permission_callback=None, acp_family: str = "claude") -> _AcpMode
     )
 
 
-def _ctx() -> _AcpSessionContext:
+def _ctx() -> AcpSessionContext:
     # The callback-return and no-callback paths never touch the session context.
-    return cast("_AcpSessionContext", SimpleNamespace())
+    return cast("AcpSessionContext", SimpleNamespace())
 
 
-async def _decide(options: list, config: _AcpModelConfig) -> object:
+async def _decide(options: list, config: AcpModelConfig) -> object:
     params = {"toolCall": {"title": "Edit", "rawInput": {}}, "options": options}
     raw = await on_request_permission(1, params, _ctx(), config)
     resp = cast("dict[str, Any]", raw)

@@ -11,7 +11,7 @@ import logging
 import subprocess
 import sys
 from contextlib import suppress
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING
 
 from ..utils import kill_pid_tree_async
 from ..utils.process import ProcessContainment, ProcessContainmentError
@@ -19,7 +19,12 @@ from ..utils.process import ProcessContainment, ProcessContainmentError
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
-__all__ = ["kill_process_tree", "spawn_acp_process"]
+__all__ = [
+    "attach_process_containment",
+    "kill_process_tree",
+    "process_containment",
+    "spawn_acp_process",
+]
 
 logger = logging.getLogger(__name__)
 
@@ -27,6 +32,22 @@ logger = logging.getLogger(__name__)
 # reaper can reach it from a bare ``Process`` handle without changing the
 # spawn/kill signatures the chat models already call.
 _CONTAINMENT_ATTR = "_vaultspec_containment"
+
+
+def attach_process_containment(
+    process: asyncio.subprocess.Process,
+    containment: ProcessContainment,
+) -> None:
+    """Attach run-owned containment to one spawned process."""
+    setattr(process, _CONTAINMENT_ATTR, containment)
+
+
+def process_containment(
+    process: asyncio.subprocess.Process,
+) -> ProcessContainment | None:
+    """Return the containment attached by :func:`attach_process_containment`."""
+    attached = getattr(process, _CONTAINMENT_ATTR, None)
+    return attached if isinstance(attached, ProcessContainment) else None
 
 
 def _metadata_extra(metadata: Mapping[str, object] | None) -> dict[str, object]:
@@ -65,15 +86,6 @@ async def spawn_acp_process(
     # as one on run terminal, without a parent-pid walk. The containment rides on
     # the returned Process for the shared reaper to reach.
     containment = ProcessContainment.create()
-    kwargs: dict[str, Any] = {
-        "stdin": asyncio.subprocess.PIPE,
-        "stdout": asyncio.subprocess.PIPE,
-        "stderr": asyncio.subprocess.PIPE,
-        "env": env,
-        "cwd": cwd,
-        "limit": 10 * 1024 * 1024,
-        **containment.spawn_kwargs(),
-    }
     spawn_mode = "exec" if sys.platform != "win32" or use_exec else "shell"
     log_extra = _metadata_extra(metadata)
     log_extra.update(
@@ -98,19 +110,35 @@ async def spawn_acp_process(
                     command[0],
                     *command[1:],
                     creationflags=subprocess.CREATE_NEW_PROCESS_GROUP,
-                    **kwargs,
+                    stdin=asyncio.subprocess.PIPE,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                    env=env,
+                    cwd=cwd,
+                    limit=10 * 1024 * 1024,
                 )
             else:
                 process = await asyncio.create_subprocess_shell(
                     subprocess.list2cmdline(command),
                     creationflags=subprocess.CREATE_NEW_PROCESS_GROUP,
-                    **kwargs,
+                    stdin=asyncio.subprocess.PIPE,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                    env=env,
+                    cwd=cwd,
+                    limit=10 * 1024 * 1024,
                 )
         else:
             process = await asyncio.create_subprocess_exec(
                 command[0],
                 *command[1:],
-                **kwargs,
+                stdin=asyncio.subprocess.PIPE,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                env=env,
+                cwd=cwd,
+                limit=10 * 1024 * 1024,
+                start_new_session=True,
             )
     except BaseException as exc:
         containment.close()
@@ -130,7 +158,7 @@ async def spawn_acp_process(
                 extra=log_extra,
                 exc_info=True,
             )
-        cast("Any", process)._vaultspec_containment = containment
+        attach_process_containment(process, containment)
     except BaseException:
         # The root is alive but the caller will never receive it, so nothing else
         # can reach it to reap it. Fell the tree rather than return a spawn the
@@ -159,7 +187,8 @@ async def kill_process_tree(
     The asyncio transport handle is closed last to prevent OS handle leaks
     when the event loop finalizer runs (cpython#114177).
     """
-    has_containment = getattr(process, _CONTAINMENT_ATTR, None) is not None
+    containment = process_containment(process)
+    has_containment = containment is not None
     kill_strategy = "os_containment" if has_containment else "per_pid_tree_kill"
     log_extra = _metadata_extra(metadata)
     log_extra.update(
@@ -176,7 +205,6 @@ async def kill_process_tree(
     # assignment failed) falls back to the shared per-pid tree kill. The asyncio
     # Process is then waited/reaped here, and its transport closed below to avoid
     # an OS handle leak when the loop finalizer runs (cpython#114177).
-    containment: ProcessContainment | None = getattr(process, _CONTAINMENT_ATTR, None)
     if containment is not None:
         await containment.terminate(term_timeout=5.0, kill_timeout=5.0)
     else:

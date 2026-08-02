@@ -11,17 +11,19 @@ circular imports — this module does NOT import from ``_acp_rpc_handlers``.
 import asyncio
 import json
 import logging
-from collections.abc import Awaitable, Callable
 
 from langchain_core.messages import AIMessageChunk
 from langchain_core.outputs import ChatGenerationChunk
+from pydantic import TypeAdapter, ValidationError
 
-from ._acp_auth import _log_task_exception, runtime_log_extra
-from ._acp_types import _AcpModelConfig, _AcpSessionContext
+from ._acp_auth import runtime_log_extra
+from ._acp_types import AcpModelConfig, AcpRpcId, AcpSessionContext, RpcHandlerMap
+from ._json_contract import JsonObject, JsonValue
 
 __all__: list[str] = []
 
 logger = logging.getLogger(__name__)
+_JSON_VALUE: TypeAdapter[JsonValue] = TypeAdapter(JsonValue)
 
 # Map RPC method -> AgentCapabilities attribute name.
 # Used for defense-in-depth capability checks at dispatch time
@@ -39,19 +41,35 @@ _CAPABILITY_REQUIREMENTS: dict[str, str] = {
     # client->server request.  No clientCapability flag governs it.
 }
 
-# Type alias for the RPC handler map passed by the caller.
-RpcHandlerMap = dict[
-    str,
-    Callable[
-        [int | str, dict, _AcpSessionContext, _AcpModelConfig],
-        Awaitable[dict[str, object]],
-    ],
-]
+
+def _json_object(value: JsonValue | None) -> JsonObject:
+    """Return an object payload or the empty object for malformed fields."""
+    return value if isinstance(value, dict) else {}
+
+
+def _json_string(value: JsonValue | None, *, default: str = "") -> str:
+    """Return one protocol string, falling back for malformed fields."""
+    return value if isinstance(value, str) else default
+
+
+def _rpc_id(value: JsonValue | None) -> AcpRpcId | None:
+    """Return a JSON-RPC request identifier, excluding JSON booleans."""
+    if isinstance(value, str) or (
+        isinstance(value, int) and not isinstance(value, bool)
+    ):
+        return value
+    return None
+
+
+def _log_task_exception(task: asyncio.Task[None]) -> None:
+    """Log one unhandled background server-RPC task failure."""
+    if not task.cancelled() and (exc := task.exception()):
+        logger.error("ACP background RPC task failed: %s", exc, exc_info=exc)
 
 
 async def process_stdout_loop(
-    ctx: _AcpSessionContext,
-    config: _AcpModelConfig,
+    ctx: AcpSessionContext,
+    config: AcpModelConfig,
     rpc_handler_map: RpcHandlerMap,
 ) -> None:
     """Read JSON-RPC messages from stdout and dispatch them."""
@@ -63,8 +81,8 @@ async def process_stdout_loop(
             if not line.strip():
                 continue
             try:
-                parsed = json.loads(line.decode("utf-8"))
-            except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+                parsed = _JSON_VALUE.validate_json(line)
+            except (ValidationError, UnicodeDecodeError) as exc:
                 logger.warning(
                     "ACP stdout: malformed line skipped: %s | raw=%r",
                     exc,
@@ -97,9 +115,9 @@ async def process_stdout_loop(
 
 
 async def dispatch_packet(
-    data: dict,
-    ctx: _AcpSessionContext,
-    config: _AcpModelConfig,
+    data: JsonObject,
+    ctx: AcpSessionContext,
+    config: AcpModelConfig,
     rpc_handler_map: RpcHandlerMap,
 ) -> None:
     """Route a single JSON-RPC message to the appropriate handler."""
@@ -107,9 +125,9 @@ async def dispatch_packet(
         await handle_client_response(data, ctx)
         return
 
-    method = data.get("method", "")
-    rpc_id = data.get("id")
-    params = data.get("params", {})
+    method = _json_string(data.get("method"))
+    rpc_id = _rpc_id(data.get("id"))
+    params = _json_object(data.get("params"))
 
     if rpc_id is not None and method:
         t = asyncio.create_task(
@@ -125,11 +143,12 @@ async def dispatch_packet(
 
 
 async def handle_client_response(
-    data: dict,
-    ctx: _AcpSessionContext,
+    data: JsonObject,
+    ctx: AcpSessionContext,
 ) -> None:
     """Resolve response futures, detect end_turn, enqueue error sentinels."""
-    rid = data.get("id")
+    raw_id = data.get("id")
+    rid = raw_id if isinstance(raw_id, int) and not isinstance(raw_id, bool) else None
     if rid in ctx.response_futures:
         fut = ctx.response_futures[rid]
         if not fut.done():
@@ -142,8 +161,8 @@ async def handle_client_response(
                     "Response for rpc_id=%r arrived after timeout; discarding", rid
                 )
 
-    result = data.get("result", {})
-    if isinstance(result, dict) and result.get("stopReason") == "end_turn":
+    result = _json_object(data.get("result"))
+    if result.get("stopReason") == "end_turn":
         ctx.prompt_done.set()
     elif "error" in data and ctx.prompt_id_ref and rid == ctx.prompt_id_ref[0]:
         try:
@@ -154,10 +173,10 @@ async def handle_client_response(
 
 async def handle_server_rpc(
     method: str,
-    rpc_id: int | str,
-    params: dict,
-    ctx: _AcpSessionContext,
-    config: _AcpModelConfig,
+    rpc_id: AcpRpcId,
+    params: JsonObject,
+    ctx: AcpSessionContext,
+    config: AcpModelConfig,
     rpc_handler_map: RpcHandlerMap,
 ) -> None:
     """Capability check + dispatch to handler function via the map."""
@@ -173,7 +192,7 @@ async def handle_server_rpc(
             else False
         )
         if not allowed:
-            resp: dict[str, object] = {
+            resp: JsonObject = {
                 "jsonrpc": "2.0",
                 "id": rpc_id,
                 "error": {
@@ -229,15 +248,15 @@ async def handle_server_rpc(
 
 
 async def handle_session_update(
-    params: dict,
-    ctx: _AcpSessionContext,
+    params: JsonObject,
+    ctx: AcpSessionContext,
 ) -> None:
     """Dispatch all session update notification types."""
-    update = params.get("update", {})
-    u_type = update.get("sessionUpdate")
+    update = _json_object(params.get("update"))
+    u_type = _json_string(update.get("sessionUpdate"))
 
     if u_type in ("agent_message_chunk", "agent_thought_chunk"):
-        text = update.get("content", {}).get("text", "")
+        text = _json_string(_json_object(update.get("content")).get("text"))
         if text:
             try:
                 ctx.chunk_queue.put_nowait(
@@ -250,8 +269,8 @@ async def handle_session_update(
         # ACP agents stream partial JSON args via tool_call_chunk before the
         # final tool_call event.  Forwarded as a streaming ToolCallChunk so
         # LangGraph can accumulate args progressively.
-        tid = update.get("toolCallId", "")
-        args_delta = update.get("inputDelta", "")
+        tid = _json_string(update.get("toolCallId"))
+        args_delta = _json_string(update.get("inputDelta"))
         if tid and args_delta:
             try:
                 ctx.chunk_queue.put_nowait(
@@ -284,13 +303,16 @@ async def handle_session_update(
     elif u_type == "plan":
         # Plan updates are metadata; log receipt and let graph-level plan
         # handling in the supervisor/aggregator layer process them.
-        plan_entries = update.get("entries", [])
-        logger.debug("ACP plan update: %d entries received", len(plan_entries))
+        plan_entries = update.get("entries")
+        logger.debug(
+            "ACP plan update: %d entries received",
+            len(plan_entries) if isinstance(plan_entries, list) else 0,
+        )
 
 
-async def on_tool_call(update: dict, ctx: _AcpSessionContext) -> None:
+async def on_tool_call(update: JsonObject, ctx: AcpSessionContext) -> None:
     """Record a tool_call and enqueue a ToolCallChunk."""
-    tid = update.get("toolCallId", "")
+    tid = _json_string(update.get("toolCallId"))
     ctx.tool_calls[tid] = dict(update)
     chunk = ChatGenerationChunk(
         message=AIMessageChunk(
@@ -298,7 +320,7 @@ async def on_tool_call(update: dict, ctx: _AcpSessionContext) -> None:
             tool_call_chunks=[
                 {
                     "id": tid,
-                    "name": update.get("title", ""),
+                    "name": _json_string(update.get("title")),
                     "args": json.dumps(update.get("rawInput")),
                     "index": 0,
                 }
@@ -313,16 +335,16 @@ async def on_tool_call(update: dict, ctx: _AcpSessionContext) -> None:
         )
 
 
-async def on_tool_call_update(update: dict, ctx: _AcpSessionContext) -> None:
+async def on_tool_call_update(update: JsonObject, ctx: AcpSessionContext) -> None:
     """Update an existing tool_call record and enqueue if new."""
-    tid = update.get("toolCallId", "")
+    tid = _json_string(update.get("toolCallId"))
     if tid not in ctx.tool_calls:
         # Unknown toolCallId: synthesise a tool_call entry so the update
         # is not silently lost (TOAD reference pattern for late/out-of-order
         # tool_call_update notifications).
         ctx.tool_calls[tid] = {
             "toolCallId": tid,
-            "title": update.get("title", tid),
+            "title": _json_string(update.get("title"), default=tid),
         }
         chunk = ChatGenerationChunk(
             message=AIMessageChunk(
@@ -330,7 +352,7 @@ async def on_tool_call_update(update: dict, ctx: _AcpSessionContext) -> None:
                 tool_call_chunks=[
                     {
                         "id": tid,
-                        "name": update.get("title", tid),
+                        "name": _json_string(update.get("title"), default=tid),
                         "args": "{}",
                         "index": 0,
                     }
@@ -346,5 +368,5 @@ async def on_tool_call_update(update: dict, ctx: _AcpSessionContext) -> None:
     for k, v in update.items():
         if v is not None:
             ctx.tool_calls[tid][k] = v
-    if status := update.get("status"):
+    if status := _json_string(update.get("status")):
         logger.debug("Tool %s status: %s", tid, status)

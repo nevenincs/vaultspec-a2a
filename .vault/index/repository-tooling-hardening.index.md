@@ -6,7 +6,7 @@ tags:
 date: '2026-08-02'
 modified: '2026-08-02'
 body_schema: 'body-v1'
-body_hash: 'sha256:2f3357baf2eb5a1a1fc555543b56b969205e4a821a04671318bc24bb140cd200'
+body_hash: 'sha256:f77e490c1dcbe1ec36d6b11f3043f32aeae3e4e4ef1704b2a9e8a730eb9c8c4e'
 related:
   - '[[2026-07-19-repository-tooling-hardening-W01-P01-S01]]'
   - '[[2026-07-19-repository-tooling-hardening-W01-P01-summary]]'
@@ -40,6 +40,7 @@ related:
   - '[[2026-07-19-repository-tooling-hardening-W06-P11-S22]]'
   - '[[2026-07-19-repository-tooling-hardening-W06-P11-S23]]'
   - '[[2026-07-19-repository-tooling-hardening-W06-P12-S24]]'
+  - '[[2026-07-19-repository-tooling-hardening-W06-P12-S25]]'
   - '[[2026-07-19-repository-tooling-hardening-adr]]'
   - '[[2026-07-19-repository-tooling-hardening-audit]]'
   - '[[2026-07-19-repository-tooling-hardening-plan]]'
@@ -67,11 +68,13 @@ related:
   - '[[2026-08-02-repository-tooling-hardening-strict-s24-thread-state-audit]]'
   - '[[2026-08-02-repository-tooling-hardening-strict-s24-verdict-subscriber-audit]]'
   - '[[2026-08-02-repository-tooling-hardening-strict-s24-worker-health-audit]]'
+  - '[[2026-08-02-repository-tooling-hardening-strict-s25-acp-core-audit]]'
   - '[[2026-08-02-repository-tooling-hardening-strict-s25-codex-audit]]'
   - '[[2026-08-02-repository-tooling-hardening-strict-s25-deterministic-mock-audit]]'
   - '[[2026-08-02-repository-tooling-hardening-strict-s25-factory-audit]]'
   - '[[2026-08-02-repository-tooling-hardening-strict-s25-gemini-auth-audit]]'
   - '[[2026-08-02-repository-tooling-hardening-strict-s25-json-mcp-foundation-audit]]'
+  - '[[2026-08-02-repository-tooling-hardening-strict-s25-model-profiles-audit]]'
   - '[[2026-08-02-repository-tooling-hardening-strict-s25-project-mcp-audit]]'
   - '[[2026-08-02-repository-tooling-hardening-strict-s25-provider-lazy-exports-audit]]'
 ---
@@ -108,11 +111,13 @@ Auto-generated index of all documents tagged with `#repository-tooling-hardening
 - `2026-08-02-repository-tooling-hardening-strict-s24-thread-state-audit` - `repository-tooling-hardening` audit: `Control thread-state checkpoint boundary review`
 - `2026-08-02-repository-tooling-hardening-strict-s24-verdict-subscriber-audit` - `repository-tooling-hardening` audit: `Verdict subscriber type-boundary review`
 - `2026-08-02-repository-tooling-hardening-strict-s24-worker-health-audit` - `repository-tooling-hardening` audit: `Worker health public-contract review`
+- `2026-08-02-repository-tooling-hardening-strict-s25-acp-core-audit` - `repository-tooling-hardening` audit: `ACP core wire and permission contract review`
 - `2026-08-02-repository-tooling-hardening-strict-s25-codex-audit` - `repository-tooling-hardening` audit: `Codex closed wire and config review`
 - `2026-08-02-repository-tooling-hardening-strict-s25-deterministic-mock-audit` - `repository-tooling-hardening` audit: `Deterministic and mock provider contract review`
 - `2026-08-02-repository-tooling-hardening-strict-s25-factory-audit` - `repository-tooling-hardening` audit: `Provider factory canonical interface review`
 - `2026-08-02-repository-tooling-hardening-strict-s25-gemini-auth-audit` - `repository-tooling-hardening` audit: `Gemini credential boundary review`
 - `2026-08-02-repository-tooling-hardening-strict-s25-json-mcp-foundation-audit` - `repository-tooling-hardening` audit: `Provider JSON and MCP boundary review`
+- `2026-08-02-repository-tooling-hardening-strict-s25-model-profiles-audit` - `repository-tooling-hardening` audit: `Model profile persistence and readiness review`
 - `2026-08-02-repository-tooling-hardening-strict-s25-project-mcp-audit` - `repository-tooling-hardening` audit: `ACP project MCP trust boundary review`
 - `2026-08-02-repository-tooling-hardening-strict-s25-provider-lazy-exports-audit` - `repository-tooling-hardening` audit: `Provider lazy export contract review`
 
@@ -150,6 +155,7 @@ Auto-generated index of all documents tagged with `#repository-tooling-hardening
 - `2026-07-19-repository-tooling-hardening-W06-P11-S22` - Repair the API endpoint test partition against the typed fixture contract.
 - `2026-07-19-repository-tooling-hardening-W06-P11-S23` - Repair the API live-gateway and clarification test partitions without overlapping peer work.
 - `2026-07-19-repository-tooling-hardening-W06-P12-S24` - Repair strict types in the control and repository production domains.
+- `2026-07-19-repository-tooling-hardening-W06-P12-S25` - Repair strict types in the provider and ACP production domains.
 
 ### plan
 

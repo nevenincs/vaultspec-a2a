@@ -34,7 +34,7 @@ from ..providers._acp_rpc_handlers import (
     on_terminal_create,
     on_terminal_kill,
 )
-from ..providers._acp_types import _AcpModelConfig, _AcpSessionContext
+from ..providers._acp_types import AcpModelConfig, AcpSessionContext
 from ..providers._subprocess import kill_process_tree, spawn_acp_process
 from ..tests.gateway_boot import (
     armed_gateway_env,
@@ -150,8 +150,8 @@ async def test_provider_tree_reaped_on_forced_orphaned_terminal() -> None:
 # ---------------------------------------------------------------------------
 
 
-def _terminal_config(workspace_root: str) -> _AcpModelConfig:
-    return _AcpModelConfig(
+def _terminal_config(workspace_root: str) -> AcpModelConfig:
+    return AcpModelConfig(
         agent_config=None,
         permission_callback=None,
         workspace_root=workspace_root,
@@ -194,7 +194,7 @@ async def test_terminal_child_tree_contained_and_reaped(tmp_path: Path) -> None:
     ctx = _TerminalCtx()
     script = tmp_path / "terminal_grandchild.py"
     script.write_text(_TERMINAL_GRANDCHILD_SCRIPT, encoding="utf-8")
-    session_ctx = cast("_AcpSessionContext", ctx)
+    session_ctx = cast("AcpSessionContext", ctx)
 
     resp = await on_terminal_create(
         1,

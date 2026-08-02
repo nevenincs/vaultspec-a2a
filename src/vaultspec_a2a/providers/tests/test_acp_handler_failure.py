@@ -24,7 +24,7 @@ from typing import Any, cast
 import pytest
 
 from .._acp_protocol import handle_server_rpc
-from .._acp_types import _AcpModelConfig, _AcpSessionContext
+from .._acp_types import AcpModelConfig, AcpSessionContext
 
 
 class _CapturingStdin:
@@ -54,7 +54,7 @@ async def _dispatch(
     await handle_server_rpc(method, rpc_id, {}, _context(stdin), _config(), handlers)
 
 
-def _context(stdin: _CapturingStdin) -> _AcpSessionContext:
+def _context(stdin: _CapturingStdin) -> AcpSessionContext:
     """Build a real session context around a recording stdin.
 
     The real dataclass rather than a stand-in: dispatch is typed against it, and
@@ -62,7 +62,7 @@ def _context(stdin: _CapturingStdin) -> _AcpSessionContext:
     object; only the writer records instead of reaching a subprocess, because
     the bytes it captures are what the assertions are about.
     """
-    return _AcpSessionContext(
+    return AcpSessionContext(
         process=cast("asyncio.subprocess.Process", None),
         stdin=cast("asyncio.StreamWriter", stdin),
         stdout=asyncio.StreamReader(),
@@ -74,9 +74,9 @@ def _context(stdin: _CapturingStdin) -> _AcpSessionContext:
     )
 
 
-def _config() -> _AcpModelConfig:
+def _config() -> AcpModelConfig:
     """Build the minimal real config dispatch reads, mirroring the security suite."""
-    return _AcpModelConfig(
+    return AcpModelConfig(
         agent_config=None,
         permission_callback=None,
         workspace_root=None,
@@ -110,7 +110,7 @@ def test_a_raising_handler_still_answers_with_a_protocol_error() -> None:
         rpc_id: int | str,
         params: dict[str, Any],
         ctx_: object,
-        config: _AcpModelConfig,
+        config: AcpModelConfig,
     ) -> dict[str, Any]:
         raise RuntimeError("handler exploded")
 
@@ -137,7 +137,7 @@ def test_the_failure_reply_does_not_leak_the_exception_text() -> None:
         rpc_id: int | str,
         params: dict[str, Any],
         ctx_: object,
-        config: _AcpModelConfig,
+        config: AcpModelConfig,
     ) -> dict[str, Any]:
         raise RuntimeError("/secret/path/leaked.txt missing")
 
@@ -161,7 +161,7 @@ def test_a_successful_handler_reply_is_unchanged() -> None:
         rpc_id: int | str,
         params: dict[str, Any],
         ctx_: object,
-        config: _AcpModelConfig,
+        config: AcpModelConfig,
     ) -> dict[str, Any]:
         return {"jsonrpc": "2.0", "id": rpc_id, "result": {"content": "hello"}}
 
@@ -184,7 +184,7 @@ def test_cancellation_is_not_reported_as_a_handler_failure() -> None:
         rpc_id: int | str,
         params: dict[str, Any],
         ctx_: object,
-        config: _AcpModelConfig,
+        config: AcpModelConfig,
     ) -> dict[str, Any]:
         raise asyncio.CancelledError
 
@@ -254,12 +254,12 @@ async def test_a_failing_handler_answers_the_agent_over_a_real_session_pipe() ->
     async def _boom(
         rpc_id: int | str,
         params: dict[Any, Any],
-        ctx_: _AcpSessionContext,
-        config: _AcpModelConfig,
+        ctx_: AcpSessionContext,
+        config: AcpModelConfig,
     ) -> dict[str, object]:
         raise RuntimeError("handler exploded on a live session")
 
-    ctx = _AcpSessionContext(
+    ctx = AcpSessionContext(
         process=process,
         stdin=cast("asyncio.StreamWriter", process.stdin),
         stdout=cast("asyncio.StreamReader", process.stdout),

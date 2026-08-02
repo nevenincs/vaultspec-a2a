@@ -10,11 +10,17 @@ import logging
 from collections.abc import Mapping
 from contextlib import suppress
 from pathlib import Path
-from typing import Any, cast
+from typing import Never
 
 from ..control.config import settings
 from ..utils.enums import AcpRequestId
-from ._acp_types import _AcpModelConfig, _AcpSessionContext
+from ._acp_types import (
+    AcpModelConfig,
+    AcpResponseFuture,
+    AcpResponseFutures,
+    AcpSessionContext,
+)
+from ._json_contract import JsonObject, JsonValue
 from .acp_exceptions import AcpAuthError, AcpErrorCode
 
 __all__: list[str] = []
@@ -31,14 +37,8 @@ class _AuthResponseCancelledError(RuntimeError):
     """Raised when the authenticate response future is cancelled in-band."""
 
 
-def _log_task_exception(task: asyncio.Task) -> None:
-    """Log unhandled exceptions from fire-and-forget background RPC tasks."""
-    if not task.cancelled() and (exc := task.exception()):
-        logger.error("Background RPC task failed: %s", exc, exc_info=exc)
-
-
 def runtime_log_extra(
-    config: _AcpModelConfig,
+    config: AcpModelConfig,
     *,
     process: asyncio.subprocess.Process | None = None,
     handshake_step: str | None = None,
@@ -85,7 +85,7 @@ def runtime_log_extra(
 # ---------------------------------------------------------------------------
 
 
-def auth_hint(config: _AcpModelConfig) -> str:
+def auth_hint(config: AcpModelConfig) -> str:
     """Return a provider-specific authentication hint for error messages."""
     exe = config.command[0] if config.command else ""
     if "gemini" in exe:
@@ -110,7 +110,7 @@ def auth_url_hint(auth_url: str | None, last_auth_url: str | None) -> str:
 
 
 def select_auth_method_id(
-    auth_methods: list[dict[str, Any]],
+    auth_methods: list[JsonObject],
     env: Mapping[str, str],
     auth_mode: str | None,
 ) -> str:
@@ -118,7 +118,6 @@ def select_auth_method_id(
     method_ids: list[str] = [
         mid
         for method in auth_methods
-        if isinstance(method, dict)
         for mid in (method.get("id"),)
         if isinstance(mid, str)
     ]
@@ -141,11 +140,11 @@ def select_auth_method_id(
     return method_ids[0]
 
 
-def is_auth_required_error(error: object) -> bool:
+def is_auth_required_error(error: JsonValue) -> bool:
     """Return True when an ACP error indicates authentication is required."""
     if not isinstance(error, dict):
         return False
-    err = cast("dict[str, Any]", error)
+    err: JsonObject = error
     message = str(err.get("message", "")).lower()
     return bool(
         err.get("code") == AcpErrorCode.UNAUTHENTICATED
@@ -156,11 +155,11 @@ def is_auth_required_error(error: object) -> bool:
     )
 
 
-def is_auth_cancelled_error(error: object) -> bool:
+def is_auth_cancelled_error(error: JsonValue) -> bool:
     """Return True when an auth error indicates operator cancellation."""
     if not isinstance(error, dict):
         return False
-    err = cast("dict[str, Any]", error)
+    err: JsonObject = error
     message = str(err.get("message", "")).lower()
     return bool(
         "cancelled" in message
@@ -170,11 +169,11 @@ def is_auth_cancelled_error(error: object) -> bool:
     )
 
 
-def is_auth_rejected_error(error: object) -> bool:
+def is_auth_rejected_error(error: JsonValue) -> bool:
     """Return True when an auth error indicates explicit auth rejection."""
     if not isinstance(error, dict):
         return False
-    err = cast("dict[str, Any]", error)
+    err: JsonObject = error
     message = str(err.get("message", "")).lower()
     return bool(
         "access_denied" in message
@@ -192,7 +191,7 @@ def raise_auth_outcome_error(
     auth_outcome: str,
     auth_url: str | None = None,
     last_auth_url: str | None = None,
-) -> None:
+) -> Never:
     """Raise AcpAuthError with a bounded machine-readable auth outcome."""
     raise AcpAuthError(
         f"{message}{auth_url_hint(auth_url, last_auth_url)}",
@@ -208,17 +207,17 @@ def raise_auth_outcome_error(
 
 async def authenticate_rpc(
     *,
-    ctx: _AcpSessionContext | None,
-    config: _AcpModelConfig,
+    ctx: AcpSessionContext | None,
+    config: AcpModelConfig,
     env: Mapping[str, str],
-    auth_methods: list[dict[str, Any]],
+    auth_methods: list[JsonObject],
     stdin: asyncio.StreamWriter,
     stdin_lock: asyncio.Lock,
-    response_futures: dict[int, asyncio.Future],
+    response_futures: AcpResponseFutures,
     process: asyncio.subprocess.Process | None = None,
     stderr_event_count: int | None = None,
     auth_url: str | None = None,
-) -> dict[str, object]:
+) -> JsonObject:
     """Send the ACP authenticate RPC using the advertised method."""
     last_auth_url = ctx.last_auth_url if ctx is not None else None
     if ctx is not None:
@@ -226,7 +225,7 @@ async def authenticate_rpc(
     method_id = select_auth_method_id(auth_methods, env, config.auth_mode)
     rpc_id = AcpRequestId.AUTHENTICATE
     response_futures[rpc_id] = asyncio.get_running_loop().create_future()
-    req: dict[str, object] = {
+    req: JsonObject = {
         "jsonrpc": "2.0",
         "id": rpc_id,
         "method": "authenticate",
@@ -311,11 +310,12 @@ async def authenticate_rpc(
         )
     if "error" in resp:
         raw_err = resp["error"]
-        err = cast("dict[str, Any]", raw_err) if isinstance(raw_err, dict) else {}
+        err: JsonObject = raw_err if isinstance(raw_err, dict) else {}
         err_msg = str(err.get("message", "")) if err else str(raw_err)
-        err_code: int = (
-            err.get("code", AcpErrorCode.INTERNAL_ERROR)
-            if err
+        raw_code = err.get("code")
+        err_code = (
+            raw_code
+            if isinstance(raw_code, int) and not isinstance(raw_code, bool)
             else AcpErrorCode.INTERNAL_ERROR
         )
         if is_auth_cancelled_error(err):
@@ -342,15 +342,15 @@ async def authenticate_rpc(
             last_auth_url=last_auth_url,
         )
     result = resp.get("result")
-    return cast("dict[str, object]", result) if isinstance(result, dict) else {}
+    return result if isinstance(result, dict) else {}
 
 
 async def wait_for_authenticate_response(
     *,
-    response_future: asyncio.Future,
+    response_future: AcpResponseFuture,
     process: asyncio.subprocess.Process | None,
     timeout_seconds: float,
-) -> dict[str, object]:
+) -> JsonObject:
     """Wait for auth completion, subprocess exit, or watchdog expiry."""
     if process is None:
         return await asyncio.wait_for(response_future, timeout=timeout_seconds)

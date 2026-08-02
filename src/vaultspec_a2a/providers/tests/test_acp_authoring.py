@@ -36,7 +36,7 @@ from .._acp_authoring import (
     is_write_tool_name,
 )
 from .._acp_rpc_handlers import on_fs_write_text_file
-from .._acp_types import _AcpModelConfig, _AcpSessionContext
+from .._acp_types import AcpModelConfig, AcpSessionContext
 from ..acp_chat_model import AcpChatModel
 
 if TYPE_CHECKING:
@@ -296,10 +296,10 @@ class TestConfigHomeAuthoringEntry:
             config_home_authoring_entry([no_env])
 
 
-def _config_with_authoring(workspace_root: str) -> _AcpModelConfig:
+def _config_with_authoring(workspace_root: str) -> AcpModelConfig:
     """Build an ACP config whose session advertises the bridged authoring tools."""
     binding = _binding("read_context", "propose_changeset")
-    return _AcpModelConfig(
+    return AcpModelConfig(
         agent_config=None,
         permission_callback=None,
         workspace_root=workspace_root,
@@ -340,7 +340,7 @@ class TestAuthoringVisibleButVaultWriteDenied:
         result = await on_fs_write_text_file(
             1,
             {"path": ".vault/plan/x.md", "content": "SHOULD NOT LAND"},
-            cast("_AcpSessionContext", None),
+            cast("AcpSessionContext", None),
             config,
         )
         payload = cast("dict", result["result"])
@@ -406,7 +406,7 @@ class TestAcpWriteGitSerialization:
                         "path": "serialized.txt",
                         "content": "written after the lock frees",
                     },
-                    cast("_AcpSessionContext", None),
+                    cast("AcpSessionContext", None),
                     config,
                 )
             )

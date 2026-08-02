@@ -33,7 +33,9 @@ import json
 import logging
 from dataclasses import dataclass, field
 from enum import StrEnum
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
+
+from pydantic import TypeAdapter, ValidationError
 
 from ..control.config import settings
 from ..graph.enums import MODEL_MAP, PROVIDER_DEFAULT_MODELS, Model, Provider
@@ -46,6 +48,7 @@ from ..team.team_config import (
     load_agent_config,
 )
 from ..thread.errors import AgentConfigNotFoundError, ConfigError
+from ._json_contract import JsonObject, JsonValue
 from .factory import classify_provider_command
 from .lane_admission import lane_admission_reason, unproven_lanes_in
 
@@ -74,6 +77,8 @@ __all__ = [
 ]
 
 logger = logging.getLogger(__name__)
+
+_JSON_OBJECT: TypeAdapter[JsonObject] = TypeAdapter(dict[str, JsonValue])
 
 # The hardcoded final provider fallback when no layer sets a provider (mirrors
 # the compiler's historical default).
@@ -614,9 +619,9 @@ class FrozenAssignment:
 
     profile_id: str
     digest: str
-    roles: dict[str, dict[str, Any]]
+    roles: dict[str, JsonObject]
 
-    def compiler_map(self) -> dict[str, dict[str, Any]]:
+    def compiler_map(self) -> dict[str, JsonObject]:
         """The provider/capability/fallback subset the compiler consumes."""
         return {
             agent_id: {
@@ -627,18 +632,21 @@ class FrozenAssignment:
             for agent_id, role in self.roles.items()
         }
 
-    def to_record(self) -> dict[str, Any]:
+    def to_record(self) -> JsonObject:
         """The JSON-safe record persisted in run metadata."""
+        roles: JsonObject = {}
+        for agent_id, role in self.roles.items():
+            roles[agent_id] = role
         return {
             "profile_id": self.profile_id,
             "digest": self.digest,
-            "roles": self.roles,
+            "roles": roles,
         }
 
 
 def freeze_assignment(assignment: ProfileAssignment) -> FrozenAssignment:
     """Freeze a resolved assignment into a safe, digest-stamped, persistable form."""
-    roles: dict[str, dict[str, Any]] = {}
+    roles: dict[str, JsonObject] = {}
     for role in assignment.roles:
         roles[role.agent_id] = {
             "role_id": role.role_id,
@@ -659,17 +667,28 @@ def freeze_assignment(assignment: ProfileAssignment) -> FrozenAssignment:
     )
 
 
-def frozen_from_record(record: Any) -> FrozenAssignment | None:
+def frozen_from_record(record: object) -> FrozenAssignment | None:
     """Rebuild a :class:`FrozenAssignment` from a persisted record, or ``None``."""
-    if not isinstance(record, dict):
+    try:
+        frozen_record = _JSON_OBJECT.validate_python(record, strict=True)
+    except ValidationError:
         return None
-    profile_id = record.get("profile_id")
-    digest = record.get("digest")
-    roles = record.get("roles")
+    profile_id = frozen_record.get("profile_id")
+    digest = frozen_record.get("digest")
+    roles = frozen_record.get("roles")
     if (
         not isinstance(profile_id, str)
         or not isinstance(digest, str)
         or not isinstance(roles, dict)
     ):
         return None
-    return FrozenAssignment(profile_id=profile_id, digest=digest, roles=roles)
+    frozen_roles: dict[str, JsonObject] = {}
+    for agent_id, role in roles.items():
+        if not isinstance(role, dict):
+            return None
+        frozen_roles[agent_id] = role
+    return FrozenAssignment(
+        profile_id=profile_id,
+        digest=digest,
+        roles=frozen_roles,
+    )

@@ -22,7 +22,7 @@ import sys
 from collections.abc import AsyncIterator, Mapping
 from contextlib import suppress
 from pathlib import Path
-from typing import Any, override
+from typing import Any, Never, override
 
 from langchain_core.callbacks import (
     AsyncCallbackManagerForLLMRun,
@@ -60,7 +60,7 @@ from ._acp_config_home import (
 )
 from ._acp_mcp import config_home_mcp_servers
 from ._acp_project_mcp import cleanup_projected_mcp, project_declared_mcp
-from ._acp_protocol import RpcHandlerMap, process_stdout_loop
+from ._acp_protocol import process_stdout_loop
 from ._acp_rpc_handlers import (
     on_fs_read_text_file,
     on_fs_write_text_file,
@@ -72,8 +72,16 @@ from ._acp_rpc_handlers import (
     on_terminal_wait_for_exit,
 )
 from ._acp_session import initialize_session, setup_prompt, setup_session
-from ._acp_types import PermissionCallback, _AcpModelConfig, _AcpSessionContext
+from ._acp_types import (
+    AcpModelConfig,
+    AcpResponseFuture,
+    AcpResponseFutures,
+    AcpSessionContext,
+    PermissionCallback,
+    RpcHandlerMap,
+)
 from ._cleanup import CleanupStep, run_independent_cleanups
+from ._json_contract import JsonObject, JsonValue
 from ._mcp_contract import verify_harness_mcp_contract
 from ._subprocess import kill_process_tree as _kill_process_tree
 from ._subprocess import spawn_acp_process as _spawn_acp_process
@@ -87,6 +95,48 @@ from .gemini_auth import refresh_gemini_token
 __all__ = ["AcpChatModel"]
 
 logger = logging.getLogger(__name__)
+
+
+def _json_object(value: JsonValue | None) -> JsonObject:
+    """Return an object payload or the empty object for malformed fields."""
+    return value if isinstance(value, dict) else {}
+
+
+def _json_object_list(value: JsonValue | None) -> list[JsonObject]:
+    """Return object entries from one protocol array."""
+    return (
+        [entry for entry in value if isinstance(entry, dict)]
+        if isinstance(value, list)
+        else []
+    )
+
+
+def _required_session_id(result: JsonObject, *, operation: str) -> str:
+    """Return the session id in one successful ACP response result."""
+    session_id = result.get("sessionId")
+    if not isinstance(session_id, str) or not session_id:
+        raise AcpError(
+            f"ACP {operation} succeeded without a sessionId",
+            code=AcpErrorCode.INTERNAL_ERROR,
+        )
+    return session_id
+
+
+def _raise_prompt_error(response: JsonObject) -> Never:
+    """Raise a typed prompt failure from one JSON-RPC error response."""
+    raw_error = response.get("error")
+    error = _json_object(raw_error)
+    code_value = error.get("code")
+    code = (
+        code_value
+        if isinstance(code_value, int) and not isinstance(code_value, bool)
+        else AcpErrorCode.INTERNAL_ERROR
+    )
+    raise AcpPromptError(
+        f"ACP prompt failed: {raw_error}",
+        code=code,
+        data=error.get("data"),
+    )
 
 
 class AcpChatModel(BaseChatModel):
@@ -109,7 +159,7 @@ class AcpChatModel(BaseChatModel):
         default=None,
         description="If set, resume an existing session via session/load.",
     )
-    mcp_servers: list[dict[str, Any]] = Field(
+    mcp_servers: list[JsonObject] = Field(
         default_factory=list,
         description="MCP server configs to pass via session/new or session/load.",
     )
@@ -193,7 +243,7 @@ class AcpChatModel(BaseChatModel):
     )
 
     # --- Runtime state (private, not model fields) ---
-    _config: _AcpModelConfig = PrivateAttr()
+    _config: AcpModelConfig = PrivateAttr()
     _process: asyncio.subprocess.Process | None = PrivateAttr(default=None)
     _stdin: asyncio.StreamWriter | None = PrivateAttr(default=None)
     # Shared lock for _stdin writes — used both by background RPC tasks and
@@ -201,12 +251,13 @@ class AcpChatModel(BaseChatModel):
     # interleaved JSON-RPC frames (H14 fix).
     _stdin_lock: asyncio.Lock = PrivateAttr(default_factory=asyncio.Lock)
     _active_session_id: str | None = PrivateAttr(default=None)
-    _response_futures: dict[int, asyncio.Future] | None = PrivateAttr(default=None)
-    _auth_methods: list[dict[str, Any]] = PrivateAttr(default_factory=list)
+    _response_futures: AcpResponseFutures | None = PrivateAttr(default=None)
+    _auth_methods: list[JsonObject] = PrivateAttr(default_factory=list)
 
+    @override
     def model_post_init(self, __context: object) -> None:
         """Initialize mutable instance attributes after Pydantic validation."""
-        self._config = _AcpModelConfig(
+        self._config = AcpModelConfig(
             agent_config=self.agent_config,
             permission_callback=self.permission_callback,
             workspace_root=self.workspace_root,
@@ -230,12 +281,13 @@ class AcpChatModel(BaseChatModel):
         self._auth_methods = []
 
     @property
+    @override
     def _llm_type(self) -> str:
         return "acp-chat-model"
 
     def with_mcp_servers(
         self,
-        mcp_servers: list[dict[str, Any]],
+        mcp_servers: list[JsonObject],
         allowed_tools: list[str] | None = None,
     ) -> "AcpChatModel":
         """Return a copy that advertises ``mcp_servers`` in ``session/new``.
@@ -248,7 +300,7 @@ class AcpChatModel(BaseChatModel):
         ``allowed_tools`` is supplied (headless runs only), the exact tool names
         are auto-permitted so the CLI can invoke them without a local prompt.
         """
-        update: dict[str, Any] = {"mcp_servers": list(mcp_servers)}
+        update: dict[str, object] = {"mcp_servers": list(mcp_servers)}
         if allowed_tools is not None:
             update["allowed_tools"] = list(allowed_tools)
         updated = self.model_copy(update=update)
@@ -264,7 +316,7 @@ class AcpChatModel(BaseChatModel):
         **kwargs: Any,
     ) -> AsyncIterator[ChatGenerationChunk]:
         """Streams responses from the ACP subprocess."""
-        prompt_blocks: list[dict[str, str]] = []
+        prompt_blocks: list[JsonObject] = []
         for msg in messages:
             if isinstance(
                 msg,
@@ -400,7 +452,7 @@ class AcpChatModel(BaseChatModel):
         # timeout) or a stdio-pipe failure must not orphan either artifact. ctx and
         # the reader tasks are created here too, so the finally guards on their
         # presence before touching the session.
-        ctx: _AcpSessionContext | None = None
+        ctx: AcpSessionContext | None = None
         stdout_task: asyncio.Task[None] | None = None
         stderr_task: asyncio.Task[None] | None = None
         try:
@@ -418,7 +470,7 @@ class AcpChatModel(BaseChatModel):
 
             if process.stdin is None or process.stdout is None:
                 raise RuntimeError("ACP subprocess failed to open stdio pipes")
-            ctx = _AcpSessionContext(
+            ctx = AcpSessionContext(
                 process=process,
                 stdin=process.stdin,
                 stdout=process.stdout,
@@ -500,7 +552,7 @@ class AcpChatModel(BaseChatModel):
             )
             await run_independent_cleanups(*cleanup_steps)
 
-    def _enforce_turn_deadline(self, ctx: _AcpSessionContext) -> None:
+    def _enforce_turn_deadline(self, ctx: AcpSessionContext) -> None:
         """Fail the turn once the subprocess has gone silent for too long.
 
         The queue poll below only ends on a sentinel or on ``prompt_done``, both
@@ -535,8 +587,8 @@ class AcpChatModel(BaseChatModel):
 
     async def _yield_chunks(
         self,
-        ctx: _AcpSessionContext,
-        prompt_future: asyncio.Future,
+        ctx: AcpSessionContext,
+        prompt_future: AcpResponseFuture,
         run_manager: AsyncCallbackManagerForLLMRun | None,
     ) -> AsyncIterator[ChatGenerationChunk]:
         """Poll the chunk queue and yield results."""
@@ -549,12 +601,7 @@ class AcpChatModel(BaseChatModel):
                     if prompt_future.done():
                         resp = prompt_future.result()
                         if "error" in resp:
-                            err = resp["error"]
-                            raise AcpPromptError(
-                                f"ACP prompt failed: {err}",
-                                code=err.get("code", AcpErrorCode.INTERNAL_ERROR),
-                                data=err.get("data"),
-                            )
+                            _raise_prompt_error(resp)
                     logger.warning(
                         "ACP subprocess exited before end_turn",
                         extra=runtime_log_extra(
@@ -576,12 +623,7 @@ class AcpChatModel(BaseChatModel):
                 if prompt_future.done():
                     resp = prompt_future.result()
                     if "error" in resp:
-                        err = resp["error"]
-                        raise AcpPromptError(
-                            f"ACP prompt failed: {err}",
-                            code=err.get("code", AcpErrorCode.INTERNAL_ERROR),
-                            data=err.get("data"),
-                        ) from None
+                        _raise_prompt_error(resp)
                 self._enforce_turn_deadline(ctx)
                 continue
 
@@ -601,9 +643,9 @@ class AcpChatModel(BaseChatModel):
 
     async def _cleanup_session(
         self,
-        ctx: _AcpSessionContext,
-        stdout_task: asyncio.Task,
-        stderr_task: asyncio.Task,
+        ctx: AcpSessionContext,
+        stdout_task: asyncio.Task[None],
+        stderr_task: asyncio.Task[None],
     ) -> None:
         """Terminate the subprocess and its tasks independently, aggregating errors.
 
@@ -682,6 +724,7 @@ class AcpChatModel(BaseChatModel):
         ctx.agent_modes = {}
         ctx.last_auth_url = None
 
+    @override
     async def _agenerate(
         self,
         messages: list[BaseMessage],
@@ -697,6 +740,7 @@ class AcpChatModel(BaseChatModel):
             chunks.append(chunk)
         return generate_from_stream(iter(chunks))
 
+    @override
     def _generate(
         self,
         messages: list[BaseMessage],
@@ -708,6 +752,7 @@ class AcpChatModel(BaseChatModel):
         raise NotImplementedError("AcpChatModel only supports async.")
 
     @property
+    @override
     def _identifying_params(self) -> Mapping[str, object]:
         return {"command": self.command}
 
@@ -721,12 +766,12 @@ class AcpChatModel(BaseChatModel):
             raise RuntimeError("No active session stdin.")
         return self._stdin
 
-    def _require_response_futures(self) -> dict[int, asyncio.Future]:
+    def _require_response_futures(self) -> AcpResponseFutures:
         if self._response_futures is None:
             raise RuntimeError("No active session response futures.")
         return self._response_futures
 
-    async def _read_stderr_loop(self, ctx: _AcpSessionContext) -> None:
+    async def _read_stderr_loop(self, ctx: AcpSessionContext) -> None:
         if ctx.process.stderr is None:
             return
         while line := await ctx.process.stderr.readline():
@@ -751,7 +796,7 @@ class AcpChatModel(BaseChatModel):
                     ),
                 )
 
-    def _capture_auth_progress(self, text: str, ctx: _AcpSessionContext) -> None:
+    def _capture_auth_progress(self, text: str, ctx: AcpSessionContext) -> None:
         """Capture browser-auth progress from ACP stderr lines."""
         if "Please visit the following URL to authorize the application" in text:
             ctx.auth_prompt_active = True
@@ -785,7 +830,7 @@ class AcpChatModel(BaseChatModel):
         rpc_id = AcpRequestId.SESSION_FORK
         futures = self._require_response_futures()
         futures[rpc_id] = asyncio.get_running_loop().create_future()
-        req = {
+        req: JsonObject = {
             "jsonrpc": "2.0",
             "id": rpc_id,
             "method": "session/fork",
@@ -798,15 +843,15 @@ class AcpChatModel(BaseChatModel):
         resp = await asyncio.wait_for(
             futures[rpc_id], timeout=settings.acp_startup_timeout_seconds
         )
-        return resp["result"]["sessionId"]
+        return _required_session_id(_json_object(resp.get("result")), operation="fork")
 
-    async def list_sessions(self) -> list[dict[str, object]]:
+    async def list_sessions(self) -> list[JsonObject]:
         """List all sessions."""
         self._require_session()
         rpc_id = AcpRequestId.SESSION_LIST
         futures = self._require_response_futures()
         futures[rpc_id] = asyncio.get_running_loop().create_future()
-        req = {
+        req: JsonObject = {
             "jsonrpc": "2.0",
             "id": rpc_id,
             "method": "session/list",
@@ -819,15 +864,15 @@ class AcpChatModel(BaseChatModel):
         resp = await asyncio.wait_for(
             futures[rpc_id], timeout=settings.acp_rpc_timeout_seconds
         )
-        return resp["result"].get("sessions", [])
+        return _json_object_list(_json_object(resp.get("result")).get("sessions"))
 
-    async def set_mode(self, mode_id: str) -> dict[str, object]:
+    async def set_mode(self, mode_id: str) -> JsonObject:
         """Set agent mode."""
         sid = self._require_session()
         rpc_id = AcpRequestId.SESSION_SET_MODE
         futures = self._require_response_futures()
         futures[rpc_id] = asyncio.get_running_loop().create_future()
-        req = {
+        req: JsonObject = {
             "jsonrpc": "2.0",
             "id": rpc_id,
             "method": "session/set_mode",
@@ -840,15 +885,15 @@ class AcpChatModel(BaseChatModel):
         resp = await asyncio.wait_for(
             futures[rpc_id], timeout=settings.acp_rpc_timeout_seconds
         )
-        return resp.get("result", {})
+        return _json_object(resp.get("result"))
 
-    async def set_model(self, model_id: str) -> dict[str, object]:
+    async def set_model(self, model_id: str) -> JsonObject:
         """Set LLM model."""
         sid = self._require_session()
         rpc_id = AcpRequestId.SESSION_SET_MODEL
         futures = self._require_response_futures()
         futures[rpc_id] = asyncio.get_running_loop().create_future()
-        req = {
+        req: JsonObject = {
             "jsonrpc": "2.0",
             "id": rpc_id,
             "method": "session/set_model",
@@ -861,15 +906,15 @@ class AcpChatModel(BaseChatModel):
         resp = await asyncio.wait_for(
             futures[rpc_id], timeout=settings.acp_rpc_timeout_seconds
         )
-        return resp.get("result", {})
+        return _json_object(resp.get("result"))
 
-    async def set_config_option(self, key: str, value: object) -> dict[str, object]:
+    async def set_config_option(self, key: str, value: JsonValue) -> JsonObject:
         """Set config option."""
         sid = self._require_session()
         rpc_id = AcpRequestId.SESSION_SET_CONFIG_OPTION
         futures = self._require_response_futures()
         futures[rpc_id] = asyncio.get_running_loop().create_future()
-        req = {
+        req: JsonObject = {
             "jsonrpc": "2.0",
             "id": rpc_id,
             "method": "session/set_config_option",
@@ -882,9 +927,9 @@ class AcpChatModel(BaseChatModel):
         resp = await asyncio.wait_for(
             futures[rpc_id], timeout=settings.acp_rpc_timeout_seconds
         )
-        return resp.get("result", {})
+        return _json_object(resp.get("result"))
 
-    async def authenticate(self, token: str) -> dict[str, object]:
+    async def authenticate(self, token: str) -> JsonObject:
         """Authenticate session.
 
         Sends the ACP ``authenticate`` RPC per spec (§3.4). The ``methodId``

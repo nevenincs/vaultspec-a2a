@@ -23,7 +23,6 @@ from ...team.team_config import (
 )
 from ...thread.errors import ConfigError
 from ..model_profiles import (
-    _ACCEPTANCE_GATE_REASON,
     AssignmentSource,
     ProfileAssignment,
     ProviderReadiness,
@@ -213,17 +212,13 @@ class TestReadiness:
         elif r.reason is not None:
             assert key not in r.reason
 
-    def test_kimi_command_readiness_covers_binary_and_git_bash(self) -> None:
-        """The key-present branch delegates to command readiness, which covers the
-        `kimi` binary AND the Git-Bash prerequisite via classify_provider_command."""
+    def test_codex_command_readiness_uses_public_probe(self) -> None:
+        """The public Codex readiness probe delegates to command classification."""
         import shutil
 
-        from ..model_profiles import _command_readiness
-
-        r = _command_readiness(Provider.KIMI)
-        assert r.provider == Provider.KIMI
-        if shutil.which("kimi") is not None:
-            # Git for Windows is a host prerequisite here, so both resolve.
+        r = probe_provider_readiness(Provider.CODEX)
+        assert r.provider == Provider.CODEX
+        if shutil.which("codex") is not None:
             assert r.ready is True
         else:
             assert r.ready is False
@@ -288,7 +283,7 @@ class TestEligibility:
             acceptance_gate_passed=False,
         )
         assert elig.eligible is False
-        assert _ACCEPTANCE_GATE_REASON in elig.reasons
+        assert any("production acceptance gate" in reason for reason in elig.reasons)
 
     def test_eligible_fallback_keeps_role_eligible(self) -> None:
         """A not-ready primary with a ready declared fallback stays eligible."""
@@ -429,3 +424,17 @@ class TestFreeze:
         assert frozen_from_record({}) is None
         assert frozen_from_record({"profile_id": "x"}) is None
         assert frozen_from_record("garbage") is None
+        assert (
+            frozen_from_record({"profile_id": "x", "digest": "digest", "roles": []})
+            is None
+        )
+        assert (
+            frozen_from_record(
+                {
+                    "profile_id": "x",
+                    "digest": "digest",
+                    "roles": {"agent": {"provider": object()}},
+                }
+            )
+            is None
+        )

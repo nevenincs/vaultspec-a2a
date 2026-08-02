@@ -50,7 +50,7 @@ _TURN_PROBE_SCRIPT = textwrap.dedent(
     from vaultspec_a2a.providers.acp_chat_model import AcpChatModel
     from vaultspec_a2a.providers.acp_exceptions import AcpPromptError
     from vaultspec_a2a.providers._acp_protocol import process_stdout_loop
-    from vaultspec_a2a.providers._acp_types import _AcpSessionContext
+    from vaultspec_a2a.providers._acp_types import AcpSessionContext
     from vaultspec_a2a.providers._subprocess import spawn_acp_process
     from vaultspec_a2a.control.config import settings
 
@@ -62,7 +62,7 @@ _TURN_PROBE_SCRIPT = textwrap.dedent(
             [sys.executable, "-c", sys.argv[1]], env={}, cwd=".", use_exec=True
         )
         model = AcpChatModel(command=["echo"], env_vars={})
-        ctx = _AcpSessionContext(
+        ctx = AcpSessionContext(
             process=process,
             stdin=cast("asyncio.StreamWriter", process.stdin),
             stdout=cast("asyncio.StreamReader", process.stdout),

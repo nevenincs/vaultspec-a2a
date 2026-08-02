@@ -20,8 +20,9 @@ from ..control.config import settings
 from ..graph.acp_options import option_id_of, valid_option_ids
 from ..utils.process import ProcessContainment, ProcessContainmentError
 from ..workspace.environment import resolve_env_vars
-from ._acp_types import _AcpModelConfig, _AcpSessionContext
-from ._subprocess import _CONTAINMENT_ATTR
+from ._acp_types import AcpModelConfig, AcpRpcId, AcpSessionContext
+from ._json_contract import JsonObject, JsonValue
+from ._subprocess import attach_process_containment
 from ._subprocess import kill_process_tree as _kill_process_tree
 from .acp_exceptions import AcpErrorCode
 
@@ -69,7 +70,43 @@ _MAX_TERMINAL_TIMEOUT: float = 300.0
 _ENV_NAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 
-def sandbox_path(path: str, config: _AcpModelConfig) -> Path:
+def _json_object(value: JsonValue | None) -> JsonObject:
+    """Return one JSON object or the empty object for malformed input."""
+    return value if isinstance(value, dict) else {}
+
+
+def _json_object_list(value: JsonValue | None) -> list[JsonObject]:
+    """Return only object entries from one untrusted JSON array."""
+    return (
+        [entry for entry in value if isinstance(entry, dict)]
+        if isinstance(value, list)
+        else []
+    )
+
+
+def _required_string(params: JsonObject, field: str) -> str:
+    """Read one required string field from an ACP RPC payload."""
+    value = params.get(field)
+    if not isinstance(value, str):
+        raise ValueError(f"ACP field {field!r} must be a string")
+    return value
+
+
+def _integer(value: object, *, field: str) -> int:
+    """Convert a JSON numeric/string integer field without accepting booleans."""
+    if isinstance(value, bool) or not isinstance(value, (int, float, str)):
+        raise ValueError(f"ACP field {field!r} must be an integer")
+    return int(value)
+
+
+def _number(value: object, *, field: str) -> float:
+    """Convert a JSON numeric/string field without accepting booleans."""
+    if isinstance(value, bool) or not isinstance(value, (int, float, str)):
+        raise ValueError(f"ACP field {field!r} must be numeric")
+    return float(value)
+
+
+def sandbox_path(path: str, config: AcpModelConfig) -> Path:
     """Resolve and sandbox a path to the agent cwd."""
     cwd = Path(config.workspace_root or config.cwd or str(Path.cwd()))
     resolved = (cwd / path).resolve()
@@ -78,7 +115,7 @@ def sandbox_path(path: str, config: _AcpModelConfig) -> Path:
     return resolved
 
 
-def _targets_vault(file_path: Path, _config: _AcpModelConfig) -> bool:
+def _targets_vault(file_path: Path, _config: AcpModelConfig) -> bool:
     """Return True if a sandbox-resolved path lies within any ``.vault`` dir.
 
     Agents may not write the vault corpus through their coding-CLI file
@@ -98,7 +135,7 @@ def _targets_vault(file_path: Path, _config: _AcpModelConfig) -> bool:
     return any(part.casefold() == ".vault" for part in file_path.parts)
 
 
-def _vault_write_denial(rpc_id: int | str, path: str) -> dict[str, object]:
+def _vault_write_denial(rpc_id: AcpRpcId, path: str) -> JsonObject:
     """Build the value-typed ``.vault`` write denial.
 
     Mirrors the engine's ``forbidden_actor`` 200-value shape (wire-shapes
@@ -153,7 +190,7 @@ def _strip_mcp_prefix(tool_name: str) -> str:
     return tool_name
 
 
-def _option_id_at(options: list, index: int, *, default: str) -> str:
+def _option_id_at(options: list[JsonObject], index: int, *, default: str) -> str:
     """Return the id of the option at ``index``, or ``default`` if it has none.
 
     Positional, never scanning: these call sites pick an option by CONVENTION
@@ -168,7 +205,7 @@ def _option_id_at(options: list, index: int, *, default: str) -> str:
     return option_id_of(options[index]) or default
 
 
-def _first_offered_option_id(options: list, *, default: str) -> str:
+def _first_offered_option_id(options: list[JsonObject], *, default: str) -> str:
     """Return the first option id actually offered, or ``default`` if none is.
 
     Unlike :func:`_option_id_at` this scans, because its caller has already
@@ -180,7 +217,7 @@ def _first_offered_option_id(options: list, *, default: str) -> str:
     )
 
 
-def _denial_option_id(options: list) -> str:
+def _denial_option_id(options: list[JsonObject]) -> str:
     """Return the id of the most restrictive offered option.
 
     Prefer the first option whose id names a denial; fall back to the last
@@ -201,7 +238,7 @@ def _denial_option_id(options: list) -> str:
 
 
 def _kimi_autonomous_option_id(
-    name: str, config: _AcpModelConfig, options: list
+    name: str, config: AcpModelConfig, options: list[JsonObject]
 ) -> str:
     """Return the option id for a Kimi autonomous permission decision.
 
@@ -216,43 +253,34 @@ def _kimi_autonomous_option_id(
         _KIMI_NATIVE_READ_TOOLS
     )
     if canonical in allowed:
-        return next(
-            (
-                option_id
-                for option in options
-                if isinstance(option, dict)
-                and option.get("kind") in ("allow_once", "allow_always")
-                and (option_id := option_id_of(option))
-            ),
-            _option_id_at(options, 0, default="approve"),
-        )
-    return next(
-        (
-            option_id
-            for option in options
-            if isinstance(option, dict)
-            and (option_id := option_id_of(option))
-            and (
-                option.get("kind") in ("reject_once", "reject_always")
-                or "reject" in option_id.lower()
-                or "deny" in option_id.lower()
-            )
-        ),
-        _option_id_at(options, -1, default="reject"),
-    )
+        for option in options:
+            option_id = option_id_of(option)
+            if option.get("kind") in ("allow_once", "allow_always") and option_id:
+                return option_id
+        return _option_id_at(options, 0, default="approve")
+    for option in options:
+        option_id = option_id_of(option)
+        if option_id and (
+            option.get("kind") in ("reject_once", "reject_always")
+            or "reject" in option_id.lower()
+            or "deny" in option_id.lower()
+        ):
+            return option_id
+    return _option_id_at(options, -1, default="reject")
 
 
 async def on_request_permission(
-    rpc_id: int | str,
-    params: dict,
-    ctx: _AcpSessionContext,
-    config: _AcpModelConfig,
-) -> dict[str, object]:
+    rpc_id: AcpRpcId,
+    params: JsonObject,
+    ctx: AcpSessionContext,
+    config: AcpModelConfig,
+) -> JsonObject:
     """Handle session/request_permission RPC."""
-    options = params.get("options", [])
-    tool_call = params.get("toolCall", {})
-    name = tool_call.get("title", "unknown")
-    args = tool_call.get("rawInput", {})
+    options = _json_object_list(params.get("options"))
+    tool_call = _json_object(params.get("toolCall"))
+    name_value = tool_call.get("title")
+    name = name_value if isinstance(name_value, str) else "unknown"
+    args = _json_object(tool_call.get("rawInput"))
 
     # Diagnostic (R7: tool name + option ids only, never rawInput/payloads):
     # this handler firing means the SDK's canUseTool rung was reached — i.e. no
@@ -348,11 +376,11 @@ async def on_request_permission(
 
 
 async def on_fs_read_text_file(
-    rpc_id: int | str,
-    params: dict,
-    _ctx: _AcpSessionContext,
-    config: _AcpModelConfig,
-) -> dict[str, object]:
+    rpc_id: AcpRpcId,
+    params: JsonObject,
+    _ctx: AcpSessionContext,
+    config: AcpModelConfig,
+) -> JsonObject:
     """Handle fs/read_text_file RPC.
 
     Supports optional ``offset`` (byte offset) and ``limit`` (byte count)
@@ -360,10 +388,12 @@ async def on_fs_read_text_file(
     Uses asyncio.to_thread so blocking I/O does not stall the event loop.
     """
     try:
-        file_path = sandbox_path(params["path"], config)
-        offset: int = int(params.get("offset") or 0)
+        file_path = sandbox_path(_required_string(params, "path"), config)
+        offset = _integer(params.get("offset") or 0, field="offset")
         limit: int | None = (
-            int(params["limit"]) if params.get("limit") is not None else None
+            _integer(params["limit"], field="limit")
+            if params.get("limit") is not None
+            else None
         )
 
         # Cap reads at _FS_READ_MAX_BYTES.  When the caller also
@@ -389,11 +419,11 @@ async def on_fs_read_text_file(
 
 
 async def on_fs_write_text_file(
-    rpc_id: int | str,
-    params: dict,
-    _ctx: _AcpSessionContext,
-    config: _AcpModelConfig,
-) -> dict[str, object]:
+    rpc_id: AcpRpcId,
+    params: JsonObject,
+    _ctx: AcpSessionContext,
+    config: AcpModelConfig,
+) -> JsonObject:
     """Handle fs/write_text_file RPC.
 
     Acquires the global git mutex before writing to prevent races with
@@ -403,7 +433,8 @@ async def on_fs_write_text_file(
     from ..workspace.concurrency import git_workspace_mutex
 
     try:
-        file_path = sandbox_path(params["path"], config)
+        path = _required_string(params, "path")
+        file_path = sandbox_path(path, config)
 
         # Deny agent writes into the vault corpus. Returns a value-typed
         # forbidden_actor denial (not a transport error) so the agent is steered
@@ -411,11 +442,11 @@ async def on_fs_write_text_file(
         if _targets_vault(file_path, config):
             logger.info(
                 "Denied .vault/ write via ACP fs (R2 forbidden_actor): %r",
-                params["path"],
+                path,
             )
-            return _vault_write_denial(rpc_id, params["path"])
+            return _vault_write_denial(rpc_id, path)
 
-        content: str = params["content"]
+        content = _required_string(params, "content")
 
         def _write() -> None:
             file_path.parent.mkdir(parents=True, exist_ok=True)
@@ -433,11 +464,11 @@ async def on_fs_write_text_file(
 
 
 async def on_terminal_create(
-    rpc_id: int | str,
-    params: dict,
-    ctx: _AcpSessionContext,
-    config: _AcpModelConfig,
-) -> dict[str, object]:
+    rpc_id: AcpRpcId,
+    params: JsonObject,
+    ctx: AcpSessionContext,
+    config: AcpModelConfig,
+) -> JsonObject:
     """Handle terminal/create RPC.
 
     Validates that the working directory is within the sandbox, logs
@@ -446,8 +477,16 @@ async def on_terminal_create(
     environment so the subprocess inherits PATH and other required vars.
     """
     try:
-        command = params["command"]
-        args = params.get("args") or []
+        command = _required_string(params, "command")
+        raw_args = params.get("args")
+        if raw_args is None:
+            args: list[str] = []
+        elif isinstance(raw_args, list):
+            args = [argument for argument in raw_args if isinstance(argument, str)]
+            if len(args) != len(raw_args):
+                raise ValueError("ACP field 'args' must be a list of strings")
+        else:
+            raise ValueError("ACP field 'args' must be a list of strings")
 
         # --- Security: command allowlist validation (C4) ----------------
         # Extract the base name without directory path and .exe suffix so
@@ -468,8 +507,11 @@ async def on_terminal_create(
         # ----------------------------------------------------------------
 
         # Sandbox the terminal cwd: must be within the agent workspace root.
+        requested_cwd = params.get("cwd")
         raw_cwd = (
-            params.get("cwd") or config.workspace_root or config.cwd or str(Path.cwd())
+            requested_cwd
+            if isinstance(requested_cwd, str) and requested_cwd
+            else config.workspace_root or config.cwd or str(Path.cwd())
         )
         sandbox_root = Path(
             config.workspace_root or config.cwd or str(Path.cwd())
@@ -495,17 +537,28 @@ async def on_terminal_create(
             if isinstance(extra_env, list):
                 # ACP protocol: env is list[EnvVariable] with name/value keys
                 # Validate env variable names before applying
-                for v in extra_env:
-                    if not _ENV_NAME_RE.match(v["name"]):
-                        raise ValueError(
-                            f"Invalid environment variable name: {v['name']!r}"
-                        )
-                terminal_env.update({v["name"]: v["value"] for v in extra_env})
-            elif isinstance(extra_env, dict):
-                for name in extra_env:
+                env_entries = _json_object_list(extra_env)
+                if len(env_entries) != len(extra_env):
+                    raise ValueError("ACP terminal env entries must be objects")
+                validated_env: dict[str, str] = {}
+                for entry in env_entries:
+                    name = _required_string(entry, "name")
+                    value = _required_string(entry, "value")
                     if not _ENV_NAME_RE.match(name):
                         raise ValueError(f"Invalid environment variable name: {name!r}")
-                terminal_env.update(extra_env)
+                    validated_env[name] = value
+                terminal_env.update(validated_env)
+            elif isinstance(extra_env, dict):
+                validated_env = {}
+                for name, value in extra_env.items():
+                    if not _ENV_NAME_RE.match(name):
+                        raise ValueError(f"Invalid environment variable name: {name!r}")
+                    if not isinstance(value, str):
+                        raise ValueError(
+                            f"ACP terminal env value for {name!r} must be a string"
+                        )
+                    validated_env[name] = value
+                terminal_env.update(validated_env)
         # M12: on Windows, use CREATE_NEW_PROCESS_GROUP so child
         # processes don't become orphans when the terminal is killed.
         creation_flags = (
@@ -552,7 +605,7 @@ async def on_terminal_create(
                     process.pid,
                     exc_info=True,
                 )
-            setattr(process, _CONTAINMENT_ATTR, containment)
+            attach_process_containment(process, containment)
             terminal_id = uuid4().hex[:8]
             ctx.terminals[terminal_id] = process
         except BaseException:
@@ -572,10 +625,10 @@ async def on_terminal_create(
 
 
 def _resolve_terminal(
-    rpc_id: int | str,
-    params: dict,
-    ctx: _AcpSessionContext,
-) -> tuple[asyncio.subprocess.Process | None, dict[str, object]]:
+    rpc_id: AcpRpcId,
+    params: JsonObject,
+    ctx: AcpSessionContext,
+) -> tuple[asyncio.subprocess.Process | None, JsonObject]:
     """Resolve ``params["terminalId"]`` to its live process, or to the refusal.
 
     Returns ``(process, refusal)``: on a hit the live process and an empty
@@ -594,7 +647,8 @@ def _resolve_terminal(
     ``terminal/release`` is deliberately NOT a caller: releasing a terminal that
     is already gone is idempotent success, not an invalid-params refusal.
     """
-    terminal_id = params.get("terminalId", "")
+    terminal_id_value = params.get("terminalId")
+    terminal_id = terminal_id_value if isinstance(terminal_id_value, str) else ""
     process = ctx.terminals.get(terminal_id)
     if process is not None:
         return process, {}
@@ -609,13 +663,14 @@ def _resolve_terminal(
 
 
 async def on_terminal_kill(
-    rpc_id: int | str,
-    params: dict,
-    ctx: _AcpSessionContext,
-    _config: _AcpModelConfig,
-) -> dict[str, object]:
+    rpc_id: AcpRpcId,
+    params: JsonObject,
+    ctx: AcpSessionContext,
+    _config: AcpModelConfig,
+) -> JsonObject:
     """Handle terminal/kill RPC."""
-    terminal_id = params.get("terminalId", "")
+    terminal_id_value = params.get("terminalId")
+    terminal_id = terminal_id_value if isinstance(terminal_id_value, str) else ""
     process, refusal = _resolve_terminal(rpc_id, params, ctx)
     if process is None:
         return refusal
@@ -625,11 +680,11 @@ async def on_terminal_kill(
 
 
 async def on_terminal_output(
-    rpc_id: int | str,
-    params: dict,
-    ctx: _AcpSessionContext,
-    _config: _AcpModelConfig,
-) -> dict[str, object]:
+    rpc_id: AcpRpcId,
+    params: JsonObject,
+    ctx: AcpSessionContext,
+    _config: AcpModelConfig,
+) -> JsonObject:
     """Handle terminal/output RPC."""
     process, refusal = _resolve_terminal(rpc_id, params, ctx)
     if process is None:
@@ -646,7 +701,7 @@ async def on_terminal_output(
             stderr_data = await asyncio.wait_for(
                 process.stderr.read(65536), timeout=0.5
             )
-    output_result: dict[str, object] = {
+    output_result: JsonObject = {
         "output": stdout_data.decode("utf-8", errors="replace")
         + stderr_data.decode("utf-8", errors="replace"),
         "truncated": False,
@@ -658,16 +713,18 @@ async def on_terminal_output(
 
 
 async def on_terminal_wait_for_exit(
-    rpc_id: int | str,
-    params: dict,
-    ctx: _AcpSessionContext,
-    _config: _AcpModelConfig,
-) -> dict[str, object]:
+    rpc_id: AcpRpcId,
+    params: JsonObject,
+    ctx: AcpSessionContext,
+    _config: AcpModelConfig,
+) -> JsonObject:
     """Handle terminal/wait_for_exit RPC."""
     process, refusal = _resolve_terminal(rpc_id, params, ctx)
     if process is None:
         return refusal
-    timeout = min(float(params.get("timeout") or 60.0), _MAX_TERMINAL_TIMEOUT)
+    timeout = min(
+        _number(params.get("timeout") or 60.0, field="timeout"), _MAX_TERMINAL_TIMEOUT
+    )
     try:
         await asyncio.wait_for(process.wait(), timeout=timeout)
     except TimeoutError:
@@ -676,7 +733,7 @@ async def on_terminal_wait_for_exit(
             "id": rpc_id,
             "error": {"code": -32603, "message": "Timeout waiting for exit"},
         }
-    exit_result: dict[str, object] = {"exitCode": process.returncode}
+    exit_result: JsonObject = {"exitCode": process.returncode}
     # On Unix, negative returncode means the process was killed by a signal
     # (returncode == -signum). Include the signal number for completeness.
     if process.returncode is not None and process.returncode < 0:
@@ -685,13 +742,14 @@ async def on_terminal_wait_for_exit(
 
 
 async def on_terminal_release(
-    rpc_id: int | str,
-    params: dict,
-    ctx: _AcpSessionContext,
-    _config: _AcpModelConfig,
-) -> dict[str, object]:
+    rpc_id: AcpRpcId,
+    params: JsonObject,
+    ctx: AcpSessionContext,
+    _config: AcpModelConfig,
+) -> JsonObject:
     """Handle terminal/release RPC."""
-    terminal_id = params.get("terminalId", "")
+    terminal_id_value = params.get("terminalId")
+    terminal_id = terminal_id_value if isinstance(terminal_id_value, str) else ""
     process = ctx.terminals.pop(terminal_id, None)
     if process is not None and process.returncode is None:
         await _kill_process_tree(process)

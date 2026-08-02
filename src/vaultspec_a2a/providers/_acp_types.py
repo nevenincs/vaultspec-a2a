@@ -6,22 +6,26 @@ from auth logic and session lifecycle RPCs.
 
 import asyncio
 import time
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass, field
-from typing import Any
 
 from langchain_core.outputs import ChatGenerationChunk
 
 from ..team.team_config import AgentConfig
+from ._json_contract import JsonObject
 
 __all__: list[str] = []
 
 
-PermissionCallback = Callable[[str, dict, list[dict[str, Any]]], Awaitable[str]]
+type AcpRpcId = int | str
+type AcpResponseFuture = asyncio.Future[JsonObject]
+type AcpResponseFutures = dict[int, AcpResponseFuture]
+
+PermissionCallback = Callable[[str, JsonObject, list[JsonObject]], Awaitable[str]]
 
 
 @dataclass(frozen=True)
-class _AcpModelConfig:
+class AcpModelConfig:
     """Frozen snapshot of read-only ACP model configuration.
 
     Built once in ``AcpChatModel.model_post_init`` and threaded through
@@ -38,7 +42,7 @@ class _AcpModelConfig:
     # dataclass repr (env_vars redaction audit).
     env_vars: dict[str, str] = field(repr=False)
     session_id: str | None
-    mcp_servers: list[dict[str, Any]]
+    mcp_servers: list[JsonObject]
     use_exec: bool
     provider: str | None
     runtime_authority: str | None
@@ -63,18 +67,18 @@ class _AcpModelConfig:
 
 
 @dataclass
-class _AcpSessionContext:
+class AcpSessionContext:
     """Consolidated state for an active ACP session."""
 
     process: asyncio.subprocess.Process
     stdin: asyncio.StreamWriter
     stdout: asyncio.StreamReader
-    response_futures: dict[int, asyncio.Future]
+    response_futures: AcpResponseFutures
     chunk_queue: asyncio.Queue[ChatGenerationChunk | None]
     prompt_done: asyncio.Event
     prompt_id_ref: list[int]
     interrupt_exc: list[BaseException]
-    background_tasks: set[asyncio.Task] = field(default_factory=set)
+    background_tasks: set[asyncio.Task[None]] = field(default_factory=set)
     terminals: dict[str, asyncio.subprocess.Process] = field(default_factory=dict)
     stderr_event_count: int = 0
     auth_prompt_active: bool = False
@@ -83,8 +87,8 @@ class _AcpSessionContext:
     # RPC tasks cannot interleave writes and produce malformed JSON-RPC frames.
     stdin_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
     # Session-scoped mutables (moved from AcpChatModel PrivateAttrs)
-    tool_calls: dict[str, Any] = field(default_factory=dict)
-    agent_modes: dict[str, Any] = field(default_factory=dict)
+    tool_calls: dict[str, JsonObject] = field(default_factory=dict)
+    agent_modes: JsonObject = field(default_factory=dict)
     last_auth_url: str | None = None
     # Monotonic stamp of the last frame read from the subprocess. The turn loop
     # measures silence against this, so any protocol traffic - streamed content,
@@ -105,8 +109,8 @@ class _AcpSessionContext:
 class InitializeResult:
     """Return value of ``initialize_session``."""
 
-    agent_capabilities: dict[str, Any]
-    auth_methods: list[dict[str, Any]]
+    agent_capabilities: JsonObject
+    auth_methods: list[JsonObject]
 
 
 @dataclass(frozen=True)
@@ -114,4 +118,10 @@ class SessionSetupResult:
     """Return value of ``setup_session``."""
 
     session_id: str
-    agent_modes: dict[str, Any]
+    agent_modes: JsonObject
+
+
+type AcpRpcHandler = Callable[
+    [AcpRpcId, JsonObject, AcpSessionContext, AcpModelConfig], Awaitable[JsonObject]
+]
+type RpcHandlerMap = Mapping[str, AcpRpcHandler]

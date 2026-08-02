@@ -18,12 +18,12 @@ from .._acp_rpc_handlers import (
     on_terminal_create,
     sandbox_path,
 )
-from .._acp_types import _AcpModelConfig, _AcpSessionContext
+from .._acp_types import AcpModelConfig, AcpSessionContext
 
 
-def _make_config(workspace_root: str | None = None) -> _AcpModelConfig:
-    """Create a minimal _AcpModelConfig for security tests."""
-    return _AcpModelConfig(
+def _make_config(workspace_root: str | None = None) -> AcpModelConfig:
+    """Create a minimal AcpModelConfig for security tests."""
+    return AcpModelConfig(
         agent_config=None,
         permission_callback=None,
         workspace_root=workspace_root,
@@ -212,7 +212,7 @@ class TestOnTerminalCreateValidation:
         """Create a minimal session context for on_terminal_create calls.
 
         Policy exception: _MinimalSessionContext satisfies the structural
-        subset of _AcpSessionContext used by on_terminal_create's validation
+        subset of AcpSessionContext used by on_terminal_create's validation
         paths (allowlist check, metachar check, sandbox check). This is pure
         logic that runs before any subprocess is spawned. The project's
         no-mocks mandate targets mocking out network/LLM/subprocess calls;
@@ -224,7 +224,7 @@ class TestOnTerminalCreateValidation:
             terminals: ClassVar[dict] = {}
 
         # Structural guard: verify real type has the attrs we shadow
-        _ctx_fields = {f.name for f in dataclasses.fields(_AcpSessionContext)}
+        _ctx_fields = {f.name for f in dataclasses.fields(AcpSessionContext)}
         assert "stdin_lock" in _ctx_fields, "ctx interface drift"
         assert "terminals" in _ctx_fields, "ctx interface drift"
 

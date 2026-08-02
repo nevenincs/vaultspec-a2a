@@ -2,11 +2,11 @@
 
 Pins the env_vars redaction audit: env_vars carries
 CLAUDE_CODE_OAUTH_TOKEN / ANTHROPIC_AUTH_TOKEN, and neither the Pydantic model's
-repr/str/serialization nor the frozen _AcpModelConfig snapshot's dataclass repr
+repr/str/serialization nor the frozen AcpModelConfig snapshot's dataclass repr
 may render the token value. Real objects, a token-shaped (synthetic) value.
 """
 
-from .._acp_types import _AcpModelConfig
+from .._acp_types import AcpModelConfig
 from ..acp_chat_model import AcpChatModel
 
 # Token-shaped probe; clearly synthetic, never a real credential.
@@ -20,8 +20,8 @@ def _model() -> AcpChatModel:
     )
 
 
-def _config() -> _AcpModelConfig:
-    return _AcpModelConfig(
+def _config() -> AcpModelConfig:
+    return AcpModelConfig(
         agent_config=None,
         permission_callback=None,
         workspace_root=None,
@@ -56,7 +56,7 @@ def test_token_absent_from_model_dump_json() -> None:
 
 
 def test_token_absent_from_config_repr() -> None:
-    """The frozen _AcpModelConfig snapshot's dataclass repr must redact the token."""
+    """The frozen AcpModelConfig snapshot's dataclass repr must redact the token."""
     assert _TOKEN not in repr(_config())
 
 

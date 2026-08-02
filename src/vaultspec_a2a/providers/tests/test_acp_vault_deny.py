@@ -18,14 +18,14 @@ from typing import TYPE_CHECKING, cast
 import pytest
 
 from .._acp_rpc_handlers import on_fs_read_text_file, on_fs_write_text_file
-from .._acp_types import _AcpModelConfig, _AcpSessionContext
+from .._acp_types import AcpModelConfig, AcpSessionContext
 
 if TYPE_CHECKING:
     from pathlib import Path
 
 
-def _make_config(workspace_root: str) -> _AcpModelConfig:
-    return _AcpModelConfig(
+def _make_config(workspace_root: str) -> AcpModelConfig:
+    return AcpModelConfig(
         agent_config=None,
         permission_callback=None,
         workspace_root=workspace_root,
@@ -47,10 +47,10 @@ def _make_config(workspace_root: str) -> _AcpModelConfig:
 
 
 # The write handler never touches ctx (it is the ``_ctx`` throwaway param).
-_NO_CTX = cast("_AcpSessionContext", None)
+_NO_CTX = cast("AcpSessionContext", None)
 
 
-async def _write(config: _AcpModelConfig, path: str) -> dict:
+async def _write(config: AcpModelConfig, path: str) -> dict:
     return await on_fs_write_text_file(
         1, {"path": path, "content": "SHOULD NOT LAND"}, _NO_CTX, config
     )

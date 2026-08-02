@@ -9,7 +9,7 @@ containment.
 The remaining tests pin the terminal-id resolution contract shared by
 ``terminal/kill``, ``terminal/output`` and ``terminal/wait_for_exit``: one wire
 refusal for an unknown id, and ``terminal/release``'s deliberate exemption from
-it. They run against real subprocesses and a real ``_AcpSessionContext`` built
+it. They run against real subprocesses and a real ``AcpSessionContext`` built
 from that subprocess's own streams - no Docker, so they stay in the default gate
 where a regression in the shared refusal is actually visible.
 """
@@ -32,7 +32,7 @@ from .._acp_rpc_handlers import (
     on_terminal_release,
     on_terminal_wait_for_exit,
 )
-from .._acp_types import _AcpModelConfig, _AcpSessionContext
+from .._acp_types import AcpModelConfig, AcpSessionContext
 from ..acp_exceptions import AcpErrorCode
 
 # A script (run by path, so the terminal args carry no shell metacharacters the
@@ -46,8 +46,8 @@ _GRANDCHILD_SCRIPT = (
 )
 
 
-def _make_config(workspace_root: str) -> _AcpModelConfig:
-    return _AcpModelConfig(
+def _make_config(workspace_root: str) -> AcpModelConfig:
+    return AcpModelConfig(
         agent_config=None,
         permission_callback=None,
         workspace_root=workspace_root,
@@ -85,7 +85,7 @@ async def test_terminal_child_contained_and_reaped_whole(tmp_path) -> None:
     script = tmp_path / "spawn_grandchild.py"
     script.write_text(_GRANDCHILD_SCRIPT, encoding="utf-8")
 
-    session_ctx = cast("_AcpSessionContext", ctx)
+    session_ctx = cast("AcpSessionContext", ctx)
     resp = await on_terminal_create(
         1,
         {"command": sys.executable, "args": [str(script)]},
@@ -120,7 +120,7 @@ async def test_terminal_child_contained_and_reaped_whole(tmp_path) -> None:
             await kill_pid_tree_async(grandchild_pid)
 
 
-async def _real_session_context() -> _AcpSessionContext:
+async def _real_session_context() -> AcpSessionContext:
     """Build a genuine session context around a real, idle ACP-shaped child.
 
     The context is the production dataclass wired to a real subprocess's own
@@ -137,7 +137,7 @@ async def _real_session_context() -> _AcpSessionContext:
     )
     assert child.stdin is not None
     assert child.stdout is not None
-    return _AcpSessionContext(
+    return AcpSessionContext(
         process=child,
         stdin=child.stdin,
         stdout=child.stdout,
@@ -149,7 +149,7 @@ async def _real_session_context() -> _AcpSessionContext:
     )
 
 
-async def _close_session_context(ctx: _AcpSessionContext) -> None:
+async def _close_session_context(ctx: AcpSessionContext) -> None:
     assert ctx.process.stdin is not None
     ctx.process.stdin.close()
     await ctx.process.wait()

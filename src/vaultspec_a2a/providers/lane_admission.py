@@ -50,12 +50,11 @@ is deliberately a SIBLING of the turn declaration rather than a field on
 withdrawn independently - upstream tool drift can cost a lane its web activation
 while it keeps serving turns perfectly - and folding them into one record would
 make withdrawing one an edit to the other's citation. The turn side admits lanes
-through TWO declarations, the mapping and :data:`IN_PROCESS_LANES`, and the
-in-process lanes must never be web-proven: they spawn no CLI, so there is nothing
-there to retrieve with, and a field hanging off :class:`LaneProof` could not have
-expressed that at all, because those lanes hold no proof record. And the consumers
-differ: turn admission is a REFUSAL consulted by the eligibility service, while web
-proof is an ACTIVATION consulted by tool and persona composition.
+through the completed-turn mapping and :data:`TAPE_BACKED_SUPPLEMENTAL_LANES`.
+The in-process completion floor must never be web-proven: it spawns no CLI, so
+there is nothing there to retrieve with. And the consumers differ: turn admission
+is a REFUSAL consulted by the eligibility service, while web proof is an ACTIVATION
+consulted by tool and persona composition.
 
 What keeps the sibling from becoming a registry that can disagree with the turn one
 is not a shared container but an enforced implication, asserted at import by
@@ -92,11 +91,13 @@ if TYPE_CHECKING:
     from collections.abc import Iterable, Mapping
 
 __all__ = [
-    "IN_PROCESS_LANES",
+    "COMPLETION_FLOOR_LANES",
     "PROVEN_TURN_LANES",
     "PROVEN_WEB_LANES",
+    "TAPE_BACKED_SUPPLEMENTAL_LANES",
     "LaneProof",
     "WebLaneProof",
+    "is_completion_floor",
     "is_lane_admissible",
     "is_web_lane_proven",
     "lane_admission_reason",
@@ -161,6 +162,10 @@ class WebLaneProof:
 #   - gemini  auth/construction coverage only; no completed turn
 #   - openai  no live turn coverage
 #   - zhipu   no live coverage of any kind
+#
+# DETERMINISTIC is not an external-provider claim. Its cited acceptance proof
+# runs the real gateway, worker, graph, and production ProviderFactory against
+# the in-process model boundary. That makes it the portable completion floor.
 # ---------------------------------------------------------------------------
 PROVEN_TURN_LANES: Mapping[Provider, LaneProof] = MappingProxyType(
     {
@@ -188,17 +193,29 @@ PROVEN_TURN_LANES: Mapping[Provider, LaneProof] = MappingProxyType(
             proves="a real Z.ai turn against the real endpoint streams assistant "
             "content through the production ACP path",
         ),
+        Provider.DETERMINISTIC: LaneProof(
+            test=(
+                "src/vaultspec_a2a/acceptance/tests/"
+                "test_deterministic_completion.py"
+                "::test_deterministic_completion_emits_a_run_bound_review_bundle"
+            ),
+            proves="a gateway-owned worker resolves the in-process deterministic "
+            "model through ProviderFactory and completes a bundled run",
+        ),
     }
 )
 
-# The in-process lanes: no external transport exists to complete a turn against,
-# so the completed-turn standard cannot be applied to them and does not gate them.
-# MOCK proxies the in-repo tape server and DETERMINISTIC runs entirely in-process
-# (the acceptance provider). Both are admitted by this explicit declaration, never
-# by falling through the check - an unlisted lane must always land on deny.
-IN_PROCESS_LANES: frozenset[Provider] = frozenset(
-    {Provider.MOCK, Provider.DETERMINISTIC}
-)
+# The permanent completion floor must work on every target without a container,
+# credential, or external service. It is intentionally distinct from served-lane
+# admission: real providers can earn admission with their own completed-turn
+# proof, but only this provider is the always-available completion substrate.
+COMPLETION_FLOOR_LANES: frozenset[Provider] = frozenset({Provider.DETERMINISTIC})
+
+# Tape-backed mock scenarios remain useful supplemental coverage, but their
+# external fixed-loopback tape server means they cannot establish or block the
+# portable completion floor. They may still be selected for a scenario that
+# needs tape content, so admission remains explicit rather than falling through.
+TAPE_BACKED_SUPPLEMENTAL_LANES: frozenset[Provider] = frozenset({Provider.MOCK})
 
 # ---------------------------------------------------------------------------
 # THE WEB DECLARATION - edit by hand, never derive. It landed EMPTY, because the
@@ -261,11 +278,11 @@ def _require_web_proof_implies_turn_proof(
 
     The single rule that keeps the two declarations from disagreeing. A retrieval
     is work completed on a lane, so a lane with no completed turn cannot have
-    completed a retrieval; and the in-process lanes, admitted for service by
-    :data:`IN_PROCESS_LANES` rather than by proof, spawn no CLI and have nothing
-    to retrieve with. Checked at import against the real declarations, so an
-    incoherent pair - a lane activated for web while refused for service - cannot
-    be committed and discovered later at a spawn.
+    completed a retrieval. The in-process completion floor cannot earn web proof:
+    it runs no provider CLI and therefore has no retrieval boundary to exercise.
+    Checked at import against the real declarations, so an incoherent pair - a
+    lane activated for web while refused for service, or a deterministic floor
+    claimed to retrieve - cannot be committed and discovered later at a spawn.
 
     Raises:
         ConfigError: If any web-proven lane is absent from *turn*.
@@ -277,6 +294,13 @@ def _require_web_proof_implies_turn_proof(
             f"proof: {', '.join(sorted(unbacked))}. A lane must be servable before "
             "its web capability can activate; record the completed-turn proof first, "
             "or drop the web entry"
+        )
+    floor_lanes = [lane.value for lane in web if lane in COMPLETION_FLOOR_LANES]
+    if floor_lanes:
+        raise ConfigError(
+            "refusing a web-grounding activation for in-process completion floor "
+            f"lane(s): {', '.join(sorted(floor_lanes))}. The deterministic floor "
+            "has no provider retrieval boundary to prove"
         )
 
 
@@ -302,14 +326,21 @@ def _lane_of(provider: Provider | str | None) -> Provider | None:
         return None
 
 
+def is_completion_floor(provider: Provider) -> bool:
+    """Return whether *provider* is the portable deterministic completion floor."""
+    return provider in COMPLETION_FLOOR_LANES
+
+
 def is_lane_admissible(provider: Provider) -> bool:
     """Return whether *provider* may be named by a served model profile.
 
-    True for a lane with recorded completed-turn proof and for the in-process
-    lanes. False for everything else, including any provider this module has
-    never heard of - deny is the default.
+    True for a lane with recorded completed-turn proof and for explicit
+    tape-backed supplemental coverage. The latter remains selectable for its
+    scripted scenarios but cannot satisfy the completion-floor predicate. False
+    for everything else, including any provider this module has never heard of -
+    deny is the default.
     """
-    return provider in PROVEN_TURN_LANES or provider in IN_PROCESS_LANES
+    return provider in PROVEN_TURN_LANES or provider in TAPE_BACKED_SUPPLEMENTAL_LANES
 
 
 def lane_admission_reason(provider: Provider) -> str | None:

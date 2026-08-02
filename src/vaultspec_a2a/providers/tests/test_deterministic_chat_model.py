@@ -15,6 +15,11 @@ from ..deterministic_chat_model import (
     _role_of,
 )
 from ..factory import ProviderFactory
+from ..lane_admission import (
+    COMPLETION_FLOOR_LANES,
+    TAPE_BACKED_SUPPLEMENTAL_LANES,
+    is_completion_floor,
+)
 
 
 def _agent(agent_id: str) -> AgentConfig:
@@ -43,7 +48,11 @@ def test_enum_and_maps_wired() -> None:
 
 
 def test_factory_returns_first_class_base_chat_model() -> None:
-    """The factory dispatches Provider.DETERMINISTIC to a BaseChatModel."""
+    """The production factory resolves the permanent completion floor."""
+    assert {Provider.DETERMINISTIC} == COMPLETION_FLOOR_LANES
+    assert {Provider.MOCK} == TAPE_BACKED_SUPPLEMENTAL_LANES
+    assert is_completion_floor(Provider.DETERMINISTIC) is True
+    assert is_completion_floor(Provider.MOCK) is False
     model = _model("vaultspec-researcher")
     assert isinstance(model, BaseChatModel)
 

@@ -30,13 +30,15 @@ from ...team.team_config import (
 )
 from ...thread.errors import ConfigError
 from ..lane_admission import (
-    IN_PROCESS_LANES,
+    COMPLETION_FLOOR_LANES,
     PROVEN_TURN_LANES,
     PROVEN_WEB_LANES,
+    TAPE_BACKED_SUPPLEMENTAL_LANES,
     LaneProof,
     WebLaneProof,
     _lane_of,
     _require_web_proof_implies_turn_proof,
+    is_completion_floor,
     is_lane_admissible,
     is_web_lane_proven,
     lane_admission_reason,
@@ -176,15 +178,28 @@ class TestDeclaration:
             Provider.CLAUDE,
             Provider.CODEX,
             Provider.ZAI,
+            Provider.DETERMINISTIC,
         }
-        for provider in (*PROVEN_TURN_LANES, *IN_PROCESS_LANES):
+        assert {Provider.DETERMINISTIC} == COMPLETION_FLOOR_LANES
+        assert {Provider.MOCK} == TAPE_BACKED_SUPPLEMENTAL_LANES
+        for provider in (*PROVEN_TURN_LANES, *TAPE_BACKED_SUPPLEMENTAL_LANES):
             assert is_lane_admissible(provider) is True
 
+    def test_only_deterministic_is_the_portable_completion_floor(self) -> None:
+        """Tape-backed coverage remains admissible but cannot satisfy completion."""
+        assert set(COMPLETION_FLOOR_LANES) <= set(PROVEN_TURN_LANES)
+        assert COMPLETION_FLOOR_LANES.isdisjoint(TAPE_BACKED_SUPPLEMENTAL_LANES)
+        assert is_completion_floor(Provider.DETERMINISTIC) is True
+        assert is_completion_floor(Provider.MOCK) is False
+
     def test_every_provider_is_classified(self) -> None:
-        """No enum member is unaccounted for: it is proven, in-process, or refused."""
+        """No enum member is unaccounted for: proven, supplemental, or refused."""
         for provider in Provider:
             admissible = is_lane_admissible(provider)
-            declared = provider in PROVEN_TURN_LANES or provider in IN_PROCESS_LANES
+            declared = (
+                provider in PROVEN_TURN_LANES
+                or provider in TAPE_BACKED_SUPPLEMENTAL_LANES
+            )
             assert admissible is declared
 
     def test_each_proven_lane_cites_a_live_test_that_exists(self) -> None:
@@ -321,13 +336,9 @@ class TestWebDeclaration:
         assert "kimi" in str(excinfo.value)
         assert "completed-turn proof" in str(excinfo.value)
 
-    def test_an_in_process_lane_can_never_be_web_proven(self) -> None:
-        """Turn-admissible is not enough: the in-process lanes hold no turn proof.
-
-        They spawn no CLI, so there is nothing there to retrieve with, and the
-        implication rejects them even though ``is_lane_admissible`` admits them.
-        """
-        for lane in IN_PROCESS_LANES:
+    def test_the_completion_floor_can_never_be_web_proven(self) -> None:
+        """The in-process floor has no provider retrieval boundary to prove."""
+        for lane in COMPLETION_FLOOR_LANES:
             assert is_lane_admissible(lane) is True
             with pytest.raises(ConfigError):
                 _require_web_proof_implies_turn_proof(
@@ -336,7 +347,7 @@ class TestWebDeclaration:
 
     def test_a_turn_proven_lane_is_accepted_by_the_implication(self) -> None:
         """The guard refuses incoherent pairs, not every pair."""
-        for lane in PROVEN_TURN_LANES:
+        for lane in set(PROVEN_TURN_LANES) - set(COMPLETION_FLOOR_LANES):
             _require_web_proof_implies_turn_proof(
                 {lane: WebLaneProof(test="t::t", proves="p")}, PROVEN_TURN_LANES
             )

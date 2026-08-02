@@ -323,9 +323,9 @@ def probe_provider_readiness(provider: Provider) -> ProviderReadiness:
     string is safe - it names what is missing, never a secret value.
     """
     if provider in (Provider.MOCK, Provider.DETERMINISTIC):
-        # Both are in-process fakes with no credential and no launch command:
-        # MOCK proxies the VidaiMock tape server, DETERMINISTIC runs entirely
-        # in-process (the research_adr acceptance provider). Always runnable.
+        # Neither provider needs a credential or launch command. This readiness
+        # probe says construction can proceed, not that MOCK's external tape
+        # server is reachable or that it can satisfy the completion floor.
         return ProviderReadiness(provider=provider, ready=True)
 
     if provider == Provider.CLAUDE:

@@ -496,6 +496,20 @@ class RunStatusResponse(BaseModel):
     # relay (012840a4) rather than a bare "failed". Additive; None for a run
     # that never failed, or one whose failure predates this field.
     failure_reason: str | None = None
+    # The machine-readable counterpart to the reason above: which member of the
+    # closed provider-condition vocabulary the failure resolved to. The reason
+    # says what happened, this says what the reader should do about it - wait,
+    # re-authenticate, top up, raise a ceiling, or change the request - and a
+    # client that had to derive that from the reason text would be matching
+    # vendor prose, which breaks the moment a vendor rewords a message.
+    #
+    # Authoritative here rather than on the relay, following the same discipline
+    # the pending clarification below follows: the error frame carrying this
+    # value is droppable, so a reloading client with no live stream recovers it
+    # only from this response. Additive; None for a run that never failed, or
+    # one whose failure predates the durable column. The value is a wire
+    # contract shared with the consuming repository and is additive-only.
+    provider_condition: str | None = None
     # model-profiles: the frozen profile the run launched with and its
     # effective per-role assignment, reproduced verbatim from run metadata across
     # restarts (additive v1; absent for runs started before profiles landed).

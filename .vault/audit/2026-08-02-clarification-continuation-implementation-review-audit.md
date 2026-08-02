@@ -5,7 +5,7 @@ tags:
 date: '2026-08-02'
 modified: '2026-08-02'
 body_schema: 'body-v1'
-body_hash: 'sha256:e78b74e58202c93f6cd1246fe97668d2964e278917ef4a015c3a18ac085e74d5'
+body_hash: 'sha256:d04b573b069a8f697b4f148c45fe54a91c850b0bca6ef472e179b2cc1f9dbc0a'
 related:
   - "[[2026-08-02-clarification-continuation-plan]]"
   - "[[2026-08-02-clarification-continuation-adr]]"
@@ -30,6 +30,25 @@ continuation outcome. The gateway reads and validates a pending checkpoint
 before dispatch, so two concurrent valid resolutions can both observe the same
 request and dispatch resume commands. The accepted ADR deliberately defers this
 larger protocol change; it remains open.
+
+### implementation-review | high | RESOLVED - the leased dispatch journal closed the concurrency gap
+
+Appended 2026-08-02, later the same day: the follow-on decision the
+recommendation below asks for exists and shipped as
+`2026-08-02-control-action-leases-adr` (accepted; its plan completed 22 of 22
+steps). The respond path now reserves an atomic claim on the request-scoped
+idempotency key before any dispatch
+(`src/vaultspec_a2a/control/clarification_service.py:296`,
+`src/vaultspec_a2a/control/action_lease.py:65`): a competing resolution with a
+different payload observes the recorded outcome and refuses with 409
+(`payload_matches=false`), an identical concurrent replay returns the durable
+outcome without dispatching (`acquired=false`), only the committed lease holder
+dispatches, and worker success is never taken as application proof - only the
+request-scoped checkpoint receipt settles the journal row, with restart
+recovery redriving expired committed leases. The live loop suite proves six
+racing identical replays and lost-ack recovery
+(`src/vaultspec_a2a/api/tests/test_clarification_loop_live.py`). The original
+entry above stands as written for its date; this gap is closed.
 
 ### implementation-review | low | whitespace and wire-boundary cases were initially absent
 

@@ -5,7 +5,7 @@ tags:
 date: '2026-08-02'
 modified: '2026-08-02'
 body_schema: 'body-v1'
-body_hash: 'sha256:4aeddee8aac2896153d3e18c0dfc58f37b3c59daa232fb99c66d7fb7df7e3894'
+body_hash: 'sha256:0fcbe26216ea3086178e3ced5b0469133d2abe3d5f6845a0f19add55698ed13a'
 related:
   - "[[2026-08-02-clarification-decline-plan]]"
   - "[[2026-08-02-clarification-decline-adr]]"
@@ -51,9 +51,19 @@ continuation review applies unchanged to the decline outcome; nothing about a
 payload-free resolution widens or narrows it. Recorded here for trace only - the
 open item is owned by the continuation audit's standing recommendation.
 
+### decline-concurrency-correction | low | CORRECTION - the inherited gap was already closed when this audit was written
+
+Appended 2026-08-02: the entry above repeated the continuation audit's high
+finding as open, but that finding had already been closed by
+`2026-08-02-control-action-leases-adr` before this audit was taken - the
+decline rides the leased dispatch journal from its first commit, which is
+exactly why its distinct fingerprint gives idempotent replay and 409 conflict
+for free. The resolution evidence is appended to the continuation audit itself;
+no concurrency item remains open against any of the three outcomes.
+
 ## Recommendations
 
 Route the landing to an independent reviewer when session capacity returns and
-close the provenance finding with their verdict. No code recommendation is open
-from this pass beyond the standing concurrency ADR the continuation audit
-already names.
+close the provenance finding with their verdict. No code recommendation remains
+open from this pass: the concurrency item the first-pass entry deferred to was
+already resolved by the control-action-leases record, as corrected above.

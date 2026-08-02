@@ -64,6 +64,18 @@ def main() -> None:
         "--session-id", default="sim-sess-123", help="Session ID to return"
     )
     parser.add_argument(
+        "--advertise-model",
+        action="append",
+        default=None,
+        metavar="MODEL_ID",
+        help="Advertise a model selector on session/new, repeatable. The real "
+        "adapter emits one unconditionally, and the served catalog builds its "
+        "entries from it - so a simulator that returns only a sessionId cannot "
+        "be reached through the gateway at all: with no catalog entry there is "
+        "no selection to name, and run creation is refused before admission. "
+        "Omitted by default, so every existing caller is unaffected.",
+    )
+    parser.add_argument(
         "--error", help="If set, return this error message for session/prompt"
     )
     parser.add_argument(
@@ -138,10 +150,27 @@ def main() -> None:
             if args.record_session_new:
                 with open(args.record_session_new, "w", encoding="utf-8") as fh:
                     json.dump(req.get("params", {}), fh)
+            session_result: dict[str, object] = {"sessionId": args.session_id}
+            if args.advertise_model:
+                # The real adapter's shape: one select whose category is "model",
+                # carrying the ids it will accept. The catalog reads its entries
+                # from exactly this, so the shape is copied rather than invented.
+                session_result["configOptions"] = [
+                    {
+                        "id": "model",
+                        "category": "model",
+                        "type": "select",
+                        "currentValue": args.advertise_model[0],
+                        "options": [
+                            {"value": model_id, "name": model_id}
+                            for model_id in args.advertise_model
+                        ],
+                    }
+                ]
             resp = {
                 "jsonrpc": "2.0",
                 "id": msg_id,
-                "result": {"sessionId": args.session_id},
+                "result": session_result,
             }
         elif method == "session/prompt":
             if args.record_session_prompt:

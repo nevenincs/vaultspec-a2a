@@ -5,7 +5,7 @@ tags:
 date: '2026-08-02'
 modified: '2026-08-02'
 body_schema: 'body-v1'
-body_hash: 'sha256:793c0818a206167b552d4ae0369dd2c27bcdd30af11a80f4482801679d7c2910'
+body_hash: 'sha256:5c99e34497085e0ae5cf2240be1f2f8691e0c352c9a7a1e27522b949a7dfb7c8'
 related:
   - "[[2026-08-02-resource-aware-test-execution-plan]]"
 ---
@@ -81,6 +81,24 @@ The pre-change full serial baseline (44m21s) closed with 5 failures outside
 this feature's scope, including the CLI live gateway test and a desktop
 readiness case. They collect from lanes this feature did not touch and are
 recorded here so the post-change full-suite comparison is honest.
+
+### closing-verification-full-suite | low | recorded
+
+Post-change gates, run 2026-08-02: whole-tree ruff clean; whole-tree ty
+clean; full default suite (`python -m pytest src/vaultspec_a2a -q`, the
+`-m "not service"` profile) closed 4 failed, 3522 passed, 163 deselected in
+39m29s against the same-day pre-change baseline of 5 failed, 3446 passed in
+44m21s. Both failures named in the baseline tail (the CLI live gateway test
+and the desktop readiness case) pass post-change. The four remaining
+failures sit in lanes carrying live uncommitted concurrent work at run time
+(`providers/acp_chat_model.py` modified, `providers/openai_catalog.py`
+staged, both codex test modules modified): two codex desktop-profile
+config-home assertions, one API permission-respond assertion, one dashboard
+terminal-replay acceptance case. Each fails in isolation on a pure
+business-logic assertion in those lanes; none touches this feature's
+surfaces, and this feature's 40 framework tests plus the 105-test
+service-tier collection are green. Attribution therefore rests with the
+concurrent lanes, recorded here for the honest comparison.
 
 ## Recommendations
 

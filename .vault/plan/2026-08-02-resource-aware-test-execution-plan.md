@@ -4,7 +4,7 @@ tags:
   - '#resource-aware-test-execution'
 date: '2026-08-02'
 modified: '2026-08-02'
-body_hash: 'sha256:69219d78c2d712ffa48c37b49ad9c9c3057c846055d2b28147f8ed128f4d68d9'
+body_hash: 'sha256:450f861eca5e150d95d8312c207366f6440c89e93e8b16d00da153fe4e61c154'
 tier: L1
 related:
   - '[[2026-07-15-dev-process-registry-adr]]'
@@ -42,7 +42,7 @@ resolution, closing the audited harness-registry gap.
 - [x] `S07` - Wire the plugin into the root conftest and register the resource marker; `src/vaultspec_a2a/conftest.py`.
 - [x] `S08` - Replace the hardcoded gateway default with registry resolution in the pw7 harness; `src/vaultspec_a2a/service_tests/test_pw7_acceptance.py`.
 - [x] `S09` - Prove lease serialization and declaration-derived concurrency with real subprocess runs; `src/vaultspec_a2a/testing/tests/`.
-- [ ] `S10` - Run whole-tree gates, classify findings, and close the rolling audit for this feature; `pyproject.toml`.
+- [x] `S10` - Run whole-tree gates, classify findings, and close the rolling audit for this feature; `pyproject.toml`.
 
 ## Parallelization
 

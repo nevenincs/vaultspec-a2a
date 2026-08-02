@@ -10,7 +10,6 @@ summary) instead of once per thread.
 from __future__ import annotations
 
 import logging
-from types import SimpleNamespace
 
 import httpx
 import pytest
@@ -57,14 +56,20 @@ async def test_redispatch_dedups_repeated_circuit_open_failures(
             failure_threshold=1, recovery_timeout=999.0
         )
         circuit_breaker.force_open()
+        worker_contacts: list[float] = []
 
         async with httpx.AsyncClient(
             base_url="http://127.0.0.1:9", timeout=0.2
         ) as client:
             with caplog.at_level(logging.INFO, logger=_LOGGER_NAME):
                 await redispatch_reconciling_threads(
-                    client, circuit_breaker, spawner, SimpleNamespace()
+                    client,
+                    circuit_breaker,
+                    spawner,
+                    record_worker_contact=worker_contacts.append,
                 )
+
+        assert worker_contacts == []
 
         circuit_open_warnings = [
             r
@@ -121,14 +126,20 @@ async def test_redispatch_logs_once_for_a_single_failure_with_no_summary(
             failure_threshold=1, recovery_timeout=999.0
         )
         circuit_breaker.force_open()
+        worker_contacts: list[float] = []
 
         async with httpx.AsyncClient(
             base_url="http://127.0.0.1:9", timeout=0.2
         ) as client:
             with caplog.at_level(logging.INFO, logger=_LOGGER_NAME):
                 await redispatch_reconciling_threads(
-                    client, circuit_breaker, spawner, SimpleNamespace()
+                    client,
+                    circuit_breaker,
+                    spawner,
+                    record_worker_contact=worker_contacts.append,
                 )
+
+        assert worker_contacts == []
 
         circuit_open_warnings = [
             r

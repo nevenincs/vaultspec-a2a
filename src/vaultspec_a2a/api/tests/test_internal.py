@@ -13,6 +13,7 @@ import logging
 import pytest
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
+from sqlalchemy import select
 from starlette.testclient import TestClient
 
 from ...database import (
@@ -20,6 +21,7 @@ from ...database import (
     get_permission_request,
     get_thread_execution_state,
 )
+from ...database.models import ThreadExecutionStateModel
 from ...streaming.aggregator import EventAggregator
 from ..internal import internal_router
 
@@ -346,6 +348,64 @@ class TestInternalEvents:
         assert projection.checkpoint_id == "cp-1"
         assert projection.parent_checkpoint_id == "cp-0"
         assert projection.task_count == 1
+
+    @pytest.mark.asyncio(loop_scope="function")
+    async def test_invalid_projection_timestamp_persists_without_relay_state(
+        self,
+        session_factory,
+    ) -> None:
+        """The ASGI projection route stores malformed clock data as absent.
+
+        Execution-state projection is a persistence-only worker report. It must
+        not enter subscriber or sequence state while the durable boundary safely
+        treats an invalid optional timestamp as unavailable.
+        """
+        aggregator = EventAggregator()
+        app = _make_test_app(session_factory=session_factory)
+        app.state.aggregator = aggregator
+
+        async with session_factory() as session:
+            await create_thread(session, thread_id="t-invalid-projection-clock")
+            await session.commit()
+
+        async with AsyncClient(
+            transport=ASGITransport(app=app),
+            base_url="http://test",
+        ) as client:
+            response = await client.post(
+                "/internal/events",
+                json={
+                    "type": "event",
+                    "thread_id": "t-invalid-projection-clock",
+                    "payload": {
+                        "type": "execution_state_projection",
+                        "checkpoint_id": "cp-invalid-clock",
+                        "snapshot_created_at": "not-an-rfc3339-timestamp",
+                    },
+                },
+            )
+
+        assert response.status_code == 200
+        assert response.json() == {"status": "ok"}
+        assert aggregator.subscriber_count() == 0
+        assert aggregator.subscription_count() == 0
+        assert aggregator.sequence_count() == 0
+
+        async with session_factory() as session:
+            rows = list(
+                (
+                    await session.scalars(
+                        select(ThreadExecutionStateModel).where(
+                            ThreadExecutionStateModel.thread_id
+                            == "t-invalid-projection-clock"
+                        )
+                    )
+                ).all()
+            )
+
+        assert len(rows) == 1
+        assert rows[0].checkpoint_id == "cp-invalid-clock"
+        assert rows[0].snapshot_created_at is None
 
     @pytest.mark.asyncio(loop_scope="function")
     async def test_plan_approval_relay_creates_durable_permission_and_can_be_responded(

@@ -14,9 +14,11 @@ import json
 import logging
 import time
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from http import HTTPStatus
+from typing import TYPE_CHECKING
 
 import httpx
+from pydantic import TypeAdapter, ValidationError
 
 from ..database import list_threads
 from ..database.session import get_session_factory
@@ -25,6 +27,8 @@ from ..ipc.schemas import DispatchRequest, DispatchResponse, to_dispatch_action
 from ..thread.enums import ControlActionType, ThreadStatus
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from .circuit_breaker import WorkerCircuitBreaker
     from .worker_management import LazyWorkerSpawner
 
@@ -46,6 +50,61 @@ logger = logging.getLogger(__name__)
 # first occurrence logs in full, every Nth repeat thereafter logs in full, the
 # rest only advance the counter a batch-end summary reports.
 _REDISPATCH_LOG_EVERY_N = 5
+_STRING_KEYED_MAPPING = TypeAdapter(dict[str, object])
+_STRING_LIST = TypeAdapter(list[str])
+
+
+def _string_keyed_mapping(value: object) -> dict[str, object] | None:
+    """Validate an untrusted JSON value as a string-keyed mapping."""
+    try:
+        return _STRING_KEYED_MAPPING.validate_python(value, strict=True)
+    except ValidationError:
+        return None
+
+
+def _string_list(value: object) -> list[str] | None:
+    """Validate an untrusted JSON value as a list of strings."""
+    try:
+        return _STRING_LIST.validate_python(value, strict=True)
+    except ValidationError:
+        return None
+
+
+def _frozen_model_assignment(
+    metadata: dict[str, object],
+) -> tuple[str | None, dict[str, dict[str, object]]]:
+    """Extract the compiler-safe subset of a persisted frozen model assignment."""
+    frozen_record = metadata.get("model_profile")
+    frozen_record_mapping = _string_keyed_mapping(frozen_record)
+    if frozen_record_mapping is None:
+        return None, {}
+
+    profile_value = frozen_record_mapping.get("profile_id")
+    profile_id = profile_value if isinstance(profile_value, str) else None
+    roles_value = _string_keyed_mapping(frozen_record_mapping.get("roles"))
+    if roles_value is None:
+        return profile_id, {}
+
+    assignment: dict[str, dict[str, object]] = {}
+    for agent_id, role_value in roles_value.items():
+        role_mapping = _string_keyed_mapping(role_value)
+        if role_mapping is None:
+            continue
+        provider = role_mapping.get("provider")
+        capability = role_mapping.get("capability")
+        fallback = _string_list(role_mapping.get("fallback", []))
+        if (
+            not isinstance(provider, str)
+            or not (isinstance(capability, str) or capability is None)
+            or fallback is None
+        ):
+            continue
+        assignment[agent_id] = {
+            "provider": provider,
+            "capability": capability,
+            "fallback": fallback,
+        }
+    return profile_id, assignment
 
 
 @dataclass(frozen=True, slots=True)
@@ -182,7 +241,7 @@ async def dispatch_to_worker(
             cause=exc,
         ) from exc
 
-    if resp.status_code == httpx.codes.TOO_MANY_REQUESTS:
+    if resp.status_code == HTTPStatus.TOO_MANY_REQUESTS:
         circuit_breaker.record_failure()
         logger.warning(
             "Worker at capacity (429) for dispatch_id=%s thread %s",
@@ -249,9 +308,9 @@ async def redispatch_reconciling_threads(
     worker_client: httpx.AsyncClient,
     circuit_breaker: WorkerCircuitBreaker,
     spawner: LazyWorkerSpawner,
-    app_state: Any,
     *,
-    trace_headers_fn: Any = None,
+    record_worker_contact: Callable[[float], None],
+    trace_headers_fn: Callable[[], dict[str, str]] | None = None,
 ) -> None:
     """Re-dispatch RECONCILING threads after the worker is ready.
 
@@ -272,11 +331,14 @@ async def redispatch_reconciling_threads(
             failure_counts: dict[str, int] = {}
             failure_thread_ids: dict[str, list[str]] = {}
             for thread in threads:
-                meta: dict[str, Any] = {}
+                meta: dict[str, object] = {}
                 if thread.thread_metadata:
                     try:
-                        meta = json.loads(thread.thread_metadata)
-                    except Exception:
+                        raw_metadata: object = json.loads(thread.thread_metadata)
+                        parsed_metadata = _string_keyed_mapping(raw_metadata)
+                        if parsed_metadata is not None:
+                            meta = parsed_metadata
+                    except json.JSONDecodeError:
                         logger.debug(
                             "Failed to parse thread metadata for %s",
                             thread.id,
@@ -285,28 +347,18 @@ async def redispatch_reconciling_threads(
                 # model-profiles: reuse the frozen effective assignment on
                 # restart so the run recompiles the exact launched models, never
                 # a re-resolution against possibly-drifted config.
-                frozen_record = meta.get("model_profile")
-                frozen_profile_id: str | None = None
-                frozen_map: dict[str, dict[str, Any]] = {}
-                if isinstance(frozen_record, dict):
-                    raw_profile = frozen_record.get("profile_id")
-                    frozen_profile_id = (
-                        raw_profile if isinstance(raw_profile, str) else None
-                    )
-                    roles = frozen_record.get("roles")
-                    if isinstance(roles, dict):
-                        for agent_id, role in roles.items():
-                            if isinstance(role, dict):
-                                frozen_map[agent_id] = {
-                                    "provider": role.get("provider"),
-                                    "capability": role.get("capability"),
-                                    "fallback": role.get("fallback", []),
-                                }
+                frozen_profile_id, frozen_map = _frozen_model_assignment(meta)
+                workspace_root_value = meta.get("workspace_root")
+                workspace_root = (
+                    workspace_root_value
+                    if isinstance(workspace_root_value, str)
+                    else None
+                )
                 dispatch = DispatchRequest(
                     action=to_dispatch_action(ControlActionType.INGEST),
                     thread_id=thread.id,
                     team_preset=thread.team_preset,
-                    workspace_root=meta.get("workspace_root"),
+                    workspace_root=workspace_root,
                     recursion_limit=domain_config.graph_recursion_limit,
                     profile_id=frozen_profile_id,
                     model_assignment=frozen_map,
@@ -320,7 +372,7 @@ async def redispatch_reconciling_threads(
                         spawner,
                         trace_headers=headers,
                     )
-                    app_state.worker_last_heartbeat_ts = time.monotonic()
+                    record_worker_contact(time.monotonic())
                     logger.info(
                         "Re-dispatched reconciling thread %s",
                         thread.id,

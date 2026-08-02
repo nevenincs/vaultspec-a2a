@@ -12,13 +12,14 @@ call sequence that previously appeared in 3 call sites.
 from __future__ import annotations
 
 import asyncio
-import contextlib
-import json
 import logging
 from datetime import datetime
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
+
+from pydantic import TypeAdapter, ValidationError
 
 from ..ipc.schemas import ExecutionStateProjectionPayload
+from ..thread.enums import InvalidTransitionError, ThreadStatus
 from ..thread.permission_fsm import (
     PROGRESS_BATCH_EFFECTS,
     compute_permission_request_effects,
@@ -35,6 +36,9 @@ from ..thread.snapshots import (
 from ..thread.terminal_effects import compute_terminal_effects
 
 if TYPE_CHECKING:
+    from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+
+    from ..streaming.aggregator import EventAggregator
     from .drain import DrainGate
 
 __all__ = [
@@ -50,12 +54,11 @@ logger = logging.getLogger(__name__)
 _TERMINAL_STATUS_MAP = TERMINAL_STATUS_MAP
 
 
-def _time_now_utc() -> Any:
-    """Late-bound helper to avoid a top-level datetime import churn."""
+def _time_now_utc() -> datetime:
+    """Return the current UTC timestamp for durable terminal effects."""
     from datetime import UTC
-    from datetime import datetime as _datetime
 
-    return _datetime.now(UTC)
+    return datetime.now(UTC)
 
 
 # The metadata key binding a run to its non-secret admission lease identity,
@@ -66,12 +69,49 @@ _RUN_LEASE_METADATA_KEY = "run_lease"
 # Strong references to in-flight settlement callbacks so a fire-and-forget task is
 # not garbage-collected before it completes; each removes itself when done.
 _settlement_tasks: set[asyncio.Task[None]] = set()
+_JSON_OBJECT = TypeAdapter(dict[str, object])
+_OPTION_MAPPINGS = TypeAdapter(list[dict[str, object]])
+
+
+def _session_factory(
+    configured: async_sessionmaker[AsyncSession] | None,
+) -> async_sessionmaker[AsyncSession]:
+    """Select the injected session factory or the application factory."""
+    if configured is not None:
+        return configured
+    from ..database.session import get_session_factory
+
+    return get_session_factory()
+
+
+def _json_object(encoded: str) -> dict[str, object] | None:
+    """Decode a JSON object without leaking untyped decoder output."""
+    try:
+        return _JSON_OBJECT.validate_json(encoded)
+    except ValidationError:
+        return None
+
+
+def _option_mappings(value: object) -> list[dict[str, object]]:
+    """Keep only bounded, string-keyed permission option objects."""
+    try:
+        return _OPTION_MAPPINGS.validate_python(value)[:50]
+    except ValidationError:
+        return []
+
+
+def _object_mapping(value: object) -> dict[str, object] | None:
+    """Validate a nested JSON-object value at the boundary."""
+    try:
+        return _JSON_OBJECT.validate_python(value)
+    except ValidationError:
+        return None
 
 
 def _schedule_terminal_settlement(
     thread_id: str,
-    terminal_status: Any,
-    session_factory: Any,
+    terminal_status: ThreadStatus,
+    session_factory: async_sessionmaker[AsyncSession],
 ) -> None:
     """Schedule the run's terminal-settlement callback without blocking the relay.
 
@@ -93,8 +133,8 @@ def _schedule_terminal_settlement(
 
 async def _settle_terminal_run(
     thread_id: str,
-    terminal_status: Any,
-    session_factory: Any,
+    terminal_status: ThreadStatus,
+    session_factory: async_sessionmaker[AsyncSession],
 ) -> None:
     """Recover the run's lease and deliver its attach-authenticated settlement."""
     from ..desktop.settlement import emit_run_settlement
@@ -117,39 +157,32 @@ async def _settle_terminal_run(
         )
 
 
-async def _read_run_lease(thread_id: str, session_factory: Any) -> str | None:
+async def _read_run_lease(
+    thread_id: str, session_factory: async_sessionmaker[AsyncSession]
+) -> str | None:
     """Read a run's non-secret lease identity from its persisted metadata."""
     from ..database import get_thread
 
-    if session_factory is None:
-        from ..database.session import get_session_factory
-
-        factory = get_session_factory()
-    else:
-        factory = session_factory
-    async with factory() as db:
+    async with session_factory() as db:
         thread = await get_thread(db, thread_id)
     if thread is None or not thread.thread_metadata:
         return None
-    try:
-        data = json.loads(thread.thread_metadata)
-    except (json.JSONDecodeError, TypeError):
+    data = _json_object(thread.thread_metadata)
+    if data is None:
         return None
-    if not isinstance(data, dict):
+    lease = _object_mapping(data.get(_RUN_LEASE_METADATA_KEY))
+    if lease is None:
         return None
-    lease = data.get(_RUN_LEASE_METADATA_KEY)
-    if not isinstance(lease, dict):
-        return None
-    lease_id = lease.get("lease_id")
+    lease_id: object = lease.get("lease_id")
     return lease_id if isinstance(lease_id, str) and lease_id else None
 
 
 async def _handle_terminal_event(
     thread_id: str,
-    payload: dict[str, Any],
+    payload: dict[str, object],
     *,
-    aggregator: Any | None = None,
-    session_factory: Any | None = None,
+    aggregator: EventAggregator | None = None,
+    session_factory: async_sessionmaker[AsyncSession] | None = None,
     drain_gate: DrainGate | None = None,
 ) -> None:
     """Update thread DB status when a ``thread_terminal`` event arrives.
@@ -166,7 +199,12 @@ async def _handle_terminal_event(
     """
     if not is_terminal_event(payload):
         return
-    status_str = _TERMINAL_STATUS_MAP.get(payload.get("status", ""))
+    payload_status = payload.get("status")
+    status_str = (
+        _TERMINAL_STATUS_MAP.get(payload_status)
+        if isinstance(payload_status, str)
+        else None
+    )
     if not status_str:
         return
     try:
@@ -176,18 +214,9 @@ async def _handle_terminal_event(
             set_thread_repair_state,
             update_thread_status,
         )
-        from ..thread.enums import (
-            ControlActionType,
-            InvalidTransitionError,
-            ThreadStatus,
-        )
+        from ..thread.enums import ControlActionType
 
-        if session_factory is None:
-            from ..database.session import get_session_factory
-
-            factory = get_session_factory()
-        else:
-            factory = session_factory
+        factory = _session_factory(session_factory)
         # error_detail rides the same thread_terminal payload the SSE relay
         # already surfaces it through (012840a4); threading it into the
         # durable status write here is the only additional step needed for a
@@ -256,18 +285,6 @@ async def _handle_terminal_event(
                 "action": "thread_terminal_status_skipped",
             },
         )
-    except Exception:
-        logger.exception(
-            "Failed to update thread %s status to %s",
-            thread_id,
-            status_str,
-            extra={
-                "thread_id": thread_id,
-                "status": status_str,
-                "event_type": payload.get("event_type", ""),
-                "action": "thread_terminal_status_update_failed",
-            },
-        )
     finally:
         # Release the run's admission on every exit above, including a failed
         # status write. The gate counts live executions, not successful
@@ -278,31 +295,12 @@ async def _handle_terminal_event(
         # with the cancel verb's release for the same run is safe.
         if drain_gate is not None:
             await drain_gate.release(thread_id)
-
-    # GC aggregator state for the terminated thread.
-    if aggregator is not None:
-        try:
-            # The DB rows were expired above; mirror that in memory. Age-based
-            # pruning alone cannot do it — a request recorded seconds before the
-            # terminal event is not yet stale, but is already unanswerable.
-            aggregator.expire_thread_permissions(thread_id)
-            aggregator.prune_stale_permissions()
-            # Remove the sequence counter for the now-terminal thread.
-            active: set[str] = set(
-                getattr(aggregator._emitters, "_sequences", {}).keys()
-            ) - {thread_id}
-            aggregator.prune_sequences(active)
-        except Exception:
-            logger.warning(
-                "Aggregator GC failed for thread %s",
-                thread_id,
-                extra={
-                    "thread_id": thread_id,
-                    "action": "aggregator_gc_failed",
-                    "event_type": payload.get("event_type", ""),
-                },
-                exc_info=True,
-            )
+        # The terminal status either committed or was already terminal, and every
+        # other database exception still propagates after this finally block. Keep
+        # the in-memory relay state aligned with that terminal observation only
+        # after releasing the idempotent admission gate.
+        if aggregator is not None:
+            aggregator.clear_thread_state(thread_id)
 
 
 _PERMISSION_REQUEST_EVENT_TYPES = frozenset(
@@ -311,9 +309,9 @@ _PERMISSION_REQUEST_EVENT_TYPES = frozenset(
 
 
 async def _persist_permission_request(
-    db: Any,
+    db: AsyncSession,
     thread_id: str,
-    payload: dict[str, Any],
+    payload: dict[str, object],
     *,
     event_type: str,
 ) -> None:
@@ -338,10 +336,12 @@ async def _persist_permission_request(
         ControlActionType,
     )
 
-    request_id = str(payload.get("request_id", ""))
+    request_value = payload.get("request_id")
+    request_id = request_value if isinstance(request_value, str) else ""
     if not request_id:
         return
-    tool_call = payload.get("tool_call")
+    tool_value = payload.get("tool_call")
+    tool_call = tool_value if isinstance(tool_value, str) else None
     pause_reason_type = (
         event_type
         if event_type in {"plan_approval_request", "document_approval_request"}
@@ -353,8 +353,9 @@ async def _persist_permission_request(
         thread_id=thread_id,
         except_request_id=request_id,
     )
-    description = str(payload.get("description", ""))[:4096]
-    allowed_options = list(payload.get("options", []))[:50]
+    description_value = payload.get("description")
+    description = description_value[:4096] if isinstance(description_value, str) else ""
+    allowed_options = _option_mappings(payload.get("options"))
     await record_permission_request(
         db,
         request_id=request_id,
@@ -388,15 +389,15 @@ async def _persist_permission_request(
             thread_id,
             approval_status=ApprovalStatus.PENDING,
             approval_request_id=request_id,
-            approval_reason=str(payload.get("description", "")),
+            approval_reason=description,
             approval_response_action_id=None,
         )
 
 
 async def _apply_permission_resolution(
-    db: Any,
+    db: AsyncSession,
     thread_id: str,
-    payload: dict[str, Any],
+    payload: dict[str, object],
 ) -> None:
     """Finalize a worker-applied permission resolution into the journal.
 
@@ -414,7 +415,8 @@ async def _apply_permission_resolution(
     )
     from ..thread.enums import ControlActionResultStatus
 
-    request_id = str(payload.get("request_id", ""))
+    request_value = payload.get("request_id")
+    request_id = request_value if isinstance(request_value, str) else ""
     permission = await get_permission_request(db, request_id)
     if permission is None or permission.request_status != "answered_pending_apply":
         return
@@ -455,9 +457,9 @@ async def _apply_permission_resolution(
 
 async def _handle_permission_event(
     thread_id: str,
-    payload: dict[str, Any],
+    payload: dict[str, object],
     *,
-    session_factory: Any | None = None,
+    session_factory: async_sessionmaker[AsyncSession] | None = None,
 ) -> None:
     """Persist worker permission events into the durable journal.
 
@@ -466,14 +468,9 @@ async def _handle_permission_event(
     """
     if not is_permission_event(payload):
         return
-    event_type = payload.get("type", "")
-
-    if session_factory is None:
-        from ..database.session import get_session_factory
-
-        factory = get_session_factory()
-    else:
-        factory = session_factory
+    event_value = payload.get("type")
+    event_type = event_value if isinstance(event_value, str) else ""
+    factory = _session_factory(session_factory)
     async with factory() as db:
         if event_type in _PERMISSION_REQUEST_EVENT_TYPES:
             await _persist_permission_request(
@@ -486,14 +483,15 @@ async def _handle_permission_event(
 
 async def _handle_progress_event(
     thread_id: str,
-    payload: dict[str, Any],
+    payload: dict[str, object],
     *,
-    session_factory: Any | None = None,
+    session_factory: async_sessionmaker[AsyncSession] | None = None,
 ) -> None:
     """Infer permission application from post-resume worker progress."""
     if not is_progress_event(payload):
         return
-    event_type = payload.get("type", "")
+    event_value = payload.get("type")
+    event_type = event_value if isinstance(event_value, str) else ""
 
     from ..database import (
         create_control_action,
@@ -507,12 +505,7 @@ async def _handle_progress_event(
         ControlActionResultStatus,
     )
 
-    if session_factory is None:
-        from ..database.session import get_session_factory
-
-        factory = get_session_factory()
-    else:
-        factory = session_factory
+    factory = _session_factory(session_factory)
     async with factory() as db:
         pending = await get_pending_permission_requests(db, thread_id=thread_id)
         answered = [
@@ -550,8 +543,14 @@ async def _handle_progress_event(
                 )
         if answered:
             batch = PROGRESS_BATCH_EFFECTS
-            with contextlib.suppress(Exception):
+            try:
                 await update_thread_status(db, thread_id, batch.thread_status)
+            except InvalidTransitionError:
+                logger.info(
+                    "Thread %s progress status already terminal",
+                    thread_id,
+                    extra={"thread_id": thread_id, "action": "progress_status_skipped"},
+                )
             await set_thread_repair_state(
                 db,
                 thread_id,
@@ -565,9 +564,9 @@ async def _handle_progress_event(
 
 async def _handle_execution_state_event(
     thread_id: str,
-    payload: dict[str, Any],
+    payload: dict[str, object],
     *,
-    session_factory: Any | None = None,
+    session_factory: async_sessionmaker[AsyncSession] | None = None,
 ) -> None:
     """Persist worker-owned execution-state projection events."""
     if payload.get("type") != "execution_state_projection":
@@ -578,15 +577,12 @@ async def _handle_execution_state_event(
     projection = ExecutionStateProjectionPayload.model_validate(payload)
     snapshot_created_at: datetime | None = None
     if projection.snapshot_created_at is not None:
-        with contextlib.suppress(ValueError):
+        try:
             snapshot_created_at = datetime.fromisoformat(projection.snapshot_created_at)
+        except ValueError:
+            snapshot_created_at = None
 
-    if session_factory is None:
-        from ..database.session import get_session_factory
-
-        factory = get_session_factory()
-    else:
-        factory = session_factory
+    factory = _session_factory(session_factory)
     async with factory() as db:
         await record_thread_execution_state(
             db,
@@ -606,10 +602,10 @@ async def _handle_execution_state_event(
 
 async def relay_event(
     thread_id: str,
-    payload: dict[str, Any],
+    payload: dict[str, object],
     *,
-    aggregator: Any | None = None,
-    session_factory: Any | None = None,
+    aggregator: EventAggregator | None = None,
+    session_factory: async_sessionmaker[AsyncSession] | None = None,
     drain_gate: DrainGate | None = None,
 ) -> None:
     """Consolidated relay: run all 4 event handlers in sequence.
@@ -618,10 +614,9 @@ async def relay_event(
     appeared in ``_relay_worker_event``, ``receive_worker_event``, and
     ``receive_worker_event_batch``.
 
-    Callers are responsible for:
-    - Early-returning on ``execution_state_projection`` before calling this
-    - Broadcasting to WS clients via ConnectionManager
-    - Syncing into the aggregator
+    Callers are responsible for routing execution-state projections before this
+    general relay, broadcasting to WS clients via ConnectionManager, and syncing
+    non-projection events into the aggregator.
 
     This function handles the DB-side event processing:
     permission journal, progress inference, execution state persistence,

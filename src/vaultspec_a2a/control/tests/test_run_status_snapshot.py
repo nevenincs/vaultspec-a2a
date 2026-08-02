@@ -13,38 +13,44 @@ otherwise turn every assertion into "field absent" and keep passing.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import Any
+from langgraph.checkpoint.base import CheckpointTuple
 
 from ...control.thread_state_service import (
-    _ACTIVE_FEATURE_FIELD,
-    _AUTHORING_SESSION_FIELD,
-    _CHANGESET_ID_FIELD,
-    _PROPOSAL_ID_FIELD,
+    ACTIVE_FEATURE_FIELD,
+    AUTHORING_SESSION_FIELD,
+    CHANGESET_ID_FIELD,
+    PROPOSAL_ID_FIELD,
     derive_run_authoring_ids,
     derive_run_semantic_context,
 )
 
 
-@dataclass(frozen=True)
-class _Tuple:
-    """A checkpoint tuple shaped exactly as the library returns one."""
-
-    checkpoint: dict[str, Any]
-
-
-def _snapshot(**values: Any) -> _Tuple:
-    return _Tuple(checkpoint={"channel_values": dict(values)})
+def _snapshot(values: dict[str, object]) -> CheckpointTuple:
+    """Build the concrete LangGraph tuple that production code receives."""
+    return CheckpointTuple(
+        config={"configurable": {"thread_id": "thread-1"}},
+        checkpoint={
+            "v": 1,
+            "id": "checkpoint-1",
+            "ts": "2026-08-02T00:00:00+00:00",
+            "channel_values": values,
+            "channel_versions": {},
+            "versions_seen": {},
+            "updated_channels": [],
+        },
+        metadata={"source": "loop", "step": 0, "parents": {}},
+        pending_writes=[],
+    )
 
 
 def test_both_derivations_read_the_same_snapshot() -> None:
     """One tuple in, coherent fields out."""
     snapshot = _snapshot(
-        **{
-            _PROPOSAL_ID_FIELD: ["p-1", "p-2"],
-            _CHANGESET_ID_FIELD: ["c-1"],
-            _ACTIVE_FEATURE_FIELD: "my-feature",
-            _AUTHORING_SESSION_FIELD: "s-1",
+        {
+            PROPOSAL_ID_FIELD: ["p-1", "p-2"],
+            CHANGESET_ID_FIELD: ["c-1"],
+            ACTIVE_FEATURE_FIELD: "my-feature",
+            AUTHORING_SESSION_FIELD: "s-1",
         }
     )
 
@@ -68,15 +74,17 @@ def test_an_absent_snapshot_degrades_every_field_rather_than_raising() -> None:
     assert semantic.authoring_session_id is None
 
 
-def test_a_snapshot_without_channel_values_is_tolerated() -> None:
-    """A checkpoint of an unexpected shape degrades rather than raising."""
-    assert derive_run_authoring_ids(_Tuple(checkpoint={})) == ([], [])
-    assert derive_run_semantic_context(_Tuple(checkpoint={})).feature_tag is None
+def test_a_snapshot_with_empty_channel_values_is_tolerated() -> None:
+    """A real checkpoint with no relevant channels degrades rather than raising."""
+    snapshot = _snapshot({})
+
+    assert derive_run_authoring_ids(snapshot) == ([], [])
+    assert derive_run_semantic_context(snapshot).feature_tag is None
 
 
 def test_missing_individual_fields_degrade_independently() -> None:
     """A run with proposals but no feature tag reports exactly that."""
-    snapshot = _snapshot(**{_PROPOSAL_ID_FIELD: ["p-1"]})
+    snapshot = _snapshot({PROPOSAL_ID_FIELD: ["p-1"]})
 
     proposals, changesets = derive_run_authoring_ids(snapshot)
     semantic = derive_run_semantic_context(snapshot)
@@ -88,7 +96,7 @@ def test_missing_individual_fields_degrade_independently() -> None:
 
 def test_the_derivations_do_not_mutate_the_snapshot() -> None:
     """Two derivations share one tuple; neither may disturb it for the other."""
-    snapshot = _snapshot(**{_PROPOSAL_ID_FIELD: ["p-1"], _ACTIVE_FEATURE_FIELD: "f"})
+    snapshot = _snapshot({PROPOSAL_ID_FIELD: ["p-1"], ACTIVE_FEATURE_FIELD: "f"})
     before = dict(snapshot.checkpoint["channel_values"])
 
     derive_run_authoring_ids(snapshot)

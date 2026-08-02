@@ -55,6 +55,31 @@ class _CheckedOutPool(Protocol):
     def checkedout(self) -> int: ...
 
 
+@runtime_checkable
+class _SqlTraceConnection(Protocol):
+    """The real aiosqlite tracing operation used by the coherence regression."""
+
+    async def set_trace_callback(
+        self, trace_callback: Callable[[str], object] | None
+    ) -> None: ...
+
+
+async def _set_sql_trace_callback(
+    connection: object, trace_callback: Callable[[str], object] | None
+) -> None:
+    """Install a trace on the concrete SQLite connection after structural proof."""
+    if not isinstance(connection, _SqlTraceConnection):
+        raise AssertionError("AsyncSqliteSaver did not expose SQLite trace support")
+    await _apply_sql_trace_callback(connection, trace_callback)
+
+
+async def _apply_sql_trace_callback(
+    connection: _SqlTraceConnection, trace_callback: Callable[[str], object] | None
+) -> None:
+    """Keep the untyped third-party connection behind the tested protocol seam."""
+    await connection.set_trace_callback(trace_callback)
+
+
 _PRESET = "mock-success-single"
 
 
@@ -371,6 +396,76 @@ async def test_legacy_lease_only_metadata_remains_status_visible(
     assert valid_status.json()["lease_id"] == "lease-legacy123"
     assert invalid_status.status_code == 200, invalid_status.text
     assert invalid_status.json()["lease_id"] is None
+
+
+@pytest.mark.asyncio(loop_scope="function")
+async def test_run_status_projects_one_stored_checkpoint_tuple(
+    session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
+) -> None:
+    """The TCP gateway projects one real stored tuple without a second latest read."""
+    from langgraph.checkpoint.base import empty_checkpoint
+
+    from ...database.thread_repository import create_thread
+    from ...thread.enums import ThreadStatus
+
+    thread_id = "coherent-status-capture"
+    metadata: JsonObject = {"run_lease": {"lease_id": "lease-coherent"}}
+    async with session_factory() as session:
+        await create_thread(
+            session,
+            thread_id=thread_id,
+            status=ThreadStatus.RUNNING,
+            title="coherent tuple",
+            team_preset=_PRESET,
+            metadata=json.dumps(metadata),
+        )
+        await session.commit()
+
+    checkpoint = empty_checkpoint()
+    checkpoint["id"] = "checkpoint-coherent"
+    checkpoint["channel_values"].update(
+        {
+            "authoring_proposal_ids": ["proposal-coherent"],
+            "authoring_changeset_ids": ["changeset-coherent"],
+            "active_feature": "feature-coherent",
+            "authoring_session_id": "session-coherent",
+        }
+    )
+    await checkpointer.aput(
+        {"configurable": {"thread_id": thread_id, "checkpoint_ns": ""}},
+        checkpoint,
+        {"source": "loop", "step": 1, "parents": {}},
+        {},
+    )
+
+    statements: list[str] = []
+    connection = checkpointer.conn
+    await _set_sql_trace_callback(connection, statements.append)
+    app, _agg, _worker, _cp = make_app(session_factory, checkpointer)
+    try:
+        async with (
+            _live_server(app) as base,
+            httpx.AsyncClient(base_url=base, timeout=10.0) as client,
+        ):
+            response = await client.get(f"/v1/runs/{thread_id}")
+    finally:
+        await _set_sql_trace_callback(connection, None)
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["checkpoint_id"] == "checkpoint-coherent"
+    assert body["proposal_ids"] == ["proposal-coherent"]
+    assert body["changeset_ids"] == ["changeset-coherent"]
+    assert body["feature_tag"] == "feature-coherent"
+    assert body["authoring_session_id"] == "session-coherent"
+    assert body["topology"]["team_preset"] == _PRESET
+    assert body["lease_id"] == "lease-coherent"
+    latest_tuple_reads = [
+        statement
+        for statement in statements
+        if "ORDER BY CHECKPOINT_ID DESC LIMIT 1" in " ".join(statement.upper().split())
+    ]
+    assert len(latest_tuple_reads) == 1, latest_tuple_reads
 
 
 @asynccontextmanager

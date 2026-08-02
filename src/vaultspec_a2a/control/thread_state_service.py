@@ -12,6 +12,9 @@ import logging
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from langgraph.checkpoint.base import CheckpointTuple
+from pydantic import TypeAdapter, ValidationError
+
 from ..control.projection import (
     apply_checkpoint_projection,
     clear_permissions_without_checkpoint_truth,
@@ -42,17 +45,22 @@ if TYPE_CHECKING:
 
 __all__ = [
     "SemanticContext",
+    "ThreadStateCapture",
     "build_thread_state",
+    "capture_thread_state",
     "project_semantic_phase",
 ]
 
 logger = logging.getLogger(__name__)
 
 # Checkpointed TeamState fields carrying the engine ids a run produced.
-_PROPOSAL_ID_FIELD = "authoring_proposal_ids"
-_CHANGESET_ID_FIELD = "authoring_changeset_ids"
-_ACTIVE_FEATURE_FIELD = "active_feature"
-_AUTHORING_SESSION_FIELD = "authoring_session_id"
+PROPOSAL_ID_FIELD = "authoring_proposal_ids"
+CHANGESET_ID_FIELD = "authoring_changeset_ids"
+ACTIVE_FEATURE_FIELD = "active_feature"
+AUTHORING_SESSION_FIELD = "authoring_session_id"
+
+_STRING_KEYED_MAPPING = TypeAdapter(dict[str, object])
+_STRING_LIST = TypeAdapter(list[str])
 
 # --- Semantic authoring-phase projection -------
 
@@ -115,18 +123,20 @@ def project_semantic_phase(
 
 def _string_list(value: object) -> list[str]:
     """Return the non-empty string items of *value* when it is a list."""
-    if not isinstance(value, list):
+    try:
+        string_values = _STRING_LIST.validate_python(value, strict=True)
+    except ValidationError:
         return []
-    return [item for item in value if isinstance(item, str) and item]
+    return [item for item in string_values if item]
 
 
-def _channel_values(checkpoint_tuple: object) -> dict[str, object]:
+def _channel_values(checkpoint_tuple: CheckpointTuple) -> dict[str, object]:
     """Return the channel values of a checkpoint tuple, or an empty mapping."""
-    checkpoint = getattr(checkpoint_tuple, "checkpoint", None)
-    values = (
-        checkpoint.get("channel_values", {}) if isinstance(checkpoint, dict) else {}
-    )
-    return values if isinstance(values, dict) else {}
+    channel_values: object = checkpoint_tuple.checkpoint.get("channel_values")
+    try:
+        return _STRING_KEYED_MAPPING.validate_python(channel_values, strict=True)
+    except ValidationError:
+        return {}
 
 
 async def read_run_snapshot(
@@ -134,7 +144,7 @@ async def read_run_snapshot(
     thread_id: str,
     *,
     timeout: float = 2.0,
-) -> object | None:
+) -> CheckpointTuple | None:
     """Read a run's checkpoint tuple once, or ``None`` when it is unreadable.
 
     Every run-status field derives from one snapshot. Reading the checkpoint
@@ -148,7 +158,12 @@ async def read_run_snapshot(
     """
     config: RunnableConfig = {"configurable": {"thread_id": thread_id}}
     try:
-        return await asyncio.wait_for(checkpointer.aget_tuple(config), timeout=timeout)
+        checkpoint_tuple = await asyncio.wait_for(
+            checkpointer.aget_tuple(config), timeout=timeout
+        )
+        return (
+            checkpoint_tuple if isinstance(checkpoint_tuple, CheckpointTuple) else None
+        )
     except TimeoutError:
         logger.warning("Checkpoint read timed out: %s", thread_id)
         return None
@@ -158,15 +173,15 @@ async def read_run_snapshot(
 
 
 def derive_run_authoring_ids(
-    checkpoint_tuple: object | None,
+    checkpoint_tuple: CheckpointTuple | None,
 ) -> tuple[list[str], list[str]]:
     """Derive ``(proposal_ids, changeset_ids)`` from an already-read snapshot."""
     if checkpoint_tuple is None:
         return [], []
     values = _channel_values(checkpoint_tuple)
     return (
-        _string_list(values.get(_PROPOSAL_ID_FIELD)),
-        _string_list(values.get(_CHANGESET_ID_FIELD)),
+        _string_list(values.get(PROPOSAL_ID_FIELD)),
+        _string_list(values.get(CHANGESET_ID_FIELD)),
     )
 
 
@@ -178,34 +193,53 @@ class SemanticContext:
     authoring_session_id: str | None
 
 
+@dataclass(frozen=True, slots=True)
+class ThreadStateCapture:
+    """One coherent durable and checkpoint-backed run-status read.
+
+    The gateway must derive every response field from this capture.  Keeping the
+    tuple with its fully reconciled snapshot prevents a second checkpoint or
+    thread read from mixing different moments of a progressing run.
+    """
+
+    snapshot: ThreadStateData
+    checkpoint_tuple: CheckpointTuple | None
+    team_preset: str | None
+    thread_metadata: str | None
+
+
 def _optional_str(value: object) -> str | None:
     """Return *value* when it is a non-empty string, else None."""
     return value if isinstance(value, str) and value else None
 
 
-def derive_run_semantic_context(checkpoint_tuple: object | None) -> SemanticContext:
+def derive_run_semantic_context(
+    checkpoint_tuple: CheckpointTuple | None,
+) -> SemanticContext:
     """Derive the target feature and authoring session from a read snapshot."""
     if checkpoint_tuple is None:
         return SemanticContext(feature_tag=None, authoring_session_id=None)
     values = _channel_values(checkpoint_tuple)
     return SemanticContext(
-        feature_tag=_optional_str(values.get(_ACTIVE_FEATURE_FIELD)),
-        authoring_session_id=_optional_str(values.get(_AUTHORING_SESSION_FIELD)),
+        feature_tag=_optional_str(values.get(ACTIVE_FEATURE_FIELD)),
+        authoring_session_id=_optional_str(values.get(AUTHORING_SESSION_FIELD)),
     )
 
 
-async def build_thread_state(
+async def capture_thread_state(
     db: AsyncSession,
     *,
     thread_id: str,
     aggregator: EventAggregator,
     checkpointer: Checkpointer,
-) -> ThreadStateData | None:
-    """Assemble a complete thread state snapshot for client reconnection.
+) -> ThreadStateCapture | None:
+    """Capture a coherent thread snapshot and its successfully projected tuple.
 
-    Returns a ``ThreadStateData`` (Layer 1 dataclass), or ``None`` if the
-    thread does not exist.  Does **not** raise ``HTTPException`` — the route
-    handler owns HTTP response mapping.
+    A single durable thread/permission read is reconciled against exactly one
+    checkpoint tuple.  The tuple is exposed only after its projection succeeds,
+    so consumers cannot combine a partial snapshot with untrusted checkpoint
+    fields.  Does **not** raise ``HTTPException`` — the route handler owns HTTP
+    response mapping.
     """
     thread = await get_thread(db, thread_id)
     if thread is None or thread.status == ThreadStatus.DELETING.value:
@@ -234,6 +268,7 @@ async def build_thread_state(
     checkpoint_loaded = False
     checkpoint_present = False
     checkpoint_error = False
+    captured_tuple: CheckpointTuple | None = None
 
     try:
         config: RunnableConfig = {"configurable": {"thread_id": thread_id}}
@@ -276,6 +311,7 @@ async def build_thread_state(
                 durable_request_ids=durable_permission_ids,
             )
             checkpoint_loaded = True
+            captured_tuple = checkpoint_tuple
     except TimeoutError:
         logger.warning(
             "Timed out loading checkpoint for thread %s after 10s; "
@@ -324,10 +360,33 @@ async def build_thread_state(
         checkpoint_id=snapshot.checkpoint_id,
     )
 
-    return finalize_snapshot_replay_status(
+    finalized_snapshot = finalize_snapshot_replay_status(
         snapshot,
         checkpoint_loaded=checkpoint_loaded,
         checkpoint_present=checkpoint_present,
         checkpoint_error=checkpoint_error,
         thread_status=thread.status,
     )
+    return ThreadStateCapture(
+        snapshot=finalized_snapshot,
+        checkpoint_tuple=captured_tuple,
+        team_preset=thread.team_preset,
+        thread_metadata=thread.thread_metadata,
+    )
+
+
+async def build_thread_state(
+    db: AsyncSession,
+    *,
+    thread_id: str,
+    aggregator: EventAggregator,
+    checkpointer: Checkpointer,
+) -> ThreadStateData | None:
+    """Return the snapshot portion of :func:`capture_thread_state`."""
+    capture = await capture_thread_state(
+        db,
+        thread_id=thread_id,
+        aggregator=aggregator,
+        checkpointer=checkpointer,
+    )
+    return capture.snapshot if capture is not None else None

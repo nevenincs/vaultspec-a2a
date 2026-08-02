@@ -5,11 +5,14 @@ import json
 import pytest
 import pytest_asyncio
 from sqlalchemy import select
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
+from ...control.drain import DrainGate
 from ...control.event_handlers import (
     _handle_permission_event,
     _handle_progress_event,
+    _handle_terminal_event,
 )
 from ...database import (
     create_thread,
@@ -19,6 +22,7 @@ from ...database import (
     set_thread_approval_state,
 )
 from ...database.models import Base, ControlActionModel, ThreadModel
+from ...streaming.aggregator import EventAggregator
 
 
 @pytest_asyncio.fixture
@@ -130,7 +134,7 @@ async def test_plan_approval_request_is_persisted_as_durable_pending_permission(
         thread_id = thread.id
 
     request_id = f"{thread_id}:plan-approval-1"
-    payload = {
+    payload: dict[str, object] = {
         "type": "plan_approval_request",
         "request_id": request_id,
         "description": "Approve plan for feature 'audit-5'",
@@ -178,7 +182,7 @@ async def test_document_approval_request_is_persisted_as_durable_pending_permiss
         thread_id = thread.id
 
     request_id = f"{thread_id}:document-approval-1"
-    payload = {
+    payload: dict[str, object] = {
         "type": "document_approval_request",
         "request_id": request_id,
         "phase": "research",
@@ -422,3 +426,44 @@ async def test_permission_resolution_for_unknown_request_is_a_clean_noop(
     async with session_factory() as session:
         actions = (await session.execute(select(ControlActionModel))).scalars().all()
         assert actions == []
+
+
+@pytest.mark.asyncio
+async def test_terminal_db_failure_releases_and_clears_public_state() -> None:
+    """Terminal persistence failures must still release all live in-memory state.
+
+    A schema-less real SQLite session causes the real status write to fail. The
+    handler must surface that database fault, after releasing the admitted run
+    and removing its publicly observable aggregator state.
+    """
+    engine = create_async_engine("sqlite+aiosqlite://")
+    session_factory = async_sessionmaker(
+        engine, class_=AsyncSession, expire_on_commit=False
+    )
+    aggregator = EventAggregator()
+    drain_gate = DrainGate()
+    thread_id = "terminal-db-error"
+    client_id = "terminal-db-error-subscriber"
+    aggregator.add_subscriber(client_id)
+    aggregator.subscribe(client_id, [thread_id])
+    aggregator.advance_sequence(thread_id)
+    admission = await drain_gate.admit(thread_id)
+    assert admission.admitted
+
+    try:
+        with pytest.raises(OperationalError, match="no such table"):
+            await _handle_terminal_event(
+                thread_id,
+                {"event_type": "thread_terminal", "status": "completed"},
+                aggregator=aggregator,
+                session_factory=session_factory,
+                drain_gate=drain_gate,
+            )
+
+        assert drain_gate.active_run_count == 0
+        assert not drain_gate.is_active(thread_id)
+        assert aggregator.sequence_count() == 0
+        assert aggregator.get_active_thread_ids() == []
+        assert aggregator.get_subscriptions(client_id) == frozenset()
+    finally:
+        await engine.dispose()

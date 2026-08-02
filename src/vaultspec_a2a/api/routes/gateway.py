@@ -70,6 +70,7 @@ from ...control.thread_service import (
 )
 from ...control.thread_state_service import (
     build_thread_state,
+    capture_thread_state,
     derive_run_authoring_ids,
     derive_run_semantic_context,
     project_semantic_phase,
@@ -1382,21 +1383,15 @@ async def run_status_endpoint(
     checkpointer: Checkpointer = Depends(get_checkpointer),
 ) -> RunStatusResponse:
     """Return the authoritative recovery snapshot for a run."""
-    snapshot = await build_thread_state(
+    capture = await capture_thread_state(
         db, thread_id=run_id, aggregator=aggregator, checkpointer=checkpointer
     )
-    if snapshot is None:
+    if capture is None:
         raise HTTPException(status_code=404, detail="Run not found")
 
-    thread = await get_thread(db, run_id)
-    team_preset = thread.team_preset if thread is not None else None
-    # One checkpoint read for the whole response. Reading per field let the run
-    # advance between reads, so a single run-status could carry a status from one
-    # moment and a position from another - internally inconsistent, and worse
-    # than a stale but coherent answer.
-    checkpoint_snapshot = await read_run_snapshot(checkpointer, run_id)
-    proposal_ids, changeset_ids = derive_run_authoring_ids(checkpoint_snapshot)
-    semantic = derive_run_semantic_context(checkpoint_snapshot)
+    snapshot = capture.snapshot
+    proposal_ids, changeset_ids = derive_run_authoring_ids(capture.checkpoint_tuple)
+    semantic = derive_run_semantic_context(capture.checkpoint_tuple)
     semantic_phase = project_semantic_phase(
         status=snapshot.status,
         next_nodes=snapshot.next_nodes,
@@ -1404,9 +1399,7 @@ async def run_status_endpoint(
     )
     # model-profiles: disclose the run's frozen profile + effective assignment,
     # reproduced verbatim from run metadata (never re-resolved).
-    frozen = _read_persisted_frozen(
-        thread.thread_metadata if thread is not None else None
-    )
+    frozen = _read_persisted_frozen(capture.thread_metadata)
 
     return RunStatusResponse(
         run_id=snapshot.thread_id,
@@ -1415,7 +1408,7 @@ async def run_status_endpoint(
         feature_tag=semantic.feature_tag,
         authoring_session_id=semantic.authoring_session_id,
         topology=TopologyPosition(
-            team_preset=team_preset,
+            team_preset=capture.team_preset,
             active_agent=_active_role(snapshot.next_nodes, snapshot.agents),
             pause_cause=snapshot.pause_cause,
         ),
@@ -1440,25 +1433,19 @@ async def run_status_endpoint(
         failure_reason=snapshot.failure_reason,
         profile_id=frozen.profile_id if frozen is not None else None,
         assignments=await _disclose_frozen(frozen),
-        lease_id=_persisted_lease_id(
-            thread.thread_metadata if thread is not None else None
-        ),
+        lease_id=_persisted_lease_id(capture.thread_metadata),
         reservation_id=(
             binding.reservation_id
-            if (
-                binding := _persisted_lease_binding(
-                    thread.thread_metadata if thread is not None else None
-                )
-            )
+            if (binding := _persisted_lease_binding(capture.thread_metadata))
             is not None
             else None
         ),
-        # Read from the SAME single checkpoint read as every other field above, so
+        # Read from the SAME capture tuple as every other field above, so
         # a questionnaire cannot be reported against a position the run has since
         # left. This is the authoritative disclosure a reloaded client recovers
         # from; the progress relay only ever nudges it to look here.
         pending_clarification=pending_clarification(
-            checkpoint_snapshot, thread_id=run_id
+            capture.checkpoint_tuple, thread_id=run_id
         ),
     )
 

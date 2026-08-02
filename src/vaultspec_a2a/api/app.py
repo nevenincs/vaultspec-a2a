@@ -357,6 +357,10 @@ async def _lifespan(app: FastAPI) -> AsyncGenerator[None]:
 
         worker_state = WorkerState()
         app.state.worker_state = worker_state
+
+        def record_worker_contact(timestamp: float) -> None:
+            app.state.worker_last_heartbeat_ts = timestamp
+
         watchdog = WorkerWatchdog(
             worker_spawner, circuit_breaker, worker_state, app.state
         )
@@ -378,7 +382,7 @@ async def _lifespan(app: FastAPI) -> AsyncGenerator[None]:
                 worker_client,
                 circuit_breaker,
                 worker_spawner,
-                app.state,
+                record_worker_contact=record_worker_contact,
                 trace_headers_fn=trace_headers,
             )
 
@@ -394,7 +398,7 @@ async def _lifespan(app: FastAPI) -> AsyncGenerator[None]:
                     worker_client,
                     circuit_breaker,
                     worker_spawner,
-                    app.state,
+                    record_worker_contact=record_worker_contact,
                     trace_headers_fn=trace_headers,
                 )
             )

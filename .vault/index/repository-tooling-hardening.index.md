@@ -6,7 +6,7 @@ tags:
 date: '2026-08-02'
 modified: '2026-08-02'
 body_schema: 'body-v1'
-body_hash: 'sha256:6287c741a481735d9178896c7ae7f6978666298bb201fb7d8ef43a56fb503953'
+body_hash: 'sha256:f3994cb2cd81322dd3d1ac33171a9f3e6739f0cda65d9f3ba924335170de11f5'
 related:
   - '[[2026-07-19-repository-tooling-hardening-W01-P01-S01]]'
   - '[[2026-07-19-repository-tooling-hardening-W01-P01-summary]]'
@@ -59,8 +59,11 @@ related:
   - '[[2026-08-01-repository-tooling-hardening-strict-s22-audit]]'
   - '[[2026-08-01-repository-tooling-hardening-strict-s23-audit]]'
   - '[[2026-08-01-repository-tooling-hardening-strict-s24-control-init-audit]]'
+  - '[[2026-08-02-repository-tooling-hardening-strict-s24-dispatch-audit]]'
+  - '[[2026-08-02-repository-tooling-hardening-strict-s24-event-relay-audit]]'
   - '[[2026-08-02-repository-tooling-hardening-strict-s24-leaf-bundle-audit]]'
   - '[[2026-08-02-repository-tooling-hardening-strict-s24-projection-audit]]'
+  - '[[2026-08-02-repository-tooling-hardening-strict-s24-thread-state-audit]]'
   - '[[2026-08-02-repository-tooling-hardening-strict-s24-verdict-subscriber-audit]]'
 ---
 
@@ -89,8 +92,11 @@ Auto-generated index of all documents tagged with `#repository-tooling-hardening
 - `2026-08-01-repository-tooling-hardening-strict-s22-audit` - `repository-tooling-hardening` audit: `Typed API endpoint partition review`
 - `2026-08-01-repository-tooling-hardening-strict-s23-audit` - `repository-tooling-hardening` audit: `Live gateway and clarification contract review`
 - `2026-08-01-repository-tooling-hardening-strict-s24-control-init-audit` - `repository-tooling-hardening` audit: `Control package export contract review`
+- `2026-08-02-repository-tooling-hardening-strict-s24-dispatch-audit` - `repository-tooling-hardening` audit: `Control dispatch type-boundary review`
+- `2026-08-02-repository-tooling-hardening-strict-s24-event-relay-audit` - `repository-tooling-hardening` audit: `Control event relay type-boundary review`
 - `2026-08-02-repository-tooling-hardening-strict-s24-leaf-bundle-audit` - `repository-tooling-hardening` audit: `Control leaf type-boundary review`
 - `2026-08-02-repository-tooling-hardening-strict-s24-projection-audit` - `repository-tooling-hardening` audit: `Control projection type-boundary review`
+- `2026-08-02-repository-tooling-hardening-strict-s24-thread-state-audit` - `repository-tooling-hardening` audit: `Control thread-state checkpoint boundary review`
 - `2026-08-02-repository-tooling-hardening-strict-s24-verdict-subscriber-audit` - `repository-tooling-hardening` audit: `Verdict subscriber type-boundary review`
 
 ### exec

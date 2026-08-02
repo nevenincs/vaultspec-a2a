@@ -34,6 +34,11 @@ _logger = logging.getLogger(__name__)
 
 __all__ = ["create_worker_node"]
 
+# A lane name and a model id are bounded configuration values, not free text, and
+# they reach a client-visible failure reason. Anything longer than this is not an
+# identity and is declined rather than truncated into a misleading one.
+_MAX_MODEL_IDENTITY_LEN = 64
+
 # The research_adr document-authoring roles are role-SCOPED: they receive only the
 # document-authoring conventions opted in to their role (via the authoring
 # contract), not the whole corpus. Every other
@@ -167,11 +172,46 @@ def _resolve_effective_worker_model(
     )
 
 
+def _describe_worker_model(model: BaseChatModel) -> str:
+    """Name the provider lane and concrete model a worker turn actually ran on.
+
+    The class name a worker used to report - ``AcpChatModel`` - names neither:
+    the same class serves every ACP lane with a redirected base URL, so a failure
+    report built from it could not distinguish which vendor was called, let alone
+    which model. Both facts are already on the resolved model instance; this reads
+    them off the SAME instance the turn invoked rather than the provider that was
+    requested, because a fallback chain means those can differ and only the
+    former is a fact about the run.
+
+    Degrades rather than guesses: a model declaring neither (the in-process mock,
+    a hosted API model) falls back to its class name, which is at least true.
+    """
+    lane = _bounded_model_identity(getattr(model, "provider", None))
+    model_id: str | None = None
+    for attribute in ("desired_model", "model_name", "model"):
+        model_id = _bounded_model_identity(getattr(model, attribute, None))
+        if model_id is not None:
+            break
+    if lane is not None and model_id is not None:
+        return f"{lane}/{model_id}"
+    return lane or model_id or type(model).__name__
+
+
+def _bounded_model_identity(value: object) -> str | None:
+    """Accept one short, single-line identity string, or nothing at all."""
+    if not isinstance(value, str):
+        return None
+    candidate = " ".join(value.split())
+    if not candidate or len(candidate) > _MAX_MODEL_IDENTITY_LEN:
+        return None
+    return candidate
+
+
 def _wrap_worker_exception(
     *,
     exc: Exception,
     worker: str,
-    model_type: str,
+    model_label: str,
     message_count: int,
 ) -> WorkerExecutionError:
     """Convert a non-interrupt worker failure into WorkerExecutionError.
@@ -185,12 +225,12 @@ def _wrap_worker_exception(
     _logger.exception(
         "worker[%s] model=%s raised during ainvoke — wrapping as WorkerExecutionError",
         worker,
-        model_type,
+        model_label,
         exc_info=exc,
     )
     return WorkerExecutionError(
         worker=worker,
-        model=model_type,
+        model=model_label,
         message_count=message_count,
         cause=exc,
     )
@@ -611,11 +651,11 @@ def create_worker_node(
             ),
         )
 
-        model_type = type(effective_model).__name__
+        model_label = _describe_worker_model(effective_model)
         _logger.debug(
             "worker[%s] invoking model=%s messages=%d compacted=%s autonomous=%s",
             name,
-            model_type,
+            model_label,
             len(messages),
             compacted,
             autonomous,
@@ -636,7 +676,7 @@ def create_worker_node(
             raise _wrap_worker_exception(
                 exc=exc,
                 worker=name,
-                model_type=model_type,
+                model_label=model_label,
                 message_count=len(messages),
             ) from exc
 

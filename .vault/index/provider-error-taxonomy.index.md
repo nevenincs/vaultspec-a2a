@@ -6,9 +6,10 @@ tags:
 date: '2026-08-02'
 modified: '2026-08-02'
 body_schema: 'body-v1'
-body_hash: 'sha256:584c0020e37a0d93450983833a5e2e8240f379e4234ba825499a9bf5db2e5ecf'
+body_hash: 'sha256:76e3931a1454c770c33875d84ebab68c25bb7abd8dbd30acb75e58fb73d3033c'
 related:
   - '[[2026-08-02-provider-error-taxonomy-W01-P01-S01]]'
+  - '[[2026-08-02-provider-error-taxonomy-W01-P01-S02]]'
   - '[[2026-08-02-provider-error-taxonomy-adr]]'
   - '[[2026-08-02-provider-error-taxonomy-plan]]'
   - '[[2026-08-02-provider-error-taxonomy-research]]'
@@ -27,6 +28,7 @@ Auto-generated index of all documents tagged with `#provider-error-taxonomy`.
 ### exec
 
 - `2026-08-02-provider-error-taxonomy-W01-P01-S01` - Retain the provider exception type, message, and code on the worker wrapper
+- `2026-08-02-provider-error-taxonomy-W01-P01-S02` - Name the resolved provider lane and model id instead of the model class
 
 ### plan
 

@@ -4,7 +4,7 @@ tags:
   - '#provider-error-taxonomy'
 date: '2026-08-02'
 modified: '2026-08-02'
-body_hash: 'sha256:df26fb61887c0a5eccc372a5927ffae159dd6f5c55669838cc84ec25593e5b87'
+body_hash: 'sha256:7d2565c8bbc57746d95ce36e23e3767ab42d440a0df3c42ec6f1948c733b160b'
 tier: L3
 related:
   - '[[2026-08-02-provider-error-taxonomy-adr]]'
@@ -41,7 +41,7 @@ Delivers the backend half end to end: the provider exception survives to the rep
 Restores a truthful failure reason by stopping the worker-node wrapper and the ingest summarizer from discarding the provider exception's identity.
 
 - [x] `W01.P01.S01` - Retain the provider exception type, message, and code on the worker wrapper; `src/vaultspec_a2a/graph/nodes/worker.py`.
-- [ ] `W01.P01.S02` - Name the resolved provider lane and model id instead of the model class; `src/vaultspec_a2a/graph/nodes/worker.py`.
+- [x] `W01.P01.S02` - Name the resolved provider lane and model id instead of the model class; `src/vaultspec_a2a/graph/nodes/worker.py`.
 - [ ] `W01.P01.S03` - Walk the cause chain in the ingest exception summarizer; `src/vaultspec_a2a/streaming/ingest.py`.
 - [ ] `W01.P01.S04` - Prove a provider exception's identity survives to the failure reason through real ingest; `src/vaultspec_a2a/streaming/tests/test_aggregator.py`.
 

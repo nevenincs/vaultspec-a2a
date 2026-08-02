@@ -5,15 +5,19 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 import pytest
+from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import HumanMessage, SystemMessage
 
 from ....thread.errors import WorkerExecutionError
 
 if TYPE_CHECKING:
+    from langchain_core.outputs import ChatResult
+
     from ....thread.state import TeamState
 
 from ...nodes.worker import (
     _build_worker_messages,
+    _describe_worker_model,
     _resolve_resume_option_id,
     _wrap_worker_exception,
 )
@@ -24,11 +28,11 @@ def test_worker_exception_wraps_with_context() -> None:
     wrapped = _wrap_worker_exception(
         exc=RuntimeError("boom"),
         worker="coder",
-        model_type="AcpChatModel",
+        model_label="claude/claude-sonnet-4-5",
         message_count=3,
     )
     assert wrapped.worker == "coder"
-    assert wrapped.model == "AcpChatModel"
+    assert wrapped.model == "claude/claude-sonnet-4-5"
     assert "coder" in str(wrapped)
 
 
@@ -38,10 +42,63 @@ def test_worker_exception_chains_original_cause() -> None:
     wrapped = _wrap_worker_exception(
         exc=original,
         worker="coder",
-        model_type="MockModel",
+        model_label="mock/coder",
         message_count=1,
     )
     assert isinstance(wrapped, WorkerExecutionError)
+
+
+def test_worker_model_label_names_the_lane_and_the_model_id() -> None:
+    """The label names what the turn ran on, not which class carried it.
+
+    Driven against the real ACP chat model because the class name it would
+    otherwise report - one class serving every ACP lane behind a redirected base
+    URL - is exactly the identity this replaces.
+    """
+    from ....providers.acp_chat_model import AcpChatModel
+
+    model = AcpChatModel(
+        command=["true"],
+        env_vars={},
+        provider="zai",
+        desired_model="glm-4.6",
+    )
+
+    assert _describe_worker_model(model) == "zai/glm-4.6"
+
+
+def test_worker_model_label_falls_back_to_the_class_it_can_name() -> None:
+    """A model declaring no lane and no id is still named, just less precisely."""
+
+    class _Unidentified(BaseChatModel):
+        @property
+        def _llm_type(self) -> str:
+            return "unidentified"
+
+        def _generate(self, *args: object, **kwargs: object) -> ChatResult:
+            raise NotImplementedError
+
+    assert _describe_worker_model(_Unidentified()) == "_Unidentified"
+
+
+def test_worker_model_label_declines_an_unbounded_identity() -> None:
+    """An overlong value is not an identity and is not truncated into one.
+
+    A model id reaches a client-visible failure reason, so a pathological value
+    must not eat the budget the provider's own message needs.
+    """
+
+    class _Overlong(BaseChatModel):
+        model_name: str = "m" * 500
+
+        @property
+        def _llm_type(self) -> str:
+            return "overlong"
+
+        def _generate(self, *args: object, **kwargs: object) -> ChatResult:
+            raise NotImplementedError
+
+    assert _describe_worker_model(_Overlong()) == "_Overlong"
 
 
 def test_resolve_resume_option_id_accepts_valid_string() -> None:

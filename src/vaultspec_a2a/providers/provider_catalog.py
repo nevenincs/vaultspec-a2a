@@ -188,9 +188,11 @@ class ModelCatalogEntry:
     display_name: str
     description: str | None = None
     capabilities: tuple[str, ...] = ()
+    native_control_ids: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "capabilities", tuple(self.capabilities))
+        object.__setattr__(self, "native_control_ids", tuple(self.native_control_ids))
         _required_text(self.entry_id, "entry_id")
         _required_text(self.provider_value, "provider_value")
         _required_text(self.display_name, "display_name", max_length=MAX_DISPLAY_LENGTH)
@@ -199,6 +201,13 @@ class ModelCatalogEntry:
         for capability in self.capabilities:
             _required_text(capability, "capability")
         _unique(self.capabilities, "capabilities")
+        if len(self.native_control_ids) > MAX_CONTROLS:
+            raise ValueError(
+                f"model native control ids exceed the {MAX_CONTROLS}-item limit"
+            )
+        for control_id in self.native_control_ids:
+            _required_text(control_id, "model native control id")
+        _unique(self.native_control_ids, "model native control ids")
         _optional_text(self.description, "description")
 
 
@@ -331,6 +340,13 @@ class ProviderCatalog:
             tuple(control.control_id for control in self.native_controls),
             "native control ids",
         )
+        known_control_ids = {control.control_id for control in self.native_controls}
+        for model in self.models:
+            unknown = set(model.native_control_ids) - known_control_ids
+            if unknown:
+                raise ValueError(
+                    "model native_control_ids must name advertised controls"
+                )
         if self.state.status in {CatalogStatus.UNAVAILABLE, CatalogStatus.UNKNOWN} and (
             self.models
         ):

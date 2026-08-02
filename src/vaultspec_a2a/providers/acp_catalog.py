@@ -12,7 +12,7 @@ import asyncio
 import hashlib
 import json
 from contextlib import suppress
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Final
 
@@ -337,7 +337,13 @@ def _revision(
 ) -> str:
     payload = {
         "execution_mode": key.execution_mode,
-        "models": [model.provider_value for model in models],
+        "models": [
+            {
+                "value": model.provider_value,
+                "native_control_ids": list(model.native_control_ids),
+            }
+            for model in models
+        ],
         "native_controls": [
             {
                 "control_id": control.control_id,
@@ -359,6 +365,11 @@ def catalog_from_session_result(
 ) -> ProviderCatalog:
     """Normalize one successful ``session/new`` result into the S01 contract."""
     models, controls = _normalized_payload(result, key)
+    if controls:
+        control_ids = tuple(control.control_id for control in controls)
+        models = tuple(
+            replace(model, native_control_ids=control_ids) for model in models
+        )
     now = (checked_at or datetime.now(UTC)).astimezone(UTC)
     if not models:
         return ProviderCatalog(

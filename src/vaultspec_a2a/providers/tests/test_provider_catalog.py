@@ -46,6 +46,7 @@ def _catalog(key: ProviderCatalogKey, revision: str = "revision-a") -> ProviderC
                 provider_value="provider-model-a",
                 display_name="Provider model A",
                 capabilities=("generate",),
+                native_control_ids=("thinking",),
             ),
         ),
         native_controls=(
@@ -83,6 +84,7 @@ def test_catalog_contract_is_immutable_normalized_and_opaque() -> None:
 def test_catalog_contract_detaches_every_caller_owned_sequence() -> None:
     key = ProviderCatalogKey(provider_id="provider-a", execution_mode="lane-a")
     capabilities = ["generate"]
+    native_control_ids = ["thinking"]
     options = [NativeControlOption("balanced", "provider-balanced", "Balanced")]
     models = [
         ModelCatalogEntry(
@@ -90,6 +92,7 @@ def test_catalog_contract_detaches_every_caller_owned_sequence() -> None:
             "provider-model-a",
             "Provider model A",
             capabilities=cast("tuple[str, ...]", capabilities),
+            native_control_ids=cast("tuple[str, ...]", native_control_ids),
         )
     ]
     controls = [
@@ -115,11 +118,13 @@ def test_catalog_contract_detaches_every_caller_owned_sequence() -> None:
         cast("tuple[ControlSelection, ...]", selections),
     )
     capabilities.clear()
+    native_control_ids.clear()
     options.clear()
     models.clear()
     controls.clear()
     selections.clear()
     assert catalog.models[0].capabilities == ("generate",)
+    assert catalog.models[0].native_control_ids == ("thinking",)
     assert catalog.native_controls[0].options[0].option_id == "balanced"
     assert selection.controls[0].control_id == "thinking"
 
@@ -127,6 +132,27 @@ def test_catalog_contract_detaches_every_caller_owned_sequence() -> None:
 def test_catalog_contract_rejects_unbounded_display_metadata() -> None:
     with pytest.raises(ValueError, match="256-character limit"):
         ModelCatalogEntry("entry-a", "provider-model-a", "x" * 257)
+
+
+def test_catalog_rejects_model_references_to_unadvertised_controls() -> None:
+    key = ProviderCatalogKey("provider-a", "lane-a")
+    with pytest.raises(ValueError, match="name advertised controls"):
+        ProviderCatalog(
+            key=key,
+            state=CatalogState(
+                CatalogStatus.AVAILABLE,
+                datetime.now(UTC),
+                "revision-a",
+            ),
+            models=(
+                ModelCatalogEntry(
+                    "entry-a",
+                    "provider-model-a",
+                    "Provider model A",
+                    native_control_ids=("missing",),
+                ),
+            ),
+        )
 
 
 def test_structured_health_derives_selectability_from_independent_axes() -> None:

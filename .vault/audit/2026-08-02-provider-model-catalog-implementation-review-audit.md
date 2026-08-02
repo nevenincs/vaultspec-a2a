@@ -5,19 +5,19 @@ tags:
 date: '2026-08-02'
 modified: '2026-08-02'
 body_schema: 'body-v1'
-body_hash: 'sha256:db1597b2695cefa035b09b738c0adabccbf35e8a195c927a8248fe12316d35fc'
+body_hash: 'sha256:91ca1883085dda08d0f79b34ca70ba1f274b229437716d2af9673faba2ae6a44'
 related:
   - "[[2026-08-02-provider-model-catalog-plan]]"
 ---
-
 # `provider-model-catalog` audit: `implementation review`
 
 ## Scope
 
 Review S01's normalized catalog contracts, canonical selection identity,
-structured health, TTL refresh behavior, S02's prompt-free ACP discovery, and
-S13's Dashboard catalog adapter/composer migration against the accepted
-provider-owned catalog decision.
+structured health, TTL refresh behavior, S02's prompt-free ACP discovery,
+S03's Codex app-server catalog discovery, and S13's Dashboard catalog
+adapter/composer migration against the accepted provider-owned catalog
+decision.
 
 ## Findings
 
@@ -108,6 +108,32 @@ completes containment cleanup; no provider prompt is sent.
 Resolved in S02. ACP normalization rejects more than 256 models, 32 native
 controls, or 128 control options with `AcpCatalogProtocolError` before immutable
 S01 construction. Direct coverage exercises the control and option ceilings.
+
+### codex-failure-lifecycle-proof | medium | Failure cleanup initially lacked production-path evidence
+
+Resolved in S03. Direct real-process tests now drive provider RPC failure with
+credential-shaped diagnostic text and aggregate stderr exhaustion through
+`discover_codex_catalog`, then prove the contained process tree is gone. The
+output-budget failure is surfaced after independent cleanup rather than being
+masked by the stdout EOF caused by terminating the over-budget process.
+
+### codex-pagination-method-proof | low | Cursor forwarding and prompt-free sequencing were initially inspection-only
+
+Resolved in S03. A bounded malformed-process fixture records the exact request
+stream through a repeated-cursor failure. The proof observes `initialize`,
+`initialized`, `account/read`, and cursor-bearing `model/list` only before
+failure, with no thread, turn, prompt, or completion-bearing method; successful
+installed runtime coverage continues through
+`modelProvider/capabilities/read`.
+
+### codex-control-scope | high | Model entries initially did not identify their applicable native controls
+
+Resolved in S03. `ModelCatalogEntry` now carries immutable bounded
+`native_control_ids`, and `ProviderCatalog` rejects any reference that does not
+name an advertised control. ACP binds its session-wide controls to every model;
+Codex binds only each model's own reasoning-effort and service-tier controls.
+Catalog revisions cover the association, and direct tests prove both shared and
+model-scoped behavior.
 
 ## Recommendations
 

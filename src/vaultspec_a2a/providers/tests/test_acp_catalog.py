@@ -78,6 +78,12 @@ def test_config_options_normalize_models_and_native_controls() -> None:
     ]
     assert catalog.native_controls[0].options[0].provider_value == "balanced"
     assert catalog.native_controls[0].default_option_id is not None
+    expected_control_ids = tuple(
+        control.control_id for control in catalog.native_controls
+    )
+    assert all(
+        model.native_control_ids == expected_control_ids for model in catalog.models
+    )
 
 
 def test_grouped_model_options_preserve_provider_order() -> None:

@@ -5,7 +5,7 @@ tags:
 date: '2026-08-02'
 modified: '2026-08-02'
 body_schema: 'body-v1'
-body_hash: 'sha256:0e240fa7d884121fcf370e46ceb2d1d5e5d7fdf6758e58713ddee1816007f5db'
+body_hash: 'sha256:8b00cf662d7ff9e2fdacbd39b2a74bbe35023cefe978de01f8a9389954019a5c'
 related:
   - "[[2026-07-19-repository-tooling-hardening-plan]]"
 ---
@@ -45,6 +45,10 @@ The clarification-loop service test now decodes its real HTTP and SSE payloads t
 ### compose-stream-auth-proof | low | open validation boundary
 
 The stream-followup test now fails closed at each real compose HTTP/SSE read boundary and focused static gates plus independent review are clean. Its compose-backed runtime path is unverified because `POST /v1/runs` returns 401 in `ServiceStack.create_thread` before the changed reader or any stream assertion executes. Diagnose the stack authentication contract in its owner before using this test as stream/resume evidence; do not weaken the test or bypass authentication. `src/vaultspec_a2a/service_tests/harness.py:692`; `src/vaultspec_a2a/service_tests/test_stream_followup.py`.
+
+### compose-permission-auth-proof | low | open validation boundary
+
+The permissions/resume test now narrows every real service payload at its boundary while retaining approval, denial, invalid-option, stale-response, and supervisor paths. Focused static gates and independent review are clean. The selected compose run again fails with 401 from `ServiceStack.create_thread` before its first changed reader; this corroborates the existing shared harness-auth boundary rather than a file-local regression. Repair and prove the run-start authentication path in its owner before certifying these permission scenarios. `src/vaultspec_a2a/service_tests/harness.py:692`; `src/vaultspec_a2a/service_tests/test_permissions_resume.py`.
 ## Recommendations
 
 - Provision a healthy loopback service-discovery record, then run the named engine-backed stdio service lane and append the outcome to this audit before declaring S26 fully runtime-proven.

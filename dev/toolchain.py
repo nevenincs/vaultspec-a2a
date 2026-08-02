@@ -374,7 +374,7 @@ LINT = Verb(
         Target(
             "toml",
             "Taplo TOML linting.",
-            (ToolOrDocker("taplo", ("lint", "*.toml"), "tamasfe/taplo:0.9"),),
+            (ToolOrDocker("taplo", ("lint", "*.toml"), "tamasfe/taplo:0.9.3"),),
         ),
         Target(
             "workflow",
@@ -456,7 +456,7 @@ FIX = Verb(
         Target(
             "toml",
             "Format TOML files.",
-            (ToolOrDocker("taplo", ("fmt", "*.toml"), "tamasfe/taplo:0.9"),),
+            (ToolOrDocker("taplo", ("fmt", "*.toml"), "tamasfe/taplo:0.9.3"),),
         ),
         Target(
             "vault",
@@ -583,6 +583,22 @@ TEST = Verb(
             "unit",
             "The unit gate, explicitly excluding service tests.",
             (uv_run("pytest", "-m", "not service"),),
+        ),
+        Target(
+            "parallel",
+            "The unit gate under declaration-derived distribution: workers "
+            "requested at the core count, then admitted against live peer "
+            "sessions and machine capacity by the resource plugin.",
+            (
+                uv_run(
+                    "pytest",
+                    "-m",
+                    "not service",
+                    "-n",
+                    "auto",
+                    "--dist=loadgroup",
+                ),
+            ),
         ),
         Target(
             "service",

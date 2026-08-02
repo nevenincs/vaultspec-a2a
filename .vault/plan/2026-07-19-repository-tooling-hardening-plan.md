@@ -4,7 +4,7 @@ tags:
   - '#repository-tooling-hardening'
 date: '2026-07-19'
 modified: '2026-08-02'
-body_hash: 'sha256:0b1c59f2aabc220ef01b0b7c437c4ef825390a1d86a95e86f4f1ddc851ba39c3'
+body_hash: 'sha256:db3031162571fe37b70822915230eea5c61ca8b51086668aa7eb0b0bbb4ca010'
 tier: L3
 related:
   - '[[2026-07-19-repository-tooling-hardening-adr]]'
@@ -136,7 +136,7 @@ Repair production typing by bounded domain with no suppressions or compatibility
 
 - [x] `W06.P12.S24` - Repair strict types in the control and repository production domains.; `src/vaultspec_a2a/control, src/vaultspec_a2a/control/repositories, src/vaultspec_a2a/authoring/discovery.py, src/vaultspec_a2a/api/routes/gateway.py, src/vaultspec_a2a/desktop_tests/test_worker_health_decode_contract.py`.
 - [x] `W06.P12.S25` - Repair strict types in the provider and ACP production domains.; `src/vaultspec_a2a/providers, src/vaultspec_a2a/desktop/profile.py, src/vaultspec_a2a/desktop/tests/test_profile.py, src/vaultspec_a2a/desktop_tests/test_profile_paths.py, src/vaultspec_a2a/cli/tests/test_desktop_serve.py, src/vaultspec_a2a/desktop_tests/test_owned_process_tree.py`.
-- [ ] `W06.P12.S26` - Repair strict types in provider/service tests and the bounded callback-observability contracts they require after production contracts stabilize.; `src/vaultspec_a2a/providers/tests, src/vaultspec_a2a/service_tests, src/vaultspec_a2a/conftest.py, src/vaultspec_a2a/tests/test_prerequisite_rule.py, src/vaultspec_a2a/graph/nodes/worker.py, src/vaultspec_a2a/graph/nodes/diverge.py, src/vaultspec_a2a/graph/compiler.py`.
+- [ ] `W06.P12.S26` - Repair strict types in provider/service tests and the bounded callback-observability contracts they require after production contracts stabilize.; `src/vaultspec_a2a/providers/tests, src/vaultspec_a2a/service_tests, src/vaultspec_a2a/conftest.py, src/vaultspec_a2a/tests/test_prerequisite_rule.py, src/vaultspec_a2a/graph/nodes/worker.py, src/vaultspec_a2a/graph/nodes/diverge.py, src/vaultspec_a2a/graph/compiler.py, src/vaultspec_a2a/graph/tests/nodes/test_diverge.py`.
 - [ ] `W06.P12.S27` - Repair strict types in lifecycle test helpers and their production contracts.; `src/vaultspec_a2a/lifecycle, src/vaultspec_a2a/lifecycle/tests`.
 - [ ] `W06.P12.S28` - Repair strict types in graph, authoring, worker, and streaming domains.; `src/vaultspec_a2a/graph, src/vaultspec_a2a/authoring, src/vaultspec_a2a/worker, src/vaultspec_a2a/streaming`.
 - [ ] `W06.P12.S47` - Resolve every residual Ty and Basedpyright diagnostic across the canonical Python roots before any strict-type graduation.; `src, dev, docs, scripts, packaging`.

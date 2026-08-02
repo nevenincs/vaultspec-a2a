@@ -7,7 +7,7 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from langchain_core.language_models import BaseChatModel
 from langchain_openai import ChatOpenAI
@@ -981,6 +981,54 @@ class ProviderFactory:
             A LangChain BaseChatModel implementation.
         """
         timeout = kwargs.pop("timeout", settings.provider_timeout_seconds)
+        execution_mode = kwargs.pop("execution_mode", None)
+        native_controls = kwargs.pop("native_controls", None)
+        if execution_mode is not None:
+            if not isinstance(execution_mode, str):
+                raise ValueError("execution_mode must be a string")
+            acp_prefixes = {
+                Provider.CLAUDE: "claude-agent-acp:",
+                Provider.ZAI: "zai-claude-agent-acp:",
+            }
+            acp_prefix = acp_prefixes.get(provider)
+            if acp_prefix is not None and execution_mode.startswith(acp_prefix):
+                frozen_backend = execution_mode.removeprefix(acp_prefix)
+                if frozen_backend not in {"node", "binary"}:
+                    raise ValueError(
+                        f"Provider {provider.value!r} cannot execute mode "
+                        f"{execution_mode!r}"
+                    )
+                if backend is not None and backend != frozen_backend:
+                    raise ValueError("backend conflicts with frozen execution_mode")
+                backend = frozen_backend
+            expected_modes = {
+                Provider.CODEX: "codex-app-server",
+                Provider.CLAUDE: f"claude-agent-acp:{backend or settings.acp_backend}",
+                Provider.ZAI: f"zai-claude-agent-acp:{backend or settings.acp_backend}",
+                Provider.KIMI: "kimi-code-acp",
+                Provider.GEMINI: "gemini-cli-acp",
+                Provider.OPENAI: "openai-api",
+                Provider.ZHIPU: "zhipu-openai-compatible-api",
+            }
+            if expected_modes.get(provider) != execution_mode:
+                raise ValueError(
+                    f"Provider {provider.value!r} cannot execute mode "
+                    f"{execution_mode!r}"
+                )
+        if native_controls is None:
+            selected_controls: dict[str, str] = {}
+        elif isinstance(native_controls, dict):
+            raw_controls = cast("dict[object, object]", native_controls)
+            if not all(
+                isinstance(key, str) and isinstance(value, str)
+                for key, value in raw_controls.items()
+            ):
+                raise ValueError(
+                    "native_controls must map control ids to provider values"
+                )
+            selected_controls = cast("dict[str, str]", dict(raw_controls))
+        else:
+            raise ValueError("native_controls must map control ids to provider values")
 
         # Admission: refuse an unsupported provider and resolve its model name
         # before any construction begins, so a bad request fails clearly rather
@@ -1017,9 +1065,21 @@ class ProviderFactory:
             # Codex auth is file-based (persisted local session in the Codex home);
             # no secret env is injected. A raw model string bypasses MODEL_MAP, so
             # pass the resolved name through; None falls back to the account default.
+            codex_controls: dict[str, str] = {}
+            for control_id, value in selected_controls.items():
+                field = control_id.partition(":")[0]
+                if field not in {"reasoning_effort", "service_tier"}:
+                    raise ValueError(
+                        f"Unsupported Codex native control {control_id!r}"
+                    )
+                if field in codex_controls:
+                    raise ValueError(f"Duplicate Codex native control {field!r}")
+                codex_controls[field] = value
             return CodexChatModel(
                 command=command,
                 model_name=model_name,
+                effort=codex_controls.get("reasoning_effort"),
+                service_tier=codex_controls.get("service_tier"),
                 agent_config=agent_config,
                 workspace_root=str(workspace_root) if workspace_root else None,
                 codex_home=settings.codex_home,
@@ -1056,6 +1116,7 @@ class ProviderFactory:
                 command=command,
                 env_vars=env_vars,
                 desired_model=model_name,
+                desired_config_options=selected_controls,
                 agent_config=agent_config,
                 workspace_root=str(workspace_root) if workspace_root else None,
                 # Native PE32+ binary bypasses cmd.exe shim — use exec directly.
@@ -1098,6 +1159,7 @@ class ProviderFactory:
                 command=command,
                 env_vars=env_vars,
                 desired_model=model_name,
+                desired_config_options=selected_controls,
                 agent_config=agent_config,
                 workspace_root=str(workspace_root) if workspace_root else None,
                 use_exec=(backend == "binary"),
@@ -1138,6 +1200,20 @@ class ProviderFactory:
                     settings.kimi_temporary_model_capabilities
                 ),
             )
+            kimi_effort: str | None = None
+            for control_id, value in selected_controls.items():
+                if control_id.partition(":")[0] != "thinking_effort":
+                    raise ValueError(
+                        f"Unsupported Kimi native control {control_id!r}"
+                    )
+                if kimi_effort is not None:
+                    raise ValueError("Duplicate Kimi thinking-effort control")
+                kimi_effort = value
+            if kimi_effort is not None:
+                # Kimi's model-scoped environment binding is the supported
+                # per-invocation override; the CLI intentionally has no effort
+                # flag. Admission already proved this value belongs to the alias.
+                env_vars["KIMI_MODEL_THINKING_EFFORT"] = kimi_effort
             logger.debug(
                 "[%s] Instantiating Kimi ACP agent. Temporary definition present: %s",
                 provider,
@@ -1191,6 +1267,7 @@ class ProviderFactory:
             return AcpChatModel(
                 command=command,
                 env_vars=env_vars,
+                desired_config_options=selected_controls,
                 agent_config=agent_config,
                 workspace_root=str(workspace_root) if workspace_root else None,
                 provider=str(provider.value),
@@ -1207,6 +1284,11 @@ class ProviderFactory:
                     if "GEMINI_CLI_HOME" in env_vars
                     else "local_oauth_refresh"
                 ),
+            )
+
+        if selected_controls:
+            raise ValueError(
+                f"Provider {provider.value!r} has no exact native-control executor"
             )
 
         if provider == Provider.ZHIPU:

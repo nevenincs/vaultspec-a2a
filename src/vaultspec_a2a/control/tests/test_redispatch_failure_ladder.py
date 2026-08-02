@@ -1,3 +1,5 @@
+# pyright: reportPrivateUsage=false
+
 """Re-dispatch failure logging must not re-log identically per stuck thread.
 
 Real DB, real threads in RECONCILING status, a real (forced-open) circuit
@@ -9,10 +11,15 @@ summary) instead of once per thread.
 
 from __future__ import annotations
 
+import json
 import logging
+from typing import TYPE_CHECKING
 
 import httpx
 import pytest
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 from ...control.circuit_breaker import WorkerCircuitBreaker
 from ...control.dispatch import (
@@ -20,7 +27,7 @@ from ...control.dispatch import (
     redispatch_reconciling_threads,
 )
 from ...control.worker_management import LazyWorkerSpawner
-from ...database import create_thread
+from ...database import create_thread, get_thread
 from ...database.session import close_db, get_session_factory, init_db
 from ...thread.enums import ThreadStatus
 
@@ -28,8 +35,87 @@ _LOGGER_NAME = "vaultspec_a2a.control.dispatch"
 
 
 @pytest.mark.asyncio
+async def test_invalid_frozen_selection_fails_only_its_thread_and_sweep_continues(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A corrupt modern authority cannot prevent later restart work from running."""
+    db_file = tmp_path / "redispatch-invalid-frozen.db"
+    await close_db()
+    await init_db(str(db_file))
+    try:
+        session_factory = get_session_factory()
+        async with session_factory() as session:
+            # list_threads orders newest first, so create the valid thread before
+            # the corrupt one to prove a malformed first item does not abort.
+            await create_thread(
+                session,
+                thread_id="valid-after-corrupt",
+                status=ThreadStatus.RECONCILING,
+                team_preset="mock-success-single",
+            )
+            await create_thread(
+                session,
+                thread_id="corrupt-modern-freeze",
+                status=ThreadStatus.RECONCILING,
+                team_preset="mock-success-single",
+                metadata=json.dumps(
+                    {
+                        "provider_catalog_selection": {
+                            "schema_version": 1,
+                            "digest": "not-a-valid-digest",
+                        }
+                    }
+                ),
+            )
+            await session.commit()
+
+        spawner = LazyWorkerSpawner(
+            worker_url="http://127.0.0.1:9", worker_port=9, auto_spawn=False
+        )
+        spawner.replace_process(None)
+        circuit_breaker = WorkerCircuitBreaker(
+            failure_threshold=1, recovery_timeout=999.0
+        )
+        circuit_breaker.force_open()
+
+        async with httpx.AsyncClient(
+            base_url="http://127.0.0.1:9", timeout=0.2
+        ) as client:
+            with caplog.at_level(logging.INFO, logger=_LOGGER_NAME):
+                await redispatch_reconciling_threads(
+                    client,
+                    circuit_breaker,
+                    spawner,
+                    record_worker_contact=lambda _when: None,
+                )
+
+        async with session_factory() as session:
+            corrupt = await get_thread(session, "corrupt-modern-freeze")
+            valid = await get_thread(session, "valid-after-corrupt")
+        assert corrupt is not None
+        assert corrupt.status == ThreadStatus.FAILED.value
+        assert (
+            corrupt.failure_reason
+            == "persisted provider catalog selection is invalid"
+        )
+        assert valid is not None
+        assert valid.status == ThreadStatus.RECONCILING.value
+        assert any(
+            "Refusing invalid frozen assignment" in record.getMessage()
+            for record in caplog.records
+        )
+        assert any(
+            "Circuit breaker open" in record.getMessage()
+            and "valid-after-corrupt" in record.getMessage()
+            for record in caplog.records
+        )
+    finally:
+        await close_db()
+
+
+@pytest.mark.asyncio
 async def test_redispatch_dedups_repeated_circuit_open_failures(
-    tmp_path, caplog: pytest.LogCaptureFixture
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
 ) -> None:
     db_file = tmp_path / "redispatch-dedup.db"
     await close_db()
@@ -102,7 +188,7 @@ async def test_redispatch_dedups_repeated_circuit_open_failures(
 
 @pytest.mark.asyncio
 async def test_redispatch_logs_once_for_a_single_failure_with_no_summary(
-    tmp_path, caplog: pytest.LogCaptureFixture
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
 ) -> None:
     """A lone failure logs in full with no batch-end summary noise."""
     db_file = tmp_path / "redispatch-single.db"

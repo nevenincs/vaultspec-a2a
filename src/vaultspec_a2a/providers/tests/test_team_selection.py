@@ -26,6 +26,7 @@ from ..provider_catalog import (
 from ..team_selection import (
     TeamSelectionError,
     freeze_team_selection,
+    frozen_team_selection_from_record,
     normalize_replay_selection,
 )
 
@@ -114,7 +115,72 @@ def test_freeze_normalizes_authoritative_defaults_and_exact_model_value() -> Non
         ControlSelection(control_id="reasoning", option_id="low"),
     )
     assert frozen.compiler_map()["coder"]["model_name"] == "gpt-exact"
-    assert frozen.to_record()["selection"]["controls"] == {"reasoning": "low"}
+    assert frozen.to_record()["selection"]["controls"] == [
+        {
+            "control_id": "reasoning",
+            "option_id": "low",
+            "provider_value": "low",
+            "display_name": "Reasoning",
+            "option_display_name": "Low",
+        }
+    ]
+    assert frozen.disclosure()["assignments"][0] == {
+        "provider_id": "codex",
+        "provider_display_name": "Codex",
+        "execution_mode": "app-server",
+        "catalog_revision": "rev-1",
+        "entry_id": "entry-1",
+        "model_name": "gpt-exact",
+        "model_display_name": "Exact",
+        "controls": [
+            {
+                "control_id": "reasoning",
+                "option_id": "low",
+                "provider_value": "low",
+                "display_name": "Reasoning",
+                "option_display_name": "Low",
+            }
+        ],
+        "role_id": "coder",
+        "fallbacks": [],
+        "provenance": {"selection_source": "team_selection"},
+    }
+    assert frozen_team_selection_from_record(frozen.to_record()) == frozen
+
+
+def test_persisted_selection_refuses_tampered_provider_value() -> None:
+    frozen = freeze_team_selection(
+        selection=_selection(),
+        overrides={},
+        fallbacks=(),
+        required_roles=("coder",),
+        records=(_record(),),
+    )
+    record = frozen.to_record()
+    record["selection"]["model_name"] = "tampered"
+
+    with pytest.raises(TeamSelectionError, match="digest does not match"):
+        frozen_team_selection_from_record(record)
+
+
+def test_restart_prefers_modern_selection_over_legacy_profile() -> None:
+    from ...control.dispatch import _frozen_model_assignment
+
+    frozen = freeze_team_selection(
+        selection=_selection(),
+        overrides={},
+        fallbacks=(),
+        required_roles=("coder",),
+        records=(_record(),),
+    )
+    profile_id, assignment = _frozen_model_assignment(
+        {
+            "provider_catalog_selection": frozen.to_record(),
+            "model_profile": {"profile_id": "must-not-win", "roles": {}},
+        }
+    )
+    assert profile_id is None
+    assert assignment == frozen.compiler_map()
 
 
 @pytest.mark.parametrize(

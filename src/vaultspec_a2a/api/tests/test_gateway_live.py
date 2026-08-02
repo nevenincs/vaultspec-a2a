@@ -20,6 +20,7 @@ import asyncio
 import json
 import logging
 from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import TYPE_CHECKING, Protocol, cast, runtime_checkable
 
 import httpx
@@ -37,7 +38,6 @@ from .conftest import make_app
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator, AsyncIterator, Callable
-    from pathlib import Path
 
     from fastapi import FastAPI
     from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
@@ -81,6 +81,35 @@ async def _apply_sql_trace_callback(
 
 
 _PRESET = "mock-success-single"
+
+
+async def _first_selectable_catalog_selection(
+    client: httpx.AsyncClient,
+) -> tuple[JsonObject, str]:
+    """Read one genuinely served lane and return its public selection reference."""
+    workspace_root = str(Path.cwd())
+    response = await client.get(
+        "/v1/provider-catalog", params={"workspace_root": workspace_root}
+    )
+    assert response.status_code == 200, response.text
+    providers = response.json()["providers"]
+    record = next(
+        item
+        for item in providers
+        if item["health"]["selectable"] and item["catalog"]["models"]
+    )
+    catalog = record["catalog"]
+    return (
+        {
+            "schema_version": 1,
+            "provider_id": record["provider_id"],
+            "execution_mode": record["execution_mode"],
+            "catalog_revision": catalog["state"]["revision"],
+            "entry_id": catalog["models"][0]["entry_id"],
+            "controls": {},
+        },
+        workspace_root,
+    )
 
 
 async def _seed_permission(
@@ -1675,6 +1704,131 @@ async def test_run_start_idempotency_is_race_safe(
         # The winner dispatched exactly once; the losers returned it idempotently.
         raced = [d for d in worker.dispatches if d.get("thread_id") == "rid-race"]
         assert len(raced) == 1
+
+
+@pytest.mark.asyncio(loop_scope="function")
+async def test_modern_selection_insert_race_and_direct_replay_disclose_same_freeze(
+    engine: AsyncEngine,
+    session_factory: SessionFactory,
+    checkpointer: AsyncSqliteSaver,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Both real insert-race recovery and later replay disclose durable authority."""
+    app, _agg, worker, _cp = make_app(session_factory, checkpointer)
+    gate = admission_gate(app)
+    run_id = "rid-modern-freeze-race"
+    pool = engine.sync_engine.pool
+    assert isinstance(pool, _CheckedOutPool)
+    checked_out = pool.checkedout
+
+    with caplog.at_level(logging.INFO, logger="vaultspec_a2a.api.routes.gateway"):
+        async with (
+            _live_server(app) as base,
+            httpx.AsyncClient(base_url=base, timeout=30.0) as client,
+        ):
+            selection, workspace_root = await _first_selectable_catalog_selection(
+                client
+            )
+            payload = {
+                "team_preset": _PRESET,
+                "message": "same durable intention",
+                "run_id": run_id,
+                "selection": selection,
+                "metadata": {"workspace_root": workspace_root},
+            }
+            barrier = await engine.connect()
+            baseline = checked_out()
+            await barrier.exec_driver_sql("BEGIN IMMEDIATE")
+            try:
+                first = asyncio.create_task(client.post("/v1/runs", json=payload))
+                await _wait_until(
+                    lambda: gate.is_active(run_id),
+                    what="the first modern request to pass its read",
+                )
+                second = asyncio.create_task(client.post("/v1/runs", json=payload))
+                await _wait_until(
+                    lambda: checked_out() >= baseline + 2,
+                    what="the second modern request to reach the store",
+                )
+                await asyncio.sleep(0.25)
+            finally:
+                await barrier.exec_driver_sql("ROLLBACK")
+                await barrier.close()
+            first_response, second_response = await asyncio.gather(first, second)
+            replay = await client.post("/v1/runs", json=payload)
+
+            # The inverse collision is also classified after rollback: two
+            # different durable intentions sharing one explicit nickname must
+            # remain a nickname conflict, never a same-id replay or a 500.
+            nickname = "shared-modern-race"
+            left_id = "rid-modern-nickname-left"
+            right_id = "rid-modern-nickname-right"
+            nickname_base = {
+                "team_preset": _PRESET,
+                "message": "nickname collision",
+                "selection": selection,
+                "metadata": {
+                    "workspace_root": workspace_root,
+                    "nickname": nickname,
+                },
+            }
+            await _wait_until(
+                lambda: checked_out() == 0,
+                what="the same-id race connections to return to the pool",
+            )
+            barrier = await engine.connect()
+            baseline = checked_out()
+            await barrier.exec_driver_sql("BEGIN IMMEDIATE")
+            try:
+                left = asyncio.create_task(
+                    client.post("/v1/runs", json={**nickname_base, "run_id": left_id})
+                )
+                await _wait_until(
+                    lambda: gate.is_active(left_id),
+                    what="the first nickname request to pass its read",
+                )
+                right = asyncio.create_task(
+                    client.post(
+                        "/v1/runs", json={**nickname_base, "run_id": right_id}
+                    )
+                )
+                await _wait_until(
+                    lambda: checked_out() >= baseline + 2,
+                    what="the second nickname request to reach the store",
+                )
+                await asyncio.sleep(0.25)
+            finally:
+                await barrier.exec_driver_sql("ROLLBACK")
+                await barrier.close()
+            nickname_responses = await asyncio.gather(left, right)
+
+    responses = (first_response, second_response, replay)
+    assert all(response.status_code == 201 for response in responses), [
+        response.text for response in responses
+    ]
+    assert [
+        record
+        for record in caplog.records
+        if "lost a concurrent insert race" in record.getMessage()
+        and run_id in record.getMessage()
+    ], "the integrity-error recovery branch did not execute"
+    frozen = [response.json()["frozen_assignment"] for response in responses]
+    assert all(item is not None for item in frozen)
+    assert frozen[0] == frozen[1] == frozen[2]
+    assert frozen[0]["schema_version"] == 1
+    assert frozen[0]["digest"]
+    assert len([d for d in worker.dispatches if d.get("thread_id") == run_id]) == 1
+    assert sorted(response.status_code for response in nickname_responses) == [201, 409]
+    nickname_conflict = next(
+        response for response in nickname_responses if response.status_code == 409
+    )
+    assert "nickname already exists" in nickname_conflict.json()["detail"]
+    nickname_dispatches = [
+        dispatch
+        for dispatch in worker.dispatches
+        if dispatch.get("thread_id") in {left_id, right_id}
+    ]
+    assert len(nickname_dispatches) == 1
 
 
 @pytest.mark.asyncio(loop_scope="function")

@@ -260,6 +260,8 @@ async def test_codex_live_turn_returns_output() -> None:
     if not _CODEX_PRESENT:
         pytest.fail("codex CLI unavailable; install Codex before service tests")
     model = ProviderFactory().create(Provider.CODEX, model=Model.LOW)
+    assert isinstance(model, CodexChatModel)
+    assert model.model_name == MODEL_MAP[Provider.CODEX][Model.LOW]
     messages = [
         SystemMessage(content="You are terse."),
         HumanMessage(content="Reply with exactly this word and no punctuation: pong"),
@@ -275,6 +277,8 @@ async def test_early_app_server_exit_reports_redacted_bounded_stderr_tail(
     tmp_path: Path,
 ) -> None:
     """A real early exit exposes its code and safe diagnostic tail to the caller."""
+    codex_home = tmp_path / "empty-codex-home"
+    codex_home.mkdir()
     command = (
         "import sys; "
         "[print(f'startup-diagnostic-{index}', file=sys.stderr) "
@@ -285,6 +289,7 @@ async def test_early_app_server_exit_reports_redacted_bounded_stderr_tail(
     model = CodexChatModel(
         command=[sys.executable, "-c", command],
         cwd=str(tmp_path),
+        codex_home=str(codex_home),
         timeout=10.0,
     )
 

@@ -488,6 +488,7 @@ class CodexChatModel(BaseChatModel):
     command: list[str] = Field(default_factory=lambda: ["codex", "app-server"])
     model_name: str | None = None
     effort: str | None = None
+    service_tier: str | None = None
     cwd: str | None = None
     workspace_root: str | None = None
     codex_home: str | None = None
@@ -752,6 +753,7 @@ class CodexChatModel(BaseChatModel):
                         ],
                         "model": self.model_name,
                         "effort": self.effort,
+                        "serviceTier": self.service_tier,
                         "outputSchema": None,
                     },
                 ),

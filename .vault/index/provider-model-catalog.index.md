@@ -6,7 +6,7 @@ tags:
 date: '2026-08-02'
 modified: '2026-08-02'
 body_schema: 'body-v1'
-body_hash: 'sha256:9e73466a0f762c1256a100e86996b43190c40be8d56c8c531ab4170647a47b98'
+body_hash: 'sha256:1145b839dc9bd5fa5666283a445914e8c54ba6e6d95a692fa52943856ee35fb1'
 related:
   - '[[2026-08-02-provider-model-catalog-P01-S01]]'
   - '[[2026-08-02-provider-model-catalog-P01-S02]]'
@@ -15,6 +15,7 @@ related:
   - '[[2026-08-02-provider-model-catalog-P01-S05]]'
   - '[[2026-08-02-provider-model-catalog-P01-S06]]'
   - '[[2026-08-02-provider-model-catalog-P01-S07]]'
+  - '[[2026-08-02-provider-model-catalog-P01-S09]]'
   - '[[2026-08-02-provider-model-catalog-P02-S12]]'
   - '[[2026-08-02-provider-model-catalog-P02-S13]]'
   - '[[2026-08-02-provider-model-catalog-P02-S15]]'
@@ -24,6 +25,7 @@ related:
   - '[[2026-08-02-provider-model-catalog-catalog-registration-p01s06-review-audit]]'
   - '[[2026-08-02-provider-model-catalog-dashboard-health-p02s16-audit]]'
   - '[[2026-08-02-provider-model-catalog-dashboard-s15-audit]]'
+  - '[[2026-08-02-provider-model-catalog-freeze-p01s09-review-audit]]'
   - '[[2026-08-02-provider-model-catalog-frozen-run-evidence-p02s17-audit]]'
   - '[[2026-08-02-provider-model-catalog-gateway-p01s07-review-audit]]'
   - '[[2026-08-02-provider-model-catalog-gateway-p01s08-review-audit]]'
@@ -51,6 +53,7 @@ Auto-generated index of all documents tagged with `#provider-model-catalog`.
 - `2026-08-02-provider-model-catalog-catalog-registration-p01s06-review-audit` - `provider-model-catalog` audit: `catalog registration P01.S06 review`
 - `2026-08-02-provider-model-catalog-dashboard-health-p02s16-audit` - `provider-model-catalog` audit: `P02.S16 dashboard provider health review`
 - `2026-08-02-provider-model-catalog-dashboard-s15-audit` - `provider-model-catalog` audit: `Dashboard S15 bounded expert selection review`
+- `2026-08-02-provider-model-catalog-freeze-p01s09-review-audit` - `provider-model-catalog` audit: `P01.S09 exact freeze review`
 - `2026-08-02-provider-model-catalog-frozen-run-evidence-p02s17-audit` - `provider-model-catalog` audit: `Frozen run evidence P02.S17 review`
 - `2026-08-02-provider-model-catalog-gateway-p01s07-review-audit` - `provider-model-catalog` audit: `gateway P01.S07 review`
 - `2026-08-02-provider-model-catalog-gateway-p01s08-review-audit` - `provider-model-catalog` audit: `P01.S08 explicit run selection review`
@@ -68,6 +71,7 @@ Auto-generated index of all documents tagged with `#provider-model-catalog`.
 - `2026-08-02-provider-model-catalog-P01-S05` - Implement authenticated OpenAI-compatible model discovery with unsupported metadata explicitly absent
 - `2026-08-02-provider-model-catalog-P01-S06` - Register execution-mode-specific catalog adapters and report unsupported enumeration honestly
 - `2026-08-02-provider-model-catalog-P01-S07` - Serve bounded workspace provider catalogs through v1
+- `2026-08-02-provider-model-catalog-P01-S09` - Freeze catalog provenance, exact model values, controls, fallbacks, execution modes, and schema version through compilation
 - `2026-08-02-provider-model-catalog-P02-S12` - Add the provider-catalog verb and validate bounded catalog, health, selection, control, fallback, and override shapes without hard-coded enums
 - `2026-08-02-provider-model-catalog-P02-S13` - Directly migrate the Dashboard store, composer chooser, and obsolete profile fixtures to opaque provider catalogs, structured health, required selection, controls, and frozen assignments
 - `2026-08-02-provider-model-catalog-P02-S15` - Add bounded per-role model and control overrides and explicit served fallbacks without arbitrary role keys or model values

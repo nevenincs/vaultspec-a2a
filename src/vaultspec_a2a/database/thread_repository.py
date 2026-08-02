@@ -176,7 +176,15 @@ async def create_thread(
     try:
         return await save_model(session, thread)
     except IntegrityError as exc:
-        if nickname is not None and "nickname" in str(exc).lower():
+        # With a caller-owned id, a simultaneous same-id insert can be reported
+        # by SQLite as the generated nickname constraint instead of the primary
+        # key. Let the gateway roll back and reconcile that durable id first;
+        # it translates a genuine different-id nickname collision afterwards.
+        if (
+            nickname is not None
+            and thread_id is None
+            and "nickname" in str(exc).lower()
+        ):
             raise NicknameConflictError(nickname) from exc
         raise
 

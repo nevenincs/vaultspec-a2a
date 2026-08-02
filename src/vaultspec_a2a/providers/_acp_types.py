@@ -67,6 +67,9 @@ class AcpModelConfig:
     # Concrete model resolved by the profile layer. Claude-family ACP adapters
     # select it through the session's negotiated configuration surface.
     desired_model: str | None = None
+    # Exact session-wide provider config values frozen at run admission, keyed
+    # by the ACP adapter's advertised configuration option id.
+    desired_config_options: dict[str, str] = field(default_factory=dict)
 
 
 @dataclass

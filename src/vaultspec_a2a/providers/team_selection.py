@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import hmac
 import json
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -23,6 +24,7 @@ __all__ = [
     "FrozenTeamSelection",
     "TeamSelectionError",
     "freeze_team_selection",
+    "frozen_team_selection_from_record",
     "normalize_replay_selection",
 ]
 
@@ -41,24 +43,53 @@ class TeamSelectionError(ValueError):
 
 
 @dataclass(frozen=True, slots=True)
+class FrozenNativeControl:
+    """One catalog option resolved to the exact provider-native value."""
+
+    control_id: str
+    option_id: str
+    provider_value: str
+    display_name: str | None = None
+    option_display_name: str | None = None
+
+    def to_record(self) -> dict[str, Any]:
+        record: dict[str, Any] = {
+            "control_id": self.control_id,
+            "option_id": self.option_id,
+            "provider_value": self.provider_value,
+        }
+        if self.display_name is not None:
+            record["display_name"] = self.display_name
+        if self.option_display_name is not None:
+            record["option_display_name"] = self.option_display_name
+        return record
+
+
+@dataclass(frozen=True, slots=True)
 class FrozenSelectedLane:
     reference: SelectionReference
     provider_value: str
+    controls: tuple[FrozenNativeControl, ...] = ()
+    provider_display_name: str | None = None
+    model_display_name: str | None = None
     defaulted_control_ids: tuple[str, ...] = ()
 
     def to_record(self) -> dict[str, Any]:
-        return {
+        record: dict[str, Any] = {
             "schema_version": self.reference.schema_version,
             "provider_id": self.reference.provider_id,
             "execution_mode": self.reference.execution_mode,
             "catalog_revision": self.reference.catalog_revision,
             "entry_id": self.reference.entry_id,
-            "controls": {
-                item.control_id: item.option_id for item in self.reference.controls
-            },
-            "provider_value": self.provider_value,
+            "model_name": self.provider_value,
+            "controls": [item.to_record() for item in self.controls],
             "defaulted_control_ids": list(self.defaulted_control_ids),
         }
+        if self.provider_display_name is not None:
+            record["provider_display_name"] = self.provider_display_name
+        if self.model_display_name is not None:
+            record["model_display_name"] = self.model_display_name
+        return record
 
 
 @dataclass(frozen=True, slots=True)
@@ -86,18 +117,55 @@ class FrozenTeamSelection:
         }
 
     def compiler_map(self) -> dict[str, dict[str, Any]]:
-        """Render the exact provider model values for the current compiler seam."""
-        fallback_providers = [item.reference.provider_id for item in self.fallbacks]
+        """Render exact, catalog-independent execution inputs for compilation."""
         result: dict[str, dict[str, Any]] = {}
         for role in self.roles:
             selected = self.overrides.get(role, self.selection)
             result[role] = {
                 "provider": selected.reference.provider_id,
-                "capability": None,
+                "execution_mode": selected.reference.execution_mode,
+                "catalog_revision": selected.reference.catalog_revision,
+                "entry_id": selected.reference.entry_id,
                 "model_name": selected.provider_value,
-                "fallback": fallback_providers,
+                "controls": [item.to_record() for item in selected.controls],
+                "fallbacks": [item.to_record() for item in self.fallbacks],
+                "provenance": {
+                    "selection_source": (
+                        "role_override" if role in self.overrides else "team_selection"
+                    )
+                },
+                "schema_version": self.schema_version,
             }
         return result
+
+    def disclosure(self) -> dict[str, Any]:
+        """Return the bounded public historical assignment projection."""
+        assignments: list[dict[str, Any]] = []
+        for role in self.roles:
+            selected = self.overrides.get(role, self.selection)
+            assignment = selected.to_record()
+            assignment.pop("schema_version", None)
+            assignment.pop("defaulted_control_ids", None)
+            assignment["role_id"] = role
+            assignment["fallbacks"] = [
+                {
+                    key: value
+                    for key, value in fallback.to_record().items()
+                    if key not in {"schema_version", "defaulted_control_ids"}
+                }
+                for fallback in self.fallbacks
+            ]
+            assignment["provenance"] = {
+                "selection_source": (
+                    "role_override" if role in self.overrides else "team_selection"
+                )
+            }
+            assignments.append(assignment)
+        return {
+            "schema_version": self.schema_version,
+            "digest": self.digest,
+            "assignments": assignments,
+        }
 
 
 def _normalize_reference(
@@ -157,9 +225,27 @@ def _normalize_reference(
             for key in sorted(chosen)
         ),
     )
+    frozen_controls: list[FrozenNativeControl] = []
+    for item in normalized.controls:
+        control = advertised[item.control_id]
+        option = next(
+            option for option in control.options if option.option_id == item.option_id
+        )
+        frozen_controls.append(
+            FrozenNativeControl(
+                control_id=item.control_id,
+                option_id=item.option_id,
+                provider_value=option.provider_value,
+                display_name=control.display_name,
+                option_display_name=option.display_name,
+            )
+        )
     return FrozenSelectedLane(
         reference=normalized,
         provider_value=model.provider_value,
+        controls=tuple(frozen_controls),
+        provider_display_name=record.display_name,
+        model_display_name=model.display_name,
         defaulted_control_ids=tuple(defaulted),
     )
 
@@ -176,10 +262,19 @@ def _normalize_replay_lane(
         or stored_record.get("entry_id") != incoming.entry_id
     ):
         raise TeamSelectionError("replay selection does not match the accepted run")
-    stored_controls_record = _json_object(stored_record.get("controls"))
+    raw_stored_controls = stored_record.get("controls")
+    if not isinstance(raw_stored_controls, list):
+        raise TeamSelectionError("persisted team selection is invalid")
     stored_controls: dict[str, str] = {}
-    for key, value in stored_controls_record.items():
-        if not isinstance(value, str):
+    for raw_control in raw_stored_controls:
+        control = _json_object(raw_control)
+        key = control.get("control_id")
+        value = control.get("option_id")
+        if (
+            not isinstance(key, str)
+            or not isinstance(value, str)
+            or key in stored_controls
+        ):
             raise TeamSelectionError("persisted team selection is invalid")
         stored_controls[key] = value
     raw_defaulted = stored_record.get("defaulted_control_ids", [])
@@ -239,6 +334,167 @@ def normalize_replay_selection(
     )
 
 
+def _required_record_text(record: JsonObject, field: str) -> str:
+    value = record.get(field)
+    if (
+        not isinstance(value, str)
+        or not value
+        or value != value.strip()
+        or len(value) > 1_024
+    ):
+        raise TeamSelectionError("persisted team selection is invalid")
+    return value
+
+
+def _optional_record_text(record: JsonObject, field: str) -> str | None:
+    value = record.get(field)
+    if value is None:
+        return None
+    if (
+        not isinstance(value, str)
+        or not value
+        or value != value.strip()
+        or len(value) > 256
+    ):
+        raise TeamSelectionError("persisted team selection is invalid")
+    return value
+
+
+def _lane_from_record(value: object) -> FrozenSelectedLane:
+    record = _json_object(value)
+    if record.get("schema_version") != 1:
+        raise TeamSelectionError("persisted team selection is invalid")
+    raw_controls = record.get("controls")
+    raw_defaulted = record.get("defaulted_control_ids")
+    if (
+        not isinstance(raw_controls, list)
+        or len(raw_controls) > 32
+        or not isinstance(raw_defaulted, list)
+        or not all(isinstance(item, str) for item in raw_defaulted)
+    ):
+        raise TeamSelectionError("persisted team selection is invalid")
+    controls: list[FrozenNativeControl] = []
+    selections: list[ControlSelection] = []
+    seen: set[str] = set()
+    for raw_control in raw_controls:
+        control = _json_object(raw_control)
+        control_id = _required_record_text(control, "control_id")
+        if control_id in seen:
+            raise TeamSelectionError("persisted team selection is invalid")
+        seen.add(control_id)
+        option_id = _required_record_text(control, "option_id")
+        controls.append(
+            FrozenNativeControl(
+                control_id=control_id,
+                option_id=option_id,
+                provider_value=_required_record_text(control, "provider_value"),
+                display_name=_optional_record_text(control, "display_name"),
+                option_display_name=_optional_record_text(
+                    control, "option_display_name"
+                ),
+            )
+        )
+        selections.append(ControlSelection(control_id, option_id))
+    defaulted = tuple(item for item in raw_defaulted if isinstance(item, str))
+    if len(defaulted) != len(set(defaulted)) or not set(defaulted).issubset(seen):
+        raise TeamSelectionError("persisted team selection is invalid")
+    reference = SelectionReference(
+        schema_version=1,
+        provider_id=_required_record_text(record, "provider_id"),
+        execution_mode=_required_record_text(record, "execution_mode"),
+        catalog_revision=_required_record_text(record, "catalog_revision"),
+        entry_id=_required_record_text(record, "entry_id"),
+        controls=tuple(selections),
+    )
+    try:
+        Provider(reference.provider_id)
+    except ValueError as exc:
+        raise TeamSelectionError("persisted team selection is invalid") from exc
+    return FrozenSelectedLane(
+        reference=reference,
+        provider_value=_required_record_text(record, "model_name"),
+        controls=tuple(controls),
+        provider_display_name=_optional_record_text(record, "provider_display_name"),
+        model_display_name=_optional_record_text(record, "model_display_name"),
+        defaulted_control_ids=defaulted,
+    )
+
+
+def _digest_record(
+    *,
+    selection: FrozenSelectedLane,
+    overrides: dict[str, FrozenSelectedLane],
+    fallbacks: tuple[FrozenSelectedLane, ...],
+    roles: tuple[str, ...],
+) -> str:
+    def digest_lane(lane: FrozenSelectedLane) -> dict[str, Any]:
+        lane_record = lane.to_record()
+        lane_record.pop("defaulted_control_ids", None)
+        return lane_record
+
+    record = {
+        "schema_version": 1,
+        "selection": digest_lane(selection),
+        "overrides": {
+            role: digest_lane(lane) for role, lane in sorted(overrides.items())
+        },
+        "fallbacks": [digest_lane(lane) for lane in fallbacks],
+        "roles": list(roles),
+    }
+    canonical = json.dumps(record, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(canonical.encode()).hexdigest()
+
+
+def frozen_team_selection_from_record(record: object) -> FrozenTeamSelection:
+    """Validate and reconstruct the persisted modern execution authority."""
+    stored = _json_object(record)
+    if stored.get("schema_version") != 1:
+        raise TeamSelectionError("persisted team selection is invalid")
+    raw_roles = stored.get("roles")
+    raw_overrides = _json_object(stored.get("overrides"))
+    raw_fallbacks = stored.get("fallbacks")
+    if (
+        not isinstance(raw_roles, list)
+        or not raw_roles
+        or len(raw_roles) > 64
+        or not all(isinstance(role, str) and role for role in raw_roles)
+        or len(raw_roles) != len(set(raw_roles))
+        or not isinstance(raw_fallbacks, list)
+        or len(raw_fallbacks) > 8
+    ):
+        raise TeamSelectionError("persisted team selection is invalid")
+    roles = tuple(role for role in raw_roles if isinstance(role, str))
+    if not set(raw_overrides).issubset(roles):
+        raise TeamSelectionError("persisted team selection is invalid")
+    selection = _lane_from_record(stored.get("selection"))
+    overrides = {
+        role: _lane_from_record(value) for role, value in raw_overrides.items()
+    }
+    fallbacks = tuple(_lane_from_record(value) for value in raw_fallbacks)
+    identities = [
+        selection.reference.fingerprint(),
+        *(lane.reference.fingerprint() for lane in fallbacks),
+    ]
+    if len(identities) != len(set(identities)):
+        raise TeamSelectionError("persisted team selection is invalid")
+    digest = stored.get("digest")
+    expected = _digest_record(
+        selection=selection,
+        overrides=overrides,
+        fallbacks=fallbacks,
+        roles=roles,
+    )
+    if not isinstance(digest, str) or not hmac.compare_digest(digest, expected):
+        raise TeamSelectionError("persisted team selection digest does not match")
+    return FrozenTeamSelection(
+        selection=selection,
+        overrides=overrides,
+        fallbacks=fallbacks,
+        roles=roles,
+        digest=digest,
+    )
+
+
 def freeze_team_selection(
     *,
     selection: SelectionReference,
@@ -270,37 +526,15 @@ def freeze_team_selection(
     if len(identities) != len(set(identities)):
         raise TeamSelectionError("selection fallbacks must not contain duplicates")
 
-    provisional = FrozenTeamSelection(
-        selection=primary,
-        overrides=normalized_overrides,
-        fallbacks=normalized_fallbacks,
-        roles=required_roles,
-        digest="",
-    )
-    def digest_lane(lane: FrozenSelectedLane) -> dict[str, Any]:
-        lane_record = lane.to_record()
-        lane_record.pop("defaulted_control_ids", None)
-        return lane_record
-
-    record = {
-        "schema_version": provisional.schema_version,
-        "selection": digest_lane(primary),
-        "overrides": {
-            role: digest_lane(lane)
-            for role, lane in sorted(normalized_overrides.items())
-        },
-        "fallbacks": [digest_lane(lane) for lane in normalized_fallbacks],
-        "roles": list(required_roles),
-    }
-    canonical = json.dumps(
-        record,
-        sort_keys=True,
-        separators=(",", ":"),
-    )
     return FrozenTeamSelection(
         selection=primary,
         overrides=normalized_overrides,
         fallbacks=normalized_fallbacks,
         roles=required_roles,
-        digest=hashlib.sha256(canonical.encode()).hexdigest(),
+        digest=_digest_record(
+            selection=primary,
+            overrides=normalized_overrides,
+            fallbacks=normalized_fallbacks,
+            roles=required_roles,
+        ),
     )

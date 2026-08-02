@@ -5,7 +5,7 @@ tags:
 date: '2026-08-02'
 modified: '2026-08-02'
 body_schema: 'body-v1'
-body_hash: 'sha256:3fdc0ab24ef3ac8274801919af5bdab66dd5a50837e3d990982d6f09d3d8fd20'
+body_hash: 'sha256:253b88f297b2b264030546042e961bea7f5cfcde4551d556a37f7267e1a6e370'
 related:
   - "[[2026-02-25-llm-context-provider-abstraction-adr]]"
   - "[[2026-07-15-model-profiles-adr]]"
@@ -108,8 +108,20 @@ be unique and number between one and sixty-four before overrides or capacity are
 accepted. The complete normalized selection is persisted under
 `provider_catalog_selection` and included in prepare, commit, and same-ID replay
 identity. Legacy `model_profile` records remain readable for old-run restart but
-are not accepted as new-run policy. P01.S09 owns exact provider-native value
-freezing through compilation, modern restart, and frozen-assignment disclosure.
+are not accepted as new-run policy.
+
+P01.S09 freezes each role's provider ID, provider display name, execution mode,
+catalog revision, entry ID, exact provider model value, model display name,
+native control IDs, option IDs, exact provider option values, default provenance,
+and complete ordered fallback lanes. The digest covers the execution authority;
+only the omitted-versus-explicit default marker is excluded so equivalent replay
+forms share an identity. Compilation and restart consume that record directly
+without live catalog discovery. Codex receives exact reasoning effort and
+service tier, Kimi receives the exact alias plus model-scoped thinking effort,
+and ACP lanes set and confirm exact session configuration options. Start,
+commit, same-ID recovery, and status disclose the same validated schema-v1
+digest and role assignments. A malformed modern record fails its own run with a
+safe static reason while reconciliation continues to later threads.
 
 Kimi Code configuration has two distinct modes. Persisted aliases live under the
 normal Kimi home, optionally relocated by `KIMI_CODE_HOME`. A temporary in-memory

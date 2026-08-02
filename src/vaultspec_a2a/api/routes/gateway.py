@@ -385,7 +385,13 @@ async def _create_run_core(
 
     # Thread the target feature onto the metadata so it reaches dispatch and the
     # vault index; the top-level field is authoritative when both are present.
-    metadata = body.metadata
+    # ``process_metadata`` enriches its input with the generated nickname and
+    # discovered context. Keep that durable enrichment off the request object:
+    # the replay digest describes what the caller sent, and the same request on
+    # a later retry has not yet been enriched.
+    metadata = (
+        body.metadata.model_copy(deep=True) if body.metadata is not None else None
+    )
     if body.feature_tag and metadata is not None:
         metadata = metadata.model_copy(update={"feature_tag": body.feature_tag})
     # Thread the opaque feedback-batch id onto the metadata the same way, so it
@@ -487,7 +493,7 @@ async def _create_run_core(
                 status_code=409,
                 detail=f"Run nickname already exists: {exc.nickname!r}",
             ) from exc
-        except IntegrityError:
+        except IntegrityError as exc:
             # Insert-or-return idempotency: two simultaneous requests with the same
             # run_id race past the check-then-act guard above; the loser's insert
             # hits the primary-key unique violation. Roll back and resolve against
@@ -520,6 +526,11 @@ async def _create_run_core(
                     frozen=_read_persisted_team_selection(winner.thread_metadata),
                     replayed=True,
                 )
+            if nickname is not None and "nickname" in str(exc).lower():
+                raise HTTPException(
+                    status_code=409,
+                    detail=f"Run nickname already exists: {nickname!r}",
+                ) from exc
             raise
 
         # The durable run row now exists and owns its admission; the finally no

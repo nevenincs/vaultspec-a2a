@@ -8,9 +8,12 @@ from langchain_core.language_models import BaseChatModel
 from langchain_openai import ChatOpenAI
 
 from ...control.config import settings
+from ...graph.compiler import _resolve_model_for_worker
 from ...graph.enums import MODEL_MAP, PROVIDER_DEFAULT_MODELS, Model, Provider
+from ...team.team_config import load_agent_config, load_team_config
 from ...thread.errors import ConfigError
 from ..acp_chat_model import AcpChatModel
+from ..codex_chat_model import CodexChatModel
 from ..factory import (
     _BIN_PATH,
     _CLAUDE_ACP_JS,
@@ -464,6 +467,101 @@ def test_provider_factory_gemini_with_workspace_root() -> None:
     model = ProviderFactory().create(Provider.GEMINI, workspace_root=ws)
     assert isinstance(model, AcpChatModel)
     assert model.workspace_root == str(ws)
+
+
+def test_factory_applies_exact_codex_model_scoped_controls() -> None:
+    model = ProviderFactory().create(
+        Provider.CODEX,
+        model="catalog-model",
+        execution_mode="codex-app-server",
+        native_controls={
+            "reasoning_effort:entry": "brief",
+            "service_tier:entry": "priority",
+        },
+    )
+    assert isinstance(model, CodexChatModel)
+    assert model.model_name == "catalog-model"
+    assert model.effort == "brief"
+    assert model.service_tier == "priority"
+
+
+def test_factory_applies_exact_kimi_model_scoped_effort() -> None:
+    model = ProviderFactory().create(
+        Provider.KIMI,
+        model="configured-alias",
+        execution_mode="kimi-code-acp",
+        native_controls={"thinking_effort:entry": "deep"},
+    )
+    assert isinstance(model, AcpChatModel)
+    assert model.command[1:3] == ["-m", "configured-alias"]
+    assert model.env_vars["KIMI_MODEL_THINKING_EFFORT"] == "deep"
+
+
+def test_factory_applies_exact_acp_session_controls() -> None:
+    model = ProviderFactory().create(
+        Provider.CLAUDE,
+        model="catalog-model",
+        execution_mode=f"claude-agent-acp:{settings.acp_backend}",
+        native_controls={"thinking-budget": "brief-wire"},
+    )
+    assert isinstance(model, AcpChatModel)
+    assert model.desired_model == "catalog-model"
+    assert model.desired_config_options == {"thinking-budget": "brief-wire"}
+
+
+def test_factory_restarts_the_frozen_acp_backend_not_the_current_default() -> None:
+    if not _CLAUDE_ACP_JS.exists():
+        with pytest.raises(ConfigError, match="Claude ACP entry point not found"):
+            ProviderFactory().create(
+                Provider.CLAUDE,
+                model="catalog-model",
+                execution_mode="claude-agent-acp:node",
+            )
+        return
+    model = ProviderFactory().create(
+        Provider.CLAUDE,
+        model="catalog-model",
+        execution_mode="claude-agent-acp:node",
+    )
+    assert isinstance(model, AcpChatModel)
+    assert model.acp_backend == "node"
+    assert model.command == ["node", str(_CLAUDE_ACP_JS)]
+
+
+def test_compiler_uses_the_next_exact_frozen_lane_when_primary_is_unavailable() -> None:
+    team = load_team_config("vaultspec-solo-coder")
+    worker_ref = team.workers[0]
+    agent = load_agent_config(worker_ref.agent_id)
+    assignment = {
+        worker_ref.agent_id: {
+            "schema_version": 1,
+            "provider": "codex",
+            "execution_mode": "unavailable-mode",
+            "model_name": "primary-model",
+            "controls": [],
+            "fallbacks": [
+                {
+                    "schema_version": 1,
+                    "provider_id": "codex",
+                    "execution_mode": "codex-app-server",
+                    "model_name": "fallback-model",
+                    "controls": [],
+                }
+            ],
+        }
+    }
+
+    model, provider, capability = _resolve_model_for_worker(
+        worker_ref,
+        agent,
+        team,
+        provider_factory=ProviderFactory(),
+        frozen_assignment=assignment,
+    )
+    assert isinstance(model, CodexChatModel)
+    assert model.model_name == "fallback-model"
+    assert provider is Provider.CODEX
+    assert capability is None
 
 
 class TestProviderAdmission:

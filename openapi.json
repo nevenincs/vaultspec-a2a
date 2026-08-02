@@ -1826,6 +1826,294 @@
         "title": "ExecutionTaskSnapshot",
         "description": "Normalized execution task used in reconnect snapshots."
       },
+      "FrozenExecutionSnapshotSummary": {
+        "properties": {
+          "provider_id": {
+            "type": "string",
+            "maxLength": 1024,
+            "minLength": 1,
+            "title": "Provider Id"
+          },
+          "provider_display_name": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 256
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Provider Display Name"
+          },
+          "execution_mode": {
+            "type": "string",
+            "maxLength": 1024,
+            "minLength": 1,
+            "title": "Execution Mode"
+          },
+          "catalog_revision": {
+            "type": "string",
+            "maxLength": 1024,
+            "minLength": 1,
+            "title": "Catalog Revision"
+          },
+          "entry_id": {
+            "type": "string",
+            "maxLength": 1024,
+            "minLength": 1,
+            "title": "Entry Id"
+          },
+          "model_name": {
+            "type": "string",
+            "maxLength": 1024,
+            "minLength": 1,
+            "title": "Model Name"
+          },
+          "model_display_name": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 256
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model Display Name"
+          },
+          "controls": {
+            "items": {
+              "$ref": "#/components/schemas/FrozenNativeControlSummary"
+            },
+            "type": "array",
+            "maxItems": 32,
+            "title": "Controls"
+          }
+        },
+        "type": "object",
+        "required": [
+          "provider_id",
+          "execution_mode",
+          "catalog_revision",
+          "entry_id",
+          "model_name"
+        ],
+        "title": "FrozenExecutionSnapshotSummary",
+        "description": "Catalog provenance and exact provider inputs for one execution lane."
+      },
+      "FrozenNativeControlSummary": {
+        "properties": {
+          "control_id": {
+            "type": "string",
+            "maxLength": 1024,
+            "minLength": 1,
+            "title": "Control Id"
+          },
+          "option_id": {
+            "type": "string",
+            "maxLength": 1024,
+            "minLength": 1,
+            "title": "Option Id"
+          },
+          "provider_value": {
+            "type": "string",
+            "maxLength": 1024,
+            "minLength": 1,
+            "title": "Provider Value"
+          },
+          "display_name": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 256
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Display Name"
+          },
+          "option_display_name": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 256
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Option Display Name"
+          }
+        },
+        "type": "object",
+        "required": [
+          "control_id",
+          "option_id",
+          "provider_value"
+        ],
+        "title": "FrozenNativeControlSummary",
+        "description": "One exact provider-native value frozen for historical disclosure."
+      },
+      "FrozenRoleAssignmentSummary": {
+        "properties": {
+          "provider_id": {
+            "type": "string",
+            "maxLength": 1024,
+            "minLength": 1,
+            "title": "Provider Id"
+          },
+          "provider_display_name": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 256
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Provider Display Name"
+          },
+          "execution_mode": {
+            "type": "string",
+            "maxLength": 1024,
+            "minLength": 1,
+            "title": "Execution Mode"
+          },
+          "catalog_revision": {
+            "type": "string",
+            "maxLength": 1024,
+            "minLength": 1,
+            "title": "Catalog Revision"
+          },
+          "entry_id": {
+            "type": "string",
+            "maxLength": 1024,
+            "minLength": 1,
+            "title": "Entry Id"
+          },
+          "model_name": {
+            "type": "string",
+            "maxLength": 1024,
+            "minLength": 1,
+            "title": "Model Name"
+          },
+          "model_display_name": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 256
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model Display Name"
+          },
+          "controls": {
+            "items": {
+              "$ref": "#/components/schemas/FrozenNativeControlSummary"
+            },
+            "type": "array",
+            "maxItems": 32,
+            "title": "Controls"
+          },
+          "role_id": {
+            "type": "string",
+            "maxLength": 1024,
+            "minLength": 1,
+            "title": "Role Id"
+          },
+          "agent_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 1024
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Agent Id"
+          },
+          "fallbacks": {
+            "items": {
+              "$ref": "#/components/schemas/FrozenExecutionSnapshotSummary"
+            },
+            "type": "array",
+            "maxItems": 8,
+            "title": "Fallbacks"
+          },
+          "provenance": {
+            "$ref": "#/components/schemas/FrozenSelectionProvenanceSummary"
+          }
+        },
+        "type": "object",
+        "required": [
+          "provider_id",
+          "execution_mode",
+          "catalog_revision",
+          "entry_id",
+          "model_name",
+          "role_id",
+          "provenance"
+        ],
+        "title": "FrozenRoleAssignmentSummary",
+        "description": "One role's exact primary and ordered fallback execution snapshots."
+      },
+      "FrozenSelectionProvenanceSummary": {
+        "properties": {
+          "selection_source": {
+            "type": "string",
+            "enum": [
+              "team_selection",
+              "role_override"
+            ],
+            "title": "Selection Source"
+          }
+        },
+        "type": "object",
+        "required": [
+          "selection_source"
+        ],
+        "title": "FrozenSelectionProvenanceSummary",
+        "description": "Bounded admission layer that supplied one role's primary lane."
+      },
+      "FrozenTeamAssignmentSummary": {
+        "properties": {
+          "schema_version": {
+            "type": "integer",
+            "const": 1,
+            "title": "Schema Version",
+            "default": 1
+          },
+          "digest": {
+            "type": "string",
+            "maxLength": 71,
+            "minLength": 64,
+            "pattern": "^(?:sha256:)?[a-f0-9]{64}$",
+            "title": "Digest"
+          },
+          "assignments": {
+            "items": {
+              "$ref": "#/components/schemas/FrozenRoleAssignmentSummary"
+            },
+            "type": "array",
+            "maxItems": 64,
+            "minItems": 1,
+            "title": "Assignments"
+          }
+        },
+        "type": "object",
+        "required": [
+          "digest",
+          "assignments"
+        ],
+        "title": "FrozenTeamAssignmentSummary",
+        "description": "Complete immutable schema-v1 execution authority for a modern run."
+      },
       "GatewayReadiness": {
         "type": "string",
         "enum": [
@@ -2988,6 +3276,16 @@
             },
             "type": "array",
             "title": "Assignments"
+          },
+          "frozen_assignment": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/FrozenTeamAssignmentSummary"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "type": "object",
@@ -3593,6 +3891,16 @@
             },
             "type": "array",
             "title": "Assignments"
+          },
+          "frozen_assignment": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/FrozenTeamAssignmentSummary"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "type": "object",
@@ -3757,6 +4065,18 @@
             ],
             "title": "Provider Condition"
           },
+          "repair_reason": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 500
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Repair Reason"
+          },
           "profile_id": {
             "anyOf": [
               {
@@ -3774,6 +4094,16 @@
             },
             "type": "array",
             "title": "Assignments"
+          },
+          "frozen_assignment": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/FrozenTeamAssignmentSummary"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "lease_id": {
             "anyOf": [
@@ -4580,6 +4910,17 @@
               }
             ],
             "title": "Provider Condition"
+          },
+          "repair_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Repair Reason"
           }
         },
         "type": "object",

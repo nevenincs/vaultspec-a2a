@@ -20,10 +20,14 @@ from typing import TYPE_CHECKING
 import httpx
 from pydantic import TypeAdapter, ValidationError
 
-from ..database import list_threads
+from ..database import list_threads, update_thread_status
 from ..database.session import get_session_factory
 from ..domain_config import domain_config
 from ..ipc.schemas import DispatchRequest, DispatchResponse, to_dispatch_action
+from ..providers.team_selection import (
+    TeamSelectionError,
+    frozen_team_selection_from_record,
+)
 from ..thread.enums import ControlActionType, ThreadStatus
 
 if TYPE_CHECKING:
@@ -74,6 +78,11 @@ def _frozen_model_assignment(
     metadata: dict[str, object],
 ) -> tuple[str | None, dict[str, dict[str, object]]]:
     """Extract the compiler-safe subset of a persisted frozen model assignment."""
+    modern_record = metadata.get("provider_catalog_selection")
+    if modern_record is not None:
+        frozen = frozen_team_selection_from_record(modern_record)
+        return None, frozen.compiler_map()
+
     frozen_record = metadata.get("model_profile")
     frozen_record_mapping = _string_keyed_mapping(frozen_record)
     if frozen_record_mapping is None:
@@ -347,7 +356,27 @@ async def redispatch_reconciling_threads(
                 # model-profiles: reuse the frozen effective assignment on
                 # restart so the run recompiles the exact launched models, never
                 # a re-resolution against possibly-drifted config.
-                frozen_profile_id, frozen_map = _frozen_model_assignment(meta)
+                try:
+                    frozen_profile_id, frozen_map = _frozen_model_assignment(meta)
+                except TeamSelectionError:
+                    await update_thread_status(
+                        db,
+                        thread.id,
+                        ThreadStatus.FAILED,
+                        failure_reason=(
+                            "persisted provider catalog selection is invalid"
+                        ),
+                    )
+                    await db.commit()
+                    _log_redispatch_failure_ladder(
+                        failure_counts,
+                        failure_thread_ids,
+                        "invalid_frozen_assignment",
+                        thread.id,
+                        "Refusing invalid frozen assignment for thread %s",
+                        thread.id,
+                    )
+                    continue
                 workspace_root_value = meta.get("workspace_root")
                 workspace_root = (
                     workspace_root_value

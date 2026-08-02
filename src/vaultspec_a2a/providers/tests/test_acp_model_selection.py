@@ -19,7 +19,7 @@ import pytest_asyncio
 
 from ...graph.enums import MODEL_MAP, Model, Provider
 from ...utils.enums import AcpRequestId
-from .._acp_session import _select_desired_model
+from .._acp_session import _select_desired_config_options, _select_desired_model
 from .._acp_types import AcpModelConfig, AcpSessionContext
 from .._json_contract import JsonObject
 from ..acp_exceptions import AcpErrorCode, AcpSessionError
@@ -97,6 +97,50 @@ def _config(desired_model: str | None) -> AcpModelConfig:
         auth_mode=None,
         desired_model=desired_model,
     )
+
+
+@pytest.mark.asyncio
+async def test_native_control_uses_its_advertised_session_option_id(
+    echo_context: AcpSessionContext,
+) -> None:
+    config = _config(None)
+    config.desired_config_options["thinking-budget"] = "brief-wire"
+    advertised: list[JsonObject] = [
+        {
+            "id": "thinking-budget",
+            "category": "thought",
+            "currentValue": "deep-wire",
+        }
+    ]
+    task = asyncio.create_task(
+        _select_desired_config_options(
+            echo_context, config, _SESSION_ID, advertised
+        )
+    )
+    frame = await read_acp_frame(
+        echo_context.stdout, AcpRequestId.SESSION_SET_CONFIG_OPTION, timeout=_TIMEOUT
+    )
+    assert frame["params"] == {
+        "sessionId": _SESSION_ID,
+        "configId": "thinking-budget",
+        "value": "brief-wire",
+    }
+    _resolve(
+        echo_context,
+        {
+            "result": {
+                "configOptions": [
+                    {
+                        "id": "thinking-budget",
+                        "category": "thought",
+                        "currentValue": "brief-wire",
+                    }
+                ]
+            }
+        },
+    )
+    confirmed = await task
+    assert confirmed[0]["currentValue"] == "brief-wire"
 
 
 def _advertised(config_id: str = _CONFIG_ID) -> list[JsonObject]:

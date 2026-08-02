@@ -63,6 +63,48 @@ def build(dist_dir: Path) -> Path:
     return binary
 
 
+def flatten_links(root: Path) -> int:
+    """Replace every symlink in the frozen tree with the bytes it points at.
+
+    The consumer unpacks this tree into an immutable generation directory and
+    REFUSES any non-regular entry - symlink, reparse object or device - because
+    an immutable tree whose contents can be redirected after verification is not
+    immutable. That refusal happens at install time on a user's machine, so a
+    tree that breaks it must never be published.
+
+    PyInstaller reproduces the versioned shared-library symlink farms its
+    dependencies ship: scipy's OpenBLAS, libgfortran and libquadmath arrive as
+    chains of `.so.5.0.0` links. Nothing in this repository asks for them, and a
+    dependency bump can introduce more, so the tree is flattened here rather than
+    audited by hand.
+
+    A link is only flattened when it resolves to a regular file INSIDE the tree.
+    One that escapes, or dangles, is a build fault and fails loudly.
+    """
+    resolved_root = root.resolve()
+    links = [path for path in sorted(root.rglob("*")) if path.is_symlink()]
+    for path in links:
+        if path.is_dir():
+            raise SystemExit(f"symlinked directory in the frozen tree: {path}")
+        target = path.resolve()
+        if not target.is_file():
+            raise SystemExit(f"dangling link in the frozen tree: {path}")
+        try:
+            target.relative_to(resolved_root)
+        except ValueError:
+            raise SystemExit(
+                f"link escapes the frozen tree: {path} -> {target}"
+            ) from None
+        payload = target.read_bytes()
+        mode = target.stat().st_mode
+        path.unlink()
+        path.write_bytes(payload)
+        path.chmod(mode)
+    if links:
+        print(f"flattened {len(links)} link(s) into regular files", flush=True)
+    return len(links)
+
+
 def smoke(binary: Path) -> None:
     """Prove the frozen dispatch surface without booting a service.
 
@@ -104,6 +146,9 @@ def main() -> None:
     )
     args = parser.parse_args()
     binary = build(args.dist.resolve())
+    # Before the smoke gate: a tree the consumer would refuse is not worth
+    # proving the dispatch surface of.
+    flatten_links(binary.parent)
     smoke(binary)
 
 

@@ -28,9 +28,17 @@ _FILE_GENERIC_WRITE = 0x40000000
 _ERROR_SHARING_VIOLATION = 32
 #: How long the two publication paths - the directory lease and the rename that
 #: publishes a held handle - ride out a sharing violation before giving up.
-#: Sized like the atomic writer's replace window: long enough to outlast a peer's
-#: lease, short enough that a genuinely wedged holder still surfaces as an error.
-_SHARING_RETRY_SECONDS = 2.0
+#: Long enough to outlast a peer's lease or a scanner's sample, short enough that
+#: a genuinely wedged holder still surfaces as an error rather than a stall.
+#:
+#: Sized at ten seconds because two was measured too short. The credential is
+#: created, written, fsynced and re-ACLed within microseconds, and re-ACLing goes
+#: through `SetNamedSecurityInfoW`, which opens the file BY NAME - so a real-time
+#: scanner is invited to sample a brand-new secret at exactly the moment the
+#: rename needs delete-class access to it. On a loaded CI runner that sample
+#: outlived a two-second budget on every Windows release attempt. Nothing here
+#: masks a wedged holder: one holds indefinitely and still fails loudly.
+_SHARING_RETRY_SECONDS = 10.0
 _SHARING_RETRY_INTERVAL_SECONDS = 0.02
 
 _DELETE = 0x00010000

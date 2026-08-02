@@ -275,7 +275,17 @@ jobs:
             *)         bin="dist/binary/vaultspec-a2a/vaultspec-a2a" ;;
           esac
           test -x "$bin" || { echo "::error::frozen binary absent or not executable at $bin" >&2; exit 1; }
-          home="${RUNNER_TEMP}/a2a-smoke-home"
+          # NOT under RUNNER_TEMP. That directory is the runner agent's own
+          # scratch and is written to continuously while a job runs, which on
+          # Windows puts a third party on files microseconds after this process
+          # creates them. Publishing the discovery credential renames a file it
+          # has just written, and a rename is a delete-class operation on its
+          # source: any other opener holding it without DELETE sharing denies
+          # the publish. A private directory under the workspace has no such
+          # traffic. (Two openers that caused this were ours and are fixed; this
+          # removes the remaining environmental one.)
+          home="${GITHUB_WORKSPACE}/.a2a-smoke-home"
+          rm -rf "$home"
           mkdir -p "$home"
 
           echo "--- setup (local only; provisions the home and runs bundled migrations)"
@@ -286,7 +296,7 @@ jobs:
           # error says so: "start with --log to capture output". An exit code with
           # no output is not a diagnosis — it names that something failed without
           # naming what, which is the failure class this gate exists to close.
-          gwlog="${RUNNER_TEMP}/gateway.log"
+          gwlog="${GITHUB_WORKSPACE}/.a2a-smoke-gateway.log"
           echo "--- start (blocks until discoverably healthy, emits ServiceStatus)"
           if ! "$bin" start --app-home "$home" --host 127.0.0.1 --port "${SMOKE_PORT}" --log "$gwlog" > start.json; then
             echo "::error::start failed; the spawned gateway's own output follows" >&2

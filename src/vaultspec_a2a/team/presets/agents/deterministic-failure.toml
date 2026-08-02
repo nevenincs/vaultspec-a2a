@@ -1,0 +1,13 @@
+[agent]
+id           = "deterministic-failure"
+display_name = "Deterministic Failure"
+role         = "coder"
+description  = "In-process ProviderFactory scenario that raises one fixed provider failure."
+
+[agent.persona]
+system_prompt = "Run the programmed deterministic provider failure scenario."
+
+[agent.model]
+provider   = "deterministic"
+capability = "mid"
+

@@ -9,6 +9,12 @@ license-files = ["LICENSE"]
 dependencies = [
   "anyio>=4.9.0",
   "aiosqlite>=0.20.0",
+  # Imported directly by this package rather than reached through pydantic and
+  # langchain-core, which is where both used to arrive from. A transitive
+  # dependency is one an upstream may drop in a patch release without any
+  # obligation to us, so what src/ imports, src/ declares.
+  "annotated-types>=0.8.0",
+  "typing-extensions>=4.16.0",
   "fastapi>=0.133.1",
   "httpx>=0.28.1",
   "langchain-core>=1.2.16",
@@ -51,6 +57,14 @@ rag = [
 [project.scripts]
 vaultspec-a2a = "vaultspec_a2a.cli.main:main"
 
+# The resource-aware execution plugin loads through the pytest11 entry point,
+# NOT through addopts: a lane that replaces addopts wholesale (the toolchain's
+# service target does, via --override-ini) must still run under the leases,
+# groups, and admission the plugin provides. An addopts channel is strippable;
+# this one is not.
+[project.entry-points.pytest11]
+vaultspec-a2a-testing = "vaultspec_a2a.testing.plugin"
+
 [dependency-groups]
 docs = [
   "sphinx>=8.2",
@@ -82,6 +96,10 @@ tooling = [
   # (C0302, R0902, R0904, R0916). Everything else pylint would report is
   # already covered by ruff and stays disabled in [tool.pylint].
   "pylint>=4.0",
+  # The provider catalog tests inspect real processes to prove a launched
+  # provider is the one they think it is. That arrived transitively; a test
+  # importing it directly declares it directly.
+  "psutil>=7.2.2",
   "pytest>=9.0.2",
   "pytest-asyncio>=1.3.0",
   "pytest-cov>=6.0.0",
@@ -198,11 +216,10 @@ exclude = [
 # --capture=sys: avoids pytest's fd-level dup2 which crashes silently under
 # Git Bash / MinTTY (the _windowsconsoleio_workaround path). sys-level capture
 # replaces sys.stdout/stderr in memory only — no CloseHandle, no silent death.
-# -p vaultspec_a2a.testing.plugin: the resource-aware execution plugin
-# (declaration-derived xdist groups, machine-global leases, registry-backed
-# endpoints, progress deadlines). Loaded here because pytest forbids
-# pytest_plugins below the rootdir conftest.
-addopts = ["--durations=10", "--showlocals", "-ra", "--capture=sys", "-p", "vaultspec_a2a.testing.plugin", "-m", "not service"]
+# The resource-aware execution plugin (declaration-derived xdist groups,
+# machine-global leases, registry-backed endpoints, session admission) loads
+# through its pytest11 entry point, so an addopts override cannot strip it.
+addopts = ["--durations=10", "--showlocals", "-ra", "--capture=sys", "-m", "not service"]
 # log_cli is opt-in, not a default: every module logger streaming live into
 # every run buries the pass/fail signal in noise, and failing-test log capture
 # (pytest's own default) already surfaces diagnostics without it. Opt in with
@@ -336,6 +353,9 @@ DEP002 = [
 DEP004 = [
   "jsonschema",
   "packaging",
+  # The provider catalog tests inspect real processes; psutil is a tooling-group
+  # package a test imports, exactly like pytest below.
+  "psutil",
   "pytest",
   "pytest_asyncio",
   # dev/health/report.py uses radon's library API to measure this tree.
@@ -343,6 +363,11 @@ DEP004 = [
   "sphinx",
   "tenacity",
   "tomlkit",
+  # The grounding-parity test drives the real vaultspec-core CLI, which the
+  # `freeze` group owns because the frozen binary dispatches it. Importing it
+  # from a test is the same construction as every entry above: the wheel packs
+  # only `src/vaultspec_a2a`, so nothing shipped depends on it.
+  "vaultspec_core",
 ]
 
 [tool.ty.environment]

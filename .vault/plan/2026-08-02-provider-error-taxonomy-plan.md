@@ -4,7 +4,7 @@ tags:
   - '#provider-error-taxonomy'
 date: '2026-08-02'
 modified: '2026-08-02'
-body_hash: 'sha256:55d2005fb6647b2120664de617a57e168524a06e3cf771a8fc27c732c619dad4'
+body_hash: 'sha256:7d9fd79fa5f9f3bc66889fb2a4f97a5fcce7f3177d594562f383b6178822e92c'
 tier: L3
 related:
   - '[[2026-08-02-provider-error-taxonomy-adr]]'
@@ -84,7 +84,7 @@ Derives the recoverable flag from the condition rather than the catch site and b
 - [x] `W01.P04.S26` - Bind the condition to the node retry classifier; `src/vaultspec_a2a/graph/compiler.py`.
 - [x] `W01.P04.S27` - Prefer a lane-supplied retry hint over inferred retryability; `src/vaultspec_a2a/graph/compiler.py`.
 - [x] `W01.P04.S28` - Prove throttled and overloaded conditions retry under the existing backoff policy; `src/vaultspec_a2a/graph/tests/test_compiler.py`.
-- [ ] `W01.P04.S60` - Refuse a retry once the lane has already relayed output; `src/vaultspec_a2a/graph/nodes/worker.py`.
+- [x] `W01.P04.S60` - Refuse a retry once the lane has already relayed output; `src/vaultspec_a2a/graph/nodes/worker.py`.
 
 ### Phase `W01.P05` - close the blank terminals
 

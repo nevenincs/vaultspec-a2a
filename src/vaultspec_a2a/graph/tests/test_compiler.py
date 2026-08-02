@@ -21,7 +21,7 @@ if TYPE_CHECKING:
 
 from ...providers import AcpPromptError, ProviderCondition
 from ...providers.codex_chat_model import _turn_failure
-from ...providers.conditions import condition_from_acp_error
+from ...providers.conditions import condition_from_acp_error, condition_is_retryable
 from ...team.team_config import (
     TeamConfig,
     TopologyConfig,
@@ -30,7 +30,7 @@ from ...team.team_config import (
     load_agent_config,
     load_team_config,
 )
-from ...thread.errors import ConfigError
+from ...thread.errors import ConfigError, WorkerExecutionError
 from ...thread.state import TeamState
 from ..compiler import (
     _NODE_RETRY_POLICY,
@@ -1084,3 +1084,83 @@ async def test_research_producer_injects_scoped_conventions(tmp_path) -> None:
     assert "RESEARCHER SYSTEM PROMPT" in texts
     # A stable heading from the bundled document-authoring conventions.
     assert "Emission mechanics" in texts
+
+
+# ---------------------------------------------------------------------------
+# A turn that already streamed is never retried
+# ---------------------------------------------------------------------------
+
+
+class TestARetryNeverDuplicatesRelayedOutput:
+    """A turn that already reached the client must not be run again.
+
+    The node re-invokes the model on retry, so every token the lane already
+    produced is relayed a second time and the user watches the same text arrive
+    twice with nothing to explain it. The pair below is what distinguishes this
+    guard from simply switching retry off: the SAME condition must still retry
+    when nothing was relayed.
+    """
+
+    def _refusal(self, *, relayed: bool) -> tuple[WorkerExecutionError, AcpPromptError]:
+        """A retryable provider refusal, wrapped as the worker node wraps it.
+
+        The condition is resolved by the PRODUCTION mapper from the wire shape
+        the adapter actually emits, then carried on the exception exactly as the
+        lane carries it at its raise site - so the retryable-ness under test is
+        the real one rather than a value this test chose.
+        """
+        wire = {
+            "code": -32603,
+            "message": "provider is over capacity",
+            "data": {"errorKind": "overloaded"},
+        }
+        cause = AcpPromptError(
+            "provider is over capacity",
+            code=-32603,
+            data={"errorKind": "overloaded"},
+            condition=condition_from_acp_error(wire),
+        )
+        wrapped = WorkerExecutionError(
+            worker="researcher",
+            model="claude/sonnet",
+            message_count=3,
+            cause=cause,
+            relayed_output=relayed,
+        )
+        wrapped.__cause__ = cause
+        return wrapped, cause
+
+    def test_a_refusal_after_output_is_not_retried(self) -> None:
+        """Streamed output outranks a retryable condition."""
+        failure, cause = self._refusal(relayed=True)
+        # The condition itself is retryable - that is the point. Retry is
+        # refused because of what the attempt already sent, not what refused it.
+        assert cause.condition == ProviderCondition.PROVIDER_OVERLOADED
+        assert condition_is_retryable(ProviderCondition.PROVIDER_OVERLOADED) is True
+        assert _worker_retry_on(failure) is False
+
+    def test_the_same_refusal_is_retried_when_nothing_was_relayed(self) -> None:
+        """Without the companion, the guard is indistinguishable from off."""
+        failure, _cause = self._refusal(relayed=False)
+        assert _worker_retry_on(failure) is True
+
+    def test_streamed_output_outranks_a_lane_hint_that_says_retry(self) -> None:
+        """A vendor cannot consent to duplicated output on the user's behalf.
+
+        The hint is the provider's verdict on ITS failure; the duplication is
+        harm we would cause. So this is the one axis that outranks a stated
+        hint, and the ordering is asserted rather than left to reading order.
+        """
+        cause = _turn_failure(
+            {"message": "stream died", "codexErrorInfo": "responseStreamDisconnected"},
+            will_retry=True,
+        )
+        wrapped = WorkerExecutionError(
+            worker="researcher",
+            model="codex/gpt",
+            message_count=3,
+            cause=cause,
+            relayed_output=True,
+        )
+        wrapped.__cause__ = cause
+        assert _worker_retry_on(wrapped) is False

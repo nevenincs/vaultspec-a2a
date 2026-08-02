@@ -238,6 +238,22 @@ def _worker_retry_on(exc: Exception) -> bool:
 
     # WorkerExecutionError wraps the original cause -- inspect it.
     if isinstance(exc, WorkerExecutionError):
+        # A turn that already streamed cannot be retried, whatever refused it.
+        # The node re-invokes the model on retry, and every token the lane
+        # already produced is relayed a second time - the client watches the
+        # same text arrive twice, with nothing to explain it.
+        #
+        # This outranks the lane's stated hint deliberately. The hint is the
+        # provider's verdict on ITS OWN failure; the duplication is harm WE
+        # would cause, and a vendor cannot consent to that on the user's behalf.
+        #
+        # It is placed on the wrapper rather than in the verdict because only
+        # the wrapper knows what the attempt relayed. Duplication is a property
+        # of whether the lane streamed, NOT of which condition refused it: an
+        # ordinary overload that happens to arrive after the first token
+        # duplicates exactly as a mid-stream disconnect does.
+        if exc.relayed_output:
+            return False
         cause = exc.__cause__
         if cause is None:
             return False
@@ -297,7 +313,7 @@ def _resolve_model_for_worker(
                         execution_mode,
                     )
                     return model, provider, None
-                except ValueError as exc:
+                except (ConfigError, ValueError) as exc:
                     logger.warning(
                         "Frozen provider lane %s/%s unavailable for worker %s: %s",
                         provider.value,

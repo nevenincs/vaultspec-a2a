@@ -128,40 +128,6 @@ class ConfigError(VaultspecError):
     __slots__ = ()
 
 
-class ProjectionRefusedError(ConfigError):
-    """Raised when the run workspace cannot host a projected ``.mcp.json``.
-
-    The surfacing channel merges the declared MCP set into the run workspace's
-    ``.mcp.json`` (the only scope the adapter path surfaces), adding its entries
-    alongside any the project already declares. Refusal is narrow: a declared
-    server name that collides with an existing NON-projected entry (silently
-    shadowing either side is unacceptable), or an existing ``.mcp.json`` that
-    cannot be parsed (projecting over a file we cannot reason about would risk the
-    project's real config). A sibling of :class:`IsolationRequiredError`: both mean
-    the run cannot establish its declared, bounded MCP surface, so it must not
-    launch.
-    """
-
-    __slots__ = ()
-
-
-class IsolationRequiredError(ConfigError):
-    """Raised when a harness-armed run cannot get its required CLI isolation.
-
-    The agent-harness-provisioning ADR binds a spawned agent's MCP surface to an
-    allowlist equal to the declared harness; enforcing that requires a per-run
-    isolated ``CLAUDE_CONFIG_DIR`` established from an env-carried provider token.
-    An armed run that resolves to ``auth_mode == "none_detected"`` (refused at
-    compile) or that reaches the ACP spawn without an isolated home (refused at
-    the spawn seam) must fail loud here rather than launch an agent with an
-    unbounded MCP surface that inherits ambient and workspace ``.mcp.json``
-    servers. A ``ConfigError`` so the compile path wraps it as a
-    ``GraphCompilationError``.
-    """
-
-    __slots__ = ()
-
-
 class HarnessToolContractError(ConfigError):
     """Raised when a declared harness MCP server does not serve its declared tools.
 
@@ -170,12 +136,12 @@ class HarnessToolContractError(ConfigError):
     ``enabled_tools`` set. That declaration is the compatibility contract with the
     separately released server, and it is verified against the server's own
     ``tools/list`` before the run launches - a declared-but-unchecked contract is
-    the defect class this codebase keeps finding. A third sibling of
-    :class:`IsolationRequiredError` and :class:`ProjectionRefusedError`: all three
-    mean the run cannot establish the declared, bounded MCP surface it was promised,
-    so it must refuse rather than launch an agent whose grounding tools are silently
-    absent. Raised equally when the probe itself cannot complete, because an
-    unverifiable contract is an unmet one.
+    the defect class this codebase keeps finding. Like the declared-surface
+    refusal at the session seam, it means the run cannot establish the declared,
+    bounded MCP surface it was promised, so it must refuse rather than launch an
+    agent whose grounding tools are silently absent. Raised equally when the
+    probe itself cannot complete, because an unverifiable contract is an unmet
+    one.
     """
 
     __slots__ = ()
@@ -204,7 +170,7 @@ class WorkerExecutionError(VaultspecError):
     cause-free attribution for readers composing their own cause chain.
     """
 
-    __slots__ = ("message", "message_count", "model", "worker")
+    __slots__ = ("message", "message_count", "model", "relayed_output", "worker")
 
     def __init__(
         self,
@@ -213,8 +179,17 @@ class WorkerExecutionError(VaultspecError):
         message_count: int,
         *,
         cause: BaseException | None = None,
+        relayed_output: bool = False,
     ) -> None:
-        """Record worker, model, message count, and the failure being wrapped."""
+        """Record worker, model, message count, and the failure being wrapped.
+
+        ``relayed_output`` records whether the lane had already streamed any
+        token to the client before it failed. It rides the exception because the
+        retry classifier is the only reader that needs it and the exception is
+        the only thing that reaches it - and because the answer must come from
+        the attempt that failed, not from a later inspection of state that a
+        retry would already have changed.
+        """
         attribution = f"worker={worker!r} model={model} messages={message_count}"
         detail = describe_exception(cause) if cause is not None else None
         super().__init__(f"{attribution} | {detail}" if detail else attribution)
@@ -222,6 +197,7 @@ class WorkerExecutionError(VaultspecError):
         self.model = model
         self.message_count = message_count
         self.message = attribution
+        self.relayed_output = relayed_output
 
 
 # ---------------------------------------------------------------------------
@@ -366,10 +342,8 @@ __all__ = [
     "EventAggregatorError",
     "GitWorkspaceError",
     "HarnessToolContractError",
-    "IsolationRequiredError",
     "NicknameConflictError",
     "PermissionDeniedError",
-    "ProjectionRefusedError",
     "ProtocolError",
     "ProviderSessionError",
     "TeamConfigNotFoundError",

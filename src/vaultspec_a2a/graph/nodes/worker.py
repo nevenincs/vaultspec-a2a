@@ -5,6 +5,7 @@ import logging
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol, cast
 
+from langchain_core.callbacks import BaseCallbackHandler
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import AIMessage, BaseMessage, SystemMessage, ToolMessage
 from langchain_core.runnables import RunnableConfig
@@ -207,12 +208,58 @@ def _bounded_model_identity(value: object) -> str | None:
     return candidate
 
 
+class _RelayWatch(BaseCallbackHandler):
+    """Records whether this attempt streamed any token to the client.
+
+    Attached to the config of ONE ``ainvoke``, so it answers for that attempt
+    alone. It observes the same callback stream that becomes the client's
+    chunks - not an approximation of it - so the retry guard reading this cannot
+    disagree with what the client actually saw.
+    """
+
+    def __init__(self) -> None:
+        self.relayed = False
+
+    def on_llm_new_token(
+        self, token: str | list[str | dict[str, Any]], **kwargs: Any
+    ) -> None:
+        """Mark the attempt as having produced client-visible output.
+
+        The signature widens to the base class's because a token is not always a
+        plain string; the content is irrelevant here, only that one arrived.
+        """
+        del token, kwargs
+        self.relayed = True
+
+
+def _config_with_relay_watch(
+    config: RunnableConfig | None, watch: _RelayWatch
+) -> RunnableConfig:
+    """Return *config* with *watch* added, leaving the caller's own intact.
+
+    Merged rather than replaced: the run config already carries the callbacks
+    that produce the client's stream, and dropping them to observe them would
+    be self-defeating.
+    """
+    merged = cast("RunnableConfig", dict(config) if config else {})
+    existing = merged.get("callbacks")
+    if existing is None:
+        merged["callbacks"] = [watch]
+    elif isinstance(existing, list):
+        merged["callbacks"] = [*cast("list[BaseCallbackHandler]", existing), watch]
+    else:
+        # A CallbackManager rather than a bare list; it owns the same protocol.
+        existing.add_handler(watch, inherit=True)
+    return merged
+
+
 def _wrap_worker_exception(
     *,
     exc: Exception,
     worker: str,
     model_label: str,
     message_count: int,
+    relayed_output: bool = False,
 ) -> WorkerExecutionError:
     """Convert a non-interrupt worker failure into WorkerExecutionError.
 
@@ -233,6 +280,7 @@ def _wrap_worker_exception(
         model=model_label,
         message_count=message_count,
         cause=exc,
+        relayed_output=relayed_output,
     )
 
 
@@ -660,15 +708,19 @@ def create_worker_node(
             compacted,
             autonomous,
         )
+        # Scoped to this attempt: a retry constructs a new one, so the flag can
+        # never carry a previous attempt's output into the next decision.
+        relay_watch = _RelayWatch()
+        attempt_config = _config_with_relay_watch(config, relay_watch)
         try:
-            response = await effective_model.ainvoke(messages, config=config)
+            response = await effective_model.ainvoke(messages, config=attempt_config)
             response, state_updates = await _resolve_worker_tool_calls(
                 messages=messages,
                 response=response,
                 queue_tool=queue_tool,
                 model=effective_model,
                 autonomous=autonomous,
-                config=config,
+                config=attempt_config,
             )
         except GraphBubbleUp:
             raise
@@ -678,6 +730,7 @@ def create_worker_node(
                 worker=name,
                 model_label=model_label,
                 message_count=len(messages),
+                relayed_output=relay_watch.relayed,
             ) from exc
 
         _logger.debug("worker[%s] response len=%d", name, len(str(response.content)))

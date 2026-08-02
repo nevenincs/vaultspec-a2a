@@ -1207,3 +1207,88 @@ class TestTerminalEventProviderConditionPersistence:
             assert row is not None
             assert row.status == "completed"
             assert row.provider_condition is None
+
+
+class TestConditionSurvivesAReload:
+    """A reloading client recovers the condition from run-status ALONE.
+
+    The whole point of persisting the condition is the client that was not
+    listening: the error frame carrying it is droppable and a reconnecting
+    subscriber gets a fresh empty queue, so a run's classification is only as
+    recoverable as this read makes it. Nothing here subscribes to the stream -
+    the terminal is relayed over the real worker-to-gateway HTTP hop, and the
+    answer is read back over the real product route on a separate connection.
+    """
+
+    @pytest.mark.asyncio(loop_scope="function")
+    async def test_run_status_recovers_the_condition_with_no_stream_attached(
+        self,
+        session_factory,
+        checkpointer,
+    ) -> None:
+        from ...providers import ProviderCondition
+        from .conftest import make_app
+
+        app, _aggregator, _worker, _checkpointer = make_app(
+            session_factory, checkpointer
+        )
+        async with session_factory() as session:
+            await create_thread(session, thread_id="t-reload-condition")
+            await session.commit()
+
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            relayed = await client.post(
+                "/internal/events",
+                json={
+                    "thread_id": "t-reload-condition",
+                    "payload": {
+                        "event_type": "thread_terminal",
+                        "status": "failed",
+                        "error_detail": (
+                            "Graph event stream failed unexpectedly: "
+                            "AcpPromptError: credit balance too low"
+                        ),
+                        "provider_condition": (
+                            ProviderCondition.CREDITS_EXHAUSTED.value
+                        ),
+                    },
+                },
+            )
+            assert relayed.status_code == 200
+
+        # A SEPARATE client, as a reloaded panel would be: no subscription, no
+        # replay, nothing retained from the connection the failure arrived on.
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            status = await client.get("/v1/runs/t-reload-condition")
+
+        assert status.status_code == 200
+        body = status.json()
+        assert body["status"] == "failed"
+        assert body["provider_condition"] == ProviderCondition.CREDITS_EXHAUSTED.value
+        # The reason survives beside it: the two answer different questions and a
+        # client needs both, so recovering one without the other is a half-fix.
+        assert "credit balance too low" in body["failure_reason"]
+
+    @pytest.mark.asyncio(loop_scope="function")
+    async def test_a_run_that_never_failed_discloses_no_condition(
+        self,
+        session_factory,
+        checkpointer,
+    ) -> None:
+        """An absent condition means no failure, never an unreported one."""
+        from .conftest import make_app
+
+        app, _aggregator, _worker, _checkpointer = make_app(
+            session_factory, checkpointer
+        )
+        async with session_factory() as session:
+            await create_thread(session, thread_id="t-reload-no-condition")
+            await session.commit()
+
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            status = await client.get("/v1/runs/t-reload-no-condition")
+
+        assert status.status_code == 200
+        assert status.json()["provider_condition"] is None

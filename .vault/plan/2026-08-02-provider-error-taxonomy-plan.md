@@ -4,7 +4,7 @@ tags:
   - '#provider-error-taxonomy'
 date: '2026-08-02'
 modified: '2026-08-02'
-body_hash: 'sha256:1fae7291983d8d99046dd9538029ba864cce84bd54cc3d3f0fce57528938f5e8'
+body_hash: 'sha256:f766acef76047717b1ccfaac44c0840f5ed36c3cc7e681bc69ceb597686bdc1d'
 tier: L3
 related:
   - '[[2026-08-02-provider-error-taxonomy-adr]]'
@@ -73,7 +73,7 @@ Carries the condition on the error frame, persists it beside the failure reason,
 - [x] `W01.P03.S21` - Declare the condition on the domain snapshot dataclass; `src/vaultspec_a2a/api/schemas/snapshots.py`.
 - [x] `W01.P03.S22` - Declare the condition on the run-status response schema; `src/vaultspec_a2a/api/schemas/gateway.py`.
 - [x] `W01.P03.S23` - Project the condition onto the run-status response; `src/vaultspec_a2a/api/routes/gateway.py`.
-- [ ] `W01.P03.S24` - Prove the condition survives a reload through run-status alone; `src/vaultspec_a2a/api/tests/test_internal.py`.
+- [x] `W01.P03.S24` - Prove the condition survives a reload through run-status alone; `src/vaultspec_a2a/api/tests/test_internal.py`.
 - [ ] `W01.P03.S58` - Project the repair reason onto the run-status response; `src/vaultspec_a2a/api/routes/gateway.py`.
 
 ### Phase `W01.P04` - recoverability and retry

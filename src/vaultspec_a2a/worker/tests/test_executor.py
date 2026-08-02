@@ -29,6 +29,8 @@ from pydantic import ValidationError
 from ...api.tests.clarification_harness import new_state_graph
 from ...ipc.schemas import DispatchRequest
 from ...providers import ProviderCondition
+from ...providers.acp_exceptions import AcpPromptError
+from ...providers.conditions import condition_from_acp_error
 from ...thread.actor_tokens import ActorTokenBundle
 from ...thread.enums import ThreadStatus
 from ..executor import _INGEST_GUARDS, _RESUME_GUARDS, Executor
@@ -1717,6 +1719,160 @@ class TestPreRunRefusalsCarryTheirReason:
                 # The reason reaches both channels intact: a consumer keying on
                 # either one recovers the same account of the refusal.
                 assert errors[0]["message"] == terminals[0]["error_detail"]
+            finally:
+                await bridge.close()
+                await executor.shutdown()
+
+
+class TestTheFailureStashCannotOutliveItsRun:
+    """A run's classification must not be inherited by the next run.
+
+    The worker holds a per-thread reason and condition between the ingest that
+    classified them and the settle that pops them. The settle is the only other
+    drain, so a settle that dies first would leave both entries under a key the
+    next run on that thread id reuses - and a client BRANCHES on the condition,
+    so the following run would be told to re-authenticate or wait out a rate
+    limit because its predecessor did.
+
+    The stash is filled by a real failing ingest raising a real provider
+    exception, and the condition is the one the lane's own mapper resolves from
+    a wire discriminator rather than a hand-picked member.
+    """
+
+    @staticmethod
+    def _throttled_graph(executor: Executor) -> RegisteredCompiledGraph:
+        """A real graph whose node fails the way a rate-limited lane fails."""
+
+        def rate_limited_node(state: TeamState) -> dict[str, object]:
+            del state
+            raise AcpPromptError(
+                "quota exceeded for this window",
+                condition=condition_from_acp_error(
+                    {"code": -32603, "data": {"errorKind": "rate_limit"}}
+                ),
+            )
+
+        builder = new_state_graph()
+        builder.add_node("prompt", rate_limited_node)
+        builder.add_edge("__start__", "prompt")
+        builder.add_edge("prompt", "__end__")
+        return builder.compile(checkpointer=executor._checkpointer)
+
+    @pytest.mark.asyncio(loop_scope="function")
+    async def test_a_dispatch_that_dies_before_its_settle_strands_nothing(
+        self,
+    ) -> None:
+        thread_id = "t-stash-leak"
+        relayed: list[dict[str, Any]] = []
+        async with AsyncSqliteSaver.from_conn_string(":memory:") as cp:
+            await cp.setup()
+            bridge = _make_recording_bridge(relayed)
+            executor = Executor(checkpointer=cp, bridge=bridge)
+            try:
+                # Run A fails through a real ingest, which classifies it and
+                # stashes both halves exactly as production does.
+                outcome = await executor.aggregator.ingest(
+                    thread_id,
+                    "supervisor",
+                    self._throttled_graph(executor),
+                    {"messages": []},
+                    {"configurable": {"thread_id": thread_id}},
+                )
+                assert outcome == ThreadStatus.FAILED
+
+                # Run A's settle never reaches its pops. What production runs in
+                # that case is this backstop, reached from handle_dispatch's own
+                # handler with whatever killed the settle.
+                await executor._fail_unhandled_dispatch(
+                    DispatchRequest(
+                        action="ingest",
+                        thread_id=thread_id,
+                        content="build it",
+                        recursion_limit=10,
+                    ),
+                    RuntimeError("execution-state projection died"),
+                )
+                await bridge.flush_events()
+
+                terminals = _frames_of(relayed, "thread_terminal")
+                assert len(terminals) == 1
+                # The run's own account is preferred over the backstop's
+                # wording: what killed the settle is a fault in the machinery,
+                # not the reason the run failed.
+                assert terminals[0]["provider_condition"] == (
+                    ProviderCondition.THROTTLED.value
+                )
+                assert "quota exceeded" in terminals[0]["error_detail"]
+
+                relayed.clear()
+
+                # Run B reuses the thread id and completes cleanly. Nothing of
+                # run A may reach it.
+                await executor._settle_run(
+                    DispatchRequest(
+                        action="ingest",
+                        thread_id=thread_id,
+                        content="build it again",
+                        recursion_limit=10,
+                    ),
+                    _terminal_graph(executor),
+                    {"configurable": {"thread_id": thread_id}},
+                    ThreadStatus.COMPLETED,
+                )
+                await bridge.flush_events()
+
+                second = _frames_of(relayed, "thread_terminal")
+                assert len(second) == 1
+                assert second[0]["status"] == ThreadStatus.COMPLETED
+                assert not second[0].get("error_detail"), (
+                    "run B must not inherit the reason run A failed with"
+                )
+                assert not second[0].get("provider_condition"), (
+                    "run B must not inherit the condition run A failed with - "
+                    "a client branches on it and would act on the wrong run"
+                )
+                assert _frames_of(relayed, "error") == []
+            finally:
+                await bridge.close()
+                await executor.shutdown()
+
+    @pytest.mark.asyncio(loop_scope="function")
+    async def test_a_backstop_with_nothing_stashed_reports_its_own_failure(
+        self,
+    ) -> None:
+        """Adopting the run's account must not silence the backstop's own.
+
+        The companion to the case above: when no ingest classified anything -
+        the dispatch died before any turn ran - the wording that names where it
+        died is all there is, and the condition is the floor.
+        """
+        thread_id = "t-stash-empty"
+        relayed: list[dict[str, Any]] = []
+        async with AsyncSqliteSaver.from_conn_string(":memory:") as cp:
+            await cp.setup()
+            bridge = _make_recording_bridge(relayed)
+            executor = Executor(checkpointer=cp, bridge=bridge)
+            try:
+                await executor._fail_unhandled_dispatch(
+                    DispatchRequest(
+                        action="ingest",
+                        thread_id=thread_id,
+                        content="build it",
+                        recursion_limit=10,
+                    ),
+                    _wrapped_failure(),
+                )
+                await bridge.flush_events()
+
+                terminals = _frames_of(relayed, "thread_terminal")
+                assert len(terminals) == 1
+                assert (
+                    "Worker dispatch failed unexpectedly"
+                    in (terminals[0]["error_detail"])
+                )
+                assert terminals[0]["provider_condition"] == (
+                    ProviderCondition.UNKNOWN.value
+                )
             finally:
                 await bridge.close()
                 await executor.shutdown()

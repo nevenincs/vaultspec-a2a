@@ -505,9 +505,10 @@ class Executor:
         # compile-time refusal.
         #
         # The read is a pop, but that alone does NOT make a stale entry
-        # impossible: it is the only drain, so a settle that dies before
-        # reaching it leaves the entry for the next run reusing this thread id.
-        # Whatever guarantees the drain has to sit outside this function.
+        # impossible: a settle that dies before reaching it would leave the entry
+        # for the next run reusing this thread id. The guarantee therefore sits
+        # outside this function, in the dispatch backstop that catches whatever
+        # killed the settle - see ``_fail_unhandled_dispatch``.
         failure_reason = self._aggregator.take_failure_reason(req.thread_id)
         # The condition ingest resolved from the failing lane. Both stashes are
         # drained on every settle, not only on a failure, so a completed run
@@ -625,22 +626,53 @@ class Executor:
         ingest owns the run's terminal and will emit its own on settle, so this
         arm stays silent there rather than racing a legitimate outcome with a
         fabricated failure.
+
+        This is also where the run's failure stash is guaranteed to be drained.
+        The settle path pops it, and that pop is the only other drain, so a
+        settle that died before reaching it would strand both entries under a key
+        the NEXT run on this thread id reuses. A stranded condition is the worse
+        half: a client BRANCHES on it, so the following run would be told to
+        re-authenticate or wait out a rate limit because its predecessor hit one.
+        The drain runs before anything here that can fail, and is unconditional
+        past the guard above - the one arm that returns early leaves a live
+        ingest owning both the run and the stash it will drain itself.
         """
         owns_slot = req.action in _SLOT_OWNING_ACTIONS
         if not owns_slot:
             async with self._ingest_lock:
                 if req.thread_id in self._active_ingests:
                     return
-        reason = f"Worker dispatch failed unexpectedly: {describe_exception_chain(exc)}"
+        stranded_reason = self._aggregator.take_failure_reason(req.thread_id)
+        stranded_condition = self._aggregator.take_failure_condition(req.thread_id)
+        # A surviving entry is the run's OWN account of why it failed, and it is
+        # preferred over this arm's wording: the exception handled here killed
+        # the SETTLE, which is a fault in the machinery rather than the reason
+        # the run failed. The operator loses nothing, since that exception is
+        # logged above with its full traceback, while the client gets the answer
+        # its lane actually resolved instead of the floor. Only a slot-owning
+        # dispatch may adopt it, because only an ingest or a resume produced it;
+        # any other action drains without speaking for a run that is not its own.
+        adopted_reason = stranded_reason if owns_slot else None
+        reason = adopted_reason or (
+            f"Worker dispatch failed unexpectedly: {describe_exception_chain(exc)}"
+        )
+        condition = (
+            stranded_condition
+            if owns_slot and stranded_condition is not None
+            else _EXECUTOR_CONDITION
+        )
         try:
             await self._aggregator.emit_error(
                 req.thread_id,
-                _EXECUTOR_CONDITION.value,
+                condition.value,
                 reason,
                 recoverable=False,
             )
             await self._state_projector.emit_terminal_status(
-                req.thread_id, ThreadStatus.FAILED, error_detail=reason
+                req.thread_id,
+                ThreadStatus.FAILED,
+                error_detail=reason,
+                provider_condition=condition,
             )
             if owns_slot:
                 await self._mark_ingest_done(req.thread_id, ThreadStatus.FAILED)

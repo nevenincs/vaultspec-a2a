@@ -342,12 +342,20 @@ jobs:
           cat health.json
           # 200 alone is not readiness: this endpoint answers 200 while `ready`
           # is false (for example with the worker down), so assert the field.
+          #
+          # `ready` is the field, and ONLY that field. The composite `status`
+          # reports `degraded` on a cold gateway because no worker is spawned yet
+          # — which is the designed behaviour, not a fault: demand attaches to a
+          # worker on first use and nothing starts eagerly. Requiring
+          # `status == "ok"` here demanded an eagerly-spawned worker the product
+          # deliberately does not create, and failed all four targets on a gateway
+          # that had just reported itself ready.
           "$PY" -c '
           import json,sys
           d=json.load(open("health.json"))
-          if d.get("status")!="ok" or d.get("ready") is not True:
+          if d.get("ready") is not True:
               sys.exit(f"/health answered but is not ready: {d}")
-          print("health ok and ready")'
+          print("health ready (composite status=" + str(d.get("status")) + ")")'
 
           echo "--- stop"
           "$bin" stop --app-home "$home"

@@ -55,6 +55,7 @@ __all__ = [
     "config_home_mcp_servers",
     "declared_harness_tools",
     "harness_allowed_tool_names",
+    "harness_server_egresses",
     "is_known_harness_server",
     "reject_duplicate_identities",
     "reject_duplicate_names",
@@ -295,6 +296,22 @@ def declared_harness_tools(name: str) -> tuple[str, ...]:
         ConfigError: If *name* is not a known harness server.
     """
     return _frozen_strings(_registry_entry(name), "tools")
+
+
+def harness_server_egresses(name: str) -> bool:
+    """Return whether the registry declares *name* as reaching outward.
+
+    The single typed reader of the ``network_egress`` axis, and the sibling of
+    :func:`declared_harness_tools`. Consumers ask this rather than subscripting
+    the registry, for the reason the registry is frozen at all: an entry is a
+    recursive JSON value, so ``entry.get("network_egress")`` is untypeable at the
+    call site and each consumer would narrow it its own way. One reader keeps the
+    axis meaning one thing.
+
+    Raises:
+        ConfigError: If *name* is not a known harness server.
+    """
+    return _registry_entry(name).get("network_egress") is True
 
 
 def _desktop_available(entry: FrozenJsonObject) -> bool:

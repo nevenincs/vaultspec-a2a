@@ -29,7 +29,12 @@ from __future__ import annotations
 
 import pytest
 
-from ...providers._acp_mcp import _KNOWN_MCP_SERVERS, NATIVE_TOOL_EGRESS
+from ...providers._acp_mcp import (
+    _KNOWN_MCP_SERVERS,
+    NATIVE_TOOL_EGRESS,
+    declared_harness_tools,
+    harness_server_egresses,
+)
 from ...providers.lane_admission import PROVEN_WEB_LANES
 from ..team_config import (
     _PRESET_AGENTS_DIR,
@@ -52,9 +57,7 @@ def _shipped_team_ids() -> list[str]:
 def _egressing_servers() -> frozenset[str]:
     """The registry entries that reach outward, per their own declared axis."""
     return frozenset(
-        name
-        for name, entry in _KNOWN_MCP_SERVERS.items()
-        if entry.get("network_egress") is True
+        name for name in _KNOWN_MCP_SERVERS if harness_server_egresses(name)
     )
 
 
@@ -66,7 +69,7 @@ def _server_tokens(server: str) -> frozenset[str]:
     description tells the reader where the capability comes from. A persona that
     names either is telling the model the server is there.
     """
-    tools = _KNOWN_MCP_SERVERS[server].get("tools", ())
+    tools = declared_harness_tools(server)
     return frozenset({server, *(f"mcp__{server}__{tool}" for tool in tools)})
 
 

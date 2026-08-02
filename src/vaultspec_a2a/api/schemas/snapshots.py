@@ -175,3 +175,11 @@ class ThreadStateSnapshot(BaseModel):
     # Persisting the reason and never carrying it to the wire left no client
     # able to say why a run failed.
     failure_reason: str | None = None
+    # The machine-readable counterpart to the reason above, and declared here
+    # for exactly the same reason: this seam is a ``model_validate`` over the
+    # domain dataclass, so a field this model does not name is dropped silently
+    # and without failing. That is how the reason itself was lost once already.
+    # Naming the condition on BOTH sides is what stops the condition following
+    # it - a value persisted, carried to the seam, and then quietly discarded is
+    # indistinguishable from one that was never recorded.
+    provider_condition: str | None = None

@@ -4,7 +4,7 @@ tags:
   - '#provider-error-taxonomy'
 date: '2026-08-02'
 modified: '2026-08-02'
-body_hash: 'sha256:7cad4fa0915547c464dec352a1d492da5c0c4c22e733b1ec41b4df312ec4aa25'
+body_hash: 'sha256:cf08d6b40bb8b798780a0987d0c84d5b14e9964ecdceebad0e662eba7c9feeb7'
 tier: L3
 related:
   - '[[2026-08-02-provider-error-taxonomy-adr]]'
@@ -70,7 +70,7 @@ Carries the condition on the error frame, persists it beside the failure reason,
 - [x] `W01.P03.S18` - Align the failure reason bound to the consumer byte limit; `src/vaultspec_a2a/database/thread_repository.py`.
 - [x] `W01.P03.S19` - Thread the condition through the gateway terminal event handler; `src/vaultspec_a2a/control/event_handlers.py`.
 - [x] `W01.P03.S20` - Read the condition into the thread state snapshot; `src/vaultspec_a2a/control/thread_state_service.py`.
-- [ ] `W01.P03.S21` - Declare the condition on the domain snapshot dataclass; `src/vaultspec_a2a/api/schemas/snapshots.py`.
+- [x] `W01.P03.S21` - Declare the condition on the domain snapshot dataclass; `src/vaultspec_a2a/api/schemas/snapshots.py`.
 - [ ] `W01.P03.S22` - Declare the condition on the run-status response schema; `src/vaultspec_a2a/api/schemas/gateway.py`.
 - [ ] `W01.P03.S23` - Project the condition onto the run-status response; `src/vaultspec_a2a/api/routes/gateway.py`.
 - [ ] `W01.P03.S24` - Prove the condition survives a reload through run-status alone; `src/vaultspec_a2a/api/tests/test_internal.py`.

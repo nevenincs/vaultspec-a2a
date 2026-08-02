@@ -20,9 +20,10 @@ from fastapi.responses import StreamingResponse
 
 from ..control.config import settings
 from ..database.thread_repository import get_thread
+from ..providers.conditions import ProviderCondition
 from ..streaming.aggregator import EventAggregator, SequencedEvent
 from ..streaming.sse_frames import encode_sse_frame
-from ..thread.enums import TERMINAL_STATUSES
+from ..thread.enums import TERMINAL_STATUSES, ThreadStatus
 from ..thread.errors import EventAggregatorError
 from ..thread.snapshots import normalize_wire_event_type
 from .event_adapter import sequenced_to_positive_payload
@@ -37,14 +38,29 @@ logger = logging.getLogger(__name__)
 
 __all__ = ["build_thread_stream_response"]
 
+_UNRECORDED_REASON = "The run failed; no reason was recorded"
+"""Stands in for a failed run whose durable row holds a condition and no reason.
+
+Says what is true of the RECORD rather than inventing an account of the failure,
+so a client is never handed a diagnosis nothing observed.
+"""
+
 
 async def _stream_thread_events(
     *,
     aggregator: EventAggregator,
     thread_id: str,
     initial_status: str,
+    failure_reason: str | None = None,
+    provider_condition: str | None = None,
 ) -> AsyncIterator[bytes]:
-    """Yield thread-scoped events from the shared subscriber queue as SSE."""
+    """Yield thread-scoped events from the shared subscriber queue as SSE.
+
+    *failure_reason* and *provider_condition* are the durable columns of the run
+    being attached to, and they matter only on the replay path: a client that
+    attaches after the run has already ended receives no live frames at all, so
+    whatever the replay does not say is lost to it.
+    """
     client_id = f"sse-{uuid4()}"
     try:
         queue = aggregator.add_subscriber(client_id)
@@ -87,14 +103,43 @@ async def _stream_thread_events(
         aggregator.subscribe(client_id, [thread_id])
 
         if initial_status in TERMINAL_STATUSES:
+            # A run that failed before this client attached gets the same pair of
+            # frames a live client saw, in the same order and shape: the coded
+            # error first, then the terminal carrying the reason. Replaying only
+            # the terminal told a reconnecting client "failed" and nothing else,
+            # while the durable row held both halves of the answer the whole
+            # time. The condition rides the error frame's code exactly as it does
+            # live, rather than widening the terminal frame to carry it twice.
+            if initial_status == ThreadStatus.FAILED.value and (
+                failure_reason or provider_condition
+            ):
+                yield encode_sse_frame(
+                    {
+                        "type": "error",
+                        "event_type": "error",
+                        "thread_id": thread_id,
+                        # The floor stands in for a row written before the
+                        # condition column existed; the reason is still true.
+                        "code": provider_condition or ProviderCondition.UNKNOWN.value,
+                        "message": failure_reason or _UNRECORDED_REASON,
+                        # The run is already over, so nothing about it can be
+                        # retried - whatever recoverability meant while it ran.
+                        "recoverable": False,
+                    },
+                    event="error",
+                    thread_id=thread_id,
+                )
+            terminal: dict[str, object] = {
+                "type": "thread_terminal",
+                "event_type": "thread_terminal",
+                "thread_id": thread_id,
+                "status": initial_status,
+                "replay": True,
+            }
+            if failure_reason:
+                terminal["error_detail"] = failure_reason
             yield encode_sse_frame(
-                {
-                    "type": "thread_terminal",
-                    "event_type": "thread_terminal",
-                    "thread_id": thread_id,
-                    "status": initial_status,
-                    "replay": True,
-                },
+                terminal,
                 event="thread_terminal",
                 thread_id=thread_id,
             )
@@ -178,6 +223,8 @@ async def build_thread_stream_response(
             aggregator=aggregator,
             thread_id=thread_id,
             initial_status=thread.status,
+            failure_reason=thread.failure_reason,
+            provider_condition=thread.provider_condition,
         ),
         media_type="text/event-stream",
         headers={

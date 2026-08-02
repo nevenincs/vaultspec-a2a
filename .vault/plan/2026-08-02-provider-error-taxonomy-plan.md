@@ -4,7 +4,7 @@ tags:
   - '#provider-error-taxonomy'
 date: '2026-08-02'
 modified: '2026-08-02'
-body_hash: 'sha256:3fa58d551e6b2efc7954efb77703d9dd46904a5cce45f86afc91a273cbcaf8a4'
+body_hash: 'sha256:cd702c5ba48fb2ff1317767a8a7b5399e963dc9e618a035fc7caed669c40d49d'
 tier: L3
 related:
   - '[[2026-08-02-provider-error-taxonomy-adr]]'
@@ -99,7 +99,7 @@ Guarantees every path that fails a run records a condition, emits a terminal, an
 - [x] `W01.P05.S36` - Record a condition on the ingest and resume catch-alls; `src/vaultspec_a2a/worker/executor.py`.
 - [x] `W01.P05.S37` - Emit an error frame on compile refusal; `src/vaultspec_a2a/worker/executor.py`.
 - [x] `W01.P05.S38` - Carry status and condition on the terminal replay frame; `src/vaultspec_a2a/api/thread_stream.py`.
-- [ ] `W01.P05.S39` - Protect terminal and error frames from backpressure eviction; `src/vaultspec_a2a/streaming/fanout.py`.
+- [x] `W01.P05.S39` - Protect terminal and error frames from backpressure eviction; `src/vaultspec_a2a/streaming/fanout.py`.
 - [ ] `W01.P05.S40` - Prove no failed run persists without a condition across dispatch and executor paths; `src/vaultspec_a2a/api/tests/test_internal.py`.
 - [ ] `W01.P05.S59` - Drain the worker failure stash even when the settle path dies; `src/vaultspec_a2a/worker/executor.py`.
 

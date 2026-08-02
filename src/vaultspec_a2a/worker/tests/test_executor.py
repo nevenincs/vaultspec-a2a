@@ -1657,3 +1657,66 @@ class TestPreRunRefusalsCarryTheirReason:
             finally:
                 await bridge.close()
                 await executor.shutdown()
+
+    @pytest.mark.asyncio(loop_scope="function")
+    @pytest.mark.parametrize("guards", [_INGEST_GUARDS, _RESUME_GUARDS])
+    async def test_a_compile_refusal_carries_a_code_and_not_only_a_reason(
+        self, guards: Any
+    ) -> None:
+        """The refusal that spoke on one channel now speaks on both.
+
+        A compile refusal always carried the compiler's own message as the
+        terminal's detail, so a client reading the terminal saw why. A client
+        branching on the error frame's code saw nothing at all, because no error
+        frame was emitted - the single asymmetry among the pre-run refusals.
+
+        The error is raised the way the graph lifecycle raises it, wrapping the
+        underlying compile fault, so the message under test is the one production
+        would carry rather than a hand-picked string.
+        """
+        thread_id = f"t-compile-refusal-{guards.runtime_mode}"
+        relayed: list[dict[str, Any]] = []
+        async with AsyncSqliteSaver.from_conn_string(":memory:") as cp:
+            await cp.setup()
+            bridge = _make_recording_bridge(relayed)
+            executor = Executor(checkpointer=cp, bridge=bridge)
+            try:
+                try:
+                    raise RuntimeError("engine unreachable at http://127.0.0.1:1")
+                except RuntimeError as cause:
+                    exc = GraphCompilationError(str(cause))
+                    exc.__cause__ = cause
+
+                await executor._reject_compile_failure(
+                    DispatchRequest(
+                        action=guards.runtime_mode,
+                        thread_id=thread_id,
+                        content="build it",
+                        option_id="allow_once",
+                        recursion_limit=10,
+                    ),
+                    _recording_span(),
+                    exc,
+                    guards,
+                )
+                await bridge.flush_events()
+
+                terminals = _frames_of(relayed, "thread_terminal")
+                assert len(terminals) == 1
+                assert terminals[0]["status"] == ThreadStatus.FAILED
+                assert terminals[0]["error_detail"] == (
+                    "engine unreachable at http://127.0.0.1:1"
+                )
+
+                errors = _frames_of(relayed, "error")
+                assert len(errors) == 1, (
+                    "a compile refusal must carry a machine-readable code"
+                )
+                assert errors[0]["code"] == ProviderCondition.UNKNOWN.value
+                assert errors[0]["recoverable"] is False
+                # The reason reaches both channels intact: a consumer keying on
+                # either one recovers the same account of the refusal.
+                assert errors[0]["message"] == terminals[0]["error_detail"]
+            finally:
+                await bridge.close()
+                await executor.shutdown()

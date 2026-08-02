@@ -375,7 +375,14 @@ class Executor:
         exc: GraphCompilationError,
         guards: _GuardWording,
     ) -> None:
-        """Journal an uncompilable graph and drive the run to FAILED."""
+        """Journal an uncompilable graph and drive the run to FAILED.
+
+        A compile refusal was the one pre-run rejection that spoke on a single
+        channel: it carried the compiler's own message as the terminal's detail
+        but emitted no error frame, so a consumer that branches on the frame's
+        code could not see the failure at all while every sibling refusal gave it
+        both. It now takes the same epilogue as the rest of them.
+        """
         logger.warning(
             guards.compile_failure,
             req.thread_id,
@@ -389,9 +396,7 @@ class Executor:
         )
         span.set_attribute("error", True)
         span.set_attribute("error.message", str(exc))
-        await self._state_projector.emit_terminal_status(
-            req.thread_id, ThreadStatus.FAILED, error_detail=str(exc)
-        )
+        await self._reject_with_condition(req, str(exc))
 
     async def _reject_with_condition(self, req: DispatchRequest, reason: str) -> None:
         """Fail a run before it ran, on both the coded and the durable channel.

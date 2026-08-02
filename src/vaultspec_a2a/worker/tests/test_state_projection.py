@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
+import pytest
 from langgraph.types import Interrupt, PregelTask
 from pydantic import BaseModel, ConfigDict
 
@@ -63,3 +64,35 @@ def test_normalize_execution_state_projects_interrupt_contract() -> None:
     assert not task.has_error
     assert not task.has_nested_state
     assert not task.has_result
+
+
+def test_normalize_state_keeps_missing_configurable_metadata_optional() -> None:
+    """A checkpoint without configurable metadata remains a valid empty projection."""
+    state = _StateNormalizationFixture(
+        next=(),
+        interrupts=(),
+        tasks=(),
+        created_at=datetime(2026, 8, 2, tzinfo=UTC),
+        config={},
+        parent_config=None,
+    )
+
+    payload = StateProjector.normalize_execution_state(state)
+
+    assert payload.checkpoint_id is None
+    assert payload.parent_checkpoint_id is None
+
+
+def test_normalize_state_raises_for_malformed_configurable_metadata() -> None:
+    """A present non-mapping configurable value raises for emitter degradation."""
+    state = _StateNormalizationFixture(
+        next=(),
+        interrupts=(),
+        tasks=(),
+        created_at=datetime(2026, 8, 2, tzinfo=UTC),
+        config={"configurable": []},
+        parent_config=None,
+    )
+
+    with pytest.raises(TypeError, match="configurable metadata"):
+        StateProjector.normalize_execution_state(state)

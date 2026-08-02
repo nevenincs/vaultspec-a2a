@@ -175,10 +175,13 @@ def _checkpoint_id(config: Mapping[str, object] | None) -> str | None:
     """Read a checkpoint identifier from a LangGraph runnable config."""
     if config is None:
         return None
-    configurable = _object_mapping(config.get("configurable"))
+    configurable = config.get("configurable")
     if configurable is None:
         return None
-    checkpoint_id = configurable.get("checkpoint_id")
+    configurable_metadata = _object_mapping(configurable)
+    if configurable_metadata is None or not isinstance(configurable, Mapping):
+        raise TypeError("Checkpoint configurable metadata must be a mapping")
+    checkpoint_id = configurable_metadata.get("checkpoint_id")
     return str(checkpoint_id) if checkpoint_id is not None else None
 
 

@@ -55,15 +55,28 @@ _SERIAL_CATCHALL_GROUP = "undeclared-live-serial"
 _GROUP_PREFIX = "res:"
 
 
+# This session's machine-global registration and the admission verdict, kept
+# for the report header and released at unconfigure. Module state rather than
+# config attributes so ty sees real types; one plugin instance per process.
+_SESSION_LEASE: object | None = None
+_ADMISSION_LINE: str = ""
+
+
 @pytest.hookimpl(trylast=True)
 def pytest_configure(config: pytest.Config) -> None:
-    """Register the marker vocabulary and refuse blind distribution modes.
+    """Register the marker, refuse blind modes, and admit this session.
 
     Configure-time runs after xdist's tryfirst ``pytest_cmdline_main`` has
     normalized ``-n`` into its ``dist`` default, so a plain ``-n auto``
     (implicit ``--dist=load``) is caught as reliably as an explicit blind
     mode. Only declaration-driven ``loadgroup`` placement is admitted.
+
+    Every non-worker session then registers itself machine-globally and, when
+    distribution was requested, is admitted with a worker count derived from
+    the machine's observed capacity split across live peer sessions - a
+    concurrent suite degrades gracefully instead of multiplying load.
     """
+    global _SESSION_LEASE, _ADMISSION_LINE
     config.addinivalue_line(
         "markers",
         f"{MARKER_NAME}(key, shared=False): declare that this test uses the "
@@ -79,6 +92,44 @@ def pytest_configure(config: pytest.Config) -> None:
             "declared resource disjointness, never blind distribution. "
             "Run: pytest -n <N> --dist=loadgroup"
         )
+    if hasattr(config, "workerinput"):
+        return  # xdist worker: the controller already registered this run.
+    from .sessions import effective_worker_count, live_peer_sessions, register_session
+
+    _SESSION_LEASE = register_session()
+    peers = live_peer_sessions()
+    if isinstance(numprocesses, int) and numprocesses > 0:
+        admitted = effective_worker_count(numprocesses, peers=peers)
+        if admitted < numprocesses:
+            config.option.numprocesses = admitted
+            config.option.tx = ["popen"] * admitted
+        _ADMISSION_LINE = (
+            f"resource-aware admission: {peers} live peer test session(s); "
+            f"workers {numprocesses} -> {admitted}"
+        )
+    else:
+        _ADMISSION_LINE = (
+            f"resource-aware admission: {peers} live peer test session(s); serial run"
+        )
+
+
+def pytest_report_header(config: pytest.Config) -> str | None:
+    """Surface the admission verdict where the operator reads run context."""
+    del config
+    return _ADMISSION_LINE or None
+
+
+def pytest_unconfigure(config: pytest.Config) -> None:
+    """Deregister this session; pid-death reclaim covers unclean exits."""
+    del config
+    global _SESSION_LEASE
+    lease = _SESSION_LEASE
+    _SESSION_LEASE = None
+    if lease is not None:
+        from .leases import Lease
+
+        if isinstance(lease, Lease):
+            lease.release()
 
 
 class _UnionFind:

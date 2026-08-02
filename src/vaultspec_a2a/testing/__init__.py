@@ -45,13 +45,23 @@ from .resources import (
     exclusive_keys,
     resolve_spec,
 )
+from .sessions import (
+    CPU_BUDGET_ENV,
+    SESSION_LEASE_KEY,
+    effective_worker_count,
+    live_peer_sessions,
+    machine_cpu_budget,
+    register_session,
+)
 
 __all__ = [
+    "CPU_BUDGET_ENV",
     "LEASE_TTL_MS",
     "MARKER_NAME",
     "RESOURCES",
     "SCRATCH_PREFIX",
     "SCRATCH_ROLE",
+    "SESSION_LEASE_KEY",
     "Lease",
     "LeaseAcquisitionTimeoutError",
     "LivenessWatch",
@@ -63,9 +73,13 @@ __all__ = [
     "ResourceDiedError",
     "ResourceSpec",
     "declared_claims",
+    "effective_worker_count",
     "exclusive_keys",
     "hold_lease",
     "lease_home",
+    "live_peer_sessions",
+    "machine_cpu_budget",
+    "register_session",
     "registry_watch",
     "reserved_port",
     "resolve_gateway_url",

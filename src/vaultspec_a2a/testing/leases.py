@@ -51,6 +51,7 @@ __all__ = [
     "LeaseAcquisitionTimeoutError",
     "hold_lease",
     "lease_home",
+    "live_shared_holder_count",
 ]
 
 # Pid-reuse backstop only: the holder's refresher touches the marker every
@@ -59,6 +60,12 @@ __all__ = [
 # briefly-starved refresher thread on a loaded host cannot forfeit a live lease.
 LEASE_TTL_MS = 300_000
 _REFRESH_INTERVAL_S = 15.0
+# A marker whose mtime is AHEAD of the observer's clock is anomalous only past
+# this tolerance: a peer legitimately creates or refreshes a marker between the
+# observer capturing "now" and statting the file, and a zero-tolerance check
+# would read that fresh LIVE marker as reclaimable and steal the lease - the
+# registry's reservation path carried exactly this race.
+_FUTURE_SKEW_TOLERANCE_MS = 10_000
 
 _EXCLUSIVE_SUFFIX = ".lease"
 _SHARED_SUFFIX = ".shared"
@@ -94,7 +101,7 @@ def _marker_is_live(path: Path, *, now_ms: int) -> bool:
         age = now_ms - int(path.stat().st_mtime * 1000)
     except OSError:
         return False
-    if age < 0 or age > LEASE_TTL_MS:
+    if age < -_FUTURE_SKEW_TOLERANCE_MS or age > LEASE_TTL_MS:
         return False
     pid = _read_holder_pid(path)
     if pid is None:
@@ -151,13 +158,37 @@ def _reap_dead_marker(path: Path, *, now_ms: int) -> None:
             path.unlink()
 
 
-def _live_shared_markers(root: Path, key: str, *, now_ms: int) -> list[Path]:
+def _live_shared_markers(root: Path, key: str) -> list[Path]:
+    # Judged per-marker with a fresh clock; a snapshot taken before the walk
+    # reads a marker created mid-walk as future-dated.
     markers: list[Path] = []
     for marker in root.glob(f"{key}.*{_SHARED_SUFFIX}"):
-        _reap_dead_marker(marker, now_ms=now_ms)
-        if marker.exists() and _marker_is_live(marker, now_ms=now_ms):
+        fresh = int(time.time() * 1000)
+        _reap_dead_marker(marker, now_ms=fresh)
+        if marker.exists() and _marker_is_live(marker, now_ms=fresh):
             markers.append(marker)
     return markers
+
+
+def live_shared_holder_count(
+    key: str, *, home: Path | None = None, excluding_pid: int | None = None
+) -> int:
+    """Count the LIVE shared holders of *key*, optionally excluding one pid.
+
+    Judged with the same dual-signal marker liveness the acquisition paths
+    use, so a crashed holder stops counting the moment its pid dies. The
+    exclusion exists for a holder asking "how many peers beside me".
+    """
+    _validate_key(key)
+    root = lease_home(home)
+    if not root.is_dir():
+        return 0
+    count = 0
+    for marker in _live_shared_markers(root, key):
+        if excluding_pid is not None and _read_holder_pid(marker) == excluding_pid:
+            continue
+        count += 1
+    return count
 
 
 @dataclass(slots=True)
@@ -214,7 +245,7 @@ def _try_acquire_exclusive(
     _reap_dead_marker(exclusive, now_ms=now)
     if exclusive.exists():
         return None
-    if _live_shared_markers(root, key, now_ms=now):
+    if _live_shared_markers(root, key):
         return None
     token = _write_marker_excl(exclusive, owner=owner)
     if token is None:
@@ -223,7 +254,7 @@ def _try_acquire_exclusive(
     # only if they observed no exclusive marker; our marker existed before
     # their re-check completes or theirs existed before ours - the re-check
     # below on the shared path guarantees one side retreats.
-    if _live_shared_markers(root, key, now_ms=int(time.time() * 1000)):
+    if _live_shared_markers(root, key):
         with contextlib.suppress(OSError):
             exclusive.unlink()
         return None
@@ -261,7 +292,7 @@ def _contention_detail(root: Path, key: str) -> str:
     parts: list[str] = []
     if exclusive.exists() and _marker_is_live(exclusive, now_ms=now):
         parts.append(f"exclusive holder: {_holder_description(exclusive)}")
-    for marker in _live_shared_markers(root, key, now_ms=now):
+    for marker in _live_shared_markers(root, key):
         parts.append(f"shared holder: {_holder_description(marker)}")
     return "; ".join(parts) if parts else "no live holder (transient contention)"
 

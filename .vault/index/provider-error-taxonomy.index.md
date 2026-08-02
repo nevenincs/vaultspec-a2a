@@ -6,7 +6,7 @@ tags:
 date: '2026-08-02'
 modified: '2026-08-02'
 body_schema: 'body-v1'
-body_hash: 'sha256:4bfdedcd8428e9fab2ee8e8b05805ac9170f37336e9f92143b4d5daff93194bd'
+body_hash: 'sha256:acb291c50495b1982fdffaebd6ecf1bfd19c03293bc59979a2adbff56c63ee27'
 related:
   - '[[2026-08-02-provider-error-taxonomy-W01-P01-S01]]'
   - '[[2026-08-02-provider-error-taxonomy-W01-P01-S02]]'
@@ -18,6 +18,7 @@ related:
   - '[[2026-08-02-provider-error-taxonomy-W01-P02-S08]]'
   - '[[2026-08-02-provider-error-taxonomy-W01-P02-S09]]'
   - '[[2026-08-02-provider-error-taxonomy-W01-P02-S10]]'
+  - '[[2026-08-02-provider-error-taxonomy-W01-P02-S11]]'
   - '[[2026-08-02-provider-error-taxonomy-adr]]'
   - '[[2026-08-02-provider-error-taxonomy-plan]]'
   - '[[2026-08-02-provider-error-taxonomy-research]]'
@@ -45,6 +46,7 @@ Auto-generated index of all documents tagged with `#provider-error-taxonomy`.
 - `2026-08-02-provider-error-taxonomy-W01-P02-S08` - Map the Codex error info variants onto the vocabulary
 - `2026-08-02-provider-error-taxonomy-W01-P02-S09` - Attach the resolved condition to the ACP prompt error at raise
 - `2026-08-02-provider-error-taxonomy-W01-P02-S10` - Attach the condition and the lane retry hint to the Codex error at raise
+- `2026-08-02-provider-error-taxonomy-W01-P02-S11` - Consume the populated Codex turn error instead of the bare status string
 
 ### plan
 

@@ -227,6 +227,25 @@ def _turn_failure(
     )
 
 
+def _failed_turn_error(turn: JsonObject, status: JsonValue) -> _CodexProtocolError:
+    """Build a protocol failure from one non-completed turn.
+
+    A turn that did not complete carries its own error object, populated by the
+    app-server exactly when the turn failed. Reading it is what separates "the
+    turn failed" from "the turn failed BECAUSE the credential was rejected": the
+    status alone is the same four words for every cause. The status is still
+    reported, because it also covers the interrupted case, where there is no
+    error object to explain and none should be invented.
+    """
+    error = turn.get("error")
+    ended = f"codex turn ended with status {status!r}"
+    detail = error.get("message") if isinstance(error, dict) else None
+    return _turn_failure(
+        error,
+        message=(f"{ended}: {detail}" if isinstance(detail, str) and detail else ended),
+    )
+
+
 def _required_object_field(
     message: JsonObject, field: str, *, context: str
 ) -> JsonObject:
@@ -802,7 +821,5 @@ class CodexChatModel(BaseChatModel):
                 )
                 status = turn.get("status")
                 if status != "completed":
-                    raise _CodexProtocolError(
-                        f"codex turn ended with status {status!r}"
-                    )
+                    raise _failed_turn_error(turn, status)
                 return

@@ -98,9 +98,11 @@ def _tape_server_listening(base: str) -> bool:
         return probe.connect_ex((host, port)) == 0
 
 
-def _await_terminal(gateway: CertifiedGateway, run_id: str, *, budget: float) -> dict:
+def _await_terminal(
+    gateway: CertifiedGateway, run_id: str, *, budget: float
+) -> dict[str, Any]:
     deadline = time.monotonic() + budget
-    last: dict = {}
+    last: dict[str, Any] = {}
     while time.monotonic() < deadline:
         response = gateway.status(run_id)
         if response.status_code == 200:

@@ -6,13 +6,15 @@ import time
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from .harness import ServiceStack
 
 
 def _wait_for_thread_state(
     stack: ServiceStack,
     thread_id: str,
-    predicate,
+    predicate: Callable[[dict[str, object]], bool],
     *,
     timeout: float = 120.0,
 ) -> dict[str, object]:

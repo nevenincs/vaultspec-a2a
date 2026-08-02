@@ -23,7 +23,7 @@ bundled-only default the ADR names).
 from __future__ import annotations
 
 import contextlib
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, override
 
 import pytest
 from langchain_core.language_models.chat_models import BaseChatModel
@@ -39,9 +39,19 @@ from ..thread.errors import AgentConfigNotFoundError
 if TYPE_CHECKING:
     from pathlib import Path
 
+    from langchain_core.callbacks import (
+        AsyncCallbackManagerForLLMRun,
+        CallbackManagerForLLMRun,
+    )
     from langgraph.graph.state import CompiledStateGraph
 
     from ..thread.state import TeamState
+
+# The compiler erases the graph's state schema at the ``StateGraph`` boundary, so
+# the compiled object it hands back carries no recoverable state, input, or output
+# type. Naming that erasure once keeps every consumer below a known type instead of
+# propagating the compiler's unparameterised result through the module.
+type ReceiptGraph = CompiledStateGraph[Any, None, Any, Any]
 
 # The bundled document-authoring conventions carry this heading; the worker wraps
 # a compiled rule string in its own "Project Coding Rules & Guidelines" system
@@ -79,24 +89,27 @@ class _RecordingChatModel(BaseChatModel):
         return self._calls
 
     @property
+    @override
     def _llm_type(self) -> str:
         return "recording-chat-model"
 
+    @override
     def _generate(
         self,
         messages: list[BaseMessage],
         stop: list[str] | None = None,
-        run_manager: Any | None = None,
-        **kwargs: Any,
+        run_manager: CallbackManagerForLLMRun | None = None,
+        **kwargs: object,
     ) -> ChatResult:
         raise NotImplementedError("recording model is async-only")
 
+    @override
     async def _agenerate(
         self,
         messages: list[BaseMessage],
         stop: list[str] | None = None,
-        run_manager: Any | None = None,
-        **kwargs: Any,
+        run_manager: AsyncCallbackManagerForLLMRun | None = None,
+        **kwargs: object,
     ) -> ChatResult:
         self._calls.append(list(messages))
         return ChatResult(
@@ -168,7 +181,7 @@ def _system_texts(calls: list[list[BaseMessage]]) -> list[str]:
 
 def _compile_research_adr(
     workspace_root: Path, factory: _RecordingProviderFactory
-) -> CompiledStateGraph:
+) -> ReceiptGraph:
     team = load_team_config(_RESEARCH_ADR_PRESET)
     assert team.topology.type == "research_adr"
     agent_configs = {w.agent_id: load_agent_config(w.agent_id) for w in team.workers}

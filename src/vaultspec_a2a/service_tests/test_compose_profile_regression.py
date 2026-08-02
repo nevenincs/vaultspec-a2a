@@ -28,7 +28,7 @@ import time
 import uuid
 from contextlib import contextmanager
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 import httpx
 import pytest
@@ -37,7 +37,7 @@ import yaml
 from ..tests.gateway_boot import free_port
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
+    from collections.abc import Generator
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 PROD_COMPOSE = REPO_ROOT / "service" / "docker-compose.prod.yml"
@@ -59,10 +59,13 @@ def _load_compose(path: Path) -> dict[str, Any]:
 def _worker_healthcheck_cmd(compose_path: Path) -> str:
     """Return the worker healthcheck command string from a compose file."""
     doc = _load_compose(compose_path)
-    worker = doc["services"]["worker"]
-    test = worker["healthcheck"]["test"]
+    worker: dict[str, Any] = doc["services"]["worker"]
+    raw: object = worker["healthcheck"]["test"]
     # CMD form: ['CMD', 'python', '-c', '<script>']
-    assert isinstance(test, list), "expected list-form healthcheck test"
+    assert isinstance(raw, list), "expected list-form healthcheck test"
+    # ``isinstance`` proves the container, never its elements; the CMD form is
+    # a string vector, and a non-string element fails loudly at the join below.
+    test = cast("list[str]", raw)
     script_parts = [part for part in test if part not in ("CMD", "CMD-SHELL")]
     return " ".join(script_parts)
 
@@ -438,7 +441,7 @@ HTTPServer(("127.0.0.1", port), Handler).serve_forever()
 @contextmanager
 def _worker_on_port(
     tmp_path: Path, port: int, body: dict[str, Any]
-) -> Iterator[tuple[subprocess.Popen[bytes], Path]]:
+) -> Generator[tuple[subprocess.Popen[bytes], Path]]:
     """Run a real worker process serving *body* on ``/health`` at *port*."""
     log_path = tmp_path / f"worker-requests-{port}.log"
     log_path.write_text("", encoding="utf-8")

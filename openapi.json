@@ -892,7 +892,7 @@
     "/v1/runs/{run_id}/clarifications/{request_id}/respond": {
       "post": {
         "summary": "Run Clarification Respond Endpoint",
-        "description": "Answer the questionnaire a run is parked on, and resume it.\n\nThe typed counterpart to the questionnaire ``run-status`` discloses. It is\ndeliberately NOT the follow-up ``messages`` verb: that verb starts a fresh\nturn, so answers would re-enter as prose and the pending question would stay\npending. This verb instead maps the answers onto the parked node's\n``Command(resume=...)``, which is the only pause/resume mechanism the graph\nhas.\n\nAuthority is the checkpoint, not a side table. The run's own parked interrupt\nis resolved first and its request id checked against the path, so a guessed\nrequest id cannot answer another run's question and - because the check\nprecedes everything else - a mismatch has no effect at all rather than being\ndetected after acting. That same read is the at-most-once guard: once the run\nresumes, nothing is pending, so a replayed answer is refused rather than\ndispatched a second time.\n\nValidation is layered to match. The wire model bounds the answer sheet's size\nand each answer's length before any run state is read; the checks that need\nthe parked questions - an unknown question id, a required question left\nblank, a choice outside its declared options - run here against the\ncheckpoint and are reported together, so a rejected sheet is fixable in one\ncorrection.",
+        "description": "Resolve through the durable clarification lease service.",
         "operationId": "run_clarification_respond_endpoint_v1_runs__run_id__clarifications__request_id__respond_post",
         "parameters": [
           {
@@ -2295,28 +2295,45 @@
       "RunClarificationRespondRequest": {
         "properties": {
           "answers": {
-            "patternProperties": {
-              "^[A-Za-z0-9_][A-Za-z0-9_.\\-]*$": {
-                "type": "string",
-                "maxLength": 2048
+            "anyOf": [
+              {
+                "patternProperties": {
+                  "^[A-Za-z0-9_][A-Za-z0-9_.\\-]*$": {
+                    "type": "string",
+                    "maxLength": 2048
+                  }
+                },
+                "propertyNames": {
+                  "maxLength": 64,
+                  "minLength": 1
+                },
+                "type": "object",
+                "maxProperties": 4
+              },
+              {
+                "type": "null"
               }
-            },
-            "propertyNames": {
-              "maxLength": 64,
-              "minLength": 1
-            },
-            "type": "object",
-            "maxProperties": 4,
+            ],
             "title": "Answers"
+          },
+          "prompt": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 65536,
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Prompt"
           }
         },
         "additionalProperties": false,
         "type": "object",
-        "required": [
-          "answers"
-        ],
         "title": "RunClarificationRespondRequest",
-        "description": "Answer the bounded questionnaire a run is parked on.\n\nCarries only the answers, keyed by question id. The questions themselves were\ndisclosed authoritatively by ``run-status`` (and the run id and request id\naddress the questionnaire from the path), so the answer names what it answers\nrather than restating what was asked.\n\nThe bounds here are the same ones the question set was built under - they are\nimported from the one module that owns them rather than restated - so an\nover-long answer or an over-full answer sheet is refused at the wire, before\nany run state is touched. The checks that need the parked questions in hand\n(an id nobody asked about, a required question left blank, a choice outside\nits declared options) are applied by the route against the checkpoint."
+        "description": "Resolve a parked questionnaire with answers or a new prompt.\n\nCarries exactly one outcome: legacy answers keyed by question id, or a new\nprompt that continues the same run. The questions themselves were disclosed\nauthoritatively by ``run-status``; the run id and request id address the\nquestionnaire from the path, so neither outcome restates what was asked.\n\nAll bounds are imported from the domain contract rather than restated. The\nchecks that need the parked questions in hand (an id nobody asked about, a\nrequired question left blank, a choice outside its declared options) are\napplied only to the answer outcome by the route against the checkpoint."
       },
       "RunClarificationRespondResponse": {
         "properties": {
@@ -2346,6 +2363,17 @@
           "action_status": {
             "type": "string",
             "title": "Action Status"
+          },
+          "idempotency_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Idempotency Key"
           }
         },
         "type": "object",
@@ -2356,7 +2384,7 @@
           "action_status"
         ],
         "title": "RunClarificationRespondResponse",
-        "description": "Report that a questionnaire's answers were taken and the run resumed.\n\n``accepted`` says the answers were admitted and the resume dispatched;\n``applied`` is false on the accepting call, because the graph resumes\nasynchronously and this response is assembled before it has advanced. A\ncaller reconciles the outcome from ``run-status``, exactly as it does for a\npermission answer.\n\nThere is no duplicate-replay reading here, and deliberately so: the parked\ninterrupt in the run's checkpoint IS the at-most-once guard. Once the run\nresumes, the questionnaire is no longer pending, so a second answer finds\nnothing to answer and is refused as not-found rather than re-dispatched."
+        "description": "Report the durable outcome of a questionnaire resolution.\n\nIdentical retries replay the journal outcome without dispatch while a lease\nis fresh. ``applied`` becomes true only after the request-scoped checkpoint\nreceipt matches the accepted resolution fingerprint, including when a retry\nfollows a lost response after the graph already advanced."
       },
       "RunCommitResponse": {
         "properties": {
@@ -4397,7 +4425,7 @@
           "request_id"
         ],
         "title": "_ClarificationRequestSnapshot",
-        "description": "Layer 1 equivalent of ``thread.snapshots.ClarificationRequestData``.\n\nA pending mid-run clarification (agent-flow ADR D5(a)): disclosed on\n``run-status`` so a reload re-renders the questionnaire from authoritative\nstate alone, never from a relay frame."
+        "description": "Layer 1 equivalent of ``thread.snapshots.ClarificationRequestData``.\n\nA pending mid-run clarification, disclosed on ``run-status`` so a reload\nre-renders the questionnaire from authoritative state alone, never from a\nrelay frame."
       },
       "_PermissionOptionSnapshot": {
         "properties": {

@@ -1910,7 +1910,23 @@ class TestPermissionRespond:
     def test_respond_success_marks_permission_response_submitted_as_applied(
         self, session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
     ) -> None:
-        """Successful resume dispatch must stamp the repair row as applied."""
+        """A paused run returns to healthy only once the worker receipt lands.
+
+        This drives the whole pause/resume contract rather than its first half,
+        because the halfway state and the finished state are both legitimate and
+        only their ORDER distinguishes a resumable run from a stuck one.
+
+        Responding does NOT settle the run. Dispatch is a request, and the thread
+        parks in ``paused_resumable`` until the worker confirms it actually
+        applied the resume - the durability boundary described on
+        ``_dispatch_permission_resume``. Asserting ``healthy`` right after the
+        POST would assert a synchronous contract this service deliberately does
+        not offer, and asserting ``paused_resumable`` and stopping there would
+        leave nothing anywhere proving a paused conversation can ever resume.
+        So both halves are asserted, in order.
+        """
+        from ...control.event_handlers import _handle_permission_event
+
         app, _agg, worker, _cp = make_app(session_factory, checkpointer)
 
         with TestClient(app, raise_server_exceptions=True) as client:
@@ -1934,22 +1950,51 @@ class TestPermissionRespond:
         assert resp.status_code == 200
         assert len(worker.dispatches) == 1
 
-        async def _assert_state() -> None:
+        async def _assert_parked_then_resumed() -> None:
+            async with session_factory() as session:
+                thread = await session.get(ThreadModel, thread_id)
+                assert thread is not None
+                assert thread.repair_status == "paused_resumable", (
+                    "the response is a request, not a settlement; parking here is "
+                    "what makes the run resumable rather than silently finished"
+                )
+                assert (
+                    thread.last_requested_action
+                    == ControlActionType.PERMISSION_RESPONSE_SUBMITTED.value
+                )
+                assert thread.last_applied_action != (
+                    ControlActionType.PERMISSION_RESPONSE_SUBMITTED.value
+                ), "nothing may claim the resume was applied before the receipt"
+
+            # The worker confirms it applied the resume. This is the ONLY thing
+            # that settles the pause, so a regression that stops emitting it
+            # strands every paused conversation - which is what this asserts.
+            await _handle_permission_event(
+                thread_id,
+                {"type": "permission_resolved", "request_id": request_id},
+                session_factory=session_factory,
+            )
+
             async with session_factory() as session:
                 thread = await session.get(ThreadModel, thread_id)
                 assert thread is not None
                 assert thread.repair_status == "healthy"
                 assert thread.execution_readiness == "healthy"
+                # The receipt stamps its OWN action type. Submitted and applied
+                # are deliberately distinct: one records what was asked for, the
+                # other what the worker confirmed doing, and collapsing them
+                # would make an unacknowledged dispatch indistinguishable from a
+                # completed one - exactly the ambiguity that strands a run.
+                assert (
+                    thread.last_applied_action
+                    == ControlActionType.PERMISSION_RESPONSE_APPLIED.value
+                )
                 assert (
                     thread.last_requested_action
                     == ControlActionType.PERMISSION_RESPONSE_SUBMITTED.value
                 )
-                assert (
-                    thread.last_applied_action
-                    == ControlActionType.PERMISSION_RESPONSE_SUBMITTED.value
-                )
 
-        asyncio.run(_assert_state())
+        asyncio.run(_assert_parked_then_resumed())
 
     def test_resume_dispatch_includes_team_preset(
         self, session_factory: SessionFactory, checkpointer: AsyncSqliteSaver

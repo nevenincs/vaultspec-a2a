@@ -18,11 +18,13 @@ from langgraph.types import Command
 from ..domain_config import domain_config
 from ..ipc.schemas import DispatchApplicationReceiptPayload
 from ..ipc.serializers import sequenced_to_dict
+from ..providers import ProviderCondition
 from ..streaming.aggregator import EventAggregator, SequencedEvent, StreamableGraph
 from ..team.team_config import load_team_config
 from ..telemetry import ws_span
 from ..thread.constants import DEFAULT_SUPERVISOR_ID
 from ..thread.enums import TERMINAL_STATUSES, ControlActionType, ThreadStatus
+from ..thread.errors import describe_exception_chain
 from .catalog_store import RunCatalogStore
 from .graph_lifecycle import (
     GraphCacheKey,
@@ -81,6 +83,19 @@ _RESUME_GUARDS = _GuardWording(
     slot_held="Ingest already active for thread %s -- cannot resume",
     slot_held_action="resume_rejected_active",
 )
+
+# The provider condition every executor-side rejection resolves to, and it is a
+# decision rather than an omission: a graph that refused to compile, a dispatch
+# that named no preset, and a fault in the executor's own machinery all failed
+# BEFORE any provider was engaged, so there is no provider condition to report
+# and claiming one would send the reader after a remedy the run never needed.
+# The floor is what keeps such a run from carrying no condition at all.
+_EXECUTOR_CONDITION = ProviderCondition.UNKNOWN
+
+# The two dispatch actions that take the thread's ingest slot. A failure in
+# either is that dispatch's own to settle; a cancel or an unrecognised action
+# never held the slot, so a held slot there belongs to a concurrent run.
+_SLOT_OWNING_ACTIONS = frozenset({ControlActionType.INGEST, ControlActionType.RESUME})
 
 
 class ConcurrentCapError(RuntimeError):
@@ -493,15 +508,69 @@ class Executor:
                         span.set_attribute(
                             "error.message", f"Unknown action: {req.action}"
                         )
-        except Exception:
+        except Exception as exc:
             logger.exception(
                 "Unhandled exception in handle_dispatch (action=%s, thread=%s); "
-                "worker task group protected — thread may be stuck in RUNNING",
+                "worker task group protected — failing the run",
                 req.action,
                 req.thread_id,
                 extra=self._dispatch_log_extra(
                     req,
                     action="dispatch_unhandled_exception",
+                ),
+            )
+            await self._fail_unhandled_dispatch(req, exc)
+
+    async def _fail_unhandled_dispatch(
+        self, req: DispatchRequest, exc: BaseException
+    ) -> None:
+        """Terminate a run whose dispatch died outside every inner handler.
+
+        The task group deliberately swallows this exception so one bad run cannot
+        take the worker down with it. But the gateway acked the dispatch the
+        moment it was scheduled, so with nothing emitted here it believes the
+        dispatch succeeded while the run sits RUNNING forever - the failure with
+        the least information of any in the system, and the one an operator is
+        least able to diagnose. A terminal and a condition-coded error frame
+        replace that silence.
+
+        By the time this runs the exception has propagated out of the inner
+        handler, so nothing is left executing for THIS dispatch. An ingest or a
+        resume therefore still owns the thread's ingest slot and must give it
+        back, or the thread can never be dispatched again. A cancel or an
+        unrecognised action never owned that slot: when it is held, a concurrent
+        ingest owns the run's terminal and will emit its own on settle, so this
+        arm stays silent there rather than racing a legitimate outcome with a
+        fabricated failure.
+        """
+        owns_slot = req.action in _SLOT_OWNING_ACTIONS
+        if not owns_slot:
+            async with self._ingest_lock:
+                if req.thread_id in self._active_ingests:
+                    return
+        reason = f"Worker dispatch failed unexpectedly: {describe_exception_chain(exc)}"
+        try:
+            await self._aggregator.emit_error(
+                req.thread_id,
+                _EXECUTOR_CONDITION.value,
+                reason,
+                recoverable=False,
+            )
+            await self._state_projector.emit_terminal_status(
+                req.thread_id, ThreadStatus.FAILED, error_detail=reason
+            )
+            if owns_slot:
+                await self._mark_ingest_done(req.thread_id, ThreadStatus.FAILED)
+        except Exception:
+            # This runs from the handler that keeps one bad run from taking the
+            # worker's task group down with it, so it may not raise in turn - a
+            # backstop that can itself fail is not one. There is nowhere left to
+            # report to at this point, so the log is the last word.
+            logger.exception(
+                "Could not settle a run whose dispatch failed unexpectedly",
+                extra=self._dispatch_log_extra(
+                    req,
+                    action="dispatch_unhandled_settle_failed",
                 ),
             )
 

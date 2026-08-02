@@ -16,6 +16,17 @@ from enum import StrEnum
 # bounded, so no single link in a cause chain may consume the whole budget.
 _MAX_DETAIL_MESSAGE_LEN = 240
 
+# How many links of a ``__cause__`` chain reach a client. The links that carry
+# the answer are the first few - the catch site, its wrapper, and the fault that
+# started it - and every further link spends the capped budget on framework
+# plumbing the reader cannot act on.
+_MAX_CHAIN_LINKS = 4
+
+# Bounds a whole rendered chain. Matches the durable ``threads.failure_reason``
+# cap, so a reason assembled here survives the durable write intact instead of
+# being truncated a second time at a boundary that cannot say what it dropped.
+_MAX_CHAIN_LEN = 500
+
 
 def describe_exception(exc: BaseException) -> str:
     """Render one exception's own identity: its type, its code, and its message.
@@ -47,6 +58,39 @@ def describe_exception(exc: BaseException) -> str:
     if len(message) > _MAX_DETAIL_MESSAGE_LEN:
         message = message[: _MAX_DETAIL_MESSAGE_LEN - 1] + "…"
     return f"{label}: {message}" if message else label
+
+
+def describe_exception_chain(exc: BaseException) -> str:
+    """Render an exception and the causes it was raised from, oldest link last.
+
+    What reaches a reporting site is rarely the failure itself: a provider fault
+    raised inside a worker node arrives as a wrapper, and describing the wrapper
+    alone answers where a run died rather than why. So each link is described in
+    turn by :func:`describe_exception` and joined, bounded in both the number of
+    links and the total length.
+
+    Only ``__cause__`` is followed, never ``__context__``: an explicit
+    ``raise ... from`` states that one failure explains another, whereas implicit
+    context merely records what happened to be in flight, which is how an
+    unrelated cleanup error comes to be reported as the reason a run failed.
+
+    Every path that has to name a failure in one client-visible line shares this
+    rendering, so the reason a run failed reads the same whether it was the graph
+    stream, the executor's own machinery, or a dispatch that never started.
+    """
+    links: list[str] = []
+    seen: set[int] = set()
+    current: BaseException | None = exc
+    while current is not None and len(links) < _MAX_CHAIN_LINKS:
+        if id(current) in seen:  # a chain may be cyclic; describe each link once
+            break
+        seen.add(id(current))
+        links.append(describe_exception(current))
+        current = current.__cause__
+    detail = " <- ".join(links)
+    if len(detail) > _MAX_CHAIN_LEN:
+        detail = detail[: _MAX_CHAIN_LEN - 1] + "…"
+    return detail
 
 
 class ErrorSeverity(StrEnum):
@@ -405,4 +449,5 @@ __all__ = [
     "VaultspecError",
     "WorkerExecutionError",
     "describe_exception",
+    "describe_exception_chain",
 ]

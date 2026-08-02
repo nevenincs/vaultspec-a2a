@@ -26,7 +26,11 @@ from .. import errors as _errors_module
 
 # GitWorkspaceError and describe_exception live in errors but are NOT
 # re-exported by the thread facade
-from ..errors import GitWorkspaceError, describe_exception
+from ..errors import (
+    GitWorkspaceError,
+    describe_exception,
+    describe_exception_chain,
+)
 
 # ---------------------------------------------------------------------------
 # ErrorSeverity enum
@@ -356,6 +360,89 @@ class TestDescribeException:
         assert describe_exception(wrapper) == "ValueError: wrapper"
 
 
+class TestDescribeExceptionChain:
+    """Tests for the one renderer every failure-reporting site shares.
+
+    Chains are built by raising and catching rather than by assigning
+    ``__cause__``, because only a genuine ``raise ... from`` sets the link the
+    way the interpreter does, and a hand-assembled chain would prove the walker
+    reads a field production never fills the same way.
+    """
+
+    @staticmethod
+    def _chain(depth: int) -> BaseException:
+        """Raise and catch a real ``raise ... from`` chain *depth* links deep."""
+        current: BaseException = RuntimeError("link-0")
+        for index in range(1, depth):
+            try:
+                raise ValueError(f"link-{index}") from current
+            except ValueError as raised:
+                current = raised
+        return current
+
+    def test_each_link_of_a_real_chain_is_named_outermost_first(self) -> None:
+        detail = describe_exception_chain(self._chain(3))
+
+        assert detail == (
+            "ValueError: link-2 <- ValueError: link-1 <- RuntimeError: link-0"
+        )
+
+    def test_a_lone_exception_renders_exactly_as_its_own_identity(self) -> None:
+        exc = RuntimeError("boom")
+
+        assert describe_exception_chain(exc) == describe_exception(exc)
+
+    def test_a_deep_chain_stops_before_the_framework_plumbing(self) -> None:
+        """The links that answer are the first few; the rest spend the budget."""
+        detail = describe_exception_chain(self._chain(9))
+
+        assert detail.count(" <- ") == 3
+        assert "link-8" in detail
+        assert "link-4" not in detail
+
+    def test_implicit_context_is_never_followed(self) -> None:
+        """A cleanup error that merely happened to be in flight is not a cause.
+
+        Implicit context is what the interpreter records about whatever was in
+        flight; only ``raise ... from`` states that one failure EXPLAINS another.
+        Following context is how an unrelated cleanup error comes to be reported
+        as the reason a run failed.
+        """
+        try:
+            try:
+                raise ValueError("unrelated cleanup")
+            except ValueError:
+                raise RuntimeError("the actual failure") from None
+        except RuntimeError as exc:
+            assert exc.__context__ is not None
+            assert exc.__cause__ is None
+            assert describe_exception_chain(exc) == "RuntimeError: the actual failure"
+
+    def test_a_cyclic_chain_describes_each_link_once(self) -> None:
+        first = RuntimeError("first")
+        second = ValueError("second")
+        first.__cause__ = second
+        second.__cause__ = first
+
+        assert describe_exception_chain(first) == (
+            "RuntimeError: first <- ValueError: second"
+        )
+
+    def test_the_whole_chain_is_bounded_to_the_durable_reason_cap(self) -> None:
+        """A long chain cannot outgrow the column that has to store it."""
+        long_link: BaseException = RuntimeError("y" * 4000)
+        for _ in range(3):
+            try:
+                raise ValueError("x" * 4000) from long_link
+            except ValueError as raised:
+                long_link = raised
+
+        detail = describe_exception_chain(long_link)
+
+        assert len(detail) == 500
+        assert detail.endswith("…")
+
+
 class TestWorkerExecutionErrorRetainsItsCause:
     """Tests that the worker wrapper stops discarding the provider's identity."""
 
@@ -446,6 +533,7 @@ class TestAllExports:
             "VaultspecError",
             "WorkerExecutionError",
             "describe_exception",
+            "describe_exception_chain",
         }
         assert set(_errors_module.__all__) == expected
 

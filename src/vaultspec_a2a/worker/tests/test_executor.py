@@ -28,6 +28,7 @@ from pydantic import ValidationError
 
 from ...api.tests.clarification_harness import new_state_graph
 from ...ipc.schemas import DispatchRequest
+from ...providers import ProviderCondition
 from ...thread.actor_tokens import ActorTokenBundle
 from ...thread.enums import ThreadStatus
 from ..executor import _INGEST_GUARDS, _RESUME_GUARDS, Executor
@@ -1247,3 +1248,166 @@ class TestAuthoringBridgeFailClosed:
                 assert events == ["fast_task", "slow_build"]
             finally:
                 await bridge.close()
+
+
+# ---------------------------------------------------------------------------
+# Blank terminals — every failing dispatch reports a condition
+# ---------------------------------------------------------------------------
+
+
+def _make_recording_bridge(relayed: list[dict[str, Any]]) -> WorkerBridge:
+    """A real bridge whose in-process gateway keeps every relayed payload.
+
+    The payloads are read off a real HTTP batch POST, so what the assertions see
+    is what the gateway would see - not the executor's intent before it crossed
+    the IPC boundary, which is where a frame with no wire type silently loses
+    everything that made it meaningful.
+    """
+    app = FastAPI()
+
+    @app.post("/internal/events/batch")
+    async def _batch(request: Request) -> Response:
+        body = await request.json()
+        for item in body.get("events", []):
+            relayed.append(item.get("payload", {}))
+        return Response(content='{"status":"ok"}', media_type="application/json")
+
+    @app.post("/internal/heartbeat")
+    async def _heartbeat(request: Request) -> Response:
+        return Response(content='{"status":"ok"}', media_type="application/json")
+
+    bridge = WorkerBridge(api_url="http://control:8000", worker_id="blank-worker")
+    bridge._client = httpx.AsyncClient(
+        transport=ASGITransport(app=app),
+        base_url="http://control:8000",
+    )
+    return bridge
+
+
+def _frames_of(relayed: list[dict[str, Any]], kind: str) -> list[dict[str, Any]]:
+    """Select the relayed payloads of one wire kind, in arrival order."""
+    return [
+        payload
+        for payload in relayed
+        if (payload.get("type") or payload.get("event_type")) == kind
+    ]
+
+
+def _wrapped_failure() -> BaseException:
+    """A real wrapped exception, raised and caught rather than assembled.
+
+    What reaches a reporting site in production is a wrapper around the fault
+    that actually happened, and only a genuine ``raise ... from`` produces the
+    ``__cause__`` link the reason renderer follows. Setting the attribute by hand
+    would prove the renderer walks a field the interpreter fills differently.
+    """
+    try:
+        try:
+            raise ValueError("bad workspace root")
+        except ValueError as cause:
+            raise RuntimeError("relay exploded") from cause
+    except RuntimeError as exc:
+        return exc
+
+
+class TestUnhandledDispatchTerminal:
+    """A dispatch that dies outside every inner handler still settles the run.
+
+    The worker's task group swallows the exception so one bad run cannot take the
+    process down, and the gateway acked the dispatch the moment it was scheduled.
+    Without a terminal the run therefore sits RUNNING forever while the gateway
+    believes the dispatch succeeded - the failure carrying the least information
+    of any in the system.
+
+    The backstop's own trigger is not inducible from ``handle_dispatch`` with a
+    well-formed dispatch, and deliberately so: every inner path already guards
+    itself, which is why the arm is a backstop rather than a branch. So these
+    drive its target directly, over a real bridge, a real HTTP relay and the
+    executor's real ingest-slot state - the assertions read what the gateway
+    would receive, not what the executor meant to send.
+    """
+
+    @pytest.mark.asyncio(loop_scope="function")
+    async def test_slot_owning_dispatch_fails_the_run_and_returns_its_slot(
+        self,
+    ) -> None:
+        thread_id = "t-unhandled-dispatch"
+        relayed: list[dict[str, Any]] = []
+        async with AsyncSqliteSaver.from_conn_string(":memory:") as cp:
+            await cp.setup()
+            bridge = _make_recording_bridge(relayed)
+            executor = Executor(checkpointer=cp, bridge=bridge)
+            try:
+                # The slot the ingest took before it died, taken through the
+                # executor's own gate rather than by reaching into its state.
+                assert await executor._mark_ingest_active(thread_id) is True
+                await executor._fail_unhandled_dispatch(
+                    DispatchRequest(
+                        action="ingest",
+                        thread_id=thread_id,
+                        content="build it",
+                        recursion_limit=10,
+                    ),
+                    _wrapped_failure(),
+                )
+                await bridge.flush_events()
+
+                terminals = _frames_of(relayed, "thread_terminal")
+                assert len(terminals) == 1, "the run must settle exactly once"
+                assert terminals[0]["status"] == ThreadStatus.FAILED
+                # The whole cause chain, not just the outermost wrapper: the
+                # wrapper says where the run died, the cause says why.
+                assert "RuntimeError: relay exploded" in terminals[0]["error_detail"]
+                assert "ValueError: bad workspace root" in terminals[0]["error_detail"]
+
+                errors = _frames_of(relayed, "error")
+                assert len(errors) == 1, (
+                    "the failure must carry a machine-readable code"
+                )
+                assert errors[0]["code"] == ProviderCondition.UNKNOWN.value
+                assert errors[0]["recoverable"] is False
+
+                # The slot the dispatch took is given back, or the thread could
+                # never be dispatched again.
+                assert executor.active_ingest_count == 0
+            finally:
+                await bridge.close()
+                await executor.shutdown()
+
+    @pytest.mark.asyncio(loop_scope="function")
+    async def test_cancel_fault_stays_silent_while_an_ingest_owns_the_terminal(
+        self,
+    ) -> None:
+        """A cancel arm must not fabricate a failure over a live run's outcome.
+
+        The cancel path never holds the ingest slot, so a held slot means a
+        concurrent ingest owns the run's terminal. Emitting one here would race a
+        legitimate settle with an invented failure.
+        """
+        thread_id = "t-cancel-fault"
+        relayed: list[dict[str, Any]] = []
+        async with AsyncSqliteSaver.from_conn_string(":memory:") as cp:
+            await cp.setup()
+            bridge = _make_recording_bridge(relayed)
+            executor = Executor(checkpointer=cp, bridge=bridge)
+            try:
+                # The slot a live ingest would hold, taken through the executor's
+                # own gate rather than by reaching into its state.
+                assert await executor._mark_ingest_active(thread_id) is True
+                await executor._fail_unhandled_dispatch(
+                    DispatchRequest(
+                        action="cancel",
+                        thread_id=thread_id,
+                        recursion_limit=10,
+                    ),
+                    RuntimeError("cancel relay exploded"),
+                )
+                await bridge.flush_events()
+
+                assert _frames_of(relayed, "thread_terminal") == []
+                assert _frames_of(relayed, "error") == []
+                # The concurrent ingest still owns its slot.
+                assert executor.active_ingest_count == 1
+            finally:
+                await bridge.close()
+                await executor.shutdown()

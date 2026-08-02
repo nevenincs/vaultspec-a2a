@@ -4,7 +4,7 @@ tags:
   - '#provider-error-taxonomy'
 date: '2026-08-02'
 modified: '2026-08-02'
-body_hash: 'sha256:cd702c5ba48fb2ff1317767a8a7b5399e963dc9e618a035fc7caed669c40d49d'
+body_hash: 'sha256:546e5ee7e5e670709d0855b95bc7c40f1937b786bde0c837751b8a448fcd7c5f'
 tier: L3
 related:
   - '[[2026-08-02-provider-error-taxonomy-adr]]'
@@ -100,7 +100,7 @@ Guarantees every path that fails a run records a condition, emits a terminal, an
 - [x] `W01.P05.S37` - Emit an error frame on compile refusal; `src/vaultspec_a2a/worker/executor.py`.
 - [x] `W01.P05.S38` - Carry status and condition on the terminal replay frame; `src/vaultspec_a2a/api/thread_stream.py`.
 - [x] `W01.P05.S39` - Protect terminal and error frames from backpressure eviction; `src/vaultspec_a2a/streaming/fanout.py`.
-- [ ] `W01.P05.S40` - Prove no failed run persists without a condition across dispatch and executor paths; `src/vaultspec_a2a/api/tests/test_internal.py`.
+- [x] `W01.P05.S40` - Prove no failed run persists without a condition across dispatch and executor paths; `src/vaultspec_a2a/api/tests/test_internal.py`.
 - [ ] `W01.P05.S59` - Drain the worker failure stash even when the settle path dies; `src/vaultspec_a2a/worker/executor.py`.
 
 ### Phase `W01.P06` - cleanup and live proof
@@ -110,7 +110,7 @@ Removes the superseded dead vocabulary and proves a real provider failure surfac
 - [x] `W01.P06.S41` - Remove the dead severity and recovery-action vocabulary; `src/vaultspec_a2a/thread/errors.py`.
 - [x] `W01.P06.S42` - Withdraw the removed vocabulary from the thread package surface; `src/vaultspec_a2a/thread/__init__.py`.
 - [ ] `W01.P06.S43` - Replace the usage-limit substring sniff with the typed condition; `src/vaultspec_a2a/service_tests/test_claude_web_grounding_live.py`.
-- [ ] `W01.P06.S44` - Add a scripted failure scenario preset for the integration-verification ask; `src/vaultspec_a2a/team/presets/teams`.
+- [x] `W01.P06.S44` - Add a scripted failure scenario preset for the integration-verification ask; `src/vaultspec_a2a/team/presets/teams`.
 - [ ] `W01.P06.S45` - Prove a live provider failure surfaces a typed condition end to end; `src/vaultspec_a2a/service_tests/test_provider_condition_live.py`.
 
 ## Wave `W02` - dashboard condition surfacing

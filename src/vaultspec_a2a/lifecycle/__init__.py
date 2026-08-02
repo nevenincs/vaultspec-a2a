@@ -16,6 +16,7 @@ The process commands in :mod:`vaultspec_a2a.cli` use this package. See
 :ref:`process-registry` for operator guidance.
 """
 
+from .discovery import is_pid_alive
 from .manager import (
     LifecycleError,
     ProcVerdict,
@@ -86,6 +87,7 @@ __all__ = [
     "default_procs_owner",
     "deregister_serve",
     "endpoint_for",
+    "is_pid_alive",
     "kill",
     "list_records",
     "list_verdicts",

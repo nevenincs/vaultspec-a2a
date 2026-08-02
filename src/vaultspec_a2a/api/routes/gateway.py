@@ -1441,6 +1441,11 @@ async def run_status_endpoint(
         execution_readiness=snapshot.execution_readiness,
         degraded_reasons=snapshot.degraded_reasons,
         failure_reason=snapshot.failure_reason,
+        # Named explicitly beside the reason because this response is built with
+        # keyword arguments rather than validated from the snapshot: nothing here
+        # is dropped silently, but nothing arrives without being written either,
+        # which is how the reason itself was missed when it was first persisted.
+        provider_condition=snapshot.provider_condition,
         profile_id=frozen.profile_id if frozen is not None else None,
         assignments=await _disclose_frozen(frozen),
         lease_id=_persisted_lease_id(capture.thread_metadata),

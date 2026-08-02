@@ -6,7 +6,7 @@ tags:
 date: '2026-08-02'
 modified: '2026-08-02'
 body_schema: 'body-v1'
-body_hash: 'sha256:7f14cf9307d48c75740110a9f79cda54c9fecd19d66ae8d1d4c9eb3fc7b32f60'
+body_hash: 'sha256:9e73466a0f762c1256a100e86996b43190c40be8d56c8c531ab4170647a47b98'
 related:
   - '[[2026-08-02-provider-model-catalog-P01-S01]]'
   - '[[2026-08-02-provider-model-catalog-P01-S02]]'
@@ -26,9 +26,11 @@ related:
   - '[[2026-08-02-provider-model-catalog-dashboard-s15-audit]]'
   - '[[2026-08-02-provider-model-catalog-frozen-run-evidence-p02s17-audit]]'
   - '[[2026-08-02-provider-model-catalog-gateway-p01s07-review-audit]]'
+  - '[[2026-08-02-provider-model-catalog-gateway-p01s08-review-audit]]'
   - '[[2026-08-02-provider-model-catalog-implementation-review-audit]]'
   - '[[2026-08-02-provider-model-catalog-kimi-catalog-p01s04-review-audit]]'
   - '[[2026-08-02-provider-model-catalog-openai-catalog-p01s05-review-audit]]'
+  - '[[2026-08-02-provider-model-catalog-p03-integration-preflight-audit]]'
   - '[[2026-08-02-provider-model-catalog-plan]]'
   - '[[2026-08-02-provider-model-catalog-reference]]'
   - '[[2026-08-02-provider-model-catalog-research]]'
@@ -51,9 +53,11 @@ Auto-generated index of all documents tagged with `#provider-model-catalog`.
 - `2026-08-02-provider-model-catalog-dashboard-s15-audit` - `provider-model-catalog` audit: `Dashboard S15 bounded expert selection review`
 - `2026-08-02-provider-model-catalog-frozen-run-evidence-p02s17-audit` - `provider-model-catalog` audit: `Frozen run evidence P02.S17 review`
 - `2026-08-02-provider-model-catalog-gateway-p01s07-review-audit` - `provider-model-catalog` audit: `gateway P01.S07 review`
+- `2026-08-02-provider-model-catalog-gateway-p01s08-review-audit` - `provider-model-catalog` audit: `P01.S08 explicit run selection review`
 - `2026-08-02-provider-model-catalog-implementation-review-audit` - `provider-model-catalog` audit: `implementation review`
 - `2026-08-02-provider-model-catalog-kimi-catalog-p01s04-review-audit` - `provider-model-catalog` audit: `Kimi catalog P01.S04 review`
 - `2026-08-02-provider-model-catalog-openai-catalog-p01s05-review-audit` - `provider-model-catalog` audit: `OpenAI catalog P01.S05 review`
+- `2026-08-02-provider-model-catalog-p03-integration-preflight-audit` - `provider-model-catalog` audit: `P03 integration preflight preparation review`
 
 ### exec
 

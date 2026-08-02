@@ -153,6 +153,9 @@ class _Reservation:
     binding_digest: str
     expires_monotonic: float
     expires_at_iso: str
+    # The exact client-visible prepare body, kept separately because commit may
+    # bind a server-normalized form (for example, advertised catalog defaults).
+    release_digest: str | None = None
     state: ReservationState = ReservationState.ACTIVE
 
 
@@ -183,6 +186,7 @@ class AdmissionBroker:
         ensure_worker: Callable[[], Awaitable[None]],
         probe_readiness: Callable[[], Awaitable[AdmissionReadiness]],
         binding_digest: str,
+        release_digest: str | None = None,
     ) -> PrepareOutcome:
         """Reserve a bounded admission slot after triggering worker startup.
 
@@ -262,6 +266,7 @@ class AdmissionBroker:
                 binding_digest=binding_digest,
                 expires_monotonic=now + self._ttl,
                 expires_at_iso=expires_at_iso,
+                release_digest=release_digest,
             )
         return PrepareOutcome(
             admitted=True,
@@ -369,7 +374,33 @@ class AdmissionBroker:
 
         The explicit counterpart to expiry: a failed commit, a cancellation, or a
         caller-observed timeout frees the slot immediately rather than waiting out
-        the reservation's time-to-live.
+        the reservation's time-to-live. The release binding is the exact prepared
+        client body, which may differ from a server-normalized commit binding.
+        """
+        async with self._lock:
+            reservation = self._reservations.get(reservation_id)
+            if (
+                reservation is not None
+                and reservation.state is ReservationState.ACTIVE
+                and hmac.compare_digest(
+                    reservation.release_digest or reservation.binding_digest,
+                    binding_digest,
+                )
+            ):
+                reservation.state = ReservationState.RELEASED
+                del self._reservations[reservation_id]
+                return True
+            return False
+
+    async def release_failed_commit(
+        self, reservation_id: str, *, binding_digest: str
+    ) -> bool:
+        """Release pre-commit capacity under the canonical commit authority.
+
+        This internal route-owned operation is distinct from client release:
+        the caller may change only the representation of authoritative defaults
+        between prepare and commit, so cleanup must compare the normalized
+        commit binding rather than the original client release binding.
         """
         async with self._lock:
             reservation = self._reservations.get(reservation_id)

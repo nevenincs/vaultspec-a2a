@@ -64,7 +64,6 @@ from ...control.thread_service import (
     archive_thread,
     create_and_dispatch_thread,
     delete_thread_service,
-    generate_thread_id,
     list_threads_service,
     process_metadata,
 )
@@ -81,9 +80,16 @@ from ...database.permission_repository import get_permission_request
 from ...database.session import get_db
 from ...database.thread_repository import normalize_workspace_identity
 from ...domain_config import domain_config
+from ...providers.provider_catalog import ControlSelection, SelectionReference
 from ...providers.provider_catalog_service import (
     ProviderCatalogScopeCapacityError,
     ProviderCatalogService,
+)
+from ...providers.team_selection import (
+    FrozenTeamSelection,
+    TeamSelectionError,
+    freeze_team_selection,
+    normalize_replay_selection,
 )
 from ...streaming.aggregator import EventAggregator
 from ...thread.clarification import (
@@ -124,6 +130,7 @@ from ..schemas.gateway import (
     PresetsListResponse,
     PresetSummary,
     ProfileSummary,
+    ProviderCatalogSelection,
     RoleAssignmentSummary,
     RoleState,
     RunAgentSummary,
@@ -360,21 +367,20 @@ async def _create_run_core(
     """
     # Client idempotency: a retry with the same stable run id returns the
     # existing run rather than starting a second one (dispatch-exactly-once).
-    if body.run_id is not None:
-        existing = await get_thread(db, body.run_id)
-        if existing is not None:
-            existing_profile = _replay_identity_or_conflict(
-                existing.id, existing.thread_metadata, body
-            )
-            return _RunDispatchResult(
-                thread_id=existing.id,
-                status=existing.status,
-                nickname=existing.nickname,
-                profile_id=existing_profile,
-                frozen=None,
-                replayed=True,
-            )
-    run_id = body.run_id or generate_thread_id()
+    existing = await get_thread(db, body.run_id)
+    if existing is not None:
+        existing_profile = _replay_identity_or_conflict(
+            existing.id, existing.thread_metadata, body
+        )
+        return _RunDispatchResult(
+            thread_id=existing.id,
+            status=existing.status,
+            nickname=existing.nickname,
+            profile_id=existing_profile,
+            frozen=None,
+            replayed=True,
+        )
+    run_id = body.run_id
 
     # Thread the target feature onto the metadata so it reaches dispatch and the
     # vault index; the top-level field is authoritative when both are present.
@@ -409,23 +415,19 @@ async def _create_run_core(
     if not eligibility.eligible:
         raise HTTPException(status_code=422, detail=eligibility.reason)
 
-    # model-profiles: validate the selected profile belongs to the preset and
-    # is runnable, then freeze its effective per-role assignment. The frozen record
-    # is threaded to the worker (compilation consumes it verbatim) and persisted in
-    # metadata so restart reproduces it. Never silently falls back to team-defaults.
-    frozen = _resolve_and_freeze_profile_or_refuse(
-        team_config, body.profile_id, ws_root
+    frozen = await _validate_and_freeze_selection_or_refuse(
+        request.app, body, team_config, ws_root
     )
-    metadata_json = _persist_frozen(metadata_json, frozen)
+    canonical_body = _body_with_frozen_selection(body, frozen)
+    metadata_json = _persist_team_selection(metadata_json, frozen)
     # Persist what this run was started with, so a later replay is compared
     # against the whole request rather than one field of it. The stamped form
     # records the rule it was computed under: raw tokens are never persisted, so
     # a stored fingerprint cannot be recomputed and a rule change would
     # otherwise refuse a byte-identical replay of an older run.
-    if body.run_id is not None:
-        metadata_json = _persist_request_digest(
-            metadata_json, stamped_replay_digest(body)
-        )
+    metadata_json = _persist_request_digest(
+        metadata_json, stamped_replay_digest(canonical_body)
+    )
     # Bind the committed reservation's non-secret lease identity to the run,
     # durably, so terminal settlement and post-restart reconciliation recover it.
     if commit_binding is not None:
@@ -469,7 +471,7 @@ async def _create_run_core(
                     metadata_json=metadata_json,
                     workspace_root=ws_root,
                     actor_tokens=body.actor_tokens,
-                    profile_id=frozen.profile_id,
+                    profile_id=None,
                     model_assignment=frozen.compiler_map(),
                 ),
                 circuit_breaker=circuit_breaker,
@@ -543,7 +545,7 @@ async def _create_run_core(
             thread_id=result.thread_id,
             status=result.status,
             nickname=result.nickname,
-            profile_id=frozen.profile_id,
+            profile_id=None,
             frozen=frozen,
             replayed=False,
         )
@@ -597,6 +599,10 @@ async def _run_prepare(
     """
     ws_root = _prepare_workspace_root(body)
     team_config = _load_preset_or_refuse(body.team_preset, ws_root)
+    frozen = await _validate_and_freeze_selection_or_refuse(
+        request.app, body, team_config, ws_root
+    )
+    canonical_body = _body_with_frozen_selection(body, frozen)
     broker = admission_broker(request.app)
     outcome = await broker.prepare(
         required_roles=required_role_ids(team_config),
@@ -604,7 +610,8 @@ async def _run_prepare(
         probe_readiness=lambda: _probe_admission_readiness(
             request.app.state, worker_client
         ),
-        binding_digest=request_digest(body, prepared=True),
+        binding_digest=request_digest(canonical_body, prepared=True),
+        release_digest=_release_binding_digest(body),
     )
     if (
         not outcome.admitted
@@ -645,8 +652,6 @@ async def _run_commit(
     if body.reservation_id is None:  # pragma: no cover - guarded by the schema
         raise HTTPException(status_code=422, detail="commit requires a reservation id")
     run_id = body.run_id
-    if run_id is None:  # pragma: no cover - guarded by the schema
-        raise HTTPException(status_code=422, detail="commit requires a stable run id")
     async with commit_singleflight(request.app).hold(run_id):
         return await _run_commit_locked(
             request,
@@ -671,9 +676,6 @@ async def _run_commit_locked(
     if reservation_id is None:  # pragma: no cover - guarded by the schema
         raise HTTPException(status_code=422, detail="commit requires a reservation id")
     run_id = body.run_id
-    if run_id is None:  # pragma: no cover - guarded by the schema
-        raise HTTPException(status_code=422, detail="commit requires a stable run id")
-    commit_digest = request_digest(body, prepared=False)
     broker = admission_broker(request.app)
 
     # A commit acknowledgement can be lost after the durable run is created.
@@ -681,14 +683,10 @@ async def _run_commit_locked(
     # returning the persisted non-secret gateway lease identity.
     existing = await get_thread(db, run_id)
     if existing is not None:
+        canonical_body = _canonical_replay_body(existing.thread_metadata, body)
+        commit_digest = request_digest(canonical_body, prepared=False)
         existing_frozen = _read_persisted_frozen(existing.thread_metadata)
-        if existing_frozen is None:
-            raise HTTPException(
-                status_code=409,
-                detail="existing run has no committed model profile binding",
-            )
-        existing_profile = existing_frozen.profile_id
-        _refuse_profile_mismatch(existing.id, existing_profile, body)
+        existing_profile = existing_frozen.profile_id if existing_frozen else None
         binding = _persisted_lease_binding(existing.thread_metadata)
         if binding is None:
             raise HTTPException(
@@ -713,8 +711,17 @@ async def _run_commit_locked(
             lease_id=binding.lease_id,
             nickname=existing.nickname,
             profile_id=existing_profile,
-            assignments=await _disclose_frozen(existing_frozen),
+            assignments=(
+                await _disclose_frozen(existing_frozen) if existing_frozen else []
+            ),
         )
+    ws_root = _prepare_workspace_root(body)
+    team_config = _load_preset_or_refuse(body.team_preset, ws_root)
+    frozen = await _validate_and_freeze_selection_or_refuse(
+        request.app, body, team_config, ws_root
+    )
+    canonical_body = _body_with_frozen_selection(body, frozen)
+    commit_digest = request_digest(canonical_body, prepared=False)
     # Evaluate worker and provider eligibility BEFORE consuming the reservation,
     # accepting the actor tokens, or creating a run (ADR: mint run credentials only
     # after the runtime and provider are eligible). The worker reachability is
@@ -731,9 +738,8 @@ async def _run_commit_locked(
         provider_eligibility=readiness.provider_eligibility,
     )
     if not execution.eligible:
-        await broker.release(
-            reservation_id,
-            binding_digest=request_digest(body, prepared=True),
+        await _release_ineligible_reservation(
+            broker, reservation_id, canonical_body
         )
         raise HTTPException(status_code=503, detail=execution.reason)
 
@@ -742,7 +748,7 @@ async def _run_commit_locked(
     )
     outcome = await broker.commit(
         reservation_id,
-        binding_digest=request_digest(body, prepared=True),
+        binding_digest=request_digest(canonical_body, prepared=True),
         presented_roles=presented_roles,
     )
     if not outcome.committed or outcome.lease_id is None:
@@ -829,12 +835,10 @@ async def _run_release(request: Request, body: RunStartRequest) -> RunReleaseRes
     if reservation_id is None:  # pragma: no cover - guarded by the schema
         raise HTTPException(status_code=422, detail="release requires a reservation id")
     run_id = body.run_id
-    if run_id is None:  # pragma: no cover - guarded by the schema
-        raise HTTPException(status_code=422, detail="release requires a stable run id")
     async with commit_singleflight(request.app).hold(run_id):
         released = await admission_broker(request.app).release(
             reservation_id,
-            binding_digest=request_digest(body, prepared=True),
+            binding_digest=_release_binding_digest(body),
         )
     return RunReleaseResponse(reservation_id=reservation_id, released=released)
 
@@ -853,6 +857,140 @@ def _prepare_workspace_root(body: RunStartRequest) -> Path | None:
         return None
     candidate = Path(workspace_root)
     return candidate if candidate.is_absolute() else None
+
+
+def _release_binding_digest(body: RunStartRequest) -> str:
+    """Bind release to the raw prepared request, not canonical commit policy."""
+    return request_digest(body, prepared=True)
+
+
+async def _release_ineligible_reservation(
+    broker: AdmissionBroker, reservation_id: str, canonical_body: RunStartRequest
+) -> bool:
+    """Release a refused commit under its canonical prepared identity."""
+    return await broker.release_failed_commit(
+        reservation_id,
+        binding_digest=request_digest(canonical_body, prepared=True),
+    )
+
+
+def _selection_reference(value: ProviderCatalogSelection) -> SelectionReference:
+    """Convert the bounded wire map into the canonical provider-domain type."""
+    return SelectionReference(
+        schema_version=value.schema_version,
+        provider_id=value.provider_id,
+        execution_mode=value.execution_mode,
+        catalog_revision=value.catalog_revision,
+        entry_id=value.entry_id,
+        controls=tuple(
+            ControlSelection(control_id=control_id, option_id=option_id)
+            for control_id, option_id in sorted(value.controls.items())
+        ),
+    )
+
+
+def _wire_reference(reference: SelectionReference) -> ProviderCatalogSelection:
+    """Render a normalized domain reference into the canonical request wire."""
+    return ProviderCatalogSelection(
+        schema_version=1,
+        provider_id=reference.provider_id,
+        execution_mode=reference.execution_mode,
+        catalog_revision=reference.catalog_revision,
+        entry_id=reference.entry_id,
+        controls={item.control_id: item.option_id for item in reference.controls},
+    )
+
+
+def _wire_selection(value: Any) -> ProviderCatalogSelection:
+    """Render a normalized frozen lane back into the canonical request wire."""
+    return _wire_reference(value.reference)
+
+
+def _body_with_frozen_selection(
+    body: RunStartRequest, frozen: FrozenTeamSelection
+) -> RunStartRequest:
+    """Return the request with authoritative catalog defaults made explicit."""
+    return body.model_copy(
+        update={
+            "selection": _wire_selection(frozen.selection),
+            "overrides": {
+                role: _wire_selection(value) for role, value in frozen.overrides.items()
+            },
+            "fallbacks": [_wire_selection(value) for value in frozen.fallbacks],
+        }
+    )
+
+
+def _canonical_replay_body(
+    metadata_json: str | None, body: RunStartRequest
+) -> RunStartRequest:
+    """Canonicalize a replay from persisted defaults, without live discovery."""
+    metadata = _metadata_object(metadata_json)
+    record = metadata.get(_TEAM_SELECTION_METADATA_KEY) if metadata else None
+    if record is None:
+        return body
+    try:
+        selection, overrides, fallbacks = normalize_replay_selection(
+            record=record,
+            selection=_selection_reference(body.selection),
+            overrides={
+                role: _selection_reference(reference)
+                for role, reference in body.overrides.items()
+            },
+            fallbacks=tuple(_selection_reference(item) for item in body.fallbacks),
+        )
+    except (TeamSelectionError, ValueError) as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return body.model_copy(
+        update={
+            "selection": _wire_reference(selection),
+            "overrides": {
+                role: _wire_reference(reference)
+                for role, reference in overrides.items()
+            },
+            "fallbacks": [_wire_reference(reference) for reference in fallbacks],
+        }
+    )
+
+
+async def _validate_and_freeze_selection_or_refuse(
+    app: FastAPI,
+    body: RunStartRequest,
+    team_config: Any,
+    workspace_root: Path | None,
+) -> FrozenTeamSelection:
+    """Revalidate the complete new-run selection in its canonical workspace."""
+    if workspace_root is None:
+        raise HTTPException(
+            status_code=422,
+            detail="explicit provider selection requires an existing workspace_root",
+        )
+    canonical = normalize_workspace_identity(str(workspace_root))
+    if len(canonical) > 4096 or not Path(canonical).is_dir():
+        raise HTTPException(
+            status_code=422,
+            detail="workspace_root must identify an existing directory",
+        )
+    try:
+        records = await provider_catalog_service(app).records(canonical)
+    except ProviderCatalogScopeCapacityError:
+        raise HTTPException(
+            status_code=503,
+            detail="provider catalog workspace capacity is temporarily busy",
+        ) from None
+    try:
+        return freeze_team_selection(
+            selection=_selection_reference(body.selection),
+            overrides={
+                role: _selection_reference(reference)
+                for role, reference in body.overrides.items()
+            },
+            fallbacks=tuple(_selection_reference(item) for item in body.fallbacks),
+            required_roles=tuple(required_role_ids(team_config)),
+            records=records,
+        )
+    except (TeamSelectionError, ValueError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
 # The metadata key binding a run to its non-secret admission lease identity. The
@@ -898,35 +1036,6 @@ def _persisted_request_digest(metadata_json: str | None) -> str | None:
     return digest if isinstance(digest, str) and digest else None
 
 
-def _refuse_profile_mismatch(
-    run_id: str, existing_profile: str, body: RunStartRequest
-) -> None:
-    """Refuse a request naming a different model profile than the durable run.
-
-    The single encoding of that refusal, shared by the plain-start replay check
-    and the staged commit's recovery of a lost acknowledgement. Both ask the
-    same question of the same immutable field, and both answered it with their
-    own copy of the same message - two encodings free to drift apart the first
-    time either was touched.
-
-    Only the profile comparison is shared. The two paths deliberately fingerprint
-    the rest of the request under DIFFERENT rules - the commit binding folds
-    credential values in, the plain-start replay classifies them out - and those
-    rules are not harmonised here or anywhere else.
-
-    Raises:
-        HTTPException: 409 when the profile differs.
-    """
-    if existing_profile != body.profile_id:
-        raise HTTPException(
-            status_code=409,
-            detail=(
-                f"Run {run_id!r} was already started with profile "
-                f"{existing_profile!r}; cannot re-start with {body.profile_id!r}"
-            ),
-        )
-
-
 def _replay_identity_or_conflict(
     run_id: str, metadata_json: str | None, body: RunStartRequest
 ) -> str | None:
@@ -963,15 +1072,14 @@ def _replay_identity_or_conflict(
         HTTPException: 409 when the profile or the request fingerprint differs.
     """
     existing_profile = _persisted_profile_id(metadata_json)
-    if existing_profile is not None:
-        _refuse_profile_mismatch(run_id, existing_profile, body)
     # ``None`` means the digest is unknown - an older run, or one whose id this
     # service minted - not that the request was empty; refusing on it would
     # break a legitimate replay. Such a request is compared on the frozen
     # profile alone, which is narrower rather than absent.
     persisted_digest = _persisted_request_digest(metadata_json)
+    canonical_body = _canonical_replay_body(metadata_json, body)
     if persisted_digest is not None and not replay_digest_matches(
-        persisted_digest, body
+        persisted_digest, canonical_body
     ):
         raise HTTPException(
             status_code=409,
@@ -1101,55 +1209,15 @@ def _probe_harness(team_config: Any, ws_root: Path | None) -> Any:
     )
 
 
-def _resolve_and_freeze_profile_or_refuse(
-    team_config: Any, profile_id: str, ws_root: Path | None
-) -> Any:
-    """Validate the selected profile and freeze its effective assignment, or 4xx.
-
-    Refuses an unknown profile (422) and a profile that is not runnable - a role
-    naming a provider lane without completed-turn proof, or a role whose provider
-    is not ready with no eligible fallback (422). Launch gates on lane admission
-    and provider readiness: the production acceptance gate and engine
-    reachability are discovery-certification signals surfaced by presets-list,
-    not launch blockers (enforcing them here would refuse every run). The
-    admission term is NOT waived at launch - an unproven lane is refused here
-    with the provider named, so it can never be discovered mid-run. Never
-    silently replaces the selection with team-defaults.
-    """
-    from ...providers.model_profiles import (
-        evaluate_profile_eligibility,
-        freeze_assignment,
-        resolve_effective_assignment,
-    )
-
-    profiles = team_config.effective_profiles()
-    if profile_id not in profiles:
-        raise HTTPException(
-            status_code=422,
-            detail=(
-                f"Unknown model profile {profile_id!r} for preset "
-                f"{team_config.id!r}; available: {sorted(profiles)!r}"
-            ),
-        )
-    assignment = resolve_effective_assignment(team_config, profile_id, ws_root)
-    eligibility = evaluate_profile_eligibility(
-        assignment, engine_reachable=True, acceptance_gate_passed=True
-    )
-    if not eligibility.eligible:
-        raise HTTPException(
-            status_code=422,
-            detail=(
-                f"Model profile {profile_id!r} is not runnable: "
-                + "; ".join(eligibility.reasons)
-            ),
-        )
-    return freeze_assignment(assignment)
+_TEAM_SELECTION_METADATA_KEY = "provider_catalog_selection"
 
 
-def _persist_frozen(metadata_json: str | None, frozen: Any) -> str:
-    """Embed the frozen profile record into the thread metadata JSON for restart."""
+def _persist_team_selection(
+    metadata_json: str | None, frozen: FrozenTeamSelection
+) -> str:
+    """Persist the normalized schema-v1 selection without a legacy profile id."""
     data = _metadata_object(metadata_json) or {}
-    data["model_profile"] = frozen.to_record()
+    data[_TEAM_SELECTION_METADATA_KEY] = frozen.to_record()
     return json.dumps(data)
 
 
@@ -1230,7 +1298,7 @@ async def _disclose_frozen(frozen: Any) -> list[RoleAssignmentSummary]:
     sites. The offload matches ``presets_list_endpoint``: readiness reaches the
     filesystem, and ``/v1/runs/{run_id}`` is polled.
     """
-    if frozen is None:
+    if frozen is None or isinstance(frozen, FrozenTeamSelection):
         return []
     return await asyncio.to_thread(_frozen_disclosure, frozen)
 

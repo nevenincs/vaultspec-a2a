@@ -2290,6 +2290,64 @@
         "type": "object",
         "title": "ProviderCatalogResponse"
       },
+      "ProviderCatalogSelection": {
+        "properties": {
+          "schema_version": {
+            "type": "integer",
+            "const": 1,
+            "title": "Schema Version"
+          },
+          "provider_id": {
+            "type": "string",
+            "maxLength": 512,
+            "minLength": 1,
+            "title": "Provider Id"
+          },
+          "execution_mode": {
+            "type": "string",
+            "maxLength": 512,
+            "minLength": 1,
+            "title": "Execution Mode"
+          },
+          "catalog_revision": {
+            "type": "string",
+            "maxLength": 512,
+            "minLength": 1,
+            "title": "Catalog Revision"
+          },
+          "entry_id": {
+            "type": "string",
+            "maxLength": 512,
+            "minLength": 1,
+            "title": "Entry Id"
+          },
+          "controls": {
+            "additionalProperties": {
+              "type": "string",
+              "maxLength": 512,
+              "minLength": 1
+            },
+            "propertyNames": {
+              "maxLength": 128,
+              "minLength": 1
+            },
+            "type": "object",
+            "maxProperties": 32,
+            "title": "Controls"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "schema_version",
+          "provider_id",
+          "execution_mode",
+          "catalog_revision",
+          "entry_id"
+        ],
+        "title": "ProviderCatalogSelection",
+        "description": "One explicit schema-v1 reference to a served provider catalog entry."
+      },
       "ProviderCatalogStateResponse": {
         "properties": {
           "status": {
@@ -3428,25 +3486,34 @@
             "title": "Feature Tag"
           },
           "run_id": {
-            "anyOf": [
-              {
-                "type": "string",
-                "maxLength": 128,
-                "minLength": 1,
-                "pattern": "^[A-Za-z0-9_][A-Za-z0-9_-]{0,127}$"
-              },
-              {
-                "type": "null"
-              }
-            ],
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9_][A-Za-z0-9_-]{0,127}$",
             "title": "Run Id"
           },
-          "profile_id": {
-            "type": "string",
-            "maxLength": 64,
-            "minLength": 1,
-            "title": "Profile Id",
-            "default": "team-defaults"
+          "selection": {
+            "$ref": "#/components/schemas/ProviderCatalogSelection"
+          },
+          "overrides": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/ProviderCatalogSelection"
+            },
+            "propertyNames": {
+              "maxLength": 63,
+              "minLength": 1
+            },
+            "type": "object",
+            "maxProperties": 64,
+            "title": "Overrides"
+          },
+          "fallbacks": {
+            "items": {
+              "$ref": "#/components/schemas/ProviderCatalogSelection"
+            },
+            "type": "array",
+            "maxItems": 8,
+            "title": "Fallbacks"
           },
           "feedback_batch_id": {
             "anyOf": [
@@ -3465,7 +3532,9 @@
         "additionalProperties": false,
         "type": "object",
         "required": [
-          "team_preset"
+          "team_preset",
+          "run_id",
+          "selection"
         ],
         "title": "RunStartRequest",
         "description": "Start a run: the engine-facing shape of thread-create + first message.\n\nCarries the engine-provisioned per-role actor token bundle alongside\nthe run's preset and opening message. The gateway threads this onto the same\ndispatch path the internal thread-create flow uses — no second code path."
@@ -3676,6 +3745,17 @@
               }
             ],
             "title": "Failure Reason"
+          },
+          "provider_condition": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Provider Condition"
           },
           "profile_id": {
             "anyOf": [
@@ -4489,6 +4569,17 @@
               }
             ],
             "title": "Failure Reason"
+          },
+          "provider_condition": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Provider Condition"
           }
         },
         "type": "object",

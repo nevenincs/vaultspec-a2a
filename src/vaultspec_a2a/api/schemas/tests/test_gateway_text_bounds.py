@@ -15,9 +15,29 @@ from pydantic import ValidationError
 
 from ..gateway import (
     MAX_RUN_MESSAGE_CHARS,
+    ProviderCatalogSelection,
     RunClarificationRespondRequest,
     RunStartRequest,
 )
+
+_SELECTION = ProviderCatalogSelection(
+    schema_version=1,
+    provider_id="codex",
+    execution_mode="app-server",
+    catalog_revision="revision-1",
+    entry_id="entry-1",
+)
+
+
+def _run_start(message: str, **changes: object) -> RunStartRequest:
+    payload = {
+        "team_preset": "preset",
+        "message": message,
+        "run_id": "message-bound",
+        "selection": _SELECTION,
+        **changes,
+    }
+    return RunStartRequest.model_validate(payload)
 
 # Genuine multibyte samples: CJK at three UTF-8 bytes, an astral-plane emoji at
 # four, and a combining sequence whose character count differs from its visible
@@ -73,7 +93,7 @@ def test_message_bound_counts_characters_not_bytes(
 ) -> None:
     """A full-length multibyte prompt is accepted, as an ASCII one would be."""
     message = filler * MAX_RUN_MESSAGE_CHARS
-    request = RunStartRequest(team_preset="preset", message=message)
+    request = _run_start(message)
 
     assert len(request.message) == MAX_RUN_MESSAGE_CHARS
     # The prompt genuinely exceeds the character bound when measured in bytes,
@@ -89,9 +109,7 @@ def test_message_bound_rejects_one_character_past_the_cap(
     """The bound still binds - it is a character bound, not an absent one."""
     del utf8_width
     with pytest.raises(ValidationError):
-        RunStartRequest(
-            team_preset="preset", message=filler * (MAX_RUN_MESSAGE_CHARS + 1)
-        )
+        _run_start(filler * (MAX_RUN_MESSAGE_CHARS + 1))
 
 
 def test_documented_byte_budget_covers_the_character_bound() -> None:
@@ -106,7 +124,7 @@ def test_documented_byte_budget_covers_the_character_bound() -> None:
     published budget had drifted apart.
     """
     widest = "\U0001f600" * MAX_RUN_MESSAGE_CHARS
-    accepted = RunStartRequest(team_preset="preset", message=widest).message
+    accepted = _run_start(widest).message
 
     assert len(accepted.encode("utf-8")) == _CONTRACT_MESSAGE_BYTE_BUDGET
 
@@ -175,9 +193,8 @@ def test_title_and_feature_tag_accept_multibyte_prose(
     which must stay path-safe - carries such a class.
     """
     del utf8_width
-    request = RunStartRequest(
-        team_preset="preset",
-        message="hello",
+    request = _run_start(
+        "hello",
         title=filler * 200,
         feature_tag=filler * 128,
     )

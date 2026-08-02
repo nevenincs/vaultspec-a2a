@@ -4,7 +4,7 @@ tags:
   - '#provider-model-catalog'
 date: '2026-08-02'
 modified: '2026-08-02'
-body_hash: 'sha256:5b7458a0a79a77dbeab685110a1951cf1b848ffa3fcbc032cebb333ee70642bb'
+body_hash: 'sha256:0d2368c2c0809711dc1f9788237cbea430327777d063908e923ad2b7af04bb0c'
 tier: L2
 related:
   - '[[2026-08-02-provider-model-catalog-adr]]'
@@ -37,7 +37,7 @@ Build the provider-owned catalog, structured health, provider-native controls, f
 - [x] `P01.S05` - Implement authenticated OpenAI-compatible model discovery with unsupported metadata explicitly absent; `src/vaultspec_a2a/providers/openai_catalog.py`.
 - [x] `P01.S06` - Register execution-mode-specific catalog adapters and report unsupported enumeration honestly; `src/vaultspec_a2a/providers/factory.py`.
 - [x] `P01.S07` - Serve provider catalogs, refresh state, structured health, selectability, and safe reasons through bounded gateway contracts; `src/vaultspec_a2a/api/`.
-- [ ] `P01.S08` - Replace new-run profile admission with required served selection, bounded overrides, explicit fallbacks, controls, validation, and replay identity; `src/vaultspec_a2a/api/routes/gateway.py`.
+- [x] `P01.S08` - Replace new-run profile admission with required served selection, bounded overrides, explicit fallbacks, controls, validation, and replay identity; `src/vaultspec_a2a/api/routes/gateway.py`.
 - [ ] `P01.S09` - Freeze catalog provenance, exact model values, controls, fallbacks, execution modes, and schema version through compilation; `src/vaultspec_a2a/providers/model_profiles.py, src/vaultspec_a2a/graph/compiler.py`.
 - [ ] `P01.S10` - Remove provider and model policy from product presets and retire static external model-map authority while preserving legacy restart; `src/vaultspec_a2a/team/, src/vaultspec_a2a/graph/enums.py`.
 - [ ] `P01.S11` - Prove catalog discovery, stale refusal, health separation, served validation, replay, frozen restart, and legacy restart with real behavior; `src/vaultspec_a2a/providers/tests/, src/vaultspec_a2a/api/tests/, src/vaultspec_a2a/service_tests/`.

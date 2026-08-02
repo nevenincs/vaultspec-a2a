@@ -5,7 +5,7 @@ tags:
 date: '2026-08-02'
 modified: '2026-08-02'
 body_schema: 'body-v1'
-body_hash: 'sha256:4e47ff69a44a18862b88b99fec8fabe980f1fc1c5533965ee050e04cd75a0f8f'
+body_hash: 'sha256:3fdc0ab24ef3ac8274801919af5bdab66dd5a50837e3d990982d6f09d3d8fd20'
 related:
   - "[[2026-02-25-llm-context-provider-abstraction-adr]]"
   - "[[2026-07-15-model-profiles-adr]]"
@@ -13,24 +13,26 @@ related:
 
 # `provider-model-catalog` reference: `provider model catalog and health integration reference`
 
-This reference maps the current A2A and Dashboard selection path, provider
-catalog surfaces available to replace hard-coded model policy, and health facts
-that can be reported without spending a completion. It reflects the shared
-worktrees on 2026-08-02, including concurrent uncommitted A2A work.
+This reference maps the current A2A and Dashboard catalog-selection path,
+provider discovery surfaces, and health facts that can be reported without
+spending a completion. It reflects the shared worktrees on 2026-08-02,
+including the P01.S08 new-run admission contract.
 
 ## Summary
 
 ### Current cross-project path
 
-- A2A `RunStartRequest` forbids extra fields and accepts `profile_id`, not a
-  provider/catalog selection: `src/vaultspec_a2a/api/schemas/gateway.py:189,234`.
-- The Dashboard request and Rust pass-through likewise carry only
-  `profile_id`: `frontend/src/stores/server/agent/a2aTeam.ts:189` and
-  `engine/crates/vaultspec-api/src/routes/ops/a2a.rs:163,500` in the Dashboard
-  worktree.
-- The Dashboard composer renders backend-served profiles rather than provider
-  catalogs: `frontend/src/app/agent/Composer.tsx:758` and
-  `frontend/src/app/agent/ComposerModelPicker.tsx:1`.
+- A2A `RunStartRequest` forbids extra fields and requires a stable `run_id` plus
+  one explicit schema-v1 catalog selection. Optional override keys are bounded
+  to the preset's required worker IDs and ordered fallbacks are capped at eight:
+  `src/vaultspec_a2a/api/schemas/gateway.py`.
+- Every primary, override, and fallback reference names an exact provider,
+  execution mode, catalog revision, entry, and bounded native-control map.
+  `profile_id`, missing schema versions, and arbitrary provider/model/control
+  fields fail at the request boundary.
+- Dashboard and the Rust pass-through carry the same literal
+  `schema_version: 1` shape. Dashboard derives override keys from served
+  `required_roles` and revalidates retained choices against the current catalog.
 - Product preset TOMLs still encode provider lanes, and missing provider input
   can fall back to Claude: `src/vaultspec_a2a/team/presets/teams/vaultspec-adr-research.toml:164`
   and `src/vaultspec_a2a/providers/model_profiles.py:85,218`.
@@ -44,8 +46,10 @@ worktrees on 2026-08-02, including concurrent uncommitted A2A work.
   fallback, provenance, and digest:
   `src/vaultspec_a2a/providers/model_profiles.py:610-666`. The compiler consumes
   the frozen name at `src/vaultspec_a2a/graph/compiler.py:154,266`.
-- Run-start replay conflict handling compares `profile_id` today and must cover
-  the provider/model snapshot: `src/vaultspec_a2a/api/routes/gateway.py:888`.
+- Run-start persists the normalized whole-team selection and a complete request
+  digest. Replay canonicalizes omitted authoritative defaults from that persisted
+  record without requiring the old catalog entry to remain current; a changed
+  selection, override, fallback order, or control is refused.
 - The accepted provider-abstraction architecture assigns model catalog and auth
   metadata to provider descriptors/registry. P01.S06 implements that boundary as
   exact provider-and-execution-mode registrations in
@@ -93,6 +97,19 @@ Catalog admission is exact-mode and deny-by-default. Only `codex-app-server`
 currently has an intrinsically execution-mode-specific completed-turn citation.
 Claude and Z.AI provider-level citations do not capture the runtime-configurable
 ACP backend, so neither node nor binary catalog lanes inherit that evidence.
+
+P01.S08 consumes that served truth at both prepare and create. A selection is
+admitted only when its canonical workspace still serves the exact lane as
+selectable, the catalog is available and unexpired, its revision matches, the
+entry remains a member, and every supplied control option is attached to that
+entry. Advertised control defaults are inserted into the normalized selection;
+unsupported controls and options are never inferred. Required worker IDs must
+be unique and number between one and sixty-four before overrides or capacity are
+accepted. The complete normalized selection is persisted under
+`provider_catalog_selection` and included in prepare, commit, and same-ID replay
+identity. Legacy `model_profile` records remain readable for old-run restart but
+are not accepted as new-run policy. P01.S09 owns exact provider-native value
+freezing through compilation, modern restart, and frozen-assignment disclosure.
 
 Kimi Code configuration has two distinct modes. Persisted aliases live under the
 normal Kimi home, optionally relocated by `KIMI_CODE_HOME`. A temporary in-memory

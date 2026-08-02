@@ -39,7 +39,7 @@ from ...api.run_admission import (
     request_digest,
     stamped_replay_digest,
 )
-from ...api.schemas.gateway import RunStartRequest
+from ...api.schemas.gateway import ProviderCatalogSelection, RunStartRequest
 from ...thread.actor_tokens import ActorTokenBundle
 
 
@@ -52,7 +52,17 @@ def _request(**overrides: Any) -> RunStartRequest:
     field name.
     """
     base = RunStartRequest(
-        team_preset="research-adr", message="do the thing", run_id="r-1"
+        team_preset="research-adr",
+        message="do the thing",
+        run_id="r-1",
+        selection=ProviderCatalogSelection(
+            schema_version=1,
+            provider_id="codex",
+            execution_mode="app-server",
+            catalog_revision="revision-1",
+            entry_id="entry-1",
+            controls={"reasoning": "low"},
+        ),
     )
     return base.model_copy(update=overrides) if overrides else base
 
@@ -77,7 +87,8 @@ def test_identical_bodies_share_a_fingerprint() -> None:
     [
         ("message", "do something else entirely"),
         ("team_preset", "another-preset"),
-        ("profile_id", "not-team-defaults"),
+        ("overrides", {"coder": _request().selection}),
+        ("fallbacks", [_request().selection]),
         ("autonomous", True),
         ("title", "a different title"),
         ("feature_tag", "another-feature"),
@@ -153,7 +164,7 @@ def test_the_fingerprint_is_stable_across_processes() -> None:
 # canonicalisation guard: any change to field ordering, JSON separators, the
 # exclusion set, or the hash moves this value and fails here rather than
 # silently refusing every replay of a run started before the change.
-_STABLE_DIGEST = "d86e1fae08b2151ef9b9c54019e7b340f790a5718a933983d5d6804f77934b5e"
+_STABLE_DIGEST = "74449631837868195c63ad0e9f98a4744232dfeb27a556ec04bd402c57390443"
 
 
 def test_the_stored_fingerprint_value_itself_is_pinned() -> None:
@@ -260,7 +271,9 @@ def test_every_top_level_request_field_is_consciously_classified() -> None:
         "title",
         "feature_tag",
         "run_id",
-        "profile_id",
+        "selection",
+        "overrides",
+        "fallbacks",
         "feedback_batch_id",
     }
 

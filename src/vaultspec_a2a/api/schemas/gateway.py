@@ -53,6 +53,7 @@ __all__ = [
     "PresetSummary",
     "PresetsListResponse",
     "ProfileSummary",
+    "ProviderCatalogSelection",
     "ProviderEligibility",
     "ReservationId",
     "RoleAssignmentSummary",
@@ -95,6 +96,22 @@ LeaseId = Annotated[
     str,
     Field(min_length=1, max_length=128, pattern=_PATH_SAFE_RUN_ID.pattern),
 ]
+
+
+class ProviderCatalogSelection(BaseModel):
+    """One explicit schema-v1 reference to a served provider catalog entry."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    schema_version: Literal[1]
+    provider_id: str = Field(min_length=1, max_length=512)
+    execution_mode: str = Field(min_length=1, max_length=512)
+    catalog_revision: str = Field(min_length=1, max_length=512)
+    entry_id: str = Field(min_length=1, max_length=512)
+    controls: dict[
+        Annotated[str, Field(min_length=1, max_length=128)],
+        Annotated[str, Field(min_length=1, max_length=512)],
+    ] = Field(default_factory=dict, max_length=32)
 
 
 class LivenessState(StrEnum):
@@ -224,14 +241,19 @@ class RunStartRequest(BaseModel):
     # policy requires it for document-authoring presets. Falls back to
     # metadata.feature_tag when the field is omitted.
     feature_tag: str | None = Field(default=None, max_length=128)
-    # Client-supplied stable run/idempotency id. Staged prepare, commit, and
-    # release require it so a lost acknowledgement can be replayed; direct start
-    # keeps the compatibility shape and may mint a server-side id when absent.
-    run_id: PathSafeRunId | None = None
-    # model-profiles: the selected model profile id. Defaults to the implicit
-    # team-defaults profile (the team's normal resolution). An unknown or
-    # ineligible profile is refused before dispatch - never silently replaced.
-    profile_id: str = Field(default="team-defaults", min_length=1, max_length=64)
+    # Client-supplied stable run/idempotency id. Explicit provider selection is
+    # replay-safe only when every start owns a durable caller identity.
+    run_id: PathSafeRunId
+    # Explicit whole-team catalog choice. New runs have no implicit profile or
+    # provider default; every selected value must revalidate against the current
+    # workspace catalog before admission.
+    selection: ProviderCatalogSelection
+    overrides: dict[
+        Annotated[str, Field(min_length=1, max_length=63)], ProviderCatalogSelection
+    ] = Field(default_factory=dict, max_length=64)
+    fallbacks: list[ProviderCatalogSelection] = Field(
+        default_factory=list, max_length=8
+    )
     # feedback-loop: an OPAQUE engine feedback-batch id for a revision run. a2a
     # never parses or owns batch content; it transports only the id
     # and the worker retrieves the authoritative feedback context from the engine
@@ -255,27 +277,20 @@ class RunStartRequest(BaseModel):
                 raise ValueError("prepare must not carry actor tokens")
             if self.reservation_id is not None:
                 raise ValueError("prepare must not carry a reservation id")
-            if self.run_id is None:
-                raise ValueError("prepare requires a stable run id")
-        if self.stage == RunStage.COMMIT:
-            if self.reservation_id is None:
-                raise ValueError("commit requires a reservation id")
-            if self.run_id is None:
-                raise ValueError("commit requires a stable run id")
+        if self.stage == RunStage.COMMIT and self.reservation_id is None:
+            raise ValueError("commit requires a reservation id")
         if self.stage == RunStage.RELEASE:
             if self.reservation_id is None:
                 raise ValueError("release requires a reservation id")
-            if self.run_id is None:
-                raise ValueError("release requires a stable run id")
             if self.actor_tokens is not None:
                 raise ValueError("release must not carry actor tokens")
         return self
 
     @field_validator("run_id")
     @classmethod
-    def _run_id_must_be_path_safe(cls, value: str | None) -> str | None:
+    def _run_id_must_be_path_safe(cls, value: str) -> str:
         """Keep client identities addressable by every per-run gateway route."""
-        if value is not None and _PATH_SAFE_RUN_ID.fullmatch(value) is None:
+        if _PATH_SAFE_RUN_ID.fullmatch(value) is None:
             raise ValueError("run_id must be a path-safe token")
         return value
 

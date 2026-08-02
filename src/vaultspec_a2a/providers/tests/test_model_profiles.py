@@ -207,22 +207,24 @@ class TestReadiness:
         elif r.reason is not None:
             assert token not in r.reason
 
-    def test_kimi_readiness_reason_is_safe_and_credential_gated(self) -> None:
-        """Kimi readiness gates on KIMI_API_KEY and never leaks the SecretStr.
+    def test_kimi_persisted_config_mode_reaches_command_readiness(self) -> None:
+        """No temporary definition leaves Kimi's persisted-config mode eligible."""
+        import shutil
 
-        With no key configured the verdict is not-ready with the safe reason;
-        with a key it proceeds to command resolvability. Either way the reason is
-        credential-free (the key is a SecretStr; its value is never surfaced).
-        """
         key = (
             settings.kimi_api_key.get_secret_value() if settings.kimi_api_key else ""
         ).strip()
         r = probe_provider_readiness(Provider.KIMI)
         assert r.provider == Provider.KIMI
-        if not key:
-            assert r.ready is False
-            assert r.reason == "no Kimi API key configured"
-        elif r.reason is not None:
+        if (
+            not key
+            and not settings.kimi_base_url
+            and not settings.kimi_temporary_model_name
+        ):
+            assert r.ready is (shutil.which("kimi") is not None)
+            if r.ready:
+                assert r.reason is None
+        if key and r.reason is not None:
             assert key not in r.reason
 
     def test_codex_command_readiness_uses_public_probe(self) -> None:

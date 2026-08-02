@@ -100,11 +100,20 @@ class ProviderCondition(StrEnum):
     """
 
     INVALID_REQUEST = "invalid_request"
-    """The provider rejected the request as malformed or unsatisfiable.
+    """The request cannot succeed as sent; changing it is the remedy.
 
-    Covers a request the provider understood and refused on its own terms - a
-    bad shape, an unknown model, or a length past a hard model limit. Retrying
-    the same request cannot help; the request itself has to change.
+    The operative property is that retrying the SAME request cannot help - the
+    request itself has to change. That is what a consumer should act on, and it
+    is the only claim every mapped discriminator supports.
+
+    Deliberately wider than "the provider rejected it as malformed". Three
+    distinct shapes land here, and only the first is a malformed-input refusal:
+    a bad shape or unknown model; a policy refusal the provider understood and
+    declined on its own terms; and an output or context ceiling reached, which
+    may be a CLIENT-configured cap rather than a provider limit and may mean a
+    response was truncated rather than refused. Copy written for this member
+    must not tell a user their request was invalid, because for the ceiling case
+    nothing was wrong with it.
     """
 
     UNKNOWN = "unknown"

@@ -208,6 +208,11 @@ class InfraConfig(BaseSettings):
         default=None,
         validation_alias="OPENAI_API_KEY",
     )
+    openai_base_url: str = Field(
+        default="https://api.openai.com/v1",
+        validation_alias="OPENAI_BASE_URL",
+        description="Base URL for the OpenAI API execution and catalog lane.",
+    )
     zhipu_api_key: str | None = Field(
         default=None,
         validation_alias="ZHIPU_API_KEY",
@@ -251,20 +256,27 @@ class InfraConfig(BaseSettings):
             "indexed, live). Unset serves live on a web-proven lane."
         ),
     )
-    # Kimi (Moonshot AI) drives its own `kimi acp` agent. The CLI reads these
-    # unprefixed names from its own environment (the Z.ai ANTHROPIC_* passthrough
-    # precedent), so the factory injects them verbatim: KIMI_API_KEY authenticates,
-    # KIMI_BASE_URL retargets the Moonshot endpoint (unset = the CLI's own default),
-    # Model selection is profile-owned. The factory injects the resolved model
-    # into the subprocess and does not expose a global model override.
+    # Kimi Code reads persisted aliases from KIMI_CODE_HOME (default ~/.kimi-code).
+    # KIMI_MODEL_* defines a temporary provider and is valid only as a complete
+    # name/key/base tuple. Current names precede retained legacy key/base aliases.
+    # Runtime alias selection is not a setting; the factory uses `-m`.
+    kimi_code_home: str | None = Field(
+        default=None,
+        validation_alias="KIMI_CODE_HOME",
+    )
     kimi_api_key: SecretStr | None = Field(
         default=None,
-        validation_alias="KIMI_API_KEY",
+        validation_alias="KIMI_MODEL_API_KEY",
     )
     kimi_base_url: str | None = Field(
         default=None,
-        validation_alias="KIMI_BASE_URL",
-        description="Override base URL for the Kimi/Moonshot endpoint.",
+        validation_alias="KIMI_MODEL_BASE_URL",
+        description="Base URL in a complete temporary Kimi model definition.",
+    )
+    kimi_temporary_model_name: str | None = Field(
+        default=None,
+        validation_alias="KIMI_MODEL_NAME",
+        description="Alias in a complete temporary Kimi model definition.",
     )
     host: str = Field(
         default="127.0.0.1",

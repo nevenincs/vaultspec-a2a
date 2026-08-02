@@ -16,16 +16,55 @@ from ..factory import (
     _CLAUDE_ACP_JS,
     ProviderFactory,
     _build_gemini_env,
+    _build_kimi_env,
     _build_zai_env,
     _classify_acp_command,
     _classify_gemini_command,
     classify_provider_command,
+    kimi_temporary_model_configuration_reason,
 )
+from ..provider_catalog import AuthenticationState, CatalogStatus, ProviderCatalogKey
 
 
 def get_model_attr(model_obj: BaseChatModel) -> str | None:
     """Helper to get model name from different LangChain model classes."""
     return getattr(model_obj, "model", getattr(model_obj, "model_name", None))
+
+
+def test_catalog_registrations_are_execution_mode_specific() -> None:
+    registrations = ProviderFactory().catalog_registrations()
+    assert tuple(registration.key for registration in registrations) == (
+        ProviderCatalogKey("claude", f"claude-agent-acp:{settings.acp_backend}"),
+        ProviderCatalogKey("codex", "codex-app-server"),
+        ProviderCatalogKey("gemini", "gemini-cli-acp"),
+        ProviderCatalogKey("kimi", "kimi-code-acp"),
+        ProviderCatalogKey("openai", "openai-api"),
+        ProviderCatalogKey("zai", f"zai-claude-agent-acp:{settings.acp_backend}"),
+        ProviderCatalogKey("zhipu", "zhipu-openai-compatible-api"),
+    )
+    with pytest.raises(ValueError, match="no catalog registration"):
+        ProviderFactory().catalog_registration(ProviderCatalogKey("openai", "api"))
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "key",
+    (
+        ProviderCatalogKey("zai", f"zai-claude-agent-acp:{settings.acp_backend}"),
+        ProviderCatalogKey("zhipu", "zhipu-openai-compatible-api"),
+    ),
+)
+async def test_unverified_catalog_lanes_are_truthfully_unavailable(
+    key: ProviderCatalogKey,
+) -> None:
+    discovery = await ProviderFactory().catalog_registration(key).discover()
+    assert discovery.catalog.key == key
+    assert discovery.catalog.state.status is CatalogStatus.UNAVAILABLE
+    assert discovery.catalog.models == ()
+    assert discovery.catalog.state.reason == (
+        "provider lane has no verified prompt-free model enumeration"
+    )
+    assert discovery.authentication is AuthenticationState.UNKNOWN
 
 
 def _assert_binary_backend_unavailable(action: Callable[[], object]) -> None:
@@ -132,7 +171,7 @@ def test_provider_factory_gemini_creates_acp() -> None:
     model = ProviderFactory().create(Provider.GEMINI)
     assert isinstance(model, AcpChatModel)
     expected_model = MODEL_MAP[Provider.GEMINI][Model.MID]
-    assert model.command[1:] == ["--model", expected_model, "--experimental-acp"]
+    assert model.command[1:] == ["--model", expected_model, "--acp"]
 
 
 def test_classify_gemini_command_uses_explicit_executable_metadata() -> None:
@@ -145,11 +184,20 @@ def test_classify_gemini_command_uses_explicit_executable_metadata() -> None:
         "/usr/local/bin/gemini",
         "--model",
         "gemini-test-model",
-        "--experimental-acp",
+        "--acp",
     ]
     assert meta["runtime_authority"] == "explicit_executable"
     assert meta["command_origin"] == "explicit_executable"
     assert meta["command_kind"] == "gemini_cli"
+
+
+def test_gemini_catalog_command_does_not_preselect_a_model() -> None:
+    command, _ = _classify_gemini_command(
+        None,
+        executable="/usr/local/bin/gemini",
+    )
+
+    assert command == ["/usr/local/bin/gemini", "--acp"]
 
 
 def test_build_gemini_env_injects_supported_noninteractive_auth() -> None:
@@ -280,61 +328,82 @@ def test_provider_factory_kimi_creates_acp_on_kimi_agent() -> None:
     # Kimi drives its own agent, NOT the claude-agent-acp wrapper.
     assert model.command[-1] == "acp"
     assert "kimi" in model.command[0].lower()
-    # Per-run isolation (P03.S12): the inline --config global flag replaces the
-    # ambient ~/.kimi/config.toml, suppressing any ambient Kimi MCP.
-    assert "--config" in model.command
-    cfg_idx = model.command.index("--config")
-    assert "mcpServers" in model.command[cfg_idx + 1]
-    assert cfg_idx < model.command.index("acp")  # global flag before subcommand
+    expected_model = MODEL_MAP[Provider.KIMI][Model.MID]
+    assert model.command[1:] == ["-m", expected_model, "acp"]
     assert model.provider == Provider.KIMI.value
     # The backend family discriminator: kimi omits the Claude allowedTools _meta.
     assert model.acp_family == "kimi"
     assert model._config.acp_family == "kimi"
-    # Env passthrough uses the CLI's native unprefixed names; the key is a secret.
-    if settings.kimi_api_key:
-        assert model.env_vars["KIMI_API_KEY"] == (
+    # A complete temporary definition is explicit and separate from `-m`.
+    if "KIMI_MODEL_API_KEY" in model.env_vars:
+        assert settings.kimi_api_key is not None
+        assert model.env_vars["KIMI_MODEL_API_KEY"] == (
             settings.kimi_api_key.get_secret_value()
         )
-        assert model.auth_mode == "kimi_api_key"
+        assert model.auth_mode == "temporary_model"
         assert settings.kimi_api_key.get_secret_value() not in repr(model)
     else:
-        assert "KIMI_API_KEY" not in model.env_vars
-        assert model.auth_mode == "none_detected"
+        assert model.auth_mode == "persisted_config"
+    assert "KIMI_API_KEY" not in model.env_vars
+    assert "KIMI_BASE_URL" not in model.env_vars
 
 
-def test_kimi_pin_and_install_hint_are_colocated() -> None:
-    """The kimi-cli pin lives as one named constant and rides the install hint."""
-    from ..factory import _KIMI_CLI_PIN, _KIMI_INSTALL_HINT
+def test_kimi_persisted_configuration_injects_no_temporary_definition() -> None:
+    assert _build_kimi_env(kimi_code_home="C:/kimi-home") == {
+        "KIMI_CODE_HOME": "C:/kimi-home"
+    }
 
-    assert _KIMI_CLI_PIN == "1.49.0"
-    assert f"kimi-cli=={_KIMI_CLI_PIN}" in _KIMI_INSTALL_HINT
-    assert _KIMI_INSTALL_HINT.startswith("uv tool install")
+
+def test_complete_kimi_temporary_definition_uses_current_names() -> None:
+    assert _build_kimi_env(
+        kimi_api_key="temporary-key",
+        kimi_base_url="https://kimi.example.invalid/v1",
+        kimi_temporary_model_name="configured-alias",
+    ) == {
+        "KIMI_MODEL_API_KEY": "temporary-key",
+        "KIMI_MODEL_BASE_URL": "https://kimi.example.invalid/v1",
+        "KIMI_MODEL_NAME": "configured-alias",
+    }
+
+
+@pytest.mark.parametrize(
+    ("key", "base_url", "name"),
+    (
+        ("key", None, None),
+        (None, "https://kimi.example.invalid/v1", None),
+        (None, None, "alias"),
+        ("key", "https://kimi.example.invalid/v1", None),
+        ("key", None, "alias"),
+        (None, "https://kimi.example.invalid/v1", "alias"),
+    ),
+)
+def test_every_partial_kimi_temporary_definition_fails_closed(
+    key: str | None, base_url: str | None, name: str | None
+) -> None:
+    reason = kimi_temporary_model_configuration_reason(
+        kimi_api_key=key,
+        kimi_base_url=base_url,
+        kimi_temporary_model_name=name,
+    )
+    assert reason == (
+        "incomplete Kimi temporary model definition; set KIMI_MODEL_NAME, "
+        "KIMI_MODEL_API_KEY, and KIMI_MODEL_BASE_URL together"
+    )
+    with pytest.raises(ValueError, match="incomplete Kimi temporary model"):
+        _build_kimi_env(key, base_url, name)
 
 
 def test_classify_provider_command_kimi_resolves_or_hints_install() -> None:
-    """KIMI classifies to the kimi acp agent meta, or raises the pinned hint."""
+    """Kimi classifies to the installed Kimi Code ACP executable."""
     import shutil
 
-    from ..factory import _KIMI_CLI_PIN, classify_provider_command
-
     if shutil.which("kimi") is None:
-        with pytest.raises(ValueError, match=f"kimi-cli=={_KIMI_CLI_PIN}"):
+        with pytest.raises(ValueError, match="Kimi Code CLI not resolvable"):
             classify_provider_command(Provider.KIMI)
         return
     meta = classify_provider_command(Provider.KIMI)
     assert meta["command_kind"] == "kimi_cli"
     assert meta["command_origin"] == "system_path_executable"
-
-
-def test_kimi_git_bash_prerequisite_helper() -> None:
-    """The Git-Bash prerequisite helper honors the CLI's own env override name."""
-    from ..factory import _KIMI_GIT_BASH_ENV, _kimi_git_bash_resolvable
-
-    # The override name matches the installed CLI source, not the ADR's inferred
-    # KIMI_SHELL_PATH (grounding correction).
-    assert _KIMI_GIT_BASH_ENV == "KIMI_CLI_GIT_BASH_PATH"
-    # Git for Windows is a host prerequisite here, so this resolves True.
-    assert _kimi_git_bash_resolvable() is True
 
 
 def test_classify_provider_command_zai_returns_acp_meta() -> None:
@@ -359,6 +428,7 @@ def test_provider_factory_explicit_string_model() -> None:
     )
     assert get_model_attr(model) == custom_model
     assert isinstance(model, ChatOpenAI)
+    assert str(model.openai_api_base).rstrip("/") == settings.openai_base_url
 
 
 def test_provider_factory_zhipu_mapping() -> None:

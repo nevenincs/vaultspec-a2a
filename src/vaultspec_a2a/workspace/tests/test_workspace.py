@@ -115,6 +115,14 @@ _SCRUB_SECRET_KEYS: list[str] = [
     "LANGCHAIN_TRACING_V2",
     # ANTHROPIC_LOG causes SDK debug text on stdout → JSON-RPC corruption.
     "ANTHROPIC_LOG",
+    # Kimi Code temporary-provider definitions are never inherited piecemeal.
+    "KIMI_API_KEY",
+    "KIMI_BASE_URL",
+    "KIMI_MODEL_API_KEY",
+    "KIMI_MODEL_BASE_URL",
+    "KIMI_MODEL_NAME",
+    "KIMI_MODEL_MAX_CONTEXT_SIZE",
+    "KIMI_MODEL_CAPABILITIES",
 ]
 
 _SCRUB_VAULTSPEC_KEYS: dict[str, str] = {

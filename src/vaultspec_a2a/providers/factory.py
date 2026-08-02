@@ -3,6 +3,9 @@
 import logging
 import os
 import shutil
+from collections.abc import Awaitable, Callable
+from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -13,9 +16,27 @@ from ..control.config import settings
 from ..graph.enums import MODEL_MAP, PROVIDER_DEFAULT_MODELS, Model, Provider
 from ..team.team_config import AgentConfig
 from ..thread.errors import ConfigError
+from ..workspace.environment import resolve_env_vars
+from .acp_catalog import discover_acp_catalog
 from .acp_chat_model import AcpChatModel
+from .codex_catalog import discover_codex_catalog
+from .kimi_catalog import discover_kimi_catalog
+from .openai_catalog import discover_openai_compatible_catalog
+from .provider_catalog import (
+    AuthenticationState,
+    CatalogState,
+    CatalogStatus,
+    ProviderCatalog,
+    ProviderCatalogKey,
+)
 
-__all__ = ["ProviderFactory", "classify_provider_command"]
+__all__ = [
+    "ProviderCatalogDiscovery",
+    "ProviderCatalogRegistration",
+    "ProviderFactory",
+    "classify_provider_command",
+    "kimi_temporary_model_configuration_reason",
+]
 
 logger = logging.getLogger(__name__)
 
@@ -110,39 +131,61 @@ def _build_zai_env(
 def _build_kimi_env(
     kimi_api_key: str | None = None,
     kimi_base_url: str | None = None,
-    kimi_model_name: str | None = None,
+    kimi_temporary_model_name: str | None = None,
+    kimi_code_home: str | None = None,
 ) -> dict[str, str]:
-    """Return explicit Kimi auth/config env vars for the ``kimi acp`` subprocess.
+    """Return the explicit Kimi Code home and temporary-provider definition.
 
-    The Kimi CLI reads its NATIVE unprefixed names directly from the process
-    environment (the Z.ai ``ANTHROPIC_*`` passthrough precedent): ``KIMI_API_KEY``
-    authenticates, ``KIMI_BASE_URL`` retargets the Moonshot endpoint, and
-    ``KIMI_MODEL_NAME`` selects the model. Only names with a value are injected;
-    the key is a secret, placed in the returned dict but never logged.
+    Kimi Code 0.28.1 treats ``KIMI_MODEL_*`` as one temporary provider, not as
+    independent launch overrides. The tuple is injected only when complete;
+    exact configured-alias selection is a separate ``-m`` argument.
     """
+    reason = kimi_temporary_model_configuration_reason(
+        kimi_api_key=kimi_api_key,
+        kimi_base_url=kimi_base_url,
+        kimi_temporary_model_name=kimi_temporary_model_name,
+    )
+    if reason is not None:
+        raise ValueError(reason)
     env_vars: dict[str, str] = {}
-    if kimi_api_key and kimi_api_key.strip():
-        env_vars["KIMI_API_KEY"] = kimi_api_key
-    if kimi_base_url and kimi_base_url.strip():
-        env_vars["KIMI_BASE_URL"] = kimi_base_url
-    if kimi_model_name and kimi_model_name.strip():
-        env_vars["KIMI_MODEL_NAME"] = kimi_model_name
+    if kimi_code_home and kimi_code_home.strip():
+        env_vars["KIMI_CODE_HOME"] = kimi_code_home.strip()
+    if kimi_api_key and kimi_base_url and kimi_temporary_model_name:
+        env_vars["KIMI_MODEL_API_KEY"] = kimi_api_key.strip()
+        env_vars["KIMI_MODEL_BASE_URL"] = kimi_base_url.strip()
+        env_vars["KIMI_MODEL_NAME"] = kimi_temporary_model_name.strip()
     return env_vars
 
 
+def kimi_temporary_model_configuration_reason(
+    *,
+    kimi_api_key: str | None,
+    kimi_base_url: str | None,
+    kimi_temporary_model_name: str | None,
+) -> str | None:
+    """Return a static reason when a temporary Kimi definition is partial."""
+    values = (kimi_api_key, kimi_base_url, kimi_temporary_model_name)
+    present = tuple(bool(value and value.strip()) for value in values)
+    if not any(present) or all(present):
+        return None
+    return (
+        "incomplete Kimi temporary model definition; set KIMI_MODEL_NAME, "
+        "KIMI_MODEL_API_KEY, and KIMI_MODEL_BASE_URL together"
+    )
+
+
 def _classify_gemini_command(
-    model_name: str,
+    model_name: str | None,
     *,
     executable: str | None = None,
 ) -> tuple[list[str], dict[str, str]]:
     """Return the Gemini CLI command plus bounded runtime metadata."""
     if executable is not None:
-        return [
-            executable,
-            "--model",
-            model_name,
-            "--experimental-acp",
-        ], {
+        command = [executable]
+        if model_name is not None:
+            command.extend(("--model", model_name))
+        command.append("--acp")
+        return command, {
             "runtime_authority": "explicit_executable",
             "command_origin": "explicit_executable",
             "command_kind": "gemini_cli",
@@ -152,13 +195,11 @@ def _classify_gemini_command(
 
     docker_entry = Path("/usr/local/lib/node_modules/@google/gemini-cli/dist/index.js")
     if docker_entry.exists():
-        return [
-            "node",
-            str(docker_entry),
-            "--model",
-            model_name,
-            "--experimental-acp",
-        ], {
+        command = ["node", str(docker_entry)]
+        if model_name is not None:
+            command.extend(("--model", model_name))
+        command.append("--acp")
+        return command, {
             "runtime_authority": "docker_bundled",
             "command_origin": "docker_node_modules_entry",
             "command_kind": "node_entry",
@@ -175,13 +216,11 @@ def _classify_gemini_command(
         / "index.js"
     )
     if local_entry.exists():
-        return [
-            "node",
-            str(local_entry),
-            "--model",
-            model_name,
-            "--experimental-acp",
-        ], {
+        command = ["node", str(local_entry)]
+        if model_name is not None:
+            command.extend(("--model", model_name))
+        command.append("--acp")
+        return command, {
             "runtime_authority": "project_local",
             "command_origin": "project_node_modules_entry",
             "command_kind": "node_entry",
@@ -191,12 +230,11 @@ def _classify_gemini_command(
 
     system_gemini = shutil.which("gemini")
     if system_gemini:
-        return [
-            system_gemini,
-            "--model",
-            model_name,
-            "--experimental-acp",
-        ], {
+        command = [system_gemini]
+        if model_name is not None:
+            command.extend(("--model", model_name))
+        command.append("--acp")
+        return command, {
             "runtime_authority": "system_cli",
             "command_origin": "system_path_executable",
             "command_kind": "gemini_cli",
@@ -208,12 +246,11 @@ def _classify_gemini_command(
     candidate_name = "gemini.cmd" if os.name == "nt" else "gemini"
     local_gemini = local_bin / candidate_name
     if local_gemini.exists():
-        return [
-            str(local_gemini),
-            "--model",
-            model_name,
-            "--experimental-acp",
-        ], {
+        command = [str(local_gemini)]
+        if model_name is not None:
+            command.extend(("--model", model_name))
+        command.append("--acp")
+        return command, {
             "runtime_authority": "project_local",
             "command_origin": "project_local_bin",
             "command_kind": "gemini_cli",
@@ -221,12 +258,11 @@ def _classify_gemini_command(
             "command_target": str(local_gemini),
         }
 
-    return [
-        "gemini",
-        "--model",
-        model_name,
-        "--experimental-acp",
-    ], {
+    command = ["gemini"]
+    if model_name is not None:
+        command.extend(("--model", model_name))
+    command.append("--acp")
+    return command, {
         "runtime_authority": "system_cli",
         "command_origin": "fallback_cli_name",
         "command_kind": "gemini_cli",
@@ -434,51 +470,13 @@ def _classify_codex_command() -> tuple[list[str], dict[str, str]]:
     }
 
 
-# Single recorded home for the Kimi CLI pin (a Python `uv tool install` axis,
-# distinct from the Node package.json adapter pin). Surfaced in the install hint
-# below, mirroring the _classify_acp_command "Run 'npm install' ..." pattern.
-_KIMI_CLI_PIN = "1.49.0"
-_KIMI_INSTALL_HINT = f"uv tool install kimi-cli=={_KIMI_CLI_PIN}"
-# Per-run config isolation: the inline `--config` global flag REPLACES the
-# operator's ~/.kimi/config.toml for this launch (kimi --help: "override ... set
-# in config file"), so any ambient Kimi MCP the operator has configured is
-# suppressed. An explicit empty mcpServers documents the intent. Auth rides the
-# KIMI_API_KEY env and the harness rides session-injected mcpServers, both
-# independent of this file, so nothing the run needs is lost. Inline text carries
-# NO file, so there is no per-run temp file to create or clean up.
-_KIMI_ISOLATION_CONFIG = '{"mcpServers": {}}'
-# The Kimi CLI's Windows shell backend is Git Bash; it resolves bash.exe via the
-# KIMI_CLI_GIT_BASH_PATH env override, then `git` on PATH, then standard install
-# paths, and exits at startup if none resolve (kimi-cli 1.49.0 CHANGELOG). NOTE:
-# grounding the installed source corrected the env name from the ADR's inferred
-# "KIMI_SHELL_PATH" to the actual "KIMI_CLI_GIT_BASH_PATH".
-_KIMI_GIT_BASH_ENV = "KIMI_CLI_GIT_BASH_PATH"
-
-
-def _kimi_git_bash_resolvable() -> bool:
-    """Return whether the Kimi CLI's required Git-Bash shell is resolvable.
-
-    Mirrors the CLI's own resolution order so the readiness probe fails for the
-    same reason the CLI would exit at startup: the ``KIMI_CLI_GIT_BASH_PATH``
-    override (validated to exist), else ``git`` on PATH (Git for Windows ships
-    bash.exe beside it), else a standard install path.
-    """
-    override = os.environ.get(_KIMI_GIT_BASH_ENV)
-    if override and Path(override).exists():
-        return True
-    if shutil.which("git") is not None or shutil.which("bash") is not None:
-        return True
-    return Path(r"C:\Program Files\Git\bin\bash.exe").exists()
-
-
 def _classify_kimi_command() -> tuple[list[str], dict[str, str]]:
     """Return the ``kimi acp`` command plus bounded runtime metadata.
 
     Kimi speaks ACP natively (``kimi acp`` is a stdio ACP server). Resolution
-    prefers the ``kimi`` executable on PATH (the ``uv tool install`` shim at
-    ``~/.local/bin/kimi``); the bare-name ``fallback_cli_name`` origin (no
-    resolved path) is what ``classify_provider_command`` treats as unresolvable,
-    matching the Codex/Gemini classifier convention.
+    prefers the installed Kimi Code executable on PATH. The bare-name
+    ``fallback_cli_name`` origin is treated as unresolvable by readiness and
+    catalog registration.
     """
     system_kimi = shutil.which("kimi")
     if system_kimi:
@@ -522,10 +520,8 @@ def classify_provider_command(
         _, meta = _classify_acp_command(resolved_backend)
         return meta
     if provider == Provider.GEMINI:
-        default_model = MODEL_MAP[Provider.GEMINI][
-            PROVIDER_DEFAULT_MODELS[Provider.GEMINI]
-        ]
-        _, meta = _classify_gemini_command(default_model)
+        # Catalog/readiness classification must not preselect a static model.
+        _, meta = _classify_gemini_command(None)
         if meta.get("command_origin") == "fallback_cli_name":
             raise ValueError(
                 "Gemini CLI not resolvable: not found in node_modules, the docker "
@@ -540,16 +536,7 @@ def classify_provider_command(
     if provider == Provider.KIMI:
         _, meta = _classify_kimi_command()
         if meta.get("command_origin") == "fallback_cli_name":
-            raise ValueError(
-                f"Kimi CLI not resolvable: 'kimi' not found on PATH. "
-                f"Install with '{_KIMI_INSTALL_HINT}'."
-            )
-        if not _kimi_git_bash_resolvable():
-            raise ValueError(
-                "Kimi CLI prerequisite missing: Git for Windows (Git Bash) is "
-                "required as the CLI's shell. Install Git for Windows, or set "
-                f"{_KIMI_GIT_BASH_ENV} to your bash.exe."
-            )
+            raise ValueError("Kimi Code CLI not resolvable: 'kimi' not found on PATH.")
         return meta
     raise ValueError(f"provider {provider.value} has no subprocess command to classify")
 
@@ -567,6 +554,165 @@ _SUPPORTED_PROVIDERS: frozenset[Provider] = frozenset(
         Provider.OPENAI,
     }
 )
+
+
+@dataclass(frozen=True, slots=True)
+class ProviderCatalogDiscovery:
+    """One adapter result normalized at the factory registration boundary."""
+
+    catalog: ProviderCatalog
+    authentication: AuthenticationState
+
+
+@dataclass(frozen=True, slots=True)
+class ProviderCatalogRegistration:
+    """A single execution-mode-specific catalog discovery callback."""
+
+    key: ProviderCatalogKey
+    discover: Callable[[], Awaitable[ProviderCatalogDiscovery]]
+
+
+def _unavailable_catalog_discovery(
+    key: ProviderCatalogKey,
+    *,
+    reason: str,
+    authentication: AuthenticationState = AuthenticationState.UNKNOWN,
+) -> ProviderCatalogDiscovery:
+    return ProviderCatalogDiscovery(
+        catalog=ProviderCatalog(
+            key=key,
+            state=CatalogState(
+                status=CatalogStatus.UNAVAILABLE,
+                checked_at=datetime.now(UTC),
+                reason=reason,
+            ),
+            models=(),
+        ),
+        authentication=authentication,
+    )
+
+
+async def _discover_claude_catalog(key: ProviderCatalogKey) -> ProviderCatalogDiscovery:
+    try:
+        command, metadata = _classify_acp_command(settings.acp_backend)
+    except (ConfigError, ValueError):
+        return _unavailable_catalog_discovery(
+            key, reason="provider catalog command is unavailable"
+        )
+    env = resolve_env_vars(settings.project_root)
+    use_exec = metadata["acp_backend"] == "binary"
+    if use_exec:
+        env["CLAUDE_AGENT_ACP_IS_SINGLE_FILE_BUN"] = "1"
+    discovered = await discover_acp_catalog(
+        tuple(command),
+        env=env,
+        cwd=str(settings.project_root),
+        key=key,
+        use_exec=use_exec,
+        metadata={"provider": Provider.CLAUDE.value, **metadata},
+    )
+    return ProviderCatalogDiscovery(discovered.catalog, discovered.authentication)
+
+
+async def _discover_codex_catalog(key: ProviderCatalogKey) -> ProviderCatalogDiscovery:
+    try:
+        command, _ = _classify_codex_command()
+        if command[0] == "codex":
+            raise ValueError("Codex CLI is not resolvable")
+    except ValueError:
+        return _unavailable_catalog_discovery(
+            key, reason="provider catalog command is unavailable"
+        )
+    env = resolve_env_vars(settings.project_root)
+    if settings.codex_home:
+        env["CODEX_HOME"] = settings.codex_home
+    discovered = await discover_codex_catalog(
+        tuple(command),
+        env=env,
+        cwd=str(settings.project_root),
+        key=key,
+    )
+    return ProviderCatalogDiscovery(discovered.catalog, discovered.authentication)
+
+
+async def _discover_gemini_catalog(key: ProviderCatalogKey) -> ProviderCatalogDiscovery:
+    try:
+        command, metadata = _classify_gemini_command(None)
+        if metadata["command_origin"] == "fallback_cli_name":
+            raise ValueError("Gemini CLI is not resolvable")
+    except ValueError:
+        return _unavailable_catalog_discovery(
+            key, reason="provider catalog command is unavailable"
+        )
+    env = resolve_env_vars(settings.project_root)
+    env.update(
+        _build_gemini_env(
+            settings.gemini_api_key,
+            settings.google_api_key,
+            settings.google_application_credentials,
+            settings.gemini_cli_home,
+        )
+    )
+    discovered = await discover_acp_catalog(
+        tuple(command),
+        env=env,
+        cwd=str(settings.project_root),
+        key=key,
+        metadata={"provider": Provider.GEMINI.value, **metadata},
+    )
+    return ProviderCatalogDiscovery(discovered.catalog, discovered.authentication)
+
+
+async def _discover_kimi_catalog(key: ProviderCatalogKey) -> ProviderCatalogDiscovery:
+    try:
+        command, metadata = _classify_kimi_command()
+        if metadata["command_origin"] == "fallback_cli_name":
+            raise ValueError("Kimi Code CLI is not resolvable")
+    except ValueError:
+        return _unavailable_catalog_discovery(
+            key, reason="provider catalog command is unavailable"
+        )
+    api_key = (
+        settings.kimi_api_key.get_secret_value() if settings.kimi_api_key else None
+    )
+    try:
+        injected = _build_kimi_env(
+            kimi_api_key=api_key,
+            kimi_base_url=settings.kimi_base_url,
+            kimi_temporary_model_name=settings.kimi_temporary_model_name,
+            kimi_code_home=settings.kimi_code_home,
+        )
+    except ValueError as exc:
+        return _unavailable_catalog_discovery(key, reason=str(exc))
+    env = resolve_env_vars(settings.project_root)
+    env.update(injected)
+    # Discovery is a sibling command, never `kimi acp provider list`.
+    discovered = await discover_kimi_catalog(
+        (command[0],),
+        env=env,
+        cwd=str(settings.project_root),
+        key=key,
+        metadata={"provider": Provider.KIMI.value, **metadata},
+    )
+    return ProviderCatalogDiscovery(discovered.catalog, discovered.authentication)
+
+
+async def _discover_openai_catalog(key: ProviderCatalogKey) -> ProviderCatalogDiscovery:
+    discovered = await discover_openai_compatible_catalog(
+        base_url=settings.openai_base_url,
+        api_key=settings.openai_api_key,
+        key=key,
+    )
+    return ProviderCatalogDiscovery(discovered.catalog, discovered.authentication)
+
+
+async def _discover_unverified_catalog(
+    key: ProviderCatalogKey,
+) -> ProviderCatalogDiscovery:
+    return _unavailable_catalog_discovery(
+        key,
+        reason="provider lane has no verified prompt-free model enumeration",
+    )
 
 
 def _admit_and_resolve_model_name(
@@ -617,6 +763,53 @@ def _admit_and_resolve_model_name(
 
 class ProviderFactory:
     """Factory for instantiating LangChain chat models for different providers."""
+
+    def catalog_registrations(self) -> tuple[ProviderCatalogRegistration, ...]:
+        """Return each external catalog lane with its exact discovery adapter.
+
+        Registrations deliberately contain no model values. A lane without a
+        verified enumeration surface remains present but unavailable, rather than
+        inheriting an API or ACP catalog from a different execution mode.
+        """
+        claude = ProviderCatalogKey(
+            Provider.CLAUDE.value, f"claude-agent-acp:{settings.acp_backend}"
+        )
+        codex = ProviderCatalogKey(Provider.CODEX.value, "codex-app-server")
+        gemini = ProviderCatalogKey(Provider.GEMINI.value, "gemini-cli-acp")
+        kimi = ProviderCatalogKey(Provider.KIMI.value, "kimi-code-acp")
+        openai = ProviderCatalogKey(Provider.OPENAI.value, "openai-api")
+        zai = ProviderCatalogKey(
+            Provider.ZAI.value, f"zai-claude-agent-acp:{settings.acp_backend}"
+        )
+        zhipu = ProviderCatalogKey(Provider.ZHIPU.value, "zhipu-openai-compatible-api")
+        return (
+            ProviderCatalogRegistration(
+                claude, lambda: _discover_claude_catalog(claude)
+            ),
+            ProviderCatalogRegistration(codex, lambda: _discover_codex_catalog(codex)),
+            ProviderCatalogRegistration(
+                gemini, lambda: _discover_gemini_catalog(gemini)
+            ),
+            ProviderCatalogRegistration(kimi, lambda: _discover_kimi_catalog(kimi)),
+            ProviderCatalogRegistration(
+                openai, lambda: _discover_openai_catalog(openai)
+            ),
+            ProviderCatalogRegistration(zai, lambda: _discover_unverified_catalog(zai)),
+            ProviderCatalogRegistration(
+                zhipu, lambda: _discover_unverified_catalog(zhipu)
+            ),
+        )
+
+    def catalog_registration(
+        self, key: ProviderCatalogKey
+    ) -> ProviderCatalogRegistration:
+        """Resolve a served lane exactly; unknown modes cannot borrow an adapter."""
+        for registration in self.catalog_registrations():
+            if registration.key == key:
+                return registration
+        raise ValueError(
+            "no catalog registration exists for the requested provider execution lane"
+        )
 
     def create(
         self,
@@ -780,27 +973,11 @@ class ProviderFactory:
             )
 
         if provider == Provider.KIMI:
-            # Kimi (Moonshot AI) drives its own `kimi acp` ACP agent, not the
-            # claude-agent-acp wrapper. It honors session-injected mcpServers, so
-            # its harness composition rides the existing with_mcp_servers ACP
-            # branch unchanged; the only conditioning is the backend family
-            # discriminator (acp_family="kimi"), which makes _acp_session OMIT the
-            # Claude-only allowedTools _meta while the terminal-auth handshake
-            # stays unconditional. Read-only discipline is enforced at the
-            # permission-RPC handler, not via a config allowlist (Kimi has none).
-            #
-            # Per-run isolation: inject the inline `--config` global flag before
-            # the `acp` subcommand so this launch loads ONLY the run's config,
-            # excluding the operator's ~/.kimi/config.toml and thereby suppressing
-            # any ambient Kimi MCP (the same per-run-config isolation as the Codex
-            # CODEX_HOME and the Claude isolated home).
+            # Kimi Code owns its provider aliases. The exact catalog-selected
+            # alias is passed through the installed CLI's `-m` option; it is not
+            # reinterpreted as a temporary-provider KIMI_MODEL_NAME.
             base_command, command_meta = _classify_kimi_command()
-            command = [
-                base_command[0],
-                "--config",
-                _KIMI_ISOLATION_CONFIG,
-                *base_command[1:],
-            ]
+            command = [base_command[0], "-m", model_name, *base_command[1:]]
             api_key = (
                 settings.kimi_api_key.get_secret_value()
                 if settings.kimi_api_key
@@ -809,12 +986,13 @@ class ProviderFactory:
             env_vars = _build_kimi_env(
                 kimi_api_key=api_key,
                 kimi_base_url=settings.kimi_base_url,
-                kimi_model_name=model_name,
+                kimi_temporary_model_name=settings.kimi_temporary_model_name,
+                kimi_code_home=settings.kimi_code_home,
             )
             logger.debug(
-                "[%s] Instantiating Kimi ACP agent. API key present: %s",
+                "[%s] Instantiating Kimi ACP agent. Temporary definition present: %s",
                 provider,
-                "KIMI_API_KEY" in env_vars,
+                "KIMI_MODEL_API_KEY" in env_vars,
             )
 
             return AcpChatModel(
@@ -829,9 +1007,11 @@ class ProviderFactory:
                 command_kind=command_meta["command_kind"],
                 command_executable=command_meta["command_executable"],
                 command_target=command_meta["command_target"],
-                acp_backend="kimi_cli",
+                acp_backend="kimi-code",
                 auth_mode=(
-                    "kimi_api_key" if "KIMI_API_KEY" in env_vars else "none_detected"
+                    "temporary_model"
+                    if "KIMI_MODEL_API_KEY" in env_vars
+                    else "persisted_config"
                 ),
             )
 
@@ -928,6 +1108,7 @@ class ProviderFactory:
             )
             kwargs["api_key"] = api_key
             kwargs["model"] = model_name
+            kwargs["base_url"] = settings.openai_base_url
             kwargs["timeout"] = timeout
             kwargs["max_retries"] = 2
 

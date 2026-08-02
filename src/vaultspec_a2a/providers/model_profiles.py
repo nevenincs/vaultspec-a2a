@@ -49,7 +49,10 @@ from ..team.team_config import (
 )
 from ..thread.errors import AgentConfigNotFoundError, ConfigError
 from ._json_contract import JsonObject, JsonValue
-from .factory import classify_provider_command
+from .factory import (
+    classify_provider_command,
+    kimi_temporary_model_configuration_reason,
+)
 from .lane_admission import lane_admission_reason, unproven_lanes_in
 
 if TYPE_CHECKING:
@@ -386,20 +389,23 @@ def probe_provider_readiness(provider: Provider) -> ProviderReadiness:
         return ProviderReadiness(provider=provider, ready=True)
 
     if provider == Provider.KIMI:
-        # Kimi authenticates via the CLI-native KIMI_API_KEY (a SecretStr):
-        # presence is checked by extracting the value into a bool, never surfacing
-        # it in the reason. Command readiness additionally covers the `kimi` binary
-        # AND the Git-Bash prerequisite (classify_provider_command raises for
-        # either), so a ready result means the key is configured and the lane can
-        # actually launch.
+        # No temporary definition means persisted-config/device-session mode and
+        # is eligible for the later provider-list probe. A complete temporary
+        # definition is also eligible. Partial definitions fail before launch;
+        # neither case is authentication or completed-turn proof.
         key = (
             settings.kimi_api_key.get_secret_value() if settings.kimi_api_key else None
         )
-        if not _has_text(key):
+        reason = kimi_temporary_model_configuration_reason(
+            kimi_api_key=key,
+            kimi_base_url=settings.kimi_base_url,
+            kimi_temporary_model_name=settings.kimi_temporary_model_name,
+        )
+        if reason is not None:
             return ProviderReadiness(
                 provider=provider,
                 ready=False,
-                reason="no Kimi API key configured",
+                reason=reason,
             )
         return _command_readiness(provider)
 

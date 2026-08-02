@@ -103,6 +103,16 @@ def resolve_env_vars(workspace_path: Path) -> dict[str, str]:
             "LANGSMITH_API_KEY",
             "LANGCHAIN_TRACING_V2",
             "ANTHROPIC_LOG",
+            # Kimi Code's temporary-provider definition is an all-or-none unit.
+            # Scrub its current family and retained legacy spellings so only the
+            # Settings-owned definition can be re-injected by the factory.
+            "KIMI_API_KEY",
+            "KIMI_BASE_URL",
+            "KIMI_MODEL_API_KEY",
+            "KIMI_MODEL_BASE_URL",
+            "KIMI_MODEL_NAME",
+            "KIMI_MODEL_MAX_CONTEXT_SIZE",
+            "KIMI_MODEL_CAPABILITIES",
         }
     )
     claude_code_allowlist = frozenset(

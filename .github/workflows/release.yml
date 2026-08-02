@@ -158,6 +158,99 @@ jobs:
         shell: bash
         run: uv run --no-sync --frozen python scripts/build_binary.py --dist dist/binary
 
+      # THE TREE THE CONSUMER ACTUALLY ACCEPTS. The archive is unpacked into an
+      # immutable generation tree, and that tree's rules are narrower than "a
+      # directory of files": it admits no directory without a regular-file
+      # descendant, and no link or reparse object anywhere. A tree that breaks
+      # either is refused at INSTALL time, on a user's machine, long after this
+      # workflow went green — and the consumer names the freeze recipe as the
+      # thing at fault, because it is.
+      #
+      # This is cheap and it is checked here rather than trusted, because what
+      # populates the onedir is PyInstaller plus whatever the dependency set
+      # happens to lay down: a bump can introduce an empty package directory or
+      # a symlinked shared library without anything in this repository changing.
+      - name: Prove the frozen tree is one the consumer can install
+        shell: bash
+        run: |
+          set -euo pipefail
+          "$PY" - <<'PY'
+          import os
+          import stat
+          import sys
+          from pathlib import Path
+
+          root = Path("dist/binary/vaultspec-a2a")
+          if not root.is_dir():
+              sys.exit(f"::error::frozen onedir absent at {root}")
+
+          REPARSE = 0x400  # FILE_ATTRIBUTE_REPARSE_POINT
+          empty: list[str] = []
+          nonregular: list[str] = []
+          links: list[str] = []
+          directories: set[Path] = set()
+          populated: set[Path] = set()
+          files = 0
+
+
+          def is_link(entry: Path) -> bool:
+              """A junction is not a symlink, and both are reparse objects."""
+              attributes = getattr(entry.lstat(), "st_file_attributes", 0)
+              return bool(attributes & REPARSE) or entry.is_symlink()
+
+
+          for dirpath, dirnames, filenames in os.walk(root):
+              directory = Path(dirpath)
+              directories.add(directory)
+              regular = 0
+              for name in filenames:
+                  entry = directory / name
+                  if is_link(entry):
+                      links.append(str(entry.relative_to(root)))
+                  elif stat.S_ISREG(entry.lstat().st_mode):
+                      regular += 1
+                  else:
+                      nonregular.append(str(entry.relative_to(root)))
+              files += regular
+              if regular:
+                  # "No regular-file DESCENDANT" is the rule, so a directory
+                  # holding only populated subdirectories is legitimate: credit
+                  # every ancestor rather than re-walking each subtree.
+                  for ancestor in (directory, *directory.parents):
+                      populated.add(ancestor)
+                      if ancestor == root:
+                          break
+              # Never DESCEND through a reparse object. os.walk does not treat a
+              # Windows junction as a link, so a self-referential one would walk
+              # forever; recording it and pruning it is what keeps this bounded.
+              kept = []
+              for name in dirnames:
+                  if is_link(directory / name):
+                      links.append(str((directory / name).relative_to(root)))
+                  else:
+                      kept.append(name)
+              dirnames[:] = kept
+
+          empty = sorted(str(d.relative_to(root)) for d in directories - populated)
+
+          for label, found in (
+              ("directory with no regular-file descendant", empty),
+              ("link or reparse object", links),
+              ("non-regular entry", nonregular),
+          ):
+              for path in found[:20]:
+                  print(f"::error::frozen tree contains a {label}: {path}")
+              if len(found) > 20:
+                  print(f"::error::...and {len(found) - 20} more of: {label}")
+
+          if empty or links or nonregular:
+              sys.exit(
+                  "the frozen tree violates the consumer's generation-tree rules; "
+                  "it would be refused when installed, not here"
+              )
+          print(f"frozen tree accepted: {files} files, no empty subtree, no links")
+          PY
+
       # THE GATE THAT MATTERS. The build script's own smoke proves the frozen
       # dispatch surface parses — `--version`, `--help`, and a run-module refusal
       # — but it never boots anything, so it cannot prove the artifact is USABLE.
@@ -203,32 +296,16 @@ jobs:
             echo "===== app home after the failed start ====="
             find "$home" -maxdepth 2 2>/dev/null | sed "s|^$home|<app-home>|" | sort || true
 
-            # DISCRIMINATOR, not a retry. The failure above is a Windows sharing
-            # violation while the gateway publishes its OWN discovery credential,
-            # and the log shows a worker child being started moments earlier. If
-            # a handle leaked into that child, the parent's publish would collide
-            # with itself through the child — so suppressing the autospawn either
-            # makes the publish succeed (the child is the conflict) or does not
-            # (the child is exonerated and the fault is in the publish path).
-            #
-            # This runs into a FRESH app home so partial state from the failed
-            # attempt cannot confound it, and the step exits non-zero either way:
-            # it is here to answer a question, never to turn this job green.
-            echo "===== DISCRIMINATOR: start again with the worker autospawn suppressed ====="
-            home2="${RUNNER_TEMP}/a2a-smoke-home-noworker"
-            gwlog2="${RUNNER_TEMP}/gateway-noworker.log"
-            mkdir -p "$home2"
-            "$bin" setup --app-home "$home2" >/dev/null 2>&1 || true
-            if VAULTSPEC_AUTO_SPAWN_WORKER=false "$bin" start \
-                 --app-home "$home2" --host 127.0.0.1 --port 18874 --log "$gwlog2" > start2.json 2>&1; then
-              echo "DISCRIMINATOR: start SUCCEEDED with the autospawn suppressed"
-              echo "  => the conflicting handle comes from the spawned worker child"
-              cat start2.json || true
-              "$bin" stop --app-home "$home2" >/dev/null 2>&1 || true
+            # Who else is holding the home. A startup failure here has twice been
+            # a Windows sharing violation on a file the gateway had just created
+            # itself, and the one thing the traceback cannot say is which other
+            # process was holding it. Naming the live vaultspec-a2a processes
+            # costs nothing and is the missing half of that diagnosis.
+            echo "===== other vaultspec-a2a processes at the time of failure ====="
+            if [ "${RUNNER_OS}" = "Windows" ]; then
+              tasklist //FI "IMAGENAME eq vaultspec-a2a.exe" 2>/dev/null || true
             else
-              echo "DISCRIMINATOR: start ALSO FAILED with the autospawn suppressed"
-              echo "  => the worker child is NOT the conflict; that hypothesis is dead"
-              tail -25 "$gwlog2" 2>/dev/null || echo "(no second gateway log)"
+              ps -eo pid,ppid,comm,args | grep -i "[v]aultspec-a2a" || echo "(none)"
             fi
             exit 1
           fi

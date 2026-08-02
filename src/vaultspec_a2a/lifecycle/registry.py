@@ -62,6 +62,13 @@ __all__ = [
 # the reclaim never couples to a caller's ready_timeout.
 RESERVATION_TTL_MS = 300_000
 _RESERVATION_SUFFIX = ".reserved"
+# A marker whose mtime sits AHEAD of the observer's clock is anomalous only
+# beyond this tolerance. Sub-second future skew is normal life: a peer creates
+# a marker between the observer capturing "now" and statting the file, and a
+# zero-tolerance check then reads that fresh LIVE marker as reclaimable and
+# steals the port - a race observed live handing one scratch port to two
+# concurrent allocators. Genuine clock anomalies sit far outside this window.
+_FUTURE_SKEW_TOLERANCE_MS = 10_000
 
 _PROCS_HOME_ENV = "VAULTSPEC_PROCS_HOME"
 # The managed-process name env var: written into a self-registering child's
@@ -366,9 +373,8 @@ def allocate_port(
     record once the process is spawned. Raises :class:`RuntimeError` when the band
     is exhausted. For a race-free claim, prefer :func:`reserve_port`.
     """
-    now = now_ms()
     claimed = {rec.port for rec in list_records(home) if is_pid_alive(rec.pid)}
-    reserved = _live_reservation_ports(home, now=now)
+    reserved = _live_reservation_ports(home)
     resident_ports = set(config.resident.values()) if config is not None else set()
     for candidate in role_config.band:
         if candidate in claimed or candidate in reserved or candidate in resident_ports:
@@ -414,7 +420,7 @@ def _reservation_is_live(path: Path, *, now: int) -> bool:
         age = now - int(path.stat().st_mtime * 1000)
     except OSError:
         return False
-    if age < 0 or age > RESERVATION_TTL_MS:
+    if age < -_FUTURE_SKEW_TOLERANCE_MS or age > RESERVATION_TTL_MS:
         return False
     pid = _read_reservation_pid(path)
     if pid is None:
@@ -422,14 +428,18 @@ def _reservation_is_live(path: Path, *, now: int) -> bool:
     return is_pid_alive(pid)
 
 
-def _live_reservation_ports(home: Path | None, *, now: int) -> set[int]:
-    """Ports currently held by a live (non-stale) reservation marker."""
+def _live_reservation_ports(home: Path | None) -> set[int]:
+    """Ports currently held by a live (non-stale) reservation marker.
+
+    Judged per-marker with a fresh clock: a stale snapshot reads a marker
+    created after it as future-dated and (without tolerance) dead.
+    """
     root = procs_home(home)
     if not root.is_dir():
         return set()
     ports: set[int] = set()
     for marker in root.glob(f"*{_RESERVATION_SUFFIX}"):
-        if not _reservation_is_live(marker, now=now):
+        if not _reservation_is_live(marker, now=now_ms()):
             continue
         tail = marker.stem.rsplit("-", 1)
         if len(tail) == 2 and tail[1].isdigit():
@@ -456,7 +466,6 @@ def reserve_port(
     """
     root = procs_home(home)
     root.mkdir(parents=True, exist_ok=True)
-    now = now_ms()
     claimed = {rec.port for rec in list_records(home) if is_pid_alive(rec.pid)}
     resident_ports = set(config.resident.values()) if config is not None else set()
     for candidate in role_config.band:
@@ -464,7 +473,10 @@ def reserve_port(
             continue
         path = _reservation_path(role, candidate, home=home)
         if path.exists():
-            if _reservation_is_live(path, now=now):
+            # Fresh clock per candidate: the walk across a band takes long
+            # enough (bind probes) that the loop-entry snapshot would read a
+            # peer's just-created marker as future-dated.
+            if _reservation_is_live(path, now=now_ms()):
                 continue
             # Stale marker: drop it, then the O_EXCL create below arbitrates the race.
             with contextlib.suppress(OSError):

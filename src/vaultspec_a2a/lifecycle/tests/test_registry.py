@@ -344,3 +344,57 @@ def test_port_free_and_reserve_skip_a_foreign_reuseaddr_listener(tmp_path) -> No
             )
     finally:
         foreign.close()
+
+
+def test_concurrent_reservers_in_two_processes_never_share_a_port(tmp_path) -> None:
+    """Two real interpreters reserving from one band get disjoint ports.
+
+    The regression this pins: liveness judged against a stale clock snapshot
+    read a peer's just-created marker as future-dated, reclaimed it, and
+    handed one port to two allocators. Each child publishes its ports and
+    then HOLDS its reservations until the peer has published, so the claims
+    provably overlap in time.
+    """
+    import json
+
+    script = (
+        "import json, sys, time\n"
+        "from pathlib import Path\n"
+        "from vaultspec_a2a.lifecycle import reserve_port\n"
+        "from vaultspec_a2a.lifecycle.procs_config import (\n"
+        "    PortBand, ProcsConfig, RoleConfig)\n"
+        "home = Path(sys.argv[1])\n"
+        "band = PortBand(18900, 18999)\n"
+        "role = RoleConfig(name='scratch', band=band, heartbeat=False,\n"
+        "                  staleness_ms=1000, build=[], serve=[])\n"
+        "config = ProcsConfig(resident={}, roles={'scratch': role})\n"
+        "held = [reserve_port('scratch', role, home=home, config=config)\n"
+        "        for _ in range(10)]\n"
+        "Path(sys.argv[2]).write_text(json.dumps([r.port for r in held]))\n"
+        "peer = Path(sys.argv[3])\n"
+        "deadline = time.monotonic() + 120\n"
+        "while not peer.exists() and time.monotonic() < deadline:\n"
+        "    time.sleep(0.05)\n"
+        "assert peer.exists(), 'peer never published; holds did not overlap'\n"
+    )
+    home = tmp_path / "home"
+
+    def _spawn(tag: str, peer: str) -> subprocess.Popen[bytes]:
+        return subprocess.Popen(
+            [
+                sys.executable,
+                "-c",
+                script,
+                str(home),
+                str(tmp_path / f"{tag}.json"),
+                str(tmp_path / f"{peer}.json"),
+            ]
+        )
+
+    first, second = _spawn("one", "two"), _spawn("two", "one")
+    assert first.wait(timeout=180) == 0
+    assert second.wait(timeout=180) == 0
+    one = set(json.loads((tmp_path / "one.json").read_text()))
+    two = set(json.loads((tmp_path / "two.json").read_text()))
+    assert len(one) == 10 and len(two) == 10
+    assert one.isdisjoint(two), f"concurrent reservers shared ports: {one & two}"

@@ -200,15 +200,48 @@ def _resolved_condition(exc: BaseException) -> ProviderCondition | None:
     return None
 
 
+def _lane_retry_hint(exc: BaseException) -> bool | None:
+    """Return the retry verdict the lane itself stated, or ``None`` for silence.
+
+    One served lane answers this question outright: its error notification
+    declares a required boolean beside the turn error, saying whether it would
+    have made another attempt. Because this adapter abandons the turn on that
+    notification rather than waiting for the lane's own retry, honouring the flag
+    reinstates the attempt the lane intended rather than adding one it did not.
+
+    Silence and a stated refusal are deliberately distinct. Only the frame that
+    carries the flag can answer, so a failure raised anywhere else leaves this
+    ``None`` and the inference below decides; reading an absent flag as a refusal
+    would let one lane's shape veto every other lane's condition.
+    """
+    hint = getattr(exc, "will_retry", None)
+    if isinstance(hint, bool):
+        return hint
+    return None
+
+
 def _retry_verdict(exc: BaseException) -> bool:
     """Decide whether one unwrapped failure is worth another attempt.
 
-    The condition axis answers first and outranks the type axis, because a
-    resolved condition is the lane's own statement about what it refused while a
-    type match is an inference from the exception's base class. That ordering
-    also leaves the stdlib types untouched: they carry no condition, so they
-    still reach the type axis exactly as before.
+    Three axes, in descending order of how directly each answers the question.
+
+    A hint the lane STATED wins outright, in both directions: it is the provider's
+    own verdict on its own failure, arriving for free on a frame already parsed,
+    and preferring a conclusion we derived over one the vendor sent would be
+    strictly worse information. A stated refusal is as authoritative as a stated
+    intent - the lane saying it is done trying is exactly the signal that stops a
+    pointless round of backoff.
+
+    Absent a hint, the resolved condition answers, and it outranks the type axis
+    because a condition is a statement about what the provider refused while a
+    type match is an inference from the exception's base class. That ordering also
+    leaves the stdlib types untouched: they carry neither hint nor condition, so
+    they still reach the type axis exactly as before.
     """
+    hint = _lane_retry_hint(exc)
+    if hint is not None:
+        return hint
+
     condition = _resolved_condition(exc)
     if condition is not None:
         return condition in _RETRYABLE_CONDITIONS

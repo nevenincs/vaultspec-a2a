@@ -4,7 +4,7 @@ tags:
   - '#resource-aware-test-execution'
 date: '2026-08-02'
 modified: '2026-08-02'
-body_hash: 'sha256:35a4b42c9c5433b03b510bc0451000bf25b62a17f4b4fb6f96250d6d292a6bd9'
+body_hash: 'sha256:a3851c844c35fdb09621f8215179f13e775a01580d52f8afa110947b995d5f62'
 tier: L1
 related:
   - '[[2026-07-15-dev-process-registry-adr]]'
@@ -46,9 +46,9 @@ resolution, closing the audited harness-registry gap.
 - [x] `S11` - Centralize the production port-literal defaults into the strict config home; `src/vaultspec_a2a/control/config.py`.
 - [x] `S12` - Provide the one canonical allocator-backed test port acquisition helper; `src/vaultspec_a2a/testing/ports.py`.
 - [x] `S13` - Verify the literal inventory with a Python sweep and classify every kept literal in the audit; `src/vaultspec_a2a`.
-- [ ] `S14` - Move reservation-backed allocation inside the shared spawning primitives with candidate fallback; `src/vaultspec_a2a/tests/gateway_boot.py`.
-- [ ] `S15` - Register every pytest session machine-globally and derive distributed worker counts from observed capacity; `src/vaultspec_a2a/testing/sessions.py`.
-- [ ] `S16` - Prove cross-run exclusion for undeclared tests and degraded admission of a concurrent session; `src/vaultspec_a2a/testing/tests/`.
+- [x] `S14` - Move reservation-backed allocation inside the shared spawning primitives with candidate fallback; `src/vaultspec_a2a/tests/gateway_boot.py`.
+- [x] `S15` - Register every pytest session machine-globally and derive distributed worker counts from observed capacity; `src/vaultspec_a2a/testing/sessions.py`.
+- [x] `S16` - Prove cross-run exclusion for undeclared tests and degraded admission of a concurrent session; `src/vaultspec_a2a/testing/tests/`.
 
 ## Parallelization
 

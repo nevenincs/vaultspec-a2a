@@ -5,7 +5,7 @@ tags:
 date: '2026-08-02'
 modified: '2026-08-02'
 body_schema: 'body-v1'
-body_hash: 'sha256:781558099526016c384b249f3b8ecaab737ff8cc5b236a2f96c68bbc537424b2'
+body_hash: 'sha256:dbcdf1f01ce90d0e5d58835e72f9595fe15e268814b22becb46b9170c65fb1c4'
 related:
   - "[[2026-08-02-resource-aware-test-execution-plan]]"
 ---
@@ -129,6 +129,43 @@ assertions, deliberate dead ports (`localhost:1`, `59999`, netstat-table
 `9000`), and the conftest's non-routable OTLP sink - all correct as written
 and kept. No test binds a hardcoded port; the one that connected to one (the
 pw7 gateway default, 18100) was eliminated in S08.
+
+### default-safety-was-opt-in | high | resolved
+
+Owner directive 2026-08-02: the framework as first shipped made safety a
+consequence of declaration - roughly two percent of test modules declared,
+and the undeclared rest contended freely across concurrent runs; the lease
+home had never been created by a real run. Inverted: the shared spawning
+module now allocates every port through held registry reservations with no
+declaration anywhere (standalone holds live for the process and are
+pid-reclaimed; a proven-bound gateway port's marker returns to the band; the
+lazily-bound worker port's marker is held), every non-worker pytest session
+registers a machine-global shared lease at configure time, and a distributed
+run is admitted with a worker count derived from the operator's core budget
+or the load-discounted core count split across live peer sessions.
+Declaration is now exactly the optimization hint the decision record intended.
+
+### reservation-liveness-stale-clock-race | high | resolved
+
+Found by the cross-process proof, in production allocator code predating this
+feature: reservation liveness was judged against a clock snapshot taken at
+loop entry, and any marker created after the snapshot carried a future mtime,
+read as anomalous (negative age), and was reclaimed - one port handed to two
+concurrent allocators, observed live as shared scratch ports. Fixed by
+judging liveness with a fresh clock per candidate plus a ten-second future-
+skew tolerance, in both the registry reservations and the lease markers, with
+a two-interpreter barrier-overlapped regression test at the registry level.
+This race plausibly contributed to the historical freed-port boot flakes.
+
+### stale-marker-double-reclaim-window | low | open
+
+Pre-existing and narrow: two allocators that both judge one genuinely stale
+marker reclaimable can interleave unlink-create-unlink so the second unlink
+removes the first allocator's fresh marker. Requires a stale marker (dead
+holder or TTL expiry) plus sub-millisecond interleaving; the bind probe and
+the boot path's fell-and-retry cover the consequence. Recorded rather than
+fixed - a compare-and-delete needs a rename dance the current risk does not
+justify; revisit if a live collision is ever traced here.
 
 ## Recommendations
 

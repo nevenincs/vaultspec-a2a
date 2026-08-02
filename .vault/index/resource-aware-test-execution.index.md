@@ -6,7 +6,7 @@ tags:
 date: '2026-08-02'
 modified: '2026-08-02'
 body_schema: 'body-v1'
-body_hash: 'sha256:0e7474ddfce0c1ebb90b0d907a39dde316e6c6e4c3da9fd7215db8bb70768fdf'
+body_hash: 'sha256:ce05bde80fab0c7c1878943b5baef85babf5a40a4bb715f81fda75ada4846b12'
 related:
   - '[[2026-08-02-resource-aware-test-execution-S01]]'
   - '[[2026-08-02-resource-aware-test-execution-S02]]'
@@ -21,6 +21,9 @@ related:
   - '[[2026-08-02-resource-aware-test-execution-S11]]'
   - '[[2026-08-02-resource-aware-test-execution-S12]]'
   - '[[2026-08-02-resource-aware-test-execution-S13]]'
+  - '[[2026-08-02-resource-aware-test-execution-S14]]'
+  - '[[2026-08-02-resource-aware-test-execution-S15]]'
+  - '[[2026-08-02-resource-aware-test-execution-S16]]'
   - '[[2026-08-02-resource-aware-test-execution-adr]]'
   - '[[2026-08-02-resource-aware-test-execution-audit]]'
   - '[[2026-08-02-resource-aware-test-execution-plan]]'
@@ -55,6 +58,9 @@ Auto-generated index of all documents tagged with `#resource-aware-test-executio
 - `2026-08-02-resource-aware-test-execution-S11` - Centralize the production port-literal defaults into the strict config home
 - `2026-08-02-resource-aware-test-execution-S12` - Provide the one canonical allocator-backed test port acquisition helper
 - `2026-08-02-resource-aware-test-execution-S13` - Verify the literal inventory with a Python sweep and classify every kept literal in the audit
+- `2026-08-02-resource-aware-test-execution-S14` - Move reservation-backed allocation inside the shared spawning primitives with candidate fallback
+- `2026-08-02-resource-aware-test-execution-S15` - Register every pytest session machine-globally and derive distributed worker counts from observed capacity
+- `2026-08-02-resource-aware-test-execution-S16` - Prove cross-run exclusion for undeclared tests and degraded admission of a concurrent session
 
 ### plan
 

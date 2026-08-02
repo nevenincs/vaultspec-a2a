@@ -5,7 +5,7 @@ tags:
 date: '2026-08-02'
 modified: '2026-08-02'
 body_schema: 'body-v1'
-body_hash: 'sha256:5c99e34497085e0ae5cf2240be1f2f8691e0c352c9a7a1e27522b949a7dfb7c8'
+body_hash: 'sha256:781558099526016c384b249f3b8ecaab737ff8cc5b236a2f96c68bbc537424b2'
 related:
   - "[[2026-08-02-resource-aware-test-execution-plan]]"
 ---
@@ -99,6 +99,36 @@ business-logic assertion in those lanes; none touches this feature's
 surfaces, and this feature's 40 framework tests plus the 105-test
 service-tier collection are green. Attribution therefore rests with the
 concurrent lanes, recorded here for the honest comparison.
+
+### port-policy-centralization | low | resolved
+
+Owner mandate executed 2026-08-02: two policies, one canonical home each, no
+second implementation. Inventory was verified with a Python regex sweep over
+the tree (not ripgrep, which under-reports here; the sweep script and counts
+are reproduced in the S13 record). Production policy: `control/config.py` is
+the single home - it already owned the gateway (18000), worker (18001), and
+MCP (8200) defaults, and now also owns `DEFAULT_MOCK_API_BASE`
+(`http://localhost:8100`, consumed by the mock provider with unchanged
+explicit-field > `MOCK_API_BASE` env > default precedence) and
+`DEFAULT_OTLP_ENDPOINT` (`http://localhost:4317`, consumed by the telemetry
+module's import-time `OTEL_EXPORTER_OTLP_ENDPOINT` read). Those two were the
+only production RUNTIME literals outside the home; both are eliminated. Every
+remaining production occurrence is either inside the canonical home itself or
+docstring/help prose describing resident defaults (engine 8767 examples, CLI
+help text, netstat format examples) - descriptive, not wired, and kept.
+Test policy: `testing/ports.py` `reserved_port` is the one canonical
+acquisition - the registry's O_EXCL scratch-band reserve, held while used -
+and the `leased_port` fixture delegates to it. The ephemeral free-port probe
+in `tests/gateway_boot.py` is deliberately NOT a second allocator: it hands
+out unclaimed candidates for negative tests and readiness races, its
+docstring now names the distinction and points binders at the canonical
+helper. Remaining test literals were judged one by one: record/URL fixtures
+against isolated registry homes (no bind), render/parse assertions of exact
+substitution behaviour, scratch-band band definitions with band-relative
+assertions, deliberate dead ports (`localhost:1`, `59999`, netstat-table
+`9000`), and the conftest's non-routable OTLP sink - all correct as written
+and kept. No test binds a hardcoded port; the one that connected to one (the
+pw7 gateway default, 18100) was eliminated in S08.
 
 ## Recommendations
 

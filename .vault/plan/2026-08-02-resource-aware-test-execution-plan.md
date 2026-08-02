@@ -4,7 +4,7 @@ tags:
   - '#resource-aware-test-execution'
 date: '2026-08-02'
 modified: '2026-08-02'
-body_hash: 'sha256:450f861eca5e150d95d8312c207366f6440c89e93e8b16d00da153fe4e61c154'
+body_hash: 'sha256:0487e9a715c85355e5228a73d837ae18bb2347834516522bfc238bd98ffc7e68'
 tier: L1
 related:
   - '[[2026-07-15-dev-process-registry-adr]]'
@@ -43,6 +43,9 @@ resolution, closing the audited harness-registry gap.
 - [x] `S08` - Replace the hardcoded gateway default with registry resolution in the pw7 harness; `src/vaultspec_a2a/service_tests/test_pw7_acceptance.py`.
 - [x] `S09` - Prove lease serialization and declaration-derived concurrency with real subprocess runs; `src/vaultspec_a2a/testing/tests/`.
 - [x] `S10` - Run whole-tree gates, classify findings, and close the rolling audit for this feature; `pyproject.toml`.
+- [x] `S11` - Centralize the production port-literal defaults into the strict config home; `src/vaultspec_a2a/control/config.py`.
+- [x] `S12` - Provide the one canonical allocator-backed test port acquisition helper; `src/vaultspec_a2a/testing/ports.py`.
+- [x] `S13` - Verify the literal inventory with a Python sweep and classify every kept literal in the audit; `src/vaultspec_a2a`.
 
 ## Parallelization
 

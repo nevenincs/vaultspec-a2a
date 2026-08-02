@@ -6,7 +6,7 @@ tags:
 date: '2026-08-02'
 modified: '2026-08-02'
 body_schema: 'body-v1'
-body_hash: 'sha256:b85297c6dd7f144140a1b90ee3bb2ed0adf278f4480457f8c6ecd149a8b4a22a'
+body_hash: 'sha256:0e7474ddfce0c1ebb90b0d907a39dde316e6c6e4c3da9fd7215db8bb70768fdf'
 related:
   - '[[2026-08-02-resource-aware-test-execution-S01]]'
   - '[[2026-08-02-resource-aware-test-execution-S02]]'
@@ -18,6 +18,9 @@ related:
   - '[[2026-08-02-resource-aware-test-execution-S08]]'
   - '[[2026-08-02-resource-aware-test-execution-S09]]'
   - '[[2026-08-02-resource-aware-test-execution-S10]]'
+  - '[[2026-08-02-resource-aware-test-execution-S11]]'
+  - '[[2026-08-02-resource-aware-test-execution-S12]]'
+  - '[[2026-08-02-resource-aware-test-execution-S13]]'
   - '[[2026-08-02-resource-aware-test-execution-adr]]'
   - '[[2026-08-02-resource-aware-test-execution-audit]]'
   - '[[2026-08-02-resource-aware-test-execution-plan]]'
@@ -49,6 +52,9 @@ Auto-generated index of all documents tagged with `#resource-aware-test-executio
 - `2026-08-02-resource-aware-test-execution-S08` - Replace the hardcoded gateway default with registry resolution in the pw7 harness
 - `2026-08-02-resource-aware-test-execution-S09` - Prove lease serialization and declaration-derived concurrency with real subprocess runs
 - `2026-08-02-resource-aware-test-execution-S10` - Run whole-tree gates, classify findings, and close the rolling audit for this feature
+- `2026-08-02-resource-aware-test-execution-S11` - Centralize the production port-literal defaults into the strict config home
+- `2026-08-02-resource-aware-test-execution-S12` - Provide the one canonical allocator-backed test port acquisition helper
+- `2026-08-02-resource-aware-test-execution-S13` - Verify the literal inventory with a Python sweep and classify every kept literal in the audit
 
 ### plan
 

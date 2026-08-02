@@ -5,7 +5,7 @@ tags:
 date: '2026-08-02'
 modified: '2026-08-02'
 body_schema: 'body-v1'
-body_hash: 'sha256:59542bc8970de86c6599492da77d91e9f56e13fb7ef85f24475122112eedb363'
+body_hash: 'sha256:6ca9f277b0ee50c8bca25a22c86912367a7c05869177145e58fca24bda7651e2'
 related:
   - "[[2026-07-19-repository-tooling-hardening-plan]]"
 ---
@@ -81,6 +81,11 @@ Commit `d9c37bd8` imports `RunnableConfig` at runtime and adds a public compiled
 ### complexity-state-projection | high | open structural defect
 
 The mandatory `just lint complexity` sentinel is now demonstrably blocking: `StateProjector.normalize_execution_state` scores 31, exceeding the configured 15-point limit. This is production complexity, not test-harness noise, and it prevents the strict Just/CI surface from becoming fully green. Decompose the normalization branches behind focused behavior-preserving tests, then rerun the complete complexity gate before promoting it from advisory to blocking CI. `src/vaultspec_a2a/worker/state_projection.py`.
+
+### duplication-cognitive-gate | high | open baseline
+
+The mandatory duplication sentinel is wired as `just audit duplication` (not a `just lint` target) and completed successfully as an advisory check, but reports 22 clones: 547 duplicated lines (0.41%) and 4,457 duplicated tokens (0.51%) across 574 analysed files. The reported candidates include the ADR-research team presets; active-run migrations; repeated executor-token and authoring-binding tests; ACP security/config/authoring tests; task-queue and vault-reader tests; verdict/redispatch and clarification relay tests; service stream/permission/cancellation/tool-core tests; and the terminal containment/desktop process-tree tests. Triage each clone as intentional generated/migration structure, a justified scenario fixture, or an extractable shared production/test helper; eliminate or explicitly suppress none by policy. Until that classification and the chosen refactors are complete, JSCPD must remain advisory and cannot be promoted to a strict CI gate. `dev/toolchain.py`; `.github/workflows/test.yml`.
+
 ## Recommendations
 
 - Provision a healthy loopback service-discovery record, then run the named engine-backed stdio service lane and append the outcome to this audit before declaring S26 fully runtime-proven.

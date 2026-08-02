@@ -755,12 +755,24 @@ async def test_presets_list_is_truthful_and_resilient(
         assert "capability" in researcher
         assert td_by_agent["vaultspec-doc-reviewer"]["provider_id"] == "claude"
 
-        # fast lowers the researcher to a low capability and attributes the change
-        # to the profile; the authoring roles fall through unchanged.
+        # team-defaults overlays nothing, so every assignment is attributed to the
+        # agent's own configuration. This is the fall-through branch of `source`,
+        # and it is asserted HERE because `fast` no longer exhibits it: the
+        # assertion moved rather than being dropped when that profile went total.
+        assert all(a["source"] == "agent" for a in td_by_agent.values())
+
+        # fast is a cost CEILING, so it overlays every role and attributes all of
+        # them to the profile. It once covered only the two high-volume roles,
+        # which let the authoring roles fall through to their own higher
+        # capability - a floor the served surface advertised but did not apply.
+        # Asserting the whole set is what makes a later partial overlay fail here.
         fast_by_agent = {a["agent_id"]: a for a in profiles["fast"]["assignments"]}
-        assert fast_by_agent["vaultspec-researcher"]["capability"] == "low"
-        assert fast_by_agent["vaultspec-researcher"]["source"] == "profile"
-        assert fast_by_agent["vaultspec-synthesist"]["source"] == "agent"
+        assert set(fast_by_agent) == set(td_by_agent), (
+            "fast must assign every role team-defaults does, or a role escapes "
+            "the ceiling by omission"
+        )
+        assert all(a["capability"] == "low" for a in fast_by_agent.values())
+        assert all(a["source"] == "profile" for a in fast_by_agent.values())
 
         # Provider axis: the discovery response
         # surfaces the new providers per role. `codex` overlays codex on the three

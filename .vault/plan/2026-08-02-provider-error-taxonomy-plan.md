@@ -4,7 +4,7 @@ tags:
   - '#provider-error-taxonomy'
 date: '2026-08-02'
 modified: '2026-08-02'
-body_hash: 'sha256:1de3c7415514ad3dfa1f99e06bb35cf544f40a8d24a84cc41c7e659ac1d2a76e'
+body_hash: 'sha256:55d2005fb6647b2120664de617a57e168524a06e3cf771a8fc27c732c619dad4'
 tier: L3
 related:
   - '[[2026-08-02-provider-error-taxonomy-adr]]'
@@ -74,7 +74,7 @@ Carries the condition on the error frame, persists it beside the failure reason,
 - [x] `W01.P03.S22` - Declare the condition on the run-status response schema; `src/vaultspec_a2a/api/schemas/gateway.py`.
 - [x] `W01.P03.S23` - Project the condition onto the run-status response; `src/vaultspec_a2a/api/routes/gateway.py`.
 - [x] `W01.P03.S24` - Prove the condition survives a reload through run-status alone; `src/vaultspec_a2a/api/tests/test_internal.py`.
-- [ ] `W01.P03.S58` - Project the repair reason onto the run-status response; `src/vaultspec_a2a/api/routes/gateway.py`.
+- [x] `W01.P03.S58` - Project the repair reason onto the run-status response; `src/vaultspec_a2a/api/routes/gateway.py`.
 
 ### Phase `W01.P04` - recoverability and retry
 
@@ -84,6 +84,7 @@ Derives the recoverable flag from the condition rather than the catch site and b
 - [x] `W01.P04.S26` - Bind the condition to the node retry classifier; `src/vaultspec_a2a/graph/compiler.py`.
 - [x] `W01.P04.S27` - Prefer a lane-supplied retry hint over inferred retryability; `src/vaultspec_a2a/graph/compiler.py`.
 - [x] `W01.P04.S28` - Prove throttled and overloaded conditions retry under the existing backoff policy; `src/vaultspec_a2a/graph/tests/test_compiler.py`.
+- [ ] `W01.P04.S60` - Refuse a retry once the lane has already relayed output; `src/vaultspec_a2a/graph/nodes/worker.py`.
 
 ### Phase `W01.P05` - close the blank terminals
 

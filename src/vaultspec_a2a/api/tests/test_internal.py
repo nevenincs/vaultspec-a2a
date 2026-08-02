@@ -21,6 +21,7 @@ from ...database import (
     create_thread,
     get_permission_request,
     get_thread_execution_state,
+    set_thread_repair_state,
 )
 from ...database.models import ThreadExecutionStateModel
 from ...streaming.aggregator import EventAggregator
@@ -1293,6 +1294,51 @@ class TestConditionSurvivesAReload:
 
         assert status.status_code == 200
         assert status.json()["provider_condition"] is None
+
+    @pytest.mark.asyncio(loop_scope="function")
+    async def test_run_status_discloses_why_an_operation_missed_a_live_run(
+        self,
+        session_factory,
+        checkpointer,
+    ) -> None:
+        """A follow-up that never arrived is readable WITHOUT faking a failure.
+
+        The paths that record this - an undelivered follow-up, an undelivered
+        clarification resume - deliberately decline to write a failure reason,
+        because the run is still parked on its question and may yet complete.
+        That decision is only honest if the account still reaches a client, so
+        this is the read that keeps it from being durable and unreadable.
+        """
+        from .conftest import make_app
+
+        app, _aggregator, _worker, _checkpointer = make_app(
+            session_factory, checkpointer
+        )
+        async with session_factory() as session:
+            thread = await create_thread(session, thread_id="t-live-run-repair")
+            await set_thread_repair_state(
+                session,
+                thread.id,
+                repair_status=thread.repair_status,
+                repair_reason="Follow-up message not delivered: worker unreachable",
+            )
+            await session.commit()
+
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            status = await client.get("/v1/runs/t-live-run-repair")
+
+        assert status.status_code == 200
+        body = status.json()
+        assert body["repair_reason"] == (
+            "Follow-up message not delivered: worker unreachable"
+        )
+        # The run is ALIVE. Reporting either failure field here would tell a user
+        # their run died when it is still waiting - the precise confusion the
+        # two-channel split exists to prevent.
+        assert body["failure_reason"] is None
+        assert body["provider_condition"] is None
+        assert body["status"] != "failed"
 
 
 def _worker_bridge_into(app: FastAPI) -> WorkerBridge:

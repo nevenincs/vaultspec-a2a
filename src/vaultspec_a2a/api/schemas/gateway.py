@@ -295,6 +295,60 @@ class RunStartRequest(BaseModel):
         return value
 
 
+class FrozenNativeControlSummary(BaseModel):
+    """One exact provider-native value frozen for historical disclosure."""
+
+    control_id: str = Field(min_length=1, max_length=1024)
+    option_id: str = Field(min_length=1, max_length=1024)
+    provider_value: str = Field(min_length=1, max_length=1024)
+    display_name: str | None = Field(default=None, max_length=256)
+    option_display_name: str | None = Field(default=None, max_length=256)
+
+
+class FrozenExecutionSnapshotSummary(BaseModel):
+    """Catalog provenance and exact provider inputs for one execution lane."""
+
+    provider_id: str = Field(min_length=1, max_length=1024)
+    provider_display_name: str | None = Field(default=None, max_length=256)
+    execution_mode: str = Field(min_length=1, max_length=1024)
+    catalog_revision: str = Field(min_length=1, max_length=1024)
+    entry_id: str = Field(min_length=1, max_length=1024)
+    model_name: str = Field(min_length=1, max_length=1024)
+    model_display_name: str | None = Field(default=None, max_length=256)
+    controls: list[FrozenNativeControlSummary] = Field(
+        default_factory=list, max_length=32
+    )
+
+
+class FrozenSelectionProvenanceSummary(BaseModel):
+    """Bounded admission layer that supplied one role's primary lane."""
+
+    selection_source: Literal["team_selection", "role_override"]
+
+
+class FrozenRoleAssignmentSummary(FrozenExecutionSnapshotSummary):
+    """One role's exact primary and ordered fallback execution snapshots."""
+
+    role_id: str = Field(min_length=1, max_length=1024)
+    agent_id: str | None = Field(default=None, max_length=1024)
+    fallbacks: list[FrozenExecutionSnapshotSummary] = Field(
+        default_factory=list, max_length=8
+    )
+    provenance: FrozenSelectionProvenanceSummary
+
+
+class FrozenTeamAssignmentSummary(BaseModel):
+    """Complete immutable schema-v1 execution authority for a modern run."""
+
+    schema_version: Literal[1] = 1
+    digest: str = Field(
+        min_length=64,
+        max_length=71,
+        pattern=r"^(?:sha256:)?[a-f0-9]{64}$",
+    )
+    assignments: list[FrozenRoleAssignmentSummary] = Field(min_length=1, max_length=64)
+
+
 class RunStartResponse(BaseModel):
     """Acknowledge a started run, with its initial semantic status."""
 
@@ -313,6 +367,7 @@ class RunStartResponse(BaseModel):
     # path where the response is reconstructed from the existing run row.
     profile_id: str | None = None
     assignments: list[RoleAssignmentSummary] = Field(default_factory=list)
+    frozen_assignment: FrozenTeamAssignmentSummary | None = None
 
 
 class RunPrepareResponse(BaseModel):
@@ -360,6 +415,7 @@ class RunCommitResponse(BaseModel):
     nickname: str | None = None
     profile_id: str | None = None
     assignments: list[RoleAssignmentSummary] = Field(default_factory=list)
+    frozen_assignment: FrozenTeamAssignmentSummary | None = None
 
 
 class RunReleaseResponse(BaseModel):
@@ -504,12 +560,11 @@ class RunStatusResponse(BaseModel):
     repair_status: str | None = None
     execution_readiness: str | None = None
     degraded_reasons: list[str] = Field(default_factory=list)
-    # S37 / failure-reason persistence: the capped, single-line reason this
-    # run last transitioned to FAILED, sourced from the durable
-    # threads.failure_reason column (never a live SSE frame), so a reloaded
-    # panel recovers the SAME reason a connected client already saw over the
-    # relay (012840a4) rather than a bare "failed". Additive; None for a run
-    # that never failed, or one whose failure predates this field.
+    # The capped, single-line reason this run last transitioned to FAILED,
+    # sourced from the durable threads.failure_reason column (never a live SSE
+    # frame), so a reloaded panel recovers the SAME reason a connected client
+    # already saw over the relay rather than a bare "failed". Additive; None for
+    # a run that never failed, or one whose failure predates this field.
     failure_reason: str | None = None
     # The machine-readable counterpart to the reason above: which member of the
     # closed provider-condition vocabulary the failure resolved to. The reason
@@ -525,11 +580,25 @@ class RunStatusResponse(BaseModel):
     # one whose failure predates the durable column. The value is a wire
     # contract shared with the consuming repository and is additive-only.
     provider_condition: str | None = None
+    # Why an OPERATION did not take on a run that is STILL ALIVE - a follow-up
+    # or a resume the worker never received - as opposed to why a run FAILED.
+    # The distinction is not cosmetic and a client must not collapse it: a run
+    # reported here is still parked on its question and may yet complete, so
+    # rendering this as a failure tells a user their run died when it did not.
+    # The two never both describe the same event; a failed run carries
+    # failure_reason and a live one carries this.
+    #
+    # Projected because the paths that write it - an undelivered follow-up, an
+    # undelivered clarification resume - deliberately decline to stamp
+    # failure_reason precisely BECAUSE the run survives. Without this field that
+    # account reached no client at all: durable, and readable by nobody.
+    repair_reason: str | None = Field(default=None, max_length=500)
     # model-profiles: the frozen profile the run launched with and its
     # effective per-role assignment, reproduced verbatim from run metadata across
     # restarts (additive v1; absent for runs started before profiles landed).
     profile_id: str | None = None
     assignments: list[RoleAssignmentSummary] = Field(default_factory=list)
+    frozen_assignment: FrozenTeamAssignmentSummary | None = None
     # Non-secret staged-admission lease identity. It lets the dashboard repair
     # a locally reserved hash bundle after a process crash that followed remote
     # commit but preceded the local binding write.

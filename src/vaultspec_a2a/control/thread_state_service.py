@@ -259,6 +259,7 @@ async def capture_thread_state(
         approval_request_id=thread.approval_request_id,
         failure_reason=thread.failure_reason,
         provider_condition=thread.provider_condition,
+        repair_reason=thread.repair_reason,
     )
     snapshot = await enrich_snapshot_from_durable_state(
         db, thread=thread, snapshot=snapshot

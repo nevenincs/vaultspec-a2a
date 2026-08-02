@@ -126,6 +126,7 @@ from ..run_admission import (
 from ..schemas.gateway import (
     ActiveRunRecord,
     ActiveRunsResponse,
+    FrozenTeamAssignmentSummary,
     PathSafeRunId,
     PresetsListResponse,
     PresetSummary,
@@ -377,7 +378,7 @@ async def _create_run_core(
             status=existing.status,
             nickname=existing.nickname,
             profile_id=existing_profile,
-            frozen=None,
+            frozen=_read_persisted_team_selection(existing.thread_metadata),
             replayed=True,
         )
     run_id = body.run_id
@@ -516,7 +517,7 @@ async def _create_run_core(
                     status=winner.status,
                     nickname=winner.nickname,
                     profile_id=winner_profile,
-                    frozen=None,
+                    frozen=_read_persisted_team_selection(winner.thread_metadata),
                     replayed=True,
                 )
             raise
@@ -579,6 +580,7 @@ async def _run_direct_start(
         eligible=True,
         profile_id=result.profile_id,
         assignments=await _disclose_frozen(result.frozen),
+        frozen_assignment=_modern_frozen_disclosure(result.frozen),
     )
 
 
@@ -686,6 +688,7 @@ async def _run_commit_locked(
         canonical_body = _canonical_replay_body(existing.thread_metadata, body)
         commit_digest = request_digest(canonical_body, prepared=False)
         existing_frozen = _read_persisted_frozen(existing.thread_metadata)
+        existing_modern = _read_persisted_team_selection(existing.thread_metadata)
         existing_profile = existing_frozen.profile_id if existing_frozen else None
         binding = _persisted_lease_binding(existing.thread_metadata)
         if binding is None:
@@ -714,6 +717,7 @@ async def _run_commit_locked(
             assignments=(
                 await _disclose_frozen(existing_frozen) if existing_frozen else []
             ),
+            frozen_assignment=_modern_frozen_disclosure(existing_modern),
         )
     ws_root = _prepare_workspace_root(body)
     team_config = _load_preset_or_refuse(body.team_preset, ws_root)
@@ -738,9 +742,7 @@ async def _run_commit_locked(
         provider_eligibility=readiness.provider_eligibility,
     )
     if not execution.eligible:
-        await _release_ineligible_reservation(
-            broker, reservation_id, canonical_body
-        )
+        await _release_ineligible_reservation(broker, reservation_id, canonical_body)
         raise HTTPException(status_code=503, detail=execution.reason)
 
     presented_roles: set[str] = (
@@ -826,6 +828,7 @@ async def _run_commit_locked(
         nickname=result.nickname,
         profile_id=result.profile_id,
         assignments=await _disclose_frozen(result.frozen),
+        frozen_assignment=_modern_frozen_disclosure(result.frozen),
     )
 
 
@@ -1231,6 +1234,27 @@ def _read_persisted_frozen(metadata_json: str | None) -> Any:
     return frozen_from_record(data.get("model_profile"))
 
 
+def _read_persisted_team_selection(
+    metadata_json: str | None,
+) -> FrozenTeamSelection | None:
+    """Rebuild the modern frozen execution authority without live discovery."""
+    from ...providers.team_selection import frozen_team_selection_from_record
+
+    data = _metadata_object(metadata_json)
+    if data is None or _TEAM_SELECTION_METADATA_KEY not in data:
+        return None
+    return frozen_team_selection_from_record(data[_TEAM_SELECTION_METADATA_KEY])
+
+
+def _modern_frozen_disclosure(
+    frozen: Any,
+) -> FrozenTeamAssignmentSummary | None:
+    """Project only validated modern selections onto the public frozen shape."""
+    if not isinstance(frozen, FrozenTeamSelection):
+        return None
+    return FrozenTeamAssignmentSummary.model_validate(frozen.disclosure())
+
+
 def _persisted_profile_id(metadata_json: str | None) -> str | None:
     """Read only the persisted profile id from thread metadata, or None."""
     frozen = _read_persisted_frozen(metadata_json)
@@ -1478,6 +1502,7 @@ async def run_status_endpoint(
     # model-profiles: disclose the run's frozen profile + effective assignment,
     # reproduced verbatim from run metadata (never re-resolved).
     frozen = _read_persisted_frozen(capture.thread_metadata)
+    modern_frozen = _read_persisted_team_selection(capture.thread_metadata)
 
     return RunStatusResponse(
         run_id=snapshot.thread_id,
@@ -1514,8 +1539,14 @@ async def run_status_endpoint(
         # is dropped silently, but nothing arrives without being written either,
         # which is how the reason itself was missed when it was first persisted.
         provider_condition=snapshot.provider_condition,
+        # The account of an operation that did not take on a run that is still
+        # alive. Its writers decline to set the failure reason precisely because
+        # the run survives, so without this line their account is durable and
+        # unreadable - recorded for nobody.
+        repair_reason=snapshot.repair_reason,
         profile_id=frozen.profile_id if frozen is not None else None,
         assignments=await _disclose_frozen(frozen),
+        frozen_assignment=_modern_frozen_disclosure(modern_frozen),
         lease_id=_persisted_lease_id(capture.thread_metadata),
         reservation_id=(
             binding.reservation_id

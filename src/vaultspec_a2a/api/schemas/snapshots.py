@@ -183,3 +183,8 @@ class ThreadStateSnapshot(BaseModel):
     # it - a value persisted, carried to the seam, and then quietly discarded is
     # indistinguishable from one that was never recorded.
     provider_condition: str | None = None
+    # Why an operation did not take on a run that is STILL ALIVE, as opposed to
+    # why a run failed. Named here for the same silent-drop reason as the two
+    # above; the paths that write it decline to write a failure reason precisely
+    # because the run survives, so this is the only channel their account has.
+    repair_reason: str | None = None

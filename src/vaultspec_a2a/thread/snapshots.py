@@ -490,6 +490,12 @@ class ThreadStateData:
     # from the same durable row and on the same terms - None for a run that
     # never failed, or whose record predates the column.
     provider_condition: str | None = None
+    # Why an operation did not take on a run that is STILL ALIVE - an
+    # undelivered follow-up or resume - as distinct from why a run FAILED. Its
+    # writers decline to set the two fields above precisely because the run
+    # survives, so this is the only channel their account has, and a client that
+    # rendered it as a failure would report a death that did not happen.
+    repair_reason: str | None = None
 
 
 # ---------------------------------------------------------------------------

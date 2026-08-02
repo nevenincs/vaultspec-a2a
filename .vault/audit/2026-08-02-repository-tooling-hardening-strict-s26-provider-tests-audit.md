@@ -5,7 +5,7 @@ tags:
 date: '2026-08-02'
 modified: '2026-08-02'
 body_schema: 'body-v1'
-body_hash: 'sha256:1169ea854ae5a800b4a4db512de0a14781bfa36b3838a90c530bd10af931a369'
+body_hash: 'sha256:0e240fa7d884121fcf370e46ceb2d1d5e5d7fdf6758e58713ddee1816007f5db'
 related:
   - "[[2026-07-19-repository-tooling-hardening-plan]]"
 ---
@@ -41,6 +41,10 @@ The strict cleanup of the lost-ack relay, shared prerequisite registry, and live
 ### clarification-loop-engine-proof | low | open validation boundary
 
 The clarification-loop service test now decodes its real HTTP and SSE payloads through fail-closed structural readers and retains the production preset, run-status, SSE, answer, and resumed-graph assertions. Focused static gates are clean and independent review found no shortcut. Both runtime cases remain unproven because no reachable engine discovery record exists after the production-style retry probe. Provision that named engine prerequisite and rerun this module before claiming real-process clarification evidence. `src/vaultspec_a2a/service_tests/test_clarification_loop_stitched.py`.
+
+### compose-stream-auth-proof | low | open validation boundary
+
+The stream-followup test now fails closed at each real compose HTTP/SSE read boundary and focused static gates plus independent review are clean. Its compose-backed runtime path is unverified because `POST /v1/runs` returns 401 in `ServiceStack.create_thread` before the changed reader or any stream assertion executes. Diagnose the stack authentication contract in its owner before using this test as stream/resume evidence; do not weaken the test or bypass authentication. `src/vaultspec_a2a/service_tests/harness.py:692`; `src/vaultspec_a2a/service_tests/test_stream_followup.py`.
 ## Recommendations
 
 - Provision a healthy loopback service-discovery record, then run the named engine-backed stdio service lane and append the outcome to this audit before declaring S26 fully runtime-proven.

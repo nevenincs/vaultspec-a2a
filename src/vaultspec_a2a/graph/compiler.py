@@ -12,7 +12,7 @@ map.  Three topology types are supported:
 
 import functools
 import logging
-from collections.abc import Callable
+from collections.abc import Callable, Mapping, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol, cast
@@ -75,13 +75,38 @@ __all__ = ["CompiledTeamGraph", "build_initial_vault_index", "compile_team_graph
 
 
 class CompiledTeamGraph(Protocol):
-    """The compiler's supported invocation surface for a team graph."""
+    """The compiler's supported surface for a team graph: invoke, and inspect.
+
+    ``ainvoke`` returns the run's final state rather than ``object``. It is a
+    state mapping in fact, and saying so is what lets a caller read a key off the
+    result without casting at every site - the previous ``object`` return made
+    every such read an error while the value underneath was always a mapping.
+
+    ``nodes`` and ``interrupt_before_nodes`` are introspection rather than
+    invocation, and they are declared because compilation is a thing this project
+    ASSERTS about: which nodes a topology produced, and where it parks, are the
+    compiler's observable output. Both exist on the compiled graph; leaving them
+    off the protocol did not hide them, it only stopped the checker seeing what
+    the tests legitimately read.
+    """
+
+    @property
+    def nodes(self) -> Mapping[str, object]: ...
+
+    @property
+    def interrupt_before_nodes(self) -> Sequence[str]: ...
 
     async def ainvoke(
         self,
-        input: TeamState | Command[str] | None,
+        # A PARTIAL state mapping, which is what the graph actually accepts:
+        # every TeamState field bar a few is NotRequired, and callers seed a run
+        # with the handful of keys it needs. Annotating this ``TeamState`` named
+        # the intent but refused the real argument, since a plain dict is not
+        # structurally a TypedDict. TeamState remains the shape being described -
+        # the state module is where that contract lives.
+        input: Mapping[str, Any] | Command[str] | None,
         config: RunnableConfig | None = None,
-    ) -> object: ...
+    ) -> TeamState: ...
 
 
 # Maps AgentConfig.role -> pipeline phase for worker_phase_map derivation.
@@ -617,7 +642,12 @@ def compile_team_graph(
     """
     from ..team.team_config import TopologyType
 
-    builder = StateGraph(TeamState)
+    # ``cast`` matches how every other StateGraph in this tree is built. TeamState
+    # is a TypedDict and langgraph's state parameter does not accept one directly,
+    # so the bare form left the builder's type unresolved - which then made every
+    # ``_compile_*`` call below an argument-type error, since those take a bare
+    # ``StateGraph``. One cast at construction, not five at the call sites.
+    builder: StateGraph = StateGraph(cast("Any", TeamState))
     topology = team_config.topology
 
     # M3: validate topology_type is a known TopologyType enum value before dispatch.
@@ -727,7 +757,12 @@ def compile_team_graph(
         # Pin to LangGraph >=0.2.60 if relying on this.
         graph.step_timeout = effective_timeout
 
-    return graph
+    # The builder was constructed through a cast (TeamState is a TypedDict), so the
+    # compiled graph's own ainvoke is typed Unknown and does not structurally match
+    # the protocol. Asserting the shape HERE is the honest place: this function is
+    # what built the graph, so it is the one caller that knows the state type its
+    # ainvoke returns. Callers get the protocol and need no cast of their own.
+    return cast("CompiledTeamGraph", graph)
 
 
 def _compile_star(

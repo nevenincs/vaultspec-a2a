@@ -5,7 +5,7 @@ tags:
 date: '2026-08-02'
 modified: '2026-08-02'
 body_schema: 'body-v1'
-body_hash: 'sha256:de9bff46fe323fd56ce8618b1c707185f6bdc53de92bfada774b0831a256d976'
+body_hash: 'sha256:023a51ba273cd25454e9c008209519de88683b17d85f8e97e2f7fb08abecd392'
 related:
   - "[[2026-07-19-repository-tooling-hardening-plan]]"
 ---
@@ -61,6 +61,10 @@ The cancellation, health, and Jaeger checks now decode their actual wire payload
 ### solo-coder-malformed-payload | medium | resolved
 
 The prior fail-open decoder finding is corrected. Malformed proposal API objects, populated policy records, empty SSE data, malformed SSE JSON, and non-object SSE payloads now raise contextual assertions; the run-scoped changeset plus zero-`.vault`-write proof is unchanged. The live solo-coder bridge remains unverified locally only because its named loopback engine/gateway/worker prerequisite is absent. `src/vaultspec_a2a/service_tests/test_s20_solo_coder_bridge_live.py`.
+
+### pw7-fail-closed-regressions | medium | open coverage gap
+
+PW7â€™s strict readers correctly narrow live run-status, authoring response, queue, marker, receipt, and permission-history payloads, but all eight live lanes that reach those readers are declared-prerequisite skips. The 12 passing non-live tests cover retry and callback behaviour only. Add stack-free malformed-payload regressions for non-object responses, malformed item lists, receipts, and permission history before claiming the boundary is fail closed. Do not stage the shared PW7 file with concurrent profile edits until this finding is resolved and the S26 hunks can be isolated safely. `src/vaultspec_a2a/service_tests/test_pw7_acceptance.py`.
 ## Recommendations
 
 - Provision a healthy loopback service-discovery record, then run the named engine-backed stdio service lane and append the outcome to this audit before declaring S26 fully runtime-proven.

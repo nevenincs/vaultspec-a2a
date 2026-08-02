@@ -58,7 +58,8 @@ import pytest
 
 from ..api.schemas.gateway import ProviderCatalogSelection
 from ..providers.conditions import ProviderCondition
-from .test_pw7_acceptance import _GATEWAY_AUTH_HEADERS, _reachable_stack
+from ..testing.endpoints import resolve_gateway_url
+from .test_pw7_acceptance import _GATEWAY_AUTH_HEADERS
 
 if TYPE_CHECKING:
     from ..conftest import ExternalPrerequisiteRule
@@ -70,6 +71,10 @@ JsonObject = dict[str, object]
 #: starts a run, so pointing the default suite at a healthy stack cannot burn
 #: quota and cannot report a confusing failure for a run that simply succeeded.
 _EXPECT_ENV = "VAULTSPEC_PROVIDER_CONDITION_EXPECT"
+
+#: The workspace the armed lane belongs to. Named explicitly rather than derived
+#: from an engine discovery file, so this proof needs no engine at all.
+_WORKSPACE_ENV = "VAULTSPEC_PROVIDER_CONDITION_WORKSPACE"
 
 #: The preset the provocation rides. A coding topology deliberately: it authors no
 #: document, so the run needs no engine session and no actor tokens, and the only
@@ -86,6 +91,34 @@ _TERMINAL_DEADLINE_SECONDS = 900.0
 
 #: How often run-status is asked whether the run has gone terminal.
 _POLL_SECONDS = 10.0
+
+
+def _gateway_only_stack() -> tuple[str, str] | None:
+    """Resolve (gateway_url, workspace_root), or ``None`` when no gateway answers.
+
+    Deliberately NARROWER than the shared loopback-stack resolver this module
+    first borrowed. That one additionally requires a reachable dashboard ENGINE
+    and an engine service-discovery file, because it was written for authoring
+    acceptance - and this proof touches neither. It destructured both engine
+    values into throwaways.
+
+    Requiring them anyway made the proof unrunnable in every situation where a
+    gateway exists but an engine does not, which is the common one: a provider
+    refusal needs a run and a lane, not a document session. A prerequisite
+    broader than the need does not make a test safer, it makes it unrunnable and
+    so silently unproven - the exact outcome this module exists to avoid.
+
+    The workspace root is read from the environment rather than derived from the
+    engine's discovery path, since that derivation was the only thing the engine
+    was supplying here.
+    """
+    gateway = resolve_gateway_url()
+    if gateway is None:
+        return None
+    workspace_root = os.environ.get(_WORKSPACE_ENV)
+    if not workspace_root:
+        return None
+    return gateway.url, workspace_root
 
 
 def _declared_expectation() -> ProviderCondition | None:
@@ -175,11 +208,10 @@ async def test_a_real_provider_refusal_reaches_run_status_as_a_typed_condition(
             "naming the missing prerequisite: the chain is unproven, not proven"
         )
 
-    stack = _reachable_stack()
+    stack = _gateway_only_stack()
     if stack is None:
-        external_prerequisite.absent("loopback-stack")
-    gateway_url, _engine_base_url, _engine_bearer, vault_root = stack
-    workspace_root = str(vault_root.parent)
+        external_prerequisite.absent("gateway")
+    gateway_url, workspace_root = stack
 
     run_id = f"provider-condition-{uuid.uuid4().hex[:12]}"
 

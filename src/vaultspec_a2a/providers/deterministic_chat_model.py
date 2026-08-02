@@ -17,7 +17,7 @@ parameterized harness can assert the materialized document stems.
 
 import logging
 from collections.abc import AsyncIterator
-from typing import Any, override
+from typing import override
 
 from langchain_core.callbacks import (
     AsyncCallbackManagerForLLMRun,
@@ -26,7 +26,7 @@ from langchain_core.callbacks import (
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import AIMessage, AIMessageChunk, BaseMessage
 from langchain_core.outputs import ChatGeneration, ChatGenerationChunk, ChatResult
-from pydantic import Field, PrivateAttr
+from pydantic import Field
 
 from ..team.team_config import AgentConfig
 
@@ -157,22 +157,17 @@ class DeterministicResearchAdrChatModel(BaseChatModel):
 
     feature_tag: str = "acceptance-harness"
     topic: str = "research_adr acceptance"
-    permission_callback: Any | None = Field(default=None, exclude=True)
-
-    _agent_config: AgentConfig | None = PrivateAttr(default=None)
-
-    def __init__(self, **kwargs: Any) -> None:
-        agent_config = kwargs.pop("agent_config", None)
-        super().__init__(**kwargs)
-        self._agent_config = agent_config
+    agent_config: AgentConfig | None = Field(default=None, exclude=True)
+    permission_callback: object | None = Field(default=None, exclude=True)
 
     @property
+    @override
     def _llm_type(self) -> str:
         return "deterministic-research-adr-chat-model"
 
     def _content_for_role(self) -> str:
         """Return the deterministic content for this model's resolved role."""
-        role = _role_of(self._agent_config.id if self._agent_config else None)
+        role = _role_of(self.agent_config.id if self.agent_config else None)
         if role == _ROLE_DOC_REVIEWER:
             return _REVIEW_PASS
         if role == _ROLE_ADR_AUTHOR:
@@ -191,16 +186,17 @@ class DeterministicResearchAdrChatModel(BaseChatModel):
         # content, so a misconfigured preset surfaces instead of a blank proposal.
         logger.warning(
             "DeterministicResearchAdrChatModel: unresolved role for agent_id=%r",
-            self._agent_config.id if self._agent_config else None,
+            self.agent_config.id if self.agent_config else None,
         )
         return f"Deterministic content for `{self.topic}`."
 
+    @override
     def _generate(
         self,
         messages: list[BaseMessage],
         stop: list[str] | None = None,
         run_manager: CallbackManagerForLLMRun | None = None,
-        **kwargs: Any,
+        **kwargs: object,
     ) -> ChatResult:
         """Synchronous generation is unsupported; use the async path."""
         del messages, stop, run_manager, kwargs  # interface-required, unused
@@ -209,12 +205,13 @@ class DeterministicResearchAdrChatModel(BaseChatModel):
             "_astream/_agenerate"
         )
 
+    @override
     async def _agenerate(
         self,
         messages: list[BaseMessage],
         stop: list[str] | None = None,
         run_manager: AsyncCallbackManagerForLLMRun | None = None,
-        **kwargs: Any,
+        **kwargs: object,
     ) -> ChatResult:
         """Return the resolved role content as a single AIMessage."""
         del messages, stop, run_manager, kwargs  # interface-required, unused
@@ -229,7 +226,7 @@ class DeterministicResearchAdrChatModel(BaseChatModel):
         messages: list[BaseMessage],
         stop: list[str] | None = None,
         run_manager: AsyncCallbackManagerForLLMRun | None = None,
-        **kwargs: Any,
+        **kwargs: object,
     ) -> AsyncIterator[ChatGenerationChunk]:
         """Yield the resolved role content as a single streaming chunk."""
         del messages, stop, run_manager, kwargs  # interface-required, unused

@@ -20,6 +20,7 @@ from ..ipc.schemas import (
     ExecutionStateProjectionPayload,
     ExecutionTaskProjectionPayload,
 )
+from ..providers import ProviderCondition
 from ..thread.enums import TERMINAL_STATUSES, ThreadStatus
 
 if TYPE_CHECKING:
@@ -375,6 +376,8 @@ class StateProjector:
         thread_id: str,
         outcome: str,
         error_detail: str | None = None,
+        *,
+        provider_condition: ProviderCondition | None = None,
     ) -> None:
         """Emit a ``thread_terminal`` event to the gateway.
 
@@ -384,6 +387,24 @@ class StateProjector:
 
         *error_detail* is forwarded in the event payload when set, allowing
         the gateway to surface compilation/execution error messages to clients.
+
+        *provider_condition* is its machine-readable counterpart: the detail says
+        what happened, the condition says what the reader should do about it, and
+        a client that has to derive the second from the first is back to matching
+        vendor prose. It rides this same payload because the terminal event is
+        what the gateway persists, and the error frame that also carries the
+        condition is droppable - a reloading client recovers it only from here.
+
+        A FAILED terminal ALWAYS carries a condition, defaulting to the
+        vocabulary's floor. That is the invariant this campaign exists to
+        establish, and it is enforced at this single emitter rather than asked of
+        every call site, because a failure whose classification depends on a
+        caller remembering to supply it is exactly the blank terminal being
+        removed. The floor is honest at the sites that omit it: a run refused
+        before any provider was engaged has no provider condition to report, and
+        saying so plainly beats inventing one. Non-failed terminals carry none at
+        all, since a completed or cancelled run had no provider failure to
+        classify and an ``unknown`` there would read as one.
         """
         if outcome not in TERMINAL_STATUSES:
             return
@@ -394,6 +415,10 @@ class StateProjector:
         }
         if error_detail:
             payload["error_detail"] = error_detail
+        if outcome == ThreadStatus.FAILED:
+            payload["provider_condition"] = (
+                provider_condition or ProviderCondition.UNKNOWN
+            ).value
         await self._bridge.send_event(thread_id, payload)
         # Flush terminal events immediately -- do not batch.
         # A lost thread_terminal event leaves the thread stuck in RUNNING

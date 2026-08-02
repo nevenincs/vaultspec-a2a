@@ -4,7 +4,7 @@ tags:
   - '#provider-error-taxonomy'
 date: '2026-08-02'
 modified: '2026-08-02'
-body_hash: 'sha256:6ef234e973ed2335bdf2540c4b1c4fa92ee6b2824a9dfae6a51af5ca9f677a33'
+body_hash: 'sha256:b6574b772a32a8f7e72591911f4488c8dd47a168938017f8d34c5abf31d44517'
 tier: L3
 related:
   - '[[2026-08-02-provider-error-taxonomy-adr]]'
@@ -63,7 +63,7 @@ Establishes the closed condition vocabulary, proves the ZAI lane's discriminator
 Carries the condition on the error frame, persists it beside the failure reason, and projects it authoritatively onto run-status so a reloading client recovers it.
 
 - [x] `W01.P03.S13` - Emit the resolved condition as the error frame code; `src/vaultspec_a2a/streaming/ingest.py`.
-- [ ] `W01.P03.S14` - Carry the condition on the terminal status payload; `src/vaultspec_a2a/worker/state_projection.py`.
+- [x] `W01.P03.S14` - Carry the condition on the terminal status payload; `src/vaultspec_a2a/worker/state_projection.py`.
 - [x] `W01.P03.S15` - Declare the provider condition column on the thread model; `src/vaultspec_a2a/database/models.py`.
 - [x] `W01.P03.S16` - Add the provider condition migration revision; `src/vaultspec_a2a/database/migrations/versions`.
 - [x] `W01.P03.S17` - Persist the condition alongside the failure reason on the terminal write; `src/vaultspec_a2a/database/thread_repository.py`.
@@ -74,6 +74,7 @@ Carries the condition on the error frame, persists it beside the failure reason,
 - [ ] `W01.P03.S22` - Declare the condition on the run-status response schema; `src/vaultspec_a2a/api/schemas/gateway.py`.
 - [ ] `W01.P03.S23` - Project the condition onto the run-status response; `src/vaultspec_a2a/api/routes/gateway.py`.
 - [ ] `W01.P03.S24` - Prove the condition survives a reload through run-status alone; `src/vaultspec_a2a/api/tests/test_internal.py`.
+- [ ] `W01.P03.S58` - Project the repair reason onto the run-status response; `src/vaultspec_a2a/api/routes/gateway.py`.
 
 ### Phase `W01.P04` - recoverability and retry
 

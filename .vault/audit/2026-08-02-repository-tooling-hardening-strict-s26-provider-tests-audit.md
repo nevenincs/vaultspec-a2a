@@ -5,7 +5,7 @@ tags:
 date: '2026-08-02'
 modified: '2026-08-02'
 body_schema: 'body-v1'
-body_hash: 'sha256:f282ea82ecb7892339ee43ab62c9fa03c91f1d817f7ebda7e30598c303a3c233'
+body_hash: 'sha256:5822159ee3f36c384405536d3cf03768ff2a2a42dc5703e96f3354d36722bbc5'
 related:
   - "[[2026-07-19-repository-tooling-hardening-plan]]"
 ---
@@ -64,7 +64,7 @@ The prior fail-open decoder finding is corrected. Malformed proposal API objects
 
 ### pw7-fail-closed-regressions | medium | open coverage gap
 
-PW7ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢s strict readers correctly narrow live run-status, authoring response, queue, marker, receipt, and permission-history payloads, but all eight live lanes that reach those readers are declared-prerequisite skips. The 12 passing non-live tests cover retry and callback behaviour only. Add stack-free malformed-payload regressions for non-object responses, malformed item lists, receipts, and permission history before claiming the boundary is fail closed. Do not stage the shared PW7 file with concurrent profile edits until this finding is resolved and the S26 hunks can be isolated safely. `src/vaultspec_a2a/service_tests/test_pw7_acceptance.py`.
+PW7ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢s strict readers correctly narrow live run-status, authoring response, queue, marker, receipt, and permission-history payloads, but all eight live lanes that reach those readers are declared-prerequisite skips. The 12 passing non-live tests cover retry and callback behaviour only. Add stack-free malformed-payload regressions for non-object responses, malformed item lists, receipts, and permission history before claiming the boundary is fail closed. Do not stage the shared PW7 file with concurrent profile edits until this finding is resolved and the S26 hunks can be isolated safely. `src/vaultspec_a2a/service_tests/test_pw7_acceptance.py`.
 
 ### receipt-role-callback-observability | medium | open production contract
 
@@ -73,6 +73,10 @@ Receipt-role rules cannot be repaired as annotations only: the current recording
 ### researcher-config-default | high | open compatibility regression
 
 The new researcher-node callback propagation always passed `config=None` to injected producers, breaking existing direct two-argument producers before any research finding is made. Restore the compatibility branch: omit the keyword when config is absent and forward it only when supplied. Prove this through the existing direct researcher-node regression before the callback-observability payload is reviewed or staged. `src/vaultspec_a2a/graph/nodes/diverge.py:305`.
+
+### compiled-researcher-config-injection | high | open framework integration defect
+
+`RunnableConfig` is imported only under `TYPE_CHECKING` in the researcher node, so LangGraph cannot resolve the postponed runtime annotation, warns during graph compilation, and fails to inject public graph callback configuration into the divergence node. Move the import to runtime scope and add a config-aware producer regression through the compiled public graph; source-level forwarding is insufficient. `src/vaultspec_a2a/graph/nodes/diverge.py`; `src/vaultspec_a2a/graph/tests/nodes/test_diverge.py`.
 ## Recommendations
 
 - Provision a healthy loopback service-discovery record, then run the named engine-backed stdio service lane and append the outcome to this audit before declaring S26 fully runtime-proven.

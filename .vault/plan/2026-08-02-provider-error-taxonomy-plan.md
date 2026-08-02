@@ -4,7 +4,7 @@ tags:
   - '#provider-error-taxonomy'
 date: '2026-08-02'
 modified: '2026-08-02'
-body_hash: 'sha256:983db192a9580c8d39848504e11f39edb1386b8e624bc3d5f435c6e8c641accb'
+body_hash: 'sha256:bbf44a98885b3de9a4fdb3a64ffe81d024b14578d0a547cbce758574287035aa'
 tier: L3
 related:
   - '[[2026-08-02-provider-error-taxonomy-adr]]'
@@ -49,7 +49,7 @@ Restores a truthful failure reason by stopping the worker-node wrapper and the i
 
 Establishes the closed condition vocabulary, proves the ZAI lane's discriminator fidelity live, and gives each served lane a total pure mapping from its own wire vocabulary into it.
 
-- [ ] `W01.P02.S05` - Capture a live ZAI error payload and record the discriminator fidelity verdict; `src/vaultspec_a2a/providers/tests/test_zai_error_fidelity_live.py`.
+- [x] `W01.P02.S05` - Capture a live ZAI error payload and record the discriminator fidelity verdict; `src/vaultspec_a2a/providers/tests/test_zai_error_fidelity_live.py`.
 - [ ] `W01.P02.S06` - Declare the closed provider condition vocabulary; `src/vaultspec_a2a/providers/conditions.py`.
 - [ ] `W01.P02.S07` - Map the ACP error kind and JSON-RPC code onto the vocabulary; `src/vaultspec_a2a/providers/conditions.py`.
 - [ ] `W01.P02.S08` - Map the Codex error info variants onto the vocabulary; `src/vaultspec_a2a/providers/conditions.py`.

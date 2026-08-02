@@ -16,11 +16,24 @@ from ..factory import _build_kimi_env, _classify_kimi_command
 
 
 def _kimi_model() -> AcpChatModel:
-    """A Kimi AcpChatModel as the factory builds it (kimi family, kimi acp)."""
+    """A Kimi AcpChatModel as the factory builds it (kimi family, kimi acp).
+
+    The temporary-model triple is passed COMPLETE. ``KIMI_MODEL_*`` is one
+    provider definition rather than three independent overrides, so the factory
+    refuses a partial tuple rather than emitting an env that names a key with no
+    model to use it. This helper once passed the key alone and got an empty env
+    back by omission; that silent path is now a loud refusal, and a fixture that
+    depends on it would be asserting composition against a model the factory
+    would never actually build.
+    """
     command, _ = _classify_kimi_command()
     return AcpChatModel(
         command=command,
-        env_vars=_build_kimi_env(kimi_api_key="sk-test"),
+        env_vars=_build_kimi_env(
+            kimi_api_key="sk-test",
+            kimi_base_url="https://api.moonshot.example/v1",
+            kimi_temporary_model_name="kimi-test-model",
+        ),
         acp_family="kimi",
         provider="kimi",
     )

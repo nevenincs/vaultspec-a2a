@@ -5,7 +5,7 @@ tags:
 date: '2026-08-02'
 modified: '2026-08-02'
 body_schema: 'body-v1'
-body_hash: 'sha256:d3b9cd0cf0f4e674150c600b543bdd9e48b179eb258bb5799d6db61625d93d3a'
+body_hash: 'sha256:9a1d6b7e5f91bfd708943218382eb8ce9a1c5e8b88a9b82b42c53884c27516c3'
 related:
   - "[[2026-07-19-repository-tooling-hardening-plan]]"
 ---
@@ -91,9 +91,9 @@ The mandatory duplication sentinel is wired as `just audit duplication` (not a `
 
 Commit `d1f02edb` returns `NotRequired` to `typing`, keeps `TypedDict` at `typing_extensions` for LangGraph schema metadata, and sorts the imports. Independent review confirms Ruff and format pass, the strict receipt service scope remains zero in Basedpyright and Ty, and no concurrent state/control work entered the commit. `src/vaultspec_a2a/thread/state.py`.
 
-### state-projection-configurable-fail-open | medium | open correctness regression
+### state-projection-configurable-fail-open | medium | resolved
 
-Post-commit review of `689c80b7` found the new structural guard accepts a top-level mapping whose `config["configurable"]` is not itself a mapping. The normalizer then emits a healthy-looking payload with `checkpoint_id=None`, whereas the prior direct `.get("checkpoint_id")` raised and the existing emitter converted that malformed state into `execution_state_projection_unavailable`. Restore fail-closed behavior: an absent `configurable` key may yield `None`, but a present non-mapping value must raise into the existing degraded emission path. Add a real regression covering `config={"configurable": []}`; do not relax the guard, add a suppression, or alter the normal absent-key case. `src/vaultspec_a2a/worker/state_projection.py`; `src/vaultspec_a2a/worker/tests/test_state_projection.py`.
+Commit `26bccdcd` restores the pre-refactor fail-closed boundary: an absent `configurable` key yields `None`, while a present non-mapping raises `TypeError`. Direct normalization-contract tests prove both arms; the existing production emitter catches that exception and deterministically emits `execution_state_projection_unavailable`. This is structural/control-flow proof of degradation, not a live graph, bridge, persistence, or gateway proof. Independent review found no new defect; focused tests, Ruff, format, and Ty pass, and `_checkpoint_id` remains below the complexity limit. `src/vaultspec_a2a/worker/state_projection.py`; `src/vaultspec_a2a/worker/tests/test_state_projection.py`.
 ## Recommendations
 
 - Provision a healthy loopback service-discovery record, then run the named engine-backed stdio service lane and append the outcome to this audit before declaring S26 fully runtime-proven.

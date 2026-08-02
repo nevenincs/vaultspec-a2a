@@ -17,6 +17,8 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any, cast
 
 import pytest
+from langchain_core.callbacks import BaseCallbackHandler
+from langchain_core.callbacks.manager import AsyncCallbackManager
 from langchain_core.messages import AIMessage, HumanMessage
 from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
@@ -37,6 +39,7 @@ from ....thread.state import TeamState
 if TYPE_CHECKING:
     from pathlib import Path
 
+    from langchain_core.runnables import RunnableConfig
 _SPECS: list[dict[str, Any]] = [
     {"thread_id": "codebase", "locators": ["compiler.py:402"]},
     {"thread_id": "prior-art", "locators": ["Send docs"]},
@@ -127,6 +130,49 @@ async def test_researcher_node_appends_single_finding() -> None:
             }
         ]
     }
+
+
+@pytest.mark.asyncio
+async def test_compiled_researcher_forwards_config_to_config_aware_producer() -> None:
+    """A public compiled graph injects its callback-bearing config into a producer."""
+    observed_configs: list[RunnableConfig] = []
+    passive_callback = BaseCallbackHandler()
+    spec: dict[str, object] = {
+        "thread_id": "config-aware",
+        "locators": ["diverge.py:config"],
+    }
+
+    async def config_aware_producer(
+        state: TeamState,
+        spec: dict[str, object],
+        *,
+        config: RunnableConfig | None = None,
+    ) -> dict[str, object]:
+        assert config is not None
+        observed_configs.append(config)
+        return {
+            "claim": "the compiled graph injected its runtime config",
+            "locators": spec["locators"],
+            "source_thread": spec["thread_id"],
+        }
+
+    builder = StateGraph(TeamState)
+    builder.add_node("researcher", create_researcher_node(spec, config_aware_producer))
+    builder.add_edge(START, "researcher")
+    builder.add_edge("researcher", END)
+    graph = builder.compile(checkpointer=InMemorySaver())
+    config: RunnableConfig = {
+        "callbacks": [passive_callback],
+        "configurable": {"thread_id": "config-aware-run"},
+    }
+
+    result = await graph.ainvoke(_base_state(), config=config)
+
+    assert result["research_findings"][0]["source_thread"] == "config-aware"
+    assert observed_configs
+    observed_callbacks = observed_configs[0].get("callbacks")
+    assert isinstance(observed_callbacks, AsyncCallbackManager)
+    assert passive_callback in observed_callbacks.handlers
 
 
 @pytest.mark.asyncio

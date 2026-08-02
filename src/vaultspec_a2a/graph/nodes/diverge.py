@@ -23,17 +23,16 @@ evidence already is. External sources never become vault wiki-links; that
 channel stays machine-resolved from applied proposals only.
 """
 
-from __future__ import annotations
-
 from datetime import datetime
-from typing import TYPE_CHECKING, Any, Protocol, cast
+from inspect import signature
+from typing import Any, Protocol, TypeIs, cast, override
 from urllib.parse import urlsplit
 
+from langchain_core.runnables import RunnableConfig
 from langgraph.types import Command, Send
 
-if TYPE_CHECKING:
-    from ...thread.state import TeamState
-    from .worker import WorkerNode
+from ...thread.state import TeamState
+from .worker import WorkerNode
 
 __all__ = [
     "MAX_WEB_LOCATORS_PER_FINDING",
@@ -59,8 +58,40 @@ class ResearchFindingProducer(Protocol):
     """
 
     async def __call__(
-        self, state: TeamState, spec: dict[str, Any]
+        self,
+        state: TeamState,
+        spec: dict[str, Any],
     ) -> dict[str, Any]: ...
+
+
+class ConfiguredResearchFindingProducer(ResearchFindingProducer, Protocol):
+    """A finding producer that opts into LangGraph invocation configuration."""
+
+    @override
+    async def __call__(
+        self,
+        state: TeamState,
+        spec: dict[str, Any],
+        *,
+        config: RunnableConfig | None = None,
+    ) -> dict[str, Any]: ...
+
+
+def _supports_runnable_config(
+    producer: ResearchFindingProducer,
+) -> TypeIs[ConfiguredResearchFindingProducer]:
+    """Return whether an injected producer explicitly accepts ``config=``."""
+    return "config" in signature(producer).parameters
+
+
+class ResearchDispatchNode(Protocol):
+    """Config-aware dispatch callable returned by the diverge-stage builder."""
+
+    __name__: str
+
+    async def __call__(
+        self, state: TeamState, config: RunnableConfig | None = None
+    ) -> Command[object]: ...
 
 
 def researcher_node_name(dispatch_name: str, index: int) -> str:
@@ -73,7 +104,7 @@ def researcher_node_name(dispatch_name: str, index: int) -> str:
     return f"{dispatch_name}_researcher_{index:02d}"
 
 
-def create_research_dispatch_node(researcher_names: list[str]) -> WorkerNode:
+def create_research_dispatch_node(researcher_names: list[str]) -> ResearchDispatchNode:
     """Create the dispatch node that fans out to the researcher branches.
 
     The node emits one ``Send`` per researcher, each carrying the current state
@@ -83,8 +114,11 @@ def create_research_dispatch_node(researcher_names: list[str]) -> WorkerNode:
     ``Command.goto``; the dispatch node has no static outgoing edges.
     """
 
-    async def research_dispatch_node(state: TeamState) -> Command:
+    async def research_dispatch_node(
+        state: TeamState, config: RunnableConfig | None = None
+    ) -> Command[object]:
         """Fan out to every researcher branch via Send."""
+        _ = config
         return Command(
             goto=[Send(name, state) for name in researcher_names],
         )
@@ -280,9 +314,17 @@ def create_researcher_node(
     appended.
     """
 
-    async def researcher_node(state: TeamState) -> dict[str, Any]:
+    async def researcher_node(
+        state: TeamState, config: RunnableConfig | None = None
+    ) -> dict[str, Any]:
         """Produce this thread's finding and append it to research_findings."""
-        finding = _validate_finding(await producer(state, spec), spec)
+        if config is None:
+            produced = await producer(state, spec)
+        elif _supports_runnable_config(producer):
+            produced = await producer(state, spec, config=config)
+        else:
+            produced = await producer(state, spec)
+        finding = _validate_finding(produced, spec)
         return {"research_findings": [finding]}
 
     researcher_node.__name__ = "researcher_node"

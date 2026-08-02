@@ -24,6 +24,7 @@ if TYPE_CHECKING:
     from ..worker.authoring_binding import AuthoringBindingProvider
 
 from langchain_core.language_models import BaseChatModel
+from langchain_core.runnables import RunnableConfig
 from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.errors import GraphRecursionError
 from langgraph.graph import END, START, StateGraph
@@ -1069,9 +1070,10 @@ def _wrap_loop_node(worker_node: WorkerNode) -> WorkerNode:
     @functools.wraps(worker_node)
     async def _loop_node_with_counter(
         state: TeamState,
+        config: RunnableConfig | None = None,
         _inner: WorkerNode = worker_node,
     ) -> dict[str, Any]:
-        result = await _inner(state)
+        result = await _inner(state, config=config)
         result["loop_count"] = state.get("loop_count", 0) + 1
         return result
 
@@ -1314,7 +1316,11 @@ def _make_research_producer(
     folds into a non-conformant document.
     """
 
-    async def producer(state: TeamState, spec: dict[str, Any]) -> dict[str, Any]:
+    async def producer(
+        state: TeamState,
+        spec: dict[str, Any],
+        config: RunnableConfig | None = None,
+    ) -> dict[str, Any]:
         from langchain_core.messages import SystemMessage
 
         from ..context.rules import (
@@ -1362,7 +1368,7 @@ def _make_research_producer(
             effective_model = compose_harness_mcp_servers(
                 model, harness_mcp_servers, allowed_tools=harness_allowed
             )
-        response = await effective_model.ainvoke(messages)
+        response = await effective_model.ainvoke(messages, config=config)
         claim = str(response.content)
         # Stamped once for the whole turn: a provider-native retrieval happens
         # inside the turn and is not separately observable, so the turn's

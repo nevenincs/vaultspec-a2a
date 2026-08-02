@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, Any, Protocol, cast
 
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import AIMessage, BaseMessage, SystemMessage, ToolMessage
+from langchain_core.runnables import RunnableConfig
 from langgraph.errors import GraphBubbleUp
 from langgraph.types import Command, interrupt
 
@@ -45,7 +46,9 @@ class WorkerNode(Protocol):
 
     __name__: str
 
-    async def __call__(self, state: TeamState) -> dict[str, Any]:
+    async def __call__(
+        self, state: TeamState, config: RunnableConfig | None = None
+    ) -> dict[str, Any]:
         """Execute the worker's task."""
         ...
 
@@ -266,6 +269,7 @@ async def _resolve_worker_tool_calls(
     queue_tool: "BaseTool | None",
     model: BaseChatModel,
     autonomous: bool,
+    config: RunnableConfig | None,
 ) -> tuple[BaseMessage, dict[str, Any]]:
     """Resolve every node-owned tool call in one response, in one follow-up turn.
 
@@ -312,7 +316,7 @@ async def _resolve_worker_tool_calls(
     # a durability bug: mark_complete is idempotent, so the retried turn replays it
     # to the same next task and re-derives the same patch. Ordering is intentional:
     # the model still needs the ToolMessages to produce its final response.
-    final_response = await model.ainvoke(follow_up_messages)
+    final_response = await model.ainvoke(follow_up_messages, config=config)
     return final_response, state_patch
 
 
@@ -481,7 +485,9 @@ def create_worker_node(
         An async function that conforms to the LangGraph node signature.
     """
 
-    async def worker_node(state: TeamState) -> dict[str, Any]:
+    async def worker_node(
+        state: TeamState, config: RunnableConfig | None = None
+    ) -> dict[str, Any]:
         """Execute the worker's task and return the generated message."""
         # The task queue is thread-scoped, so build the mark-complete
         # tool per invocation using the thread_id carried in graph state — the
@@ -578,13 +584,14 @@ def create_worker_node(
             autonomous,
         )
         try:
-            response = await effective_model.ainvoke(messages)
+            response = await effective_model.ainvoke(messages, config=config)
             response, state_updates = await _resolve_worker_tool_calls(
                 messages=messages,
                 response=response,
                 queue_tool=queue_tool,
                 model=effective_model,
                 autonomous=autonomous,
+                config=config,
             )
         except GraphBubbleUp:
             raise

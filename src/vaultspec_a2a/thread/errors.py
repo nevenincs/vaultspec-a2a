@@ -10,6 +10,44 @@ typed error-taxonomy requirement.
 
 from enum import StrEnum
 
+# Bounds the message portion of one rendered exception identity. A client-visible
+# failure reason is assembled from a small number of these, and the durable
+# ``threads.failure_reason`` column - and the consumer validating it - are byte
+# bounded, so no single link in a cause chain may consume the whole budget.
+_MAX_DETAIL_MESSAGE_LEN = 240
+
+
+def describe_exception(exc: BaseException) -> str:
+    """Render one exception's own identity: its type, its code, and its message.
+
+    Single-line and bounded, so the result is safe to place on a client-visible
+    failure reason. The rendering is deliberately NON-recursive - it describes
+    *this* exception only and never follows ``__cause__`` - because callers that
+    walk a cause chain compose the links themselves, and a self-recursive
+    rendering would report the same provider fault twice inside one capped
+    string, crowding out the attribution that names where it happened.
+
+    A ``message`` attribute is preferred over ``str(exc)`` when the exception
+    publishes one, following the convention the ACP errors already set: that
+    attribute is the exception's own cause-free text, whereas ``str`` may fold in
+    a wrapped cause or a vendor-shaped payload.
+    """
+    message = getattr(exc, "message", None)
+    if not isinstance(message, str) or not message:
+        message = str(exc)
+    label = type(exc).__name__
+    code = getattr(exc, "code", None)
+    if isinstance(code, bool):
+        code = None
+    if isinstance(code, int):
+        label = f"{label}[{code:d}]"
+    elif isinstance(code, str) and code:
+        label = f"{label}[{code}]"
+    message = " ".join(message.split())
+    if len(message) > _MAX_DETAIL_MESSAGE_LEN:
+        message = message[: _MAX_DETAIL_MESSAGE_LEN - 1] + "…"
+    return f"{label}: {message}" if message else label
+
 
 class ErrorSeverity(StrEnum):
     """Classification of error permanence.
@@ -154,19 +192,38 @@ class AgentProcessError(VaultspecError):
 
 
 class WorkerExecutionError(VaultspecError):
-    """Raised when a worker node's model invocation fails after all retries."""
+    """Raised when a worker node's model invocation fails after all retries.
 
-    __slots__ = ("message_count", "model", "worker")
+    The wrapper names the worker turn that failed AND the failure that caused it.
+    Attribution alone - which is all this exception used to carry - identifies
+    where a run died and nothing about why: the provider's own type, message and
+    numeric code survived only on ``__cause__`` and in the worker's log, so every
+    provider fault reached a client as the same opaque sentence. ``str`` therefore
+    folds in a rendered identity of *cause*, while ``message`` keeps the
+    cause-free attribution for readers composing their own cause chain.
+    """
+
+    __slots__ = ("message", "message_count", "model", "worker")
 
     severity = ErrorSeverity.TRANSIENT
     recovery_action = RecoveryAction.ESCALATE_TO_USER
 
-    def __init__(self, worker: str, model: str, message_count: int) -> None:
-        """Record worker, model and message count for context-window overflow."""
-        super().__init__(f"worker={worker!r} model={model} messages={message_count}")
+    def __init__(
+        self,
+        worker: str,
+        model: str,
+        message_count: int,
+        *,
+        cause: BaseException | None = None,
+    ) -> None:
+        """Record worker, model, message count, and the failure being wrapped."""
+        attribution = f"worker={worker!r} model={model} messages={message_count}"
+        detail = describe_exception(cause) if cause is not None else None
+        super().__init__(f"{attribution} | {detail}" if detail else attribution)
         self.worker = worker
         self.model = model
         self.message_count = message_count
+        self.message = attribution
 
 
 # ---------------------------------------------------------------------------
@@ -347,4 +404,5 @@ __all__ = [
     "TokenBudgetExceededError",
     "VaultspecError",
     "WorkerExecutionError",
+    "describe_exception",
 ]

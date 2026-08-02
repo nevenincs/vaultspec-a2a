@@ -18,13 +18,15 @@ from .. import (
     TeamConfigNotFoundError,
     TokenBudgetExceededError,
     VaultspecError,
+    WorkerExecutionError,
 )
 
 # Module object used for __all__ introspection
 from .. import errors as _errors_module
 
-# GitWorkspaceError lives in errors but is NOT re-exported by the thread facade
-from ..errors import GitWorkspaceError
+# GitWorkspaceError and describe_exception live in errors but are NOT
+# re-exported by the thread facade
+from ..errors import GitWorkspaceError, describe_exception
 
 # ---------------------------------------------------------------------------
 # ErrorSeverity enum
@@ -303,6 +305,112 @@ class TestCustomInitExceptions:
 
 
 # ---------------------------------------------------------------------------
+# Cause retention on the worker wrapper
+# ---------------------------------------------------------------------------
+
+
+class TestDescribeException:
+    """Tests for the bounded, single-line exception identity renderer."""
+
+    def test_a_real_provider_error_renders_its_type_code_and_message(self) -> None:
+        """The renderer reads the convention the ACP errors actually publish.
+
+        Exercised against the real provider exception rather than a stand-in with
+        the attributes this renderer hopes for: the renderer's whole value is that
+        it recovers a provider's own numeric code, and only the shipped class can
+        prove that ``code`` and ``message`` still mean what it assumes.
+        """
+        from ...providers.acp_exceptions import AcpErrorCode, AcpPromptError
+
+        detail = describe_exception(
+            AcpPromptError(
+                "ACP prompt failed: credit balance too low",
+                code=AcpErrorCode.UNAUTHENTICATED,
+                data={"errorKind": "billing_error"},
+            )
+        )
+
+        assert detail == (
+            "AcpPromptError[-32000]: ACP prompt failed: credit balance too low"
+        )
+
+    def test_an_exception_without_a_code_renders_type_and_message_alone(self) -> None:
+        """A plain exception carries no code, and none is invented for it."""
+        assert describe_exception(RuntimeError("boom")) == "RuntimeError: boom"
+
+    def test_the_rendering_is_single_line_and_bounded(self) -> None:
+        """A pathological message can never consume a whole failure reason."""
+        detail = describe_exception(RuntimeError("a\nb\n" + "x" * 4000))
+
+        assert "\n" not in detail
+        assert detail.startswith("RuntimeError: a b ")
+        assert detail.endswith("…")
+        assert len(detail) <= len("RuntimeError: ") + 240
+
+    def test_the_rendering_does_not_follow_the_cause_chain(self) -> None:
+        """Each link is described alone so a walker never reports one twice."""
+        cause = RuntimeError("root")
+        wrapper = ValueError("wrapper")
+        wrapper.__cause__ = cause
+
+        assert describe_exception(wrapper) == "ValueError: wrapper"
+
+
+class TestWorkerExecutionErrorRetainsItsCause:
+    """Tests that the worker wrapper stops discarding the provider's identity."""
+
+    def test_the_wrapper_message_names_the_provider_failure(self) -> None:
+        """``str`` carries attribution AND the wrapped provider fault.
+
+        This is the loss point the whole failure surface depended on: the
+        wrapper used to report only which worker and model died, so a client
+        received the same sentence for an expired credential, an overloaded
+        provider, and an empty credit balance.
+        """
+        from ...providers.acp_exceptions import AcpErrorCode, AcpPromptError
+
+        cause = AcpPromptError(
+            "ACP prompt failed: credit balance too low",
+            code=AcpErrorCode.UNAUTHENTICATED,
+        )
+        err = WorkerExecutionError(
+            worker="coder",
+            model="claude/claude-sonnet-4-5",
+            message_count=3,
+            cause=cause,
+        )
+
+        rendered = str(err)
+        assert "worker='coder' model=claude/claude-sonnet-4-5 messages=3" in rendered
+        assert "AcpPromptError" in rendered
+        assert "-32000" in rendered
+        assert "credit balance too low" in rendered
+
+    def test_the_attribution_stays_available_free_of_the_cause(self) -> None:
+        """``message`` keeps the cause-free half for cause-chain walkers.
+
+        A walker rendering this wrapper and then its ``__cause__`` would print
+        the provider fault twice if the wrapper's own identity folded it in.
+        """
+        cause = RuntimeError("provider exploded")
+        err = WorkerExecutionError(
+            worker="coder", model="claude/opus", message_count=1, cause=cause
+        )
+
+        assert err.message == "worker='coder' model=claude/opus messages=1"
+        assert describe_exception(err) == (
+            "WorkerExecutionError: worker='coder' model=claude/opus messages=1"
+        )
+
+    def test_a_wrapper_with_no_cause_reports_attribution_only(self) -> None:
+        """Nothing is appended when there is no failure to attribute."""
+        err = WorkerExecutionError(worker="coder", model="mock", message_count=2)
+
+        assert str(err) == "worker='coder' model=mock messages=2"
+        assert err.message == str(err)
+
+
+# ---------------------------------------------------------------------------
 # __all__ exports
 # ---------------------------------------------------------------------------
 
@@ -337,6 +445,7 @@ class TestAllExports:
             "TokenBudgetExceededError",
             "VaultspecError",
             "WorkerExecutionError",
+            "describe_exception",
         }
         assert set(_errors_module.__all__) == expected
 

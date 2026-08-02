@@ -338,3 +338,39 @@ async def test_a_definitely_undelivered_resume_records_why_the_answer_did_not_la
         # pause it is parked on is unchanged.
         assert updated.repair_status == "paused_resumable"
         assert updated.execution_readiness == "paused_resumable"
+
+
+@pytest.mark.asyncio
+async def test_a_reasonless_failure_still_carries_a_condition(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    """A failed run is classified even when the caller supplied no message.
+
+    The condition rides the FAILURE, not the reason. A caller that fails a run
+    without a message must still leave a classified row - otherwise the blank
+    terminal this campaign removes returns through the back door, and a client
+    reloading sees a failed run it cannot branch on.
+    """
+    async with session_factory() as session:
+        thread = await create_thread(
+            session,
+            title="Reasonless failure",
+            repair_status="healthy",
+            execution_readiness="healthy",
+        )
+        await session.commit()
+
+    async with session_factory() as session:
+        await apply_dispatch_failure(
+            session,
+            thread.id,
+            failed_status=ThreadStatus.FAILED,
+        )
+        await session.commit()
+
+    async with session_factory() as session:
+        updated = await get_thread(session, thread.id)
+        assert updated is not None
+        assert updated.status == ThreadStatus.FAILED.value
+        assert updated.failure_reason is None
+        assert updated.provider_condition == ProviderCondition.UNKNOWN.value

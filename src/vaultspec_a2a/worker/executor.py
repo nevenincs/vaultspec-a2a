@@ -496,15 +496,18 @@ class Executor:
         await self._state_projector.emit_execution_state_projection(
             req.thread_id, graph, config
         )
-        # S37/failure-reason persistence: ingest() classifies and stashes a
-        # reason for every FAILED outcome (recursion limit, LangGraph's own
-        # step_timeout, the ingest-stall watchdog, or the catch-all summary);
-        # threading it through here is what lets the gateway durably record it
-        # (control/event_handlers.py._handle_terminal_event), composing with
-        # the SAME error_detail channel _reject_compile_failure already uses
-        # for a compile-time refusal. take_failure_reason is a pop — a stale
-        # reason from an earlier run can never leak onto a later one reusing
-        # this dict's key.
+        # ingest() classifies and stashes a reason for every FAILED outcome
+        # (recursion limit, LangGraph's own step_timeout, the ingest-stall
+        # watchdog, or the catch-all summary); threading it through here is what
+        # lets the gateway durably record it
+        # (control/event_handlers.py._handle_terminal_event), composing with the
+        # SAME error_detail channel _reject_compile_failure already uses for a
+        # compile-time refusal.
+        #
+        # The read is a pop, but that alone does NOT make a stale entry
+        # impossible: it is the only drain, so a settle that dies before
+        # reaching it leaves the entry for the next run reusing this thread id.
+        # Whatever guarantees the drain has to sit outside this function.
         failure_reason = self._aggregator.take_failure_reason(req.thread_id)
         if failure_reason is None and fallback_reason is not None:
             # No stashed reason on a failure means ingest never classified it:

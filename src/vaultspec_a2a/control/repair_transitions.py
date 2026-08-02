@@ -54,8 +54,13 @@ async def apply_dispatch_failure(
         thread_id,
         failed_status,
         failure_reason=reason if run_actually_failed else None,
+        # The condition rides the FAILURE, not the reason. Gating it on the
+        # reason too would let a caller that failed a run without a message
+        # persist a failed row with no classification at all - the blank
+        # terminal this campaign exists to remove, reintroduced through the
+        # back door. A reason is nice to have; a condition is the invariant.
         provider_condition=(
-            ProviderCondition.UNKNOWN.value if run_actually_failed and reason else None
+            ProviderCondition.UNKNOWN.value if run_actually_failed else None
         ),
     )
     return await mark_dispatch_failed(

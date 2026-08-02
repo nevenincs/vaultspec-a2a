@@ -21,6 +21,7 @@ _LIVE_FILES = frozenset(
         "test_codex_config_home_service.py",
         "test_authoring_stdio_bridge.py",
         "test_acp_migration_surface.py",
+        "test_acp_catalog_live.py",
         "test_kimi_handshake_live.py",
         "test_provider_containment.py",
         "test_terminal_containment.py",

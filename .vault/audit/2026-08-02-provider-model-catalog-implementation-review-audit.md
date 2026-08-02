@@ -5,7 +5,7 @@ tags:
 date: '2026-08-02'
 modified: '2026-08-02'
 body_schema: 'body-v1'
-body_hash: 'sha256:8214203bf490f563a414443e1ec621351168069242bfc545cb3c7207b3fcffd3'
+body_hash: 'sha256:db1597b2695cefa035b09b738c0adabccbf35e8a195c927a8248fe12316d35fc'
 related:
   - "[[2026-08-02-provider-model-catalog-plan]]"
 ---
@@ -15,8 +15,9 @@ related:
 ## Scope
 
 Review S01's normalized catalog contracts, canonical selection identity,
-structured health, TTL refresh behavior, and direct production-import tests
-against the accepted provider-owned catalog decision.
+structured health, TTL refresh behavior, S02's prompt-free ACP discovery, and
+S13's Dashboard catalog adapter/composer migration against the accepted
+provider-owned catalog decision.
 
 ## Findings
 
@@ -63,9 +64,54 @@ catalog read, and preserves opaque provider, entry, native-control, and
 structured-health values inside the Dashboard envelope. The focused Rust suite
 passes 30 tests after this proof was added.
 
+### s13-legacy-run-projection | medium | Direct migration initially hid existing legacy assignments
+
+Resolved in S13. `run-status` now reads legacy persisted `assignments` only
+when no current `frozen_assignment` is present, retaining a separate read-only
+projection for existing-run roster/restart inspection. The legacy row cannot
+produce a new provider catalog selection.
+
+### s13-unneeded-catalog-query | medium | Catalog discovery initially ran outside team mode
+
+Resolved in S13. The Dashboard catalog query now requires both a resolved
+workspace and an active selected team preset; single-agent authoring does not
+trigger provider discovery or refresh.
+
+### s13-wire-regression-proof | medium | Direct provider-catalog wire coverage was initially incomplete
+
+Resolved in S13. Raw-envelope adapter tests now prove unknown/omitted and
+stale health fails closed, revision/control drift invalidates a held selection,
+and legacy status stays readable. The Composer feature render path asserts the
+exact opaque `selection` body that reaches run start.
+
+### acp-error-redaction | high | Provider diagnostic text crossed the safe discovery boundary
+
+Resolved in S02. ACP JSON-RPC errors are classified into static local messages
+without retaining provider-controlled diagnostic text. Direct coverage proves a
+credential-like value in an error message cannot escape.
+
+### acp-output-budget | medium | Discovery output was not bounded across the operation
+
+Resolved in S02. Stdout and stderr share one one-MiB operation budget. Oversized
+stdout fails closed and oversized stderr terminates the contained provider tree
+before surfacing a protocol error. Per-frame and response-count bounds remain.
+
+### acp-lifecycle-proof | medium | Normalization tests did not exercise discovery cleanup
+
+Resolved in S02. Two service tests invoke `discover_acp_catalog` through the
+production spawn path against the installed Claude ACP adapter. They prove the
+initialize/session-new-only path returns after cleanup and cancellation also
+completes containment cleanup; no provider prompt is sent.
+
+### acp-bound-alignment | medium | Adapter limits exceeded the S01 contract limits
+
+Resolved in S02. ACP normalization rejects more than 256 models, 32 native
+controls, or 128 control options with `AcpCatalogProtocolError` before immutable
+S01 construction. Direct coverage exercises the control and option ceilings.
+
 ## Recommendations
 
-Keep the catalog normalization, invalidation fence, resource ceilings, provider
-expiry bound, and single-flight refresh invariants in focused tests as provider
-adapters are added. No open critical, high, medium, or low S01 finding remains
-after remediation.
+Keep catalog normalization, redaction, containment, aggregate output ceilings,
+invalidation fencing, provider expiry, single-flight refresh, Dashboard
+selection gating, and legacy-run read boundaries in focused tests. No open
+critical, high, medium, or low S01/S02/S12/S13 finding remains after remediation.

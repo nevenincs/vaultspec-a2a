@@ -4,7 +4,7 @@ tags:
   - '#provider-model-catalog'
 date: '2026-08-02'
 modified: '2026-08-02'
-body_hash: 'sha256:23ed7fa0a2eb7f4431f8c668cf7e546068d2b63768afb0dfbc41d9a507ebced3'
+body_hash: 'sha256:92714de3b1c90c6ebdf29a655db7a8ee6095498397a629e1794bc9bfb285e4bc'
 tier: L2
 related:
   - '[[2026-08-02-provider-model-catalog-adr]]'
@@ -12,7 +12,7 @@ related:
   - '[[2026-08-02-provider-model-catalog-reference]]'
 ---
 
-<!-- RETIRED: S14 -->
+<!-- RETIRED: S14, S18 -->
 
 # `provider-model-catalog` plan
 
@@ -31,7 +31,7 @@ classification, audit queue, and lifecycle reconciliation.
 Build the provider-owned catalog, structured health, provider-native controls, frozen selection, replay, and provider-specific execution adapters in A2A.
 
 - [x] `P01.S01` - Define normalized provider catalog, native-control, selection-reference, catalog-state, structured-health, and refresh-cache contracts; `src/vaultspec_a2a/providers/provider_catalog.py`.
-- [ ] `P01.S02` - Implement prompt-free generic ACP catalog discovery with bounded cleanup and authentication evidence; `src/vaultspec_a2a/providers/_acp_session.py`.
+- [x] `P01.S02` - Implement prompt-free generic ACP catalog discovery with bounded cleanup and authentication evidence; `src/vaultspec_a2a/providers/_acp_session.py`.
 - [ ] `P01.S03` - Implement Codex model, reasoning-effort, service-tier, capability, and account discovery without a completion; `src/vaultspec_a2a/providers/codex_catalog.py`.
 - [ ] `P01.S04` - Implement Kimi configured-lane model and thinking-control discovery against the installed CLI contract; `src/vaultspec_a2a/providers/kimi_catalog.py`.
 - [ ] `P01.S05` - Implement authenticated OpenAI-compatible model discovery with unsupported metadata explicitly absent; `src/vaultspec_a2a/providers/openai_catalog.py`.
@@ -47,11 +47,10 @@ Build the provider-owned catalog, structured health, provider-native controls, f
 Add the bounded Rust edge, live catalog store, provider/model/control chooser, authoritative frozen assignment display, and truthful unavailable states in Dashboard.
 
 - [x] `P02.S12` - Add the provider-catalog verb and validate bounded catalog, health, selection, control, fallback, and override shapes without hard-coded enums; `Y:/code/vaultspec-dashboard-worktrees/main/engine/crates/vaultspec-api/src/routes/ops/a2a.rs`.
-- [ ] `P02.S13` - Replace profile wire adapters and composer profile selection with opaque provider catalog, structured health, required selection, controls, and frozen-assignment state; `Y:/code/vaultspec-dashboard-worktrees/main/frontend/src/stores/server/agent/a2aTeam.ts, frontend/src/app/agent/ComposerModelPicker.tsx, frontend/src/app/agent/Composer.tsx`.
+- [x] `P02.S13` - Directly migrate the Dashboard store, composer chooser, and obsolete profile fixtures to opaque provider catalogs, structured health, required selection, controls, and frozen assignments; `Y:/code/vaultspec-dashboard-worktrees/main/frontend/src/stores/server/agent/, frontend/src/app/agent/ComposerModelPicker.tsx, frontend/src/app/agent/Composer.tsx, frontend/dev/visual-review/specimens/agent.tsx`.
 - [ ] `P02.S15` - Add bounded per-role model and control overrides and explicit served fallbacks without arbitrary role keys or model values; `Y:/code/vaultspec-dashboard-worktrees/main/frontend/src/app/agent/`.
 - [ ] `P02.S16` - Display configured, transport, authentication, catalog freshness, admission, and selectability states truthfully; `Y:/code/vaultspec-dashboard-worktrees/main/frontend/src/app/agent/`.
 - [ ] `P02.S17` - Render exact frozen provider, model, native controls, and provenance returned for active runs; `Y:/code/vaultspec-dashboard-worktrees/main/frontend/src/app/agent/TeamRunHeader.tsx`.
-- [ ] `P02.S18` - Retire profile fixtures and prove selection, health, opaque identifiers, controls, overrides, frozen roster, accessibility, and visuals; `Y:/code/vaultspec-dashboard-worktrees/main/frontend/src/app/agent/, frontend/src/stores/server/agent/, frontend/dev/visual-review/`.
 
 ### Phase `P03` - Integrate, review, and reconcile the cross-project contract
 

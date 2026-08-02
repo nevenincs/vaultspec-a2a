@@ -221,6 +221,33 @@ def _read_handoff_credential(discovery_path: Path, reference: object) -> str | N
     return token or None
 
 
+#: Windows only. A rename is a delete-class operation on its SOURCE, so any other
+#: opener holding that file without DELETE sharing denies it. Two such openers
+#: were ours and are fixed; what remains on a CI runner is a filter driver that
+#: samples a brand-new file and latches onto that exact one. Retrying the rename
+#: on the same handle keeps asking the same holder about the same file, which is
+#: why a longer retry budget never helped. A fresh attempt claims a NEW randomly
+#: named source the driver has never seen, so the retry is over a different file
+#: rather than a longer wait on the same one.
+_CREDENTIAL_PUBLISH_ATTEMPTS = 5
+
+
+def _publish_credential(path: Path, payload: bytes) -> Path:
+    """Publish the credential, re-attempting against a fresh source on a Windows
+    sharing violation. Any other failure, and the final attempt, raise unchanged.
+    """
+    last: PermissionError | None = None
+    for _ in range(_CREDENTIAL_PUBLISH_ATTEMPTS):
+        try:
+            return _replace_private_credential(path, payload)
+        except PermissionError as error:
+            if os.name != "nt" or getattr(error, "winerror", None) != 32:
+                raise
+            last = error
+    assert last is not None
+    raise last
+
+
 def _replace_private_credential(path: Path, payload: bytes) -> Path:
     """Replace the adjacent credential through one leased parent authority."""
     authority = resolve_directory_authority(path.parent)
@@ -435,9 +462,7 @@ def write_service_json(
         and _read_handoff_credential(path, str(credential_path)) == service_token
     )
     if service_token and not credential_is_current:
-        credential_path = _replace_private_credential(
-            path, service_token.encode("utf-8")
-        )
+        credential_path = _publish_credential(path, service_token.encode("utf-8"))
     if service_token:
         record["handoff_reference"] = str(credential_path)
     else:

@@ -4,7 +4,7 @@ tags:
   - '#provider-model-catalog'
 date: '2026-08-02'
 modified: '2026-08-02'
-body_hash: 'sha256:75a24110bc0ed21f33febb0654e0934e861dc5af232ffa8f1590e04c5a41fcf5'
+body_hash: 'sha256:212b6430e4f616cfb49e1360738718bd1530c3706caca0c960c699cb764a2f52'
 tier: L2
 related:
   - '[[2026-08-02-provider-model-catalog-adr]]'
@@ -34,7 +34,7 @@ Build the provider-owned catalog, structured health, provider-native controls, f
 - [x] `P01.S02` - Implement prompt-free generic ACP catalog discovery with bounded cleanup and authentication evidence; `src/vaultspec_a2a/providers/_acp_session.py`.
 - [x] `P01.S03` - Implement Codex model, reasoning-effort, service-tier, capability, and account discovery without a completion; `src/vaultspec_a2a/providers/codex_catalog.py`.
 - [x] `P01.S04` - Implement Kimi configured-lane model and thinking-control discovery against the installed CLI contract; `src/vaultspec_a2a/providers/kimi_catalog.py`.
-- [ ] `P01.S05` - Implement authenticated OpenAI-compatible model discovery with unsupported metadata explicitly absent; `src/vaultspec_a2a/providers/openai_catalog.py`.
+- [x] `P01.S05` - Implement authenticated OpenAI-compatible model discovery with unsupported metadata explicitly absent; `src/vaultspec_a2a/providers/openai_catalog.py`.
 - [ ] `P01.S06` - Register execution-mode-specific catalog adapters and report unsupported enumeration honestly; `src/vaultspec_a2a/providers/factory.py`.
 - [ ] `P01.S07` - Serve provider catalogs, refresh state, structured health, selectability, and safe reasons through bounded gateway contracts; `src/vaultspec_a2a/api/`.
 - [ ] `P01.S08` - Replace new-run profile admission with required served selection, bounded overrides, explicit fallbacks, controls, validation, and replay identity; `src/vaultspec_a2a/api/routes/gateway.py`.

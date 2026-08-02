@@ -5,7 +5,7 @@ tags:
 date: '2026-08-02'
 modified: '2026-08-02'
 body_schema: 'body-v1'
-body_hash: 'sha256:18edc712d56a2ae2c1040b11adea6e486c558fa1619573f604e3a17a779ef41b'
+body_hash: 'sha256:3363810e600fa945f17a7564838cb926bc845d7fbe49e2ad63e041f1f40ad0fe'
 related:
   - "[[2026-02-25-llm-context-provider-abstraction-adr]]"
   - "[[2026-07-15-model-profiles-adr]]"
@@ -64,8 +64,16 @@ worktrees on 2026-08-02, including concurrent uncommitted A2A work.
 | Claude Code | ACP/config picker or `/model` | account-appropriate choices, aliases, default, managed restrictions | aliases move; preserve provider-issued values |
 | Gemini API | authenticated `models.list` / `models.get` | supported actions and extended metadata | filter only by explicit `generateContent`; do not infer tiers |
 | Kimi CLI | ACP model selection; `/model` refresh | configured-platform models and thinking support | catalog depends on configuration/authentication |
-| OpenAI API | authenticated `GET /v1/models` | id, owner, availability | does not state reasoning tiers or chat suitability |
+| OpenAI API | authenticated `GET /v1/models` | `object: list`; model `id`, `created`, `object: model`, `owned_by` | S05 maps only `id`; no capabilities, controls, reasoning tiers, or chat suitability |
 | Z.AI / Zhipu API | no verified official model-list contract in this pass | invocation docs list selected products | report catalog unavailable unless the endpoint or ACP advertises choices |
+The OpenAI-compatible S05 adapter deliberately projects only each opaque `id`
+into `ModelCatalogEntry`. It discards `created` and `owned_by` because the
+normalized entry has no corresponding fields and never repurposes them as
+descriptions, capabilities, or controls. Discovery derives `/models` from the
+lane-configured base URL, requires one exact HTTP 200 complete-list response,
+refuses redirects, partial responses, and pagination signals, bounds credentials
+and response/model/identifier sizes, emits static errors, and closes HTTP
+resources on timeout or cancellation.
 
 LangChain is an invocation abstraction here. `ChatOpenAI` accepts a model
 string and exposes an underlying OpenAI client;

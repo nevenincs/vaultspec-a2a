@@ -220,19 +220,26 @@ async def test_known_terminal_still_resolves_to_its_live_process(
     exited = await on_terminal_wait_for_exit(
         42, {"terminalId": terminal_id}, acp_session_context, config
     )
-    exit_result = exited.get("result")
-    assert isinstance(exit_result, dict)
-    assert exit_result == {"exitCode": 0, "signal": None}
+    assert exited == {
+        "jsonrpc": "2.0",
+        "id": 42,
+        "result": {"exitCode": 0, "signal": None},
+    }
 
     output = await on_terminal_output(
         43, {"terminalId": terminal_id}, acp_session_context, config
     )
-    output_result = output.get("result")
-    assert isinstance(output_result, dict)
-    terminal_output = output_result.get("output")
-    assert isinstance(terminal_output, str)
-    assert "resolved-marker" in terminal_output
-    assert output_result["exitStatus"] == {"exitCode": 0, "signal": None}
+    # The whole v1 result, not a field probe: an extra or renamed key is exactly
+    # the kind of drift a subset assertion would wave through.
+    assert output == {
+        "jsonrpc": "2.0",
+        "id": 43,
+        "result": {
+            "output": "resolved-marker",
+            "truncated": False,
+            "exitStatus": {"exitCode": 0, "signal": None},
+        },
+    }
 
     killed = await on_terminal_kill(
         44, {"terminalId": terminal_id}, acp_session_context, config
@@ -252,3 +259,168 @@ async def test_known_terminal_still_resolves_to_its_live_process(
     )
     assert released == {"jsonrpc": "2.0", "id": 46, "result": {}}
     assert terminal_id not in acp_session_context.terminals
+
+
+async def _create_terminal(
+    ctx: AcpSessionContext, config: AcpModelConfig, script: Path, body: str
+) -> str:
+    """Spawn a real allowlisted terminal child running ``body`` and return its id."""
+    script.write_text(body, encoding="utf-8")
+    created = await on_terminal_create(
+        1, {"command": sys.executable, "args": [str(script)]}, ctx, config
+    )
+    created_result = created.get("result")
+    assert isinstance(created_result, dict)
+    terminal_id = created_result.get("terminalId")
+    assert isinstance(terminal_id, str) and terminal_id
+    return terminal_id
+
+
+@pytest.mark.asyncio
+async def test_exit_status_is_absent_while_the_command_is_still_running(
+    tmp_path: Path, acp_session_context: AcpSessionContext
+) -> None:
+    """``exitStatus`` is optional and must be OMITTED before the command exits.
+
+    Reporting a status early would tell the agent a command finished while it is
+    still running, so the absence of the key - not merely a null in it - is the
+    contract being pinned.
+    """
+    config = _make_config(str(tmp_path))
+    terminal_id = await _create_terminal(
+        acp_session_context,
+        config,
+        tmp_path / "sleeper.py",
+        "import time\ntime.sleep(120)\n",
+    )
+    try:
+        output = await on_terminal_output(
+            51, {"terminalId": terminal_id}, acp_session_context, config
+        )
+        assert output == {
+            "jsonrpc": "2.0",
+            "id": 51,
+            "result": {"output": "", "truncated": False},
+        }
+        result = output["result"]
+        assert isinstance(result, dict)
+        assert "exitStatus" not in result
+    finally:
+        await on_terminal_release(
+            52, {"terminalId": terminal_id}, acp_session_context, config
+        )
+
+
+@pytest.mark.asyncio
+async def test_a_nonzero_exit_code_is_reported_exactly_not_collapsed(
+    tmp_path: Path, acp_session_context: AcpSessionContext
+) -> None:
+    """A failing command reports its own code, with a null signal beside it.
+
+    Pinning a NON-zero code catches a status builder that hardcodes success or
+    coerces the code to a boolean-ish result.
+    """
+    config = _make_config(str(tmp_path))
+    terminal_id = await _create_terminal(
+        acp_session_context,
+        config,
+        tmp_path / "failer.py",
+        "import sys\nsys.exit(7)\n",
+    )
+    exited = await on_terminal_wait_for_exit(
+        61, {"terminalId": terminal_id}, acp_session_context, config
+    )
+    assert exited == {
+        "jsonrpc": "2.0",
+        "id": 61,
+        "result": {"exitCode": 7, "signal": None},
+    }
+    output = await on_terminal_output(
+        62, {"terminalId": terminal_id}, acp_session_context, config
+    )
+    output_result = output.get("result")
+    assert isinstance(output_result, dict)
+    assert output_result["exitStatus"] == {"exitCode": 7, "signal": None}
+    await on_terminal_release(
+        63, {"terminalId": terminal_id}, acp_session_context, config
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_killed_terminal_still_answers_output_and_exit_until_released(
+    tmp_path: Path, acp_session_context: AcpSessionContext
+) -> None:
+    """Kill ends the command; the terminal stays fully usable until release.
+
+    This is the lifetime the previous implementation could not express: it
+    retired the id inside kill, so the output the agent killed the command to
+    inspect became unreachable in the same call. Every id-addressing handler is
+    driven AFTER the kill to prove addressability survives it, and the output
+    written before the kill must still come back.
+    """
+    config = _make_config(str(tmp_path))
+    terminal_id = await _create_terminal(
+        acp_session_context,
+        config,
+        tmp_path / "chatty.py",
+        "import sys, time\nsys.stdout.write('pre-kill-marker')\n"
+        "sys.stdout.flush()\ntime.sleep(120)\n",
+    )
+    process = acp_session_context.terminals[terminal_id]
+
+    # Read the marker through the handler BEFORE the kill. The handler drains the
+    # live pipe, so this is where the running terminal's output is observable;
+    # retaining it across the kill is the separate output-retention contract.
+    deadline = time.monotonic() + 10.0
+    seen = ""
+    while time.monotonic() < deadline and "pre-kill-marker" not in seen:
+        live = await on_terminal_output(
+            70, {"terminalId": terminal_id}, acp_session_context, config
+        )
+        live_result = live.get("result")
+        assert isinstance(live_result, dict)
+        seen += str(live_result["output"])
+    assert seen == "pre-kill-marker"
+
+    killed = await on_terminal_kill(
+        71, {"terminalId": terminal_id}, acp_session_context, config
+    )
+    assert killed == {"jsonrpc": "2.0", "id": 71, "result": {}}
+    assert process.returncode is not None, "kill must stop the command"
+    assert terminal_id in acp_session_context.terminals
+
+    output = await on_terminal_output(
+        72, {"terminalId": terminal_id}, acp_session_context, config
+    )
+    output_result = output.get("result")
+    assert isinstance(output_result, dict)
+    assert output_result["truncated"] is False
+    # A killed command has completed, so the status is present and describes how
+    # it died. Which of the two fields carries that is platform-dependent, so the
+    # assertion pins the exclusivity the schema requires rather than one host's
+    # answer: a signal death has a null code and a named signal, a coded death
+    # the reverse. Never both, never neither.
+    exit_status = output_result["exitStatus"]
+    assert isinstance(exit_status, dict)
+    assert set(exit_status) == {"exitCode", "signal"}
+    assert (exit_status["exitCode"] is None) != (exit_status["signal"] is None)
+    if exit_status["signal"] is not None:
+        assert isinstance(exit_status["signal"], str)
+
+    waited = await on_terminal_wait_for_exit(
+        73, {"terminalId": terminal_id}, acp_session_context, config
+    )
+    assert waited == {"jsonrpc": "2.0", "id": 73, "result": exit_status}
+
+    released = await on_terminal_release(
+        74, {"terminalId": terminal_id}, acp_session_context, config
+    )
+    assert released == {"jsonrpc": "2.0", "id": 74, "result": {}}
+    assert terminal_id not in acp_session_context.terminals
+    # Released, the id takes the shared refusal path again.
+    after = await on_terminal_output(
+        75, {"terminalId": terminal_id}, acp_session_context, config
+    )
+    error = after.get("error")
+    assert isinstance(error, dict)
+    assert error["code"] == AcpErrorCode.INVALID_PARAMS

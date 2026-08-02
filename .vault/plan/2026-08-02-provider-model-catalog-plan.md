@@ -4,7 +4,7 @@ tags:
   - '#provider-model-catalog'
 date: '2026-08-02'
 modified: '2026-08-02'
-body_hash: 'sha256:0bb1d61f176b1cafc55fd2ebc20beb7b9711c9ecdf23df58792674d23eeb78be'
+body_hash: 'sha256:75a24110bc0ed21f33febb0654e0934e861dc5af232ffa8f1590e04c5a41fcf5'
 tier: L2
 related:
   - '[[2026-08-02-provider-model-catalog-adr]]'
@@ -33,7 +33,7 @@ Build the provider-owned catalog, structured health, provider-native controls, f
 - [x] `P01.S01` - Define normalized provider catalog, native-control, selection-reference, catalog-state, structured-health, and refresh-cache contracts; `src/vaultspec_a2a/providers/provider_catalog.py`.
 - [x] `P01.S02` - Implement prompt-free generic ACP catalog discovery with bounded cleanup and authentication evidence; `src/vaultspec_a2a/providers/_acp_session.py`.
 - [x] `P01.S03` - Implement Codex model, reasoning-effort, service-tier, capability, and account discovery without a completion; `src/vaultspec_a2a/providers/codex_catalog.py`.
-- [ ] `P01.S04` - Implement Kimi configured-lane model and thinking-control discovery against the installed CLI contract; `src/vaultspec_a2a/providers/kimi_catalog.py`.
+- [x] `P01.S04` - Implement Kimi configured-lane model and thinking-control discovery against the installed CLI contract; `src/vaultspec_a2a/providers/kimi_catalog.py`.
 - [ ] `P01.S05` - Implement authenticated OpenAI-compatible model discovery with unsupported metadata explicitly absent; `src/vaultspec_a2a/providers/openai_catalog.py`.
 - [ ] `P01.S06` - Register execution-mode-specific catalog adapters and report unsupported enumeration honestly; `src/vaultspec_a2a/providers/factory.py`.
 - [ ] `P01.S07` - Serve provider catalogs, refresh state, structured health, selectability, and safe reasons through bounded gateway contracts; `src/vaultspec_a2a/api/`.
@@ -48,7 +48,7 @@ Add the bounded Rust edge, live catalog store, provider/model/control chooser, a
 
 - [x] `P02.S12` - Add the provider-catalog verb and validate bounded catalog, health, selection, control, fallback, and override shapes without hard-coded enums; `Y:/code/vaultspec-dashboard-worktrees/main/engine/crates/vaultspec-api/src/routes/ops/a2a.rs`.
 - [x] `P02.S13` - Directly migrate the Dashboard store, composer chooser, and obsolete profile fixtures to opaque provider catalogs, structured health, required selection, controls, and frozen assignments; `Y:/code/vaultspec-dashboard-worktrees/main/frontend/src/stores/server/agent/, frontend/src/app/agent/ComposerModelPicker.tsx, frontend/src/app/agent/Composer.tsx, frontend/dev/visual-review/specimens/agent.tsx`.
-- [ ] `P02.S15` - Add bounded per-role model and control overrides and explicit served fallbacks without arbitrary role keys or model values; `Y:/code/vaultspec-dashboard-worktrees/main/frontend/src/app/agent/`.
+- [x] `P02.S15` - Add bounded per-role model and control overrides and explicit served fallbacks without arbitrary role keys or model values; `Y:/code/vaultspec-dashboard-worktrees/main/frontend/src/app/agent/`.
 - [ ] `P02.S16` - Display configured, transport, authentication, catalog freshness, admission, and selectability states truthfully; `Y:/code/vaultspec-dashboard-worktrees/main/frontend/src/app/agent/`.
 - [ ] `P02.S17` - Render exact frozen provider, model, native controls, and provenance returned for active runs; `Y:/code/vaultspec-dashboard-worktrees/main/frontend/src/app/agent/TeamRunHeader.tsx`.
 

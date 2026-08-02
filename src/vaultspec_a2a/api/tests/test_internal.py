@@ -24,6 +24,7 @@ from ...database import (
 )
 from ...database.models import ThreadExecutionStateModel
 from ...streaming.aggregator import EventAggregator
+from ...worker.ipc import WorkerBridge
 from ..internal import internal_router
 
 # ---------------------------------------------------------------------------
@@ -1294,7 +1295,7 @@ class TestConditionSurvivesAReload:
         assert status.json()["provider_condition"] is None
 
 
-def _worker_bridge_into(app: FastAPI) -> "WorkerBridge":
+def _worker_bridge_into(app: FastAPI) -> WorkerBridge:
     """A real worker bridge whose relay posts into *app* over real HTTP.
 
     The executor reports a rejection by emitting a terminal through its bridge,
@@ -1302,8 +1303,6 @@ def _worker_bridge_into(app: FastAPI) -> "WorkerBridge":
     makes the worker-to-gateway hop real, so what is asserted afterwards is what
     the gateway actually received rather than what the worker meant to send.
     """
-    from ...worker.ipc import WorkerBridge
-
     bridge = WorkerBridge(api_url="http://gateway", worker_id="invariant-test")
     bridge._client = AsyncClient(
         transport=ASGITransport(app=app),

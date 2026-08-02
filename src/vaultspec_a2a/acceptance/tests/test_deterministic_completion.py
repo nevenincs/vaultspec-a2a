@@ -315,6 +315,10 @@ async def test_deterministic_completion_emits_a_run_bound_review_bundle(
     history = _required_object(history_response.json(), at="run history")
 
     state = _required_object(history.get("state"), at=f"run history state: {history}")
+    assert state.get("snapshot_complete") is True, state
+    assert state.get("repair_status") == "healthy", state
+    assert state.get("execution_readiness") == "healthy", state
+    assert state.get("degraded_reasons") == [], state
     messages = state.get("messages")
     assert isinstance(messages, list), f"run history has no messages: {history}"
     typed_messages = cast("list[object]", messages)

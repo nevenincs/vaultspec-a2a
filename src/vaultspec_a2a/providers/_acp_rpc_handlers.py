@@ -8,6 +8,7 @@ placed next to their consumers.
 import asyncio
 import logging
 import re
+import signal
 import subprocess
 import sys
 from contextlib import suppress
@@ -662,20 +663,62 @@ def _resolve_terminal(
     }
 
 
+def _signal_name(signal_number: int) -> str:
+    """Name the signal that killed a process, for the v1 string ``signal`` field.
+
+    ACP v1 types ``signal`` as a STRING, not the raw number the OS reports, so a
+    reader is not left decoding platform-specific integers. The number is
+    resolved through the stdlib enum where the running platform defines it and
+    falls back to the bare digits otherwise - Windows defines only a handful of
+    ``Signals`` members, and an unmappable number is still better reported than
+    turned into an error on a path describing how a process already died.
+    """
+    try:
+        return signal.Signals(signal_number).name
+    except ValueError:
+        return str(signal_number)
+
+
+def _exit_status(process: asyncio.subprocess.Process) -> JsonObject | None:
+    """Build the ACP v1 ``TerminalExitStatus`` for a process, or ``None``.
+
+    Returns ``None`` while the process is still running, which is what lets
+    ``terminal/output`` omit the optional field rather than assert an exit that
+    has not happened.
+
+    The two fields are mutually exclusive by construction. POSIX reports a
+    signal death as a NEGATIVE return code, which is not a valid ``exitCode``
+    (the schema types it as an unsigned integer), so that case reports a null
+    exit code beside the named signal; a normal exit reports the code beside a
+    null signal. Emitting the negative number as an ``exitCode`` - the shape
+    this replaces - told a reader the process exited with a code it never
+    returned.
+    """
+    returncode = process.returncode
+    if returncode is None:
+        return None
+    if returncode < 0:
+        return {"exitCode": None, "signal": _signal_name(-returncode)}
+    return {"exitCode": returncode, "signal": None}
+
+
 async def on_terminal_kill(
     rpc_id: AcpRpcId,
     params: JsonObject,
     ctx: AcpSessionContext,
     _config: AcpModelConfig,
 ) -> JsonObject:
-    """Handle terminal/kill RPC."""
-    terminal_id_value = params.get("terminalId")
-    terminal_id = terminal_id_value if isinstance(terminal_id_value, str) else ""
+    """Handle terminal/kill RPC.
+
+    Kill stops the command; it does NOT release the terminal. The id stays
+    registered in ``ctx.terminals`` so the agent can still collect the output it
+    killed the command to inspect and read its exit status. Only
+    ``terminal/release`` ends addressability - see :func:`on_terminal_release`.
+    """
     process, refusal = _resolve_terminal(rpc_id, params, ctx)
     if process is None:
         return refusal
     await _kill_process_tree(process)
-    ctx.terminals.pop(terminal_id, None)
     return {"jsonrpc": "2.0", "id": rpc_id, "result": {}}
 
 
@@ -706,9 +749,10 @@ async def on_terminal_output(
         + stderr_data.decode("utf-8", errors="replace"),
         "truncated": False,
     }
-    # Conditionally include exitStatus when the process has already exited
-    if process.returncode is not None:
-        output_result["exitStatus"] = process.returncode
+    # The optional exitStatus is present only once the command has completed,
+    # and is the v1 status OBJECT rather than a bare return code.
+    if (exit_status := _exit_status(process)) is not None:
+        output_result["exitStatus"] = exit_status
     return {"jsonrpc": "2.0", "id": rpc_id, "result": output_result}
 
 
@@ -733,11 +777,10 @@ async def on_terminal_wait_for_exit(
             "id": rpc_id,
             "error": {"code": -32603, "message": "Timeout waiting for exit"},
         }
-    exit_result: JsonObject = {"exitCode": process.returncode}
-    # On Unix, negative returncode means the process was killed by a signal
-    # (returncode == -signum). Include the signal number for completeness.
-    if process.returncode is not None and process.returncode < 0:
-        exit_result["signal"] = -process.returncode
+    # The wait returned, so the process has exited and the status is never None;
+    # the fallback keeps the response well-formed rather than raising on a path
+    # that exists to report an outcome.
+    exit_result = _exit_status(process) or {"exitCode": None, "signal": None}
     return {"jsonrpc": "2.0", "id": rpc_id, "result": exit_result}
 
 

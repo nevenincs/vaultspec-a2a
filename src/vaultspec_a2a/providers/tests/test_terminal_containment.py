@@ -222,7 +222,7 @@ async def test_known_terminal_still_resolves_to_its_live_process(
     )
     exit_result = exited.get("result")
     assert isinstance(exit_result, dict)
-    assert exit_result["exitCode"] == 0
+    assert exit_result == {"exitCode": 0, "signal": None}
 
     output = await on_terminal_output(
         43, {"terminalId": terminal_id}, acp_session_context, config
@@ -232,17 +232,23 @@ async def test_known_terminal_still_resolves_to_its_live_process(
     terminal_output = output_result.get("output")
     assert isinstance(terminal_output, str)
     assert "resolved-marker" in terminal_output
-    assert output_result["exitStatus"] == 0
+    assert output_result["exitStatus"] == {"exitCode": 0, "signal": None}
 
     killed = await on_terminal_kill(
         44, {"terminalId": terminal_id}, acp_session_context, config
     )
     assert killed == {"jsonrpc": "2.0", "id": 44, "result": {}}
-    # kill retires the id, so the next address of it takes the refusal path.
-    assert terminal_id not in acp_session_context.terminals
+    # kill stops the command but does NOT release the terminal, so the id stays
+    # addressable and a second kill is still answered rather than refused.
+    assert terminal_id in acp_session_context.terminals
     again = await on_terminal_kill(
         45, {"terminalId": terminal_id}, acp_session_context, config
     )
-    error = again.get("error")
-    assert isinstance(error, dict)
-    assert error["code"] == -32602
+    assert again == {"jsonrpc": "2.0", "id": 45, "result": {}}
+
+    # Only release ends addressability.
+    released = await on_terminal_release(
+        46, {"terminalId": terminal_id}, acp_session_context, config
+    )
+    assert released == {"jsonrpc": "2.0", "id": 46, "result": {}}
+    assert terminal_id not in acp_session_context.terminals

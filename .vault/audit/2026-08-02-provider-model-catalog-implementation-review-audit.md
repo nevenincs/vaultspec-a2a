@@ -5,7 +5,7 @@ tags:
 date: '2026-08-02'
 modified: '2026-08-02'
 body_schema: 'body-v1'
-body_hash: 'sha256:91ca1883085dda08d0f79b34ca70ba1f274b229437716d2af9673faba2ae6a44'
+body_hash: 'sha256:c92802c71743a01289662445a5c2ba32eff1e3d0810997921f156711365c4081'
 related:
   - "[[2026-08-02-provider-model-catalog-plan]]"
 ---
@@ -135,6 +135,38 @@ Codex binds only each model's own reasoning-effort and service-tier controls.
 Catalog revisions cover the association, and direct tests prove both shared and
 model-scoped behavior.
 
+### kimi-secret-bearing-provider-list | high | Configured provider discovery exposes raw credential fields
+
+Resolved in S04. The adapter consumes `kimi provider list --json` only inside
+the discovery boundary, validates model references by provider-table membership,
+and retains no provider record or diagnostic output. Static protocol errors and
+installed-CLI coverage prove a configured API-key value does not cross the
+normalized result boundary.
+
+### kimi-pipe-drain-order | high | Waiting for process exit before draining output could deadlock
+
+Resolved in S04 before final review. Stdout, stderr, and process exit are awaited
+concurrently under one timeout and one aggregate one-MiB budget. A real spawned
+process emits a valid response above a typical pipe capacity; discovery returns
+and the process tree is reaped.
+
+### kimi-current-env-contract-drift | medium | Existing factory variables do not configure the installed CLI catalog lane
+
+Open and assigned to S06 registration/factory integration. The installed CLI
+used for S04 recognizes the temporary configured-lane names
+`KIMI_MODEL_API_KEY` and `KIMI_MODEL_BASE_URL`; the existing factory and
+readiness path inject and gate on the older `KIMI_API_KEY` and `KIMI_BASE_URL`
+contract. S04 remains truthful by reporting only what `provider list --json`
+serves. S06 must reconcile launch, readiness, and catalog configuration against
+one verified installed-CLI contract before the Kimi lane is registered.
+### kimi-real-subprocess-boundary-proof | medium | Initial tests did not exercise both pipes, aggregate breach, or timeout cleanup
+
+Resolved in S04 after independent review. Real spawned-process coverage now
+writes above typical pipe capacity to both stdout and stderr, breaches the
+shared one-MiB budget across the two streams, and hangs past the discovery
+timeout. Each path proves its static failure where applicable and full process-
+tree reaping; configured and unconfigured installed-CLI enumeration remain
+separate prompt-free proofs.
 ## Recommendations
 
 Keep catalog normalization, redaction, containment, aggregate output ceilings,

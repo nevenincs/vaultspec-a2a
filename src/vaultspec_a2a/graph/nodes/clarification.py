@@ -33,9 +33,10 @@ the recovery snapshot reads it from.
 Wire contract: the interrupt payload is a
 :class:`~vaultspec_a2a.thread.clarification.ClarificationRequest` rendered as
 JSON (``{"type": "clarification_request", "request_id", "questions": [...]}``)
-and the resume payload is either a
-:class:`~vaultspec_a2a.thread.clarification.ClarificationAnswers` or a
-:class:`~vaultspec_a2a.thread.clarification.ClarificationContinuation`. These
+and the resume payload is a
+:class:`~vaultspec_a2a.thread.clarification.ClarificationAnswers`, a
+:class:`~vaultspec_a2a.thread.clarification.ClarificationContinuation`, or a
+:class:`~vaultspec_a2a.thread.clarification.ClarificationDecline`. These
 shapes, and every bound on them, are owned by
 :mod:`vaultspec_a2a.thread.clarification` so the node, the wire, and the
 snapshot cannot disagree about what was asked.
@@ -63,9 +64,11 @@ from langgraph.types import Command, interrupt
 from pydantic import ValidationError
 
 from ...thread.clarification import (
+    CLARIFICATION_DECLINE_MARKER,
     MAX_OPTIONS_PER_QUESTION,
     MAX_QUESTIONS_PER_REQUEST,
     ClarificationAnswers,
+    ClarificationDecline,
     ClarificationKind,
     ClarificationQuestion,
     ClarificationRequest,
@@ -74,6 +77,7 @@ from ...thread.clarification import (
     QuestionId,
     clarification_resolution_fingerprint,
     parse_clarification_resolution,
+    render_clarification_answers,
     strip_control_characters,
 )
 
@@ -361,9 +365,21 @@ def create_clarification_gate_node(*, proceed_target: str) -> RoutingNode:
             },
         }
         if isinstance(resolution, ClarificationAnswers):
-            update["clarification_answers"] = {
-                request.request_id: _declared_answers(resolution, request)
-            }
+            declared = _declared_answers(resolution, request)
+            update["clarification_answers"] = {request.request_id: declared}
+            # The transcript is the only state downstream turns read, so the
+            # answered questionnaire is ALSO rendered as one human turn - the
+            # recorded state alone reaches no model. Skipped when nothing was
+            # effectively answered (all-optional questionnaire, empty map).
+            rendered = render_clarification_answers(request, declared)
+            if rendered is not None:
+                update["messages"] = [HumanMessage(content=rendered)]
+        elif isinstance(resolution, ClarificationDecline):
+            # A decline's whole downstream trace is this one fixed marker: the
+            # transcript is the only state model turns read, and without it a
+            # declined questionnaire is indistinguishable from one never asked.
+            # No answer entry is recorded - refusal is not an answer.
+            update["messages"] = [HumanMessage(content=CLARIFICATION_DECLINE_MARKER)]
         else:
             update["messages"] = [HumanMessage(content=resolution.prompt)]
         return Command(goto=proceed_target, update=update)

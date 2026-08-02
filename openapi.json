@@ -2328,12 +2328,24 @@
               }
             ],
             "title": "Prompt"
+          },
+          "decline": {
+            "anyOf": [
+              {
+                "type": "boolean",
+                "const": true
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Decline"
           }
         },
         "additionalProperties": false,
         "type": "object",
         "title": "RunClarificationRespondRequest",
-        "description": "Resolve a parked questionnaire with answers or a new prompt.\n\nCarries exactly one outcome: legacy answers keyed by question id, or a new\nprompt that continues the same run. The questions themselves were disclosed\nauthoritatively by ``run-status``; the run id and request id address the\nquestionnaire from the path, so neither outcome restates what was asked.\n\nAll bounds are imported from the domain contract rather than restated. The\nchecks that need the parked questions in hand (an id nobody asked about, a\nrequired question left blank, a choice outside its declared options) are\napplied only to the answer outcome by the route against the checkpoint."
+        "description": "Resolve a parked questionnaire with answers, a new prompt, or a decline.\n\nCarries exactly one outcome: legacy answers keyed by question id, a new\nprompt that continues the same run, or a payload-free decline that lets the\nrun proceed with no answer given. The questions themselves were disclosed\nauthoritatively by ``run-status``; the run id and request id address the\nquestionnaire from the path, so no outcome restates what was asked.\n\nAll bounds are imported from the domain contract rather than restated. The\nchecks that need the parked questions in hand (an id nobody asked about, a\nrequired question left blank, a choice outside its declared options) are\napplied only to the answer outcome by the route against the checkpoint; a\ndecline deliberately bypasses them because refusal is not an answer.\n\n``decline`` admits only the literal ``true``: ``false`` would be a client\nsaying \"not declining\" while supplying no other outcome, which is a\ncontradiction better refused at the schema than interpreted."
       },
       "RunClarificationRespondResponse": {
         "properties": {

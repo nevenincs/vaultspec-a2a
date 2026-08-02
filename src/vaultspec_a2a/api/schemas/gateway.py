@@ -678,17 +678,23 @@ class RunPermissionRespondResponse(BaseModel):
 
 
 class RunClarificationRespondRequest(BaseModel):
-    """Resolve a parked questionnaire with answers or a new prompt.
+    """Resolve a parked questionnaire with answers, a new prompt, or a decline.
 
-    Carries exactly one outcome: legacy answers keyed by question id, or a new
-    prompt that continues the same run. The questions themselves were disclosed
+    Carries exactly one outcome: legacy answers keyed by question id, a new
+    prompt that continues the same run, or a payload-free decline that lets the
+    run proceed with no answer given. The questions themselves were disclosed
     authoritatively by ``run-status``; the run id and request id address the
-    questionnaire from the path, so neither outcome restates what was asked.
+    questionnaire from the path, so no outcome restates what was asked.
 
     All bounds are imported from the domain contract rather than restated. The
     checks that need the parked questions in hand (an id nobody asked about, a
     required question left blank, a choice outside its declared options) are
-    applied only to the answer outcome by the route against the checkpoint.
+    applied only to the answer outcome by the route against the checkpoint; a
+    decline deliberately bypasses them because refusal is not an answer.
+
+    ``decline`` admits only the literal ``true``: ``false`` would be a client
+    saying "not declining" while supplying no other outcome, which is a
+    contradiction better refused at the schema than interpreted.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -697,12 +703,18 @@ class RunClarificationRespondRequest(BaseModel):
         default=None, max_length=MAX_QUESTIONS_PER_REQUEST
     )
     prompt: ContinuationPrompt | None = None
+    decline: Literal[True] | None = None
 
     @model_validator(mode="after")
     def _require_one_resolution(self) -> RunClarificationRespondRequest:
         """Require exactly one unambiguous clarification outcome."""
-        if (self.answers is None) == (self.prompt is None):
-            msg = "exactly one of answers or prompt is required"
+        supplied = [
+            outcome
+            for outcome in (self.answers, self.prompt, self.decline)
+            if outcome is not None
+        ]
+        if len(supplied) != 1:
+            msg = "exactly one of answers, prompt, or decline is required"
             raise ValueError(msg)
         if self.prompt is not None and not self.prompt.strip():
             msg = "prompt must not be blank"

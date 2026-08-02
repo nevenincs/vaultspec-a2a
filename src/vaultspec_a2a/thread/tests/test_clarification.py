@@ -12,19 +12,23 @@ import pytest
 from pydantic import ValidationError
 
 from ..clarification import (
+    CLARIFICATION_DECLINE_MARKER,
     CLARIFICATION_INTERRUPT_TYPE,
     MAX_ANSWER_CHARS,
     MAX_OPTION_CHARS,
     MAX_PROMPT_CHARS,
+    MAX_QUESTIONS_PER_REQUEST,
     MAX_RUN_MESSAGE_CHARS,
     ClarificationAnswers,
     ClarificationContinuation,
+    ClarificationDecline,
     ClarificationKind,
     ClarificationQuestion,
     ClarificationRequest,
     clarification_resolution_fingerprint,
     parse_clarification_resolution,
     pending_clarification,
+    render_clarification_answers,
     strip_control_characters,
     validate_clarification_answers,
 )
@@ -148,6 +152,110 @@ def test_a_continuation_requires_real_prompt_content(prompt: str) -> None:
         ClarificationContinuation(request_id="clarify-1", prompt=prompt)
 
 
+def test_a_decline_is_payload_free_and_round_trips_through_the_parser() -> None:
+    """Refusal carries identity and nothing else - there is no text to bound.
+
+    The resume value is exactly the discriminator and the request id, and the
+    strict parser reads it back as the same typed outcome; extra keys are
+    refused at construction so a decline can never smuggle an answer or a
+    prompt alongside itself.
+    """
+    decline = ClarificationDecline(request_id="clarify-1")
+
+    assert decline.as_resume_value() == {
+        "type": "clarification_decline",
+        "request_id": "clarify-1",
+    }
+    parsed = parse_clarification_resolution(
+        decline.as_resume_value(), request_id="clarify-1"
+    )
+    assert isinstance(parsed, ClarificationDecline)
+
+    with pytest.raises(ValidationError):
+        ClarificationDecline.model_validate(
+            {
+                "type": "clarification_decline",
+                "request_id": "clarify-1",
+                "prompt": "smuggled",
+            }
+        )
+
+
+def test_the_decline_marker_is_a_valid_single_line_prompt() -> None:
+    """The fixed transcript trace obeys the same text rules as a question.
+
+    The marker is the one string a decline puts in front of downstream model
+    turns, so it must itself be line-safe and within the prompt ceiling - a
+    marker the contract's own validators would refuse elsewhere would be a
+    value this module forbids everyone else from producing.
+    """
+    assert strip_control_characters(CLARIFICATION_DECLINE_MARKER) == (
+        CLARIFICATION_DECLINE_MARKER
+    )
+    assert 0 < len(CLARIFICATION_DECLINE_MARKER) <= MAX_PROMPT_CHARS
+
+
+def test_answers_render_in_question_order_with_only_answered_lines() -> None:
+    """The transcript turn pairs each question's prompt with the human's answer.
+
+    Order comes from the committed request, never from answer-map insertion
+    order, and an unanswered or blank-answered question contributes no line -
+    the rendering shows what the human actually said, nothing more.
+    """
+    request = ClarificationRequest(
+        request_id="clarify-1",
+        questions=[
+            _choice("scope", prompt="Which surface?", options=["frontend", "backend"]),
+            ClarificationQuestion(
+                id="constraints",
+                prompt="Any constraint?",
+                kind=ClarificationKind.TEXT,
+                required=False,
+            ),
+            ClarificationQuestion(
+                id="deadline",
+                prompt="By when?",
+                kind=ClarificationKind.TEXT,
+                required=False,
+            ),
+        ],
+    )
+
+    rendered = render_clarification_answers(
+        request,
+        {"constraints": "keep it small", "scope": "backend", "deadline": "  "},
+    )
+    assert rendered == (
+        "Answers to the clarification questionnaire:\n"
+        "- Which surface?: backend\n"
+        "- Any constraint?: keep it small"
+    )
+
+    assert render_clarification_answers(request, {}) is None
+    assert render_clarification_answers(request, {"deadline": "   "}) is None
+
+
+def test_a_full_rendering_stays_inside_the_run_message_ceiling() -> None:
+    """Four maximal prompt/answer pairs compose to a bounded transcript turn."""
+    questions = [
+        ClarificationQuestion(
+            id=f"q{index}",
+            prompt="p" * MAX_PROMPT_CHARS,
+            kind=ClarificationKind.TEXT,
+            required=True,
+        )
+        for index in range(MAX_QUESTIONS_PER_REQUEST)
+    ]
+    request = ClarificationRequest(request_id="clarify-1", questions=questions)
+    rendered = render_clarification_answers(
+        request,
+        {question.id: "a" * MAX_ANSWER_CHARS for question in questions},
+    )
+
+    assert rendered is not None
+    assert len(rendered) <= MAX_RUN_MESSAGE_CHARS
+
+
 def test_resolution_parser_binds_the_resume_to_the_committed_request() -> None:
     """A stale typed resume cannot be consumed by a later clarification gate."""
     continuation = ClarificationContinuation(
@@ -157,6 +265,12 @@ def test_resolution_parser_binds_the_resume_to_the_committed_request() -> None:
     with pytest.raises(ValueError, match="does not match"):
         parse_clarification_resolution(
             continuation.as_resume_value(), request_id="clarify-current"
+        )
+
+    stale_decline = ClarificationDecline(request_id="clarify-old")
+    with pytest.raises(ValueError, match="does not match"):
+        parse_clarification_resolution(
+            stale_decline.as_resume_value(), request_id="clarify-current"
         )
 
     with pytest.raises(ValueError, match="discriminator"):
@@ -186,12 +300,17 @@ def test_resolution_fingerprint_is_canonical_and_outcome_sensitive() -> None:
     continuation = ClarificationContinuation(
         request_id="clarify-1", prompt="Discuss the trade-off first."
     )
+    decline = ClarificationDecline(request_id="clarify-1")
 
     fingerprint = clarification_resolution_fingerprint(first)
     assert fingerprint.startswith("sha256:")
     assert fingerprint == clarification_resolution_fingerprint(reordered)
     assert fingerprint != clarification_resolution_fingerprint(changed_answer)
     assert fingerprint != clarification_resolution_fingerprint(continuation)
+    assert clarification_resolution_fingerprint(decline) not in {
+        fingerprint,
+        clarification_resolution_fingerprint(continuation),
+    }
 
 
 @pytest.mark.parametrize(

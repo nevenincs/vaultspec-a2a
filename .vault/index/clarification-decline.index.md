@@ -1,0 +1,46 @@
+---
+generated: true
+tags:
+  - '#index'
+  - '#clarification-decline'
+date: '2026-08-02'
+modified: '2026-08-02'
+body_schema: 'body-v1'
+body_hash: 'sha256:e32faa6328d30f9b0670b9ba47dd9d1445f0fa3cd41948b71f914111fd7d58dd'
+related:
+  - '[[2026-08-02-clarification-decline-S01]]'
+  - '[[2026-08-02-clarification-decline-S02]]'
+  - '[[2026-08-02-clarification-decline-S03]]'
+  - '[[2026-08-02-clarification-decline-adr]]'
+  - '[[2026-08-02-clarification-decline-implementation-review-audit]]'
+  - '[[2026-08-02-clarification-decline-plan]]'
+  - '[[2026-08-02-clarification-decline-research]]'
+---
+
+# `clarification-decline` feature index
+
+Auto-generated index of all documents tagged with `#clarification-decline`.
+
+## Documents
+
+### adr
+
+- `2026-08-02-clarification-decline-adr` - `clarification-decline` adr: `typed decline resolution for parked questions` | (**status:** `accepted`)
+
+### audit
+
+- `2026-08-02-clarification-decline-implementation-review-audit` - `clarification-decline` audit: `decline implementation review`
+
+### exec
+
+- `2026-08-02-clarification-decline-S01` - Define the typed decline outcome, its fixed marker text, and the graph resume behavior
+- `2026-08-02-clarification-decline-S02` - Map the additive decline response through the existing gateway verb
+- `2026-08-02-clarification-decline-S03` - Prove contract boundaries and the real worker decline loop
+
+### plan
+
+- `2026-08-02-clarification-decline-plan` - `clarification-decline` plan
+
+### research
+
+- `2026-08-02-clarification-decline-research` - `clarification-decline` research: `declining a parked clarification`

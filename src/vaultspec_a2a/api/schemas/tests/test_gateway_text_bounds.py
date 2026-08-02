@@ -112,14 +112,18 @@ def test_documented_byte_budget_covers_the_character_bound() -> None:
 
 
 def test_clarification_response_requires_exactly_one_resolution_shape() -> None:
-    """Legacy answers and a new prompt are alternatives, never an ambiguous merge."""
+    """Answers, a new prompt, and a decline are alternatives, never a merge."""
     answers = RunClarificationRespondRequest(answers={"scope": "backend"})
     continuation = RunClarificationRespondRequest(prompt="Use your own judgement.")
+    decline = RunClarificationRespondRequest(decline=True)
 
     assert answers.answers == {"scope": "backend"}
     assert answers.prompt is None
     assert continuation.prompt == "Use your own judgement."
     assert continuation.answers is None
+    assert decline.decline is True
+    assert decline.answers is None
+    assert decline.prompt is None
 
     with pytest.raises(ValidationError):
         RunClarificationRespondRequest()
@@ -127,6 +131,21 @@ def test_clarification_response_requires_exactly_one_resolution_shape() -> None:
         RunClarificationRespondRequest(
             answers={"scope": "backend"}, prompt="Ignore that answer."
         )
+    with pytest.raises(ValidationError):
+        RunClarificationRespondRequest(answers={"scope": "backend"}, decline=True)
+    with pytest.raises(ValidationError):
+        RunClarificationRespondRequest(prompt="Also chat about it.", decline=True)
+
+
+def test_clarification_decline_admits_only_the_literal_true() -> None:
+    """``decline: false`` is a contradiction, not an empty resolution.
+
+    Validated through ``model_validate`` because that is how a wire payload
+    arrives: the annotation already refuses the literal at the type level, and
+    this proves the runtime boundary refuses it too.
+    """
+    with pytest.raises(ValidationError):
+        RunClarificationRespondRequest.model_validate({"decline": False})
 
 
 @pytest.mark.parametrize("prompt", ["", " ", "\t\r\n"])

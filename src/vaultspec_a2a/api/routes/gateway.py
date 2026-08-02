@@ -84,6 +84,8 @@ from ...streaming.aggregator import EventAggregator
 from ...thread.clarification import (
     ClarificationAnswers,
     ClarificationContinuation,
+    ClarificationDecline,
+    ClarificationResolution,
     pending_clarification,
 )
 from ...thread.constants import DEFAULT_SUPERVISOR_ID
@@ -1915,10 +1917,13 @@ async def run_clarification_respond_endpoint(
     checkpointer: Checkpointer = Depends(get_checkpointer),
 ) -> RunClarificationRespondResponse:
     """Resolve through the durable clarification lease service."""
+    resolution: ClarificationResolution
     if body.answers is not None:
         resolution = ClarificationAnswers(
             request_id=request_id, answers=dict(body.answers)
         )
+    elif body.decline is not None:
+        resolution = ClarificationDecline(request_id=request_id)
     else:
         prompt = body.prompt
         if prompt is None:

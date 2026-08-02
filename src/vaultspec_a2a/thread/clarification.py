@@ -2,8 +2,9 @@
 
 A run that needs human direction pauses on a checkpointed LangGraph
 ``interrupt()`` carrying a *clarification request*, and resumes only through a
-typed ``Command(resume=...)`` that either answers it or supplies a new prompt.
-This module owns the request and both resolution shapes once: the graph node
+typed ``Command(resume=...)`` that answers it, supplies a new prompt, or
+declines it outright.
+This module owns the request and every resolution shape once: the graph node
 builds and resolves these models, the gateway validates inbound resolution, and
 the recovery snapshot re-reads a parked question through them. A second
 declaration of the same shape at any of those layers is what lets a question the
@@ -54,6 +55,8 @@ if TYPE_CHECKING:
 
 __all__ = [
     "CLARIFICATION_CONTINUATION_TYPE",
+    "CLARIFICATION_DECLINE_MARKER",
+    "CLARIFICATION_DECLINE_TYPE",
     "CLARIFICATION_INTERRUPT_TYPE",
     "CLARIFICATION_RESUME_TYPE",
     "CLARIFICATION_TOPOLOGIES",
@@ -66,6 +69,7 @@ __all__ = [
     "MAX_RUN_MESSAGE_CHARS",
     "ClarificationAnswers",
     "ClarificationContinuation",
+    "ClarificationDecline",
     "ClarificationKind",
     "ClarificationQuestion",
     "ClarificationRequest",
@@ -74,17 +78,30 @@ __all__ = [
     "clarification_resolution_fingerprint",
     "parse_clarification_resolution",
     "pending_clarification",
+    "render_clarification_answers",
     "strip_control_characters",
     "topology_honours_clarification",
     "validate_clarification_answers",
 ]
 
-# The interrupt discriminator the parked node raises and the two resolution
+# The interrupt discriminator the parked node raises and the three resolution
 # discriminators a resume may carry back. They are matched by string at the
 # checkpoint and dispatch boundaries, so they are named once here.
 CLARIFICATION_INTERRUPT_TYPE = "clarification_request"
 CLARIFICATION_RESUME_TYPE = "clarification_response"
 CLARIFICATION_CONTINUATION_TYPE = "clarification_continuation"
+CLARIFICATION_DECLINE_TYPE = "clarification_decline"
+
+# The one transcript trace a declined questionnaire leaves. A constant beside
+# the resolution models rather than text composed at the gate, so the marker a
+# model turn reads and the marker a test asserts cannot drift. Fixed words, not
+# user prose: the decline body carries no free text by contract, and the marker
+# states the user's real action - refusal - rather than fabricating an
+# instruction they never gave.
+CLARIFICATION_DECLINE_MARKER = (
+    "The user declined to answer the clarification questionnaire. "
+    "Proceed on your own best judgement."
+)
 
 # The topologies whose compiled graph actually MOUNTS the clarification stage,
 # named once so the layer that accepts a declaration and the layer that honours it
@@ -372,7 +389,30 @@ class ClarificationContinuation(BaseModel):
         return self.model_dump(mode="json")
 
 
-type ClarificationResolution = ClarificationAnswers | ClarificationContinuation
+class ClarificationDecline(BaseModel):
+    """The typed resume payload that declines a parked questionnaire.
+
+    Deliberately payload-free beyond its identity: a decline means "no answer
+    given - proceed on your own judgement", so there is nothing user-authored to
+    carry or bound. Its downstream trace is the fixed
+    :data:`CLARIFICATION_DECLINE_MARKER` the gate appends, never text from this
+    model. Distinct from a cancel (the run continues) and from a continuation
+    (no new instruction is given).
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    type: Literal["clarification_decline"] = CLARIFICATION_DECLINE_TYPE
+    request_id: ClarificationRequestId
+
+    def as_resume_value(self) -> dict[str, Any]:
+        """Render the decline as the JSON-safe value handed to ``Command(resume=)``."""
+        return self.model_dump(mode="json")
+
+
+type ClarificationResolution = (
+    ClarificationAnswers | ClarificationContinuation | ClarificationDecline
+)
 
 
 def clarification_resolution_fingerprint(
@@ -399,7 +439,7 @@ def parse_clarification_resolution(
     payload: object,
     *,
     request_id: str,
-) -> ClarificationAnswers | ClarificationContinuation:
+) -> ClarificationResolution:
     """Parse a resume outcome and bind it to the committed request identity."""
     if not isinstance(payload, dict):
         msg = "invalid clarification resume payload"
@@ -423,6 +463,8 @@ def parse_clarification_resolution(
             )
         elif candidate.get("type") == CLARIFICATION_CONTINUATION_TYPE:
             resolution = ClarificationContinuation.model_validate(candidate)
+        elif candidate.get("type") == CLARIFICATION_DECLINE_TYPE:
+            resolution = ClarificationDecline.model_validate(candidate)
         else:
             msg = "invalid clarification resume discriminator"
             raise ValueError(msg)
@@ -477,6 +519,38 @@ def validate_clarification_answers(
                     f"declared options"
                 )
     return notes
+
+
+def render_clarification_answers(
+    request: ClarificationRequest,
+    answers: Mapping[str, str],
+) -> str | None:
+    """Render an answered questionnaire as one human transcript turn, or ``None``.
+
+    Owned here beside the models rather than composed at the gate so the
+    transcript form downstream turns read and the form tests assert cannot
+    drift per call site. Deterministic by construction: questions render in the
+    committed request's order, never in answer-map insertion order, and only
+    answered questions render - the human's own words paired with the question
+    they answered.
+
+    Answers ``None`` when nothing was effectively answered (an all-optional
+    questionnaire resolved with an empty map): a contentless human turn in
+    front of every downstream role is worse than no turn, and the resolution
+    receipt still records that the questionnaire was resolved.
+
+    Bounded by construction from the contract caps: at most
+    :data:`MAX_QUESTIONS_PER_REQUEST` lines of one capped prompt and one capped
+    answer each, well inside the run-message ceiling.
+    """
+    lines = [
+        f"- {question.prompt}: {answer}"
+        for question in request.questions
+        if (answer := answers.get(question.id)) is not None and answer.strip()
+    ]
+    if not lines:
+        return None
+    return "Answers to the clarification questionnaire:\n" + "\n".join(lines)
 
 
 def pending_clarification(

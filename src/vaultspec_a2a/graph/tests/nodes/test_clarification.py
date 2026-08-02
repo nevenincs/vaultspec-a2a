@@ -36,6 +36,7 @@ from ....graph.nodes.clarification import (
     create_clarification_request_node,
 )
 from ....thread.clarification import (
+    CLARIFICATION_DECLINE_MARKER,
     MAX_IDENTIFIER_CHARS,
     MAX_OPTION_CHARS,
     MAX_OPTIONS_PER_QUESTION,
@@ -43,6 +44,7 @@ from ....thread.clarification import (
     MAX_QUESTIONS_PER_REQUEST,
     ClarificationAnswers,
     ClarificationContinuation,
+    ClarificationDecline,
     ClarificationKind,
     ClarificationQuestion,
     ClarificationRequest,
@@ -204,6 +206,49 @@ async def test_answers_resume_the_run_and_are_recorded_under_the_request_id() ->
     # The questionnaire is answered, so a later status read must not re-offer it.
     assert resumed.get("clarification_request") is None
     assert resumed.get("clarification_request_id") is None
+    # The answered questionnaire is also one rendered human turn - the recorded
+    # state alone reaches no model turn, so the transcript carries the answers.
+    assert resumed["messages"][-1].content == (
+        "Answers to the clarification questionnaire:\n"
+        "- Which surface should the monitor panel dock to?: right\n"
+        "- Any constraints the panel must respect?: must survive a reload"
+    )
+
+
+@pytest.mark.asyncio
+async def test_an_empty_effective_answer_map_appends_no_transcript_turn() -> None:
+    """An all-optional questionnaire resolved empty leaves the transcript alone.
+
+    The resolution is still recorded (receipt and empty answer entry), but no
+    contentless human turn is put in front of downstream roles.
+    """
+    request = ClarificationRequest(
+        request_id="clarify-1",
+        questions=[
+            ClarificationQuestion(
+                id="notes",
+                prompt="Anything else?",
+                kind=ClarificationKind.TEXT,
+                required=False,
+            )
+        ],
+    )
+    graph = _clarify_graph(_CountingProducer(request))
+    config = {"configurable": {"thread_id": "clarify-empty-answers"}}
+
+    initial = _base_state()
+    await graph.ainvoke(initial, config=config)
+    resolution = ClarificationAnswers(request_id="clarify-1", answers={})
+    resumed = await graph.ainvoke(
+        Command(resume=resolution.as_resume_value()),
+        config=config,
+    )
+
+    assert resumed["clarification_answers"] == {"clarify-1": {}}
+    assert resumed["clarification_resolution_receipts"] == {
+        "clarify-1": clarification_resolution_fingerprint(resolution)
+    }
+    assert len(resumed["messages"]) == len(initial["messages"])
 
 
 @pytest.mark.asyncio
@@ -233,6 +278,38 @@ async def test_continuation_records_a_receipt_without_copying_prompt_state() -> 
     assert (
         resolution.prompt not in resumed["clarification_resolution_receipts"].values()
     )
+
+
+@pytest.mark.asyncio
+async def test_decline_leaves_one_marker_and_records_no_answer() -> None:
+    """Refusal resumes the run with the fixed marker as its only trace.
+
+    The run advances through the same proceed target as an answered
+    questionnaire, the pending request is cleared so a status read stops
+    re-offering it, the receipt carries the decline's own fingerprint, and no
+    answer entry is fabricated - a declined question was not answered.
+    """
+    graph = _clarify_graph(_CountingProducer(_request()))
+    config = {"configurable": {"thread_id": "clarify-decline"}}
+
+    await graph.ainvoke(_base_state(), config=config)
+    resolution = ClarificationDecline(request_id="clarify-1")
+    resumed = await graph.ainvoke(
+        Command(resume=resolution.as_resume_value()),
+        config=config,
+    )
+
+    assert resumed["next"] == "proceed"
+    assert resumed["messages"][-1].content == CLARIFICATION_DECLINE_MARKER
+    assert [message.content for message in resumed["messages"]].count(
+        CLARIFICATION_DECLINE_MARKER
+    ) == 1
+    assert resumed.get("clarification_answers", {}) == {}
+    assert resumed["clarification_resolution_receipts"] == {
+        "clarify-1": clarification_resolution_fingerprint(resolution)
+    }
+    assert resumed.get("clarification_request") is None
+    assert resumed.get("clarification_request_id") is None
 
 
 @pytest.mark.asyncio

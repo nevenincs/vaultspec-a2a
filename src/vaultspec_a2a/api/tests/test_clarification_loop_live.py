@@ -43,7 +43,10 @@ from ...control.circuit_breaker import WorkerCircuitBreaker
 from ...control.clarification_service import redrive_clarification_actions
 from ...control.worker_management import LazyWorkerSpawner
 from ...database import create_thread, get_control_action_by_idempotency_key
-from ...thread.clarification import ClarificationAnswers
+from ...thread.clarification import (
+    CLARIFICATION_DECLINE_MARKER,
+    ClarificationAnswers,
+)
 from ...thread.enums import ControlActionType, ThreadStatus
 from ...worker.app import create_worker_app
 from ...worker.executor import Executor
@@ -170,6 +173,14 @@ async def test_respond_resumes_through_a_real_worker_and_executor(
                     request_id: {"provider": "codex"}
                 }
                 assert snap.next == (), "the graph did not reach its terminal state"
+                # The answered questionnaire also reaches the transcript - the
+                # one state downstream model turns actually read.
+                transcript = cast("list[BaseMessage]", snap.values["messages"])
+                assert transcript[-1].type == "human"
+                assert transcript[-1].content == (
+                    "Answers to the clarification questionnaire:\n"
+                    "- Which provider should author the plan?: codex"
+                )
 
             await executor.shutdown()
 
@@ -241,6 +252,83 @@ async def test_new_prompt_resumes_the_parked_graph_as_a_real_human_turn(
                 assert len(appended) == 1
                 assert appended[0].type == "human"
                 assert appended[0].content == prompt
+                assert settled.values.get("clarification_request") is None
+                assert settled.values.get("clarification_request_id") is None
+                recorded_answers = cast(
+                    "dict[str, dict[str, str]]",
+                    settled.values.get("clarification_answers", {}),
+                )
+                assert request_id not in recorded_answers
+
+            await executor.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_decline_resumes_the_parked_graph_with_the_fixed_marker(
+    session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
+) -> None:
+    """A submitted decline resumes the run with no answer given.
+
+    The refusal crosses the real gateway, worker app, Executor,
+    ``Command(resume=...)``, and clarification gate. The durable graph state
+    proves the outcome: the run reached its terminal state, exactly one fixed
+    marker turn was appended, and no answer was fabricated for the declined
+    request.
+    """
+    app, _agg, _recording_worker, _cp = make_app(session_factory, checkpointer)
+
+    async with httpx.AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://gateway"
+    ) as gateway_client:
+        create_resp = await gateway_client.post(
+            "/v1/runs",
+            json={"team_preset": _BUNDLE_FREE_PRESET, "message": "plan it"},
+        )
+        assert create_resp.status_code == 201
+        thread_id = create_resp.json()["run_id"]
+
+        parked = await park_clarification(checkpointer, thread_id=thread_id)
+        request_id = parked.request.request_id
+        config: RunnableConfig = {"configurable": {"thread_id": thread_id}}
+
+        before = await parked.graph.aget_state(config)
+        assert before.next == ("clarification_gate",)
+        initial_messages = cast("list[BaseMessage]", before.values["messages"])
+
+        async with loopback_callback_bridge() as bridge:
+            executor = Executor(checkpointer=checkpointer, bridge=bridge)
+            executor.register_compiled_graph(thread_id, _CACHE_KEY, parked.graph)
+
+            worker_app = create_worker_app(lifespan=_worker_test_lifespan)
+            worker_app.state.executor = executor
+
+            async with (
+                httpx.AsyncClient(
+                    transport=ASGITransport(app=worker_app), base_url="http://worker"
+                ) as worker_client,
+                anyio.create_task_group() as tg,
+            ):
+                worker_app.state.task_group = tg
+                app.state.worker_client = worker_client
+
+                respond = await gateway_client.post(
+                    f"/v1/runs/{thread_id}/clarifications/{request_id}/respond",
+                    json={"decline": True},
+                )
+                assert respond.status_code == 200, respond.text
+
+                with anyio.fail_after(15.0):
+                    while True:
+                        settled = await parked.graph.aget_state(config)
+                        messages = cast("list[BaseMessage]", settled.values["messages"])
+                        if settled.next == () and len(messages) > len(initial_messages):
+                            break
+                        await anyio.sleep(0.05)
+
+                appended = messages[len(initial_messages) :]
+                assert len(appended) == 1
+                assert appended[0].type == "human"
+                assert appended[0].content == CLARIFICATION_DECLINE_MARKER
                 assert settled.values.get("clarification_request") is None
                 assert settled.values.get("clarification_request_id") is None
                 recorded_answers = cast(

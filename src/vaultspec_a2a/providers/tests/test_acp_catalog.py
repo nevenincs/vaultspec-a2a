@@ -7,13 +7,13 @@ from typing import TYPE_CHECKING, cast
 
 import pytest
 
-from vaultspec_a2a.providers.acp_catalog import (
+from ..acp_catalog import (
     AcpCatalogProtocolError,
     _rpc_error,
     _unauthenticated_discovery,
     catalog_from_session_result,
 )
-from vaultspec_a2a.providers.provider_catalog import (
+from ..provider_catalog import (
     AuthenticationState,
     CatalogStatus,
     ControlKind,
@@ -21,7 +21,7 @@ from vaultspec_a2a.providers.provider_catalog import (
 )
 
 if TYPE_CHECKING:
-    from vaultspec_a2a.providers._json_contract import JsonObject
+    from .._json_contract import JsonObject
 
 _KEY = ProviderCatalogKey("provider-under-test", "acp")
 

@@ -9,7 +9,7 @@ from typing import cast
 
 import pytest
 
-from vaultspec_a2a.providers.provider_catalog import (
+from ..provider_catalog import (
     AdmissionState,
     AuthenticationState,
     CacheFreshness,

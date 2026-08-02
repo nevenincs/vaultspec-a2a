@@ -47,10 +47,18 @@ Three assertions, and each one fails the lane rather than softening:
 
 Infrastructure gate, not a masked failure (the sanctioned pw7 pattern): an absent
 loopback stack reports through the external-prerequisite rule, and an unreachable
-public web or a spent provider usage window reports as a truthful skip naming what
-is missing - in neither case can the lane be asked to do the work. Every OTHER
+public web or a provider refusing the run for rate reports as a truthful skip naming
+what is missing - in neither case can the lane be asked to do the work. Every OTHER
 terminal failure is this Step's business and fails loud, as does a run that reached
 the web and then failed to cite it.
+
+That last gate reads the run's TYPED provider condition off ``run-status``, never the
+prose of its failure reason. The lane already resolved a condition from the
+discriminator the provider itself put on the wire; matching the reason text would
+re-derive it, and would break the moment a vendor reworded a message. What this lane
+can report is bounded and stated as such: its adapter reports a short-term rate limit
+and an exhausted subscription window identically, so this module can say the provider
+refused for rate and cannot say which of the two it was.
 """
 
 from __future__ import annotations
@@ -69,6 +77,7 @@ from pydantic import TypeAdapter, ValidationError
 
 from ..control.run_start_policy import required_role_ids
 from ..graph.nodes.diverge import WEB_LOCATOR_KIND
+from ..providers.conditions import ProviderCondition, condition_from_acp_error
 from ..team.team_config import load_team_config
 from .test_pw7_acceptance import (
     _GATEWAY_AUTH_HEADERS,
@@ -122,12 +131,25 @@ _OBSERVE_DEADLINE_SECONDS = 3600.0
 #: How often checkpointed state is asked whether the evidence has landed.
 _POLL_SECONDS = 15.0
 
-#: Substrings that identify a provider USAGE-WINDOW refusal in a run's failure reason.
-#: A lane whose subscription window is spent is an absent external resource, not a
-#: defect in what this module proves, and the repository's rule for an absent external
-#: resource is a skip that NAMES it. Kept deliberately narrow: only the provider's own
-#: rate-limit vocabulary matches, so an ordinary provider error still fails loud.
-_USAGE_LIMIT_MARKERS = ("rate_limit", "usage limit", "weekly limit")
+#: The one condition on which this module may decline to prove anything.
+#:
+#: A provider that refuses the run for rate is an absent external resource - the lane
+#: cannot be asked to do the work at all - and the repository's rule for an absent
+#: external resource is a skip that NAMES it. Every other condition is this Step's
+#: business and fails loud.
+#:
+#: Read as a TYPED value the lane resolved from the discriminator the provider put on
+#: the wire, never by matching the failure reason's prose. Prose classification breaks
+#: the moment a vendor rewords a message, and it re-derives a value the lane already
+#: held.
+#:
+#: THROTTLED is the honest member here and the finer USAGE_EXHAUSTED would be a false
+#: claim. This lane's adapter assigns one error kind to a short-term rate refusal AND
+#: to an exhausted subscription window, branching between them only on a response
+#: header it consumes internally, so the distinction never crosses the wire. This
+#: module therefore cannot tell which of the two happened, and says so rather than
+#: asserting the one it would prefer to report.
+_RATE_REFUSAL_CONDITION = ProviderCondition.THROTTLED
 
 JsonObject = dict[str, object]
 _JSON_OBJECT = TypeAdapter(JsonObject)
@@ -357,10 +379,17 @@ async def _read_evidence(run_id: str) -> _Evidence:
     )
 
 
-def _is_usage_limit(failure_reason: str) -> bool:
-    """Whether *failure_reason* is the provider's usage window being spent."""
-    lowered = failure_reason.lower()
-    return any(marker in lowered for marker in _USAGE_LIMIT_MARKERS)
+def _is_provider_rate_refusal(provider_condition: str) -> bool:
+    """Whether the run's TYPED condition says the provider refused it for rate.
+
+    Takes the condition the run reports rather than its reason text, so the
+    decision is a read of what the lane resolved rather than a re-derivation of
+    it. An absent or empty value never opens the skip: a run that failed without
+    recording a condition has not told us the provider refused anything, and
+    treating silence as a rate refusal is how a real regression comes to report
+    as an absent prerequisite.
+    """
+    return provider_condition == _RATE_REFUSAL_CONDITION
 
 
 @pytest.mark.service
@@ -405,6 +434,7 @@ async def test_claude_lane_completes_a_real_web_retrieval(
     before = _snapshot_vault(vault_root)
     evidence = _Evidence(claims="", locator_urls=[], body="")
     failure_reason = ""
+    failure_condition = ""
 
     from .test_pw7_acceptance import _ResilientAuthoringClient
 
@@ -444,7 +474,13 @@ async def test_claude_lane_completes_a_real_web_retrieval(
                         break
                     status = await harness._run_status(hc)
                     if status.get("status") in {"failed", "cancelled"}:
+                        # Both are read from run-status rather than from the relay:
+                        # the frame carrying the condition is droppable, and this
+                        # response is where the run's terminal state is
+                        # authoritative. The condition decides what happens next;
+                        # the reason only informs whichever message is reported.
                         failure_reason = str(status.get("failure_reason") or "")
+                        failure_condition = str(status.get("provider_condition") or "")
                         break
                     await asyncio.sleep(_POLL_SECONDS)
             finally:
@@ -454,21 +490,31 @@ async def test_claude_lane_completes_a_real_web_retrieval(
                 )
 
     # A run that died before the evidence landed proves nothing either way, so the
-    # two causes are separated rather than reported as one failure. A spent provider
-    # usage window is an ABSENT EXTERNAL RESOURCE - the lane cannot be asked to work
-    # at all - and the repository's rule for that is a skip naming it. Any other
-    # terminal failure is this Step's business and fails loud.
-    if not evidence.complete and failure_reason:
-        if _is_usage_limit(failure_reason):
+    # two causes are separated rather than reported as one failure. A provider that
+    # refused the run for rate is an ABSENT EXTERNAL RESOURCE - the lane cannot be
+    # asked to work at all - and the repository's rule for that is a skip naming it.
+    # Any other terminal failure is this Step's business and fails loud.
+    #
+    # The branch is chosen by the run's TYPED condition. The reason text is carried
+    # into both messages because it is what a reader diagnoses from, but it decides
+    # nothing: a classification derived from prose breaks whenever a vendor rewords
+    # a message, and re-derives what the lane already resolved from the provider's
+    # own discriminator.
+    if not evidence.complete and (failure_reason or failure_condition):
+        if _is_provider_rate_refusal(failure_condition):
             pytest.skip(
-                f"the {_PRESET_LIVE!r} lane's provider refused the run on its usage "
-                f"window before the evidence landed: {failure_reason}. This is a "
-                "truthful skip naming an absent external resource, not a masked "
-                "failure - re-run once the window resets"
+                f"the {_PRESET_LIVE!r} lane's provider refused the run for rate "
+                f"before the evidence landed (condition {failure_condition!r}): "
+                f"{failure_reason}. This lane cannot say whether a short-term rate "
+                "limit or an exhausted subscription window caused it - its adapter "
+                "reports both identically - so this names only what the wire "
+                "carried. A truthful skip for an absent external resource, not a "
+                "masked failure; re-run once the provider admits work again"
             )
         pytest.fail(
             f"run {harness.run_id} went terminal before the retrieval evidence "
-            f"landed: {failure_reason}"
+            f"landed (condition {failure_condition or 'none recorded'!r}): "
+            f"{failure_reason}"
         )
 
     shas_after = _fetch_live_commit_shas()
@@ -652,24 +698,54 @@ def test_evidence_is_complete_only_when_both_channels_received_something() -> No
     assert _Evidence(claims="c", locator_urls=["https://x.test"], body="# doc").complete
 
 
-def test_usage_limit_classification_is_narrow() -> None:
-    """Stack-free guard: only a spent usage window skips; every other failure fails.
+def test_the_skip_keys_on_what_this_lane_actually_resolves_a_rate_refusal_to() -> None:
+    """Stack-free guard: the skip fires on the real lane mapping, not a chosen constant.
 
-    The skip branch is the one place this module can decline to prove anything, so
-    the predicate that opens it must not admit ordinary provider or graph errors -
-    that is exactly how a real regression would come to report as an absent
-    prerequisite.
+    The condition this module opens its skip on is not asserted against a literal
+    picked here - that would only restate the constant. It is driven through the
+    PRODUCTION mapper on the error shape the installed adapter actually emits for
+    a rate refusal: the internal-error code with an ``errorKind`` of ``rate_limit``
+    on ``data``. So the branch is tied to what the lane resolves, and a mapping
+    change that moved rate refusals to a different member would fail here rather
+    than silently turning every throttled run into a loud failure.
     """
-    assert _is_usage_limit(
-        "ACP Error [-32603]: You've hit your weekly limit | Data: "
-        "{'errorKind': 'rate_limit'}"
-    )
-    assert _is_usage_limit("provider refused: usage limit reached")
-    assert not _is_usage_limit("")
-    assert not _is_usage_limit(
-        "WorkerExecutionError: worker='research_review' model=AcpChatModel messages=8"
-    )
-    assert not _is_usage_limit("ACP Error [-32603]: transport closed unexpectedly")
+    acp_rate_refusal = {
+        "code": -32603,
+        "message": "You've hit your weekly limit",
+        "data": {"errorKind": "rate_limit"},
+    }
+
+    assert _is_provider_rate_refusal(condition_from_acp_error(acp_rate_refusal))
+
+
+def test_exactly_one_condition_opens_the_skip() -> None:
+    """Stack-free guard: every other member of the vocabulary fails loud.
+
+    Enumerated from the production vocabulary rather than from a hand-copied list,
+    so a member added later cannot quietly inherit either branch - it lands in the
+    fail-loud half and this test forces the decision to be made explicitly. The
+    skip branch is the one place this module can decline to prove anything, and
+    widening it is how a real regression comes to report as an absent prerequisite.
+    """
+    opens_the_skip = {
+        condition
+        for condition in ProviderCondition
+        if _is_provider_rate_refusal(condition)
+    }
+
+    assert opens_the_skip == {ProviderCondition.THROTTLED}
+
+
+def test_an_unclassified_failure_never_opens_the_skip() -> None:
+    """Stack-free guard: silence is not a rate refusal.
+
+    A run that went terminal without recording a condition - a graph fault, a
+    cancellation, or a failure predating the durable column - has not told us the
+    provider refused anything. Reading that as a refusal would mask exactly the
+    regressions this module exists to catch.
+    """
+    assert not _is_provider_rate_refusal("")
+    assert not _is_provider_rate_refusal("none recorded")
 
 
 def test_writer_body_returns_the_last_body_the_research_writer_produced() -> None:

@@ -4,7 +4,7 @@ tags:
   - '#provider-error-taxonomy'
 date: '2026-08-02'
 modified: '2026-08-02'
-body_hash: 'sha256:33a5ee2aa948bf3169a38e1a6740669d1c36be23488551ab718416f7289a3c9a'
+body_hash: 'sha256:d53c629d3b19aa0e4571e1c06311f4b95812b07e58ce08443aa1648696c6bed4'
 tier: L3
 related:
   - '[[2026-08-02-provider-error-taxonomy-adr]]'
@@ -88,10 +88,10 @@ Derives the recoverable flag from the condition rather than the catch site and b
 
 Guarantees every path that fails a run records a condition, emits a terminal, and survives reconnect and backpressure.
 
-- [ ] `W01.P05.S29` - Record a condition and reason on the shared dispatch failure transition; `src/vaultspec_a2a/control/repair_transitions.py`.
-- [ ] `W01.P05.S30` - Pass the dispatch failure reason from run creation; `src/vaultspec_a2a/control/thread_service.py`.
+- [x] `W01.P05.S29` - Record a condition and reason on the shared dispatch failure transition; `src/vaultspec_a2a/control/repair_transitions.py`.
+- [x] `W01.P05.S30` - Pass the dispatch failure reason from run creation; `src/vaultspec_a2a/control/thread_service.py`.
 - [ ] `W01.P05.S31` - Pass the dispatch failure reason from message send; `src/vaultspec_a2a/control/message_service.py`.
-- [ ] `W01.P05.S32` - Pass the dispatch failure reason from permission resume; `src/vaultspec_a2a/control/permission_service.py`.
+- [x] `W01.P05.S32` - Pass the dispatch failure reason from permission resume; `src/vaultspec_a2a/control/permission_service.py`.
 - [ ] `W01.P05.S33` - Record a durable failure when clarification respond dispatch fails; `src/vaultspec_a2a/api/routes/gateway.py`.
 - [x] `W01.P05.S34` - Emit a terminal from the executor top-level dispatch handler; `src/vaultspec_a2a/worker/executor.py`.
 - [x] `W01.P05.S35` - Record a condition on the missing-graph rejection; `src/vaultspec_a2a/worker/executor.py`.

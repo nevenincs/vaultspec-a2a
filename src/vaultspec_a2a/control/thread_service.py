@@ -578,7 +578,10 @@ async def create_and_dispatch_thread(
         policy, typed_failure = evaluate_dispatch_failure(outcome.failure_type)
         if policy.should_mark_failed:
             await apply_dispatch_failure(
-                db, thread.id, failed_status=ThreadStatus.FAILED
+                db,
+                thread.id,
+                failed_status=ThreadStatus.FAILED,
+                reason=outcome.detail or "Worker dispatch failed",
             )
         await db.commit()
         return ThreadCreationResult(

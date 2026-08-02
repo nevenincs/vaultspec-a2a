@@ -863,7 +863,10 @@ async def _dispatch_permission_resume(
             await reset_permission_response_submission(db, request_id=request_id)
         if policy.should_mark_failed:
             await apply_dispatch_failure(
-                db, thread_id, failed_status=ThreadStatus.INPUT_REQUIRED
+                db,
+                thread_id,
+                failed_status=ThreadStatus.INPUT_REQUIRED,
+                reason=outcome.detail or "Worker dispatch failed",
             )
 
         error_detail: str | None = outcome.detail or "Worker dispatch failed"

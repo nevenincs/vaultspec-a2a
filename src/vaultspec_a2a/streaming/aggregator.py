@@ -19,6 +19,7 @@ from langgraph.types import Command
 from ..graph.enums import AgentLifecycleState, ToolCallStatus, ToolKind
 from ..graph.events import DomainEvent, PermissionRequest
 from ..graph.protocols import NullTelemetryHook, TelemetryHook
+from ..providers import ProviderCondition
 from .buffering import BufferingManager
 from .emitters import EventEmitters
 from .ingest import IngestManager
@@ -329,6 +330,10 @@ class EventAggregator:
     def take_failure_reason(self, thread_id: str) -> str | None:
         """Pop and return the reason ``thread_id``'s last FAILED ingest ended with."""
         return self._ingest.take_failure_reason(thread_id)
+
+    def take_failure_condition(self, thread_id: str) -> ProviderCondition | None:
+        """Pop the provider condition ``thread_id``'s last FAILED ingest resolved."""
+        return self._ingest.take_failure_condition(thread_id)
 
     async def ingest(
         self,

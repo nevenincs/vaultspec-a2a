@@ -4,7 +4,7 @@ tags:
   - '#provider-error-taxonomy'
 date: '2026-08-02'
 modified: '2026-08-02'
-body_hash: 'sha256:d53c629d3b19aa0e4571e1c06311f4b95812b07e58ce08443aa1648696c6bed4'
+body_hash: 'sha256:6ef234e973ed2335bdf2540c4b1c4fa92ee6b2824a9dfae6a51af5ca9f677a33'
 tier: L3
 related:
   - '[[2026-08-02-provider-error-taxonomy-adr]]'
@@ -62,7 +62,7 @@ Establishes the closed condition vocabulary, proves the ZAI lane's discriminator
 
 Carries the condition on the error frame, persists it beside the failure reason, and projects it authoritatively onto run-status so a reloading client recovers it.
 
-- [ ] `W01.P03.S13` - Emit the resolved condition as the error frame code; `src/vaultspec_a2a/streaming/ingest.py`.
+- [x] `W01.P03.S13` - Emit the resolved condition as the error frame code; `src/vaultspec_a2a/streaming/ingest.py`.
 - [ ] `W01.P03.S14` - Carry the condition on the terminal status payload; `src/vaultspec_a2a/worker/state_projection.py`.
 - [x] `W01.P03.S15` - Declare the provider condition column on the thread model; `src/vaultspec_a2a/database/models.py`.
 - [x] `W01.P03.S16` - Add the provider condition migration revision; `src/vaultspec_a2a/database/migrations/versions`.
@@ -90,9 +90,9 @@ Guarantees every path that fails a run records a condition, emits a terminal, an
 
 - [x] `W01.P05.S29` - Record a condition and reason on the shared dispatch failure transition; `src/vaultspec_a2a/control/repair_transitions.py`.
 - [x] `W01.P05.S30` - Pass the dispatch failure reason from run creation; `src/vaultspec_a2a/control/thread_service.py`.
-- [ ] `W01.P05.S31` - Pass the dispatch failure reason from message send; `src/vaultspec_a2a/control/message_service.py`.
+- [ ] `W01.P05.S31` - Record a durable reason where an undelivered follow-up settles; `src/vaultspec_a2a/control/message_service.py`.
 - [x] `W01.P05.S32` - Pass the dispatch failure reason from permission resume; `src/vaultspec_a2a/control/permission_service.py`.
-- [ ] `W01.P05.S33` - Record a durable failure when clarification respond dispatch fails; `src/vaultspec_a2a/api/routes/gateway.py`.
+- [ ] `W01.P05.S33` - Record a durable reason when a clarification resume is not delivered; `src/vaultspec_a2a/control/clarification_service.py`.
 - [x] `W01.P05.S34` - Emit a terminal from the executor top-level dispatch handler; `src/vaultspec_a2a/worker/executor.py`.
 - [x] `W01.P05.S35` - Record a condition on the missing-graph rejection; `src/vaultspec_a2a/worker/executor.py`.
 - [x] `W01.P05.S36` - Record a condition on the ingest and resume catch-alls; `src/vaultspec_a2a/worker/executor.py`.

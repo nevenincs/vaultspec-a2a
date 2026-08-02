@@ -28,6 +28,7 @@ from ...graph.events import (
     ToolCallStart,
     ToolCallUpdate,
 )
+from ...providers import ProviderCondition
 from ...thread.errors import EventAggregatorError
 from .. import EventAggregator as CoreAggregator
 from .. import aggregator as agg_module
@@ -1598,7 +1599,9 @@ class TestGenericIngestExceptionDetection:
         error_events = [e for e in domain_events if isinstance(e, ErrorOccurred)]
         assert len(error_events) >= 1
         err = error_events[-1]
-        assert err.code == "INGEST_ERROR"
+        # No lane classified this failure, so the code is the vocabulary's
+        # floor rather than a condition nothing on the wire supported.
+        assert err.code == ProviderCondition.UNKNOWN.value
         assert err.recoverable is False
         assert "authoring_actor_token_unknown" in err.message
         assert "RuntimeError" in err.message
@@ -1765,7 +1768,12 @@ class TestProviderFailureReachesTheReason:
         assert len(error_events) >= 1
         reason = error_events[-1].message
 
-        assert error_events[-1].code == "INGEST_ERROR"
+        # The condition the LANE resolved from the wire, recovered here off the
+        # exception chain rather than sniffed out of the message. The simulator
+        # refuses with the adapter's authentication-required code, so anything
+        # other than the credential member would mean the classification was
+        # lost between the raise site and the frame.
+        assert error_events[-1].code == ProviderCondition.UNAUTHENTICATED.value
         # The provider's own identity: which exception, which protocol code, and
         # what the provider actually said. None of the three used to survive.
         assert "AcpPromptError" in reason
@@ -1813,6 +1821,17 @@ class TestProviderFailureReachesTheReason:
         # Bounded: the durable column and its cross-repo consumer both refuse an
         # overlong reason, so the reason a provider fault produces must fit.
         assert len(reason) <= len("Graph event stream failed unexpectedly: ") + 500
+
+        # The condition is offered durably on the same terms as the reason, and
+        # is the SAME value the frame carried. A reloading client that recovers
+        # a different condition than the live stream showed would be worse than
+        # one that recovers none.
+        condition = aggregator.take_failure_condition("thread-provider-durable")
+        assert condition is ProviderCondition.UNAUTHENTICATED
+        assert condition.value == error_events[-1].code
+        # Popped, never re-served: a later run on this thread must not inherit
+        # the classification of the one before it.
+        assert aggregator.take_failure_condition("thread-provider-durable") is None
 
 
 class _StallingGraph:

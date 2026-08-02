@@ -16,6 +16,7 @@ from langgraph.types import Command
 from ..domain_config import domain_config
 from ..graph.enums import AgentLifecycleState
 from ..graph.protocols import NullTelemetryHook, TelemetryHook
+from ..providers import ProviderCondition
 from ..thread.enums import ThreadStatus
 from ..thread.errors import describe_exception_chain
 from .buffering import BufferingManager
@@ -73,6 +74,45 @@ def _summarize_ingest_exception(exc: BaseException) -> str:
     return f"Graph event stream failed unexpectedly: {describe_exception_chain(exc)}"
 
 
+def _resolve_provider_condition(exc: BaseException) -> ProviderCondition:
+    """Read the provider condition off an uncaught ingest exception's chain.
+
+    The lane that failed already resolved its own wire discriminator into a
+    condition and attached it to the exception it raised, so this site recovers
+    that decision rather than re-deriving one from the message text. Recovering
+    it is the whole point: a classification inferred here from prose would break
+    the moment a vendor reworded it, and would disagree with the lane that
+    actually saw the wire.
+
+    The ``__cause__`` chain is walked because what reaches this handler is
+    almost never the failure itself - a provider fault raised inside a worker
+    node arrives wrapped, and the wrapper carries no condition of its own. Only
+    explicit causes are followed, on the same reasoning as the chain describer:
+    implicit context records what happened to be in flight, not what explains
+    the failure.
+
+    A link whose condition is the unknown member is walked PAST rather than
+    accepted, because that member states only that the link resolved nothing;
+    a deeper link that did resolve something is the better answer, and taking
+    the first link's silence for a verdict would discard it. When no link
+    resolves anything the floor is returned, which is the honest report for a
+    failure no lane classified - an infrastructure fault, or a provider whose
+    wire carried no discriminator at all.
+    """
+    seen: set[int] = set()
+    current: BaseException | None = exc
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        condition = getattr(current, "condition", None)
+        if (
+            isinstance(condition, ProviderCondition)
+            and condition is not ProviderCondition.UNKNOWN
+        ):
+            return condition
+        current = current.__cause__
+    return ProviderCondition.UNKNOWN
+
+
 class IngestManager:
     """Graph consumption lifecycle: ingest, cancel, cleanup."""
 
@@ -100,6 +140,13 @@ class IngestManager:
         # describes and never leaks across an unrelated later thread reusing
         # the same dict key.
         self._failure_reasons: dict[str, str] = {}
+        # The provider condition the most recent FAILED ingest resolved, held
+        # on the same terms as the reason beside it and popped by the same
+        # caller. It is kept as well as emitted because the error frame is
+        # droppable and the durable column is not: a reloading client recovers
+        # the condition only if the terminal write carried it, and the terminal
+        # is written from what this dict hands back.
+        self._failure_conditions: dict[str, ProviderCondition] = {}
 
     # ------------------------------------------------------------------
     # Thread cancellation
@@ -132,6 +179,7 @@ class IngestManager:
         self._cancel_events.pop(thread_id, None)
         self._ingest_queues.pop(thread_id, None)
         self._failure_reasons.pop(thread_id, None)
+        self._failure_conditions.pop(thread_id, None)
         task = self._fanout_tasks.pop(thread_id, None)
         if task is not None:
             task.cancel()
@@ -144,6 +192,16 @@ class IngestManager:
         behaviour is unchanged when there is nothing to report.
         """
         return self._failure_reasons.pop(thread_id, None)
+
+    def take_failure_condition(self, thread_id: str) -> ProviderCondition | None:
+        """Pop the provider condition ``thread_id``'s last FAILED ingest resolved.
+
+        ``None`` when no ingest classified a failure for this thread - it never
+        failed, it failed on a branch that observed no provider, or the value
+        was already consumed. The caller supplies the floor in that case, so an
+        absent value here never becomes an absent condition on a failed run.
+        """
+        return self._failure_conditions.pop(thread_id, None)
 
     # ------------------------------------------------------------------
     # LangGraph graph ingest (research §1.3)
@@ -301,14 +359,26 @@ class IngestManager:
                 else:
                     _outcome = ThreadStatus.FAILED
                     _reason = _summarize_ingest_exception(exc)
+                    # Every provider fault reaches this branch, and the three
+                    # branches above never do: a recursion limit, a stalled
+                    # stream and a step timeout are facts about the graph
+                    # infrastructure, not statements a provider made, so their
+                    # codes stay as they are. Here the code becomes the resolved
+                    # condition - the catalogued field a consumer already
+                    # branches on, now carrying the one classification that
+                    # tells it which remedy to offer, in place of a constant
+                    # that told it only which handler caught the failure.
+                    _condition = _resolve_provider_condition(exc)
+                    self._failure_conditions[thread_id] = _condition
                     logger.exception(
                         "Error during graph ingest for thread %s", thread_id
                     )
                     span.set_attribute("error", True)
+                    span.set_attribute("error.provider_condition", _condition.value)
                     await self._emitters.emit_error(
                         thread_id=thread_id,
                         agent_id=agent_id,
-                        code="INGEST_ERROR",
+                        code=_condition.value,
                         message=_reason,
                         recoverable=False,
                     )

@@ -6,7 +6,7 @@ tags:
 date: '2026-08-02'
 modified: '2026-08-02'
 body_schema: 'body-v1'
-body_hash: 'sha256:acb291c50495b1982fdffaebd6ecf1bfd19c03293bc59979a2adbff56c63ee27'
+body_hash: 'sha256:6f86caf3678ff062fe34bd303a83d89e33da2ea1ef60a0d44fcd93bce8bc61ea'
 related:
   - '[[2026-08-02-provider-error-taxonomy-W01-P01-S01]]'
   - '[[2026-08-02-provider-error-taxonomy-W01-P01-S02]]'
@@ -19,6 +19,7 @@ related:
   - '[[2026-08-02-provider-error-taxonomy-W01-P02-S09]]'
   - '[[2026-08-02-provider-error-taxonomy-W01-P02-S10]]'
   - '[[2026-08-02-provider-error-taxonomy-W01-P02-S11]]'
+  - '[[2026-08-02-provider-error-taxonomy-W01-P02-S12]]'
   - '[[2026-08-02-provider-error-taxonomy-adr]]'
   - '[[2026-08-02-provider-error-taxonomy-plan]]'
   - '[[2026-08-02-provider-error-taxonomy-research]]'
@@ -47,6 +48,7 @@ Auto-generated index of all documents tagged with `#provider-error-taxonomy`.
 - `2026-08-02-provider-error-taxonomy-W01-P02-S09` - Attach the resolved condition to the ACP prompt error at raise
 - `2026-08-02-provider-error-taxonomy-W01-P02-S10` - Attach the condition and the lane retry hint to the Codex error at raise
 - `2026-08-02-provider-error-taxonomy-W01-P02-S11` - Consume the populated Codex turn error instead of the bare status string
+- `2026-08-02-provider-error-taxonomy-W01-P02-S12` - Prove each lane mapper is total over its installed wire vocabulary
 
 ### plan
 

@@ -4,7 +4,7 @@ tags:
   - '#provider-error-taxonomy'
 date: '2026-08-02'
 modified: '2026-08-02'
-body_hash: 'sha256:951cc957e75fc679f4bfd330cd5032ccdcf84ea886f93baf01ca1ade641e9529'
+body_hash: 'sha256:3510ed46e8a7deae40eea76e2c86265d24b9076abaced29aefb2449f5af97499'
 tier: L3
 related:
   - '[[2026-08-02-provider-error-taxonomy-adr]]'
@@ -56,7 +56,7 @@ Establishes the closed condition vocabulary, proves the ZAI lane's discriminator
 - [x] `W01.P02.S09` - Attach the resolved condition to the ACP prompt error at raise; `src/vaultspec_a2a/providers/acp_chat_model.py`.
 - [x] `W01.P02.S10` - Attach the condition and the lane retry hint to the Codex error at raise; `src/vaultspec_a2a/providers/codex_chat_model.py`.
 - [x] `W01.P02.S11` - Consume the populated Codex turn error instead of the bare status string; `src/vaultspec_a2a/providers/codex_chat_model.py`.
-- [ ] `W01.P02.S12` - Prove each lane mapper is total over its installed wire vocabulary; `src/vaultspec_a2a/providers/tests/test_conditions.py`.
+- [x] `W01.P02.S12` - Prove each lane mapper is total over its installed wire vocabulary; `src/vaultspec_a2a/providers/tests/test_conditions.py`.
 
 ### Phase `W01.P03` - durable carriage onto run-status
 

@@ -53,17 +53,17 @@ _CLOSE_SESSION_ROLE = "vaultspec-synthesist"
 
 @dataclass(frozen=True, slots=True)
 class _GuardWording:
-    """Per-runtime-mode wording for the guard arms ingest and resume share.
+    """Per-runtime-mode wording for the arms ingest and resume share.
 
     The pre-run guards (compile failure, missing graph, ingest slot already held)
-    are one behaviour each, reached from two dispatch modes. Only the operator-
-    facing wording and the slot-rejection log action differ between the modes, so
-    they are data here and the guard itself has a single implementation.
+    and the execution catch-all are one behaviour each, reached from two dispatch
+    modes. Only the operator-facing wording and the log actions differ between
+    the modes, so they are data here and each arm has a single implementation.
 
-    ``graph_missing`` is the operator's log line and carries the thread id;
-    ``graph_missing_detail`` is the client's, and deliberately does not - the run
-    it describes is the one the reader is already looking at, and repeating the
-    identifier spends a capped reason on something the frame already carries.
+    The ``*_detail`` fields are the client's wording, the rest the operator's.
+    The operator's carry the run identifier; the client's deliberately do not -
+    the run they describe is the one the reader is already looking at, and
+    repeating the identifier spends a capped reason on what the frame carries.
     """
 
     runtime_mode: str
@@ -72,6 +72,9 @@ class _GuardWording:
     graph_missing_detail: str
     slot_held: str
     slot_held_action: str
+    execution_failure: str
+    execution_failure_action: str
+    execution_failure_detail: str
 
 
 _INGEST_GUARDS = _GuardWording(
@@ -81,6 +84,9 @@ _INGEST_GUARDS = _GuardWording(
     graph_missing_detail="No graph to run: the dispatch named no team preset",
     slot_held="Ingest already active for thread %s -- dropping",
     slot_held_action="ingest_rejected_active",
+    execution_failure="Ingest failed for thread %s",
+    execution_failure_action="ingest_failed",
+    execution_failure_detail="Graph execution failed unexpectedly",
 )
 
 _RESUME_GUARDS = _GuardWording(
@@ -90,6 +96,9 @@ _RESUME_GUARDS = _GuardWording(
     graph_missing_detail="No graph to resume: the run has no compiled graph",
     slot_held="Ingest already active for thread %s -- cannot resume",
     slot_held_action="resume_rejected_active",
+    execution_failure="Resume failed for thread %s",
+    execution_failure_action="resume_failed",
+    execution_failure_detail="Graph resume failed unexpectedly",
 )
 
 # The provider condition every executor-side rejection resolves to, and it is a
@@ -465,6 +474,7 @@ class Executor:
         graph: StreamableGraph,
         config: dict[str, Any],
         outcome: str,
+        fallback_reason: str | None = None,
     ) -> None:
         """Settle a finished graph run; the call order here is load-bearing.
 
@@ -491,6 +501,20 @@ class Executor:
         # reason from an earlier run can never leak onto a later one reusing
         # this dict's key.
         failure_reason = self._aggregator.take_failure_reason(req.thread_id)
+        if failure_reason is None and fallback_reason is not None:
+            # No stashed reason on a failure means ingest never classified it:
+            # the exception escaped around its own reporting rather than through
+            # it, so it emitted no error frame either. Without this arm the run
+            # settles as a bare "failed" on both channels - the exact blank
+            # terminal this campaign exists to remove. The condition is the
+            # floor because nothing here observed a provider.
+            failure_reason = fallback_reason
+            await self._aggregator.emit_error(
+                req.thread_id,
+                _EXECUTOR_CONDITION.value,
+                fallback_reason,
+                recoverable=False,
+            )
         await self._state_projector.emit_terminal_status(
             req.thread_id, outcome, error_detail=failure_reason
         )
@@ -705,6 +729,10 @@ class Executor:
 
             agent_id = req.agent_id or DEFAULT_SUPERVISOR_ID
 
+            # Stays None unless the catch-all below fires, so a run that settles
+            # normally offers no fallback and keeps whatever ingest classified.
+            execution_failure_reason: str | None = None
+
             try:
                 span.add_event("starting_graph_execution")
                 outcome = await self._aggregator.ingest(
@@ -720,18 +748,21 @@ class Executor:
                 span.set_attribute("outcome", outcome)
             except Exception:
                 outcome = ThreadStatus.FAILED
+                execution_failure_reason = _INGEST_GUARDS.execution_failure_detail
                 logger.exception(
-                    "Ingest failed for thread %s",
+                    _INGEST_GUARDS.execution_failure,
                     req.thread_id,
                     extra=self._dispatch_log_extra(
                         req,
-                        action="ingest_failed",
-                        runtime_mode="ingest",
+                        action=_INGEST_GUARDS.execution_failure_action,
+                        runtime_mode=_INGEST_GUARDS.runtime_mode,
                     ),
                 )
                 span.record_exception(Exception("Graph execution failed"))
             finally:
-                await self._settle_run(req, graph, config, outcome)
+                await self._settle_run(
+                    req, graph, config, outcome, execution_failure_reason
+                )
 
     async def _handle_resume(self, req: DispatchRequest) -> None:
         """Resume a graph from a LangGraph interrupt via ``Command(resume=...)``."""
@@ -791,6 +822,10 @@ class Executor:
             }
             agent_id = req.agent_id or DEFAULT_SUPERVISOR_ID
 
+            # Stays None unless the catch-all below fires, so a resume that
+            # settles normally keeps whatever ingest classified.
+            execution_failure_reason: str | None = None
+
             try:
                 span.add_event("resuming_graph_execution")
                 # Command(resume=...) is accepted by astream_events in place of
@@ -808,18 +843,21 @@ class Executor:
                 span.set_attribute("outcome", outcome)
             except Exception:
                 outcome = ThreadStatus.FAILED
+                execution_failure_reason = _RESUME_GUARDS.execution_failure_detail
                 logger.exception(
-                    "Resume failed for thread %s",
+                    _RESUME_GUARDS.execution_failure,
                     req.thread_id,
                     extra=self._dispatch_log_extra(
                         req,
-                        action="resume_failed",
-                        runtime_mode="resume",
+                        action=_RESUME_GUARDS.execution_failure_action,
+                        runtime_mode=_RESUME_GUARDS.runtime_mode,
                     ),
                 )
                 span.record_exception(Exception("Graph resume failed"))
             finally:
-                await self._settle_run(req, graph, config, outcome)
+                await self._settle_run(
+                    req, graph, config, outcome, execution_failure_reason
+                )
 
     async def shutdown(self) -> None:
         """Release held resources (aggregator debounce tasks, etc.)."""

@@ -97,6 +97,25 @@ def _inject_graph(
     executor.register_compiled_graph(thread_id, cache_key, graph)
 
 
+def _terminal_graph(executor: Executor) -> RegisteredCompiledGraph:
+    """A real compiled graph, returned rather than registered.
+
+    The settle path takes the graph as an argument, so a test driving it needs
+    the object itself; :func:`_inject_graph` registers one but hands back
+    nothing.
+    """
+
+    def finish_node(state: TeamState) -> dict[str, object]:
+        del state
+        return {}
+
+    builder = new_state_graph()
+    builder.add_node("finish", finish_node)
+    builder.add_edge("__start__", "finish")
+    builder.add_edge("finish", "__end__")
+    return builder.compile(checkpointer=executor._checkpointer)
+
+
 # ---------------------------------------------------------------------------
 # Ingest gating (_mark_ingest_active / _mark_ingest_done)
 # ---------------------------------------------------------------------------
@@ -1455,6 +1474,97 @@ class TestPreRunRefusalsCarryTheirReason:
                 assert len(errors) == 1
                 assert errors[0]["code"] == ProviderCondition.UNKNOWN.value
                 assert errors[0]["recoverable"] is False
+            finally:
+                await bridge.close()
+                await executor.shutdown()
+
+    @pytest.mark.asyncio(loop_scope="function")
+    async def test_an_unclassified_execution_failure_still_names_itself(self) -> None:
+        """A failure ingest never classified settles with a reason, not blank.
+
+        The executor's execution catch-all fires when an exception escapes
+        AROUND ingest's own reporting rather than through it. Ingest therefore
+        stashed no reason and emitted no error frame, and before this arm the run
+        settled as a bare "failed" on both channels. Driven through the real
+        settle path with a thread ingest never saw, which is exactly the state
+        the catch-all hands it.
+        """
+        thread_id = "t-unclassified-failure"
+        relayed: list[dict[str, Any]] = []
+        async with AsyncSqliteSaver.from_conn_string(":memory:") as cp:
+            await cp.setup()
+            bridge = _make_recording_bridge(relayed)
+            executor = Executor(checkpointer=cp, bridge=bridge)
+            try:
+                graph = _terminal_graph(executor)
+                config = {"configurable": {"thread_id": thread_id}}
+
+                await executor._settle_run(
+                    DispatchRequest(
+                        action="ingest",
+                        thread_id=thread_id,
+                        content="build it",
+                        recursion_limit=10,
+                    ),
+                    graph,
+                    config,
+                    ThreadStatus.FAILED,
+                    "Graph execution failed unexpectedly",
+                )
+                await bridge.flush_events()
+
+                terminals = _frames_of(relayed, "thread_terminal")
+                assert len(terminals) == 1
+                assert terminals[0]["status"] == ThreadStatus.FAILED
+                assert terminals[0]["error_detail"] == (
+                    "Graph execution failed unexpectedly"
+                )
+
+                # Both channels, not one: a consumer keying on the frame's code
+                # could not see this failure at all when only the terminal spoke.
+                errors = _frames_of(relayed, "error")
+                assert len(errors) == 1
+                assert errors[0]["code"] == ProviderCondition.UNKNOWN.value
+                assert errors[0]["recoverable"] is False
+            finally:
+                await bridge.close()
+                await executor.shutdown()
+
+    @pytest.mark.asyncio(loop_scope="function")
+    async def test_a_settle_with_no_fallback_invents_no_failure(self) -> None:
+        """The fallback arm stays shut when the caller offers none.
+
+        The companion to the case above, and the reason it matters: if settling
+        emitted an error frame unconditionally, every ordinary completion would
+        report a failure that never happened.
+        """
+        thread_id = "t-settle-no-fallback"
+        relayed: list[dict[str, Any]] = []
+        async with AsyncSqliteSaver.from_conn_string(":memory:") as cp:
+            await cp.setup()
+            bridge = _make_recording_bridge(relayed)
+            executor = Executor(checkpointer=cp, bridge=bridge)
+            try:
+                graph = _terminal_graph(executor)
+
+                await executor._settle_run(
+                    DispatchRequest(
+                        action="ingest",
+                        thread_id=thread_id,
+                        content="build it",
+                        recursion_limit=10,
+                    ),
+                    graph,
+                    {"configurable": {"thread_id": thread_id}},
+                    ThreadStatus.COMPLETED,
+                )
+                await bridge.flush_events()
+
+                assert _frames_of(relayed, "error") == []
+                terminals = _frames_of(relayed, "thread_terminal")
+                assert len(terminals) == 1
+                assert terminals[0]["status"] == ThreadStatus.COMPLETED
+                assert not terminals[0].get("error_detail")
             finally:
                 await bridge.close()
                 await executor.shutdown()

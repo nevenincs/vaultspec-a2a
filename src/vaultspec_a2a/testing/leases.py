@@ -30,6 +30,7 @@ concurrent test sessions on the whole machine, not only within one run.
 from __future__ import annotations
 
 import contextlib
+import itertools
 import json
 import os
 import random
@@ -70,6 +71,8 @@ _FUTURE_SKEW_TOLERANCE_MS = 10_000
 _EXCLUSIVE_SUFFIX = ".lease"
 _SHARED_SUFFIX = ".shared"
 _KEY_PATTERN = re.compile(r"^[a-z0-9][a-z0-9-]*$")
+# Distinguishes multiple shared holds by one process; see _try_acquire_shared.
+_SHARED_SEQ = itertools.count()
 
 
 class LeaseAcquisitionTimeoutError(TimeoutError):
@@ -267,15 +270,16 @@ def _try_acquire_shared(root: Path, key: str, *, owner: str) -> tuple[Path, str]
     _reap_dead_marker(exclusive, now_ms=now)
     if exclusive.exists():
         return None
-    mine = root / f"{key}.{os.getpid()}{_SHARED_SUFFIX}"
+    # Unique per acquisition (pid + sequence), so one process can hold several
+    # shared leases on a key and an O_EXCL collision is structurally
+    # impossible - the previous same-name scheme unlinked an existing marker
+    # on collision under an unverifiable "leftover" assumption, which could
+    # destroy a live sibling hold. A reused-pid predecessor's leftover is
+    # retired by the ordinary dual-signal liveness (its mtime freezes).
+    mine = root / f"{key}.{os.getpid()}-{next(_SHARED_SEQ)}{_SHARED_SUFFIX}"
     token = _write_marker_excl(mine, owner=owner)
     if token is None:
-        # A leftover marker from a previous same-pid holder: reclaim it.
-        with contextlib.suppress(OSError):
-            mine.unlink()
-        token = _write_marker_excl(mine, owner=owner)
-        if token is None:
-            return None
+        return None
     # Re-check: if an exclusive claimant won concurrently, retreat so the
     # stronger claim proceeds alone.
     recheck_ms = int(time.time() * 1000)

@@ -8,13 +8,13 @@ rather than launched as if it owned the box. Two pieces deliver that:
   one well-known key at configure time, heartbeated and pid-reclaimed like
   every lease, which makes "how many test sessions are live right now" a
   cheap, honest machine-global question.
-- **Capacity.** A distributed run derives its worker count from what the box
-  actually has free: the operator's explicit core budget when declared, else
-  the core count discounted by a sampled machine-load estimate, divided
-  across the live peer sessions. A second concurrent suite therefore proceeds
-  DEGRADED instead of multiplying load quadratically; waiting was rejected
-  because it turns every scoped run launched beside a long suite into an
-  unbounded queue.
+- **Capacity.** A distributed run derives its worker count from two limits
+  composed by minimum: a fair share of the machine budget (the operator's
+  explicit core budget or the core count, divided across live sessions) and
+  the sampled free cores (covering load the session count cannot see). A
+  second concurrent suite therefore proceeds DEGRADED instead of multiplying
+  load quadratically; waiting was rejected because it turns every scoped run
+  launched beside a long suite into an unbounded queue.
 
 Correctness never rests on any of this - the lease and reservation layers
 serialize the genuinely contended resources regardless - so admission is
@@ -135,20 +135,37 @@ def _sampled_load_percent() -> int | None:
     return None
 
 
-def machine_cpu_budget() -> int:
-    """The cores this run may assume are available to test work.
-
-    The operator's explicit ``VAULTSPEC_TEST_CPU_BUDGET`` wins outright; else
-    the core count discounted by the sampled load estimate; else the plain
-    core count. Never below one.
-    """
+def _explicit_cpu_budget() -> int | None:
+    """The operator's declared machine core budget for test work, or ``None``."""
     override = (os.environ.get(CPU_BUDGET_ENV) or "").strip()
     if override.isdigit() and int(override) > 0:
         return int(override)
-    cores = os.cpu_count() or 1
+    return None
+
+
+def machine_cpu_budget() -> int:
+    """The whole-machine core budget test work may divide among sessions.
+
+    The operator's explicit ``VAULTSPEC_TEST_CPU_BUDGET`` wins outright; else
+    the plain core count. Deliberately NOT load-discounted: the peer division
+    in :func:`effective_worker_count` accounts for peer sessions, and folding
+    an instantaneous load sample (which already includes those peers' own
+    consumption) into the divisible budget double-discounts them - on a busy
+    box that floored the budget at one and switched the throughput layer off
+    exactly when it was wanted.
+    """
+    explicit = _explicit_cpu_budget()
+    if explicit is not None:
+        return explicit
+    return os.cpu_count() or 1
+
+
+def _sampled_free_cores() -> int | None:
+    """Cores the box has free right now by the load sample, or ``None``."""
     load = _sampled_load_percent()
     if load is None:
-        return cores
+        return None
+    cores = os.cpu_count() or 1
     return max(1, round(cores * (100 - load) / 100))
 
 
@@ -157,11 +174,21 @@ def effective_worker_count(
 ) -> int:
     """The worker count a distributed run is admitted with.
 
-    The budget is split evenly across this session and its live peers, and the
-    request is capped to this session's share - concurrency stays a
-    consequence of what the machine actually has free, never an assumption of
-    ownership. Never below one: a run always progresses.
+    Two independent limits compose by minimum, so neither is counted twice:
+    the FAIR-SHARE limit divides the machine budget evenly across this session
+    and its live peers (reserving room peers may ramp into), and the sampled
+    FREE-CORES limit accounts for load the session count cannot see - other
+    projects, non-test work. An explicit budget (the *cpu_budget* argument or
+    the operator's env declaration) is authoritative and skips the sample.
+    Never below one: a run always progresses.
     """
-    budget = cpu_budget if cpu_budget is not None else machine_cpu_budget()
-    share = max(1, budget // (peers + 1))
-    return max(1, min(requested, share))
+    explicit = cpu_budget if cpu_budget is not None else _explicit_cpu_budget()
+    if explicit is not None:
+        admitted = max(1, explicit // (peers + 1))
+        return max(1, min(requested, admitted))
+    cores = os.cpu_count() or 1
+    admitted = max(1, cores // (peers + 1))
+    free = _sampled_free_cores()
+    if free is not None:
+        admitted = max(1, min(admitted, free))
+    return max(1, min(requested, admitted))

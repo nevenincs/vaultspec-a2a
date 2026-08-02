@@ -241,6 +241,31 @@ def _gate_probeable_prerequisites(
             rule(prerequisite_id)
 
 
+def _acquisition_budget_s(request: pytest.FixtureRequest) -> float:
+    """The total time this item may spend WAITING for its leases.
+
+    Bounded strictly below the item's pytest-timeout clock, because on
+    Windows that clock fires through the thread method and ``os._exit``s the
+    whole session with no report - a wedged lease must instead surface as
+    this fixture's own diagnostic failure, which names the live holder. The
+    margin keeps the loud path reachable; the floor keeps a short clock from
+    making acquisition impossible.
+    """
+    marker = request.node.get_closest_marker("timeout")
+    limit: float | None = None
+    if marker is not None and marker.args and isinstance(marker.args[0], int | float):
+        limit = float(marker.args[0])
+    if limit is None:
+        raw = request.config.getini("timeout")
+        try:
+            limit = float(raw) if raw else None
+        except (TypeError, ValueError):
+            limit = None
+    if limit is None or limit <= 0:
+        return 600.0
+    return max(30.0, limit - 60.0)
+
+
 @pytest.fixture(autouse=True)
 def resource_leases(request: pytest.FixtureRequest) -> Iterator[dict[str, Lease]]:
     """Hold one machine-global lease per declared claim for the test's duration.
@@ -248,9 +273,14 @@ def resource_leases(request: pytest.FixtureRequest) -> Iterator[dict[str, Lease]
     Autouse, so a declared exclusive resource is leased even by a test that
     never asks for the handles - exclusion must not be opt-in. Acquisition
     order is the claims' sorted-by-key order, identical for every claimant,
-    so two tests claiming overlapping sets cannot deadlock. Tests wanting the
-    handles (to inspect holder metadata) request the fixture by name.
+    so two tests claiming overlapping sets cannot deadlock. The whole
+    acquisition shares one deadline bounded under the item's timeout clock,
+    so contention fails loudly with the holder named rather than letting the
+    thread-method timeout kill the session. Tests wanting the handles (to
+    inspect holder metadata) request the fixture by name.
     """
+    import time as _time
+
     claims = declared_claims(request.node)
     if not claims:
         yield {}
@@ -258,14 +288,17 @@ def resource_leases(request: pytest.FixtureRequest) -> Iterator[dict[str, Lease]
     _gate_probeable_prerequisites(request, claims)
     from .leases import hold_lease
 
+    deadline = _time.monotonic() + _acquisition_budget_s(request)
     held: dict[str, Lease] = {}
     with contextlib.ExitStack() as stack:
         for claim in claims:
+            remaining = max(1.0, deadline - _time.monotonic())
             held[claim.spec.key] = stack.enter_context(
                 hold_lease(
                     claim.spec.key,
                     shared=claim.shared,
                     owner=request.node.nodeid,
+                    acquire_timeout_s=remaining,
                 )
             )
         yield held

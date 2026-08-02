@@ -5,7 +5,7 @@ tags:
 date: '2026-08-02'
 modified: '2026-08-02'
 body_schema: 'body-v1'
-body_hash: 'sha256:6ca9f277b0ee50c8bca25a22c86912367a7c05869177145e58fca24bda7651e2'
+body_hash: 'sha256:f9caeac0ebd82d177043debbc5d7554101e3e2ea80413b47f199bc80afe8a92c'
 related:
   - "[[2026-07-19-repository-tooling-hardening-plan]]"
 ---
@@ -86,6 +86,10 @@ The mandatory `just lint complexity` sentinel is now demonstrably blocking: `Sta
 
 The mandatory duplication sentinel is wired as `just audit duplication` (not a `just lint` target) and completed successfully as an advisory check, but reports 22 clones: 547 duplicated lines (0.41%) and 4,457 duplicated tokens (0.51%) across 574 analysed files. The reported candidates include the ADR-research team presets; active-run migrations; repeated executor-token and authoring-binding tests; ACP security/config/authoring tests; task-queue and vault-reader tests; verdict/redispatch and clarification relay tests; service stream/permission/cancellation/tool-core tests; and the terminal containment/desktop process-tree tests. Triage each clone as intentional generated/migration structure, a justified scenario fixture, or an extractable shared production/test helper; eliminate or explicitly suppress none by policy. Until that classification and the chosen refactors are complete, JSCPD must remain advisory and cannot be promoted to a strict CI gate. `dev/toolchain.py`; `.github/workflows/test.yml`.
 
+
+### typed-state-import-lint | low | open tooling defect
+
+Post-commit review of `06c7ed10` found the combined `typing_extensions` import triggers Ruff `I001` and `UP035`. `TypedDict` must remain from `typing_extensions` because LangGraph's runtime `StateLike` inspection requires its schema metadata, but `NotRequired` can return to `typing` and the imports must be sorted. Make only that import correction; do not suppress the rule or weaken the compiler boundary. `src/vaultspec_a2a/thread/state.py`.
 ## Recommendations
 
 - Provision a healthy loopback service-discovery record, then run the named engine-backed stdio service lane and append the outcome to this audit before declaring S26 fully runtime-proven.

@@ -25,6 +25,7 @@ from .leases import (
     hold_lease,
     lease_home,
 )
+from .ports import SCRATCH_ROLE, reserved_port
 from .progress import (
     LivenessWatch,
     ProgressDeadline,
@@ -50,6 +51,7 @@ __all__ = [
     "MARKER_NAME",
     "RESOURCES",
     "SCRATCH_PREFIX",
+    "SCRATCH_ROLE",
     "Lease",
     "LeaseAcquisitionTimeoutError",
     "LivenessWatch",
@@ -65,6 +67,7 @@ __all__ = [
     "hold_lease",
     "lease_home",
     "registry_watch",
+    "reserved_port",
     "resolve_gateway_url",
     "resolve_service",
     "resolve_spec",

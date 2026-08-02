@@ -45,7 +45,6 @@ if TYPE_CHECKING:
     from collections.abc import Iterator
 
     from ..conftest import ExternalPrerequisiteRule
-    from ..lifecycle import PortReservation
     from .endpoints import ResolvedService
     from .leases import Lease
 
@@ -276,22 +275,16 @@ def worker_endpoint(request: pytest.FixtureRequest) -> ResolvedService:
 
 @pytest.fixture
 def leased_port() -> Iterator[int]:
-    """An exclusively-reserved scratch-band port, via the registry's allocator.
+    """An exclusively-reserved scratch-band port, via the one canonical helper.
 
-    The same race-free reserve the lifecycle verbs use: an ``O_EXCL`` marker
-    in the machine-global procs home, so two concurrent claimants - workers,
-    sessions, or agents - can never receive the same port. Released at
-    teardown. Suited to binds held for the test's duration; the reservation's
-    TTL backstop assumes bounded holds, so a test holding one for longer than
-    a few minutes should boot through ``serve_up`` instead.
+    Delegates to ``testing.ports.reserved_port`` - the registry's race-free
+    ``O_EXCL`` reserve in the machine-global procs home - so two concurrent
+    claimants (workers, sessions, agents) can never receive the same port.
+    Released at teardown. Suited to binds held for the test's duration; the
+    reservation's TTL backstop assumes bounded holds, so a test holding one
+    for longer than a few minutes should boot through ``serve_up`` instead.
     """
-    from ..lifecycle import load_procs_config, release_reservation, reserve_port
+    from .ports import reserved_port
 
-    config = load_procs_config()
-    reservation: PortReservation = reserve_port(
-        "scratch", config.role("scratch"), config=config
-    )
-    try:
-        yield reservation.port
-    finally:
-        release_reservation(reservation)
+    with reserved_port() as port:
+        yield port

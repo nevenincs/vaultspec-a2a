@@ -117,6 +117,7 @@ def _claims_or_usage_error(item: pytest.Item) -> tuple[ResourceClaim, ...]:
         raise pytest.UsageError(str(exc)) from exc
 
 
+@pytest.hookimpl(tryfirst=True)
 def pytest_collection_modifyitems(
     config: pytest.Config, items: list[pytest.Item]
 ) -> None:
@@ -125,6 +126,11 @@ def pytest_collection_modifyitems(
     Deterministic on the collected item set, so every xdist worker computes
     identical groups. Items with no claims outside the live tiers get no
     group and remain freely distributable - the in-process bulk of the suite.
+
+    ``tryfirst`` is load-bearing: the xdist worker's own (plain) hook rewrites
+    each nodeid from the ``xdist_group`` marker, and later-registered plain
+    impls run first, so without it the worker would read the markers before
+    this hook has computed them and every group would be lost.
     """
     del config
     unions = _UnionFind()
@@ -133,7 +139,13 @@ def pytest_collection_modifyitems(
         claims = _claims_or_usage_error(item)
         item_claims.append((item, claims))
         keys = exclusive_keys(claims)
-        for key in keys[1:]:
+        # Every key is registered, not only the ones being merged. A lone
+        # exclusive key forms a component of one, and it must exist in the
+        # union-find BEFORE ``members()`` snapshots the components below -
+        # otherwise it is absent from ``group_names`` and the lookup that
+        # assigns its group raises. Registering from ``keys[1:]`` alone left
+        # every single-resource test uncollectable.
+        for key in keys:
             unions.union(keys[0], key)
     components = unions.members()
     group_names = {

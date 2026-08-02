@@ -4,7 +4,7 @@ tags:
   - '#llm-context-provider-abstraction'
 date: '2026-08-02'
 modified: '2026-08-02'
-body_hash: 'sha256:66f97f66c98b0ffe1891b960b451b7d83b580b62c3344da83b3b22d0b312787a'
+body_hash: 'sha256:6f92581f2fffeeb70e8c87af6e1cc2efda6eb9b4217a295a82b108d6552980c1'
 tier: L2
 related:
   - '[[2026-08-02-llm-context-provider-abstraction-acp-v1-client-wire-adr]]'
@@ -34,7 +34,7 @@ Replace the divergent filesystem and terminal request, response, ownership, and 
 
 Prove the supported adapter observes exact v1 payloads and terminal lifecycle without doubles or compatibility fallbacks.
 
-- [ ] `P02.S04` - Replace obsolete terminal-containment expectations with exact ACP v1 response and lifetime assertions.; `src/vaultspec_a2a/providers/tests/test_terminal_containment.py`.
+- [x] `P02.S04` - Replace obsolete terminal-containment expectations with exact ACP v1 response and lifetime assertions.; `src/vaultspec_a2a/providers/tests/test_terminal_containment.py`.
 - [ ] `P02.S05` - Prove supported-adapter filesystem and terminal requests over real stdio with no legacy-shape fallback.; `src/vaultspec_a2a/providers/tests/test_acp_migration_surface.py`.
 
 ### Phase `P03` - strict closure and audit

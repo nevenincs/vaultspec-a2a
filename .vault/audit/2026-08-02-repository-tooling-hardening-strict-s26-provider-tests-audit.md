@@ -5,7 +5,7 @@ tags:
 date: '2026-08-02'
 modified: '2026-08-02'
 body_schema: 'body-v1'
-body_hash: 'sha256:023a51ba273cd25454e9c008209519de88683b17d85f8e97e2f7fb08abecd392'
+body_hash: 'sha256:1b9a776817559b189b507a58f39eeeb9a7f37ecbefb9af64cd2ccc049b2b9cb9'
 related:
   - "[[2026-07-19-repository-tooling-hardening-plan]]"
 ---
@@ -64,7 +64,11 @@ The prior fail-open decoder finding is corrected. Malformed proposal API objects
 
 ### pw7-fail-closed-regressions | medium | open coverage gap
 
-PW7â€™s strict readers correctly narrow live run-status, authoring response, queue, marker, receipt, and permission-history payloads, but all eight live lanes that reach those readers are declared-prerequisite skips. The 12 passing non-live tests cover retry and callback behaviour only. Add stack-free malformed-payload regressions for non-object responses, malformed item lists, receipts, and permission history before claiming the boundary is fail closed. Do not stage the shared PW7 file with concurrent profile edits until this finding is resolved and the S26 hunks can be isolated safely. `src/vaultspec_a2a/service_tests/test_pw7_acceptance.py`.
+PW7Ã¢â‚¬â„¢s strict readers correctly narrow live run-status, authoring response, queue, marker, receipt, and permission-history payloads, but all eight live lanes that reach those readers are declared-prerequisite skips. The 12 passing non-live tests cover retry and callback behaviour only. Add stack-free malformed-payload regressions for non-object responses, malformed item lists, receipts, and permission history before claiming the boundary is fail closed. Do not stage the shared PW7 file with concurrent profile edits until this finding is resolved and the S26 hunks can be isolated safely. `src/vaultspec_a2a/service_tests/test_pw7_acceptance.py`.
+
+### receipt-role-callback-observability | medium | open production contract
+
+Receipt-role rules cannot be repaired as annotations only: the current recording model/factory and stub submitter violate the test rules, while direct compiled-node invocation propagates no LangChain callbacks. Sol approved a narrow callback-observability seam through real worker and research producer model calls, then a rewrite using the production deterministic provider, frozen assignment, real engine submitter, passive callback observer, and compiled-graph invocation. Defaults must preserve existing direct-node callers; no stub, unarmed submitter, or expected credential failure may replace the proof. `src/vaultspec_a2a/graph/nodes/worker.py`; `src/vaultspec_a2a/graph/nodes/diverge.py`; `src/vaultspec_a2a/graph/compiler.py`; `src/vaultspec_a2a/service_tests/test_receipt_role_rules.py`.
 ## Recommendations
 
 - Provision a healthy loopback service-discovery record, then run the named engine-backed stdio service lane and append the outcome to this audit before declaring S26 fully runtime-proven.

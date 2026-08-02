@@ -31,6 +31,7 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.types import Command, RetryPolicy
 
 from ..authoring.contract import RESEARCH_ADR_ROLES, is_document_authoring_role
+from ..providers.conditions import ProviderCondition
 from ..thread.clarification import (
     CLARIFICATION_TOPOLOGIES,
     ClarificationRequest,
@@ -147,12 +148,80 @@ _NO_RETRY_EXCEPTIONS: tuple[type[BaseException], ...] = (
     ProviderSessionError,
 )
 
+#: The provider conditions another attempt can actually help.
+#:
+#: Retryability is a consequence of the resolved condition rather than of the
+#: exception's Python type. The three admitted here share one property: the work
+#: was refused BEFORE the provider did any, so a further attempt costs a request
+#: and nothing else.
+#:
+#: - ``THROTTLED`` and ``PROVIDER_OVERLOADED`` are the two canonically transient
+#:   refusals. Both say "not now" and neither says "not ever"; waiting a moment
+#:   is the remedy each names, which is exactly what the backoff already
+#:   configured on this policy does.
+#: - ``NETWORK_UNREACHABLE`` is admitted for consistency with the type axis
+#:   below, which already retries the stdlib connection errors that describe the
+#:   same fault. It is reached only when NO provider answer arrived - a forwarded
+#:   HTTP status outranks it at the mapper - so nothing was consumed upstream and
+#:   a misconfigured endpoint costs at most the two extra attempts before failing
+#:   with the identical condition.
+#:
+#: Everything else is excluded by decision, not by omission. ``UNAUTHENTICATED``,
+#: ``CREDITS_EXHAUSTED`` and ``BUDGET_EXHAUSTED`` need a credential, a payment or
+#: a raised ceiling, none of which a retry supplies. ``INVALID_REQUEST`` means
+#: the same request cannot succeed as sent. ``USAGE_EXHAUSTED`` clears only when
+#: an allowance window rolls over, which no bounded backoff outlives. And
+#: ``UNKNOWN`` is the floor, reached when the wire said nothing: retrying an
+#: unclassified failure turns one unexplained failure into a slow one.
+_RETRYABLE_CONDITIONS: frozenset[ProviderCondition] = frozenset(
+    {
+        ProviderCondition.THROTTLED,
+        ProviderCondition.PROVIDER_OVERLOADED,
+        ProviderCondition.NETWORK_UNREACHABLE,
+    }
+)
+
+
+def _resolved_condition(exc: BaseException) -> ProviderCondition | None:
+    """Return the provider condition *exc* carries, or ``None`` when it carries none.
+
+    Read off the attribute rather than matched against the provider exception
+    classes on purpose. One of those classes is private to its own adapter module
+    and importing either would pull a provider implementation into the compiler,
+    which is the import cycle the providers package's lazy boundary exists to
+    break. The attribute is the contract the lanes established at their raise
+    sites; checking the VALUE's type is what keeps that loose read honest, since
+    an unrelated ``condition`` attribute of some other type resolves to nothing
+    rather than to a member.
+    """
+    condition = getattr(exc, "condition", None)
+    if isinstance(condition, ProviderCondition):
+        return condition
+    return None
+
+
+def _retry_verdict(exc: BaseException) -> bool:
+    """Decide whether one unwrapped failure is worth another attempt.
+
+    The condition axis answers first and outranks the type axis, because a
+    resolved condition is the lane's own statement about what it refused while a
+    type match is an inference from the exception's base class. That ordering
+    also leaves the stdlib types untouched: they carry no condition, so they
+    still reach the type axis exactly as before.
+    """
+    condition = _resolved_condition(exc)
+    if condition is not None:
+        return condition in _RETRYABLE_CONDITIONS
+    return isinstance(exc, _TRANSIENT_EXCEPTIONS)
+
 
 def _worker_retry_on(exc: Exception) -> bool:
     """Predicate passed to ``RetryPolicy`` for every worker node.
 
     Inspects the direct exception and, for ``WorkerExecutionError`` wrappers,
-    the ``__cause__`` to determine whether a retry is appropriate.
+    the ``__cause__`` to determine whether a retry is appropriate. The wrapper
+    case is the production shape for a provider fault: the worker node chains the
+    provider exception onto its wrapper, so the cause is where the condition is.
 
     Returns:
         ``True``  -- transient failure, retry is safe.
@@ -169,9 +238,9 @@ def _worker_retry_on(exc: Exception) -> bool:
             return False
         if isinstance(cause, _NO_RETRY_EXCEPTIONS):
             return False
-        return isinstance(cause, _TRANSIENT_EXCEPTIONS)
+        return _retry_verdict(cause)
 
-    return isinstance(exc, _TRANSIENT_EXCEPTIONS)
+    return _retry_verdict(exc)
 
 
 #: RetryPolicy applied to every worker and supervisor node (T05).

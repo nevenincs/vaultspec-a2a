@@ -4,7 +4,7 @@ tags:
   - '#provider-error-taxonomy'
 date: '2026-08-02'
 modified: '2026-08-02'
-body_hash: 'sha256:a632c84417096231ebd54b3306af7b3080736e5bbecdaa16e56e8223bba4b6fb'
+body_hash: 'sha256:7fa9e875cd3826b8221366d1406ab56efa36a9e3cde3c93077e900367b80b53e'
 tier: L3
 related:
   - '[[2026-08-02-provider-error-taxonomy-adr]]'
@@ -81,7 +81,7 @@ Carries the condition on the error frame, persists it beside the failure reason,
 Derives the recoverable flag from the condition rather than the catch site and binds the same classification to the node retry policy.
 
 - [ ] `W01.P04.S25` - Derive the recoverable flag from the condition instead of the catch branch; `src/vaultspec_a2a/streaming/ingest.py`.
-- [ ] `W01.P04.S26` - Bind the condition to the node retry classifier; `src/vaultspec_a2a/graph/compiler.py`.
+- [x] `W01.P04.S26` - Bind the condition to the node retry classifier; `src/vaultspec_a2a/graph/compiler.py`.
 - [ ] `W01.P04.S27` - Prefer a lane-supplied retry hint over inferred retryability; `src/vaultspec_a2a/graph/compiler.py`.
 - [ ] `W01.P04.S28` - Prove throttled and overloaded conditions retry under the existing backoff policy; `src/vaultspec_a2a/graph/tests/test_compiler.py`.
 

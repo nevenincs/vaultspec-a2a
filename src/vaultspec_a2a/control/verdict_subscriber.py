@@ -48,11 +48,12 @@ from ..database import (
     list_threads,
     mark_permission_request_applied,
     set_authoring_cursor,
+    set_thread_approval_state,
     update_thread_metadata,
     update_thread_status,
 )
 from ..ipc.schemas import DispatchRequest, to_dispatch_action
-from ..thread.enums import ControlActionType, ThreadStatus
+from ..thread.enums import ApprovalStatus, ControlActionType, ThreadStatus
 from .dispatch import safe_dispatch
 
 if TYPE_CHECKING:
@@ -705,6 +706,17 @@ class VerdictSubscriber:
             # past the gate's checkpoint interrupt.
             for request_id in parked_gate_request_ids:
                 await mark_permission_request_applied(db, request_id=request_id)
+            if parked_gate_request_ids:
+                await set_thread_approval_state(
+                    db,
+                    thread_id,
+                    approval_status=(
+                        ApprovalStatus.APPROVED
+                        if verdict == VERDICT_APPROVED
+                        else ApprovalStatus.REJECTED
+                    ),
+                    approval_request_id=parked_gate_request_ids[-1],
+                )
             await update_thread_status(db, thread_id, ThreadStatus.RUNNING)
             await db.commit()
 

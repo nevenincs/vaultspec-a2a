@@ -49,6 +49,7 @@ from ...database import (
     get_permission_request,
     get_thread,
     record_permission_request,
+    set_thread_approval_state,
     update_thread_metadata,
     update_thread_status,
 )
@@ -180,6 +181,13 @@ async def test_resume_resolves_the_answered_document_gate_permission_row(
                 description="Run a command",
                 allowed_options=[],
             )
+            await set_thread_approval_state(
+                session,
+                thread_id,
+                approval_status="pending",
+                approval_request_id=f"{thread_id}:research-gate",
+                approval_reason="Approve the research document",
+            )
             await session.commit()
 
         subscriber = _make_subscriber(session_factory, checkpointer, worker_client)
@@ -200,6 +208,9 @@ async def test_resume_resolves_the_answered_document_gate_permission_row(
             thread = await get_thread(session, thread_id)
             assert thread is not None
             assert thread.status == ThreadStatus.RUNNING.value
+            assert thread.approval_status == "approved"
+            assert thread.approval_request_id == f"{thread_id}:research-gate"
+            assert thread.approval_reason == "Approve the research document"
 
 
 @pytest.mark.asyncio

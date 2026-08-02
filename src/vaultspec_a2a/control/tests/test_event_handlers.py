@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from ...control.event_handlers import (
     _handle_permission_event,
     _handle_progress_event,
+    _handle_terminal_event,
 )
 from ...database import (
     create_thread,
@@ -159,6 +160,55 @@ async def test_plan_approval_request_is_persisted_as_durable_pending_permission(
         assert thread is not None
         assert thread.approval_status == "pending"
         assert thread.approval_request_id == request_id
+
+
+@pytest.mark.asyncio
+async def test_terminal_event_expires_pending_plan_approval_projection(
+    session_factory,
+) -> None:
+    """Terminal relay settles a parked plan approval without residue."""
+    async with session_factory() as session:
+        thread = await create_thread(session, title="Terminal plan approval")
+        await session.commit()
+        thread_id = thread.id
+
+    request_id = f"{thread_id}:plan-approval-terminal"
+    await _handle_permission_event(
+        thread_id,
+        {
+            "type": "plan_approval_request",
+            "request_id": request_id,
+            "description": "Approve the plan before completion",
+            "options": [
+                {
+                    "option_id": "approve",
+                    "name": "Approve Plan",
+                    "kind": "allow_once",
+                }
+            ],
+            "tool_call": "plan_approval",
+        },
+        session_factory=session_factory,
+    )
+
+    await _handle_terminal_event(
+        thread_id,
+        {"event_type": "thread_terminal", "status": "completed"},
+        session_factory=session_factory,
+    )
+
+    async with session_factory() as session:
+        permission = await get_permission_request(session, request_id)
+        assert permission is not None
+        assert permission.request_status == "expired_by_terminal_state"
+
+        thread = await session.get(ThreadModel, thread_id)
+        assert thread is not None
+        assert thread.status == "completed"
+        assert thread.approval_status is None
+        assert thread.approval_request_id is None
+        assert thread.approval_reason is None
+        assert thread.approval_response_action_id is None
 
 
 @pytest.mark.asyncio

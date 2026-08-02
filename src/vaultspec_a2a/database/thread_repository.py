@@ -367,22 +367,44 @@ async def mark_thread_deleting(
 
 # Bounds threads.failure_reason so a pathological exception message (or one
 # wrapping a large response body) can never blow up the durable row or the
-# RunStatusResponse it is served through. Mirrors streaming/ingest.py's
-# _MAX_INGEST_ERROR_MESSAGE_LEN — kept as a separate constant rather than a
-# shared import because this is the last-line durable-write boundary: every
-# producer (ingest's classified reasons, a compile-time refusal's exception
-# text, the ingest-stall watchdog) should already be capped and single-line
-# by the time it reaches here, but this makes that an enforced invariant of
-# the column, not a convention callers must each remember.
-_MAX_FAILURE_REASON_LEN = 500
+# RunStatusResponse it is served through. This is the last-line durable-write
+# boundary: every producer (ingest's classified reasons, a compile-time
+# refusal's exception text, the ingest-stall watchdog) should already be capped
+# and single-line by the time it reaches here, but this makes that an enforced
+# invariant of the column, not a convention callers must each remember.
+#
+# The bound is in BYTES, not characters, because the consumer that decides
+# whether this reason is acceptable measures bytes. A character cap of the same
+# number silently admits any non-ASCII reason near the limit - a provider
+# message with a curly quote or a non-Latin script - which the consumer then
+# rejects OUTRIGHT, so the run reports nothing at all rather than a shortened
+# something. Capping where the reader caps is what keeps a long reason merely
+# truncated instead of discarded.
+_MAX_FAILURE_REASON_BYTES = 500
+
+# Marks a reason as shortened rather than merely ending abruptly. Counted
+# against the budget in its own encoded length, since appending it after
+# measuring is how a cap comes to be exceeded by the mark that announces it.
+_TRUNCATION_MARK = "…"
 
 
 def _capped_single_line(text: str) -> str:
-    """Collapse embedded newlines and cap *text* to the failure-reason bound."""
+    """Collapse embedded newlines and cap *text* to the failure-reason bound.
+
+    Truncation cuts on a CHARACTER boundary even though the budget is counted
+    in bytes: slicing an encoded string mid-sequence yields bytes that are not
+    valid UTF-8, and a column holding those is worse than one holding a slightly
+    shorter reason. Decoding the truncated prefix leniently drops exactly the
+    trailing partial character and nothing else, because the input it re-decodes
+    was produced by encoding a Python string and so is well-formed everywhere
+    before that cut.
+    """
     collapsed = " ".join(text.split())
-    if len(collapsed) > _MAX_FAILURE_REASON_LEN:
-        collapsed = collapsed[: _MAX_FAILURE_REASON_LEN - 1] + "…"
-    return collapsed
+    encoded = collapsed.encode("utf-8")
+    if len(encoded) <= _MAX_FAILURE_REASON_BYTES:
+        return collapsed
+    budget = _MAX_FAILURE_REASON_BYTES - len(_TRUNCATION_MARK.encode("utf-8"))
+    return encoded[:budget].decode("utf-8", errors="ignore") + _TRUNCATION_MARK
 
 
 async def update_thread_status(

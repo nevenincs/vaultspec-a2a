@@ -4,7 +4,7 @@ tags:
   - '#provider-error-taxonomy'
 date: '2026-08-02'
 modified: '2026-08-02'
-body_hash: 'sha256:5a0446a42648e767f83f4a943af295daebdad451d4ea911057100ce6b684ffac'
+body_hash: 'sha256:db856e36dd9bf54b2b6e578973a7381dd76ed61a342c01aaac38ed3542838aa1'
 tier: L3
 related:
   - '[[2026-08-02-provider-error-taxonomy-adr]]'
@@ -67,7 +67,7 @@ Carries the condition on the error frame, persists it beside the failure reason,
 - [x] `W01.P03.S15` - Declare the provider condition column on the thread model; `src/vaultspec_a2a/database/models.py`.
 - [x] `W01.P03.S16` - Add the provider condition migration revision; `src/vaultspec_a2a/database/migrations/versions`.
 - [x] `W01.P03.S17` - Persist the condition alongside the failure reason on the terminal write; `src/vaultspec_a2a/database/thread_repository.py`.
-- [ ] `W01.P03.S18` - Align the failure reason bound to the consumer byte limit; `src/vaultspec_a2a/database/thread_repository.py`.
+- [x] `W01.P03.S18` - Align the failure reason bound to the consumer byte limit; `src/vaultspec_a2a/database/thread_repository.py`.
 - [ ] `W01.P03.S19` - Thread the condition through the gateway terminal event handler; `src/vaultspec_a2a/control/event_handlers.py`.
 - [ ] `W01.P03.S20` - Read the condition into the thread state snapshot; `src/vaultspec_a2a/control/thread_state_service.py`.
 - [ ] `W01.P03.S21` - Declare the condition on the domain snapshot dataclass; `src/vaultspec_a2a/api/schemas/snapshots.py`.
@@ -101,6 +101,7 @@ Guarantees every path that fails a run records a condition, emits a terminal, an
 - [ ] `W01.P05.S38` - Carry status and condition on the terminal replay frame; `src/vaultspec_a2a/api/thread_stream.py`.
 - [ ] `W01.P05.S39` - Protect terminal and error frames from backpressure eviction; `src/vaultspec_a2a/streaming/fanout.py`.
 - [ ] `W01.P05.S40` - Prove no failed run persists without a condition across dispatch and executor paths; `src/vaultspec_a2a/api/tests/test_internal.py`.
+- [ ] `W01.P05.S59` - Drain the worker failure stash even when the settle path dies; `src/vaultspec_a2a/worker/executor.py`.
 
 ### Phase `W01.P06` - cleanup and live proof
 

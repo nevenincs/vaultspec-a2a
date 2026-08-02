@@ -75,6 +75,13 @@ from ..session import (
 
 EXPECTED_TABLES = {"artifacts", "cost_tracking", "permission_logs", "threads"}
 
+# The bound the cross-repository consumer of a failed run's reason enforces: it
+# rejects anything longer than 500 BYTES outright, so a reason over that is not
+# shown shortened, it is not shown at all. Restated here rather than imported
+# from the repository so these assertions measure the production cap against the
+# requirement it exists to satisfy instead of against itself.
+_CONSUMER_REASON_BYTES = 500
+
 
 @pytest_asyncio.fixture
 async def engine() -> AsyncGenerator[AsyncEngine]:
@@ -288,6 +295,102 @@ class TestThreadCRUD:
 
         assert updated is not None
         assert updated.is_active is False
+
+    @pytest.mark.asyncio
+    async def test_an_overlong_ascii_reason_is_truncated_and_marked(
+        self, session: AsyncSession
+    ) -> None:
+        """The durable column never grows past the bound its consumer enforces."""
+        thread = await create_thread(session, title="Long ASCII reason")
+
+        updated = await update_thread_status(
+            session,
+            thread.id,
+            ThreadStatus.FAILED,
+            failure_reason="x" * 4000,
+        )
+
+        assert updated is not None
+        assert updated.failure_reason is not None
+        assert len(updated.failure_reason.encode("utf-8")) <= _CONSUMER_REASON_BYTES
+        assert updated.failure_reason.endswith("…")
+
+    @pytest.mark.asyncio
+    async def test_a_multibyte_reason_is_bounded_in_bytes_not_characters(
+        self, session: AsyncSession
+    ) -> None:
+        """A non-ASCII reason must fit the reader's bound, not merely look short.
+
+        The consumer that validates this reason counts bytes. A character-counted
+        cap of the same number lets a multibyte reason through at well over the
+        limit, and the consumer then rejects it outright - so the run reports
+        nothing rather than a shortened something.
+        """
+        thread = await create_thread(session, title="Multibyte reason")
+        # Three bytes per character, so a character-counted cap would admit
+        # roughly three times the consumer's budget.
+        reason = "провайдер отказал" * 60
+
+        updated = await update_thread_status(
+            session,
+            thread.id,
+            ThreadStatus.FAILED,
+            failure_reason=reason,
+        )
+
+        assert updated is not None
+        assert updated.failure_reason is not None
+        assert len(updated.failure_reason) < len(reason)
+        assert len(updated.failure_reason.encode("utf-8")) <= _CONSUMER_REASON_BYTES
+
+    @pytest.mark.asyncio
+    async def test_truncation_cuts_on_a_character_boundary(
+        self, session: AsyncSession
+    ) -> None:
+        """A cut mid-sequence would store bytes that are not valid UTF-8.
+
+        The reason is built so the byte budget lands INSIDE a multi-byte
+        character: a column holding half a character is worse than one holding a
+        slightly shorter reason, and a strict decode is what tells the two apart.
+        """
+        thread = await create_thread(session, title="Boundary reason")
+        # One ASCII character then three-byte characters, so successive budgets
+        # fall at differing offsets within a character rather than aligning.
+        reason = "e" + "字" * 400
+
+        updated = await update_thread_status(
+            session,
+            thread.id,
+            ThreadStatus.FAILED,
+            failure_reason=reason,
+        )
+
+        assert updated is not None
+        assert updated.failure_reason is not None
+        stored = updated.failure_reason
+        assert len(stored.encode("utf-8")) <= _CONSUMER_REASON_BYTES
+        # Round-trips through a strict decode: every character is whole.
+        assert stored.encode("utf-8").decode("utf-8") == stored
+        assert stored.startswith("e字")
+        assert stored.endswith("字…")
+
+    @pytest.mark.asyncio
+    async def test_a_reason_within_the_bound_is_stored_verbatim(
+        self, session: AsyncSession
+    ) -> None:
+        """Only an overlong reason is touched; a short one keeps its own text."""
+        thread = await create_thread(session, title="Short reason")
+        reason = "Graph event stream failed unexpectedly: AcpPromptError: 402"
+
+        updated = await update_thread_status(
+            session,
+            thread.id,
+            ThreadStatus.FAILED,
+            failure_reason=reason,
+        )
+
+        assert updated is not None
+        assert updated.failure_reason == reason
 
     @pytest.mark.asyncio
     async def test_set_thread_approval_state(self, session: AsyncSession) -> None:

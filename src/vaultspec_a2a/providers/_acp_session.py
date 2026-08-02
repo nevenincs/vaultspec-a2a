@@ -18,6 +18,8 @@ from ._acp_auth import (
     is_auth_required_error,
     runtime_log_extra,
 )
+from ._acp_authoring import AUTHORING_MCP_SERVER_NAME
+from ._acp_mcp import require_declared_surface
 from ._acp_types import (
     AcpModelConfig,
     AcpResponseFuture,
@@ -31,6 +33,104 @@ from .acp_exceptions import AcpErrorCode, AcpSessionError
 __all__: list[str] = []
 
 logger = logging.getLogger(__name__)
+
+
+def is_strict_claude_session(config: AcpModelConfig) -> bool:
+    """Whether this session speaks to the Claude CLI's own session option surface.
+
+    True for the claude family (Claude/Z.ai share the claude adapter and CLI)
+    and false for the kimi family and for the gemini backend, which reuses the
+    claude family default while running a different agent that has no
+    ``claudeCode`` option namespace and no strict-MCP flag.
+    """
+    return config.acp_family == "claude" and config.acp_backend != "gemini-cli"
+
+
+# System-prompt addendum for an armed strict session. The CLI connects MCP
+# servers asynchronously and does not hold the first turn for them, so a
+# declared server that takes a few seconds to start (a cold package runner, an
+# index-backed search service) can miss the first tool snapshot; the CLI ships
+# the WaitForMcpServers builtin as the model-side remedy. Without this note a
+# model concludes the declared grounding tools do not exist and silently falls
+# back to native tools - grounding absent, run green.
+MCP_READINESS_NOTE = (
+    "This session declares MCP tools (tool names starting with 'mcp__'). MCP "
+    "servers finish mounting a few seconds after the session starts, so a "
+    "declared MCP tool may be missing from your first tool listing. Before "
+    "concluding a declared MCP tool is unavailable, call WaitForMcpServers "
+    "(or retry the tool call once) - never silently substitute a different "
+    "tool for work the declared MCP tools exist to ground."
+)
+
+
+def claude_session_options(config: AcpModelConfig) -> JsonObject:
+    """Compose the ``_meta.claudeCode.options`` block for a claude-family session.
+
+    ``strictMcpConfig`` is UNCONDITIONAL, armed or not: the CLI's own
+    ``--strict-mcp-config`` mode drops every ambient MCP registration scope -
+    enterprise managed config, user-global ``mcpServers``, project ``.mcp.json``,
+    local scope, plugin servers, and the account's claude.ai remote connectors -
+    and admits only the dynamic set carried by the session injection. That makes
+    the spawned agent's MCP surface EXACTLY the injected set (empty on a plain
+    run), enforced by the CLI itself rather than by config-home or workspace
+    file manipulation, while the child still runs as the operator's own
+    identity. ``allowedTools`` rides the same block for headless runs so the
+    composed tool names are auto-permitted without a local prompt.
+    """
+    options: JsonObject = {"strictMcpConfig": True}
+    if config.allowed_tools:
+        options["allowedTools"] = list[JsonValue](config.allowed_tools)
+    return options
+
+
+def session_surface_mcp_servers(config: AcpModelConfig) -> list[JsonValue]:
+    """Shape ``config.mcp_servers`` into the ``session/new`` advertisement.
+
+    Two normalizations, both load-bearing:
+
+    - Every stdio spec carries an explicit ``env`` list (empty when it has no
+      environment). The ACP schema models ``env`` as a required field of the
+      stdio server shape, and the migrated adapter's validator silently DROPS a
+      spec without it - the mechanism previously misread as a registration-scope
+      gate on session injection.
+    - On the strict claude lane, env VALUES are replaced with ``${NAME}``
+      placeholder references and the declared-surface allowlist is enforced
+      (:func:`require_declared_surface`). The adapter forwards the session set
+      into the SDK's dynamic MCP config, which is serialized onto the spawned
+      CLI's command line - visible to any local process enumerator - so real
+      values must never ride the spec. The CLI expands ``${NAME}`` from its own
+      process environment at config parse time; the caller hoists the real
+      values into the spawn environment from the same source the placeholders
+      are derived from, so a reference cannot dangle.
+
+    Non-claude families keep their env values verbatim: their agents mount the
+    injected servers themselves (no CLI argv serialization is involved) and no
+    placeholder-expansion contract exists there.
+    """
+    strict = is_strict_claude_session(config)
+    if strict:
+        require_declared_surface(
+            config.mcp_servers, bridge_name=AUTHORING_MCP_SERVER_NAME
+        )
+    surface: list[JsonValue] = []
+    for spec in config.mcp_servers:
+        shaped = dict(spec)
+        env = shaped.get("env")
+        if not isinstance(env, list):
+            env = []
+        if strict:
+            placeholders: list[JsonValue] = []
+            for item in env:
+                if isinstance(item, dict) and isinstance(item.get("name"), str):
+                    placeholders.append(
+                        {"name": item["name"], "value": f"${{{item['name']}}}"}
+                    )
+                else:
+                    placeholders.append(item)
+            env = placeholders
+        shaped["env"] = env
+        surface.append(shaped)
+    return surface
 
 
 def _config_options(result: JsonObject, *, operation: str) -> list[JsonObject]:
@@ -107,6 +207,33 @@ async def _select_desired_model(
         return config_options
 
     config_id = _model_config_id(config_options)
+    return await _select_config_option(
+        ctx,
+        session_id,
+        config_options,
+        config_id=config_id,
+        desired_value=desired_model,
+        label="model",
+        allow_bracketed_variant=True,
+    )
+
+
+async def _select_config_option(
+    ctx: AcpSessionContext,
+    session_id: str,
+    config_options: list[JsonObject],
+    *,
+    config_id: str,
+    desired_value: str,
+    label: str,
+    allow_bracketed_variant: bool = False,
+) -> list[JsonObject]:
+    """Apply and verify one adapter-advertised session configuration value."""
+    if not any(option.get("id") == config_id for option in config_options):
+        raise AcpSessionError(
+            f"ACP session does not advertise requested {label} configuration option",
+            code=AcpErrorCode.INVALID_PARAMS,
+        )
     rpc_id = AcpRequestId.SESSION_SET_CONFIG_OPTION
     ctx.response_futures[rpc_id] = asyncio.get_running_loop().create_future()
     request: JsonObject = {
@@ -116,7 +243,7 @@ async def _select_desired_model(
         "params": {
             "sessionId": session_id,
             "configId": config_id,
-            "value": desired_model,
+            "value": desired_value,
         },
     }
     async with ctx.stdin_lock:
@@ -139,7 +266,7 @@ async def _select_desired_model(
             code=AcpErrorCode.INTERNAL_ERROR,
         )
     confirmed_options = _config_options(result, operation="session/set_config_option")
-    selected_model = _selected_model(
+    selected_value = _selected_model(
         confirmed_options, config_id, operation="session/set_config_option"
     )
     # The adapter ACCEPTED the request (no error above), so the confirmed value
@@ -149,14 +276,36 @@ async def _select_desired_model(
     # context-window variant of the same model. Accept the exact id or a
     # bracketed variant of it; anything else means the adapter selected a
     # DIFFERENT model than requested, which stays a loud failure.
-    is_variant_of_desired = selected_model.startswith(f"{desired_model}[")
-    if selected_model != desired_model and not is_variant_of_desired:
+    is_variant_of_desired = allow_bracketed_variant and selected_value.startswith(
+        f"{desired_value}["
+    )
+    if selected_value != desired_value and not is_variant_of_desired:
         raise AcpSessionError(
-            "ACP session/set_config_option did not select the requested model "
-            f"{desired_model!r}; adapter reported {selected_model!r}",
+            f"ACP session/set_config_option did not select the requested {label} "
+            f"{desired_value!r}; adapter reported {selected_value!r}",
             code=AcpErrorCode.INVALID_PARAMS,
         )
     return confirmed_options
+
+
+async def _select_desired_config_options(
+    ctx: AcpSessionContext,
+    config: AcpModelConfig,
+    session_id: str,
+    config_options: list[JsonObject],
+) -> list[JsonObject]:
+    """Apply frozen non-model ACP controls in canonical control-id order."""
+    selected = config_options
+    for config_id, desired_value in sorted(config.desired_config_options.items()):
+        selected = await _select_config_option(
+            ctx,
+            session_id,
+            selected,
+            config_id=config_id,
+            desired_value=desired_value,
+            label="native control",
+        )
+    return selected
 
 
 def _json_object(value: JsonValue | None) -> JsonObject:
@@ -280,26 +429,38 @@ async def setup_session(
     """
     working_dir = config.workspace_root or config.cwd or str(Path.cwd())
     method = "session/new"
-    mcp_servers = list[JsonValue](config.mcp_servers)
+    mcp_servers = session_surface_mcp_servers(config)
     params: JsonObject = {"cwd": working_dir, "mcpServers": mcp_servers}
-    if config.allowed_tools and config.acp_family == "claude":
-        # Claude family only (Claude/Z.ai): serialize the headless auto-permit
-        # allowlist into the Claude-CLI-specific claudeCode namespace so the CLI
-        # can invoke the composed tools without a local prompt. This is a recorded
-        # approval policy, not a bypass — the real human gate is the engine review
-        # lane, and the .vault deny policy still blocks fs writes.
+    if is_strict_claude_session(config):
+        # Claude family only (Claude/Z.ai): the claudeCode options block is
+        # emitted on EVERY session. strictMcpConfig bounds the agent's MCP
+        # surface to exactly the injected set (see claude_session_options);
+        # allowedTools additionally serializes the headless auto-permit
+        # allowlist so the CLI can invoke the composed tools without a local
+        # prompt. That is a recorded approval policy, not a bypass — the real
+        # human gate is the engine review lane, and the .vault deny policy
+        # still blocks fs writes.
         #
-        # The kimi family OMITS this _meta: Kimi has no claudeCode/allowedTools
-        # analogue, so the SAME composed names (still carried in
-        # config.allowed_tools) are enforced at our session/request_permission
-        # handler as an exact-name auto-approve set (P03.S10) instead.
-        allowed_tools = list[JsonValue](config.allowed_tools)
-        params["_meta"] = {"claudeCode": {"options": {"allowedTools": allowed_tools}}}
-        logger.info(
-            "ACP auto-permitting bridged authoring tools (headless): %s",
-            config.allowed_tools,
-            extra=runtime_log_extra(config, process=ctx.process),
-        )
+        # The kimi family OMITS this _meta: Kimi has no claudeCode namespace,
+        # so the SAME composed names (still carried in config.allowed_tools)
+        # are enforced at our session/request_permission handler as an
+        # exact-name auto-approve set (P03.S10) instead.
+        session_meta: JsonObject = {
+            "claudeCode": {"options": claude_session_options(config)}
+        }
+        if config.mcp_servers:
+            # Armed session: append the MCP-readiness note so the model waits
+            # for the declared servers to mount rather than silently working
+            # ungrounded (the CLI connects MCP asynchronously and does not hold
+            # the first turn for it).
+            session_meta["systemPrompt"] = {"append": MCP_READINESS_NOTE}
+        params["_meta"] = session_meta
+        if config.allowed_tools:
+            logger.info(
+                "ACP auto-permitting bridged authoring tools (headless): %s",
+                config.allowed_tools,
+                extra=runtime_log_extra(config, process=ctx.process),
+            )
     if config.session_id and agent_capabilities.get("loadSession") is True:
         method = "session/load"
         params["sessionId"] = config.session_id
@@ -401,6 +562,9 @@ async def setup_session(
         )
     config_options = _config_options(result, operation=method)
     config_options = await _select_desired_model(
+        ctx, config, session_id, config_options
+    )
+    config_options = await _select_desired_config_options(
         ctx, config, session_id, config_options
     )
     agent_modes: JsonObject = {}

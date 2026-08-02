@@ -12,15 +12,20 @@ protocol surface ``_acp_session.py`` / ``_acp_protocol.py`` depend on survives t
   the two fields ``InitializeResult`` parses,
 - ``session/new`` returns a ``sessionId`` and a ``modes`` block with ``currentModeId``
   and ``availableModes`` — the shape ``SessionSetupResult`` parses,
-- the ``_meta.claudeCode.options.allowedTools`` auto-permit shape our headless
-  ``setup_session`` emits is accepted without error.
+- the ``_meta.claudeCode.options`` block our ``setup_session`` emits on every
+  claude-family session (``strictMcpConfig`` plus the headless ``allowedTools``
+  auto-permit) is accepted without error.
 
 Service-marked and reaped before any ``session/prompt``: the subject here is the
 handshake surface, so a turn would add runtime and flakiness without adding
-evidence. That reap is NOT a spend gate — the Claude lane authenticates with a
-flat-rate ``CLAUDE_CODE_OAUTH_TOKEN`` subscription, not metered API billing, and
-``ANTHROPIC_API_KEY`` is scrubbed from every agent subprocess. Completed-turn
-coverage for this provider lives in ``test_claude_live_turn.py``.
+evidence. The lane implements NO authentication of its own: the env is exactly
+the production workspace assembly (``resolve_env_vars``), which scrubs provider
+API keys — including ``ANTHROPIC_API_KEY``, so a stray key can never silently
+downgrade the operator's flat-rate login to metered billing — and injects no
+credential of its own; the subprocess resolves whatever login the operator
+ambiently carries. Completed-turn coverage for this provider lives in
+``test_claude_live_turn.py``; the strict-MCP surfacing loop is proven in
+``test_acp_strict_mcp_surface.py``.
 
 Skips with a pointer when the Claude CLI entry point is unavailable (an infra gate).
 """
@@ -53,11 +58,9 @@ async def test_migrated_adapter_preserves_handshake_surface() -> None:
 
     command, meta = _classify_acp_command(settings.acp_backend)
     workspace = str(Path.cwd())
+    # Exactly the production env assembly: ambient environment passthrough, no
+    # credential injected or scrubbed (the no-auth contract).
     env = resolve_env_vars(Path(workspace))
-    token = settings.claude_code_oauth_token
-    if token:
-        env["CLAUDE_CODE_OAUTH_TOKEN"] = token
-        env.pop("ANTHROPIC_API_KEY", None)
     sys_claude = shutil.which("claude")
     if sys_claude:
         env["CLAUDE_CODE_EXECUTABLE"] = sys_claude
@@ -95,7 +98,10 @@ async def test_migrated_adapter_preserves_handshake_surface() -> None:
         assert agent_caps.get("loadSession") is True
         assert isinstance(init_res.get("authMethods"), list)
 
-        # session/new with the headless allowedTools auto-permit meta our layer emits.
+        # session/new with the claudeCode options block our layer emits on every
+        # claude-family session: strictMcpConfig plus the headless allowedTools
+        # auto-permit (production emission is pinned by the ACP-simulator
+        # conditioning tests; this proves the real adapter accepts the shape).
         new: JsonObject = {
             "jsonrpc": "2.0",
             "id": 1,
@@ -105,7 +111,10 @@ async def test_migrated_adapter_preserves_handshake_surface() -> None:
                 "mcpServers": list[JsonValue](),
                 "_meta": {
                     "claudeCode": {
-                        "options": {"allowedTools": ["mcp__vaultspec-rag__search"]}
+                        "options": {
+                            "strictMcpConfig": True,
+                            "allowedTools": ["mcp__vaultspec-rag__search"],
+                        }
                     }
                 },
             },

@@ -64,7 +64,7 @@ def resolve_env_vars(workspace_path: Path) -> dict[str, str]:
     The base environment is scrubbed, never inherited wholesale. A spawned agent
     is a lower-trust process than the service that spawns it, so a credential the
     operator happens to carry must not become a credential the agent can spend.
-    Four removal families:
+    Five removal families:
 
     - Known provider secrets by name. The provider layer re-injects only the auth
       a lane intentionally supports (``_build_gemini_env``, ``_build_zai_env``),
@@ -85,6 +85,9 @@ def resolve_env_vars(workspace_path: Path) -> dict[str, str]:
     - ``ANTHROPIC_LOG``: ``debug`` makes the Anthropic SDK emit debug text to
       stdout, corrupting the ACP JSON-RPC stream (-32603 parse errors). The
       probe re-injects it explicitly only when debug=True via run_probe().
+    - ``PYTEST_*`` markers: the spawning process's own test-runner state.
+      Env-sniffing agent tool servers (the rag MCP's own-test guard) read them
+      as "I am running inside a test" and refuse their live backends.
 
     ``ANTHROPIC_BASE_URL``/``ANTHROPIC_AUTH_TOKEN`` are deliberately NOT scrubbed:
     they are endpoint/token names the Z.ai lane rides, distinct from
@@ -113,6 +116,14 @@ def resolve_env_vars(workspace_path: Path) -> dict[str, str]:
             "KIMI_MODEL_NAME",
             "KIMI_MODEL_MAX_CONTEXT_SIZE",
             "KIMI_MODEL_CAPABILITIES",
+            # Test-runner markers of the SPAWNING process, not of the agent.
+            # They are set by pytest in this service's own process and would
+            # otherwise be inherited by every agent subprocess and ITS tool
+            # servers; env-sniffing children (the rag MCP server's own-test
+            # guard, for one) then misclassify a live agent run as running
+            # inside a test and refuse their real backends.
+            "PYTEST_CURRENT_TEST",
+            "PYTEST_VERSION",
         }
     )
     claude_code_allowlist = frozenset(

@@ -26,10 +26,11 @@ from types import MappingProxyType
 from typing import TYPE_CHECKING
 
 import pytest
-from pydantic import SecretStr, TypeAdapter
+from pydantic import SecretStr
 
 from ...thread.errors import ConfigError
 from ...utils.enums import CodexWebSearchMode
+from .._acp_authoring import AUTHORING_MCP_SERVER_NAME
 from .._acp_mcp import (
     _KNOWN_MCP_SERVERS,
     NATIVE_READ_TOOL_NAMES,
@@ -43,13 +44,11 @@ from .._acp_mcp import (
     codex_mcp_server_specs,
     compose_harness_mcp_servers,
     compose_native_read_tools,
-    config_home_mcp_servers,
     harness_allowed_tool_names,
+    require_declared_surface,
     resolve_harness_mcp_servers,
 )
-from .._acp_project_mcp import project_declared_mcp
 from .._codex_config_home import build_codex_config_home, cleanup_codex_config_home
-from .._json_contract import JsonObject
 from ..acp_chat_model import AcpChatModel
 
 if TYPE_CHECKING:
@@ -58,11 +57,11 @@ if TYPE_CHECKING:
     from .._json_contract import (
         FrozenJsonObject,
         FrozenJsonValue,
+        JsonObject,
         JsonValue,
     )
 
 _RAG = "vaultspec-rag"
-_JSON_OBJECT: TypeAdapter[JsonObject] = TypeAdapter(JsonObject)
 
 # An outward-reaching built-in this tree has never heard of. It stands for the
 # live hazard the no-pinning house rule accepts: the provider ships a new web
@@ -233,18 +232,19 @@ class TestSpawnCompositionRefusesUndeclaredNativeTools:
         assert all(NATIVE_TOOL_EGRESS[name] is False for name in NATIVE_READ_TOOL_NAMES)
 
 
-class TestConfigHomeCarriesTheDeclaredAxis:
-    """The real surfacing writers emit only entries that declared the axis."""
+class TestSessionSurfaceCarriesTheDeclaredAxis:
+    """The real surfacing emitters admit only entries that declared the axis."""
 
-    def test_claude_projection_written_from_the_composed_session(
+    def test_claude_session_surface_from_the_composed_model(
         self, tmp_path: Path
     ) -> None:
-        """Walks worker spawn composition -> projection -> the real ``.mcp.json``.
+        """Walks worker spawn composition -> the declared-surface session guard.
 
-        The production chain: the worker composes the declared harness servers and
-        the native read floor onto the model, ``AcpChatModel`` then projects the
-        registry-known servers into the run workspace's ``.mcp.json``. Every name
-        that survives to the file passed the two-axis trust root.
+        The production chain: the worker composes the declared harness servers
+        and the native read floor onto the model; the session seam then guards
+        the advertisement with :func:`require_declared_surface`, the same
+        allowlist the strict claude CLI mounts verbatim. Every name that
+        survives to the session passed the two-axis trust root.
         """
         model = compose_harness_mcp_servers(
             AcpChatModel(command=["echo"], env_vars={}, workspace_root=str(tmp_path)),
@@ -255,28 +255,33 @@ class TestConfigHomeCarriesTheDeclaredAxis:
         model = compose_native_read_tools(model, autonomous=True, role="researcher")
         assert isinstance(model, AcpChatModel)
 
-        surfacing = config_home_mcp_servers(model.mcp_servers)
-        path = project_declared_mcp(tmp_path, model.mcp_servers)
-        assert path is not None
-        rendered = path.read_text(encoding="utf-8")
-
-        written = _JSON_OBJECT.validate_json(rendered)
-        written_servers = written["mcpServers"]
-        assert isinstance(written_servers, dict)
-        written_entry = written_servers[_RAG]
-        assert isinstance(written_entry, dict)
-        assert set(surfacing) == {_RAG}
-        entry = surfacing[_RAG]
-        # Nothing reached the file that had not declared both axes.
+        require_declared_surface(
+            model.mcp_servers, bridge_name=AUTHORING_MCP_SERVER_NAME
+        )
         registry_entry = _frozen_object(_KNOWN_MCP_SERVERS[_RAG])
         assert registry_entry["read_only"] is True
         assert registry_entry["network_egress"] is False
-        # Registry-only trust metadata never leaks into the surfaced shape.
-        assert "network_egress" not in entry
-        assert "read_only" not in entry
-        assert written_entry == entry
-        assert "network_egress" not in written_entry
-        assert "read_only" not in written_entry
+        # Registry-only trust metadata never leaks into the advertised shape.
+        names: list[str] = []
+        for spec in model.mcp_servers:
+            name = spec.get("name")
+            assert isinstance(name, str)
+            names.append(name)
+            assert "network_egress" not in spec
+            assert "read_only" not in spec
+            assert "tools" not in spec
+        assert names == [_RAG]
+
+    def test_an_undeclared_entry_is_refused_at_the_session_guard(self) -> None:
+        # The same guard refuses an entry the registry never admitted, which on
+        # the strict lane is the difference between a reviewed mount and an
+        # arbitrary one.
+        with pytest.raises(ConfigError) as excinfo:
+            require_declared_surface(
+                [{"name": "operator-extra", "command": "npx"}],
+                bridge_name=AUTHORING_MCP_SERVER_NAME,
+            )
+        assert "operator-extra" in str(excinfo.value)
 
     def test_codex_config_home_carries_the_same_trust_root(
         self, tmp_path: Path

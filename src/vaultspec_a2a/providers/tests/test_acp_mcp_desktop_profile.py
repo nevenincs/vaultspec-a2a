@@ -13,7 +13,6 @@ from .._acp_mcp import (
     HarnessMcpRuntimeProfile,
     codex_mcp_server_specs,
     compose_harness_mcp_servers,
-    config_home_mcp_servers,
     harness_allowed_tool_names,
     resolve_harness_mcp_capabilities,
     resolve_harness_mcp_servers,
@@ -121,13 +120,6 @@ def test_desktop_serializers_emit_no_runtime_acquisition_material() -> None:
             profile=HarnessMcpRuntimeProfile.DESKTOP,
         )
         == []
-    )
-    assert (
-        config_home_mcp_servers(
-            non_desktop_specs,
-            profile=HarnessMcpRuntimeProfile.DESKTOP,
-        )
-        == {}
     )
     assert (
         codex_mcp_server_specs(
@@ -268,7 +260,6 @@ def test_non_desktop_profile_preserves_live_preset_resolution() -> None:
     assert resolution.available_servers == tuple(harness.mcp_servers)
     assert resolution.unavailable == ()
     assert specs[0]["command"] == "uvx"
-    assert config_home_mcp_servers(specs)[RAG_SERVER]["command"] == "uvx"
     for spec in codex_mcp_server_specs(harness.mcp_servers):
         assert spec["command"] == "uvx"
     assert harness_allowed_tool_names(harness.mcp_servers) == [

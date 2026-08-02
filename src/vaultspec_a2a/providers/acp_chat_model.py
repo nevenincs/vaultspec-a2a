@@ -45,17 +45,10 @@ from pydantic import Field, PrivateAttr
 
 from ..control.config import settings
 from ..team.team_config import AgentConfig
-from ..thread.errors import ProjectionRefusedError
 from ..utils.enums import AcpRequestId
 from ..workspace.environment import resolve_env_vars
 from ._acp_auth import authenticate_rpc, runtime_log_extra
 from ._acp_authoring import config_home_authoring_entry
-from ._acp_project_mcp import (
-    cleanup_confinement_settings,
-    cleanup_projected_mcp,
-    project_confinement_settings,
-    project_declared_mcp,
-)
 from ._acp_protocol import process_stdout_loop
 from ._acp_rpc_handlers import (
     on_fs_read_text_file,
@@ -253,6 +246,7 @@ class AcpChatModel(BaseChatModel):
             "sessions negotiate this value before any prompt is sent."
         ),
     )
+    desired_config_options: dict[str, str] = Field(default_factory=dict)
 
     # --- Runtime state (private, not model fields) ---
     _config: AcpModelConfig = PrivateAttr()
@@ -291,6 +285,7 @@ class AcpChatModel(BaseChatModel):
             command_target=self.command_target,
             auth_mode=self.auth_mode,
             desired_model=self.desired_model,
+            desired_config_options=dict(self.desired_config_options),
         )
         self._auth_methods = []
         self._session_config_options = []
@@ -392,52 +387,34 @@ class AcpChatModel(BaseChatModel):
         # and memoized per launch identity so the cost lands once per process.
         await verify_harness_mcp_contract(self._config.mcp_servers, env=env)
 
-        # Armed runs: the CLI runs in the operator's REAL config home (no
-        # redirect - the no-auth contract requires the child to resolve exactly
-        # the login an interactive `claude` resolves), so the declared-surface
-        # invariant rides the RUN WORKSPACE instead, over the two project-scope
-        # channels the pinned CLI actually reads from its cwd:
-        #   - .mcp.json (project_declared_mcp): the declared harness servers plus
-        #     the run's authoring bridge, merged marker-owned alongside anything
-        #     the workspace already carries. The bridge entry holds only
-        #     ``${VAULTSPEC_AUTHORING_*}`` placeholders; the real values are
-        #     hoisted into the spawn env below and expanded by the CLI at parse
-        #     time, keeping secrets off disk.
-        #   - .claude/settings.local.json (project_confinement_settings): enables
-        #     exactly the declared names and disables/tool-denies every OTHER
-        #     known server - ancestor .mcp.json names (the S20 leak) and the
-        #     operator's user-global servers - so the surfaced set stays the
-        #     declared set (agent-harness-provisioning ambient-MCP invariant)
-        #     without touching the child environment or the config home.
-        # The session-injected copy in ``mcp_servers`` is deliberately kept, not
-        # trimmed (P05.S22): it is the SOURCE the projections read, and the
-        # honest upstream re-arm channel if a future CLI surfaces
-        # session-injected servers. Both writes are inverted in the finally.
-        projected_mcp: Path | None = None
-        confinement_settings: Path | None = None
+        # The CLI runs in the operator's REAL config home (no redirect - the
+        # no-auth contract requires the child to resolve exactly the login an
+        # interactive `claude` resolves). The declared-surface invariant rides
+        # the SESSION itself: setup_session advertises the declared servers in
+        # ``session/new`` and, on the claude family, pins the CLI into strict
+        # MCP mode so the mounted surface is exactly that advertisement - no
+        # ambient user-global, project, plugin, or account-connector server
+        # joins it, and a plain run mounts nothing. Nothing is written into the
+        # run workspace or the config home for MCP surfacing.
+        #
+        # The bridge's env values ride the session spec as ``${NAME}``
+        # placeholder references (the spec is serialized onto the CLI argv);
+        # the real values are hoisted into the spawn env here, the environment
+        # the CLI expands those references from at config parse time.
         if self._config.mcp_servers:
             _bridge_entry, bridge_env = config_home_authoring_entry(
                 self._config.mcp_servers
             )
             env.update(bridge_env)
-            projected_mcp = project_declared_mcp(_ws_path, self._config.mcp_servers)
-            try:
-                confinement_settings = project_confinement_settings(
-                    _ws_path, self._config.mcp_servers
-                )
-            except ProjectionRefusedError:
-                cleanup_projected_mcp(projected_mcp)
-                raise
 
         if self.command and Path(self.command[0]).stem.lower() == "gemini":
             await refresh_gemini_token(env=env)
 
-        # The spawn and session setup run INSIDE the try so the finally below is
-        # the single cleanup path for BOTH the isolated config home and the
-        # projected .mcp.json: a spawn-time raise (missing binary, startup
-        # timeout) or a stdio-pipe failure must not orphan either artifact. ctx and
-        # the reader tasks are created here too, so the finally guards on their
-        # presence before touching the session.
+        # The spawn and session setup run INSIDE the try so the finally below
+        # is the single cleanup path: a spawn-time raise (missing binary,
+        # startup timeout) or a stdio-pipe failure must not orphan the session
+        # tree. ctx and the reader tasks are created here, so the finally
+        # guards on their presence before touching the session.
         ctx: AcpSessionContext | None = None
         stdout_task: asyncio.Task[None] | None = None
         stderr_task: asyncio.Task[None] | None = None
@@ -509,12 +486,11 @@ class AcpChatModel(BaseChatModel):
             async for chunk in self._yield_chunks(ctx, prompt_future, run_manager):
                 yield chunk
         finally:
-            # Independent cleanup: a failure in any one release must not skip the
-            # rest. The two workspace projections are inverted regardless of how
-            # the session ended; the CLI's own transcript lives in the operator's
-            # real config home (like any interactive session) and is not ours to
-            # move. Each step runs regardless of earlier failures, which are
-            # aggregated.
+            # Independent cleanup: a failure in any one release must not skip
+            # the rest. MCP surfacing writes nothing to the workspace or the
+            # config home, so the session tree is the only thing to release;
+            # the CLI's own transcript lives in the operator's real config home
+            # (like any interactive session) and is not ours to move.
             cleanup_steps: list[CleanupStep] = []
             if ctx is not None and stdout_task is not None and stderr_task is not None:
                 session_ctx, out_task, err_task = ctx, stdout_task, stderr_task
@@ -524,15 +500,6 @@ class AcpChatModel(BaseChatModel):
                         lambda: self._cleanup_session(session_ctx, out_task, err_task),
                     )
                 )
-            cleanup_steps.append(
-                ("acp-projected-mcp", lambda: cleanup_projected_mcp(projected_mcp))
-            )
-            cleanup_steps.append(
-                (
-                    "acp-confinement-settings",
-                    lambda: cleanup_confinement_settings(confinement_settings),
-                )
-            )
             await run_independent_cleanups(*cleanup_steps)
 
     def _enforce_turn_deadline(self, ctx: AcpSessionContext) -> None:

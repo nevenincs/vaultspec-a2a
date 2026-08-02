@@ -29,9 +29,9 @@ from .._acp_mcp import (
     codex_mcp_server_specs,
     compose_harness_mcp_servers,
     compose_native_read_tools,
-    config_home_mcp_servers,
     harness_allowed_tool_names,
     is_known_harness_server,
+    require_declared_surface,
     resolve_harness_mcp_servers,
 )
 from ..acp_chat_model import AcpChatModel
@@ -276,9 +276,10 @@ def test_compose_allowlist_union_does_not_duplicate() -> None:
     ]
 
 
-def test_config_home_servers_selects_registry_known_shapes_for_claude_json() -> None:
-    # From a mixed session set (authoring bridge + harness rag), only the
-    # registry-known harness server is selected and shaped for .claude.json.
+def test_declared_surface_admits_the_bridge_beside_the_registry_server() -> None:
+    # A mixed session set (authoring bridge + harness rag) is exactly the
+    # declared surface: the bridge rides under its reserved name and the rag
+    # entry passes the registry trust root.
     session: list[JsonObject] = [
         {"name": "vaultspec-authoring", "command": "node", "args": ["bridge.js"]},
         {
@@ -291,25 +292,7 @@ def test_config_home_servers_selects_registry_known_shapes_for_claude_json() -> 
             ],
         },
     ]
-    home = config_home_mcp_servers(session)
-    assert set(home) == {"vaultspec-rag"}
-    assert home["vaultspec-rag"] == {
-        "type": "stdio",
-        "command": "uvx",
-        "args": [
-            "--from",
-            "vaultspec-rag[mcp]",
-            "vaultspec-search-mcp",
-        ],
-    }
-
-
-def test_config_home_servers_preserves_env_when_present() -> None:
-    session: list[JsonObject] = [
-        {"name": "vaultspec-rag", "command": "uvx", "args": ["x"], "env": {"K": "V"}},
-    ]
-    home = config_home_mcp_servers(session)
-    assert home["vaultspec-rag"]["env"] == {"K": "V"}
+    require_declared_surface(session, bridge_name="vaultspec-authoring")
 
 
 def test_live_preset_harness_drives_read_only_rag_composition() -> None:
@@ -368,9 +351,15 @@ def test_live_preset_harness_drives_read_only_rag_composition() -> None:
     assert composed.allowed_tools == allow
 
 
-def test_config_home_servers_empty_when_none_registry_known() -> None:
-    session: list[JsonObject] = [{"name": "vaultspec-authoring", "command": "node"}]
-    assert config_home_mcp_servers(session) == {}
+def test_declared_surface_refuses_an_unregistered_server() -> None:
+    # An entry outside the registry and not the run's own bridge would mount as
+    # a live tool surface the declared harness never reviewed - refused, named.
+    session: list[JsonObject] = [
+        {"name": "vaultspec-authoring", "command": "node"},
+        {"name": "operator-extra", "command": "npx", "args": ["something"]},
+    ]
+    with pytest.raises(ConfigError, match="operator-extra"):
+        require_declared_surface(session, bridge_name="vaultspec-authoring")
 
 
 def test_every_registry_entry_is_marked_read_only() -> None:

@@ -90,12 +90,11 @@ AUTHORING_MCP_SERVER_NAME = "vaultspec-authoring"
 
 # The stdio bridge entry module, spawned by the CLI as `python -m <module>`. The
 # subprocess reconstructs the run's dispatch against the engine and serves the
-# bridged tools over stdio. On the pinned stack, session-INJECTED MCP servers do
-# not surface (S20 registration-scope matrix: only user-global home-config
-# servers surface). The bridge reaches the model through that surfacing channel:
-# its stdio spec is admitted into the isolated config home as user-global config
-# by ``config_home_authoring_entry`` (S18), so the stdio shape IS load-bearing
-# for surfacing there — the args signature is the home's admission key.
+# bridged tools over stdio. The bridge reaches the model through the session
+# advertisement itself; ``config_home_authoring_entry`` validates the spec's
+# shape and splits its spawn environment, and the args signature is that
+# validation's admission key — an entry under the bridge name that is not this
+# runtime's own invocation of the module is refused rather than surfaced.
 AUTHORING_STDIO_MODULE = "vaultspec_a2a.protocols.mcp.authoring_stdio"
 
 # Env var names the spawned stdio bridge reads are imported from the bridge
@@ -194,12 +193,11 @@ class AuthoringToolBinding:
     MCP server) or the stdio bridge (``engine_base_url`` + ``run_id``, when the
     CLI spawns our per-run stdio bridge subprocess). At least one transport's
     fields must be present; both may coexist. Both transports are supported;
-    when both are present the stdio bridge is chosen. Session INJECTION does not
-    surface either transport on the pinned stack (S20 registration-scope matrix:
-    only user-global home-config servers surface); the stdio bridge instead
-    reaches the model by being admitted into the isolated config home as
-    user-global config (``config_home_authoring_entry``), so the transport
-    choice is load-bearing — only the stdio shape rides the home channel.
+    when both are present the stdio bridge is chosen. The session advertisement
+    is the surfacing channel, and the transport choice stays load-bearing: the
+    stdio bridge spawns as the provider CLI's own child inside the run-owned
+    containment tree, and only the stdio shape passes the bridge-shape
+    validation in ``config_home_authoring_entry``.
 
     Parameters
     ----------
@@ -327,12 +325,12 @@ def build_authoring_stdio_mcp_servers(
     env}``) that runs ``python -m <AUTHORING_STDIO_MODULE>``. The engine origin,
     run id, and tokens travel to the subprocess by env — never argv — so a
     process listing never exposes them (R7); the subprocess reconstructs the
-    run's dispatch and serves the bridged tools over stdio. Session INJECTION of
-    this spec does not surface it (S20: only user-global home-config servers
-    surface); the same spec is instead admitted into the isolated config home by
-    ``config_home_authoring_entry`` (S18), where its ``env`` becomes
-    ``${VAULTSPEC_AUTHORING_*}`` placeholders and the real values ride the CLI
-    spawn env — so surfacing rides the home channel, not the injected session.
+    run's dispatch and serves the bridged tools over stdio. The session seam
+    surfaces this spec with its ``env`` values rewritten to
+    ``${VAULTSPEC_AUTHORING_*}`` placeholder references while
+    ``config_home_authoring_entry`` hoists the real values into the CLI spawn
+    env — the environment the CLI expands those references from — so the tokens
+    stay off the CLI argv the adapter serializes the session set onto.
 
     ``python_executable`` defaults to the runtime command authority's own
     executable, which in a deployed run carries the installed package (the venv
@@ -434,13 +432,12 @@ def attach_authoring_tools(
       transport is chosen from the binding fields present: the stdio bridge
       (spawned subprocess) when the binding carries the engine transport
       (``engine_base_url`` + ``run_id``), otherwise the HTTP bridge. Session
-      INJECTION of this spec does not surface it on the pinned stack — the
-      registration-scope matrix found only user-global home-config servers
-      surface — so the stdio bridge reaches the model by a second step: its spec
-      is admitted into the isolated config home as user-global config
-      (:func:`config_home_authoring_entry`, at the spawn seam), which does
-      surface. That makes the transport choice load-bearing: only the stdio
-      shape rides the home channel.
+      injection IS the surfacing channel: the session seam normalizes the spec
+      into the ACP schema shape (a spec without an ``env`` list is silently
+      dropped by the adapter's validator — the defect once misread as a
+      registration-scope gate) and, on the strict claude lane, the CLI mounts
+      exactly the injected set. The transport choice stays load-bearing: only
+      the stdio shape spawns inside the provider's own containment tree.
     - A Codex model exposes ``with_authoring_mcp_server``: return a copy whose
       per-run ``CODEX_HOME`` ``config.toml`` carries the bridge as a
       ``[mcp_servers.vaultspec-authoring]`` block (:func:`_build_codex_config_home`
@@ -492,25 +489,26 @@ def attach_authoring_tools(
 def config_home_authoring_entry(
     mcp_servers: Sequence[JsonObject],
 ) -> tuple[dict[str, JsonObject], dict[str, str]]:
-    """Admit the run's authoring bridge into the isolated config home (S18).
+    """Validate the run's authoring bridge and split off its spawn environment.
 
-    The isolated home surfaces user-global ``mcpServers`` to the model, and the
-    per-run authoring bridge must ride that channel too — not only the read-only
-    harness registry (``config_home_mcp_servers``). This selects the bridge spec
-    out of the session's advertised ``mcp_servers`` and returns, atomically:
+    The gatekeeper for the bridge's place in the declared surface: it selects
+    the bridge spec out of the session's advertised ``mcp_servers``, refuses
+    anything under that name that is not provably the per-run stdio bridge, and
+    returns, atomically:
 
-    - the home entry keyed by :data:`AUTHORING_MCP_SERVER_NAME` in the CLI
-      user-global config shape (``{"type": "stdio", "command", "args", "env"}``)
+    - the validated bridge entry keyed by :data:`AUTHORING_MCP_SERVER_NAME` in
+      the CLI config shape (``{"type": "stdio", "command", "args", "env"}``)
       whose ``env`` values are ALL ``${VAULTSPEC_AUTHORING_*}`` placeholder
       strings — never the real tokens — and
     - the ``name -> real value`` map to hoist into the CLI spawn environment.
 
-    Token hygiene (R7) rides the CLI's user-scope env-variable expansion: the
-    pinned binary expands ``${VAR}`` in a user-scope stdio ``env`` value from the
-    CLI process environment at parse time, so the home's ``.claude.json`` carries
-    only placeholders while the real bearer/actor/run values live in the spawn
-    env in memory. The two are emitted from the SAME env list here so a
-    placeholder and its value can never diverge; callers MUST NOT split this.
+    Token hygiene rides the CLI's env-variable expansion: the binary expands
+    ``${VAR}`` in a stdio ``env`` value from the CLI process environment at MCP
+    config parse time, so the session advertisement (serialized onto the CLI
+    argv by the adapter) carries only placeholders while the real
+    bearer/actor/run values live in the spawn env in memory. The two are
+    emitted from the SAME env list here so a placeholder and its value can
+    never diverge; callers MUST NOT split this.
 
     Admission is guarded by shape: only a spec named
     :data:`AUTHORING_MCP_SERVER_NAME` whose ``args`` are exactly this runtime's
@@ -531,7 +529,7 @@ def config_home_authoring_entry(
         if not isinstance(raw_args, list):
             raise ConfigError(
                 f"refusing to admit server {AUTHORING_MCP_SERVER_NAME!r} into the "
-                f"isolated config home: its shape is not the per-run stdio "
+                f"declared MCP surface: its shape is not the per-run stdio "
                 f"authoring bridge (args must be this runtime's invocation of "
                 f"{AUTHORING_STDIO_MODULE!r} as built by "
                 f"build_authoring_stdio_mcp_servers)"
@@ -540,7 +538,7 @@ def config_home_authoring_entry(
         if not is_module_invocation(args, AUTHORING_STDIO_MODULE):
             raise ConfigError(
                 f"refusing to admit server {AUTHORING_MCP_SERVER_NAME!r} into the "
-                f"isolated config home: its shape is not the per-run stdio "
+                f"declared MCP surface: its shape is not the per-run stdio "
                 f"authoring bridge (args must be this runtime's invocation of "
                 f"{AUTHORING_STDIO_MODULE!r} as built by "
                 f"build_authoring_stdio_mcp_servers)"
@@ -549,7 +547,7 @@ def config_home_authoring_entry(
         if not isinstance(command, str) or not command:
             raise ConfigError(
                 f"authoring bridge spec {AUTHORING_MCP_SERVER_NAME!r} is missing a "
-                f"command; cannot admit it into the isolated config home"
+                f"command; cannot admit it into the declared MCP surface"
             )
         raw_env = spec.get("env")
         if not isinstance(raw_env, list) or not raw_env:

@@ -52,13 +52,13 @@ __all__ = [
     "codex_mcp_server_specs",
     "compose_harness_mcp_servers",
     "compose_native_read_tools",
-    "config_home_mcp_servers",
     "declared_harness_tools",
     "harness_allowed_tool_names",
     "harness_server_egresses",
     "is_known_harness_server",
     "reject_duplicate_identities",
     "reject_duplicate_names",
+    "require_declared_surface",
     "resolve_harness_mcp_capabilities",
     "resolve_harness_mcp_servers",
 ]
@@ -127,11 +127,11 @@ class HarnessMcpResolution:
 # over immutable values, so the registry cannot be extended, re-pointed, or
 # re-declared by an importer after import. Membership is a trust claim, and a
 # trust claim that any module can add with one assignment is not a claim at all.
-# WARNING: the config home is written with user-scope env expansion, so a literal
-# ``${...}`` placed in a future registry ``env`` value would be expanded by the
-# CLI from its process environment at parse time (the same mechanism the
-# authoring bridge relies on) — registry env values must be literals, never
-# accidental ``${...}`` strings.
+# WARNING: the session surface reaches the claude CLI as a dynamic MCP config
+# parsed with env expansion, so a literal ``${...}`` placed in a future registry
+# ``env`` value would be expanded by the CLI from its process environment at
+# parse time (the same mechanism the authoring bridge relies on) — registry env
+# values must be literals, never accidental ``${...}`` strings.
 _LAUNCH_SPEC_KEYS = ("name", "command", "args", "env")
 _TRUST_AXES = ("read_only", "network_egress")
 RAG_MCP_REQUIREMENT = "vaultspec-rag[mcp]"
@@ -427,68 +427,51 @@ def harness_allowed_tool_names(
     return tool_names
 
 
-def config_home_mcp_servers(
+def require_declared_surface(
     mcp_servers: Sequence[JsonObject],
     *,
-    profile: HarnessMcpRuntimeProfile = HarnessMcpRuntimeProfile.NON_DESKTOP,
-) -> dict[str, JsonObject]:
-    """Select the registry-known harness servers and shape them for ``.claude.json``.
+    bridge_name: str,
+) -> None:
+    """Fail loud unless every advertised server is part of the declared surface.
 
-    Given the session's advertised ``mcp_servers`` (which may also carry the per-run
-    authoring bridge), keep ONLY those whose name is a known harness server and
-    transform each ACP launch spec into the CLI user-global config shape keyed by
-    name: ``{"<name>": {"type": "stdio", "command": ..., "args": [...], "env": ...}}``.
-    Servers not in the registry (e.g. the per-run authoring bridge) are excluded
-    here: the bridge is admitted into the same isolated home through its own
-    guarded channel (``config_home_authoring_entry``), so together the home
-    surfaces exactly the declared read-only harness servers PLUS at most the run's
-    own authoring bridge. Returns an empty mapping when none match.
+    The declared-surface allowlist, enforced at the spawn seam: a session may
+    advertise ONLY read-only registry-known harness servers (both trust axes
+    checked) plus at most the run's own authoring bridge under *bridge_name*.
+    On the strict claude lane the session advertisement IS the agent's entire
+    MCP surface - the CLI mounts exactly what ``session/new`` injects - so an
+    entry that never passed the registry's trust root must refuse the run here
+    rather than ride into the agent as a live tool mount. Duplicate identities
+    are refused first, so a reviewed name can never be silently redeclared with
+    a different command.
+
+    Raises:
+        ConfigError: On a duplicate identity, a nameless spec, an unknown server
+            name, or a registry entry that fails either trust axis.
     """
     reject_duplicate_identities(mcp_servers)
-    known_names = [
-        name
-        for spec in mcp_servers
-        if isinstance(name := spec.get("name"), str) and name in _KNOWN_MCP_SERVERS
-    ]
-    resolution = resolve_harness_mcp_capabilities(known_names, profile=profile)
-    available = set(resolution.available_servers)
-    home: dict[str, JsonObject] = {}
+    unknown: list[str] = []
     for spec in mcp_servers:
         name = spec.get("name")
-        if not isinstance(name, str) or name not in available:
+        if not isinstance(name, str) or not name:
+            raise ConfigError(
+                "refusing to advertise an MCP server with no name: the declared-"
+                "surface allowlist is keyed by name, so a nameless spec can never "
+                "be part of the declared set"
+            )
+        if name == bridge_name:
+            continue
+        if name not in _KNOWN_MCP_SERVERS:
+            unknown.append(name)
             continue
         _require_trust_root(name)
-        command = spec.get("command")
-        if not isinstance(command, str) or not command:
-            raise ConfigError(
-                f"harness MCP server {name!r} has no launch command for config home"
-            )
-        entry: JsonObject = {"type": "stdio", "command": command}
-        args = spec.get("args")
-        if args is not None:
-            if not isinstance(args, list) or not all(
-                isinstance(arg, str) for arg in args
-            ):
-                raise ConfigError(
-                    f"harness MCP server {name!r} has non-string launch args"
-                )
-            entry["args"] = list(args)
-        env = spec.get("env")
-        if env is not None:
-            if not isinstance(env, dict):
-                raise ConfigError(
-                    f"harness MCP server {name!r} has non-string environment values"
-                )
-            environment: JsonObject = {}
-            for key, value in env.items():
-                if not isinstance(value, str):
-                    raise ConfigError(
-                        f"harness MCP server {name!r} has non-string environment values"
-                    )
-                environment[key] = value
-            entry["env"] = environment
-        home[name] = entry
-    return home
+    if unknown:
+        raise ConfigError(
+            f"refusing to advertise undeclared MCP server(s) "
+            f"{', '.join(sorted(unknown))}: the session surface admits only the "
+            "read-only harness registry plus the run's own authoring bridge, and "
+            "an entry outside that set would mount as a live tool surface the "
+            "declared harness never reviewed"
+        )
 
 
 def reject_duplicate_names(names: Sequence[str]) -> None:

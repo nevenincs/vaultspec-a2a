@@ -17,7 +17,7 @@ _PACKAGE_DIR = str(Path(__file__).resolve().parent)
 _LIVE_FILES = frozenset(
     {
         "test_acp_authoring_bridge.py",
-        "test_acp_project_mcp_service.py",
+        "test_acp_strict_mcp_surface.py",
         "test_codex_config_home_service.py",
         "test_authoring_stdio_bridge.py",
         "test_acp_migration_surface.py",

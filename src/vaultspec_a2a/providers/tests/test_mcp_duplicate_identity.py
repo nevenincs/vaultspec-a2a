@@ -6,8 +6,9 @@ agent's MCP surface is exactly the declared set, and a name that can be
 redeclared with a different command breaks it: the surviving entry is no longer
 the one that was reviewed.
 
-These drive the real composition functions and the real workspace projection
-writer, so a refusal is proven at the boundary that actually emits configuration.
+These drive the real declared-surface guard at the session seam and the real
+Codex spec emitter, so a refusal is proven at the boundaries that actually emit
+configuration.
 """
 
 from __future__ import annotations
@@ -15,39 +16,37 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 import pytest
-from pydantic import TypeAdapter
 
 from ...thread.errors import ConfigError
+from .._acp_authoring import AUTHORING_MCP_SERVER_NAME
 from .._acp_mcp import (
     codex_mcp_server_specs,
-    config_home_mcp_servers,
     reject_duplicate_identities,
+    require_declared_surface,
 )
-from .._acp_project_mcp import project_declared_mcp
-from .._json_contract import JsonObject
 
 if TYPE_CHECKING:
-    from pathlib import Path
+    from .._json_contract import JsonObject
 
 _KNOWN = "vaultspec-rag"
-_JSON_OBJECT: TypeAdapter[JsonObject] = TypeAdapter(JsonObject)
 
 
 def _spec(command: str) -> JsonObject:
     return {"name": _KNOWN, "command": command, "args": ["serve"]}
 
 
-def test_a_single_identity_composes() -> None:
+def test_a_single_identity_passes_the_declared_surface_guard() -> None:
     """The ordinary case is unaffected by the guard."""
-    composed = config_home_mcp_servers([_spec("only")])
-
-    assert composed[_KNOWN]["command"] == "only"
+    require_declared_surface([_spec("only")], bridge_name=AUTHORING_MCP_SERVER_NAME)
 
 
 def test_a_repeated_identity_is_refused_rather_than_overwritten() -> None:
     """Without the guard the second spec silently wins and the first vanishes."""
     with pytest.raises(ConfigError, match="duplicate MCP server identities"):
-        config_home_mcp_servers([_spec("first"), _spec("second")])
+        require_declared_surface(
+            [_spec("first"), _spec("second")],
+            bridge_name=AUTHORING_MCP_SERVER_NAME,
+        )
 
 
 def test_the_refusal_names_every_duplicated_identity() -> None:
@@ -80,31 +79,6 @@ def test_unknown_and_unnamed_specs_do_not_trigger_a_false_refusal() -> None:
     )
 
 
-def test_the_written_projection_carries_the_reviewed_command(
-    tmp_path: Path,
-) -> None:
-    """Proven through the real writer: what lands on disk is the declared entry."""
-    path = project_declared_mcp(tmp_path, [_spec("reviewed-command")])
-
-    assert path is not None
-    written = _JSON_OBJECT.validate_json(path.read_text(encoding="utf-8"))
-    servers = written["mcpServers"]
-    assert isinstance(servers, dict)
-    reviewed = servers[_KNOWN]
-    assert isinstance(reviewed, dict)
-    assert reviewed["command"] == "reviewed-command"
-
-
-def test_a_duplicate_never_reaches_the_projection_writer(tmp_path: Path) -> None:
-    """The refusal happens before anything is written, so no file is left behind."""
-    before = sorted(tmp_path.iterdir())
-
-    with pytest.raises(ConfigError):
-        project_declared_mcp(tmp_path, [_spec("first"), _spec("second")])
-
-    assert sorted(tmp_path.iterdir()) == before
-
-
 def test_the_codex_transport_also_refuses_a_repeated_name() -> None:
     """Both emitters share one registry, so both must share the refusal.
 
@@ -126,6 +100,8 @@ def test_the_codex_transport_still_resolves_a_single_name() -> None:
 def test_both_transports_refuse_the_same_condition() -> None:
     """One registry, one trust root, one answer to a repeated identity."""
     with pytest.raises(ConfigError):
-        config_home_mcp_servers([_spec("a"), _spec("b")])
+        require_declared_surface(
+            [_spec("a"), _spec("b")], bridge_name=AUTHORING_MCP_SERVER_NAME
+        )
     with pytest.raises(ConfigError):
         codex_mcp_server_specs([_KNOWN, _KNOWN])

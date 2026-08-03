@@ -24,6 +24,7 @@ this module reuses them rather than restating asset paths.
 
 from __future__ import annotations
 
+import logging
 import os
 from dataclasses import dataclass
 from pathlib import Path
@@ -43,6 +44,8 @@ __all__ = [
 # import back through ``control.config``. ``test_profile_paths`` guards the two names
 # against drift.
 _DISCOVERY_RECORD_FILENAME = "service.json"
+
+logger = logging.getLogger(__name__)
 
 
 class DesktopProfileError(ValueError):
@@ -270,6 +273,29 @@ class DesktopProfile:
         a live consumer are created; the reserved directories are left for their
         consuming phases so ``ensure`` never seeds dead empty state. Called once
         the profile is armed and about to seat live state.
+
+        Each directory is restricted to its owner. The credential files one level
+        over already get this treatment, and the state directory holds the
+        databases: thread content, the permission-decision log, and the whole of
+        every agent conversation in the checkpoint store. Restricting the
+        DIRECTORY rather than the database files is deliberate — SQLite writes
+        ``-wal`` and ``-shm`` beside each database, and the write-ahead log holds
+        recently committed rows, so hardening the files alone would leave the most
+        recent data readable.
         """
+        from ._platform_acl import harden_credential_file
+
         for directory in self.state.provisioned_directories:
             directory.mkdir(parents=True, exist_ok=True)
+            # Best effort: a filesystem that cannot express owner-only access
+            # (a network share, a mount without ACL support) must not stop the
+            # profile from arming — the store still has to work there.
+            try:
+                harden_credential_file(directory)
+            except OSError:
+                logger.warning(
+                    "Could not restrict %s to its owner; the databases beneath it "
+                    "may be readable by other local users.",
+                    directory,
+                    exc_info=True,
+                )

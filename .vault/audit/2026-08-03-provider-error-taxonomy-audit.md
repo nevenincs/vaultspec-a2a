@@ -5,7 +5,7 @@ tags:
 date: '2026-08-03'
 modified: '2026-08-03'
 body_schema: 'body-v1'
-body_hash: 'sha256:f72309d72c466e590f294a9abf25516d58cf17a48b0e96caca5854f84b020b3c'
+body_hash: 'sha256:e2a9d48f0ce7015546169ade299696efefe3219ddc968bddb2d7b3053bd65306'
 related:
   - "[[2026-08-02-provider-error-taxonomy-plan]]"
   - "[[2026-08-02-provider-error-taxonomy-adr]]"
@@ -220,6 +220,67 @@ which is the capability this campaign exists to deliver.
 The margin also makes this worse than the numbers suggest. 16.3 against 15 is not
 a comfortable overrun to tune away; a slower host, a colder cache, or one more
 served lane widens it, while a warm host hides it entirely.
+
+### consuming-surface-independently-read-and-the-central-property-holds | VERIFIED CLEAN | No presentation path depends on the opaque prose
+
+An adversarial read by a party who did not write the surface, commissioned
+because that repository's test tier has no engine-free mode and the author's own
+run was therefore the only execution evidence in existence. Two load-bearing
+claims were then re-verified a third time, independently:
+
+- The ONLY production read of the prose field on that surface renders it and
+  branches on nothing. Every comparison, match and membership operator was
+  searched against that field and its relay sibling; none exists. One unrelated
+  subsystem does branch on a similarly-named field, and predates this work.
+- The render coverage is asserted against the vocabulary itself by equality
+  INCLUDING ORDER, not by sampling, so a member cannot ship unrendered. Remedies
+  are asserted pairwise distinct.
+
+The coverage test also survives the specific attack it exists to stop. A
+hypothetical prose check for the word "credit" resolves the WRONG member on at
+least two rows, because one member's copy says "out of credit" while another
+member's says "no credit left". The contradicting reasons are real contradictions
+rather than decorative, so a future prose check fails rather than passes.
+
+All three remedy pairs that must not collapse are genuinely distinct: payment
+versus a self-imposed ceiling, waiting versus a plan change, the path to the
+provider versus the provider answering that it is over capacity. Two transient
+members share a recovery CLAUSE while differing in diagnosis, which is a decision
+rather than an accident and is recorded as one.
+
+### consuming-authoring-record-does-not-model-the-classification | low | A second surface's wire type omits both the reason and the classification
+
+The consuming repository's authoring run record mirrors the engine's run record
+but models neither the human reason nor the classification. Pre-existing for the
+reason - it never modelled it - and widened by this campaign, which added a
+second unmodelled field. NOT on the delivered path: the refusal presentation
+reads the orchestration status, not this record. The consequence is that the
+authoring surface cannot see a classification, not that anything shipped is
+broken.
+
+### consuming-settlement-payload-cannot-report-a-classification | low, latent | The browser could not report a classification if it settled a failed run
+
+The settlement payload type lacks the field. Latent rather than live: the hook
+that would send it has no component caller and is driven only by a test, so
+nothing in the product settles runs from the browser today. Worth closing when
+something does.
+
+### truncation-of-provider-prose-is-unexercised-and-splits-surrogate-pairs | low | A reason ending in an emoji truncates to a replacement character
+
+The refusal detail truncates at a character ceiling that no test reaches, since
+every fixture reason is short - so a broken truncation would pass. The cut is by
+UTF-16 code unit, so a reason ending mid-surrogate-pair renders a replacement
+character. Provider prose is plausible emoji-carrying text, which is what lifts
+this above theoretical.
+
+### floor-member-applies-to-records-predating-the-field | low, confirm-not-defect | Historical failed runs now render as reporting no cause
+
+Absence is correctly kept distinct from the floor member at the adapter, and
+deliberately becomes the floor at the view for a failed run. The consequence is
+that every failed run recorded BEFORE the field existed now presents as having
+reported no cause. That reading is honest - those runs genuinely have no recorded
+classification - and is recorded here as intended rather than as a defect, so a
+later reader does not mistake it for a migration gap.
 
 ## Recommendations
 

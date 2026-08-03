@@ -12,6 +12,7 @@ from pathlib import Path
 
 from fastapi.testclient import TestClient
 
+from .conftest import catalog_run_fields
 from .conftest import make_app as _make_app_4
 
 
@@ -74,6 +75,10 @@ class TestCreateThreadWithMetadata:
                         "team_preset": _BUNDLE_FREE_PRESET,
                         "message": "Implement auth flow",
                         "metadata": metadata,
+                        "run_id": "thread-meta-01",
+                        "selection": catalog_run_fields(
+                            client, workspace_root=metadata["workspace_root"]
+                        )["selection"],
                     },
                 )
 
@@ -98,6 +103,10 @@ class TestCreateThreadWithMetadata:
                     "team_preset": _BUNDLE_FREE_PRESET,
                     "message": "Hello",
                     "metadata": metadata,
+                    "run_id": "thread-meta-02",
+                    "selection": catalog_run_fields(
+                        client, workspace_root=metadata["workspace_root"]
+                    )["selection"],
                 },
             )
         assert resp.status_code == 422
@@ -120,6 +129,10 @@ class TestCreateThreadWithMetadata:
                         "team_preset": _BUNDLE_FREE_PRESET,
                         "message": "Hello",
                         "metadata": metadata,
+                        "run_id": "thread-meta-03",
+                        "selection": catalog_run_fields(
+                            client, workspace_root=metadata["workspace_root"]
+                        )["selection"],
                     },
                 )
 
@@ -144,6 +157,10 @@ class TestCreateThreadWithMetadata:
                         "team_preset": _BUNDLE_FREE_PRESET,
                         "message": "First",
                         "metadata": metadata,
+                        "run_id": "thread-meta-04",
+                        "selection": catalog_run_fields(
+                            client, workspace_root=metadata["workspace_root"]
+                        )["selection"],
                     },
                 )
                 assert resp1.status_code == 201
@@ -154,6 +171,10 @@ class TestCreateThreadWithMetadata:
                         "team_preset": _BUNDLE_FREE_PRESET,
                         "message": "Second",
                         "metadata": metadata,
+                        "run_id": "thread-meta-05",
+                        "selection": catalog_run_fields(
+                            client, workspace_root=metadata["workspace_root"]
+                        )["selection"],
                     },
                 )
                 assert resp2.status_code == 409
@@ -169,6 +190,8 @@ class TestCreateThreadWithMetadata:
                     "team_preset": _BUNDLE_FREE_PRESET,
                     "message": "Hello",
                     "title": "Legacy",
+                    "run_id": "thread-meta-06",
+                    **catalog_run_fields(client),
                 },
             )
 
@@ -205,6 +228,10 @@ class TestListThreadsWithMetadata:
                         "team_preset": _BUNDLE_FREE_PRESET,
                         "message": "Hello",
                         "metadata": metadata,
+                        "run_id": "thread-meta-07",
+                        "selection": catalog_run_fields(
+                            client, workspace_root=metadata["workspace_root"]
+                        )["selection"],
                     },
                 )
             summaries, _total = _list_summaries(session_factory, checkpointer)
@@ -228,6 +255,8 @@ class TestListThreadsWithMetadata:
                     "team_preset": _BUNDLE_FREE_PRESET,
                     "message": "Hello",
                     "title": "Legacy",
+                    "run_id": "thread-meta-08",
+                    **catalog_run_fields(client),
                 },
             )
         summaries, _total = _list_summaries(session_factory, checkpointer)
@@ -264,6 +293,10 @@ class TestGetMetadataEndpoint:
                         "team_preset": _BUNDLE_FREE_PRESET,
                         "message": "Hello",
                         "metadata": metadata,
+                        "run_id": "thread-meta-09",
+                        "selection": catalog_run_fields(
+                            client, workspace_root=metadata["workspace_root"]
+                        )["selection"],
                     },
                 )
                 thread_id = create_resp.json()["run_id"]
@@ -291,7 +324,12 @@ class TestGetMetadataEndpoint:
         with TestClient(app, raise_server_exceptions=True) as client:
             create_resp = client.post(
                 "/v1/runs",
-                json={"team_preset": _BUNDLE_FREE_PRESET, "message": "Hello"},
+                json={
+                    "team_preset": _BUNDLE_FREE_PRESET,
+                    "message": "Hello",
+                    "run_id": "thread-meta-10",
+                    **catalog_run_fields(client),
+                },
             )
             assert create_resp.status_code == 201, create_resp.text
             thread_id = create_resp.json()["run_id"]
@@ -347,6 +385,10 @@ class TestAutoDiscovery:
                         "team_preset": _BUNDLE_FREE_PRESET,
                         "message": "Hello",
                         "metadata": metadata,
+                        "run_id": "thread-meta-11",
+                        "selection": catalog_run_fields(
+                            client, workspace_root=metadata["workspace_root"]
+                        )["selection"],
                     },
                 )
                 thread_id = create_resp.json()["run_id"]

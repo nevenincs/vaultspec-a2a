@@ -22,7 +22,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from ...streaming.aggregator import EventAggregator
 from ...thread.clarification import MAX_ANSWER_CHARS
 from .clarification_harness import park_clarification
-from .conftest import make_app
+from .conftest import catalog_run_fields, make_app
 
 if TYPE_CHECKING:
     from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
@@ -43,7 +43,12 @@ class TestClarificationRoundTrip:
         with TestClient(app, raise_server_exceptions=True) as client:
             create_resp = client.post(
                 "/v1/runs",
-                json={"team_preset": _BUNDLE_FREE_PRESET, "message": "plan it"},
+                json={
+                    "team_preset": _BUNDLE_FREE_PRESET,
+                    "message": "plan it",
+                    "run_id": "clarify-ep-01",
+                    **catalog_run_fields(client),
+                },
             )
             assert create_resp.status_code == 201
             thread_id = create_resp.json()["run_id"]
@@ -98,7 +103,12 @@ class TestClarificationRoundTrip:
         with TestClient(app1, raise_server_exceptions=True) as client1:
             create_resp = client1.post(
                 "/v1/runs",
-                json={"team_preset": _BUNDLE_FREE_PRESET, "message": "plan it"},
+                json={
+                    "team_preset": _BUNDLE_FREE_PRESET,
+                    "message": "plan it",
+                    "run_id": "clarify-ep-02",
+                    **catalog_run_fields(client1),
+                },
             )
             thread_id = create_resp.json()["run_id"]
 
@@ -128,7 +138,12 @@ class TestClarificationRoundTrip:
         with TestClient(app, raise_server_exceptions=True) as client:
             create_resp = client.post(
                 "/v1/runs",
-                json={"team_preset": _BUNDLE_FREE_PRESET, "message": "plan it"},
+                json={
+                    "team_preset": _BUNDLE_FREE_PRESET,
+                    "message": "plan it",
+                    "run_id": "clarify-ep-03",
+                    **catalog_run_fields(client),
+                },
             )
             thread_id = create_resp.json()["run_id"]
             worker.dispatches.clear()
@@ -154,7 +169,12 @@ class TestClarificationRoundTrip:
         with TestClient(app, raise_server_exceptions=True) as client:
             create_resp = client.post(
                 "/v1/runs",
-                json={"team_preset": _BUNDLE_FREE_PRESET, "message": "plan it"},
+                json={
+                    "team_preset": _BUNDLE_FREE_PRESET,
+                    "message": "plan it",
+                    "run_id": "clarify-ep-04",
+                    **catalog_run_fields(client),
+                },
             )
             thread_id = create_resp.json()["run_id"]
             worker.dispatches.clear()
@@ -179,7 +199,12 @@ class TestClarificationRoundTrip:
         with TestClient(app, raise_server_exceptions=True) as client:
             create_resp = client.post(
                 "/v1/runs",
-                json={"team_preset": _BUNDLE_FREE_PRESET, "message": "plan it"},
+                json={
+                    "team_preset": _BUNDLE_FREE_PRESET,
+                    "message": "plan it",
+                    "run_id": "clarify-ep-05",
+                    **catalog_run_fields(client),
+                },
             )
             thread_id = create_resp.json()["run_id"]
             worker.dispatches.clear()
@@ -208,7 +233,12 @@ class TestClarificationRoundTrip:
         with TestClient(app, raise_server_exceptions=True) as client:
             create_resp = client.post(
                 "/v1/runs",
-                json={"team_preset": _BUNDLE_FREE_PRESET, "message": "plan it"},
+                json={
+                    "team_preset": _BUNDLE_FREE_PRESET,
+                    "message": "plan it",
+                    "run_id": "clarify-ep-06",
+                    **catalog_run_fields(client),
+                },
             )
             thread_id = create_resp.json()["run_id"]
             worker.dispatches.clear()
@@ -246,7 +276,12 @@ class TestClarificationRoundTrip:
         with TestClient(app, raise_server_exceptions=True) as client:
             create_resp = client.post(
                 "/v1/runs",
-                json={"team_preset": _BUNDLE_FREE_PRESET, "message": "plan it"},
+                json={
+                    "team_preset": _BUNDLE_FREE_PRESET,
+                    "message": "plan it",
+                    "run_id": "clarify-ep-07",
+                    **catalog_run_fields(client),
+                },
             )
             thread_id = create_resp.json()["run_id"]
             worker.dispatches.clear()
@@ -277,7 +312,12 @@ class TestClarificationRoundTrip:
         with TestClient(app, raise_server_exceptions=True) as client:
             create_resp = client.post(
                 "/v1/runs",
-                json={"team_preset": _BUNDLE_FREE_PRESET, "message": "plan it"},
+                json={
+                    "team_preset": _BUNDLE_FREE_PRESET,
+                    "message": "plan it",
+                    "run_id": "clarify-ep-08",
+                    **catalog_run_fields(client),
+                },
             )
             thread_id = create_resp.json()["run_id"]
             worker.dispatches.clear()
@@ -334,7 +374,12 @@ class TestClarificationRoundTrip:
         with TestClient(app, raise_server_exceptions=True) as client:
             create_resp = client.post(
                 "/v1/runs",
-                json={"team_preset": _BUNDLE_FREE_PRESET, "message": "plan it"},
+                json={
+                    "team_preset": _BUNDLE_FREE_PRESET,
+                    "message": "plan it",
+                    "run_id": "clarify-ep-09",
+                    **catalog_run_fields(client),
+                },
             )
             thread_id = create_resp.json()["run_id"]
             worker.dispatches.clear()
@@ -359,7 +404,12 @@ class TestClarificationRoundTrip:
         with TestClient(app, raise_server_exceptions=True) as client:
             create_resp = client.post(
                 "/v1/runs",
-                json={"team_preset": _BUNDLE_FREE_PRESET, "message": "plan it"},
+                json={
+                    "team_preset": _BUNDLE_FREE_PRESET,
+                    "message": "plan it",
+                    "run_id": "clarify-ep-10",
+                    **catalog_run_fields(client),
+                },
             )
             thread_id = create_resp.json()["run_id"]
             worker.dispatches.clear()
@@ -389,7 +439,12 @@ class TestClarificationRoundTrip:
         with TestClient(app, raise_server_exceptions=True) as client:
             create_resp = client.post(
                 "/v1/runs",
-                json={"team_preset": _BUNDLE_FREE_PRESET, "message": "plan it"},
+                json={
+                    "team_preset": _BUNDLE_FREE_PRESET,
+                    "message": "plan it",
+                    "run_id": "clarify-ep-11",
+                    **catalog_run_fields(client),
+                },
             )
             thread_id = create_resp.json()["run_id"]
             worker.dispatches.clear()
@@ -423,7 +478,12 @@ class TestClarificationRoundTrip:
         with TestClient(app, raise_server_exceptions=True) as client:
             create_resp = client.post(
                 "/v1/runs",
-                json={"team_preset": _BUNDLE_FREE_PRESET, "message": "plan it"},
+                json={
+                    "team_preset": _BUNDLE_FREE_PRESET,
+                    "message": "plan it",
+                    "run_id": "clarify-ep-12",
+                    **catalog_run_fields(client),
+                },
             )
             thread_id = create_resp.json()["run_id"]
             worker.dispatches.clear()
@@ -452,7 +512,12 @@ class TestClarificationRoundTrip:
         with TestClient(app, raise_server_exceptions=True) as client:
             create_resp = client.post(
                 "/v1/runs",
-                json={"team_preset": _BUNDLE_FREE_PRESET, "message": "plan it"},
+                json={
+                    "team_preset": _BUNDLE_FREE_PRESET,
+                    "message": "plan it",
+                    "run_id": "clarify-ep-13",
+                    **catalog_run_fields(client),
+                },
             )
             thread_id = create_resp.json()["run_id"]
             worker.dispatches.clear()

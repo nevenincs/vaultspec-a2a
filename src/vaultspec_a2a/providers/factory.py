@@ -1,24 +1,35 @@
-"""LLM Provider factory."""
+"""LLM Provider factory.
+
+The LangChain model classes are imported lazily, not at module scope. Importing
+``langchain_openai`` costs roughly twenty-five seconds in this environment, and
+this module's classification and readiness helpers - which several callers reach
+for WITHOUT ever constructing a model - had to pay that before answering. The
+chat-model classes are now imported where a model is actually built, so probing
+which provider a command resolves to no longer loads a model stack to answer.
+"""
+
+from __future__ import annotations
 
 import logging
 import os
 import shutil
-from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 
-from langchain_core.language_models import BaseChatModel
-from langchain_openai import ChatOpenAI
+if TYPE_CHECKING:
+    from collections.abc import Awaitable, Callable
+
+    from langchain_core.language_models import BaseChatModel
+
+    from ..team.team_config import AgentConfig
 
 from ..control.config import settings
 from ..graph.enums import MODEL_MAP, PROVIDER_DEFAULT_MODELS, Model, Provider
-from ..team.team_config import AgentConfig
 from ..thread.errors import ConfigError
 from ..workspace.environment import resolve_env_vars
 from .acp_catalog import discover_acp_catalog
-from .acp_chat_model import AcpChatModel
 from .codex_catalog import discover_codex_catalog
 from .kimi_catalog import discover_kimi_catalog
 from .openai_catalog import discover_openai_compatible_catalog
@@ -854,9 +865,7 @@ async def _discover_unverified_catalog(
     )
 
 
-def _admit_and_resolve_model_name(
-    provider: Provider, model: "Model | str | None"
-) -> str:
+def _admit_and_resolve_model_name(provider: Provider, model: Model | str | None) -> str:
     """Admit the provider and resolve its model name, or raise.
 
     The admission path, separated from construction: it refuses an unsupported
@@ -964,10 +973,10 @@ class ProviderFactory:
     def create(
         self,
         provider: Provider,
-        model: "Model | str | None" = None,
+        model: Model | str | None = None,
         agent_config: AgentConfig | None = None,
         workspace_root: Path | None = None,
-        backend: "str | None" = None,
+        backend: str | None = None,
         **kwargs: Any,
     ) -> BaseChatModel:
         """Create a configured BaseChatModel for the given provider.
@@ -987,6 +996,14 @@ class ProviderFactory:
         Returns:
             A LangChain BaseChatModel implementation.
         """
+        # Imported here rather than at module scope: this is the only place that
+        # builds one, and the LangChain model stack costs tens of seconds to load,
+        # which every caller of this module's classification helpers used to pay to
+        # answer a question that needs no model at all.
+        from langchain_openai import ChatOpenAI
+
+        from .acp_chat_model import AcpChatModel
+
         timeout = kwargs.pop("timeout", settings.provider_timeout_seconds)
         execution_mode = kwargs.pop("execution_mode", None)
         native_controls = kwargs.pop("native_controls", None)

@@ -20,8 +20,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 from uuid import uuid4
 
-from ..database.artifact_repository import append_cost_record
-from ..database.models import CostTrackingModel
+from ..database import CostTrackingModel, append_cost_record
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker

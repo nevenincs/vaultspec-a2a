@@ -66,8 +66,8 @@ if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
     from ..authoring import EngineEndpoint
+    from ..database import ControlActionModel
     from ..database.checkpoints import Checkpointer
-    from ..database.models import ControlActionModel
     from .circuit_breaker import WorkerCircuitBreaker
     from .worker_management import LazyWorkerSpawner
 

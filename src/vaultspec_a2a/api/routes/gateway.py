@@ -74,11 +74,14 @@ from ...control.thread_state_service import (
     derive_run_semantic_context,
     project_semantic_phase,
 )
-from ...database import get_thread, get_thread_metadata
+from ...database import (
+    get_db,
+    get_permission_request,
+    get_thread,
+    get_thread_metadata,
+    normalize_workspace_identity,
+)
 from ...database.checkpoints import Checkpointer
-from ...database.permission_repository import get_permission_request
-from ...database.session import get_db
-from ...database.thread_repository import normalize_workspace_identity
 from ...domain_config import domain_config
 from ...providers.provider_catalog import ControlSelection, SelectionReference
 from ...providers.provider_catalog_service import (

@@ -77,7 +77,7 @@ def _session_factory(
     """Select the injected session factory or the application factory."""
     if configured is not None:
         return configured
-    from ..database.session import get_session_factory
+    from ..database import get_session_factory
 
     return get_session_factory()
 

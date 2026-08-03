@@ -7,7 +7,7 @@ import os
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from ..database.thread_repository import (
+from ..database import (
     list_active_thread_page,
     normalize_workspace_identity,
 )

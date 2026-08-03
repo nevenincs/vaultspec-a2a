@@ -20,8 +20,7 @@ from typing import TYPE_CHECKING
 import httpx
 from pydantic import TypeAdapter, ValidationError
 
-from ..database import list_threads, update_thread_status
-from ..database.session import get_session_factory
+from ..database import get_session_factory, list_threads, update_thread_status
 from ..domain_config import domain_config
 from ..ipc.schemas import DispatchRequest, DispatchResponse, to_dispatch_action
 from ..providers.team_selection import (

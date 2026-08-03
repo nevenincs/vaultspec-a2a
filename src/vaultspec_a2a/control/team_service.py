@@ -12,8 +12,7 @@ from typing import TYPE_CHECKING
 
 from sqlalchemy import select
 
-from ..database import get_pending_permission_requests
-from ..database.models import ThreadModel
+from ..database import ThreadModel, get_pending_permission_requests
 from ..graph.enums import AgentLifecycleState
 from ..thread.enums import TERMINAL_STATUSES, RepairStatus
 from ..thread.snapshots import AgentData, build_agent_descriptor

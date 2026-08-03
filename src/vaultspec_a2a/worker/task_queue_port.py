@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from ..database.task_queue_repository import get_queue_view, mark_task_complete
+from ..database import get_queue_view, mark_task_complete
 from ..graph.protocols import MarkCompleteOutcome, QueueEntryView
 
 if TYPE_CHECKING:

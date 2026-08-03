@@ -19,8 +19,8 @@ import httpx
 from fastapi import Depends, Header, HTTPException, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from ..database import get_db
 from ..database.checkpoints import Checkpointer
-from ..database.session import get_db
 from ..streaming.aggregator import EventAggregator
 from .auth import authenticate_request as require_attach
 

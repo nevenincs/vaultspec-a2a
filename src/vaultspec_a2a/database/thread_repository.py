@@ -478,7 +478,7 @@ async def set_thread_repair_state(
     *,
     repair_status: RepairStatus | str,
     repair_reason: str | None = None,
-    execution_readiness: str | None = None,
+    execution_readiness: RepairStatus | str | None = None,
     last_requested_action: ControlActionType | str | None = None,
     last_applied_action: ControlActionType | str | None = None,
     increment_generation: bool = False,

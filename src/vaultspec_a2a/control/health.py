@@ -36,7 +36,7 @@ from pydantic import TypeAdapter, ValidationError
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine
 
-from ..database.session import inspect_sqlite_database, verify_wal_mode
+from ..database import inspect_sqlite_database, verify_wal_mode
 from .config import settings
 from .worker_management import LazyWorkerSpawner, WorkerState, probe_worker_health
 

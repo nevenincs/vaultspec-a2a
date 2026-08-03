@@ -9,8 +9,12 @@ from typing import TYPE_CHECKING
 from pydantic import TypeAdapter, ValidationError
 from sqlalchemy import select
 
-from ..database import get_permission_request, get_thread, update_thread_status
-from ..database.models import ControlActionModel
+from ..database import (
+    ControlActionModel,
+    get_permission_request,
+    get_thread,
+    update_thread_status,
+)
 from ..ipc.schemas import DispatchRequest, to_dispatch_action
 from ..thread.constants import DEFAULT_SUPERVISOR_ID
 from ..thread.dispatch_policy import FailureType, evaluate_dispatch_failure

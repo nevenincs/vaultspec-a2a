@@ -174,7 +174,7 @@ class GraphLifecycleManager:
         token_store: RunTokenStore,
         catalog_store: RunCatalogStore,
     ) -> None:
-        from ..database.session import get_session_factory
+        from ..database import get_session_factory
         from ..providers.factory import ProviderFactory
         from .cost_port import SqlCostPort
         from .task_queue_port import SqlTaskQueuePort

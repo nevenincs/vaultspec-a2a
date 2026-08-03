@@ -16,12 +16,12 @@ from typing import TYPE_CHECKING, cast
 from sqlalchemy import select
 
 from ..database import (
+    ControlActionModel,
     get_control_action_by_idempotency_key,
     get_thread,
     mark_control_action_applied,
     settle_control_action_lease,
 )
-from ..database.models import ControlActionModel
 from ..ipc.schemas import DispatchRequest, to_dispatch_action
 from ..thread.clarification import (
     ClarificationAnswers,

@@ -57,7 +57,7 @@ if TYPE_CHECKING:
     import httpx
     from sqlalchemy.ext.asyncio import AsyncSession
 
-    from ..database.models import (
+    from ..database import (
         PermissionRequestModel,
         ThreadModel,
     )

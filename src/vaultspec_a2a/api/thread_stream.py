@@ -19,7 +19,7 @@ from fastapi import HTTPException
 from fastapi.responses import StreamingResponse
 
 from ..control.config import settings
-from ..database.thread_repository import get_thread
+from ..database import get_thread
 from ..providers.conditions import ProviderCondition
 from ..streaming.aggregator import EventAggregator, SequencedEvent
 from ..streaming.sse_frames import encode_sse_frame

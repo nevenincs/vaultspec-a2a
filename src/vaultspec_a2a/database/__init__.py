@@ -44,10 +44,13 @@ from .migrations import count_pending_sdd_backfill as count_pending_sdd_backfill
 from .models import ArtifactModel as ArtifactModel
 from .models import AuthoringEventCursorModel as AuthoringEventCursorModel
 from .models import Base as Base
+from .models import ControlActionModel as ControlActionModel
 from .models import CostTrackingModel as CostTrackingModel
 from .models import PermissionLogModel as PermissionLogModel
+from .models import PermissionRequestModel as PermissionRequestModel
 from .models import TaskQueueEntryModel as TaskQueueEntryModel
 from .models import ThreadDeletionSagaModel as ThreadDeletionSagaModel
+from .models import ThreadExecutionStateModel as ThreadExecutionStateModel
 from .models import ThreadModel as ThreadModel
 from .permission_repository import (
     ControlActionReservation as ControlActionReservation,
@@ -113,6 +116,7 @@ from .session import get_db as get_db
 from .session import get_engine as get_engine
 from .session import get_session_factory as get_session_factory
 from .session import init_db as init_db
+from .session import inspect_sqlite_database as inspect_sqlite_database
 from .session import verify_wal_mode as verify_wal_mode
 from .task_queue_repository import MarkCompleteResult as MarkCompleteResult
 from .task_queue_repository import get_queue_view as get_queue_view
@@ -152,13 +156,16 @@ __all__ = [
     "ArtifactModel",
     "AuthoringEventCursorModel",
     "Base",
+    "ControlActionModel",
     "ControlActionReservation",
     "CostTrackingModel",
     "MarkCompleteResult",
     "PermissionLogModel",
+    "PermissionRequestModel",
     "SchemaCompatibilityError",
     "TaskQueueEntryModel",
     "ThreadDeletionSagaModel",
+    "ThreadExecutionStateModel",
     "ThreadModel",
     "acquire_control_action_lease",
     "append_cost_record",
@@ -190,6 +197,7 @@ __all__ = [
     "get_thread_execution_state",
     "get_thread_metadata",
     "init_db",
+    "inspect_sqlite_database",
     "list_active_thread_page",
     "list_non_terminal_threads",
     "list_threads",

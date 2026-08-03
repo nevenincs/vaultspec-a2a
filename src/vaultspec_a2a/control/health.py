@@ -540,7 +540,18 @@ def assemble_desktop_readiness(
     # --- Worker lifecycle: the cold-to-execution ladder. ---
     worker_spawned = bool(shared["worker_spawned"])
     worker_status = shared["worker_status"]
-    if not worker_spawned:
+    if not worker_spawned and worker_probe_ready is True:
+        # The spawn flag has not been set yet, but the worker just answered its
+        # real authenticated probe. This is the SAME window the ``pending``
+        # branch below documents - a demand-side caller completing the live
+        # probe before the watchdog advances its cached label - one rung
+        # earlier, and it was unhandled here. `ensure_worker` awaits the
+        # single-flight start and returns, admission probes immediately, and the
+        # flag has not caught up: prepare then refused a worker that was already
+        # answering, so first demand failed on a cold-start race rather than on
+        # anything about the run.
+        worker_state = WorkerLifecycleState.READY
+    elif not worker_spawned:
         # No worker exists yet; one starts on first execution demand.
         worker_state = WorkerLifecycleState.COLD
         reasons.append("worker is cold; starts on first execution demand")

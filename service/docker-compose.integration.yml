@@ -22,6 +22,10 @@ services:
       VAULTSPEC_DATABASE_URL: 'sqlite+aiosqlite:////app/data/vaultspec.db'
       VAULTSPEC_DATABASE_BACKEND: sqlite
       VAULTSPEC_CHECKPOINT_BACKEND: sqlite
+      # Anchored under the same db-data volume as the database — see the
+      # matching comment in docker-compose.prod.yml.
+      VAULTSPEC_A2A_HOME: '/app/data/a2a-home'
+      VAULTSPEC_WORKSPACE_ROOT: '/app/data/workspaces'
       VAULTSPEC_WORKER_URL: 'http://worker:18001'
       VAULTSPEC_AUTO_SPAWN_WORKER: 'false'
       VAULTSPEC_INTERNAL_TOKEN: 'vaultspec-integration-token'
@@ -61,6 +65,9 @@ services:
       VAULTSPEC_DATABASE_URL: 'sqlite+aiosqlite:////app/data/vaultspec.db'
       VAULTSPEC_DATABASE_BACKEND: sqlite
       VAULTSPEC_CHECKPOINT_BACKEND: sqlite
+      # See the matching comment on the gateway service above.
+      VAULTSPEC_A2A_HOME: '/app/data/a2a-home'
+      VAULTSPEC_WORKSPACE_ROOT: '/app/data/workspaces'
       VAULTSPEC_GATEWAY_URL: 'http://gateway:18000'
       VAULTSPEC_INTERNAL_TOKEN: 'vaultspec-integration-token'
       MOCK_API_BASE: 'http://vidaimock:8100'

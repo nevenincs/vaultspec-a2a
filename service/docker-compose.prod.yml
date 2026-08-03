@@ -26,6 +26,12 @@ services:
       VAULTSPEC_DATABASE_URL: 'sqlite+aiosqlite:////app/data/vaultspec.db'
       VAULTSPEC_DATABASE_BACKEND: sqlite
       VAULTSPEC_CHECKPOINT_BACKEND: sqlite
+      # Both anchored under the same db-data volume as the database, so one
+      # volume carries every canonical store: the discovery record and rotating
+      # service log (a2a_home) would otherwise land on the container's ephemeral
+      # writable layer and vanish on every recreate while the database survived.
+      VAULTSPEC_A2A_HOME: '/app/data/a2a-home'
+      VAULTSPEC_WORKSPACE_ROOT: '/app/data/workspaces'
       VAULTSPEC_WORKER_URL: 'http://worker:18001'
       VAULTSPEC_AUTO_SPAWN_WORKER: 'false'
       VAULTSPEC_INTERNAL_TOKEN: '${VAULTSPEC_INTERNAL_TOKEN:?VAULTSPEC_INTERNAL_TOKEN is required}'
@@ -62,6 +68,9 @@ services:
       VAULTSPEC_DATABASE_URL: 'sqlite+aiosqlite:////app/data/vaultspec.db'
       VAULTSPEC_DATABASE_BACKEND: sqlite
       VAULTSPEC_CHECKPOINT_BACKEND: sqlite
+      # See the matching comment on the gateway service above.
+      VAULTSPEC_A2A_HOME: '/app/data/a2a-home'
+      VAULTSPEC_WORKSPACE_ROOT: '/app/data/workspaces'
       VAULTSPEC_GATEWAY_URL: 'http://gateway:18000'
       VAULTSPEC_INTERNAL_TOKEN: '${VAULTSPEC_INTERNAL_TOKEN:?VAULTSPEC_INTERNAL_TOKEN is required}'
       OTEL_EXPORTER_OTLP_ENDPOINT: 'http://jaeger:4317'

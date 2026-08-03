@@ -5,89 +5,135 @@ tags:
 date: '2026-08-03'
 modified: '2026-08-03'
 body_schema: 'body-v1'
-body_hash: 'sha256:56afbecbc91615dc76f1b8debc148d022ea6655266eab4b6f778d0956e8148d4'
-related: []
+body_hash: 'sha256:872cd29881340e8401402813dbb98b7f34177c7274f71fcd84e45bd0ea2bdf89'
+related:
+  - '[[2026-08-03-production-boundary-audit]]'
 ---
 
-<!-- FRONTMATTER RULES:
-     tags: one directory tag (hardcoded #adr) and one feature tag.
-     Replace production-boundary with a kebab-case feature tag, e.g. #foo-bar.
-     Additional tags may be appended below the required pair.
-
-     Related: use wiki-links as '[[yyyy-mm-dd-foo-bar]]'.
-
-     modified: CLI-maintained last-modified stamp; set at scaffold time,
-     refreshed by mutating CLI verbs and vault check fix; never hand-edit.
-
-     Status convention: the H1 status value is one of proposed, accepted,
-     rejected, superseded, or deprecated. A new ADR starts as proposed; it
-     moves to accepted or rejected when the decision is made; it becomes
-     superseded when a later ADR replaces it (set by vault adr supersede,
-     which also records superseded_by); and deprecated when it is retired
-     without a direct successor.
-
-     Amend vs supersede: refinements and concretization rewrite the accepted
-     record's body in place (modified: carries the revision); a new ADR with
-     supersession is only for a major pivot. One accepted record per
-     decision.
-
-     DO NOT add fields beyond those scaffolded; metadata lives
-     only in the frontmatter. -->
-
-<!-- LINK RULES:
-     - [[wiki-links]] are ONLY for .vault/ documents in the related: field above.
-     - NEVER use [[wiki-links]] or markdown links in the document body.
-     - NEVER reference file paths in the body. If you must name a source file,
-       class, or function, use inline backtick code: `src/module.py`. -->
-
-# `production-boundary` adr: `refusing a run that carries no active project` | (**status:** `{proposed|accepted|rejected|superseded|deprecated}`)
-
-<!-- DOCUMENT BOUNDARY:
-     This record owns the decision and only the decision. Grounding evidence
-     lives in the related research/reference documents and is cited by stem
-     (e.g. `2026-02-04-editor-demo-research`), never restated - a restated
-     fact forks and goes stale. A fact this record needs but the grounding
-     lacks is added to the grounding first, then cited. -->
+# `production-boundary` adr: `refusing a run that carries no active project` | (**status:** `accepted`)
 
 ## Problem Statement
 
-<!-- The problem and why a decision is needed now, in this record's own
-     terms. Do not re-narrate the research's evidence; cite it. -->
+Every run this service executes belongs to a project, and the caller that owns
+that project supplies it: the dashboard engine derives the workspace from its
+own active scope cell on the start, prepare, commit, and release stages alike,
+and explicitly accepts nothing browser-supplied. Beneath that, however, the
+metadata envelope carrying the project was optional at every layer, and its
+absence was never refused. The null propagated into the provider factory, where
+ten fallbacks resolved it to whatever directory the serving process had been
+started in.
+
+A decision is needed now because the consequence is not merely that agents ran
+in the wrong folder. The agent filesystem and terminal sandbox roots derive from
+the same value, so an unsited run confined its agent to - and therefore
+permitted it within - this service's own tree.
 
 ## Considerations
 
-<!-- Only the forces that bear on the choice, each a terse line citing its
-     grounding by stem or locator. Nothing the research already
-     establishes is re-argued here. -->
+The active project is already mandatory in practice: the producing caller sends
+it on every stage, and the field on the metadata model is required and validated
+as an existing directory once the envelope is present.
+
+The start path's current protection is accidental. A mandatory
+provider-selection freeze happens to refuse a null workspace, reporting it as a
+provider-selection error. That invariant is owned by the wrong gate under the
+wrong name, and it evaporates if selection ever becomes optional.
+
+The follow-up message path has no protection whatsoever: it degrades a missing
+or unreadable stored workspace to null through a bare exception handler and
+dispatches the turn anyway.
+
+The middle link of the fallback chains is dead. The factory constructs every
+chat model with a workspace root and never sets the intermediate working
+directory field, so each three-way chain already reduced to two.
+
+A sandbox root is a security boundary. Deriving one from ambient process state
+means the boundary is whatever the launcher happened to choose.
 
 ## Considered options
 
-<!-- Name each alternative evaluated, compared at the same level of abstraction, with its
-key pros and cons and why it was kept or rejected. Naming the rejected options - not only
-the chosen one - is what lets a future reader reconstruct the decision. Keep each option
-to a terse claim-first line or two; the chosen option's full reasoning belongs under
-Rationale. -->
+**Refuse at the run-creation seam.** Enforce the requirement where a run becomes
+durable, beside the existing invalid-directory refusal, and remove every
+fallback beneath it. Costs one new refusal path and the rewriting of tests that
+leaned on the ambient default. Chosen.
+
+**Require the metadata envelope in the request schema.** Rejected: the field
+serves four stages, and the prepare stage legitimately resolves bundled presets
+without a workspace while creating no durable run, so a schema-wide requirement
+changes the prepare shape for no gain.
+
+**Refuse only in the provider layer.** Rejected as too late. The run would be
+admitted, persisted, and dispatched before failing, burning admission capacity
+and producing a mid-run failure instead of a clean client error.
+
+**Keep the status quo.** Rejected. The only protection on the start path is an
+incidental side effect of an unrelated gate under a misleading error, there is
+no protection at all on the follow-up path, and the ambient sandbox hazard sits
+beneath both.
 
 ## Constraints
 
-<!-- Technical limitations, e.g.: depends on non-mature library, frontier feature, requires rigorous research. 'Frontier' risk, e.g. technology is new and falls outside the implementing model's training cutoff.
+The wire contract must not change: the producing caller already satisfies the
+requirement on every stage, so tightening the schema would impose a migration
+for an invariant that is already met.
 
-List out the blocking constraints, and features, gaps needed for reliable implementation. Must explicitly evaluate how stable 'parent' features are if this adr
-relies on another feature. -->
+The prepare and release stages create no durable run and must keep working
+without a workspace.
+
+The repository-root setting retains a legitimate role resolving this service's
+own installed assets, and must not be conflated with agent siting.
 
 ## Implementation
 
-<!-- A high-level overview (not a plan!) of HOW and WHAT will be implemented. Focus on condensed but clear prose that describes functionality layering.
+The refusal lives at one seam. The metadata processor raises when the envelope
+is absent, exactly beside its existing invalid-directory refusal, and the
+gateway's existing exception mapping surfaces it as an unprocessable-entity
+response. Both the one-shot start and the prepared commit share this seam
+through the common run-creation core.
 
-Do not add code; code references must be persisted in a separate `{reference}` document. Important `{reference}` snippets must be summarized and referenced explicitly. -->
+The follow-up path applies the same rule under its own typed failure, mapped to
+the same status at the route so one invariant reads identically at both entry
+points.
+
+Beneath the seam the workspace root becomes a hard requirement, expressed once
+as a shared helper that refuses rather than invents. The dead working-directory
+field is deleted from both chat models and the runtime configuration. The spawn
+directory, the environment resolution root, the session working directory, and
+the filesystem and terminal sandbox roots all take the required value. Catalog
+discovery requires an explicit root as well, which is a type-level tightening
+only, since every production catalog call already arrives through the
+workspace-scoped service behind an existing-directory check.
 
 ## Rationale
 
-<!-- Why this option wins against the drivers: a knockout criterion or a
-     clear edge over the alternatives. Cite `{research}` findings and
-     grounding `{reference}` by stem; do not restate them. A new fact
-     surfacing here first belongs in the grounding document. -->
+Enforcing the requirement where runs become durable, rather than where requests
+are parsed, keeps the four-stage verb's shape while making the invariant real.
+The producing caller already sends the value on every stage, so the refusal
+enforces a contract that is met in practice and closes the path for any caller
+that is not the engine.
+
+Putting the rule in one named seam replaces an invariant that was borrowed from
+the selection gate and reported under the wrong name. The type system stops
+advertising an optionality the production system never intends, and the sandbox
+roots stop deriving from ambient process state.
 
 ## Consequences
 
-<!-- Gains, but framed honestly. Difficulties. Pathways this feature opens. Pitfalls. -->
+Good: an unsited run can no longer execute - silently or otherwise - in this
+service's own tree or the worker's working directory, closing both the
+wrong-siting defect and the sharper hazard that agent filesystem and terminal
+sandboxes rooted themselves in the service's own tree. The invariant is owned by
+a named seam with an honest error. The producing caller is unaffected on every
+stage; no wire contract changes.
+
+Bad: threads persisted without a workspace root lose follow-up capability and
+must be re-started rather than migrated. The stale command-line run-start verb
+remains broken for its own reasons - it already omits the required run identity
+and selection fields - and now has one more requirement to meet when repaired.
+Tests that leaned on the ambient fallback, or on the dead working-directory
+field, were rewritten against explicit workspace roots.
+
+Neutral: the worker's resume-after-restart path shifts from silently re-siting a
+resumed run to failing loudly when no workspace root is recoverable; the
+existing kill-and-restart drill should be re-run to confirm the recovery path
+always carries the workspace root. Prepare-stage behaviour is unchanged.

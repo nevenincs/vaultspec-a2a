@@ -8,14 +8,14 @@ fail loud rather than relocate quietly.
 Two things have to hold at once, and they pull in opposite directions:
 
 * An explicitly supplied relative value must be REJECTED.
-* The shipped defaults were themselves relative, and ``settings = Settings()`` runs
-  at module import — so rejecting a default would make the package unimportable on
-  a fresh checkout. An untouched default is therefore ANCHORED to the installation
-  root instead, reproducing today's effective behaviour without the working-
-  directory dependence.
+* The shipped database default was itself relative, and ``settings = Settings()``
+  runs at module import — so rejecting a default would make the package
+  unimportable on a fresh checkout. An untouched default is therefore ANCHORED to
+  ``a2a_home``, the machine-global runtime-state home, which removes the
+  working-directory dependence without founding a second place for state to live.
 
-Ordering is the other hazard. The desktop seating replaces all three values with
-absolutes derived from the application home, so the check must observe the FINAL
+Ordering is the other hazard. The desktop seating replaces every mutable path with
+an absolute derived from the application home, so the check must observe the FINAL
 resolved value; run earlier and a perfectly valid armed boot is rejected on the
 relative default it was about to discard.
 ``test_an_armed_profile_overrides_even_a_relative_supplied_value`` is the guard on
@@ -44,6 +44,9 @@ _PATH_NAMES = (
     "VAULTSPEC_WORKSPACE_ROOT",
     "VAULTSPEC_DESKTOP_APP_HOME",
     "VAULTSPEC_PROJECT_ROOT",
+    # The anchor for the database default. Cleared like the rest, or a developer
+    # who has relocated their own state home makes the anchoring tests read false.
+    "VAULTSPEC_A2A_HOME",
 )
 
 
@@ -128,22 +131,39 @@ def test_a_relative_value_is_rejected_rather_than_relocated() -> None:
             assert Settings(_env_file=None).workspace_root == absolute
 
 
-def test_untouched_defaults_are_anchored_to_the_installation_root() -> None:
+def test_the_untouched_database_default_is_anchored_to_the_a2a_home() -> None:
     """A bare construction must still succeed, with no working-directory dependence.
 
     ``settings = Settings()`` runs at module import, so this is the case that would
-    brick a fresh checkout if the relative defaults were merely rejected.
+    brick a fresh checkout if the relative default were merely rejected.
+
+    The anchor is ``a2a_home``, not ``project_root``. Two reasons, both checked
+    against the tree rather than assumed:
+
+    * ``project_root`` defaults to a ``__file__``-derived constant, so a
+      non-editable install with no ``VAULTSPEC_PROJECT_ROOT`` override would put
+      the store inside the interpreter's own library tree, where a reinstall
+      discards it.
+    * The schema is built for ONE machine-global store: ``threads.workspace_key``
+      (``database/models.py``) partitions runs by workspace, derived by
+      ``_workspace_key`` in ``database/thread_repository.py`` and indexed by the
+      ``0009_active_run_partial_indexes`` migration. A per-checkout database would
+      fragment that partitioned store across as many files as there are checkouts.
+      ``a2a_home`` already holds the rest of the machine-global runtime state — the
+      discovery ``service.json``, the serve singleton, the runtime and log dirs.
     """
     with _clean_environment():
         settings = Settings(_env_file=None)
 
-    project_root = settings.project_root
-    assert project_root.is_absolute()
+    a2a_home = settings.a2a_home
+    assert a2a_home.is_absolute()
     assert settings.database_url == (
-        f"sqlite+aiosqlite:///{(project_root / 'vaultspec.db').as_posix()}"
+        f"sqlite+aiosqlite:///{(a2a_home / 'vaultspec.db').as_posix()}"
     )
-    assert settings.workspace_root == project_root / "workspaces"
-    assert settings.database_path == (project_root / "vaultspec.db").resolve()
+    assert settings.database_path == (a2a_home / "vaultspec.db").resolve()
+    # The workspace root carries no default at all — it is a label, not a store —
+    # so there is nothing to anchor and nothing to reject.
+    assert settings.workspace_root is None
 
 
 def test_anchored_defaults_do_not_track_the_working_directory(tmp_path: Path) -> None:
@@ -172,23 +192,38 @@ def test_anchored_defaults_do_not_track_the_working_directory(tmp_path: Path) ->
     assert not from_a.database_path.is_relative_to(launch_a.resolve())
 
 
-def test_the_anchor_is_the_overridable_project_root_field(tmp_path: Path) -> None:
-    """Anchoring follows ``VAULTSPEC_PROJECT_ROOT``, not the ``__file__`` constant.
+def test_the_anchor_is_the_overridable_a2a_home_field(tmp_path: Path) -> None:
+    """Anchoring follows ``VAULTSPEC_A2A_HOME``, so a deployment can relocate it.
 
-    A non-editable container install resolves the ``__file__``-derived constant into
-    site-packages and corrects it through this variable, so anchoring to the
-    constant would place the container's default stores inside site-packages.
+    The anchor must be a real setting rather than a computed constant: a deployment
+    that puts machine-global state somewhere other than ``~/.vaultspec-a2a`` moves
+    the database with the rest of it, in one place, rather than discovering that the
+    store alone stayed behind.
     """
-    elsewhere = tmp_path / "install-root"
+    elsewhere = tmp_path / "state-home"
     elsewhere.mkdir()
 
-    with _clean_environment(VAULTSPEC_PROJECT_ROOT=str(elsewhere)):
+    with _clean_environment(VAULTSPEC_A2A_HOME=str(elsewhere)):
         settings = Settings(_env_file=None)
 
-    assert settings.workspace_root == elsewhere / "workspaces"
+    assert settings.a2a_home == elsewhere
     assert settings.database_url == (
         f"sqlite+aiosqlite:///{(elsewhere / 'vaultspec.db').as_posix()}"
     )
+
+
+def test_a_relative_a2a_home_is_refused_with_its_own_message() -> None:
+    """The anchor itself must be absolute, or the anchored default is not.
+
+    ``project_root`` has an equivalent guard, but the two now fail for different
+    reasons and say so separately: this one anchors the store, that one resolves
+    checkout-relative assets.
+    """
+    with (
+        _clean_environment(VAULTSPEC_A2A_HOME="./state"),
+        pytest.raises(ValidationError, match="VAULTSPEC_A2A_HOME must be absolute"),
+    ):
+        Settings(_env_file=None)
 
 
 def test_a_relative_project_root_is_refused_with_its_own_message() -> None:
@@ -321,3 +356,28 @@ def test_a_postgres_backend_declared_over_a_sqlite_checkpoint_is_refused() -> No
         pytest.raises(ValidationError, match="VAULTSPEC_CHECKPOINT_BACKEND=postgres"),
     ):
         Settings(_env_file=None)
+
+
+def test_the_anchor_does_not_depend_on_a_discoverable_dotenv(tmp_path: Path) -> None:
+    """The anchored default must not shift with the launch directory OR the dotenv.
+
+    A default that changed depending on whether a ``.env`` happened to be
+    discoverable would be a second-order version of the very working-directory
+    dependence this module exists to remove: same command, different store,
+    depending on where it was run. ``model_config`` resolves its dotenv from
+    ``__file__`` rather than the process working directory, which is what makes the
+    four constructions below agree.
+    """
+    prior = Path.cwd()
+    resolved: list[str] = []
+
+    with _clean_environment():
+        try:
+            for directory in (prior, tmp_path):
+                os.chdir(directory)
+                resolved.append(Settings(_env_file=None).database_url)
+                resolved.append(Settings().database_url)
+        finally:
+            os.chdir(prior)
+
+    assert len(set(resolved)) == 1, resolved

@@ -5,7 +5,7 @@ tags:
 date: '2026-08-02'
 modified: '2026-08-03'
 body_schema: 'body-v1'
-body_hash: 'sha256:b3be7e9c198b633bc0c8d57366aad42f3427fd1e79e0ea4db11c7bc9d7ca7337'
+body_hash: 'sha256:6733304288432101e7dd8ca4872a3295cebb9c14c378a241401da002fad251cb'
 step_id: 'S45'
 related:
   - "[[2026-08-02-provider-error-taxonomy-plan]]"
@@ -142,3 +142,26 @@ detached worktree with the interpreter path pointed at it, the worker started by
 hand because the auto-spawned one does not inherit it, gateway and worker ports
 agreeing, the test driven from the main checkout, and the bridge-free probe
 preset as the topology.
+
+### Routes tried and closed, so none is retried
+
+Four ways to obtain a real typed refusal on an ADMITTED lane were attempted
+against a live stack. All are closed without a production change:
+
+- Point a lane at the in-repo ACP simulator. Needs an edit to the provider
+  factory: the ACP command resolves from the capsule asset root or a
+  checkout-relative path, and no environment override accepts an arbitrary
+  command.
+- Redirect an ACP lane's base URL at a refusing endpoint. The override exists and
+  works, but neither ACP lane is admitted for its agent-acp execution mode, so
+  neither can be selected.
+- Redirect the codex lane the same way. Codex takes its endpoint from a per-run
+  isolated config home written by the worker, not from the environment.
+- Provoke the provider to refuse on its own terms by exceeding the context
+  window. The run-start message is bounded at 65,536 characters, roughly sixteen
+  thousand tokens, which is far short of any current context window. The bound is
+  correct and should not be raised to make this reachable.
+
+The admitted codex lane therefore SUCCEEDS on every input this system will accept
+from a client, which is a good property of the product and the precise reason the
+failure direction cannot be exercised from outside it.

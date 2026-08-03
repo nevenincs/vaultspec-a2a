@@ -19,11 +19,13 @@ from typing import TYPE_CHECKING
 
 from ...cli import provision
 from ...control import worker_management
-from ...database import admin, checkpoints, session
-from ...desktop import credentials
+from ...database import admin, checkpoints, reconciliation, session
+from ...desktop import credentials, profile
 from ...lifecycle import discovery, manager, registry, singleton
+from ...protocols.mcp import authoring_stdio
 from ...providers import _acp_rpc_handlers, _codex_config_home, _config_home_roots
 from ...service_tests import harness
+from ...testing import leases
 from ...utils import logging as utils_logging
 from ..retention import ArtifactDeclaration, RetentionDisposition
 
@@ -36,6 +38,7 @@ _DECLARING_MODULES: tuple[ModuleType, ...] = (
     provision,
     admin,
     checkpoints,
+    reconciliation,
     session,
     credentials,
     manager,
@@ -46,6 +49,9 @@ _DECLARING_MODULES: tuple[ModuleType, ...] = (
     _config_home_roots,
     harness,
     utils_logging,
+    profile,
+    authoring_stdio,
+    leases,
 )
 
 _INVENTORY_NAME = "ARTIFACT_DECLARATIONS"

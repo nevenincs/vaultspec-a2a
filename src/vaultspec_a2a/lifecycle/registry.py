@@ -25,6 +25,7 @@ from dataclasses import asdict, dataclass, field
 from enum import StrEnum
 from typing import TYPE_CHECKING, Any
 
+from ..artifacts import ArtifactDeclaration, RetentionDisposition
 from .atomic_write import atomic_write_text
 from .discovery import is_pid_alive, port_has_listener
 
@@ -34,7 +35,10 @@ if TYPE_CHECKING:
     from .procs_config import ProcsConfig, RoleConfig
 
 __all__ = [
+    "ARTIFACT_DECLARATIONS",
     "NAME_ENV",
+    "PORT_RESERVATION_MARKER_DECLARATION",
+    "PROCESS_RECORD_DECLARATION",
     "PortReservation",
     "ProcRecord",
     "RegistryOwnershipError",
@@ -76,6 +80,42 @@ _PROCS_HOME_ENV = "VAULTSPEC_PROCS_HOME"
 # Single home here (both modules already import from registry) so writer and reader
 # never drift.
 NAME_ENV = "VAULTSPEC_PROCS_NAME"
+
+# What this module leaves in the machine-global procs home. Both artifacts are
+# session-scoped in intent, and neither is reclaimed by a clock: the record is
+# removed only when an operator runs a lifecycle verb, and the marker only when a
+# later allocator on the same band happens to look at it. "Reclaimable" is not
+# "reclaimed", and the mechanism text says which one holds.
+PROCESS_RECORD_DECLARATION = ArtifactDeclaration(
+    name="dev-process-record",
+    root="<procs_home>/<role>-<name>.json",
+    owner="lifecycle.registry",
+    disposition=RetentionDisposition.SESSION_SCOPED,
+    mechanism=(
+        "removed by remove_record on the kill/reap/rerun verbs; a crashed process "
+        "leaves a dead-pid record that NOTHING deletes on its own - it is freely "
+        "overwritable by the next claimant of the same (role, name) and is "
+        "otherwise resident until an operator runs reap"
+    ),
+)
+
+PORT_RESERVATION_MARKER_DECLARATION = ArtifactDeclaration(
+    name="dev-port-reservation-marker",
+    root=f"<procs_home>/<role>-<port>{_RESERVATION_SUFFIX}",
+    owner="lifecycle.registry",
+    disposition=RetentionDisposition.SESSION_SCOPED,
+    mechanism=(
+        "cleared by commit_reservation and release_reservation; a marker abandoned "
+        "by a crash is reclaimed opportunistically inside reserve_port once its "
+        f"reserver pid is dead or its mtime passes {RESERVATION_TTL_MS}ms, so a "
+        "band nobody allocates from again keeps its markers indefinitely"
+    ),
+)
+
+ARTIFACT_DECLARATIONS: tuple[ArtifactDeclaration, ...] = (
+    PROCESS_RECORD_DECLARATION,
+    PORT_RESERVATION_MARKER_DECLARATION,
+)
 
 
 class RegistryOwnershipError(RuntimeError):

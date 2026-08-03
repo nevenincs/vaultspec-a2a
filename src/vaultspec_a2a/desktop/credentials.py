@@ -31,14 +31,17 @@ from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
 
+from ..artifacts import ArtifactDeclaration, RetentionDisposition
 from ._platform_acl import (
     credential_file_is_owner_restricted,
     harden_credential_file,
 )
 
 __all__ = [
+    "ARTIFACT_DECLARATIONS",
     "ATTACH_CREDENTIAL_NAME",
     "OWNERSHIP_CAPABILITY_NAME",
+    "WORKER_IPC_CREDENTIAL_DECLARATION",
     "WORKER_IPC_CREDENTIAL_NAME",
     "CredentialError",
     "CredentialPlane",
@@ -52,6 +55,30 @@ __all__ = [
 ATTACH_CREDENTIAL_NAME = "attach.cred"
 OWNERSHIP_CAPABILITY_NAME = "ownership.cap"
 WORKER_IPC_CREDENTIAL_NAME = "worker-ipc.cred"
+
+# Only the worker IPC file is declared here: the other two planes are created by
+# the dashboard and this module merely validates them, so their lifetime is not
+# this project's to state. The disk cost is nil - one fixed-name file, replaced
+# rather than accumulated - which is exactly why the interesting part of this
+# declaration is the part that is NOT enforced: a live secret stays readable on
+# disk after the gateway that minted it exits.
+WORKER_IPC_CREDENTIAL_DECLARATION = ArtifactDeclaration(
+    name="worker-ipc-credential",
+    root=f"<desktop_credentials_dir>/{WORKER_IPC_CREDENTIAL_NAME}",
+    owner="desktop.credentials",
+    disposition=RetentionDisposition.SESSION_SCOPED,
+    mechanism=(
+        "replaced wholesale on every mint, so a boot always owns its own secret "
+        "and the file never multiplies; a failed mint removes its own temporary "
+        "rather than stranding a second secret. NOTHING removes the file on "
+        "shutdown, so the last boot's secret remains at rest, owner-restricted, "
+        "until the next boot overwrites it"
+    ),
+)
+
+ARTIFACT_DECLARATIONS: tuple[ArtifactDeclaration, ...] = (
+    WORKER_IPC_CREDENTIAL_DECLARATION,
+)
 
 # A credential is an opaque high-entropy token. These bounds reject an empty or
 # truncated file and a pathologically large one before the bytes are trusted; the

@@ -21,6 +21,7 @@ from sqlalchemy.ext.asyncio import (
     create_async_engine,
 )
 
+from ..artifacts import ArtifactDeclaration, RetentionDisposition
 from ..control.config import settings
 from .models import Base
 
@@ -28,6 +29,8 @@ logger = logging.getLogger(__name__)
 
 
 __all__ = [
+    "APPLICATION_DATABASE_DECLARATION",
+    "ARTIFACT_DECLARATIONS",
     "WalCheckpointResult",
     "checkpoint_wal",
     "close_db",
@@ -38,6 +41,36 @@ __all__ = [
     "inspect_sqlite_database",
     "verify_wal_mode",
 ]
+
+# The store this module creates on first connect. Permanence is the right answer
+# and is separable from the honest part: the FILE should outlive every process,
+# but nothing bounds what accumulates INSIDE it, and no row class here carries an
+# age or count limit. The -wal sidecar's ceiling is conditional, which is why
+# ``checkpoint_wal`` reports a blocked checkpoint rather than tuning around it.
+APPLICATION_DATABASE_DECLARATION = ArtifactDeclaration(
+    name="application-database",
+    root="<database_path> (plus its -wal and -shm sidecars)",
+    owner="database.session",
+    disposition=RetentionDisposition.PERMANENT,
+    reason=(
+        "this is the system of record for runs, threads, artifacts, and the "
+        "durable control journal; a run's history is what makes restart "
+        "reconciliation and after-the-fact inspection possible, so the store must "
+        "outlive every process that opens it"
+    ),
+    mechanism=(
+        "no automatic bound on rows: growth is reclaimed only by operator-timed "
+        "verbs (`admin clear --yes` empties application rows, `admin migrate "
+        "--fix` truncates the log and VACUUMs pages back to the operating "
+        "system). The -wal sidecar settles at SQLite's autocheckpoint ceiling ONLY "
+        "while no connection holds an open read transaction; one held transaction "
+        "makes it grow linearly with writes and no setting defends against that"
+    ),
+)
+
+ARTIFACT_DECLARATIONS: tuple[ArtifactDeclaration, ...] = (
+    APPLICATION_DATABASE_DECLARATION,
+)
 
 # Module-level singletons (set via ``init_db``)
 _engine: AsyncEngine | None = None

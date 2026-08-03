@@ -29,7 +29,11 @@ import os
 from dataclasses import dataclass
 from pathlib import Path
 
+from ..artifacts import ArtifactDeclaration, RetentionDisposition
+
 __all__ = [
+    "APP_HOME_STATE_TREE_DECLARATION",
+    "ARTIFACT_DECLARATIONS",
     "DesktopProfile",
     "DesktopProfileError",
     "DesktopStatePaths",
@@ -106,6 +110,54 @@ class DesktopStatePaths:
             self.logs_dir,
             self.workspaces_root,
         )
+
+
+# Declared on the layout AUTHORITY rather than on any one creator, because three
+# call sites materialise this tree and a declaration beside any single one would
+# describe a third of the artifact: ``DesktopProfile.ensure`` (the armed path),
+# ``cli.service`` (the non-armed serve path, which seats the same layout through
+# this same function), and ``desktop.migration``, which creates the database
+# parent during a staged migration. Naming the authority keeps one declaration
+# true for all three.
+#
+# That three-creator split is worth stating plainly as a finding rather than
+# hiding behind the declaration: the artifact-lifecycle contract wants root
+# selection owned by a resolver so a caller cannot invent a location. The
+# derivation IS centralised here, but the mkdir is not, so a fourth creator could
+# appear without anything noticing. Consolidating the creation is a boot-path
+# change and deliberately NOT done as part of declaring.
+#
+# The import above is leaf-only by necessity: this module is reached from the
+# settings model validator while ``control.config`` is still constructing, so a
+# declaration that dragged in the lifecycle or HTTP stack would close the import
+# cycle the discovery-filename constant already exists to avoid. The retention
+# vocabulary imports nothing but ``dataclasses`` and ``enum``, which is what makes
+# it safe to declare here at all.
+APP_HOME_STATE_TREE_DECLARATION = ArtifactDeclaration(
+    name="desktop-application-state-tree",
+    root="<app_home>/{,state/,runtime/,workspaces/}",
+    owner="desktop.profile",
+    disposition=RetentionDisposition.PERMANENT,
+    reason=(
+        "the application home is the mutable-state root that deliberately "
+        "SURVIVES immutable runtime replacement - it holds the databases, the "
+        "checkpoint store, and the credential and discovery planes, so an "
+        "upgrade that replaced the capsule and reclaimed this tree would discard "
+        "every run the install has ever recorded"
+    ),
+    mechanism=(
+        "nothing removes the tree, and no uninstall verb exists in this repository "
+        "to remove it. The directories are created owner-restricted and idempotently "
+        "(an existing one is left untouched), so the tree itself neither grows nor "
+        "multiplies - what grows is the individually declared artifacts inside it. "
+        "Note that workspaces_root is materialised on the armed path but has no "
+        "production writer, so it is currently created empty and stays empty"
+    ),
+)
+
+ARTIFACT_DECLARATIONS: tuple[ArtifactDeclaration, ...] = (
+    APP_HOME_STATE_TREE_DECLARATION,
+)
 
 
 def _discovery_path(app_home: Path) -> Path:

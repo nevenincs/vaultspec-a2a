@@ -26,6 +26,7 @@ import time
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from ..artifacts import ArtifactDeclaration, RetentionDisposition
 from ..authoring.discovery import SERVICE_JSON_ENV as _ENGINE_SERVICE_JSON_ENV
 from ..control.config import GATEWAY_URL_ENV, INTERNAL_TOKEN_ENV, WORKER_URL_ENV
 from .procs_config import ProcsConfig, ProcsConfigError, load_procs_config
@@ -55,6 +56,8 @@ if TYPE_CHECKING:
     from .procs_config import RoleConfig
 
 __all__ = [
+    "ARTIFACT_DECLARATIONS",
+    "SPAWN_REDIRECT_LOG_DECLARATION",
     "LifecycleError",
     "ProcVerdict",
     "attach",
@@ -87,6 +90,28 @@ _TASKKILL_REAP_WAIT = 1.0
 # headroom for a single boot's worth of stdout+stderr while still bounding the
 # pathological case.
 SPAWN_LOG_CAP_BYTES = 10 * 1024 * 1024
+
+# The redirect file is durable and its location is chosen by whoever invokes the
+# spawn, so the declaration has to name the caller's path rather than a fixed
+# root. The two bounds below are genuinely different in kind: the size cap always
+# applies, while deletion applies only when a lifecycle verb runs.
+SPAWN_REDIRECT_LOG_DECLARATION = ArtifactDeclaration(
+    name="spawned-process-redirect-log",
+    root="<caller-supplied log_path> (plus its <log_path>.1 rotation sibling)",
+    owner="lifecycle.manager",
+    disposition=RetentionDisposition.BOUNDED_BY_SIZE,
+    mechanism=(
+        f"_rotate_log_if_over_cap moves the file to a single .1 sibling once it "
+        f"reaches {SPAWN_LOG_CAP_BYTES} bytes, capping the pair at roughly "
+        f"{SPAWN_LOG_CAP_BYTES * 2} bytes, and kill/reap delete the record's "
+        "log_path; the .1 sibling is NOT deleted by kill/reap, and a spawn whose "
+        "process is never killed or reaped through these verbs leaves both files"
+    ),
+)
+
+ARTIFACT_DECLARATIONS: tuple[ArtifactDeclaration, ...] = (
+    SPAWN_REDIRECT_LOG_DECLARATION,
+)
 
 
 class LifecycleError(RuntimeError):

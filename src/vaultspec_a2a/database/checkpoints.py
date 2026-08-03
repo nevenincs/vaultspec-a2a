@@ -19,10 +19,43 @@ if TYPE_CHECKING:
 
     from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 
+from ..artifacts import ArtifactDeclaration, RetentionDisposition
 from ..control.config import settings
 from .checkpoint_schema import checkpoint_pragmas
 
 logger = logging.getLogger(__name__)
+
+__all__ = [
+    "ARTIFACT_DECLARATIONS",
+    "CHECKPOINT_STORE_DECLARATION",
+    "Checkpointer",
+    "open_checkpointer",
+]
+
+# ``open_checkpointer`` creates this store on first use (LangGraph's own
+# ``setup()``), so the declaration belongs here. The permanence claim covers the
+# FILE; it deliberately does not claim anything about the rows, because nothing
+# bounds them. A run that is never deleted keeps its full checkpoint history for
+# the life of the install, and that is the honest unbounded surface.
+CHECKPOINT_STORE_DECLARATION = ArtifactDeclaration(
+    name="checkpoint-store",
+    root="<checkpoint_path> (plus its -wal and -shm sidecars)",
+    owner="database.checkpoints",
+    disposition=RetentionDisposition.PERMANENT,
+    reason=(
+        "a checkpoint is what makes a run resumable and a parked clarification "
+        "re-renderable after a restart; discarding checkpoints on a clock would "
+        "silently break resume for exactly the long-lived runs that need it most"
+    ),
+    mechanism=(
+        "per-run rows are deleted by the run-delete cleanup saga and wholesale by "
+        "`admin clear --yes`; NOTHING bounds rows for runs nobody deletes - there "
+        "is no age or count limit and no sweep - and the file itself is never "
+        "removed"
+    ),
+)
+
+ARTIFACT_DECLARATIONS: tuple[ArtifactDeclaration, ...] = (CHECKPOINT_STORE_DECLARATION,)
 
 
 # Type alias: every LangGraph checkpointer (SQLite, Postgres, in-memory) is a

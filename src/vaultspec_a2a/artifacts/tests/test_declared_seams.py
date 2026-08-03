@@ -13,11 +13,44 @@ declares nothing, which is the exact failure it exists to catch.
 
 from __future__ import annotations
 
+import ast
+from pathlib import Path
+from typing import TYPE_CHECKING
+
+from ...cli import provision
 from ...control import worker_management
-from ...lifecycle import discovery
+from ...database import admin, checkpoints, session
+from ...desktop import credentials
+from ...lifecycle import discovery, manager, registry, singleton
+from ...providers import _acp_rpc_handlers, _codex_config_home, _config_home_roots
+from ...service_tests import harness
+from ...utils import logging as utils_logging
 from ..retention import ArtifactDeclaration, RetentionDisposition
 
-_DECLARING_MODULES = (discovery, worker_management)
+if TYPE_CHECKING:
+    from types import ModuleType
+
+_DECLARING_MODULES: tuple[ModuleType, ...] = (
+    discovery,
+    worker_management,
+    provision,
+    admin,
+    checkpoints,
+    session,
+    credentials,
+    manager,
+    registry,
+    singleton,
+    _acp_rpc_handlers,
+    _codex_config_home,
+    _config_home_roots,
+    harness,
+    utils_logging,
+)
+
+_INVENTORY_NAME = "ARTIFACT_DECLARATIONS"
+_DECLARATION_SUFFIX = "_DECLARATION"
+_PACKAGE_ROOT = Path(__file__).resolve().parents[2]
 
 
 def _all_declarations() -> list[ArtifactDeclaration]:
@@ -72,6 +105,103 @@ def test_a_permanent_declaration_carries_its_justification() -> None:
             assert declaration.reason, (
                 f"{declaration.name!r} is permanent without a reason"
             )
+
+
+def _modules_assigning_an_inventory() -> dict[str, set[str]]:
+    """Map each source module that assigns the inventory to its top-level names.
+
+    Read by parsing sources rather than by importing the package.  The hand list
+    above stays the authority on WHAT is checked; this only establishes what
+    exists, so a module can never be checked into invisibility.
+    """
+    found: dict[str, set[str]] = {}
+    for source in sorted(_PACKAGE_ROOT.rglob("*.py")):
+        relative = source.relative_to(_PACKAGE_ROOT)
+        if "tests" in relative.parts:
+            continue
+        tree = ast.parse(source.read_text(encoding="utf-8"), filename=str(source))
+        names: set[str] = set()
+        for node in tree.body:
+            targets: list[ast.expr] = []
+            if isinstance(node, ast.Assign):
+                targets = list(node.targets)
+            elif isinstance(node, ast.AnnAssign):
+                targets = [node.target]
+            names.update(t.id for t in targets if isinstance(t, ast.Name))
+        if _INVENTORY_NAME in names:
+            found[str(relative.with_suffix("")).replace("\\", "/")] = names
+    return found
+
+
+def test_the_hand_maintained_list_omits_no_declaring_module() -> None:
+    """A new declaring module must be registered above, not silently unchecked.
+
+    The list is hand-maintained deliberately: walking the package to BUILD it
+    would let a module that declares nothing pass by default.  That reasoning
+    argues against deriving the list, not against verifying it is complete - and
+    without this check the failure mode is the quiet one, where a seam is
+    declared, never registered, and covered by none of the assertions here.
+    """
+    registered = {
+        module.__name__.removeprefix("vaultspec_a2a.").replace(".", "/")
+        for module in _DECLARING_MODULES
+    }
+    on_disk = set(_modules_assigning_an_inventory())
+
+    assert on_disk, "no module assigning the inventory was found; the parse is broken"
+    assert on_disk <= registered, (
+        f"these modules declare artifacts but are absent from _DECLARING_MODULES: "
+        f"{sorted(on_disk - registered)}"
+    )
+
+
+def test_every_declaration_names_the_module_it_lives_in() -> None:
+    """``owner`` must be the declaring module, which is what makes drift visible.
+
+    A declaration sits beside its creating call site so it cannot describe a seam
+    somewhere else.  An ``owner`` that has stopped matching its own module is
+    exactly that drift, and no per-declaration validation can see it.
+    """
+    mismatched = [
+        (module.__name__, declaration.name, declaration.owner)
+        for module in _DECLARING_MODULES
+        for declaration in module.ARTIFACT_DECLARATIONS
+        if module.__name__ != f"vaultspec_a2a.{declaration.owner}"
+    ]
+
+    assert not mismatched, (
+        f"these declarations name an owner that is not their own module: {mismatched}"
+    )
+
+
+def test_no_declaration_constant_is_left_out_of_its_module_inventory() -> None:
+    """A constant absent from the tuple is enumerable by nothing.
+
+    The tuple is how a reviewer, and eventually a reaper, finds what a module
+    creates.  A ``*_DECLARATION`` that exists but is unlisted reads as coverage
+    and provides none.
+    """
+    on_disk = _modules_assigning_an_inventory()
+    omitted: list[tuple[str, str]] = []
+    for module in _DECLARING_MODULES:
+        key = module.__name__.removeprefix("vaultspec_a2a.").replace(".", "/")
+        names = on_disk.get(key, set())
+        constants = {
+            name
+            for name in names
+            if name.endswith(_DECLARATION_SUFFIX)
+            and isinstance(getattr(module, name, None), ArtifactDeclaration)
+        }
+        assert constants, f"{module.__name__} exposes no declaration constant"
+        omitted.extend(
+            (module.__name__, name)
+            for name in constants
+            if getattr(module, name) not in module.ARTIFACT_DECLARATIONS
+        )
+
+    assert not omitted, (
+        f"these declarations are defined but missing from {_INVENTORY_NAME}: {omitted}"
+    )
 
 
 def test_the_discovery_record_declares_its_crash_exposure() -> None:

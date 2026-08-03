@@ -29,9 +29,10 @@ from ..control.snapshot import (
 )
 from ..database import get_thread
 from ..graph.enums import research_adr_semantic_phase
-from ..thread.enums import RepairStatus, ThreadStatus
+from ..thread.enums import RepairStatus, ThreadStatus, TranscriptAvailability
 from ..thread.snapshots import (
     ThreadStateData,
+    classify_transcript_availability,
     finalize_snapshot_replay_status,
     project_checkpoint_tuple,
 )
@@ -200,12 +201,19 @@ class ThreadStateCapture:
     The gateway must derive every response field from this capture.  Keeping the
     tuple with its fully reconciled snapshot prevents a second checkpoint or
     thread read from mixing different moments of a progressing run.
+
+    ``transcript`` states whether the snapshot's messages are the run's record
+    or an artefact of an unread checkpoint. It is carried here rather than
+    re-derived by each reader because ``checkpoint_tuple`` alone cannot answer
+    it: a ``None`` tuple is a not-yet-dispatched run, a lost checkpoint, and an
+    unreachable checkpoint store all at once.
     """
 
     snapshot: ThreadStateData
     checkpoint_tuple: CheckpointTuple | None
     team_preset: str | None
     thread_metadata: str | None
+    transcript: TranscriptAvailability
 
 
 def _optional_str(value: object) -> str | None:
@@ -374,6 +382,12 @@ async def capture_thread_state(
         checkpoint_tuple=captured_tuple,
         team_preset=thread.team_preset,
         thread_metadata=thread.thread_metadata,
+        transcript=classify_transcript_availability(
+            checkpoint_loaded=checkpoint_loaded,
+            checkpoint_present=checkpoint_present,
+            checkpoint_error=checkpoint_error,
+            thread_status=thread.status,
+        ),
     )
 
 

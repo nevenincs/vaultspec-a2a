@@ -19,6 +19,7 @@ __all__ = [
     "RepairStatus",
     "TaskQueueStatus",
     "ThreadStatus",
+    "TranscriptAvailability",
 ]
 
 
@@ -55,6 +56,32 @@ class RepairStatus(StrEnum):
     CHECKPOINT_UNAVAILABLE = "checkpoint_unavailable"
     NEEDS_RECONCILIATION = "needs_reconciliation"
     OPERATOR_INTERVENTION_REQUIRED = "operator_intervention_required"
+
+
+class TranscriptAvailability(StrEnum):
+    """Why a run's conversation is, or is not, readable from its checkpoint.
+
+    A run's transcript lives only in the checkpoint, so an unread checkpoint
+    yields an empty message list that is indistinguishable from a run that
+    genuinely said nothing. This classification is what tells the two apart, and
+    it exists so no reader has to infer loss from an empty list.
+
+    ``NOT_YET_RECORDED`` is the only non-fault absence: the run has not been
+    dispatched, so there is nothing to have lost. ``MISSING`` and ``UNREADABLE``
+    are both faults and differ in whether the checkpoint is gone or merely
+    unreachable right now.
+
+    A run whose transcript was deliberately released under a retention policy
+    would be a fourth, non-fault member. It is deliberately absent: no
+    production seam prunes a checkpoint today, so every absence really is a
+    fault, and a member with no producer would let a genuine loss be dismissed
+    as intended.
+    """
+
+    AVAILABLE = "available"
+    NOT_YET_RECORDED = "not_yet_recorded"
+    MISSING = "missing"
+    UNREADABLE = "unreadable"
 
 
 class ControlActionType(StrEnum):

@@ -68,7 +68,6 @@ from ...control.thread_service import (
     process_metadata,
 )
 from ...control.thread_state_service import (
-    build_thread_state,
     capture_thread_state,
     derive_run_authoring_ids,
     derive_run_semantic_context,
@@ -108,6 +107,7 @@ from ...thread.enums import (
     TERMINAL_STATUSES,
     PermissionRequestStatus,
     ThreadStatus,
+    TranscriptAvailability,
 )
 from ...thread.errors import NicknameConflictError
 from .._utils import mark_worker_connected, trace_headers
@@ -1635,6 +1635,13 @@ async def run_cancel_endpoint(
 # ---------------------------------------------------------------------------
 
 
+# The transcript verdicts that mean a run's record was LOST rather than never
+# written. Absence on a run that has not been dispatched is normal and excluded.
+_TRANSCRIPT_FAULTS: frozenset[TranscriptAvailability] = frozenset(
+    {TranscriptAvailability.MISSING, TranscriptAvailability.UNREADABLE}
+)
+
+
 def snapshot_to_wire(data: Any) -> ThreadStateSnapshot:
     """Project the domain run-state snapshot onto its wire model.
 
@@ -1661,17 +1668,40 @@ async def run_history_endpoint(
     wide read for a consumer that wants the record: transcript, agents, plan,
     pending answers, and the run's metadata.
 
+    "Whole" is a promise about honesty, not about always having everything. The
+    transcript lives only in the checkpoint, and a checkpoint can be gone or
+    unreachable; when it is, this answers 200 with the durable half of the
+    record it CAN read - status, agents, plan, permissions, metadata - and says
+    plainly that the transcript is not part of it. Refusing the whole read over
+    an absent transcript would cost the caller the half that survived, and
+    answering an unqualified empty message list would be worse still: silent
+    loss dressed as a run that never spoke.
+
     The state snapshot is embedded rather than restated, so this response cannot
     drift from the snapshot it reports.
     """
-    snapshot = await build_thread_state(
+    capture = await capture_thread_state(
         db,
         thread_id=run_id,
         aggregator=aggregator,
         checkpointer=checkpointer,
     )
-    if snapshot is None:
+    if capture is None:
         raise HTTPException(status_code=404, detail="Run not found")
+    snapshot = capture.snapshot
+
+    # A run past dispatch owes a transcript. Reporting the absence on the wire
+    # serves the caller; logging it serves the operator, who otherwise learns of
+    # the loss only if someone happens to read this run and happens to look. A
+    # not-yet-dispatched run owes nothing yet and is deliberately not logged.
+    if capture.transcript in _TRANSCRIPT_FAULTS:
+        logger.warning(
+            "run history: run %s (status %s) has no readable transcript (%s); "
+            "reporting the record without it",
+            run_id,
+            snapshot.status,
+            capture.transcript.value,
+        )
 
     # Absent metadata is stored as null OR as an empty string depending on how
     # the run was created, and an empty string is not parseable JSON - so the
@@ -1700,6 +1730,8 @@ async def run_history_endpoint(
         run_id=run_id,
         state=snapshot_to_wire(snapshot),
         metadata=metadata,
+        transcript_available=capture.transcript is TranscriptAvailability.AVAILABLE,
+        transcript_status=capture.transcript,
     )
 
 

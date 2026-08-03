@@ -37,7 +37,7 @@ from ...thread.clarification import (
     ContinuationPrompt,
     QuestionId,
 )
-from ...thread.enums import CleanupKind, ThreadStatus
+from ...thread.enums import CleanupKind, ThreadStatus, TranscriptAvailability
 from .snapshots import ThreadStateSnapshot
 
 __all__ = [
@@ -639,12 +639,21 @@ class RunHistoryResponse(BaseModel):
 
     The state snapshot is embedded by reference rather than restated field by
     field, so the two cannot drift apart as the snapshot evolves.
+
+    The transcript is the one part of the record this verb cannot always
+    deliver, because it lives only in the checkpoint. ``transcript_available``
+    and ``transcript_status`` say so outright, so ``state.messages`` is never
+    read as "this run had no conversation" when the truth is that its
+    conversation could not be read. They are the transcript's counterpart to the
+    snapshot's own ``snapshot_complete`` / ``degraded_reasons`` pairing.
     """
 
     api_version: Literal["v1"] = _API_VERSION
     run_id: str
     state: ThreadStateSnapshot
     metadata: ThreadMetadata | None = None
+    transcript_available: bool
+    transcript_status: TranscriptAvailability
 
 
 class RunArchiveResponse(BaseModel):

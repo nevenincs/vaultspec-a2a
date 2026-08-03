@@ -7,11 +7,11 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, cast
 from uuid import uuid4
 
-from sqlalchemy import or_, select, update
+from sqlalchemy import delete, func, or_, select, update
 from sqlalchemy.exc import IntegrityError
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Collection, Sequence
     from datetime import datetime
 
     from sqlalchemy.engine import CursorResult
@@ -48,6 +48,7 @@ __all__ = [
     "mark_control_action_duplicate",
     "mark_control_action_superseded",
     "mark_permission_request_applied",
+    "prune_repair_journal",
     "record_permission_request",
     "record_permission_response_submission",
     "release_control_action_lease",
@@ -640,6 +641,119 @@ async def get_latest_control_action(
             == _coerce_control_action_type(action_type).value
         )
     return (await session.execute(stmt.limit(1))).scalar_one_or_none()
+
+
+_REPAIR_JOURNAL_ACTION_TYPES: frozenset[str] = frozenset(
+    {
+        ControlActionType.REPAIR_STARTED.value,
+        ControlActionType.REPAIR_FINISHED.value,
+    }
+)
+
+
+MINIMUM_REPAIR_JOURNAL_RETENTION_ROWS = 2
+"""Floor on the repair-journal cap: one boot's own started/finished pair.
+
+The running pass is still holding both rows in its open transaction when the
+prune fires, so a cap that could rank either as history would delete a live
+object mid-reconciliation. Clamping makes that structural instead of relying on
+the caller to pass a sane number.
+"""
+
+
+async def prune_repair_journal(
+    session: AsyncSession,
+    *,
+    thread_ids: Collection[str],
+    keep_rows: int,
+) -> int:
+    """Bound each thread's startup-repair journal to its newest ``keep_rows`` rows.
+
+    Startup reconciliation appends a ``repair_started``/``repair_finished`` pair
+    per non-terminal thread on EVERY boot, under an idempotency key seeded by the
+    recovery epoch that the same pass increments - so the key never repeats and
+    the pair never replays onto an existing row. That is unbounded growth on a
+    desktop that restarts often and keeps long-lived threads.
+
+    Only that pair is pruned, and only once settled. It is the sole journal class
+    with no reader: recovery reads unapplied rows by action type
+    (``permission_response_submitted``, ``message_followup_requested``, ``cancel``)
+    or by idempotency-key prefix, the terminal handler reads only the latest
+    ``cancel``, and receipts resolve a ``dispatch_id`` that no repair row is ever
+    dispatched under. Nothing outside this table's own writer has ever read a
+    repair row, so bounding them costs no redrive, replay, or reconciliation
+    evidence. Every OTHER action type stays append-only: those rows back
+    idempotent replay windows whose length is set by how long a client may retry,
+    which is not a horizon this layer can derive.
+
+    Ranking is partitioned per thread inside a single statement, so the whole
+    startup backlog costs one delete per parameter chunk rather than one per
+    thread - the same flat-cost rule the surrounding reads already follow.
+
+    ``keep_rows`` of zero or less disables pruning; anything lower than
+    :data:`MINIMUM_REPAIR_JOURNAL_RETENTION_ROWS` is raised to it.
+
+    Returns the number of rows deleted.
+    """
+    if keep_rows <= 0:
+        return 0
+    retained = max(keep_rows, MINIMUM_REPAIR_JOURNAL_RETENTION_ROWS)
+    unique_ids = list(dict.fromkeys(thread_ids))
+    if not unique_ids:
+        return 0
+    # The caller wrote and mutated this pass's pair in the open transaction; the
+    # ranking below reads it back through the database, so the pending state has
+    # to be on the wire before the delete is ranked against it.
+    await session.flush()
+
+    deleted = 0
+    # Chunked for the same reason every other multi-thread lookup here is: the
+    # backlog is unbounded and each backend caps bound parameters per statement.
+    for start in range(0, len(unique_ids), _IN_CLAUSE_CHUNK):
+        chunk = unique_ids[start : start + _IN_CLAUSE_CHUNK]
+        ranked = (
+            select(
+                ControlActionModel.id.label("id"),
+                func.row_number()
+                .over(
+                    partition_by=ControlActionModel.thread_id,
+                    order_by=(
+                        ControlActionModel.requested_at.desc(),
+                        ControlActionModel.id.desc(),
+                    ),
+                )
+                .label("rank"),
+            )
+            .where(
+                ControlActionModel.thread_id.in_(chunk),
+                ControlActionModel.action_type.in_(_REPAIR_JOURNAL_ACTION_TYPES),
+            )
+            .subquery()
+        )
+        history = select(ranked.c.id).where(ranked.c.rank > retained)
+        result = cast(
+            "CursorResult[Any]",
+            await session.execute(
+                delete(ControlActionModel)
+                .where(
+                    ControlActionModel.id.in_(history),
+                    # Deliberately narrow: an unsettled row may still be owed a
+                    # redrive and a leased row is owned by a live dispatcher.
+                    # Neither is ever true of a repair row today, and stating it
+                    # as a predicate keeps it true if that ever changes.
+                    ControlActionModel.result_status
+                    == ControlActionResultStatus.APPLIED.value,
+                    ControlActionModel.claim_token.is_(None),
+                )
+                # The ranked subquery is not evaluable in Python, and letting
+                # SQLAlchemy fall back to "fetch" would issue a SELECT per call.
+                # Nothing this pass still holds is a deletion candidate, so the
+                # identity map needs no reconciliation.
+                .execution_options(synchronize_session=False)
+            ),
+        )
+        deleted += result.rowcount or 0
+    return deleted
 
 
 async def mark_control_action_applied(

@@ -67,6 +67,23 @@ WORKER_URL_ENV = "VAULTSPEC_WORKER_URL"
 DEFAULT_MOCK_API_BASE = "http://localhost:8100"
 DEFAULT_OTLP_ENDPOINT = "http://localhost:4317"
 
+DEFAULT_REPAIR_JOURNAL_RETENTION_BOOTS: int = 10
+"""Boots of startup-repair history retained per thread.
+
+Startup reconciliation appends a ``repair_started``/``repair_finished`` pair per
+non-terminal thread on every boot, keyed by a recovery epoch the same pass
+increments, so the key never repeats and the class grows with restart count
+rather than with work.
+
+Counted in BOOTS rather than rows deliberately. This is NOT a recovery horizon
+and must not be read as one: no code path reads a repair row back, so the value
+that would be safe on recovery grounds is zero. What it buys is operator
+hindsight - how many restarts of repair history survive for someone diagnosing a
+thread that will not resume - which is a legibility judgement, not a derivation.
+Rows would hide that judgement behind a boot-frequency conversion; boots state it
+plainly.
+"""
+
 logger = logging.getLogger(__name__)
 
 # The synchronous SQLAlchemy driver this project ships for each supported backend.
@@ -577,6 +594,19 @@ class InfraConfig(BaseSettings):
         default="conservative",
         description="Startup reconciliation strategy for non-terminal threads.",
         alias="VAULTSPEC_REPAIR_STRATEGY",
+    )
+    repair_journal_retention_boots: int = Field(
+        default=DEFAULT_REPAIR_JOURNAL_RETENTION_BOOTS,
+        ge=0,
+        description=(
+            "Boots of startup-repair history kept per thread. Reconciliation "
+            "appends a started/finished pair per non-terminal thread on every "
+            "boot under a key that never repeats, so the class grows with "
+            "restart count rather than with work. No code path reads a repair "
+            "row, so this bounds operator hindsight only - never a recovery, "
+            "replay, or redrive window. Zero retains every row."
+        ),
+        alias="VAULTSPEC_REPAIR_JOURNAL_RETENTION_BOOTS",
     )
 
     # Authoring verdict subscriber

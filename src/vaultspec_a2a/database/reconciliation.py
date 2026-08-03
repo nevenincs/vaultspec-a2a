@@ -15,6 +15,8 @@ if TYPE_CHECKING:
 
     from .checkpoints import Checkpointer
 
+from ..artifacts import ArtifactDeclaration, RetentionDisposition
+from ..control.config import DEFAULT_REPAIR_JOURNAL_RETENTION_BOOTS
 from ..lifecycle.reconciliation import (
     ReconciliationAction,
     ThreadSnapshot,
@@ -31,12 +33,55 @@ from .permission_repository import (
     get_control_actions_by_idempotency_keys,
     get_or_create_control_action,
     get_threads_with_pending_permission_requests,
+    prune_repair_journal,
 )
 from .thread_repository import (
     list_non_terminal_threads,
     set_thread_repair_state,
     update_thread_status,
 )
+
+__all__ = [
+    "ARTIFACT_DECLARATIONS",
+    "REPAIR_JOURNAL_DECLARATION",
+    "execute_reconciliation",
+    "probe_checkpoints",
+    "reconcile_threads_on_startup",
+]
+
+# The first declared artifact here that is not a file. A durable artifact is
+# whatever outlives the process that made it, and rows qualify: this pass appends
+# a started/finished pair per non-terminal thread on EVERY boot, so a
+# long-lived thread on a machine that restarts often grows without bound.
+#
+# The scope is deliberately narrow and must stay that way. ONLY the
+# repair_started/repair_finished pair is bounded; every other control-action type
+# is append-only on purpose, because those rows back idempotent-replay windows
+# whose length is set by how long a client may retry. Declaring the control_actions
+# TABLE as bounded would overstate the guarantee and invite a later reaper to
+# delete replay evidence.
+REPAIR_JOURNAL_DECLARATION = ArtifactDeclaration(
+    name="startup-repair-journal",
+    root=(
+        "<database_path>::control_actions rows of action_type "
+        "repair_started/repair_finished (the rest of the table is NOT covered)"
+    ),
+    owner="database.reconciliation",
+    disposition=RetentionDisposition.BOUNDED_BY_SIZE,
+    mechanism=(
+        "prune_repair_journal ranks each thread's repair rows newest-first inside "
+        "one statement and deletes beyond the operator-configured repair-journal "
+        "retention setting in control.config - expressed in BOOTS of history and "
+        "converted here at REPAIR_ROWS_PER_BOOT, since the pass appends one "
+        "started/finished pair per boot - clamped up to a floor of two rows so "
+        "the running pass's own pair can never be ranked as history. Two honest "
+        "limits: a configured value of zero or less disables pruning and returns "
+        "this seam to unbounded, and the prune runs only inside a startup "
+        "reconciliation pass, so a gateway that never restarts never prunes"
+    ),
+)
+
+ARTIFACT_DECLARATIONS: tuple[ArtifactDeclaration, ...] = (REPAIR_JOURNAL_DECLARATION,)
 
 
 async def probe_checkpoints(
@@ -96,10 +141,21 @@ def _finished_key(thread_id: str, thread_epochs: dict[str, int]) -> str:
     return f"startup-repair-finished:{thread_id}:{thread_epochs.get(thread_id, 0)}"
 
 
+REPAIR_ROWS_PER_BOOT = 2
+"""Journal rows one reconciliation pass appends per thread: started, finished.
+
+The conversion from an operator-facing boot count to the repository's row cap
+lives here because this module is what writes the pair; the repository is told a
+number of rows and does not need to know how they were grouped.
+"""
+
+
 async def execute_reconciliation(
     session: AsyncSession,
     actions: list[ReconciliationAction],
     thread_epochs: dict[str, int],
+    *,
+    retain_repair_boots: int = DEFAULT_REPAIR_JOURNAL_RETENTION_BOOTS,
 ) -> None:
     """Apply reconciliation actions to the database.
 
@@ -107,6 +163,8 @@ async def execute_reconciliation(
         session: Active database session.
         actions: Pure action descriptors from ``compute_reconciliation_actions``.
         thread_epochs: ``{thread_id: recovery_epoch}`` for idempotency keys.
+        retain_repair_boots: Per-thread cap on retained boots of repair history;
+            the pair this pass writes is always retained. Zero disables pruning.
     """
     started_keys = {
         action.thread_id: _started_key(action.thread_id, thread_epochs)
@@ -184,12 +242,22 @@ async def execute_reconciliation(
                 absence_already_resolved=True,
             )
 
+    # Bound the history this pass just extended, for the whole backlog at once:
+    # the repair pair is the only journal class that grows per boot rather than
+    # per unit of work, and the only one nothing reads back.
+    await prune_repair_journal(
+        session,
+        thread_ids=started_keys.keys(),
+        keep_rows=retain_repair_boots * REPAIR_ROWS_PER_BOOT,
+    )
+
 
 async def reconcile_threads_on_startup(
     session: AsyncSession,
     checkpointer: Checkpointer,
     *,
     strategy: Literal["conservative", "mark_repair_needed"] = "conservative",
+    retain_repair_boots: int = DEFAULT_REPAIR_JOURNAL_RETENTION_BOOTS,
 ) -> dict[str, int]:
     """Full reconciliation pipeline: probe + decide + execute.
 
@@ -237,7 +305,12 @@ async def reconcile_threads_on_startup(
         strategy=strategy,
     )
 
-    await execute_reconciliation(session, actions, thread_epochs)
+    await execute_reconciliation(
+        session,
+        actions,
+        thread_epochs,
+        retain_repair_boots=retain_repair_boots,
+    )
 
     paused = sum(1 for a in actions if a.repair_status == "paused_resumable")
     checkpoint_issues = sum(

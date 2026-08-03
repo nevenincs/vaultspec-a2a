@@ -624,6 +624,24 @@ async def _run_prepare(
         or outcome.reservation_id is None
         or outcome.lease_id is None
     ):
+        # The refusal reason is deliberately one safe sentence, so it cannot say
+        # WHICH of the three readiness legs failed. Those facts are already
+        # probed and carried on the outcome, and already served on the
+        # service-state surface, so logging them here discloses nothing new -
+        # and without them a refusal is only diagnosable by re-deriving the
+        # probe by hand, which is how three admission failures stayed open.
+        refused = outcome.readiness
+        logger.warning(
+            "run admission refused: reason=%s worker_state=%s "
+            "provider_eligibility=%s run_admission=%s eligible_providers=%s "
+            "readiness_reasons=%s",
+            outcome.reason,
+            refused.worker_state.value,
+            refused.provider_eligibility.value,
+            refused.run_admission.value,
+            ",".join(refused.eligible_providers) or "none",
+            "; ".join(refused.reasons) or "none",
+        )
         raise HTTPException(status_code=503, detail=outcome.reason)
     readiness = outcome.readiness
     return RunPrepareResponse(

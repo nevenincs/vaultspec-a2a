@@ -290,3 +290,34 @@ def test_an_in_memory_sqlite_url_is_exempt() -> None:
         settings = Settings(_env_file=None)
 
     assert settings.database_path == Path(":memory:")
+
+
+def test_backend_and_url_disagreement_is_refused_at_construction() -> None:
+    """The moved agreement check must stay enforced, and stay enforced at boot.
+
+    It used to live in the synchronous-URL properties as a discarded binding, read
+    purely for its raising side effect — invisible as load-bearing and one cleanup
+    away from deletion. It now decides whether the absolute-path check applies at
+    all, so it is consumed rather than discarded. This pins the behaviour that move
+    must preserve: the synchronous admin engines have no other validation seam.
+    """
+    with (
+        _clean_environment(
+            VAULTSPEC_DATABASE_URL="sqlite+aiosqlite:////app/data/vaultspec.db"
+        ),
+        _environment(VAULTSPEC_DATABASE_BACKEND="postgres"),
+        pytest.raises(ValidationError, match="VAULTSPEC_DATABASE_BACKEND=postgres"),
+    ):
+        Settings(_env_file=None)
+
+
+def test_a_postgres_backend_declared_over_a_sqlite_checkpoint_is_refused() -> None:
+    """The checkpoint store is held to the same agreement as the primary one."""
+    with (
+        _clean_environment(
+            VAULTSPEC_CHECKPOINT_DATABASE_URL="sqlite+aiosqlite:////app/cp.db"
+        ),
+        _environment(VAULTSPEC_CHECKPOINT_BACKEND="postgres"),
+        pytest.raises(ValidationError, match="VAULTSPEC_CHECKPOINT_BACKEND=postgres"),
+    ):
+        Settings(_env_file=None)

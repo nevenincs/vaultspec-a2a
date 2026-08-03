@@ -670,8 +670,14 @@ class CodexChatModel(BaseChatModel):
         entire activation surface for the capability on this lane: a lane with no
         recorded retrieval proof emits ``disabled`` and can reach nothing.
         """
+        # The Codex lane carries harness NAMES across the seam and renders its
+        # specs here, so the run's project is applied at render time rather than
+        # to an already-rendered spec as the ACP lane does. Same channel, same
+        # refusal to invent a root when the run names none.
         specs = (
-            codex_mcp_server_specs(self.harness_mcp_servers)
+            codex_mcp_server_specs(
+                self.harness_mcp_servers, project_root=self.workspace_root
+            )
             if self.harness_mcp_servers
             else []
         )
@@ -791,7 +797,10 @@ class CodexChatModel(BaseChatModel):
         # carries no version constraint by design - this check is what makes the
         # declaration trustworthy - and it is memoized per launch identity.
         await verify_harness_mcp_contract(
-            codex_mcp_server_specs(self.harness_mcp_servers), env=env
+            codex_mcp_server_specs(
+                self.harness_mcp_servers, project_root=self.workspace_root
+            ),
+            env=env,
         )
 
         codex_config_home: Path | None = None

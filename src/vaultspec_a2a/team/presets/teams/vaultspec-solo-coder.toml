@@ -54,3 +54,4 @@ authoring_bridge  = true
 
 [[team.workers]]
 agent_id = "vaultspec-coder"
+capability = "high"

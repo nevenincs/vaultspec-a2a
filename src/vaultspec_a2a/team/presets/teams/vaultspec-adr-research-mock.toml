@@ -51,14 +51,17 @@ model    = { provider = "mock" }
 [[team.workers]]
 agent_id = "vaultspec-synthesist"
 model    = { provider = "mock" }
+capability = "high"
 
 [[team.workers]]
 agent_id = "vaultspec-adr-author"
 model    = { provider = "mock" }
+capability = "high"
 
 [[team.workers]]
 agent_id = "vaultspec-plan-author"
 model    = { provider = "mock" }
+capability = "high"
 
 [[team.workers]]
 agent_id = "vaultspec-doc-reviewer"

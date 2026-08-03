@@ -99,12 +99,15 @@ agent_id = "vaultspec-researcher"
 
 [[team.workers]]
 agent_id = "vaultspec-synthesist"
+capability = "high"
 
 [[team.workers]]
 agent_id = "vaultspec-adr-author"
+capability = "high"
 
 [[team.workers]]
 agent_id = "vaultspec-plan-author"
+capability = "high"
 
 [[team.workers]]
 agent_id = "vaultspec-doc-reviewer"

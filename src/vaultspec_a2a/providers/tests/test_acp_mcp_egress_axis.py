@@ -83,7 +83,15 @@ def _frozen_object(value: FrozenJsonValue) -> FrozenJsonObject:
 
 
 def _entry(**overrides: JsonValue) -> JsonObject:
-    """A registry-shaped candidate entry, minus whatever the caller drops."""
+    """A registry-shaped candidate entry, minus whatever the caller drops.
+
+    An override of ``None`` DROPS its key, which is how a case here asks for an
+    undeclared axis. That spelling is unavailable for the root-pin axis, whose
+    declared-unpinnable value IS ``None``: dropping the key and declaring it null
+    are different facts to the constructor, and only the first is an omission.
+    A case wanting the unpinnable shape declares it against the constructor
+    directly rather than through this helper.
+    """
     entry: JsonObject = {
         "name": "candidate",
         "command": "uvx",
@@ -91,6 +99,9 @@ def _entry(**overrides: JsonValue) -> JsonObject:
         "tools": ["search"],
         "read_only": True,
         "network_egress": False,
+        # Fully declared on every axis, so a case about one axis is never
+        # answered by a refusal from another.
+        "root_pin": "CANDIDATE_ROOT",
     }
     entry.update(overrides)
     for key, value in list(entry.items()):

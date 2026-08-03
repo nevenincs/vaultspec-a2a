@@ -8,8 +8,9 @@ backed service endpoint resolution (``endpoints``), and the pytest plugin
 (``plugin``) that derives scheduling groups, timeout backstops, and lease
 acquisition from the declarations.
 
-The plugin is loaded through the ``-p vaultspec_a2a.testing.plugin`` entry in
-the suite's configured ``addopts``; importing this facade does not register it.
+The plugin is loaded by the repository-root ``conftest.py``, which is the one
+channel that neither an ``addopts`` override can strip nor a consumer
+environment can inherit; importing this facade does not register it.
 """
 
 from .endpoints import (

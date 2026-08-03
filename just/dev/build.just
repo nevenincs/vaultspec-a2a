@@ -27,4 +27,4 @@ docker-prod:
 
 # Remove generated package, documentation, and Python cache artifacts.
 clean:
-    uv run --no-sync --frozen --no-default-groups python -m vaultspec_a2a.cli.build_clean
+    uv run --no-sync --frozen --no-default-groups python -m dev.repo.build_clean

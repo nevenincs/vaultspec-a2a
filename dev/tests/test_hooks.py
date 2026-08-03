@@ -6,7 +6,7 @@ import os
 import subprocess
 from typing import TYPE_CHECKING
 
-from ...control import hooks
+from dev.repo import hooks
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -42,7 +42,7 @@ def test_install_hook_writes_portable_shim_into_common_hooks_dir(
 
     assert hook_path == repo / ".git" / "hooks" / "pre-commit"
     text = hook_path.read_text(encoding="utf-8")
-    assert "Managed by vaultspec_a2a.control.hooks" in text
+    assert "Managed by the vaultspec-a2a development harness" in text
     assert 'ROOT="$(git rev-parse --show-toplevel 2>/dev/null)"' in text
     assert 'export UV_CACHE_DIR="${UV_CACHE_DIR:-$ROOT/.uv-cache}"' in text
     assert 'export PREK_HOME="${PREK_HOME:-$ROOT/.prek-home}"' in text
@@ -73,3 +73,48 @@ def test_install_hook_refuses_to_replace_unmanaged_hook_without_force(
         assert "refusing to overwrite unmanaged hook" in str(exc)
     else:
         raise AssertionError("expected unmanaged hook overwrite to be refused")
+
+
+def test_install_hook_upgrades_a_hook_written_before_the_harness_move(
+    tmp_path: Path,
+) -> None:
+    """A hook carrying the installer's former module path is still ours.
+
+    Every checkout that ran ``just dev hooks install`` before the installer left
+    the shipped package has that marker on disk. Failing to recognise it would
+    turn the next install into a false "unmanaged hook" refusal on every
+    developer machine.
+    """
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git(repo, "init", "--initial-branch=main")
+    hook_dir = repo / ".git" / "hooks"
+    hook_dir.mkdir(parents=True, exist_ok=True)
+    hook_path = hook_dir / "pre-commit"
+    hook_path.write_text(
+        "#!/bin/sh\n# Managed by vaultspec_a2a.control.hooks\nexit 0\n",
+        encoding="utf-8",
+    )
+
+    installed = hooks.install_hook(repo_root=repo)
+
+    assert installed == hook_path
+    text = hook_path.read_text(encoding="utf-8")
+    assert "Managed by the vaultspec-a2a development harness" in text
+    assert "vaultspec_a2a.control.hooks" not in text
+
+
+def test_remove_hook_reports_missing_when_nothing_is_installed(tmp_path: Path) -> None:
+    """Removal is idempotent: an absent hook is reported, never an error."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git(repo, "init", "--initial-branch=main")
+    hook_path = repo / ".git" / "hooks" / "pre-commit"
+    if hook_path.exists():
+        hook_path.unlink()
+
+    assert hooks.remove_hook(repo_root=repo) is False
+
+    hooks.install_hook(repo_root=repo)
+    assert hooks.remove_hook(repo_root=repo) is True
+    assert not hook_path.exists()

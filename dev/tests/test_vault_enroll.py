@@ -1,21 +1,27 @@
-"""Real-repository tests for safe Vaultspec Core enrollment."""
+"""Real-repository tests for safe Vaultspec Core enrollment.
+
+The end-to-end case drives the script exactly as ``just dev vault install``
+does - the interpreter against the file path - rather than importing ``main``,
+so a broken invocation shape fails here instead of in a developer's checkout.
+"""
 
 from __future__ import annotations
 
 import subprocess
 import sys
-from typing import TYPE_CHECKING
+from pathlib import Path
 
 import pytest
 
-from ...cli.core_enroll import (
+from dev.vault.enroll import (
     _assert_tracked_projection,
     _require_clean_owned_paths,
     _seed_runtime_without_overwrite,
 )
+from dev.vault import enroll
 
-if TYPE_CHECKING:
-    from pathlib import Path
+#: The script path the harness recipe invokes.
+ENROLL_SCRIPT = Path(enroll.__file__).resolve()
 
 
 def _git(root: Path, *args: str) -> subprocess.CompletedProcess[str]:
@@ -118,7 +124,7 @@ dev = ["vaultspec-core>=0.1.48,<0.2"]
         text=True,
     )
     subprocess.run(
-        (sys.executable, "-m", "vaultspec_a2a.cli.core_enroll"),
+        (sys.executable, str(ENROLL_SCRIPT)),
         cwd=source,
         check=True,
         capture_output=True,
@@ -145,7 +151,7 @@ dev = ["vaultspec-core>=0.1.48,<0.2"]
 
     for _ in range(2):
         subprocess.run(
-            (sys.executable, "-m", "vaultspec_a2a.cli.core_enroll"),
+            (sys.executable, str(ENROLL_SCRIPT)),
             cwd=consumer,
             check=True,
             capture_output=True,

@@ -57,13 +57,15 @@ rag = [
 [project.scripts]
 vaultspec-a2a = "vaultspec_a2a.cli.main:main"
 
-# The resource-aware execution plugin loads through the pytest11 entry point,
-# NOT through addopts: a lane that replaces addopts wholesale (the toolchain's
-# service target does, via --override-ini) must still run under the leases,
-# groups, and admission the plugin provides. An addopts channel is strippable;
-# this one is not.
-[project.entry-points.pytest11]
-vaultspec-a2a-testing = "vaultspec_a2a.testing.plugin"
+# No `[project.entry-points.pytest11]` here, deliberately. The resource-aware
+# execution plugin must survive a lane that replaces addopts wholesale (the
+# toolchain's service target does, via --override-ini), but a pytest11 entry
+# point buys that at the price of a GLOBAL side effect: it auto-loads into
+# every pytest session in any environment that installs this package, where the
+# plugin's refusal of non-loadgroup distribution breaks a consumer's
+# `pytest -n auto` and its session registration writes leases under their home.
+# The repository-root conftest.py loads it instead - equally unreachable from
+# addopts, and scoped to this checkout.
 
 [dependency-groups]
 docs = [
@@ -190,10 +192,22 @@ packages = ["src/vaultspec_a2a"]
 #
 # Excluded: all test harnesses and certification-only preset assets. Source-run
 # and Compose certification still use these files from the checkout.
+#
+# `testing/` is test-EXECUTION machinery (declared resources, machine-global
+# leases, xdist grouping, session admission). Its only importers are the test
+# trees excluded above, so shipping it put a consumer-facing pytest plugin
+# inside a headless orchestration package. It stays a source-run facility.
+#
+# The development harness itself - the prek hook installer, the build-artifact
+# cleaner, and the Vaultspec enrollment driver - lives under `dev/`, outside the
+# package root, so it cannot reach the wheel at all rather than relying on a
+# denylist entry to keep it out.
 exclude = [
   "**/tests",
   "**/tests/**",
   "src/vaultspec_a2a/conftest.py",
+  "src/vaultspec_a2a/testing",
+  "src/vaultspec_a2a/testing/**",
   "src/vaultspec_a2a/desktop_tests",
   "src/vaultspec_a2a/desktop_tests/**",
   "src/vaultspec_a2a/service_tests",
@@ -218,7 +232,8 @@ exclude = [
 # replaces sys.stdout/stderr in memory only — no CloseHandle, no silent death.
 # The resource-aware execution plugin (declaration-derived xdist groups,
 # machine-global leases, registry-backed endpoints, session admission) loads
-# through its pytest11 entry point, so an addopts override cannot strip it.
+# through the repository-root conftest.py, so an addopts override cannot strip
+# it and no consumer environment inherits it.
 addopts = ["--durations=10", "--showlocals", "-ra", "--capture=sys", "-m", "not service"]
 # log_cli is opt-in, not a default: every module logger streaming live into
 # every run buries the pass/fail signal in noise, and failing-test log capture

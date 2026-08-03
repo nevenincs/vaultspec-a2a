@@ -15,7 +15,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from ...control import hooks
+from dev.repo import hooks
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -77,6 +77,6 @@ def test_hook_installs_under_a_non_ascii_path(tmp_path: Path, dir_name: str) -> 
 
     assert hook_path == repo / ".git" / "hooks" / "pre-commit"
     assert hook_path.is_file()
-    assert "Managed by vaultspec_a2a.control.hooks" in hook_path.read_text(
+    assert "Managed by the vaultspec-a2a development harness" in hook_path.read_text(
         encoding="utf-8"
     )

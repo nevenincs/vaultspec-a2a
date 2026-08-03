@@ -44,13 +44,16 @@ from sqlalchemy.schema import CreateTable
 
 from ...graph.compiler import compile_team_graph
 from ...graph.nodes.worker import (
+    _describe_worker_model,
     _finalize_worker_response,
     _turn_token_usage,
+    _worker_model_identity,
     create_worker_node,
 )
 from ...graph.protocols import CostPort
 from ...providers._subprocess import spawn_acp_process
 from ...providers.codex_chat_model import CodexChatModel, _CodexAppServerClient
+from ...providers.deterministic_chat_model import DeterministicResearchAdrChatModel
 from ...thread.models import TokenUsageEntry
 from ...thread.state import _merge_token_usage
 from ...worker.cost_port import SqlCostPort
@@ -825,3 +828,133 @@ class TestTheWritersAreActuallyInjected:
             async_sessionmaker(create_async_engine("sqlite+aiosqlite:///:memory:"))
         )
         assert isinstance(port, CostPort)
+
+
+class TestLaneIdentityIsTakenNotParsed:
+    """Provider and model are two facts, never one string pulled apart.
+
+    ``_describe_worker_model`` renders a joined ``lane/model_id`` for human
+    failure reports. Recovering the pair by splitting it on ``/`` would misparse
+    the vendor-prefixed model ids that legitimately contain a slash, so both
+    consumers read the same source pair instead.
+    """
+
+    def test_a_slashed_model_id_survives_as_one_value(self) -> None:
+        """The exact case a split-on-slash recovery would corrupt."""
+        model = CodexChatModel(model_name="openai/gpt-5.4-codex")
+        lane, model_id = _worker_model_identity(model)
+        assert lane == "codex"
+        assert model_id == "openai/gpt-5.4-codex"
+
+    def test_the_display_string_renders_from_the_same_pair(self) -> None:
+        """The human form must stay derived from the fact, not vice versa."""
+        model = CodexChatModel(model_name="openai/gpt-5.4-codex")
+        lane, model_id = _worker_model_identity(model)
+        assert _describe_worker_model(model) == f"{lane}/{model_id}"
+
+    def test_an_undeclared_lane_is_reported_as_unknown(self) -> None:
+        """A model declaring no lane must yield None, not a guess."""
+        lane, _ = _worker_model_identity(DeterministicResearchAdrChatModel())
+        assert lane is None
+
+    def test_the_display_fallback_never_leaks_into_the_pair(self) -> None:
+        """``_describe_worker_model`` may degrade to a class name; the pair may not.
+
+        This is the boundary the accounting writer depends on: a class name is a
+        true thing to SAY in a failure message and a false thing to STORE in a
+        provider column.
+        """
+        model = DeterministicResearchAdrChatModel()
+        assert _describe_worker_model(model) == type(model).__name__
+        assert _worker_model_identity(model)[0] is None
+
+
+class TestDegradedLaneIsStoredAsUnknown:
+    """An undeclared lane is recorded as unknown, never fabricated."""
+
+    @pytest.mark.asyncio
+    async def test_a_null_lane_still_persists_the_real_token_counts(
+        self, engine: AsyncEngine, session: AsyncSession
+    ) -> None:
+        """Measured tokens are worth keeping even when identity is not known."""
+        await _seed_thread(session, "t-degraded")
+        await session.commit()
+
+        port = SqlCostPort(async_sessionmaker(engine, expire_on_commit=False))
+        await port.record_usage(
+            thread_id="t-degraded",
+            agent_id="coder-1",
+            provider=None,
+            model=None,
+            input_tokens=210,
+            output_tokens=35,
+        )
+
+        row = (
+            await session.execute(
+                select(CostTrackingModel).where(
+                    CostTrackingModel.thread_id == "t-degraded"
+                )
+            )
+        ).scalar_one()
+        assert row.provider is None
+        assert row.model is None
+        assert row.input_tokens == 210
+        assert row.output_tokens == 35
+
+        totals = await sum_cost_by_thread(session, "t-degraded")
+        assert totals["input_tokens"] == 210
+
+    def test_the_migrated_schema_permits_the_unknown_lane(
+        self, runtime_dir: Path
+    ) -> None:
+        """Model and migration must agree that the lane columns are optional.
+
+        Asserted against the migrated database rather than the metadata, so a
+        model change without the matching migration fails here.
+        """
+        db = runtime_dir / "cost-nullable-lane.db"
+        command.upgrade(_make_config(db), "head")
+        conn = sqlite3.connect(str(db))
+        try:
+            notnull = {
+                row[1]: row[3]
+                for row in conn.execute("PRAGMA table_info(cost_tracking)")
+            }
+        finally:
+            conn.close()
+        assert notnull["provider"] == 0
+        assert notnull["model"] == 0
+        # The counters stay required; only the identity became optional.
+        assert notnull["input_tokens"] == 1
+        assert notnull["output_tokens"] == 1
+        assert notnull["estimated_cost"] == 1
+
+    def test_downgrade_backfills_rather_than_deleting_measured_rows(
+        self, runtime_dir: Path
+    ) -> None:
+        """Reversing the schema must not destroy real token counts."""
+        db = runtime_dir / "cost-nullable-downgrade.db"
+        cfg = _make_config(db)
+        command.upgrade(cfg, "head")
+        conn = sqlite3.connect(str(db))
+        conn.execute(
+            "INSERT INTO cost_tracking (id, thread_id, agent_id, provider, model,"
+            " input_tokens, output_tokens, estimated_cost, created_at)"
+            " VALUES ('r1','t1','a',NULL,NULL,210,35,0,'2026-08-03 00:00:00')"
+        )
+        conn.commit()
+        conn.close()
+
+        command.downgrade(cfg, "0013")
+
+        conn = sqlite3.connect(str(db))
+        try:
+            row = conn.execute(
+                "SELECT provider, model, input_tokens, output_tokens FROM cost_tracking"
+            ).fetchone()
+        finally:
+            conn.close()
+        assert row[0] == "<unknown>"
+        assert row[1] == "<unknown>"
+        assert (row[2], row[3]) == (210, 35)

@@ -528,8 +528,15 @@ class CostTrackingModel(Base):
     id: Mapped[str] = mapped_column(primary_key=True)
     thread_id: Mapped[str] = mapped_column(ForeignKey("threads.id"))
     agent_id: Mapped[str] = mapped_column()
-    provider: Mapped[str] = mapped_column()
-    model: Mapped[str] = mapped_column()
+    # Nullable because a lane the invoked model instance never declared is
+    # genuinely unknown, and these are free-text columns with no reserved
+    # member to spend: a sentinel string would be indistinguishable from a real
+    # provider name. NULL is the free-text counterpart of the UNKNOWN member a
+    # closed enum uses for the same purpose. The measured token counts stay
+    # worth recording, so the row is written with the identity left unset
+    # rather than dropped or back-filled with a stand-in.
+    provider: Mapped[str | None] = mapped_column(default=None)
+    model: Mapped[str | None] = mapped_column(default=None)
     input_tokens: Mapped[int] = mapped_column(default=0)
     output_tokens: Mapped[int] = mapped_column(default=0)
     estimated_cost: Mapped[Decimal] = mapped_column(MoneyAmount(), default=Decimal(0))

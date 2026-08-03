@@ -29,6 +29,11 @@ depends_on = None
 #: ``MoneyAmount``'s scaling so the migration and the type cannot disagree.
 _UNITS_PER_DOLLAR = 10**MONEY_SCALE
 
+#: Back-fill marker used only when downgrading restores the NOT NULL lane
+#: columns. Bracketed so it cannot be confused with a real provider or model
+#: name, and never written by the upgrade path or by production code.
+_UNKNOWN = "<unknown>"
+
 
 def upgrade() -> None:
     """Convert estimated_cost from IEEE-754 double to an exact decimal type.
@@ -68,6 +73,14 @@ def upgrade() -> None:
             existing_nullable=False,
             postgresql_using="estimated_cost::numeric",
         )
+        # The lane identity becomes optional in the same revision that makes the
+        # table writable for the first time. The accounting writer records the
+        # provider and model the invoked instance actually declared; when it
+        # declares neither, NULL states that honestly. Requiring a value would
+        # force a stand-in string that reads as a real provider lane, so the
+        # constraint would buy tidiness at the cost of truthfulness.
+        batch_op.alter_column("provider", existing_type=sa.String(), nullable=True)
+        batch_op.alter_column("model", existing_type=sa.String(), nullable=True)
 
 
 def downgrade() -> None:
@@ -82,7 +95,22 @@ def downgrade() -> None:
     to a double reinstates the imprecision this revision removed — but it is a
     true structural and representational inverse, so the revision reverses
     cleanly.
+
+    Restoring the NOT NULL lane columns has to contend with rows this revision
+    permitted to have none. They are back-filled with a plainly synthetic marker
+    rather than deleted: a downgrade is a schema operation and must not destroy
+    measured token counts, and the marker is chosen to be obviously not a lane
+    name so it cannot be mistaken for one on a later upgrade.
     """
+    op.execute(
+        sa.text(
+            f"UPDATE cost_tracking SET provider = '{_UNKNOWN}' WHERE provider IS NULL"
+        )
+    )
+    op.execute(
+        sa.text(f"UPDATE cost_tracking SET model = '{_UNKNOWN}' WHERE model IS NULL")
+    )
+
     with op.batch_alter_table("cost_tracking", schema=None) as batch_op:
         batch_op.alter_column(
             "estimated_cost",
@@ -91,6 +119,8 @@ def downgrade() -> None:
             existing_nullable=False,
             postgresql_using="estimated_cost::double precision",
         )
+        batch_op.alter_column("provider", existing_type=sa.String(), nullable=False)
+        batch_op.alter_column("model", existing_type=sa.String(), nullable=False)
 
     if op.get_bind().dialect.name == "sqlite":
         op.execute(

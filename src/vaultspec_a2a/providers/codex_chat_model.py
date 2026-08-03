@@ -797,11 +797,22 @@ class CodexChatModel(BaseChatModel):
         Zero or less disables the backstop, matching the setting's contract.
         """
         idle_limit = settings.acp_turn_idle_timeout_seconds
+        # The last error the lane announced it would retry past. Held rather
+        # than raised: see the `error` branch below.
+        deferred: _CodexProtocolError | None = None
         while True:
-            message = await asyncio.wait_for(
-                client.notifications.get(),
-                timeout=idle_limit if idle_limit > 0 else None,
-            )
+            try:
+                message = await asyncio.wait_for(
+                    client.notifications.get(),
+                    timeout=idle_limit if idle_limit > 0 else None,
+                )
+            except TimeoutError:
+                # A lane that announced a retry and then went quiet has already
+                # told us why it was struggling. Reporting the silence instead
+                # would replace a typed, actionable refusal with a bare timeout.
+                if deferred is not None:
+                    raise deferred from None
+                raise
             method = message.get("method")
             raw_params = message.get("params")
             params = raw_params if isinstance(raw_params, dict) else {}
@@ -813,9 +824,20 @@ class CodexChatModel(BaseChatModel):
                 if isinstance(delta, str) and delta:
                     yield ChatGenerationChunk(message=AIMessageChunk(content=delta))
             elif method == "error":
-                raise _turn_failure(
+                failure = _turn_failure(
                     params.get("error"), will_retry=params.get("willRetry")
                 )
+                if failure.will_retry:
+                    # The lane stated it is about to try again, so this frame
+                    # announces an attempt rather than an outcome. Raising here
+                    # both cancelled a retry the provider was already making and
+                    # reported the attempt's own wording as the failure - which
+                    # is how a refused credential came to be described as
+                    # "Reconnecting... 1/5". Hold it as the fallback for a stream
+                    # that ends without ever stating a result, and keep reading.
+                    deferred = failure
+                    continue
+                raise failure
             elif method == "turn/completed":
                 if params.get("threadId") not in (None, thread_id):
                     continue

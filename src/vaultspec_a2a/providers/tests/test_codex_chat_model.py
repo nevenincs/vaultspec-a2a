@@ -9,6 +9,7 @@ stdio pipes with real asyncio semantics — no mocks. The live turn test is
 
 from __future__ import annotations
 
+import json
 import shutil
 import sys
 from typing import TYPE_CHECKING
@@ -25,7 +26,7 @@ from langchain_core.messages import (
     ToolMessage,
 )
 
-from ...graph.enums import MODEL_MAP, PROVIDER_DEFAULT_MODELS, Model, Provider
+from ...graph.enums import Provider
 from .._subprocess import spawn_acp_process
 from ..codex_chat_model import (
     STDERR_TAIL_LINES,
@@ -34,6 +35,7 @@ from ..codex_chat_model import (
     _CodexProtocolError,
     _messages_to_prompt,
 )
+from ..conditions import ProviderCondition
 from ..factory import (
     ProviderFactory,
     _classify_codex_command,
@@ -211,19 +213,16 @@ def test_codex_readiness_ready_when_installed() -> None:
 
 def test_factory_creates_codex_chat_model() -> None:
     """The factory dispatches Provider.CODEX to a CodexChatModel BaseChatModel."""
-    model = ProviderFactory().create(Provider.CODEX, model=Model.HIGH)
+    model = ProviderFactory().create(Provider.CODEX, model="catalog-selected-model")
     assert isinstance(model, CodexChatModel)
     assert isinstance(model, BaseChatModel)
-    expected = MODEL_MAP[Provider.CODEX][Model.HIGH]
-    assert model.model_name == expected
+    assert model.model_name == "catalog-selected-model"
 
 
-def test_factory_codex_default_model_resolves() -> None:
-    """The default capability level maps to a real Codex model id."""
-    model = ProviderFactory().create(Provider.CODEX)
-    assert isinstance(model, CodexChatModel)
-    default_level = PROVIDER_DEFAULT_MODELS[Provider.CODEX]
-    assert model.model_name == MODEL_MAP[Provider.CODEX][default_level]
+def test_factory_codex_requires_an_exact_catalog_model() -> None:
+    """The repository does not invent a Codex default model id."""
+    with pytest.raises(ValueError, match="exact model value frozen"):
+        ProviderFactory().create(Provider.CODEX)
 
 
 def test_codex_output_message_accepts_name_assignment() -> None:
@@ -239,7 +238,7 @@ def test_codex_output_message_accepts_name_assignment() -> None:
 
 def test_codex_sync_generate_unsupported() -> None:
     """Synchronous _generate is explicitly unsupported (async-only provider)."""
-    model = ProviderFactory().create(Provider.CODEX)
+    model = ProviderFactory().create(Provider.CODEX, model="catalog-selected-model")
     with pytest.raises(NotImplementedError, match="async"):
         model.invoke([HumanMessage(content="hi")])
 
@@ -259,9 +258,9 @@ async def test_codex_live_turn_returns_output() -> None:
     """
     if not _CODEX_PRESENT:
         pytest.fail("codex CLI unavailable; install Codex before service tests")
-    model = ProviderFactory().create(Provider.CODEX, model=Model.LOW)
+    model = ProviderFactory().create(Provider.CODEX, model="catalog-selected-model")
     assert isinstance(model, CodexChatModel)
-    assert model.model_name == MODEL_MAP[Provider.CODEX][Model.LOW]
+    assert model.model_name == "catalog-selected-model"
     messages = [
         SystemMessage(content="You are terse."),
         HumanMessage(content="Reply with exactly this word and no punctuation: pong"),
@@ -373,3 +372,138 @@ async def test_deadline_expiry_terminates_a_real_session() -> None:
     # The session's real process is reaped after the deadline fires.
     await asyncio.wait_for(process.wait(), timeout=10.0)
     assert process.returncode is not None
+
+
+# ---------------------------------------------------------------------------
+# _consume_turn: an announced retry is an attempt, not an outcome
+# ---------------------------------------------------------------------------
+
+# Emits the given JSON lines as-is, then stays alive so the stream does not EOF.
+# Real subprocess and real pipes, same as the echo server above: the property
+# under test is how the turn loop reacts to a genuine notification sequence.
+_NOTIFIER = r"""
+import json, sys, time
+for line in json.loads(sys.argv[1]):
+    sys.stdout.write(json.dumps(line) + "\n")
+sys.stdout.flush()
+time.sleep(float(sys.argv[2]))
+"""
+
+
+def _error_frame(
+    message: str,
+    status: int,
+    *,
+    will_retry: bool,
+    variant: str = "responseStreamConnectionFailed",
+) -> dict[str, object]:
+    """One app-server error notification carrying a forwarded HTTP status.
+
+    The variant names a real member of the app-server's error union, and the
+    default is the one a retry sequence actually rides. A made-up variant would
+    resolve to the floor member and quietly turn these into assertions about
+    nothing.
+    """
+    return {
+        "method": "error",
+        "params": {
+            "error": {
+                "message": message,
+                "codexErrorInfo": {variant: {"httpStatusCode": status}},
+            },
+            "willRetry": will_retry,
+        },
+    }
+
+
+async def _notifier_client(
+    frames: list[dict[str, object]], linger_seconds: float = 30.0
+) -> _CodexAppServerClient:
+    process = await spawn_acp_process(
+        [sys.executable, "-c", _NOTIFIER, json.dumps(frames), str(linger_seconds)],
+        env={},
+        cwd=".",
+        use_exec=True,
+    )
+    return _CodexAppServerClient(process)
+
+
+async def _drain(client: _CodexAppServerClient) -> None:
+    model = CodexChatModel()
+    async for _ in model._consume_turn(client, "thread-1"):
+        pass
+
+
+@pytest.mark.asyncio
+async def test_an_announced_retry_does_not_end_the_turn() -> None:
+    """A retry notice must not be reported as the outcome of the turn.
+
+    This is the defect the live refusal proof exposed: a rejected credential was
+    described to the client as ``Reconnecting... 1/5``, because the first frame
+    of a retry sequence was raised as though it were the result. Raising it also
+    cancelled a retry the provider was already performing.
+    """
+    client = await _notifier_client(
+        [
+            _error_frame("Reconnecting... 1/5", 402, will_retry=True),
+            _error_frame(
+                "exceeded retry limit, last status: 402", 402, will_retry=False
+            ),
+        ]
+    )
+    try:
+        with pytest.raises(_CodexProtocolError) as caught:
+            await _drain(client)
+    finally:
+        await client.aclose()
+    assert caught.value.message == "exceeded retry limit, last status: 402"
+    assert caught.value.condition is ProviderCondition.CREDITS_EXHAUSTED
+
+
+@pytest.mark.asyncio
+async def test_a_retry_that_succeeds_leaves_no_failure_behind() -> None:
+    """A held retry notice must not resurface once the turn actually completes."""
+    client = await _notifier_client(
+        [
+            _error_frame("Reconnecting... 1/5", 429, will_retry=True),
+            {
+                "method": "item/agentMessage/delta",
+                "params": {"threadId": "thread-1", "delta": "pong"},
+            },
+            {
+                "method": "turn/completed",
+                "params": {"threadId": "thread-1", "turn": {"status": "completed"}},
+            },
+        ]
+    )
+    try:
+        model = CodexChatModel()
+        chunks = [c async for c in model._consume_turn(client, "thread-1")]
+    finally:
+        await client.aclose()
+    assert "".join(str(c.message.content) for c in chunks) == "pong"
+
+
+@pytest.mark.asyncio
+async def test_an_unannounced_error_still_ends_the_turn_immediately() -> None:
+    """The guard is bounded to what the lane actually claimed.
+
+    A frame that does NOT say a retry is coming must keep ending the turn at
+    once - otherwise the fix would trade a premature failure for a hang.
+    """
+    client = await _notifier_client(
+        [
+            _error_frame(
+                "Incorrect API key provided.",
+                401,
+                will_retry=False,
+                variant="httpConnectionFailed",
+            )
+        ]
+    )
+    try:
+        with pytest.raises(_CodexProtocolError) as caught:
+            await _drain(client)
+    finally:
+        await client.aclose()
+    assert caught.value.condition is ProviderCondition.UNAUTHENTICATED

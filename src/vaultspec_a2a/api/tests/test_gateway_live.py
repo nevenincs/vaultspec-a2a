@@ -1788,9 +1788,7 @@ async def test_modern_selection_insert_race_and_direct_replay_disclose_same_free
                     what="the first nickname request to pass its read",
                 )
                 right = asyncio.create_task(
-                    client.post(
-                        "/v1/runs", json={**nickname_base, "run_id": right_id}
-                    )
+                    client.post("/v1/runs", json={**nickname_base, "run_id": right_id})
                 )
                 await _wait_until(
                     lambda: checked_out() >= baseline + 2,

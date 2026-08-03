@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import pytest
 
-from .._acp_rpc_handlers import _kimi_autonomous_option_id, on_request_permission
+from .._acp_rpc_handlers import _autonomous_option_id, on_request_permission
 from .._acp_types import AcpModelConfig, AcpSessionContext, PermissionCallback
 from .._json_contract import JsonObject, JsonValue
 
@@ -143,22 +143,35 @@ async def test_a_snake_case_option_answered_in_kind_is_accepted(
 async def test_a_snake_case_option_is_selected_when_no_callback_decides(
     acp_session_context: AcpSessionContext,
 ) -> None:
-    """The unsupervised default path reads the leading option in either spelling."""
-    decision = await _decide(
-        [{"option_id": "allow_always"}], _config(), acp_session_context
-    )
+    """The unsupervised path reads the id it selects in either spelling.
 
-    assert decision == "allow_always"
+    ``Edit`` is not a declared tool for this config, so the unsupervised path
+    refuses it, and the refusal it selects is offered under the snake_case
+    spelling alone.
+    """
+    options: list[JsonObject] = [
+        {"option_id": "allow_always", "kind": "allow_always"},
+        {"option_id": "reject_once", "kind": "reject_once"},
+    ]
+
+    decision = await _decide(options, _config(), acp_session_context)
+
+    assert decision == "reject_once"
 
 
 @pytest.mark.asyncio
 async def test_a_leading_option_without_an_id_does_not_crash_the_default_path(
     acp_session_context: AcpSessionContext,
 ) -> None:
-    """No id on offer at position zero means the conventional allow-once id."""
+    """No usable id on offer means the conventional refusal literal.
+
+    The literal is the deliberate answer rather than a recovery: an id the agent
+    does not recognise makes it decline the call, which is the direction the
+    unsupervised path must fail in when it cannot name what it was offered.
+    """
     decision = await _decide([_MALFORMED], _config(), acp_session_context)
 
-    assert decision == "allow_once"
+    assert decision == "reject"
 
 
 @pytest.mark.asyncio
@@ -217,5 +230,5 @@ def test_the_kimi_autonomous_lane_reads_snake_case_options() -> None:
     ]
     config = _config(acp_family="kimi")
 
-    assert _kimi_autonomous_option_id("ReadFile: a.py", config, options) == "approve"
-    assert _kimi_autonomous_option_id("WriteFile: a.py", config, options) == "reject"
+    assert _autonomous_option_id("ReadFile: a.py", config, options) == "approve"
+    assert _autonomous_option_id("WriteFile: a.py", config, options) == "reject"

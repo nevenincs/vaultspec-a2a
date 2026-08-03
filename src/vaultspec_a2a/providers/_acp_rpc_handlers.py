@@ -21,6 +21,7 @@ from ..control.config import settings
 from ..graph.acp_options import option_id_of, valid_option_ids
 from ..utils.process import ProcessContainment, ProcessContainmentError
 from ..workspace.environment import resolve_env_vars
+from ._acp_mcp import NATIVE_READ_TOOL_NAMES
 from ._acp_types import (
     AcpModelConfig,
     AcpRpcId,
@@ -186,6 +187,77 @@ def _vault_write_denial(rpc_id: AcpRpcId, path: str) -> JsonObject:
 # no Claude-floor analogue for them), so the conservative posture omits them.
 _KIMI_NATIVE_READ_TOOLS: frozenset[str] = frozenset({"ReadFile", "Grep", "Glob"})
 
+# The Claude-family read floor, read from the single place this project declares
+# it rather than re-spelled here, so the tools a run auto-permits at composition
+# and the tools it auto-approves at the permission rung cannot drift.
+_CLAUDE_NATIVE_READ_TOOLS: frozenset[str] = frozenset(NATIVE_READ_TOOL_NAMES)
+
+# The gemini backend declares an EMPTY native read floor, and the emptiness is
+# the declaration, not an oversight. gemini-cli 0.46.0 fills the ACP permission
+# request's ``title`` from the invocation's display title, which for its built-in
+# tools is a human description (a shortened path, a shell command line) carrying
+# no tool name at all; only its MCP tools carry a recoverable identity, through
+# the ``"<tool> (<server> MCP Server)"` display name. An exact-name allowlist can
+# admit only what it can name, so the lane's own file tools are refused under
+# autonomy until the payload can carry an identity to allowlist. That is the
+# fail-closed direction: the alternative is approving by tool KIND, which is a
+# category rather than a name and is the blanket approval this replaces.
+_GEMINI_NATIVE_READ_TOOLS: frozenset[str] = frozenset()
+
+# gemini-cli's MCP display name, the one identity its permission payload carries.
+_GEMINI_MCP_TITLE_RE = re.compile(r"^(?P<tool>\S+) \(.+ MCP Server\)$")
+
+# ACP backend discriminator for the gemini lane. It rides ``acp_backend`` rather
+# than ``acp_family`` because gemini reuses the claude family for everything
+# except the CLI-side allowlist transport, which it does not have.
+_GEMINI_ACP_BACKEND = "gemini-cli"
+
+
+def _is_gemini_backend(config: AcpModelConfig) -> bool:
+    """Return whether this lane is served by the gemini command-line backend."""
+    return config.acp_backend == _GEMINI_ACP_BACKEND
+
+
+def _native_read_tools(config: AcpModelConfig) -> frozenset[str]:
+    """Return the lane's native read floor - the CLI's own read-only tools.
+
+    Every lane declares one. A lane whose permission payload cannot name its
+    native tools declares an empty floor rather than being omitted, so the
+    absence is a reviewed answer instead of a gap between ``if`` branches.
+    """
+    if _is_gemini_backend(config):
+        return _GEMINI_NATIVE_READ_TOOLS
+    if config.acp_family == "kimi":
+        return _KIMI_NATIVE_READ_TOOLS
+    return _CLAUDE_NATIVE_READ_TOOLS
+
+
+def _canonical_tool_identity(title: str, config: AcpModelConfig) -> str:
+    """Reduce a permission request's ``title`` to the tool name it names.
+
+    The ACP permission payload has no tool-name field: every backend projects the
+    call into a ``title`` meant for a human, and each projects it differently, so
+    the reduction is per backend and each spelling is taken from the installed
+    adapter rather than assumed.
+
+    - kimi-cli titles are ``"ToolName"`` or ``"ToolName: subtitle"``.
+    - claude-agent-acp 0.19.2 (``dist/tools.js``) hand-writes a label for each
+      built-in it knows and falls through to ``title: name`` for everything else,
+      which is what makes an MCP tool's title its exact ``mcp__<server>__<tool>``
+      name. The label branches are deliberately NOT parsed: a title like
+      ``"Read <path>"`` is prose, and matching its leading word would let a
+      sub-agent task whose description merely BEGINS with an allowlisted word
+      canonicalise into an approval.
+    - gemini-cli 0.46.0 carries a tool name only for MCP tools, in its display
+      name; anything else reduces to itself and matches no declared name.
+    """
+    if _is_gemini_backend(config):
+        match = _GEMINI_MCP_TITLE_RE.match(title)
+        return match.group("tool") if match else title
+    if config.acp_family == "kimi":
+        return title.split(": ", 1)[0]
+    return title
+
 
 def _strip_mcp_prefix(tool_name: str) -> str:
     """Reduce a Claude-form ``mcp__<server>__<tool>`` allowlist entry to the raw
@@ -245,27 +317,27 @@ def _denial_option_id(options: list[JsonObject]) -> str:
     )
 
 
-def _kimi_autonomous_option_id(
-    name: str, config: AcpModelConfig, options: list[JsonObject]
-) -> str:
-    """Return the option id for a Kimi autonomous permission decision.
+def _approval_option_id(options: list[JsonObject]) -> str:
+    """Return the id of the NARROWEST offered approval.
 
-    Read-only enforcement re-expressed at our RPC layer for a lane whose CLI
-    carries no config allowlist: auto-approve EXACTLY the composed read tools
-    (raw MCP tool names from ``config.allowed_tools``) plus Kimi's native read
-    tools; reject every other request. The tool identity is the prefix of Kimi's
-    ``get_title()`` (``"ToolName: subtitle"`` or ``"ToolName"``).
+    ``allow_once`` is preferred over ``allow_always`` strictly, never by list
+    order. The backends do not agree on ordering - gemini-cli 0.46.0 offers
+    ``proceed_always_server`` ("allow all server tools for this session") ahead
+    of ``proceed_once`` for an MCP call - so taking the first approval-kind
+    option would grant a whole server for a session on the strength of one
+    allowlisted tool, re-opening by approval exactly the undeclared verbs the
+    allowlist exists to keep unreachable.
     """
-    canonical = name.split(": ", 1)[0]
-    allowed = {_strip_mcp_prefix(t) for t in config.allowed_tools} | (
-        _KIMI_NATIVE_READ_TOOLS
-    )
-    if canonical in allowed:
+    for kind in ("allow_once", "allow_always"):
         for option in options:
             option_id = option_id_of(option)
-            if option.get("kind") in ("allow_once", "allow_always") and option_id:
+            if option.get("kind") == kind and option_id:
                 return option_id
-        return _option_id_at(options, 0, default="approve")
+    return _option_id_at(options, 0, default="approve")
+
+
+def _rejection_option_id(options: list[JsonObject]) -> str:
+    """Return the id of an offered rejection, scanning for a refusal of any spelling."""
     for option in options:
         option_id = option_id_of(option)
         if option_id and (
@@ -275,6 +347,89 @@ def _kimi_autonomous_option_id(
         ):
             return option_id
     return _option_id_at(options, -1, default="reject")
+
+
+def _autonomous_option_id(
+    name: str, config: AcpModelConfig, options: list[JsonObject]
+) -> str:
+    """Return the option id for an autonomous permission decision, on any lane.
+
+    An autonomous run has no human rung, so this IS the permission decision.
+    Every lane gets the same rule: auto-approve EXACTLY the composed tools
+    (``config.allowed_tools``, in both the qualified ``mcp__<server>__<tool>``
+    spelling a claude title carries and the raw spelling kimi and gemini carry)
+    plus the lane's native read floor; reject everything else.
+
+    Rejecting the uncovered case is the point. A permission request only reaches
+    here for a call the CLI's own static pre-approval did not cover, and what a
+    server MOUNTS is wider than what the registry DECLARES - the search server
+    also serves index-rebuild and index-clean verbs beside its three declared
+    reads. Approving the uncovered call, which is what the non-kimi lanes did,
+    made the declared surface advisory and every unadvertised verb reachable.
+    """
+    canonical = _canonical_tool_identity(name, config)
+    allowed = (
+        set(config.allowed_tools)
+        | {_strip_mcp_prefix(tool) for tool in config.allowed_tools}
+        | _native_read_tools(config)
+    )
+    if canonical in allowed:
+        return _approval_option_id(options)
+    return _rejection_option_id(options)
+
+
+# Tool-call argument keys that name a project to operate on. The search tools a
+# run is handed take their root this way - ``project_root`` on every
+# vaultspec-rag tool - which is how a scope escape arrives as an ARGUMENT that no
+# per-server trust assertion can express. Both the snake_case and camelCase
+# spellings are listed because the argument crosses a JSON boundary where either
+# convention is admissible.
+_PROJECT_ARGUMENT_KEYS: frozenset[str] = frozenset(
+    {"project_root", "projectRoot", "workspace_root", "workspaceRoot"}
+)
+
+# Depth bound for the argument scan. Tool inputs are flat in practice (the search
+# adapter exposes a deliberately flat schema), so this exists only so untrusted,
+# deeply nested input cannot turn a permission decision into a recursion.
+_MAX_ARGUMENT_SCAN_DEPTH = 6
+
+
+def _foreign_project_argument(args: JsonObject, config: AcpModelConfig) -> str | None:
+    """Return the first argument naming a project outside the run's, or ``None``.
+
+    The escape this closes is argument-borne: the run's grounding tools resolve a
+    caller-supplied root against any enrolled workspace on the machine, so a call
+    the registry considers entirely read-only and entirely local still returns
+    another project's content. The trust boundary is therefore the call, and this
+    is where calls already pass.
+
+    A named project that is not the run's is REPORTED, not corrected. Rewriting
+    the argument to the bound project would answer a different question than the
+    agent asked and hide that it asked it.
+    """
+
+    def scan(value: JsonValue, depth: int) -> str | None:
+        if depth > _MAX_ARGUMENT_SCAN_DEPTH:
+            return None
+        if isinstance(value, dict):
+            for key, item in value.items():
+                if (
+                    key in _PROJECT_ARGUMENT_KEYS
+                    and isinstance(item, str)
+                    and item.strip()
+                    and not config.binds_project_path(item.strip())
+                ):
+                    return item
+                if (found := scan(item, depth + 1)) is not None:
+                    return found
+            return None
+        if isinstance(value, list):
+            for item in value:
+                if (found := scan(item, depth + 1)) is not None:
+                    return found
+        return None
+
+    return scan(args, 0)
 
 
 async def on_request_permission(
@@ -299,6 +454,30 @@ async def on_request_permission(
         name,
         sorted(valid_option_ids(options)),
     )
+
+    # Scope enforcement precedes BOTH rungs. A run is bound to one project, and a
+    # call naming another is outside what the run was admitted to do, so neither
+    # an autonomous allowlist nor a human sitting at the supervised rung is the
+    # authority that could permit it. Placing the check first also means the
+    # refusal is the same refusal on every lane.
+    #
+    # The refused ARGUMENT is deliberately not logged, only the fact of the
+    # refusal and the run's own bound project: the R7 discipline this handler
+    # already follows keeps agent-supplied payload out of the log, and a
+    # caller-chosen path is payload.
+    if _foreign_project_argument(args, config) is not None:
+        logger.warning(
+            "Refused cross-project tool call: tool=%s named a project outside "
+            "the run's bound project (bound=%s)",
+            name,
+            config.bound_project_root(),
+        )
+        deny_id = _denial_option_id(options)
+        return {
+            "jsonrpc": "2.0",
+            "id": rpc_id,
+            "result": {"outcome": {"optionId": deny_id, "outcome": "selected"}},
+        }
 
     if config.permission_callback:
         try:
@@ -329,36 +508,16 @@ async def on_request_permission(
                 "id": rpc_id,
                 "result": {"outcome": {"optionId": deny_id, "outcome": "selected"}},
             }
-    elif config.acp_family == "kimi":
-        # Autonomous (no permission_callback) Kimi lane: enforce read-only as an
-        # exact-name auto-approve set at our RPC handler, because Kimi's CLI has
-        # no config allowlist. Auto-approve exactly the composed read tools plus
-        # Kimi's native read tools; reject everything else. Blanket approve is
-        # NOT used - a read-only-only compose still leaves Kimi's native write
-        # and shell tools reachable, so the enforcement is what the agent CAN do.
-        option_id = _kimi_autonomous_option_id(name, config, options)
     else:
-        # M14: an option list whose leading entry carries no usable id falls back
-        # to the conventional allow-once id rather than subscripting it.
-        #
-        # D7 verification (approval-shape-reconciliation ADR, 2026-08-01;
-        # explicitly left undecided there, verify-only, no behaviour change):
-        # traced whether a MUTATING tool call can reach this branch under
-        # autonomy for a non-Kimi (e.g. Claude-family) lane. It can. Under
-        # autonomy, worker.py's _resolve_effective_worker_model leaves the
-        # model's permission_callback unset (it only wires
-        # _interrupt_permission_callback when NOT autonomous), so
-        # config.permission_callback is falsy here and, for any acp_family
-        # other than "kimi", every permission request the CLI raises lands in
-        # THIS branch. Unlike _kimi_autonomous_option_id, it applies no
-        # tool-name or tool-kind allowlist: it auto-approves the first offered
-        # option unconditionally. A request reaches on_request_permission only
-        # for a tool NOT already covered by config.allowed_tools (the CLI's own
-        # static pre-approval), so an uncovered mutating call (write/edit/bash)
-        # is auto-approved here exactly like a read. This is the asymmetry the
-        # ADR's grounding reference names against Kimi's exact-name allowlist;
-        # whether to close it is its own future decision, not this one.
-        option_id = _option_id_at(options, 0, default="allow_once")
+        # Autonomous: no permission_callback means no human rung, on ANY lane.
+        # Under autonomy the worker leaves the callback unset, so every
+        # permission request the CLI raises - and a request is raised only for a
+        # call the CLI's own static pre-approval did not cover - is decided here.
+        # This used to fork: kimi enforced an exact-name read allowlist because
+        # its CLI carries no config allowlist, and every other lane approved the
+        # first offered option unconditionally, which approved an uncovered
+        # mutating call exactly like a read. One rule now covers all of them.
+        option_id = _autonomous_option_id(name, config, options)
 
     # M17: validate that option_id is among the offered options before returning.
     # Reject a callback-supplied id that is not in the options list to prevent

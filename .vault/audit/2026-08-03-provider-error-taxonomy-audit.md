@@ -5,7 +5,7 @@ tags:
 date: '2026-08-03'
 modified: '2026-08-03'
 body_schema: 'body-v1'
-body_hash: 'sha256:ed0bbb29be687fe5f50f35cf73faf57f7c9f25eceb23e895fe232e9907c98c78'
+body_hash: 'sha256:a0dd7852c90bf47811d6592f48dd70c520e44265dd90c9f8363a77bafff09afc'
 related:
   - "[[2026-08-02-provider-error-taxonomy-plan]]"
   - "[[2026-08-02-provider-error-taxonomy-adr]]"
@@ -39,6 +39,35 @@ prose - but a client that renders the reason verbatim beside the condition will
 show a correct badge next to a misleading sentence. The defect is in what the
 lane's protocol error is holding at the moment the wrapper reads it, not in the
 resolver.
+
+### live-refusal-reason-names-a-retry-step | RESOLVED | Fixed, and it was concealing a second defect
+
+Closed on 2026-08-03 and re-verified live on all three armed refusals. The cause
+was not in the wording: the turn loop raised on the FIRST error notification it
+saw, including ones where the lane had said it was about to try again, so it
+cancelled a retry the provider was already performing and reported the attempt's
+own wording as the outcome. The flag stating that intent was already parsed and
+carried; it was simply never consulted.
+
+Waiting for the terminal frame then exposed the defect underneath. It produced a
+truthful message and a WORSE condition - a live `402` dropped from
+`credits_exhausted` to the floor member - because the app-server's error union
+splits in two: a few variants are objects forwarding the provider's HTTP status,
+and the rest are bare strings with no payload. A refusal routinely ends on a
+payload-free one. The original code had been reading the right status off the
+wrong frame and getting the right answer by luck.
+
+Both are kept now: message from the frame that ended the turn, condition falling
+back to what an earlier attempt actually forwarded, and only as a fallback so a
+self-classifying terminal frame is never overridden. Checked against the schema
+the installed binary generates: all sixteen declared variants are mapped and none
+is stale, so the floor member was correct behaviour on incomplete evidence rather
+than a missing table entry - which is why the fix retains evidence instead of
+adding a mapping.
+
+A behaviour worth recording separately: the endpoint logged NINE provider attempts
+on the fixed run where it had logged one before. The lane's own retry schedule had
+been cancelled by the first notice for as long as this code has existed.
 
 ### mock-failure-tool-advertises-a-failure-it-does-not-produce | medium | A harness tool declares a failure mode it cannot actually raise
 

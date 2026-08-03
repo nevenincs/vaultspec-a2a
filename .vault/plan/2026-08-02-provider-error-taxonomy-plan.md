@@ -4,7 +4,7 @@ tags:
   - '#provider-error-taxonomy'
 date: '2026-08-02'
 modified: '2026-08-03'
-body_hash: 'sha256:0ba2395f6db08666e8b6dec530a4919dc182beffbdb570784df510a499c071ab'
+body_hash: 'sha256:477413a2ce4606e24a1b5e426373118ce305ae829fc1545a77dbdb0a7804d7ac'
 tier: L3
 related:
   - '[[2026-08-02-provider-error-taxonomy-adr]]'
@@ -113,6 +113,8 @@ Removes the superseded dead vocabulary and proves a real provider failure surfac
 - [x] `W01.P06.S43` - Replace the usage-limit substring sniff with the typed condition; `src/vaultspec_a2a/service_tests/test_claude_web_grounding_live.py`.
 - [x] `W01.P06.S44` - Add a scripted failure scenario preset for the integration-verification ask; `src/vaultspec_a2a/team/presets/teams`.
 - [x] `W01.P06.S45` - Prove a live provider failure surfaces a typed condition end to end; `src/vaultspec_a2a/service_tests/test_provider_condition_live.py`.
+- [x] `W01.P06.S61` - Stop aborting a codex turn on a retry notice the lane says it will retry; `src/vaultspec_a2a/providers/codex_chat_model.py`.
+- [x] `W01.P06.S62` - Gate the shared condition vocabulary against the engine's declaration so a new member cannot ship one-sided; `src/vaultspec_a2a/api/tests/test_engine_edge_bounds_agreement.py`.
 
 ## Wave `W02` - dashboard condition surfacing
 
@@ -122,11 +124,11 @@ Consumes the served condition in the dashboard repository: the engine models and
 
 Teaches the dashboard engine to model, validate, persist and forward the condition on a failed run, so the frontend has an authoritative field to read.
 
-- [ ] `W02.P07.S46` - Declare the provider condition on the run record type; `engine/crates/vaultspec-api/src/authoring/session/types.rs`.
-- [ ] `W02.P07.S47` - Validate the condition against the closed vocabulary; `engine/crates/vaultspec-api/src/authoring/session/validate.rs`.
-- [ ] `W02.P07.S48` - Persist and read back the condition on a failed run; `engine/crates/vaultspec-api/src/authoring/session/mod.rs`.
-- [ ] `W02.P07.S49` - Forward the condition on the a2a ops route; `engine/crates/vaultspec-api/src/routes/ops/a2a.rs`.
-- [ ] `W02.P07.S50` - Prove the condition round-trips through the session store; `engine/crates/vaultspec-api/src/authoring/session/tests.rs`.
+- [x] `W02.P07.S46` - Declare the provider condition on the run record type; `engine/crates/vaultspec-api/src/authoring/session/types.rs`.
+- [x] `W02.P07.S47` - Validate the condition against the closed vocabulary; `engine/crates/vaultspec-api/src/authoring/session/validate.rs`.
+- [x] `W02.P07.S48` - Persist and read back the condition on a failed run; `engine/crates/vaultspec-api/src/authoring/session/mod.rs`.
+- [x] `W02.P07.S49` - Forward the condition on the a2a ops route; `engine/crates/vaultspec-api/src/routes/ops/a2a.rs`.
+- [x] `W02.P07.S50` - Prove the condition round-trips through the session store; `engine/crates/vaultspec-api/src/authoring/session/tests.rs`.
 
 ### Phase `W02.P08` - adapter and panel surfacing
 

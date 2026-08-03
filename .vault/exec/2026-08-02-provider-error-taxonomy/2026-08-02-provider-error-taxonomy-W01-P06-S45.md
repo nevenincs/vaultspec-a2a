@@ -3,46 +3,13 @@ tags:
   - '#exec'
   - '#provider-error-taxonomy'
 date: '2026-08-02'
-modified: '2026-08-02'
+modified: '2026-08-03'
 body_schema: 'body-v1'
-body_hash: 'sha256:ee989cba69296ae3d38364441e33db826a7eed6b8ad29bee8ec9cf4d54a239da'
+body_hash: 'sha256:8e8fe8d0a7ee6376f4742f910d6fe2a47e53f8a43a6cad34ad1bd0c750f1e834'
 step_id: 'S45'
 related:
   - "[[2026-08-02-provider-error-taxonomy-plan]]"
 ---
-
-<!-- FRONTMATTER RULES:
-     tags: one directory tag (hardcoded #exec) and one feature tag.
-     Replace provider-error-taxonomy with a kebab-case feature tag, e.g. #foo-bar.
-     Additional tags may be appended below the required pair.
-
-     modified: CLI-maintained last-modified stamp; set at scaffold time,
-     refreshed by mutating CLI verbs and vault check fix; never hand-edit.
-
-     step_id is the originating Step's canonical identifier, e.g. S01.
-     The S45 and 2026-08-02-provider-error-taxonomy-plan placeholders are machine-filled by
-     `vaultspec-core vault add exec`; do not fill them by hand.
-
-     Related: use wiki-links as '[[yyyy-mm-dd-foo-bar-plan]]' and link the
-     parent plan.
-
-     DO NOT add fields beyond those scaffolded; metadata lives
-     only in the frontmatter. -->
-
-<!-- LINK RULES:
-     - [[wiki-links]] are ONLY for .vault/ documents in the related: field above.
-     - NEVER use [[wiki-links]] or markdown links in the document body.
-     - NEVER reference file paths in the body. If you must name a source file,
-       class, or function, use inline backtick code: `src/module.py`. -->
-
-<!-- STEP RECORD:
-     This file represents one Step from the originating plan. Identified
-     by its canonical leaf identifier (S##) and ancestor display path.
-     The Prove a live provider failure surfaces a typed condition end to end and ## Scope
-
-- `src/vaultspec_a2a/service_tests/test_provider_condition_live.py` placeholders below are machine-filled
-     by `vaultspec-core vault add exec` from the originating Step row;
-     do not fill them by hand. -->
 
 # Prove a live provider failure surfaces a typed condition end to end
 
@@ -123,3 +90,43 @@ the ONLY surface that can exercise a typed condition end to end, because
 conditions are resolved only at the served-lane raise sites and no in-process lane
 produces one. And until it is driven against an armed stack, the wave is
 code-complete rather than proven.
+
+## Live attempt, 2026-08-03
+
+Half of this Step is now proven against a real stack; half is not. The row stays
+open because the unproven half is the one the Step is named for.
+
+PROVEN. A gateway and worker were stood up and a run driven through the real
+codex lane end to end: run creation returned 201 with a frozen assignment naming
+`codex/codex-app-server`, the run reached a terminal, and `run-status` served it.
+The terminal was `completed`, carrying no condition and no failure reason. That
+is the non-failure invariant - never stamp a condition on a run that did not fail
+- holding on the real served path rather than in a unit test. It also means the
+codex lane completed a real turn through that path.
+
+NOT PROVEN. No live refusal has yet produced a typed condition on `run-status`.
+The chain has been walked, but only in its success direction.
+
+WHY THE REFUSAL COULD NOT BE ARMED. Codex resolves its endpoint through a
+per-run isolated config home written by the worker, not through a base-URL
+environment variable, so pointing it at a refusing endpoint needs a production
+change rather than configuration. The two ACP lanes DO honour a base-URL
+override, but both report `admission=not_admitted` for their agent-acp execution
+modes - "no exact completed-turn proof; evidence from another execution mode is
+not inherited" - so neither can be selected. The cheaper finish is therefore to
+complete one ordinary turn on the claude agent-acp mode so that lane becomes
+admitted, then arm it with a base-URL override; that needs no production edit.
+
+THREE OBSTACLES WERE REMOVED GETTING HERE, and each was a real defect rather than
+an environmental quirk. The simulator advertised no model selector, so a
+simulator-backed lane produced no catalog entry and no run could name a
+selection. This Step demanded a reachable authoring engine it never used. And
+every preset able to reach a real lane declared an authoring bridge, so run
+creation refused with a missing-actor-token error - which also disproves this
+module's own comment that the coding topology needs no engine session.
+
+The recipe that works is recorded on the queue entry: both processes from a clean
+detached worktree with the interpreter path pointed at it, the worker started by
+hand because the auto-spawned one does not inherit it, gateway and worker ports
+agreeing, the test driven from the main checkout, and the bridge-free probe
+preset as the topology.

@@ -3,8 +3,8 @@ tags:
   - '#exec'
   - '#desktop-product-profile'
 date: '2026-07-20'
-modified: '2026-07-30'
-body_hash: 'sha256:aad71191ae7258e3abbe7e2a709f5693bc63bd428684ee3e4e575b16de0a2c15'
+modified: '2026-08-02'
+body_hash: 'sha256:07d0d8396af14a062a7b1f586dc26a5e65f802d3600ae64883dfab2c77100818'
 related:
   - "[[2026-07-18-desktop-product-profile-plan]]"
 ---
@@ -63,7 +63,6 @@ skips, or expected failures. Review confirmed every admission and settlement
 invariant from the decision record with two optional low notes accepted
 as-is (a settlement retry nicety and an established private health-probe
 reach-in).
-
 
 The phase later took a tenth Step, which hardened that same admission path for crash
 recovery: one stable run identity, a pre-minted lease, a recoverable committing

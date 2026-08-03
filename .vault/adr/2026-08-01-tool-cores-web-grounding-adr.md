@@ -5,6 +5,7 @@ tags:
 date: '2026-08-01'
 modified: '2026-08-01'
 body_schema: 'body-v1'
+body_hash: 'sha256:5441849b4158c280806c1d4f37dbcab2b1f80314c0189f9bf4787e990cd998a6'
 related:
   - '[[2026-08-01-tool-cores-web-grounding-research]]'
   - '[[2026-07-17-tool-cores-adr]]'

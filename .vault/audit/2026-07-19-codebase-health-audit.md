@@ -3,8 +3,8 @@ tags:
   - '#audit'
   - '#codebase-health'
 date: '2026-07-19'
-modified: '2026-07-31'
-body_hash: 'sha256:a648e5ef589e57d07527b0f2ee60f74f18793897ce872f2977bd209bc6875be5'
+modified: '2026-08-02'
+body_hash: 'sha256:22b62723da613e4f864bad3efd09ffe445d5a6d187144e9fa5b5f0aeffe6efc2'
 related:
   - "[[2026-07-14-a2a-edge-conformance-adr]]"
   - "[[2026-07-18-desktop-product-profile-plan]]"
@@ -2099,7 +2099,6 @@ separately as a production defect. Recorded because a confident wrong
 attribution nearly caused a destructive action, and because the correction had
 to be pushed back to the lane before it reached a report.
 
-
 ### Wave W02 formal review (2026-07-30)
 
 Verdict: REVISE. The closed W02 Steps are safe, bounded, and concurrency-clean - no
@@ -2220,7 +2219,6 @@ and that tree carries a non-compiling refactor, so neither proof is expressible 
 today. A stale engine binary is now a shared blocker across two campaigns, not an
 incident in one.
 
-
 ### Hardening pass (2026-07-30)
 
 Two of the six findings queued by the Wave W02 review are closed with evidence, and
@@ -2264,7 +2262,6 @@ worker roles to the intended provider through the profile source. A tree-wide sw
 confirmed no second stale enumeration. The transferable lesson is scope-shaped: a preset
 change reaches every surface that discloses presets, so the gate must follow the
 disclosure surfaces rather than the edited directory.
-
 
 ### Hardening review (2026-07-30)
 
@@ -2336,7 +2333,6 @@ it is the test's least robust element. `gateway-module-over-ceiling` (low, open)
 gateway route module grew past 1600 lines, further beyond the project ceiling already
 recorded under the module-size finding above.
 
-
 ### Consumer consumption inventory (2026-07-30)
 
 The consuming product was read directly rather than assumed, to settle two decisions that
@@ -2390,7 +2386,6 @@ edit: either the accepted decision is amended to admit bounded argument and resu
 with explicit caps, or the consumer stops rendering panes that structurally cannot fill.
 Deliberately NOT fixed in passing by the catalog work, which would have meant re-admitting
 a forbidden field without a decision.
-
 
 ### Hardening lane closures and new queue (2026-07-30, second pass)
 
@@ -2462,7 +2457,6 @@ the role grammar. The byte cap is therefore a near-unreachable backstop rather t
 exposed hole, and no edge-side truncation is warranted - truncating an identifier would be
 actively worse, since the consumer keys stream grouping off the message identifier and a
 truncated one could collide.
-
 
 ### Delete-contract review and consumer repairs (2026-07-30)
 
@@ -2543,7 +2537,6 @@ removing a cause. Either the deadline should be generous or the wait should be
 signal-driven. Recorded because a lane correctly declining to blame its own change is the
 same discipline as declining to claim a green.
 
-
 ### Final adjudication and closure (2026-07-31)
 
 Three implementations were adjudicated together after their individual reviews were
@@ -2603,7 +2596,6 @@ The derived boolean retained for compatibility now has no production reader - th
 branches on the kinds tuple, and only a test asserts the property. Either use it or drop
 it.
 
-
 ### Ranked closures (2026-07-31)
 
 Three findings closed by `9d1fd49a`, taken in the order adjudication ranked them.
@@ -2641,7 +2633,6 @@ load-sensitive live stream tests, the absent digest for server-minted identifier
 over-ceiling route module, whose repair is refactor-sized and should not be chased for its
 own sake.
 
-
 #### `mcp-503-reads-as-a-server-fault` (medium, closed)
 
 The tool surfaced the resumable-incomplete outcome through a generic branch as a server
@@ -2670,7 +2661,6 @@ earlier: this repair was authored here but landed inside a concurrent session's 
 which swept the working-tree change in. Nothing was lost, and the mirror-image of the
 earlier incident is worth keeping visible - on a shared tree, uncommitted work belongs to
 whoever commits next, in either direction.
-
 
 ### Closing verification (2026-07-31)
 
@@ -2704,7 +2694,6 @@ The honest reading is therefore: green on every gate that can be measured withou
 contention, with four known contention artifacts named rather than rounded away, and the
 four proven green the moment they are given the machine to themselves. A whole-package run
 on a shared box is not the authority here; the isolated runs are.
-
 
 ### Truthfulness tranche (2026-07-31)
 
@@ -2755,7 +2744,6 @@ is unknown. If a library change ever made that store usable again, those tests w
 quietly asserted the wrong outcome for a plausible-looking reason; they now fail at the
 cause with a message saying so.
 
-
 #### `delete-result-abandoned-property-test-only` (low, closed by `be72890f`)
 
 The delete result kept a boolean derived from the abandoned-kinds tuple, retained for
@@ -2798,7 +2786,6 @@ a running system, which is the first thing any repair should establish.
 
 `bare-204-on-the-already-final-race` - closed as a documented limit, since the information
 is genuinely unrecoverable at that point rather than merely unread.
-
 
 ### Legacy surface teardown (2026-07-31)
 

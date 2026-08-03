@@ -3,8 +3,8 @@ tags:
   - '#adr'
   - '#codebase-health'
 date: '2026-07-19'
-modified: '2026-07-31'
-body_hash: 'sha256:2a46c12ad43aebb593f78e3a343dcda1d15ca99866b13ebde7ec1d5d88bc8c02'
+modified: '2026-08-02'
+body_hash: 'sha256:c34e78026d6ef906eaa5819d4a525d471844075b05c3f644212974ef385820ef'
 related:
   - "[[2026-07-19-codebase-health-research]]"
   - "[[2026-07-18-desktop-product-profile-adr]]"
@@ -148,7 +148,6 @@ A consumer asserting strictly on the no-content code will misclassify the
 abandoned case. That break is accepted deliberately on this transition surface
 rather than preserving a contract that cannot express the outcome.
 
-
 The retry invitation carried by the resumable-incomplete answer is addressed to the
 CALLER, and intermediaries do not loop on it. Automatic retry with backoff is the right
 default for a transient fault whose repetition is a cheap, side-effect-free replay - but
@@ -170,7 +169,6 @@ knows whether the work is still wanted, which is the caller, not the transport b
 them. This boundary would move if the resumable pass became a poll that does not advance
 the ledger against an unchanged cause, or if the answer carried a server-computed pacing
 hint - either would make a single bounded client retry defensible.
-
 
 A concurrent replay that loses the finalize race answers with the clean no-content
 success even when the winning pass finalized over abandoned state. The saga row carrying
@@ -262,7 +260,6 @@ lives on the run-status envelope, which is a different object and is unaffected.
 Before authentication, connection and global limits protect remaining public
 probes. After authentication, per-principal limits also apply. The progress
 stream requires authentication when this decision is implemented.
-
 
 The supported surface takes a SIXTH versioned verb: answering a permission request,
 scoped to the run that raised it. The outbound half of that exchange is already versioned -

@@ -4,7 +4,7 @@ tags:
   - '#tool-cores'
 date: '2026-07-17'
 modified: '2026-08-02'
-body_hash: 'sha256:551d078ff83f3441d1c243b41ef24e9d8837d60ac24ac9868c6ae926211ad4f5'
+body_hash: 'sha256:1f1bd29c64d30fc152bfa5e831548d19bb675e70e0c9b1ff63af932b304d7e20'
 related:
   - "[[2026-07-17-tool-cores-adr]]"
   - "[[2026-07-17-tool-cores-plan]]"

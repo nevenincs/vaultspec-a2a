@@ -18,9 +18,10 @@ from ...context.rules import DEFAULT_BUNDLED_RULES_DIR, RuleManager
 from ...context.token_budget import compact_context, should_compact
 from ...domain_config import domain_config
 from ...thread.errors import WorkerExecutionError
+from ...thread.models import TokenUsageEntry
 from ...thread.state import TeamState
 from ..acp_options import valid_option_ids
-from ..protocols import TaskQueuePort
+from ..protocols import CostPort, TaskQueuePort
 from ..tools.task_queue import create_mark_task_complete_tool
 
 if TYPE_CHECKING:
@@ -445,20 +446,89 @@ async def _resolve_worker_tool_calls(
     return final_response, state_patch
 
 
+def _turn_token_usage(response: BaseMessage) -> TokenUsageEntry | None:
+    """Read the turn's token accounting off the message the provider returned.
+
+    Reads LangChain's standard ``usage_metadata``, so any lane that reports
+    usage is picked up by this one path rather than by a per-provider branch.
+    Lanes that report nothing return ``None`` and contribute no counters — an
+    absent report is not the same fact as a measured zero, and recording it as
+    one would make unreported usage indistinguishable from a free turn.
+    """
+    usage = getattr(response, "usage_metadata", None)
+    if not usage:
+        return None
+    input_tokens = int(usage.get("input_tokens", 0))
+    output_tokens = int(usage.get("output_tokens", 0))
+    return TokenUsageEntry(
+        agent_id="",
+        input_tokens=input_tokens,
+        output_tokens=output_tokens,
+        total=int(usage.get("total_tokens", input_tokens + output_tokens)),
+    )
+
+
+async def _record_turn_usage(
+    *,
+    cost_port: CostPort | None,
+    thread_id: object,
+    worker_name: str,
+    model: BaseChatModel,
+    usage: TokenUsageEntry,
+) -> None:
+    """Persist one turn's token accounting, never failing the turn over it.
+
+    Accounting is strictly observational: a database hiccup here must not
+    destroy a completed unit of real work, so the write is best-effort and
+    logged rather than raised. The provider and model are read off the SAME
+    instance that ran the turn, for the reason given in
+    :func:`_describe_worker_model` — a fallback chain makes the requested lane
+    and the executed lane different facts.
+    """
+    if cost_port is None or not isinstance(thread_id, str) or not thread_id:
+        return
+    lane = _bounded_model_identity(getattr(model, "provider", None))
+    model_id: str | None = None
+    for attribute in ("desired_model", "model_name", "model"):
+        model_id = _bounded_model_identity(getattr(model, attribute, None))
+        if model_id is not None:
+            break
+    try:
+        await cost_port.record_usage(
+            thread_id=thread_id,
+            agent_id=worker_name,
+            provider=lane or type(model).__name__,
+            model=model_id or type(model).__name__,
+            input_tokens=usage.input_tokens,
+            output_tokens=usage.output_tokens,
+        )
+    except Exception:
+        _logger.warning(
+            "worker[%s] token accounting write failed; the turn is unaffected",
+            worker_name,
+            exc_info=True,
+        )
+
+
 def _finalize_worker_response(
     *,
     response: BaseMessage,
     worker_name: str,
     state_updates: dict[str, Any],
+    usage: TokenUsageEntry | None = None,
 ) -> dict[str, Any]:
     """Attach worker attribution and merge the queue tool's Command update.
 
     ``state_updates`` carries the non-message keys (e.g. ``current_task_id``)
     from any ``mark_task_complete`` Command dispatched this turn; they flow
     through the reducer pipeline via this node return.
+
+    When the lane reported usage, this node also emits the per-agent delta on
+    the ``token_usage`` channel, whose existing additive reducer accumulates it
+    across the run.
     """
     response.name = worker_name
-    return {
+    update: dict[str, Any] = {
         "messages": [response],
         "mounted_context": None,
         # Approval outcomes are consumed by the worker turn they routed.
@@ -466,6 +536,9 @@ def _finalize_worker_response(
         "approval_request_id": None,
         **state_updates,
     }
+    if usage is not None:
+        update["token_usage"] = {worker_name: usage.to_dict()}
+    return update
 
 
 def _require_valid_option_id(candidate: object, options: list[dict[str, Any]]) -> str:
@@ -580,6 +653,7 @@ def create_worker_node(
     role: str | None = None,
     harness_mcp_servers: list[str] | None = None,
     feedback_reader: "FeedbackContextReader | None" = None,
+    cost_port: CostPort | None = None,
 ) -> WorkerNode:
     """Create a LangGraph worker node with a specific role and model.
 
@@ -593,6 +667,9 @@ def create_worker_node(
         task_queue_port:   Optional database-backed queue port; when present the
                            mark-task-complete tool is bound per invocation to the
                            running thread.
+        cost_port:         Optional database-backed token-accounting port; when
+                           present, each turn that reports usage persists one
+                           ``cost_tracking`` row for the running thread.
         authoring_binding_provider: Optional per-run builder of the engine's
                            bridged authoring binding; when present, each invocation
                            resolves this role's binding for the running thread and,
@@ -734,10 +811,24 @@ def create_worker_node(
             ) from exc
 
         _logger.debug("worker[%s] response len=%d", name, len(str(response.content)))
+        # One extraction, two existing sinks: the state channel's additive
+        # reducer and the cost_tracking table. Reading usage twice, or letting
+        # either sink grow its own extraction, is how this capability came to be
+        # half-built in three places.
+        usage = _turn_token_usage(response)
+        if usage is not None:
+            await _record_turn_usage(
+                cost_port=cost_port,
+                thread_id=state.get("thread_id"),
+                worker_name=name,
+                model=effective_model,
+                usage=usage,
+            )
         return _finalize_worker_response(
             response=response,
             worker_name=name,
             state_updates=state_updates,
+            usage=usage,
         )
 
     return worker_node

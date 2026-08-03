@@ -63,7 +63,7 @@ from .nodes.phase_gate import (
 from .nodes.supervisor import create_plan_approval_node, create_supervisor_node
 from .nodes.vault_reader import build_initial_vault_index, create_mount_node
 from .nodes.worker import WorkerNode, create_worker_node
-from .protocols import ProviderFactoryProtocol, TaskQueuePort
+from .protocols import CostPort, ProviderFactoryProtocol, TaskQueuePort
 from .web_locators import extract_web_locators
 
 logger = logging.getLogger(__name__)
@@ -784,6 +784,7 @@ def compile_team_graph(
     step_timeout: float | None = None,
     feature_tag: str | None = None,
     task_queue_port: TaskQueuePort | None = None,
+    cost_port: CostPort | None = None,
     proposal_submitter: DocumentProposalSubmitter | None = None,
     feedback_reader: "FeedbackContextReader | None" = None,
     authoring_binding_provider: "AuthoringBindingProvider | None" = None,
@@ -878,6 +879,7 @@ def compile_team_graph(
             autonomous=autonomous,
             feature_tag=feature_tag,
             task_queue_port=task_queue_port,
+            cost_port=cost_port,
             authoring_binding_provider=authoring_binding_provider,
             frozen_assignment=model_assignment,
         )
@@ -891,6 +893,7 @@ def compile_team_graph(
             autonomous=autonomous,
             feature_tag=feature_tag,
             task_queue_port=task_queue_port,
+            cost_port=cost_port,
             authoring_binding_provider=authoring_binding_provider,
             frozen_assignment=model_assignment,
         )
@@ -905,6 +908,7 @@ def compile_team_graph(
             autonomous=autonomous,
             feature_tag=feature_tag,
             task_queue_port=task_queue_port,
+            cost_port=cost_port,
             authoring_binding_provider=authoring_binding_provider,
             frozen_assignment=model_assignment,
         )
@@ -919,6 +923,7 @@ def compile_team_graph(
             proposal_submitter=proposal_submitter,
             feedback_reader=feedback_reader,
             frozen_assignment=model_assignment,
+            cost_port=cost_port,
         )
     else:
         raise ValueError(
@@ -966,6 +971,7 @@ def _compile_star(
     autonomous: bool = False,
     feature_tag: str | None = None,
     task_queue_port: TaskQueuePort | None = None,
+    cost_port: CostPort | None = None,
     authoring_binding_provider: "AuthoringBindingProvider | None" = None,
     frozen_assignment: dict[str, dict[str, Any]] | None = None,
 ) -> None:
@@ -1069,6 +1075,7 @@ def _compile_star(
             workspace_root=workspace_root,
             feature_tag=feature_tag,
             task_queue_port=task_queue_port,
+            cost_port=cost_port,
             authoring_binding_provider=authoring_binding_provider,
             role=agent_cfg.role,
         )
@@ -1137,6 +1144,7 @@ def _compile_pipeline(
     autonomous: bool = False,
     feature_tag: str | None = None,
     task_queue_port: TaskQueuePort | None = None,
+    cost_port: CostPort | None = None,
     authoring_binding_provider: "AuthoringBindingProvider | None" = None,
     frozen_assignment: dict[str, dict[str, Any]] | None = None,
 ) -> None:
@@ -1203,6 +1211,7 @@ def _compile_pipeline(
             workspace_root=workspace_root,
             feature_tag=feature_tag,
             task_queue_port=task_queue_port,
+            cost_port=cost_port,
             authoring_binding_provider=authoring_binding_provider,
             role=agent_cfg.role,
         )
@@ -1342,6 +1351,7 @@ def _compile_pipeline_loop(
     autonomous: bool = False,
     feature_tag: str | None = None,
     task_queue_port: TaskQueuePort | None = None,
+    cost_port: CostPort | None = None,
     authoring_binding_provider: "AuthoringBindingProvider | None" = None,
     frozen_assignment: dict[str, dict[str, Any]] | None = None,
 ) -> None:
@@ -1387,6 +1397,7 @@ def _compile_pipeline_loop(
             workspace_root=workspace_root,
             feature_tag=feature_tag,
             task_queue_port=task_queue_port,
+            cost_port=cost_port,
             authoring_binding_provider=authoring_binding_provider,
             role=agent_cfg.role,
         )
@@ -1673,6 +1684,7 @@ def _compile_research_adr(
     proposal_submitter: DocumentProposalSubmitter | None,
     feedback_reader: "FeedbackContextReader | None" = None,
     frozen_assignment: dict[str, dict[str, Any]] | None = None,
+    cost_port: CostPort | None = None,
 ) -> None:
     """Wire the research_adr document phase machine.
 
@@ -1771,6 +1783,7 @@ def _compile_research_adr(
             workspace_root=workspace_root,
             role="synthesist",
             harness_mcp_servers=harness_mcp_servers,
+            cost_port=cost_port,
             # Feedback-loop grounding: the research-doc writer revises against the
             # reviewer's batch when a revision run carries a feedback_batch_id.
             feedback_reader=feedback_reader,
@@ -1789,6 +1802,7 @@ def _compile_research_adr(
             workspace_root=workspace_root,
             role="doc-reviewer",
             harness_mcp_servers=harness_mcp_servers,
+            cost_port=cost_port,
         ),
         retry_policy=_NODE_RETRY_POLICY,
     )
@@ -1807,6 +1821,7 @@ def _compile_research_adr(
             # Feedback-loop grounding: the ADR writer revises against the
             # reviewer's batch when a revision run carries a feedback_batch_id.
             feedback_reader=feedback_reader,
+            cost_port=cost_port,
         ),
         retry_policy=_NODE_RETRY_POLICY,
     )
@@ -1822,6 +1837,7 @@ def _compile_research_adr(
             workspace_root=workspace_root,
             role="doc-reviewer",
             harness_mcp_servers=harness_mcp_servers,
+            cost_port=cost_port,
         ),
         retry_policy=_NODE_RETRY_POLICY,
     )
@@ -1840,6 +1856,7 @@ def _compile_research_adr(
             # Feedback-loop grounding: the plan writer revises against the
             # reviewer's batch when a revision run carries a feedback_batch_id.
             feedback_reader=feedback_reader,
+            cost_port=cost_port,
         ),
         retry_policy=_NODE_RETRY_POLICY,
     )
@@ -1855,6 +1872,7 @@ def _compile_research_adr(
             workspace_root=workspace_root,
             role="doc-reviewer",
             harness_mcp_servers=harness_mcp_servers,
+            cost_port=cost_port,
         ),
         retry_policy=_NODE_RETRY_POLICY,
     )

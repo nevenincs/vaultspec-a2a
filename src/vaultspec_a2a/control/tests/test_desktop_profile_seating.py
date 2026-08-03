@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import os
 from contextlib import contextmanager
-from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
@@ -21,6 +20,7 @@ from ...desktop.profile import derive_state_paths
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
+    from pathlib import Path
 
 _APP_HOME_ENV = "VAULTSPEC_DESKTOP_APP_HOME"
 
@@ -79,13 +79,22 @@ def test_armed_profile_rejects_relative_app_home() -> None:
         Settings()
 
 
-def test_unarmed_profile_leaves_paths_untouched() -> None:
-    """Without an application home, path fields keep their configured values."""
+def test_unarmed_profile_leaves_paths_untouched(tmp_path: Path) -> None:
+    """Without an application home, path fields keep their configured values.
+
+    The configured values are absolute because mutable paths must now be: a
+    relative one is refused at construction rather than resolved against whatever
+    working directory the process inherited. Only the seating is under test here —
+    that rejection is pinned in ``test_absolute_path_requirement``.
+    """
+    baseline_db = (tmp_path / "baseline.db").as_posix()
+    baseline_workspaces = tmp_path / "workspaces"
+
     unarmed = Settings(
-        database_url="sqlite+aiosqlite:///baseline.db",
-        workspace_root=Path("./workspaces"),
+        database_url=f"sqlite+aiosqlite:///{baseline_db}",
+        workspace_root=baseline_workspaces,
     )
 
     assert unarmed.desktop_app_home is None
-    assert unarmed.database_url == "sqlite+aiosqlite:///baseline.db"
-    assert unarmed.workspace_root == Path("./workspaces")
+    assert unarmed.database_url == f"sqlite+aiosqlite:///{baseline_db}"
+    assert unarmed.workspace_root == baseline_workspaces

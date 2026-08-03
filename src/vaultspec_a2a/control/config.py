@@ -9,7 +9,8 @@ a drop-in replacement for the former ``core.config.Settings``.
 """
 
 import json
-from pathlib import Path
+import logging
+from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import TYPE_CHECKING, Annotated, Literal, Self
 
 from pydantic import (
@@ -49,6 +50,115 @@ WORKER_URL_ENV = "VAULTSPEC_WORKER_URL"
 # per the standard OTel contract).
 DEFAULT_MOCK_API_BASE = "http://localhost:8100"
 DEFAULT_OTLP_ENDPOINT = "http://localhost:4317"
+
+logger = logging.getLogger(__name__)
+
+# The synchronous SQLAlchemy driver this project ships for each supported backend.
+# Keyed on the SQLAlchemy *backend* name rather than on the full drivername, so the
+# mapping resolves identically for a bare scheme (``postgresql://``), an async
+# driver (``postgresql+asyncpg://``), and an already-synchronous one
+# (``postgresql+psycopg://``). Only psycopg v3 and the stdlib sqlite driver are
+# declared dependencies; psycopg2 - which SQLAlchemy would otherwise select for a
+# bare ``postgresql://`` scheme - is not installed.
+_SYNC_DRIVERNAMES: dict[str, str] = {
+    "postgresql": "postgresql+psycopg",
+    "sqlite": "sqlite",
+}
+
+
+def _synchronous_url(url: str, *, setting: str) -> str:
+    """Return the synchronous SQLAlchemy URL equivalent of ``url``.
+
+    The driver is replaced through the parsed URL structure rather than by
+    substring substitution: a substring replace is a silent no-op on a URL that
+    declares no driver, and it corrupts any URL whose password or query value
+    happens to contain the replaced text.
+
+    Raises ``ValueError`` when the URL cannot be parsed or names a backend with no
+    synchronous driver shipped here, so a broken URL is refused at its source
+    rather than reaching ``create_engine`` inside a destructive admin command.
+    """
+    # Imported lazily: SQLAlchemy costs roughly a quarter-second to import, and the
+    # settings module sits on the CLI startup path. Every consumer of the derived
+    # URL has already paid that cost.
+    from sqlalchemy.engine.url import make_url
+    from sqlalchemy.exc import ArgumentError
+
+    try:
+        parsed = make_url(url)
+    except ArgumentError as exc:
+        # The URL itself is never echoed: it routinely carries a password.
+        msg = f"{setting} is not a parseable SQLAlchemy URL."
+        raise ValueError(msg) from exc
+
+    backend = parsed.get_backend_name()
+    drivername = _SYNC_DRIVERNAMES.get(backend)
+    if drivername is None:
+        msg = (
+            f"{setting} names the {backend!r} backend, which has no synchronous "
+            f"driver in this project; expected one of {sorted(_SYNC_DRIVERNAMES)}."
+        )
+        raise ValueError(msg)
+
+    return parsed.set(drivername=drivername).render_as_string(hide_password=False)
+
+
+def _warn_seating_discard(env_name: str, supplied: object, derived: object) -> None:
+    """Report that the desktop profile discarded an explicitly configured value.
+
+    The desktop profile is the single derivation authority for mutable paths, so
+    the override itself is correct and deliberate. Only its silence was a defect:
+    an operator who sets both the application home and an explicit path had no
+    signal that the latter never took effect.
+    """
+    logger.warning(
+        "VAULTSPEC_DESKTOP_APP_HOME is set, so the desktop profile derives every "
+        "mutable path: the explicitly configured %s=%r is discarded in favour of "
+        "%r. Unset one of the two to resolve the conflict.",
+        env_name,
+        supplied,
+        derived,
+    )
+
+
+def _is_absolute_path(raw: str) -> bool:
+    """Return whether ``raw`` is absolute under either path convention.
+
+    These settings name paths on the DEPLOYMENT host, which is not necessarily the
+    host validating them: a Windows workstation legitimately reads a container
+    configuration naming ``/app/data``, and ``pathlib`` there calls that relative.
+    Accepting either convention keeps the check aimed at the hazard — a path
+    resolved against whatever working directory the process inherited — rather than
+    at the validating machine's operating system.
+    """
+    return PurePosixPath(raw).is_absolute() or PureWindowsPath(raw).is_absolute()
+
+
+def _require_absolute_sqlite_url(url: str, *, setting: str) -> None:
+    """Reject a SQLite URL whose file path is working-directory relative.
+
+    Only SQLite is checked. A Postgres URL's path component names a database on a
+    server rather than a file, and ``:memory:`` names no file at all; neither can
+    be resolved against a working directory, so neither carries the hazard.
+
+    Assumes the URL already parses — the synchronous-derivation validator runs
+    first and refuses anything that does not.
+    """
+    from sqlalchemy.engine.url import make_url
+
+    parsed = make_url(url)
+    if parsed.get_backend_name() != "sqlite":
+        return
+
+    database = parsed.database
+    if database is None or database == ":memory:" or _is_absolute_path(database):
+        return
+
+    msg = (
+        f"{setting} must be absolute. A relative URL resolves against the process "
+        "working directory, so the gateway and CLI can silently open different files."
+    )
+    raise ValueError(msg)
 
 
 class InfraConfig(BaseSettings):
@@ -823,6 +933,10 @@ class Settings(DomainSettingsConfig, InfraConfig):
         When armed, the database, checkpoint, workspace, and A2A-home paths derive
         from the application home through the desktop profile's single derivation
         authority, so no mutable path resolves relative to the launch directory.
+        That derivation outranks an explicitly configured value by design; when it
+        actually displaces one, it says so. ``model_fields_set`` distinguishes a
+        genuinely supplied value from an untouched default, so an unconfigured boot
+        stays silent rather than emitting noise every operator learns to ignore.
         """
         if self.desktop_app_home is None:
             return self
@@ -832,12 +946,56 @@ class Settings(DomainSettingsConfig, InfraConfig):
         from ..desktop.profile import derive_state_paths
 
         state = derive_state_paths(self.desktop_app_home)
-        self.a2a_home = state.app_home
-        self.workspace_root = state.workspaces_root
-        self.database_url = f"sqlite+aiosqlite:///{state.database_path.as_posix()}"
-        self.checkpoint_database_url = (
+        derived_database_url = f"sqlite+aiosqlite:///{state.database_path.as_posix()}"
+        derived_checkpoint_url = (
             f"sqlite+aiosqlite:///{state.checkpoint_path.as_posix()}"
         )
+
+        # Read before any assignment below: assigning a field marks it as set.
+        explicit = self.model_fields_set
+        if "a2a_home" in explicit:
+            _warn_seating_discard("VAULTSPEC_A2A_HOME", self.a2a_home, state.app_home)
+        if "workspace_root" in explicit:
+            _warn_seating_discard(
+                "VAULTSPEC_WORKSPACE_ROOT", self.workspace_root, state.workspaces_root
+            )
+        if "database_url" in explicit:
+            _warn_seating_discard(
+                "VAULTSPEC_DATABASE_URL", self.database_url, derived_database_url
+            )
+        if "checkpoint_database_url" in explicit:
+            _warn_seating_discard(
+                "VAULTSPEC_CHECKPOINT_DATABASE_URL",
+                self.checkpoint_database_url,
+                derived_checkpoint_url,
+            )
+
+        self.a2a_home = state.app_home
+        self.workspace_root = state.workspaces_root
+        self.database_url = derived_database_url
+        self.checkpoint_database_url = derived_checkpoint_url
+        return self
+
+    @model_validator(mode="after")
+    def _validate_synchronous_url_derivation(self) -> Self:
+        """Refuse a configured URL that has no synchronous SQLAlchemy equivalent.
+
+        The admin and command-line paths - schema creation and the destructive
+        ``db clear`` - run on synchronous engines built from these URLs. Leaving the
+        check to those call sites means a shipped-configuration typo first surfaces
+        part-way through a destructive command; here it surfaces at boot.
+
+        Declared after the desktop seating so it validates the URLs the process will
+        actually use, not the ones the seating is about to replace. The anchoring
+        that follows only ever swaps a relative SQLite path for an absolute one, so
+        it cannot change the backend or driver this validator just accepted.
+        """
+        _synchronous_url(self.database_url, setting="VAULTSPEC_DATABASE_URL")
+        if self.checkpoint_database_url is not None:
+            _synchronous_url(
+                self.checkpoint_database_url,
+                setting="VAULTSPEC_CHECKPOINT_DATABASE_URL",
+            )
         return self
 
     @property
@@ -983,9 +1141,10 @@ class Settings(DomainSettingsConfig, InfraConfig):
     @property
     def database_sync_url(self) -> str:
         """Return a synchronous SQLAlchemy URL for admin/CLI operations."""
-        if self.resolved_database_backend == "sqlite":
-            return self.database_url.replace("+aiosqlite", "", 1)
-        return self.database_url.replace("+asyncpg", "+psycopg", 1)
+        # Resolving the backend keeps URL/backend agreement enforced on this path:
+        # the admin engines built from the result have no other validation seam.
+        _backend = self.resolved_database_backend
+        return _synchronous_url(self.database_url, setting="VAULTSPEC_DATABASE_URL")
 
     @property
     def checkpoint_sync_url(self) -> str:
@@ -995,10 +1154,13 @@ class Settings(DomainSettingsConfig, InfraConfig):
         is configured, matching the runtime savers: the two stores share one file
         by default and split only when explicitly configured.
         """
-        url = self.checkpoint_database_url or self.database_url
-        if self.resolved_checkpoint_backend == "sqlite":
-            return url.replace("+aiosqlite", "", 1)
-        return url.replace("+asyncpg", "+psycopg", 1)
+        _backend = self.resolved_checkpoint_backend
+        if self.checkpoint_database_url is None:
+            return _synchronous_url(self.database_url, setting="VAULTSPEC_DATABASE_URL")
+        return _synchronous_url(
+            self.checkpoint_database_url,
+            setting="VAULTSPEC_CHECKPOINT_DATABASE_URL",
+        )
 
     def validate_postgres_requirement(self) -> None:
         """Fail fast when Postgres-backed dependencies are required but absent."""

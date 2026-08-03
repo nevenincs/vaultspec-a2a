@@ -38,6 +38,11 @@ from langchain_core.messages import (
     SystemMessage,
     ToolMessage,
 )
+from langchain_core.messages.ai import (
+    InputTokenDetails,
+    OutputTokenDetails,
+    UsageMetadata,
+)
 from langchain_core.outputs import ChatGeneration, ChatGenerationChunk, ChatResult
 from pydantic import Field, TypeAdapter, ValidationError
 
@@ -295,6 +300,47 @@ def _required_string_field(message: JsonObject, field: str, *, context: str) -> 
             f"codex {context} field {field!r} must be a non-blank string"
         )
     return value
+
+
+def _token_count(breakdown: JsonObject, field: str) -> int:
+    """Read one non-negative token counter, treating absence as zero.
+
+    Absent optional counters (``cacheWriteInputTokens`` carries a schema
+    default) are genuinely zero. A present but non-integer or negative value is
+    a protocol violation and is refused rather than silently coerced, because a
+    wrong token count becomes a wrong persisted accounting row.
+    """
+    value = breakdown.get(field)
+    if value is None:
+        return 0
+    if not isinstance(value, int) or isinstance(value, bool) or value < 0:
+        raise _CodexProtocolError(
+            f"codex token usage field {field!r} must be a non-negative integer"
+        )
+    return value
+
+
+def _usage_metadata(breakdown: JsonObject) -> UsageMetadata:
+    """Map a codex ``TokenUsageBreakdown`` onto LangChain's usage contract.
+
+    ``totalTokens`` is carried through as reported rather than recomputed: it is
+    the provider's own accounting, and substituting a local sum would quietly
+    paper over a disagreement worth seeing. The cache and reasoning counters are
+    preserved in the standard detail sub-dicts instead of being discarded — they
+    are exactly the fields that explain a surprising bill.
+    """
+    return UsageMetadata(
+        input_tokens=_token_count(breakdown, "inputTokens"),
+        output_tokens=_token_count(breakdown, "outputTokens"),
+        total_tokens=_token_count(breakdown, "totalTokens"),
+        input_token_details=InputTokenDetails(
+            cache_read=_token_count(breakdown, "cachedInputTokens"),
+            cache_creation=_token_count(breakdown, "cacheWriteInputTokens"),
+        ),
+        output_token_details=OutputTokenDetails(
+            reasoning=_token_count(breakdown, "reasoningOutputTokens"),
+        ),
+    )
 
 
 class _CodexAppServerClient:
@@ -673,6 +719,12 @@ class CodexChatModel(BaseChatModel):
             content=message.content,
             additional_kwargs=message.additional_kwargs,
             response_metadata=message.response_metadata,
+            # Carried across the chunk-to-message boundary explicitly: dropping
+            # it here is what made the turn's real token accounting invisible to
+            # every caller of the non-streaming path.
+            usage_metadata=(
+                message.usage_metadata if isinstance(message, AIMessageChunk) else None
+            ),
         )
         return ChatResult(generations=[ChatGeneration(message=final)])
 
@@ -831,6 +883,14 @@ class CodexChatModel(BaseChatModel):
         # The last error the lane announced it would retry past. Held rather
         # than raised: see the `error` branch below.
         deferred: _CodexProtocolError | None = None
+        # Latest thread-cumulative token usage seen this turn. The thread is
+        # started ``ephemeral`` immediately before a single ``turn/start``, so
+        # its cumulative total IS this invocation's usage - and unlike the
+        # per-request ``last`` breakdown it stays correct when a turn makes
+        # several model requests behind a tool loop. Held and emitted once at
+        # completion rather than per frame, because chunk addition SUMS usage
+        # metadata and would otherwise multiply-count the same tokens.
+        usage: UsageMetadata | None = None
         while True:
             try:
                 message = await asyncio.wait_for(
@@ -876,6 +936,20 @@ class CodexChatModel(BaseChatModel):
                         deferred = failure
                     continue
                 raise _carry_condition(failure, deferred)
+            elif method == "thread/tokenUsage/updated":
+                if params.get("threadId") not in (None, thread_id):
+                    continue
+                usage = _usage_metadata(
+                    _required_object_field(
+                        _required_object_field(
+                            params,
+                            "tokenUsage",
+                            context="thread/tokenUsage/updated notification",
+                        ),
+                        "total",
+                        context="thread/tokenUsage/updated tokenUsage",
+                    )
+                )
             elif method == "turn/completed":
                 if params.get("threadId") not in (None, thread_id):
                     continue
@@ -885,4 +959,10 @@ class CodexChatModel(BaseChatModel):
                 status = turn.get("status")
                 if status != "completed":
                     raise _carry_condition(_failed_turn_error(turn, status), deferred)
+                if usage is not None:
+                    # Empty content so the accumulated message text is unchanged;
+                    # this frame exists only to carry the turn's accounting.
+                    yield ChatGenerationChunk(
+                        message=AIMessageChunk(content="", usage_metadata=usage)
+                    )
                 return

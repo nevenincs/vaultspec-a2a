@@ -1355,7 +1355,7 @@
     "/health": {
       "get": {
         "summary": "Health Endpoint",
-        "description": "Top-level health check: the one probe surface for external callers.\n\nUnder the armed desktop profile the unauthenticated boundary discloses\nonly the minimal liveness fact - no process identity, product identity, or\nproduct state - while an attach-authenticated caller additionally receives\nthe readiness projection from the single readiness authority.\n\nThe Compose and development profiles get the full readiness aggregate:\nthe DB, checkpointer and worker are actively PROBED, not merely read off\napp state, because a healthcheck that only reports what the process\nbelieves about itself cannot notice a dependency that has gone away.",
+        "description": "Top-level health check: the one probe surface for external callers.\n\nUnder the armed desktop profile the unauthenticated boundary discloses\nonly the minimal liveness fact - no process identity, product identity, or\nproduct state - while an attach-authenticated caller additionally receives\nthe readiness projection from the single readiness authority, computed\nover a live database probe. Only the authenticated branch probes: the\nunauthenticated answer stays a constant so it cannot be used to measure\nthe gateway's dependencies.\n\nBoth profiles PROBE rather than read off app state - the DB here and, on\nCompose and development, the checkpointer and worker as well - because a\nhealthcheck that only reports what the process believes about itself\ncannot notice a dependency that has gone away.",
         "operationId": "health_endpoint_health_get",
         "responses": {
           "200": {

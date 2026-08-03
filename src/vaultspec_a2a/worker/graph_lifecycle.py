@@ -176,6 +176,7 @@ class GraphLifecycleManager:
     ) -> None:
         from ..database.session import get_session_factory
         from ..providers.factory import ProviderFactory
+        from .cost_port import SqlCostPort
         from .task_queue_port import SqlTaskQueuePort
 
         self._checkpointer = checkpointer
@@ -191,6 +192,9 @@ class GraphLifecycleManager:
         # The worker reaches the app database (task_queue_entries) via
         # the shared session factory; migrations are owned by the gateway.
         self._task_queue_port = SqlTaskQueuePort(get_session_factory())
+        # Token accounting reaches the same app database (cost_tracking) over
+        # the same shared session factory.
+        self._cost_port = SqlCostPort(get_session_factory())
         self._graph_cache: OrderedDict[GraphCacheKey, RegisteredCompiledGraph] = (
             OrderedDict()
         )
@@ -439,6 +443,7 @@ class GraphLifecycleManager:
                 # Thread feature_tag so vault indexing works in worker
                 feature_tag=req.active_feature,
                 task_queue_port=self._task_queue_port,
+                cost_port=self._cost_port,
                 provider_factory=self._provider_factory,
                 proposal_submitter=proposal_submitter,
                 feedback_reader=feedback_reader,

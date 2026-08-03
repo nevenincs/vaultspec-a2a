@@ -631,3 +631,35 @@ the probed `AdmissionReadiness`, but the HTTP refusal discloses only the reason
 string, so the failing leg is invisible to the test. Surfacing the three facts
 on the 503 - or logging them at refusal - would turn this from an inference into
 a reading, and is worth doing regardless of this defect.
+
+### commit-refusal-order-contradicts-the-bogus-reservation-expectation | medium | open
+
+With the cold-start race closed, the three desktop admission failures moved to a
+single remaining subject: a commit naming a reservation that does not exist
+answers 503 where the test expects 409.
+
+The cause is an ordering the ADR mandates rather than a defect in either side.
+`_run_commit_locked` evaluates execution eligibility and returns 503 at
+`api/routes/gateway.py:760`, BEFORE `broker.commit(...)` at :767 - the call that
+would recognise an unknown reservation and answer 409. The comment above it
+states the constraint directly: "Evaluate worker and provider eligibility BEFORE
+consuming the reservation, accepting the actor tokens, or creating a run (ADR:
+mint run credentials only after the runtime and provider are eligible)."
+
+So whenever eligibility is unsatisfied, every commit refusal is 503 regardless
+of whether its reservation was real. The test asserts the opposite: that a bogus
+reservation "is refused the same way" as any other, with 409.
+
+Both positions are defensible and they cannot both hold. An unknown reservation
+is arguably not requesting execution capacity at all, so validating it first
+would refuse a nonsense request without probing the runtime - cheaper and more
+truthful. Against that, the ADR's ordering exists so no credential is minted and
+no reservation consumed while the runtime is not eligible, and reordering would
+put reservation lookup ahead of the gate that clause protects.
+
+Deliberately not resolved here. Changing the order is a production change to the
+admission sequence on a constraint an accepted ADR states in the code itself,
+and this session already shipped one change that contradicted an ADR after
+verifying it against behaviour instead of against the record. The decision is
+whether the ADR's "eligibility first" applies to requests that reference no
+capacity, and it belongs in an amendment rather than in a reordering.

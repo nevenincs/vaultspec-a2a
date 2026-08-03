@@ -30,6 +30,7 @@ import json
 import time
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import httpx
@@ -47,7 +48,6 @@ from ..tests.gateway_boot import (
 if TYPE_CHECKING:
     import subprocess
     from collections.abc import Iterator
-    from pathlib import Path
 
 _ATTACH = "attach-credential-admission-1234567890abcdef"
 _OWNERSHIP = "ownership-capability-admission-fedcba0987654321"
@@ -96,6 +96,46 @@ def _running_gateway(
         log_handle.close()
 
 
+_CATALOG_CACHE: dict[str, dict[str, Any]] = {}
+
+
+def _catalog_selection(base: str, auth: str, workspace_root: str) -> dict[str, Any]:
+    """One served selection for *workspace_root*, read from this gateway.
+
+    Run start refuses a body without a selection and revalidates the one it gets
+    against the catalog served FOR THAT WORKSPACE, so the reference cannot be
+    written by hand - it has to name a lane this gateway actually reports as
+    selectable. Cached per gateway and workspace because the first read probes
+    every provider lane and these tests start several gateways.
+    """
+    key = f"{base}|{workspace_root}"
+    cached = _CATALOG_CACHE.get(key)
+    if cached is None:
+        with httpx.Client(base_url=base, timeout=180.0) as client:
+            response = client.get(
+                "/v1/provider-catalog",
+                headers={"Authorization": auth},
+                params={"workspace_root": workspace_root},
+            )
+        assert response.status_code == 200, response.text
+        record = next(
+            item
+            for item in response.json()["providers"]
+            if item["health"]["selectable"] and item["catalog"]["models"]
+        )
+        catalog = record["catalog"]
+        cached = {
+            "schema_version": 1,
+            "provider_id": record["provider_id"],
+            "execution_mode": record["execution_mode"],
+            "catalog_revision": catalog["state"]["revision"],
+            "entry_id": catalog["models"][0]["entry_id"],
+            "controls": {},
+        }
+        _CATALOG_CACHE[key] = cached
+    return dict(cached)
+
+
 @contextmanager
 def _armed_gateway(tmp_path: Path, **extra_env: str) -> Iterator[tuple[str, str]]:
     """Seat and boot a real armed desktop gateway over a migrated app home."""
@@ -104,6 +144,14 @@ def _armed_gateway(tmp_path: Path, **extra_env: str) -> Iterator[tuple[str, str]
     seed_credentials(app_home, attach=_ATTACH, ownership=_OWNERSHIP)
     seat_valid_database(app_home)
     with _running_gateway(tmp_path, app_home, **extra_env) as gateway:
+        # Warm the catalog HERE, not inside the first prepare. The first read
+        # probes every provider lane and takes seconds; paying that inside a
+        # prepare shifted the timing the concurrency and replay cases depend on,
+        # and their reservations aged out into an execution-readiness refusal.
+        # Warming at arm time is also what the product should do - a run start
+        # is not the place to discover the catalog for the first time.
+        base, auth = gateway
+        _catalog_selection(base, auth, str(Path.cwd()))
         yield gateway
 
 
@@ -119,6 +167,7 @@ def _prepare(
     Blocks inside the gateway until the single-flight worker start reaches
     readiness, so parallel calls model concurrent first demand.
     """
+    workspace = str((metadata or {}).get("workspace_root") or Path.cwd())
     with httpx.Client(base_url=base, timeout=60.0) as client:
         resp = client.post(
             "/v1/runs",
@@ -128,7 +177,10 @@ def _prepare(
                 "stage": "prepare",
                 "autonomous": True,
                 **({"run_id": run_id} if run_id is not None else {}),
-                **({"metadata": metadata} if metadata is not None else {}),
+                # The workspace anchors the selection, so it rides even when the
+                # caller declared no metadata of its own.
+                "metadata": {"workspace_root": workspace, **(metadata or {})},
+                "selection": _catalog_selection(base, auth, workspace),
             },
         )
     try:
@@ -148,6 +200,7 @@ def _commit(
     metadata: dict[str, Any] | None = None,
 ) -> tuple[int, dict[str, Any]]:
     """Fire one authenticated commit binding tokens under *reservation_id*."""
+    workspace = str((metadata or {}).get("workspace_root") or Path.cwd())
     with httpx.Client(base_url=base, timeout=60.0) as client:
         resp = client.post(
             "/v1/runs",
@@ -164,6 +217,13 @@ def _commit(
                     ),
                     "engine_bearer": "bearer",
                 },
+                # Commit carries the selection too: it is the stage that creates
+                # the durable run, so it is where the freeze happens. The value
+                # matches prepare's because both read the same cached served
+                # catalog - a replayed commit must be byte-identical to be
+                # recognised as a replay rather than a changed body.
+                "metadata": {"workspace_root": workspace, **(metadata or {})},
+                "selection": _catalog_selection(base, auth, workspace),
                 **({"run_id": run_id} if run_id is not None else {}),
                 **({"metadata": metadata} if metadata is not None else {}),
             },

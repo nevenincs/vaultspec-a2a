@@ -3,46 +3,13 @@ tags:
   - '#exec'
   - '#provider-error-taxonomy'
 date: '2026-08-02'
-modified: '2026-08-02'
+modified: '2026-08-03'
 body_schema: 'body-v1'
-body_hash: 'sha256:e03ad5222b280f0cd39898c803d1365892465199b6d95515c876865fbfd20b16'
+body_hash: 'sha256:b3eb8ec69f01f36138d1da1ac86051f1fb73b7291e963e3fc7b1df70339189a2'
 step_id: 'S19'
 related:
   - "[[2026-08-02-provider-error-taxonomy-plan]]"
 ---
-
-<!-- FRONTMATTER RULES:
-     tags: one directory tag (hardcoded #exec) and one feature tag.
-     Replace provider-error-taxonomy with a kebab-case feature tag, e.g. #foo-bar.
-     Additional tags may be appended below the required pair.
-
-     modified: CLI-maintained last-modified stamp; set at scaffold time,
-     refreshed by mutating CLI verbs and vault check fix; never hand-edit.
-
-     step_id is the originating Step's canonical identifier, e.g. S01.
-     The S19 and 2026-08-02-provider-error-taxonomy-plan placeholders are machine-filled by
-     `vaultspec-core vault add exec`; do not fill them by hand.
-
-     Related: use wiki-links as '[[yyyy-mm-dd-foo-bar-plan]]' and link the
-     parent plan.
-
-     DO NOT add fields beyond those scaffolded; metadata lives
-     only in the frontmatter. -->
-
-<!-- LINK RULES:
-     - [[wiki-links]] are ONLY for .vault/ documents in the related: field above.
-     - NEVER use [[wiki-links]] or markdown links in the document body.
-     - NEVER reference file paths in the body. If you must name a source file,
-       class, or function, use inline backtick code: `src/module.py`. -->
-
-<!-- STEP RECORD:
-     This file represents one Step from the originating plan. Identified
-     by its canonical leaf identifier (S##) and ancestor display path.
-     The Thread the condition through the gateway terminal event handler and ## Scope
-
-- `src/vaultspec_a2a/control/event_handlers.py` placeholders below are machine-filled
-     by `vaultspec-core vault add exec` from the originating Step row;
-     do not fill them by hand. -->
 
 # Thread the condition through the gateway terminal event handler
 

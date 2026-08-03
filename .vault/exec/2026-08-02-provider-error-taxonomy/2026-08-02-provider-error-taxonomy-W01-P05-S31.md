@@ -3,46 +3,13 @@ tags:
   - '#exec'
   - '#provider-error-taxonomy'
 date: '2026-08-02'
-modified: '2026-08-02'
+modified: '2026-08-03'
 body_schema: 'body-v1'
-body_hash: 'sha256:31f2c0c0033030b6b6a9769dc20d4ce8fb92cd0c60fa416862ade472bda63ced'
+body_hash: 'sha256:ddecbcd8b67a06ed10a3a5fb5e998b55d842a6f2e097b9241988db906b9875ff'
 step_id: 'S31'
 related:
   - "[[2026-08-02-provider-error-taxonomy-plan]]"
 ---
-
-<!-- FRONTMATTER RULES:
-     tags: one directory tag (hardcoded #exec) and one feature tag.
-     Replace provider-error-taxonomy with a kebab-case feature tag, e.g. #foo-bar.
-     Additional tags may be appended below the required pair.
-
-     modified: CLI-maintained last-modified stamp; set at scaffold time,
-     refreshed by mutating CLI verbs and vault check fix; never hand-edit.
-
-     step_id is the originating Step's canonical identifier, e.g. S01.
-     The S31 and 2026-08-02-provider-error-taxonomy-plan placeholders are machine-filled by
-     `vaultspec-core vault add exec`; do not fill them by hand.
-
-     Related: use wiki-links as '[[yyyy-mm-dd-foo-bar-plan]]' and link the
-     parent plan.
-
-     DO NOT add fields beyond those scaffolded; metadata lives
-     only in the frontmatter. -->
-
-<!-- LINK RULES:
-     - [[wiki-links]] are ONLY for .vault/ documents in the related: field above.
-     - NEVER use [[wiki-links]] or markdown links in the document body.
-     - NEVER reference file paths in the body. If you must name a source file,
-       class, or function, use inline backtick code: `src/module.py`. -->
-
-<!-- STEP RECORD:
-     This file represents one Step from the originating plan. Identified
-     by its canonical leaf identifier (S##) and ancestor display path.
-     The Record a durable reason where an undelivered follow-up settles and ## Scope
-
-- `src/vaultspec_a2a/control/message_service.py` placeholders below are machine-filled
-     by `vaultspec-core vault add exec` from the originating Step row;
-     do not fill them by hand. -->
 
 # Record a durable reason where an undelivered follow-up settles
 

@@ -38,10 +38,12 @@ __all__ = [
     "expire_pending_permission_requests",
     "get_control_action_by_dispatch_id",
     "get_control_action_by_idempotency_key",
+    "get_control_actions_by_idempotency_keys",
     "get_latest_control_action",
     "get_or_create_control_action",
     "get_pending_permission_requests",
     "get_permission_request",
+    "get_threads_with_pending_permission_requests",
     "mark_control_action_applied",
     "mark_control_action_duplicate",
     "mark_control_action_superseded",
@@ -68,6 +70,10 @@ class ControlActionReservation:
     action: ControlActionModel
     created: bool
     payload_matches: bool
+
+
+_IN_CLAUSE_CHUNK = 500
+"""Bound on identifiers per ``IN`` clause, under every backend's parameter cap."""
 
 
 def _encode_payload(payload: dict[str, object] | None) -> str | None:
@@ -148,6 +154,41 @@ async def get_pending_permission_requests(
         stmt = stmt.where(PermissionRequestModel.thread_id == thread_id)
     stmt = stmt.order_by(PermissionRequestModel.created_at.asc())
     return (await session.execute(stmt)).scalars().all()
+
+
+async def get_threads_with_pending_permission_requests(
+    session: AsyncSession,
+    thread_ids: Sequence[str],
+    *,
+    include_answered_pending_apply: bool = True,
+) -> set[str]:
+    """Return which of ``thread_ids`` hold at least one pending request.
+
+    Startup reconciliation asked this one thread at a time, costing a round trip
+    per non-terminal thread before the gateway could serve. The lookup is a
+    membership test over the whole backlog, so it is issued as one query per
+    chunk instead.
+    """
+    statuses = [PermissionRequestStatus.PENDING.value]
+    if include_answered_pending_apply:
+        statuses.append(PermissionRequestStatus.ANSWERED_PENDING_APPLY.value)
+
+    unique_ids = list(dict.fromkeys(thread_ids))
+    found: set[str] = set()
+    # Chunked because the backlog size is unbounded and every supported backend
+    # caps the number of bound parameters in a single statement.
+    for start in range(0, len(unique_ids), _IN_CLAUSE_CHUNK):
+        chunk = unique_ids[start : start + _IN_CLAUSE_CHUNK]
+        stmt = (
+            select(PermissionRequestModel.thread_id)
+            .where(
+                PermissionRequestModel.thread_id.in_(chunk),
+                PermissionRequestModel.request_status.in_(statuses),
+            )
+            .distinct()
+        )
+        found.update((await session.execute(stmt)).scalars().all())
+    return found
 
 
 async def record_permission_response_submission(
@@ -297,6 +338,7 @@ async def get_or_create_control_action(
         ControlActionResultStatus.ACCEPTED_NOT_APPLIED
     ),
     dispatch_id: str | None = None,
+    absence_already_resolved: bool = False,
 ) -> tuple[ControlActionModel, bool]:
     """Return the journal record for ``(thread_id, idempotency_key)``, inserting it
     only when absent.
@@ -307,14 +349,21 @@ async def get_or_create_control_action(
     same key across boots for a thread that has not advanced its epoch (e.g. rows
     written before the epoch-increment fix), and the app must not die on the second
     boot. Returns ``(action, created)`` where ``created`` is ``False`` for a replay.
+
+    ``absence_already_resolved`` skips only the existence pre-read, for a caller
+    that resolved the same absence for a whole batch in one query. It weakens no
+    guarantee: the pre-read never was the authority - the SAVEPOINT-wrapped insert
+    and its ``IntegrityError`` re-read are, precisely because a concurrent writer
+    can land between any pre-read and the insert.
     """
-    existing = await get_control_action_by_idempotency_key(
-        session,
-        thread_id=thread_id,
-        idempotency_key=idempotency_key,
-    )
-    if existing is not None:
-        return existing, False
+    if not absence_already_resolved:
+        existing = await get_control_action_by_idempotency_key(
+            session,
+            thread_id=thread_id,
+            idempotency_key=idempotency_key,
+        )
+        if existing is not None:
+            return existing, False
     # Atomic insert: wrap the INSERT in a SAVEPOINT so a concurrent boot that wins
     # the race raises IntegrityError on the UNIQUE key, rolls back only the nested
     # savepoint (leaving the outer transaction usable), and is then resolved by
@@ -416,7 +465,21 @@ async def commit_control_action_lease(
     *,
     claim_token: str,
 ) -> ControlActionModel:
-    """Commit a verified lease before its owner performs network dispatch."""
+    """Commit a verified lease before its owner performs network dispatch.
+
+    This is the one repository function that commits, against the convention
+    documented at :func:`vaultspec_a2a.control.permission_service` that the
+    dispatch stage owns the commit. The commit is load-bearing and cannot move:
+    durable ownership has to be visible to every other process *before* the
+    network dispatch happens, and the lease ``UPDATE`` lives in this session's
+    open transaction, so no other session could commit it.
+
+    What the commit cannot see is anything else the caller staged on the same
+    session, which it would publish as a side effect. The guard below refuses
+    that composition instead of silently committing it: the transaction handed
+    here must contain the claim election and nothing else.
+    """
+    _assert_no_foreign_pending_state(session)
     action = await session.get(ControlActionModel, action_id, populate_existing=True)
     if (
         action is None
@@ -427,6 +490,30 @@ async def commit_control_action_lease(
         raise RuntimeError("control action lease is not owned by this dispatcher")
     await session.commit()
     return action
+
+
+def _assert_no_foreign_pending_state(session: AsyncSession) -> None:
+    """Refuse to commit a session carrying unflushed work that is not the lease.
+
+    Detection is limited to ORM state the session has not yet flushed - inserts,
+    deletes, and attribute mutations still held in the unit of work. Work the
+    caller already flushed is indistinguishable at this seam from the claim's own
+    flushed rows, so the contract stated above remains the caller's to honour;
+    this closes the case the session can actually see.
+    """
+    sync_session = session.sync_session
+    pending: list[object] = [
+        *sync_session.new,
+        *sync_session.deleted,
+        *(obj for obj in sync_session.dirty if sync_session.is_modified(obj)),
+    ]
+    if pending:
+        kinds = sorted({type(obj).__name__ for obj in pending})
+        raise RuntimeError(
+            "control action lease commit refused: the session carries unflushed "
+            f"changes to {kinds}. Committing the lease would publish them as a "
+            "side effect. Commit or discard that work before claiming the lease."
+        )
 
 
 async def release_control_action_lease(
@@ -491,6 +578,35 @@ async def get_control_action_by_idempotency_key(
         ControlActionModel.idempotency_key == idempotency_key,
     )
     return (await session.execute(stmt)).scalar_one_or_none()
+
+
+async def get_control_actions_by_idempotency_keys(
+    session: AsyncSession,
+    keys: Sequence[tuple[str, str]],
+) -> dict[tuple[str, str], ControlActionModel]:
+    """Resolve many ``(thread_id, idempotency_key)`` journal rows in one sweep.
+
+    Startup reconciliation derives every key it will need up front, so the
+    existence lookup that :func:`get_or_create_control_action` performs per row
+    can be answered for the whole batch before the loop starts. A rebooted
+    backlog is the common case there, and every key in it already exists.
+    """
+    unique_keys = list(dict.fromkeys(keys))
+    resolved: dict[tuple[str, str], ControlActionModel] = {}
+    for start in range(0, len(unique_keys), _IN_CLAUSE_CHUNK):
+        chunk = unique_keys[start : start + _IN_CLAUSE_CHUNK]
+        stmt = select(ControlActionModel).where(
+            ControlActionModel.thread_id.in_({thread_id for thread_id, _ in chunk}),
+            ControlActionModel.idempotency_key.in_({key for _, key in chunk}),
+        )
+        wanted = set(chunk)
+        for action in (await session.execute(stmt)).scalars().all():
+            identity = (action.thread_id, action.idempotency_key)
+            # The two ``IN`` sets form a cross product wider than the requested
+            # pairs; keep only the pairs actually asked for.
+            if identity in wanted:
+                resolved[identity] = action
+    return resolved
 
 
 async def get_control_action_by_dispatch_id(

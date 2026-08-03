@@ -20,6 +20,7 @@ if TYPE_CHECKING:
     from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 
 from ..control.config import settings
+from .checkpoint_schema import checkpoint_pragmas
 
 logger = logging.getLogger(__name__)
 
@@ -248,8 +249,19 @@ async def open_checkpointer() -> AsyncIterator[Checkpointer]:
             # checkpoint writes on the shared file, instead of blocking on a writer's
             # lock (the recurring checkpoint_unavailable/missing degradations);
             # busy_timeout bounds any residual lock wait rather than failing fast.
-            await checkpointer.conn.execute("PRAGMA journal_mode=WAL")
-            await checkpointer.conn.execute("PRAGMA busy_timeout=5000")
+            # The busy timeout was hardcoded here and ignored the configured value.
+            for statement in checkpoint_pragmas(settings.sqlite_busy_timeout_ms):
+                await checkpointer.conn.execute(statement)
+            journal_row = await (
+                await checkpointer.conn.execute("PRAGMA journal_mode")
+            ).fetchone()
+            if journal_row is None or str(journal_row[0]).lower() != "wal":
+                logger.warning(
+                    "Failed to enable WAL journal mode on the checkpoint store; "
+                    "actual mode: %r. Gateway status reads will contend with "
+                    "worker checkpoint writes.",
+                    None if journal_row is None else journal_row[0],
+                )
             yield checkpointer
         return
 

@@ -2,18 +2,20 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 from langgraph.checkpoint.base import empty_checkpoint
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
+from ...conftest import materialize_schema
 from ...database import (
     create_thread,
     get_thread,
     record_permission_request,
     record_permission_response_submission,
 )
-from ...database.models import Base
 from ...database.reconciliation import reconcile_threads_on_startup
 
 
@@ -23,10 +25,8 @@ async def test_pending_permission_without_checkpoint_is_not_marked_resumable(
 ) -> None:
     """Missing checkpoint truth must win over a surviving permission row."""
     db_file = runtime_dir / "reconciliation.db"
+    materialize_schema(Path(db_file))
     engine = create_async_engine(f"sqlite+aiosqlite:///{db_file}")
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-
     session_factory = async_sessionmaker(
         engine,
         class_=AsyncSession,
@@ -77,10 +77,8 @@ async def test_cancelling_without_checkpoint_is_not_marked_cancel_pending(
 ) -> None:
     """Missing checkpoint truth must beat a surviving cancelling status."""
     db_file = runtime_dir / "reconciliation-cancelling.db"
+    materialize_schema(Path(db_file))
     engine = create_async_engine(f"sqlite+aiosqlite:///{db_file}")
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-
     session_factory = async_sessionmaker(
         engine,
         class_=AsyncSession,
@@ -123,10 +121,8 @@ async def test_answered_pending_apply_with_checkpoint_is_not_marked_resumable(
 ) -> None:
     """Answered-not-applied rows must not be treated as user-paused on restart."""
     db_file = runtime_dir / "reconciliation-answered-pending-apply.db"
+    materialize_schema(Path(db_file))
     engine = create_async_engine(f"sqlite+aiosqlite:///{db_file}")
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-
     session_factory = async_sessionmaker(
         engine,
         class_=AsyncSession,

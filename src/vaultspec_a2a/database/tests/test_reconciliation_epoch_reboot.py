@@ -11,17 +11,19 @@ and pre-fix historical rows survive a reboot.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 from langgraph.checkpoint.base import empty_checkpoint
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
+from ...conftest import materialize_schema
 from ...database import (
     create_thread,
     get_thread,
     record_permission_request,
 )
-from ...database.models import Base
 from ...database.permission_repository import (
     create_control_action,
     get_control_action_by_idempotency_key,
@@ -63,9 +65,8 @@ async def test_paused_resumable_survives_reboot_and_advances_epoch(runtime_dir) 
     """A paused_resumable thread reconciled twice must not crash on the 2nd boot."""
     tid = "thread-paused-reboot"
     db_file = runtime_dir / "reconciliation-reboot.db"
+    materialize_schema(Path(db_file))
     engine = create_async_engine(f"sqlite+aiosqlite:///{db_file}")
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
     session_factory = async_sessionmaker(
         engine, class_=AsyncSession, expire_on_commit=False
     )
@@ -116,9 +117,8 @@ async def test_historical_stuck_row_self_heals_without_crashing(runtime_dir) -> 
     replay as a no-op and advance, not crash the boot."""
     tid = "thread-historical-stuck"
     db_file = runtime_dir / "reconciliation-historical.db"
+    materialize_schema(Path(db_file))
     engine = create_async_engine(f"sqlite+aiosqlite:///{db_file}")
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
     session_factory = async_sessionmaker(
         engine, class_=AsyncSession, expire_on_commit=False
     )
@@ -166,9 +166,8 @@ async def test_get_or_create_control_action_is_idempotent_across_sessions(
     tid = "thread-idempotent-key"
     key = f"startup-repair:{tid}:1"
     db_file = runtime_dir / "reconciliation-idempotent.db"
+    materialize_schema(Path(db_file))
     engine = create_async_engine(f"sqlite+aiosqlite:///{db_file}")
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
     session_factory = async_sessionmaker(
         engine, class_=AsyncSession, expire_on_commit=False
     )

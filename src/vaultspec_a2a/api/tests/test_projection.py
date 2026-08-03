@@ -8,6 +8,7 @@ from langgraph.checkpoint.base import CheckpointTuple
 from langgraph.types import Interrupt
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
+from ...conftest import materialize_schema
 from ...control.projection import (
     apply_checkpoint_projection,
     apply_execution_state_projection,
@@ -21,7 +22,7 @@ from ...database import (
     record_thread_execution_state,
     set_thread_repair_state,
 )
-from ...database.models import Base, ThreadExecutionStateModel
+from ...database.models import ThreadExecutionStateModel
 from ...thread.snapshots import (
     CheckpointProjection,
     ExecutionStateProjection,
@@ -422,9 +423,8 @@ async def test_enrich_snapshot_from_durable_state_recovers_valid_permission_sibl
     case_dir = tmp_path / "api-test-projection-permission-siblings"
     case_dir.mkdir(parents=True, exist_ok=True)
     db_file = case_dir / "test.db"
+    materialize_schema(Path(db_file))
     engine = create_async_engine(f"sqlite+aiosqlite:///{db_file}")
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
     factory = async_sessionmaker(engine, expire_on_commit=False)
     async with factory() as session:
         thread = await create_thread(session, thread_id="thread-permission-siblings")
@@ -511,9 +511,8 @@ async def test_enrich_snapshot_from_execution_state_detects_stale_checkpoint(
     case_dir = tmp_path / "api-test-projection-db-stale"
     case_dir.mkdir(parents=True, exist_ok=True)
     db_file = case_dir / "test.db"
+    materialize_schema(Path(db_file))
     engine = create_async_engine(f"sqlite+aiosqlite:///{db_file}")
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
     factory = async_sessionmaker(engine, expire_on_commit=False)
     async with factory() as session:
         thread = await create_thread(session, thread_id="thread-1")
@@ -560,9 +559,8 @@ async def test_degraded_projection_does_not_mask_recovery_epoch_staleness(
     case_dir = tmp_path / "api-test-projection-db-epoch"
     case_dir.mkdir(parents=True, exist_ok=True)
     db_file = case_dir / "test.db"
+    materialize_schema(Path(db_file))
     engine = create_async_engine(f"sqlite+aiosqlite:///{db_file}")
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
     factory = async_sessionmaker(engine, expire_on_commit=False)
     async with factory() as session:
         thread = await create_thread(session, thread_id="thread-epoch")
@@ -634,9 +632,8 @@ async def test_unreadable_execution_state_requires_operator_intervention(
     case_dir = tmp_path / "api-test-projection-db-corrupt"
     case_dir.mkdir(parents=True, exist_ok=True)
     db_file = case_dir / "test.db"
+    materialize_schema(Path(db_file))
     engine = create_async_engine(f"sqlite+aiosqlite:///{db_file}")
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
     factory = async_sessionmaker(engine, expire_on_commit=False)
     async with factory() as session:
         thread = await create_thread(

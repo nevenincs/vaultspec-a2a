@@ -44,7 +44,6 @@ __all__ = [
     "ActiveThreadProjection",
     "create_thread",
     "delete_thread",
-    "delete_thread_execution_state",
     "get_thread",
     "get_thread_execution_state",
     "get_thread_metadata",
@@ -56,7 +55,6 @@ __all__ = [
     "record_thread_execution_state",
     "set_thread_approval_state",
     "set_thread_repair_state",
-    "update_thread_metadata",
     "update_thread_status",
 ]
 
@@ -618,37 +616,6 @@ async def get_thread_execution_state(
 ) -> ThreadExecutionStateModel | None:
     """Return the latest execution-state projection for a thread."""
     return await session.get(ThreadExecutionStateModel, thread_id)
-
-
-async def delete_thread_execution_state(
-    session: AsyncSession,
-    thread_id: str,
-) -> bool:
-    """Delete the latest execution-state projection for a thread."""
-    model = await session.get(ThreadExecutionStateModel, thread_id)
-    if model is None:
-        return False
-    await session.delete(model)
-    await session.flush()
-    return True
-
-
-async def update_thread_metadata(
-    session: AsyncSession,
-    thread_id: str,
-    metadata: str | None,
-) -> ThreadModel | None:
-    thread = await session.get(ThreadModel, thread_id)
-    if thread is None:
-        return None
-    workspace_root, feature_tag = _discovery_selectors(metadata)
-    thread.thread_metadata = metadata
-    thread.workspace_root = workspace_root
-    thread.workspace_key = _workspace_key(workspace_root)
-    thread.feature_tag = feature_tag
-    thread.updated_at = _utcnow()
-    await session.flush()
-    return thread
 
 
 async def get_thread_metadata(session: AsyncSession, thread_id: str) -> str | None:

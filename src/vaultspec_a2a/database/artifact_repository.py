@@ -81,16 +81,29 @@ async def append_permission_log(
     session: AsyncSession,
     *,
     thread_id: str,
-    agent_id: str,
+    agent_id: str | None,
     tool_name: str,
     action: str,
+    option_id: str | None = None,
 ) -> PermissionLogModel:
+    """Append one permission decision to the durable audit log.
+
+    ``action`` is the verdict (approved or rejected) and ``option_id`` the
+    concrete option that produced it. The two are recorded together because the
+    verdict alone cannot distinguish which of several rejecting options a
+    reviewer chose, and the option id alone is only interpretable against the
+    request's option list, which this row does not carry.
+
+    ``agent_id`` is keyword-required despite being nullable: a caller that has no
+    attribution must say so, rather than inherit an absence it never considered.
+    """
     log_entry = PermissionLogModel(
         id=uuid4().hex,
         thread_id=thread_id,
         agent_id=agent_id,
         tool_name=tool_name,
         action=action,
+        option_id=option_id,
     )
     return await save_model(session, log_entry)
 

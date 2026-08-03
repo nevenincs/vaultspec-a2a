@@ -51,7 +51,6 @@ from .. import (
     sum_cost_by_agent,
     sum_cost_by_thread,
     supersede_permission_requests,
-    update_thread_metadata,
     update_thread_status,
 )
 from .. import session as _session_module
@@ -500,37 +499,6 @@ class TestThreadCRUD:
         await session.commit()
         with pytest.raises(NicknameConflictError):
             await create_thread(session, nickname=nickname, title="second")
-
-    @pytest.mark.asyncio
-    async def test_update_thread_metadata(self, session: AsyncSession) -> None:
-        """update_thread_metadata should update the thread_metadata field."""
-        thread = await create_thread(session, title="Meta Update")
-        assert thread.thread_metadata is None
-
-        new_meta = '{"workspace_root": "Y:/code/updated"}'
-        updated = await update_thread_metadata(session, thread.id, new_meta)
-        assert updated is not None
-        assert updated.thread_metadata == new_meta
-        assert updated.id == thread.id
-
-    @pytest.mark.asyncio
-    async def test_update_thread_metadata_not_found(
-        self, session: AsyncSession
-    ) -> None:
-        """update_thread_metadata returns None for a non-existent thread."""
-        result = await update_thread_metadata(session, "nonexistent-id", '{"x": 1}')
-        assert result is None
-
-    @pytest.mark.asyncio
-    async def test_update_thread_metadata_clear(self, session: AsyncSession) -> None:
-        """update_thread_metadata can clear metadata by passing None."""
-        meta = '{"workspace_root": "Y:/code/vaultspec"}'
-        thread = await create_thread(session, title="Clear Meta", metadata=meta)
-        assert thread.thread_metadata == meta
-
-        cleared = await update_thread_metadata(session, thread.id, None)
-        assert cleared is not None
-        assert cleared.thread_metadata is None
 
     @pytest.mark.asyncio
     async def test_create_thread_invalid_status_raises(

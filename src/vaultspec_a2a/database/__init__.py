@@ -118,21 +118,25 @@ from .task_queue_repository import MarkCompleteResult as MarkCompleteResult
 from .task_queue_repository import get_queue_view as get_queue_view
 from .task_queue_repository import mark_task_complete as mark_task_complete
 from .task_queue_repository import seed_task_queue as seed_task_queue
+from .thread_repository import ActiveThreadProjection as ActiveThreadProjection
 from .thread_repository import create_thread as create_thread
 from .thread_repository import delete_thread as delete_thread
-from .thread_repository import (
-    delete_thread_execution_state as delete_thread_execution_state,
-)
 from .thread_repository import get_thread as get_thread
 from .thread_repository import (
     get_thread_execution_state as get_thread_execution_state,
 )
 from .thread_repository import get_thread_metadata as get_thread_metadata
 from .thread_repository import (
+    list_active_thread_page as list_active_thread_page,
+)
+from .thread_repository import (
     list_non_terminal_threads as list_non_terminal_threads,
 )
 from .thread_repository import list_threads as list_threads
 from .thread_repository import mark_thread_deleting as mark_thread_deleting
+from .thread_repository import (
+    normalize_workspace_identity as normalize_workspace_identity,
+)
 from .thread_repository import (
     record_thread_execution_state as record_thread_execution_state,
 )
@@ -140,11 +144,11 @@ from .thread_repository import (
     set_thread_approval_state as set_thread_approval_state,
 )
 from .thread_repository import set_thread_repair_state as set_thread_repair_state
-from .thread_repository import update_thread_metadata as update_thread_metadata
 from .thread_repository import update_thread_status as update_thread_status
 
 __all__ = [
     "DEFAULT_SUBSCRIBER_ID",
+    "ActiveThreadProjection",
     "ArtifactModel",
     "AuthoringEventCursorModel",
     "Base",
@@ -168,7 +172,6 @@ __all__ = [
     "create_control_action",
     "create_thread",
     "delete_thread",
-    "delete_thread_execution_state",
     "expire_pending_permission_requests",
     "get_artifact",
     "get_artifacts_by_thread",
@@ -187,6 +190,7 @@ __all__ = [
     "get_thread_execution_state",
     "get_thread_metadata",
     "init_db",
+    "list_active_thread_page",
     "list_non_terminal_threads",
     "list_threads",
     "mark_control_action_applied",
@@ -196,6 +200,7 @@ __all__ = [
     "mark_task_complete",
     "mark_thread_deleting",
     "migration_script_location",
+    "normalize_workspace_identity",
     "record_permission_request",
     "record_permission_response_submission",
     "record_thread_execution_state",
@@ -213,7 +218,6 @@ __all__ = [
     "sum_cost_by_thread",
     "supersede_permission_requests",
     "supported_migration_head",
-    "update_thread_metadata",
     "update_thread_status",
     "validate_desktop_schema",
     "verify_wal_mode",

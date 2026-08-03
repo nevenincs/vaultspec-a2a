@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, TypeIs
 
 from ..database import (
+    append_permission_log,
     create_control_action,
     get_control_action_by_idempotency_key,
     get_pending_permission_requests,
@@ -23,6 +24,7 @@ from ..database import (
     reset_permission_response_submission,
     set_thread_approval_state,
 )
+from ..graph.enums import PermissionType
 from ..ipc.schemas import DispatchRequest, to_dispatch_action
 from ..thread.dispatch_policy import FailureType, evaluate_dispatch_failure
 from ..thread.enums import (
@@ -111,14 +113,18 @@ def _allowed_option_ids(permission: object) -> set[str]:
     return extract_allowed_option_ids(raw_options)
 
 
-def _plan_response_approval_status(permission: object, option_id: str) -> str:
-    """Report the submitted plan decision without flattening it to pending.
+def _response_verdict(permission: object, option_id: str) -> str:
+    """Report the decision a response carries without flattening it to pending.
 
     Reads the verdict from the shared predicate against the options the request
     actually offered, so the status stamped here at submission is the same one the
     ``permission_resolved`` projection recomputes later. Deriving it twice from
     different fields is what previously let the projection overwrite a rejection
     with an approval.
+
+    The thread's approval state and the durable audit log both read the verdict
+    from here, for the same reason: two derivations of "was this approved" are
+    two chances to disagree about the same decision.
     """
     raw_options = getattr(permission, "allowed_options_json", None)
     return (
@@ -126,6 +132,17 @@ def _plan_response_approval_status(permission: object, option_id: str) -> str:
         if response_is_rejection(raw_options, option_id)
         else ApprovalStatus.APPROVED.value
     )
+
+
+def _audited_tool_name(permission: PermissionRequestModel) -> str:
+    """Name the gated tool for the audit log, never leaving the column blank.
+
+    An approval pause carries no ``tool_call`` because nothing tool-shaped was
+    gated; it resolves to the same ``PLAN_APPROVAL`` sentinel the client-facing
+    projection substitutes, so the audit and the surface a reviewer saw agree on
+    what was being decided.
+    """
+    return permission.tool_call or PermissionType.PLAN_APPROVAL.value
 
 
 def _rejected_permission_error(
@@ -700,11 +717,18 @@ async def _record_permission_transition(
 ) -> PermissionResult | _PermissionTransition:
     """Write the durable pre-dispatch transition for an authorized response.
 
-    Creates the submitted control action, records the response submission, and -
-    for a plan-approval pause - stamps the thread's approval state. Returns the
-    action plus the resume value and routing fields the dispatch stage carries to
-    the worker. The session is not committed here; the dispatch stage owns the
-    commit so a dispatch failure can roll the whole transition back atomically.
+    Creates the submitted control action, records the response submission, audits
+    the decision, and - for a plan-approval pause - stamps the thread's approval
+    state. Returns the action plus the resume value and routing fields the
+    dispatch stage carries to the worker.
+
+    The transition is committed here, before any network call, so the decision
+    survives a worker that never answers. It is therefore NOT rolled back by a
+    failed dispatch: the dispatch stage compensates instead, releasing the claim
+    and resetting the response submission so the request can be re-answered. The
+    audit row is deliberately left standing by that compensation - a decision the
+    operator really made is a fact about the run even when its delivery failed,
+    and a re-answer appends a second row rather than rewriting the first.
     """
     permission = authorized.permission
     thread_record = authorized.thread_record
@@ -715,10 +739,9 @@ async def _record_permission_transition(
     )
     permission_description = permission.description
     replay_approval_status = thread_record.approval_status
+    decision_verdict = _response_verdict(permission, option_id)
     submitted_approval_status = (
-        _plan_response_approval_status(permission, option_id)
-        if is_locally_respondable
-        else replay_approval_status
+        decision_verdict if is_locally_respondable else replay_approval_status
     )
 
     team_preset: str | None = thread_record.team_preset
@@ -774,6 +797,25 @@ async def _record_permission_transition(
         request_id=request_id,
         option_id=option_id,
         idempotency_key=resolved_idempotency_key,
+    )
+    # The audit entry is written here and nowhere else: this is the one point the
+    # response is applied to the pending request, and it sits behind the claim
+    # election above, so a retried or losing caller returns before reaching it and
+    # one decision produces exactly one row. Writing it at the route would log
+    # attempts rather than decisions; writing it after dispatch would lose the
+    # record of a decision the operator really made whenever the worker was
+    # unreachable. No commit here - the durability boundary below owns it.
+    await append_permission_log(
+        db,
+        thread_id=thread_id,
+        # Unattributed, deliberately. Neither sense of "who" is knowable at this
+        # seam: the agent whose tool call was gated is never captured upstream,
+        # and the responder carries no authenticated identity. Recording the
+        # decision without the actor beats fabricating one.
+        agent_id=None,
+        tool_name=_audited_tool_name(permission),
+        action=decision_verdict,
+        option_id=option_id,
     )
     if is_locally_respondable:
         await set_thread_approval_state(

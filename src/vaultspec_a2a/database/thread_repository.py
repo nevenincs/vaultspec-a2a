@@ -140,7 +140,7 @@ async def create_thread(
     team_preset: str | None = None,
     repair_status: RepairStatus | str = RepairStatus.HEALTHY,
     repair_reason: str | None = None,
-    execution_readiness: str = "healthy",
+    execution_readiness: RepairStatus | str = RepairStatus.HEALTHY,
 ) -> ThreadModel:
     """Create a new orchestration thread."""
     coerced_status = _coerce_status(status)

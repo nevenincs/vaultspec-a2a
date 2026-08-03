@@ -39,7 +39,14 @@ class ThreadStatus(StrEnum):
 
 
 class RepairStatus(StrEnum):
-    """Repair and readiness classification distinct from lifecycle."""
+    """Repair and readiness classification distinct from lifecycle.
+
+    Types BOTH durable columns that carry this classification:
+    ``threads.repair_status`` and ``threads.execution_readiness``. The two ask
+    different questions — what is wrong with this run, and is it fit to resume —
+    but they answer from this one closed set, so a new member becomes available
+    to both at once and neither can drift into a private vocabulary.
+    """
 
     HEALTHY = "healthy"
     PAUSED_RESUMABLE = "paused_resumable"

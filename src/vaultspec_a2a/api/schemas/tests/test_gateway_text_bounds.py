@@ -39,6 +39,7 @@ def _run_start(message: str, **changes: object) -> RunStartRequest:
     }
     return RunStartRequest.model_validate(payload)
 
+
 # Genuine multibyte samples: CJK at three UTF-8 bytes, an astral-plane emoji at
 # four, and a combining sequence whose character count differs from its visible
 # length. ASCII is absent on purpose - it is the case that passes either way, and

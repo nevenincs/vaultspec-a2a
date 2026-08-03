@@ -26,7 +26,13 @@ from sqlalchemy.engine.interfaces import Dialect
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 from sqlalchemy.types import TypeEngine
 
-from ..thread.enums import PermissionRequestStatus, TaskQueueStatus, ThreadStatus
+from ..thread.enums import (
+    ControlActionResultStatus,
+    PermissionRequestStatus,
+    RepairStatus,
+    TaskQueueStatus,
+    ThreadStatus,
+)
 
 __all__ = [
     "MONEY_PRECISION",
@@ -183,7 +189,52 @@ class MoneyAmount(TypeDecorator[Decimal]):
 
 
 class Base(DeclarativeBase):
-    """Shared declarative base for all database models."""
+    """Shared declarative base for all database models.
+
+    Deliberately carries NO ``naming_convention``, and that is a decision
+    rather than an omission.
+
+    Every ``UniqueConstraint`` and every ``Index`` in this schema is already
+    explicitly named, so a convention would reach only the foreign keys and
+    primary keys, which are unnamed and therefore named by whatever the backend
+    synthesizes. Adopting one would NOT rename them: a convention applies at
+    DDL-compile time, so it renames constraints only in schemas built from this
+    metadata. Production file-backed databases are built by replaying the
+    Alembic chain instead, and would keep the unnamed form. The result would be
+    named constraints in every ``create_all`` schema — the whole test suite and
+    the ``:memory:`` lane — against unnamed constraints in every deployed
+    database, a divergence the parity suite cannot see because it compares
+    foreign keys and primary keys structurally rather than by synthesized name.
+    A future batch migration written against the named form would then pass the
+    entire suite and fail on real deployments. That is strictly worse than the
+    status quo, so a forward-only convention is refused.
+
+    Renaming the existing constraints instead would mean rebuilding all ten
+    tables under SQLite batch mode (every table has an unnamed primary key, and
+    eight also carry an unnamed ``thread_id`` foreign key), copying every row
+    and recreating the four partial ``ix_threads_active_*`` indexes — a
+    whole-database rewrite whose only beneficiary is a migration nobody has
+    written yet.
+
+    That beneficiary is already served without any of it. Alembic's
+    ``batch_alter_table`` accepts a ``naming_convention`` argument precisely so
+    a reflected unnamed constraint can be given a deterministic name at the
+    moment a migration needs to target it::
+
+        with op.batch_alter_table(
+            "artifacts",
+            naming_convention={
+                "fk": "fk_%(table_name)s_%(column_0_name)s_%(referred_table_name)s"
+            },
+        ) as batch_op:
+            batch_op.drop_constraint(
+                "fk_artifacts_thread_id_threads", type_="foreignkey"
+            )
+
+    That is the supported way to drop one of these foreign keys, it needs no
+    schema change, and ``database/tests/test_schema_integrity.py`` proves it
+    works against a real migrated database rather than leaving it asserted here.
+    """
 
 
 class ThreadModel(Base):
@@ -233,9 +284,21 @@ class ThreadModel(Base):
     updated_at: Mapped[datetime] = mapped_column(
         UTCDateTime(), default=_utcnow, onupdate=_utcnow
     )
+    # Alone among the NOT NULL columns in this schema, this one carries no
+    # server_default, and it stays that way on purpose. Adding one was tried and
+    # reverted: SQLite cannot attach a default to an existing column in place, so
+    # the only route is a batch rebuild of ``threads``, and a rebuild silently
+    # rewrites the four partial ``ix_threads_active_*`` indexes that revision
+    # 0009 created DESC into ASC ones. Index DIRECTION is the single dimension
+    # SQLite reflection cannot report, so the schema-parity suite passes while
+    # that happens. Trading four deliberately-ordered production indexes for a
+    # default no writer reads — every INSERT goes through the ORM, which supplies
+    # the Python default above — is a bad bargain. Any future batch operation on
+    # this table owes the same care; the index-direction guard in
+    # ``database/tests/test_schema_integrity.py`` is what makes it fail loudly.
     status: Mapped[str] = mapped_column(default=ThreadStatus.SUBMITTED)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
-    repair_status: Mapped[str] = mapped_column(default="healthy")
+    repair_status: Mapped[str] = mapped_column(default=RepairStatus.HEALTHY)
     repair_reason: Mapped[str | None] = mapped_column(Text, default=None)
     # The capped, single-line reason a run last transitioned to FAILED, or None
     # for a run that never failed (and cleared by nothing — a run is terminal
@@ -257,7 +320,16 @@ class ThreadModel(Base):
     # a write crash that loses the run's outcome entirely, which is strictly
     # worse than recording an honest floor value.
     provider_condition: Mapped[str | None] = mapped_column(default=None)
-    execution_readiness: Mapped[str] = mapped_column(default="healthy")
+    # Typed by RepairStatus, the SAME closed vocabulary as repair_status above,
+    # and deliberately not by an enum of its own. The two columns answer
+    # different questions from one shared set of answers: repair_status is the
+    # run's repair classification, execution_readiness is the readiness reading
+    # a dispatcher consults before resuming it. Every producer already writes a
+    # RepairStatus member here — the repair policy, reconciliation, the control
+    # projection, and the thread-state service all do — and every consumer that
+    # narrows the value tests membership against RepairStatus members. A second
+    # enum duplicating those members would be a vocabulary no writer speaks.
+    execution_readiness: Mapped[str] = mapped_column(default=RepairStatus.HEALTHY)
     approval_status: Mapped[str | None] = mapped_column(default=None)
     approval_request_id: Mapped[str | None] = mapped_column(default=None)
     approval_reason: Mapped[str | None] = mapped_column(Text, default=None)
@@ -418,7 +490,9 @@ class ControlActionModel(Base):
     requested_at: Mapped[datetime] = mapped_column(UTCDateTime(), default=_utcnow)
     applied_at: Mapped[datetime | None] = mapped_column(UTCDateTime(), default=None)
     superseded_at: Mapped[datetime | None] = mapped_column(UTCDateTime(), default=None)
-    result_status: Mapped[str] = mapped_column(default="accepted_not_applied")
+    result_status: Mapped[str] = mapped_column(
+        default=ControlActionResultStatus.ACCEPTED_NOT_APPLIED
+    )
     payload_json: Mapped[str | None] = mapped_column(Text, default=None)
     worker_generation: Mapped[int] = mapped_column(default=0)
     # Stable identity reused for every redelivery of this accepted intention.

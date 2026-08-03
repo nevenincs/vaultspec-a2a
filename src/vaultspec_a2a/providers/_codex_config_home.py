@@ -61,6 +61,7 @@ __all__ = [
     "sweep_orphan_codex_homes",
 ]
 
+_OVERRIDE_PROVIDER = "vaultspec-override"
 _HOME_PREFIX = "vaultspec-codex-home-"
 
 logger = logging.getLogger(__name__)
@@ -178,6 +179,7 @@ def render_codex_config_toml(
     specs: Sequence[JsonObject],
     *,
     web_search: CodexWebSearchMode,
+    base_url_override: str | None = None,
 ) -> str:
     """Render the ``config.toml`` body for the declared read-only servers.
 
@@ -202,10 +204,24 @@ def render_codex_config_toml(
     resolution yields ``disabled``, so a defaulted argument would render the gate
     binding invisible, and deleting the binding would leave every test green. A
     caller that has not decided the posture must fail to build, not build quietly.
+
+    *base_url_override*, when set, names a ``[model_providers.*]`` table and
+    selects it, redirecting the lane's API traffic at that endpoint. See
+    :func:`build_codex_config_home` for why the seam exists and why it stays
+    absent by default.
     """
     # Kept ahead of every table header; see the docstring for why this is a
     # correctness constraint rather than a layout preference.
     blocks: list[str] = [f"web_search = {_toml_str(web_search.value)}"]
+    if base_url_override:
+        # Same bare-key-before-tables constraint as web_search above.
+        blocks.append(
+            f"model_provider = {_toml_str(_OVERRIDE_PROVIDER)}\n\n"
+            f"[model_providers.{_OVERRIDE_PROVIDER}]\n"
+            f"name = {_toml_str(_OVERRIDE_PROVIDER)}\n"
+            f"base_url = {_toml_str(base_url_override)}\n"
+            'wire_api = "chat"'
+        )
     for spec in specs:
         name = _required_server_string(spec, "name", server="<unnamed>")
         command = _required_server_string(spec, "command", server=name)
@@ -235,6 +251,7 @@ def build_codex_config_home(
     base_home: Path | None,
     *,
     web_search: CodexWebSearchMode,
+    base_url_override: str | None = None,
 ) -> Path:
     """Create a per-run ``CODEX_HOME`` carrying only the declared servers.
 
@@ -251,6 +268,17 @@ def build_codex_config_home(
     *web_search* is the run's web posture and is required - see
     :func:`render_codex_config_toml` for why it carries no default. Production
     always passes the output of :func:`resolve_codex_web_search_mode`.
+
+    *base_url_override* redirects the lane at a caller-named endpoint. It is
+    absent by default and must stay that way: this home exists precisely so a run
+    cannot inherit ambient configuration, and an override is a hole in that
+    property rather than a feature of it. It exists because the failure direction
+    of a provider lane is otherwise unobservable from outside the system - the
+    admitted lane succeeds on every input the gateway accepts - and a condition
+    taxonomy that can never be exercised against a real refusal is a claim rather
+    than a proof. The sibling ACP lane already accepts the same redirect through
+    its own base-URL variable, so this closes an asymmetry rather than opening a
+    new class of control.
     """
     # mkdtemp creates an owner-only (0700) directory, so the copied credential is
     # traversal-protected by the dir even before the file's own mode is set.
@@ -272,7 +300,12 @@ def build_codex_config_home(
                 # the temp tree is already user-scoped).
                 _restrict(dest)
         (home / "config.toml").write_text(
-            render_codex_config_toml(specs, web_search=web_search), encoding="utf-8"
+            render_codex_config_toml(
+                specs,
+                web_search=web_search,
+                base_url_override=base_url_override,
+            ),
+            encoding="utf-8",
         )
     except BaseException:
         # A mid-build failure (e.g. copy error) must not leak the dir with a

@@ -17,7 +17,7 @@ import tempfile
 import time
 import tomllib
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import pytest
 from pydantic import SecretStr
@@ -453,6 +453,33 @@ def test_build_home_writes_config_and_copies_auth(tmp_path: Path) -> None:
         assert not home.exists()
 
 
+def test_unarmed_codex_model_still_uses_an_isolated_home(tmp_path: Path) -> None:
+    """An MCP-free turn cannot inherit the operator's ambient MCP servers."""
+    from ..codex_chat_model import CodexChatModel
+
+    base = tmp_path / "operator-codex-home"
+    base.mkdir()
+    (base / "auth.json").write_text('{"token": "x"}', encoding="utf-8")
+    (base / "config.toml").write_text(
+        '[mcp_servers.operator-owned]\ncommand = "never-inherit"\n',
+        encoding="utf-8",
+    )
+    model = CodexChatModel(
+        command=["codex", "app-server"],
+        codex_home=str(base),
+        web_search_mode=CodexWebSearchMode.CACHED,
+    )
+
+    home = model._build_codex_config_home()
+    try:
+        assert home != base
+        assert (home / "auth.json").read_text(encoding="utf-8") == '{"token": "x"}'
+        config = tomllib.loads((home / "config.toml").read_text(encoding="utf-8"))
+        assert config == {"web_search": CodexWebSearchMode.CACHED.value}
+    finally:
+        cleanup_codex_config_home(home)
+
+
 def test_copied_credential_is_owner_only_on_posix(tmp_path: Path) -> None:
     # The credential copy must not widen access. On POSIX the file is pinned to
     # 0o600 and the home to 0o700; on Windows chmod is a no-op and the per-user
@@ -839,3 +866,94 @@ def test_codex_sweep_is_prefix_bound_and_never_collects_foreign_homes(
     codex_removed = sweep_orphan_codex_homes(root=tmp_path)
     assert codex_removed == [stale_codex]
     assert foreign.exists()  # untouched by the Codex-prefixed sweep
+
+
+# --- endpoint redirect on the Codex lane -----------------------------------
+
+
+def test_render_omits_any_provider_table_when_no_override_is_given() -> None:
+    # The served shape. A config home that named a provider table by default
+    # would silently move every run's traffic, so absence is the assertion that
+    # matters most here - not the presence case below.
+    parsed = tomllib.loads(
+        render_codex_config_toml(
+            codex_mcp_server_specs(["vaultspec-rag"]),
+            web_search=CodexWebSearchMode.DISABLED,
+        )
+    )
+    assert "model_providers" not in parsed
+    assert "model_provider" not in parsed
+
+
+def test_render_selects_the_provider_table_it_declares() -> None:
+    # Declaring [model_providers.X] without also setting model_provider = "X"
+    # renders an inert table: Codex would keep its own endpoint and the run
+    # would silently reach the real provider. Both halves, or neither.
+    parsed = tomllib.loads(
+        render_codex_config_toml(
+            codex_mcp_server_specs(["vaultspec-rag"]),
+            web_search=CodexWebSearchMode.DISABLED,
+            base_url_override="http://127.0.0.1:19999/v1",
+        )
+    )
+    selected = parsed["model_provider"]
+    assert parsed["model_providers"][selected]["base_url"] == (
+        "http://127.0.0.1:19999/v1"
+    )
+    # The MCP surface must survive the redirect; the override moves the endpoint,
+    # not the harness.
+    assert "vaultspec-rag" in parsed["mcp_servers"]
+
+
+def _override_config_from_child(base: Path, base_url: str | None) -> dict[str, Any]:
+    """Return the config.toml the model writes under a given environment.
+
+    Drives the REAL seam - environment -> Settings -> CodexChatModel ->
+    build_codex_config_home - in a child process, because Settings is read once
+    at import. Setting the field on the model instead would prove only that the
+    renderer works, which the tests above already cover; what is in question
+    here is whether a deployment's variable reaches the file Codex reads.
+    """
+    environment = dict(os.environ)
+    if base_url is None:
+        environment.pop("VAULTSPEC_CODEX_BASE_URL", None)
+    else:
+        environment["VAULTSPEC_CODEX_BASE_URL"] = base_url
+    proc = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            (
+                "from pathlib import Path; import sys; "
+                "from vaultspec_a2a.providers.codex_chat_model import CodexChatModel; "
+                "from vaultspec_a2a.providers._codex_config_home import "
+                "cleanup_codex_config_home; "
+                "m = CodexChatModel(codex_home=sys.argv[1]); "
+                "h = m._build_codex_config_home(); "
+                "sys.stdout.write((h / 'config.toml').read_text(encoding='utf-8')); "
+                "cleanup_codex_config_home(h)"
+            ),
+            str(base),
+        ],
+        env=environment,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=60,
+    )
+    assert proc.returncode == 0, proc.stderr
+    return tomllib.loads(proc.stdout)
+
+
+def test_deployment_variable_reaches_the_file_codex_reads(tmp_path: Path) -> None:
+    parsed = _override_config_from_child(tmp_path, "http://127.0.0.1:19998/v1")
+    selected = parsed["model_provider"]
+    assert parsed["model_providers"][selected]["base_url"] == (
+        "http://127.0.0.1:19998/v1"
+    )
+
+
+def test_unset_deployment_variable_leaves_the_provider_endpoint_alone(
+    tmp_path: Path,
+) -> None:
+    assert "model_providers" not in _override_config_from_child(tmp_path, None)

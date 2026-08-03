@@ -256,6 +256,19 @@ class InfraConfig(BaseSettings):
             "indexed, live). Unset serves live on a web-proven lane."
         ),
     )
+    # Redirects the Codex lane's API traffic at a named endpoint. Codex resolves
+    # its endpoint from its config home rather than an environment variable, so
+    # without this the lane cannot be pointed anywhere - and a lane that only ever
+    # succeeds cannot demonstrate what it does when a provider refuses. Unset in
+    # every served deployment; set it only to drive a provider-refusal proof.
+    codex_base_url_override: str | None = Field(
+        default=None,
+        validation_alias="VAULTSPEC_CODEX_BASE_URL",
+        description=(
+            "Point the Codex lane at an alternate API endpoint. Unset serves the "
+            "provider's own endpoint."
+        ),
+    )
     # Kimi Code reads persisted aliases from KIMI_CODE_HOME (default ~/.kimi-code).
     # KIMI_MODEL_* defines a temporary provider and is valid only as a complete
     # name/key/base tuple. Current names precede retained legacy key/base aliases.

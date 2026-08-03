@@ -606,6 +606,7 @@ class CodexChatModel(BaseChatModel):
                 web_proven=is_web_lane_proven(self.provider),
                 configured=configured,
             ),
+            base_url_override=settings.codex_base_url_override,
         )
 
     @override

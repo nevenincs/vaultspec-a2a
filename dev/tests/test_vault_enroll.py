@@ -13,12 +13,12 @@ from pathlib import Path
 
 import pytest
 
+from dev.vault import enroll
 from dev.vault.enroll import (
     _assert_tracked_projection,
     _require_clean_owned_paths,
     _seed_runtime_without_overwrite,
 )
-from dev.vault import enroll
 
 #: The script path the harness recipe invokes.
 ENROLL_SCRIPT = Path(enroll.__file__).resolve()

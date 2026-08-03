@@ -30,7 +30,14 @@ if TYPE_CHECKING:
 
 # Defaults for path-override fields.  Computed once at module import relative to
 # this file: control/config.py → control → vaultspec_a2a → src → project-root.
-_DEFAULT_PROJECT_ROOT: Path = Path(__file__).resolve().parent.parent.parent.parent
+# This walk leaves the installed package, which is exactly what the storage-anchor
+# gate refuses everywhere else.  It is allowed HERE and only here because this is
+# the override seam itself: the value exists to be replaced by
+# VAULTSPEC_PROJECT_ROOT, and a deployment that does not replace it holds no
+# canonical data at this path — the database and the A2A home anchor elsewhere.
+_DEFAULT_PROJECT_ROOT: Path = (
+    Path(__file__).resolve().parent.parent.parent.parent  # storage-anchor-ok
+)
 # Machine-global A2A home for runtime state.  Kept outside the repo and
 # outside .vault/ — vaultspec firmware rejects foreign directories inside the vault.
 _DEFAULT_A2A_HOME: Path = Path.home() / ".vaultspec-a2a"

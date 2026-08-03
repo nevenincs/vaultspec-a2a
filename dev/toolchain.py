@@ -367,6 +367,11 @@ LINT = Verb(
             (dev_module("guards.relative_imports"),),
         ),
         Target(
+            "anchors",
+            "Production code must not anchor storage to the repository layout.",
+            (dev_module("guards.storage_anchors"),),
+        ),
+        Target(
             "dependencies",
             "Deptry dependency-declaration drift.",
             (uv_run("deptry", "."),),

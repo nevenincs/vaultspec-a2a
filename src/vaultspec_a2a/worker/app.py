@@ -158,7 +158,13 @@ async def _lifespan(app: FastAPI) -> AsyncGenerator[None]:
         worker_record = register_serve(
             "worker-dev",
             settings.worker_port,
-            workspace=str(settings.workspace_root),
+            # Absent is the empty string the registry documents, never the
+            # rendering of None: workspace_root carries no default, so
+            # stringifying it unconditionally registers the literal "None" as a
+            # directory for every process that never had one.
+            workspace=""
+            if settings.workspace_root is None
+            else str(settings.workspace_root),
             command=[
                 "python",
                 "-m",

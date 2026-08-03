@@ -504,7 +504,13 @@ async def _lifespan(app: FastAPI) -> AsyncGenerator[None]:
         serve_record = register_serve(
             "gateway-dev",
             settings.port,
-            workspace=str(settings.workspace_root),
+            # Absent is the empty string the registry documents, never the
+            # rendering of None: workspace_root carries no default, so
+            # stringifying it unconditionally registers the literal "None" as a
+            # directory for every process that never had one.
+            workspace=""
+            if settings.workspace_root is None
+            else str(settings.workspace_root),
             command=["vaultspec-a2a", "serve", "--port", str(settings.port)],
         )
         if armed:

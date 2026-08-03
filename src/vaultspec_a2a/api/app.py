@@ -35,10 +35,10 @@ from ..control.config import settings
 from ..control.direct_control_recovery import redrive_direct_control_actions
 from ..control.dispatch import redispatch_reconciling_threads
 from ..control.health import (
-    assemble_desktop_readiness,
     assemble_health_status,
     build_full_health,
     build_sqlite_fallback_diagnostics,
+    probe_desktop_readiness,
 )
 from ..control.verdict_subscriber import VerdictSubscriber
 from ..control.worker_management import (
@@ -697,16 +697,19 @@ def create_app(
         Under the armed desktop profile the unauthenticated boundary discloses
         only the minimal liveness fact - no process identity, product identity, or
         product state - while an attach-authenticated caller additionally receives
-        the readiness projection from the single readiness authority.
+        the readiness projection from the single readiness authority, computed
+        over a live database probe. Only the authenticated branch probes: the
+        unauthenticated answer stays a constant so it cannot be used to measure
+        the gateway's dependencies.
 
-        The Compose and development profiles get the full readiness aggregate:
-        the DB, checkpointer and worker are actively PROBED, not merely read off
-        app state, because a healthcheck that only reports what the process
-        believes about itself cannot notice a dependency that has gone away.
+        Both profiles PROBE rather than read off app state - the DB here and, on
+        Compose and development, the checkpointer and worker as well - because a
+        healthcheck that only reports what the process believes about itself
+        cannot notice a dependency that has gone away.
         """
         if settings.desktop_profile_armed:
             if _http_attach_authorized(request, app):
-                readiness = assemble_desktop_readiness(app_state=app.state)
+                readiness = await probe_desktop_readiness(app_state=app.state, db=db)
                 return readiness.model_dump(mode="json")
             return LivenessResponse().model_dump(mode="json")
         aggregate = await _unarmed_health_aggregate(app, db)

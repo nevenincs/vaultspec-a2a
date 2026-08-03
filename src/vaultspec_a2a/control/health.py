@@ -14,6 +14,12 @@ complete readiness payload ``/health`` serves on the unarmed profiles.
 :mod:`vaultspec_a2a.control.admission` through
 :mod:`vaultspec_a2a.api.routes.gateway`; a prepare refuses admission unless its
 worker, provider, and admission facts are execution-ready.
+``probe_desktop_readiness()`` is its async front door: it runs the live database
+probe first so a readiness surface never reports a dependency it has not touched.
+
+``build_storage_diagnostics()`` reports what the stores are consuming on disk and
+what is left on the volume, the only warning an operator gets before a write
+fails outright.
 """
 
 from __future__ import annotations
@@ -21,19 +27,21 @@ from __future__ import annotations
 import asyncio
 import logging
 import math
+import shutil
 import time
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from pydantic import TypeAdapter, ValidationError
 from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncEngine
 
-from ..database.session import inspect_sqlite_database
+from ..database.session import inspect_sqlite_database, verify_wal_mode
 from .config import settings
 from .worker_management import LazyWorkerSpawner, WorkerState, probe_worker_health
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
-    from pathlib import Path
 
     import httpx
     from sqlalchemy.ext.asyncio import AsyncSession
@@ -46,8 +54,21 @@ __all__ = [
     "assemble_health_status",
     "build_full_health",
     "build_sqlite_fallback_diagnostics",
+    "build_storage_diagnostics",
+    "probe_database_ready",
+    "probe_desktop_readiness",
     "probe_engine_discovery_freshness",
+    "probe_journal_mode",
 ]
+
+# The in-memory SQLite URL has no file on disk and no journal to degrade, so the
+# storage and journal surfaces report it as such rather than as a missing file.
+_MEMORY_PATH = Path(":memory:")
+
+# How long a journal-mode verification may take before the health surface gives
+# up on it. The probe opens a real connection, so a database locked by a long
+# writer must not be able to stall the one endpoint an operator polls.
+_JOURNAL_PROBE_TIMEOUT_SECONDS = 5.0
 
 logger = logging.getLogger(__name__)
 _OBJECT_MAPPING = TypeAdapter(dict[str, object])
@@ -73,7 +94,6 @@ def probe_engine_discovery_freshness() -> bool | None:
     """
     import os
     import time
-    from pathlib import Path
 
     from ..authoring.discovery import (
         SERVICE_JSON_ENV,
@@ -133,6 +153,160 @@ def build_sqlite_fallback_diagnostics(
             checkpoint_path or settings.checkpoint_path
         )
     return diagnostics
+
+
+def _file_size(path: Path) -> int | None:
+    """Return a file's size in bytes, or ``None`` when it cannot be measured.
+
+    A diagnostics helper must never be the reason a health endpoint fails, so a
+    missing file, a permission-denied stat, and an unreadable path all answer
+    ``None`` rather than raising.
+    """
+    try:
+        return path.stat().st_size
+    except OSError:
+        return None
+
+
+def _sqlite_file_usage(path: Path) -> dict[str, object]:
+    """Report the on-disk footprint of one SQLite database and its sidecars.
+
+    The main file is only part of the footprint: in WAL mode the ``-wal`` log can
+    outgrow the database itself when a long-lived reader prevents a checkpoint
+    from truncating it, and that growth is invisible to anyone looking at the
+    database file alone. ``total_bytes`` is the sum an operator actually cares
+    about when asking how much disk this store is consuming.
+    """
+    if path == _MEMORY_PATH:
+        return {"path": str(path), "in_memory": True, "exists": False}
+
+    size = _file_size(path)
+    wal_size = _file_size(path.with_name(path.name + "-wal"))
+    shm_size = _file_size(path.with_name(path.name + "-shm"))
+    usage: dict[str, object] = {
+        "path": str(path),
+        "exists": size is not None,
+        "size_bytes": size,
+        "wal_size_bytes": wal_size,
+        "shm_size_bytes": shm_size,
+        "total_bytes": sum(part for part in (size, wal_size, shm_size) if part),
+    }
+    if size is None:
+        usage["detail"] = "database file not measurable"
+    return usage
+
+
+def _volume_capacity(path: Path) -> dict[str, object]:
+    """Report free space on the volume holding *path*.
+
+    Walks up to the nearest ancestor the operating system will answer for, so a
+    database directory that does not exist yet still yields the capacity of the
+    volume it would be created on. Answers a detail string rather than raising
+    when no ancestor can be measured at all.
+    """
+    directory = path.parent if path.parent != path else path
+    for candidate in (directory, *directory.parents):
+        try:
+            usage = shutil.disk_usage(candidate)
+        except OSError:
+            continue
+        return {
+            "path": str(candidate),
+            "total_bytes": usage.total,
+            "used_bytes": usage.used,
+            "free_bytes": usage.free,
+        }
+    return {"path": str(directory), "detail": "volume capacity unavailable"}
+
+
+def build_storage_diagnostics(
+    *,
+    database_backend: str | None = None,
+    checkpoint_backend: str | None = None,
+    database_path: Path | None = None,
+    checkpoint_path: Path | None = None,
+) -> dict[str, object] | None:
+    """Build live storage-consumption diagnostics for the SQLite stores.
+
+    This is the only operator-visible signal that the database is growing toward
+    the disk it lives on. Nothing prunes these stores, so the failure this
+    surfaces is not hypothetical: without it the first symptom of exhaustion is a
+    write failing outright, with no earlier warning anywhere in the process.
+
+    Unlike ``build_sqlite_fallback_diagnostics`` - a boot-time snapshot seated on
+    app state - these figures are read on every request, because a size that was
+    true at boot answers nothing about a store that has been growing since.
+
+    Returns ``None`` when neither store is SQLite; a remote backend's capacity is
+    not this process's file system to measure.
+    """
+    resolved_database_backend = database_backend or settings.resolved_database_backend
+    resolved_checkpoint_backend = (
+        checkpoint_backend or settings.resolved_checkpoint_backend
+    )
+    database_is_sqlite = resolved_database_backend == "sqlite"
+    checkpoint_is_sqlite = resolved_checkpoint_backend == "sqlite"
+    if not database_is_sqlite and not checkpoint_is_sqlite:
+        return None
+
+    diagnostics: dict[str, object] = {}
+    volume_anchor: Path | None = None
+    if database_is_sqlite:
+        resolved = database_path or settings.database_path
+        diagnostics["database"] = _sqlite_file_usage(resolved)
+        if resolved != _MEMORY_PATH:
+            volume_anchor = resolved
+    if checkpoint_is_sqlite:
+        resolved = checkpoint_path or settings.checkpoint_path
+        diagnostics["checkpoint"] = _sqlite_file_usage(resolved)
+        if volume_anchor is None and resolved != _MEMORY_PATH:
+            volume_anchor = resolved
+    if volume_anchor is not None:
+        diagnostics["volume"] = _volume_capacity(volume_anchor)
+    return diagnostics
+
+
+async def probe_database_ready(db: AsyncSession) -> bool:
+    """Issue a real query and report whether the database answered.
+
+    This is the single live database probe every readiness surface shares. It
+    exists because reading a seated engine object off application state proves
+    only that a process once configured a database, not that the database is
+    still there: a deleted file, a revoked permission, or a full volume all leave
+    that object perfectly intact.
+    """
+    try:
+        await db.execute(text("SELECT 1"))
+    except Exception:
+        logger.exception("Health check: database probe failed")
+        return False
+    return True
+
+
+async def probe_journal_mode(app_state: object) -> str | None:
+    """Return the SQLite journal mode currently in force, or ``None``.
+
+    WAL is requested on every new connection, but a filesystem is free to refuse
+    it silently, and nothing re-checks after connect time - so a gateway can run
+    for its whole lifetime on a rollback journal it believes is WAL, serialising
+    the concurrent readers the design depends on. Verifying it here, on the live
+    engine, is what turns that from an unobservable condition into a reported
+    one.
+
+    Answers ``None`` when the store is not SQLite, when no engine is seated yet,
+    or when the verification itself could not complete: a diagnostics field is
+    never worth failing a health response over.
+    """
+    engine = getattr(app_state, "db_engine", None)
+    if not isinstance(engine, AsyncEngine) or engine.dialect.name != "sqlite":
+        return None
+    try:
+        return await asyncio.wait_for(
+            verify_wal_mode(engine), timeout=_JOURNAL_PROBE_TIMEOUT_SECONDS
+        )
+    except Exception:
+        logger.exception("Health check: journal-mode probe failed")
+        return None
 
 
 def _reported_str(body: Mapping[str, object] | None, key: str) -> str | None:
@@ -238,6 +412,12 @@ def assemble_health_status(
         app_state, "sqlite_fallback_diagnostics", None
     )
 
+    # --- Storage consumption ---
+    # Read live rather than off app state: the boot-time fallback diagnostics
+    # above describe how the stores were configured, which says nothing about how
+    # much disk they are consuming now.
+    storage_diagnostics = build_storage_diagnostics()
+
     # A band gateway dispatching outside the worker-dev band with no band worker
     # present (the non-fatal half of the dispatch-pairing guard) surfaces here so an
     # operator sees the mis-target without reading logs.
@@ -266,6 +446,7 @@ def assemble_health_status(
         "paused_resumable": repair_summary.get("paused_resumable", 0),
         "checkpoint_unavailable": repair_summary.get("checkpoint_unavailable", 0),
         "sqlite_fallback": sqlite_fallback_diagnostics,
+        "storage": storage_diagnostics,
         "dispatch_pairing_warning": dispatch_pairing_warning,
     }
 
@@ -338,9 +519,14 @@ def assemble_desktop_readiness(
     reasons: list[str] = []
 
     # --- Gateway readiness: a valid database, worker state notwithstanding. ---
-    # Under the armed desktop profile the schema is validated at boot and the
-    # gateway fails closed otherwise, so a seated engine is a valid database. A
-    # caller that already ran the live probe passes its verdict in instead.
+    # Every readiness surface passes in a live probe verdict (``database_ready``);
+    # ``probe_desktop_readiness`` is the async wrapper that runs it. The seated
+    # engine fallback below is the last resort for a caller with no session to
+    # probe through - it establishes only that a database was configured at boot,
+    # never that it is still reachable, so it can never report NOT_READY for a
+    # store that has since been deleted, revoked, or filled. Boot-time schema
+    # validation under the armed profile does not close that gap either: it is a
+    # statement about the past.
     if database_ready is None:
         database_valid = getattr(app_state, "db_engine", None) is not None
     else:
@@ -417,6 +603,29 @@ def assemble_desktop_readiness(
     )
 
 
+async def probe_desktop_readiness(
+    *,
+    app_state: object,
+    db: AsyncSession,
+    worker_probe_ready: bool | None = None,
+) -> DesktopReadiness:
+    """Assemble desktop readiness over a LIVE database probe.
+
+    The desktop readiness projection is what an attach-authenticated caller and a
+    discovery contender both read before trusting this gateway, so the database
+    fact it carries has to be probed rather than inferred from seated state. This
+    is the async entry point that runs that probe and hands the verdict to the
+    single readiness authority; ``assemble_desktop_readiness`` remains available
+    for the cheap synchronous surfaces that hold no session to probe through.
+    """
+    database_ready = await probe_database_ready(db)
+    return assemble_desktop_readiness(
+        app_state=app_state,
+        database_ready=database_ready,
+        worker_probe_ready=worker_probe_ready,
+    )
+
+
 async def build_full_health(
     *,
     db: AsyncSession,
@@ -446,21 +655,31 @@ async def build_full_health(
     checks["gateway"] = {"status": "ok"}
 
     # --- Database probe ---
-    try:
-        await db.execute(text("SELECT 1"))
-        checks["database"] = {
-            "status": "ok",
-            "backend": settings.resolved_database_backend,
-            "postgres_required": "yes" if settings.postgres_required else "no",
-        }
-    except Exception:
-        logger.exception("Health check: database probe failed")
-        checks["database"] = {
-            "status": "error",
-            "backend": settings.resolved_database_backend,
-            "detail": "database probe failed",
-            "postgres_required": "yes" if settings.postgres_required else "no",
-        }
+    database_check: dict[str, str] = {
+        "status": "ok" if await probe_database_ready(db) else "error",
+        "backend": settings.resolved_database_backend,
+        "postgres_required": "yes" if settings.postgres_required else "no",
+    }
+    if database_check["status"] == "error":
+        database_check["detail"] = "database probe failed"
+
+    # --- Journal-mode verification ---
+    # WAL is requested per connection and can be silently refused by the file
+    # system, and nothing else in the process ever re-checks. Reporting the mode
+    # actually in force is informational, not a failure: an in-memory store has no
+    # journal to keep, and a rollback-journal database still serves correctly - it
+    # just serialises the concurrent readers this design assumes.
+    journal_mode = await probe_journal_mode(app_state)
+    if journal_mode is not None:
+        database_check["journal_mode"] = journal_mode
+        if journal_mode.lower() not in {"wal", "memory"}:
+            logger.warning(
+                "Health check: SQLite journal mode is %r, not WAL. Concurrent "
+                "readers will serialise against writes; the database may be on a "
+                "network or read-only filesystem.",
+                journal_mode,
+            )
+    checks["database"] = database_check
 
     # --- Checkpointer probe ---
     checkpointer = getattr(app_state, "checkpointer", None)

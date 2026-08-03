@@ -5,7 +5,7 @@ tags:
 date: '2026-08-03'
 modified: '2026-08-03'
 body_schema: 'body-v1'
-body_hash: 'sha256:e2a9d48f0ce7015546169ade299696efefe3219ddc968bddb2d7b3053bd65306'
+body_hash: 'sha256:f450c67bf1893895b85c6e4f6c21f749fd06916422ad108a3bb9e921ef510053'
 related:
   - "[[2026-08-02-provider-error-taxonomy-plan]]"
   - "[[2026-08-02-provider-error-taxonomy-adr]]"
@@ -164,7 +164,29 @@ another writer's in-flight documents on every commit, which is a known deadlock
 in this tree, and it is a repository configuration decision that belongs to the
 owner rather than to a phase executing inside it.
 
-### vocabulary-is-declared-in-three-places | low | Two of the three copies are gated against each other; the third was not
+### vocabulary-is-declared-in-three-places | RESOLVED | All three copies are now gated, and the third gate found a trap the first two did not
+
+RESOLVED. The third leg is gated: the consuming frontend now reads the engine's
+declaration off disk - a plain relative read, no environment variable, no skip
+branch, running in the ordinary tier - and requires equality member for member
+and in order.
+
+That gate found a hazard neither of the first two had to face, and it is worth
+recording as a general lesson. The engine's contract module states the nine
+spellings TWICE: once as the declaration, and again as the literal its own
+pinning test holds the declaration against. A reader anchored on "an array of
+string literals" could bind to the second copy, and would then go green on
+precisely the drift that matters - one of the two edited and the other not. The
+gate anchors on the DECLARATION specifically, and drives a synthetic source where
+the two disagree to prove the anchoring holds.
+
+The generalisable point: when a source file states the same fact twice, a
+source-reading gate must name WHICH statement is authoritative, or it can end up
+comparing a copy against itself.
+
+Both failure directions were drilled by mutating the consuming side and reading
+the real message, and non-vacuity was established four ways rather than asserted,
+including printing the members actually extracted from the real file.
 
 The closed vocabulary now exists as an enum here, a constant in the consuming
 engine's shared contract module, and a constant in the consuming frontend. The

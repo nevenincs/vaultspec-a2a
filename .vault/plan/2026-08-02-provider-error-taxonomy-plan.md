@@ -4,7 +4,7 @@ tags:
   - '#provider-error-taxonomy'
 date: '2026-08-02'
 modified: '2026-08-03'
-body_hash: 'sha256:a1729119532195350a59e26fbfe4732649213d9a6ca7100ee3481113557e64bd'
+body_hash: 'sha256:94c4edfeb6e70528e8bd6587128a8a815d5d188a36d990c854ff12d154fa114c'
 tier: L3
 related:
   - '[[2026-08-02-provider-error-taxonomy-adr]]'
@@ -135,12 +135,12 @@ Teaches the dashboard engine to model, validate, persist and forward the conditi
 
 Carries the condition from the a2a payload through the stores into the agent panel, with one localized message and one remediation affordance per member.
 
-- [ ] `W02.P08.S51` - Read the condition from the a2a run-status payload; `frontend/src/stores/server/agent/a2aTeam.ts`.
-- [ ] `W02.P08.S52` - Carry the condition through the relay adapter; `frontend/src/stores/server/liveAdapters/a2aRelay.ts`.
-- [ ] `W02.P08.S53` - Expose the condition on the agent panel view store; `frontend/src/stores/view/agentPanel.ts`.
-- [ ] `W02.P08.S54` - Add one localized message key per condition member; `frontend/src/localization/catalogAgentKeys.ts`.
-- [ ] `W02.P08.S55` - Render a distinct remediation affordance per condition; `frontend/src/app/agent/AgentPanel.tsx`.
-- [ ] `W02.P08.S56` - Prove the panel renders each condition without parsing the reason string; `frontend/src/app/agent/AgentPanel.render.test.tsx`.
+- [x] `W02.P08.S51` - Read the condition from the a2a run-status payload; `frontend/src/stores/server/agent/a2aTeam.ts`.
+- [x] `W02.P08.S52` - Carry the condition through the relay adapter; `frontend/src/stores/server/liveAdapters/a2aRelay.ts`.
+- [x] `W02.P08.S53` - Expose the condition on the agent panel view store; `frontend/src/stores/view/agentPanel.ts`.
+- [x] `W02.P08.S54` - Add one localized message key per condition member; `frontend/src/localization/catalogAgentKeys.ts`.
+- [x] `W02.P08.S55` - Render a distinct remediation affordance per condition; `frontend/src/app/agent/AgentPanel.tsx`.
+- [x] `W02.P08.S56` - Prove the panel renders each condition without parsing the reason string; `frontend/src/app/agent/AgentPanel.render.test.tsx`.
 
 ### Phase `W02.P09` - cross-repo live proof
 

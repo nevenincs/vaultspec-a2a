@@ -15,6 +15,7 @@ node will read.
 
 from __future__ import annotations
 
+import itertools
 from typing import Any, cast
 
 import httpx
@@ -34,7 +35,7 @@ from ...thread.clarification import (
     ClarificationRequest,
 )
 from ...thread.state import TeamState
-from .conftest import make_app
+from .conftest import async_catalog_run_fields, make_app
 
 _PRESET = "mock-success-single"
 
@@ -106,10 +107,25 @@ async def _park_on_clarification(
     )
 
 
+_RUN_SEQ = itertools.count(1)
+
+
 async def _start_run(client: httpx.AsyncClient) -> str:
+    """Start one run, giving each call its own id.
+
+    Every test in this module starts through here, so the id must vary per
+    CALL rather than per site: a shared one would make the second test's start
+    a replay of the first's run instead of a run of its own.
+    """
     response = await client.post(
         "/v1/runs",
-        json={"team_preset": _PRESET, "message": "plan it", "autonomous": True},
+        json={
+            "team_preset": _PRESET,
+            "message": "plan it",
+            "autonomous": True,
+            "run_id": f"clarify-edge-{next(_RUN_SEQ):02d}",
+            **await async_catalog_run_fields(client),
+        },
     )
     assert response.status_code == 201, response.text
     return str(response.json()["run_id"])

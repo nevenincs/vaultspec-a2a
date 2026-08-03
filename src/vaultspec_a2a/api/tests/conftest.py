@@ -376,3 +376,53 @@ def catalog_run_fields(
         "selection": dict(fields["selection"]),
         "metadata": dict(fields["metadata"]),
     }
+
+
+async def async_catalog_run_fields(
+    client: Any, *, workspace_root: str | None = None
+) -> dict[str, Any]:
+    """The async twin of :func:`catalog_run_fields`, for httpx.AsyncClient callers.
+
+    Deliberately a twin rather than a shared core: the sync and async clients do
+    not share a request method, and the alternative - threading a maybe-awaitable
+    through one function - reads worse than two short ones that each do the
+    obvious thing. Both consume the same cache, so whichever runs first pays for
+    the catalog and the other does not.
+    """
+    root = workspace_root or str(Path.cwd())
+    cached = _CATALOG_FIELD_CACHE.get(root)
+    if cached is None:
+        # Read on a budget of its OWN. Callers build clients with short timeouts
+        # to assert the gateway answers promptly; the first catalog read in a
+        # process also probes every provider lane and legitimately outlasts that.
+        # Borrowing the caller's budget made a cold probe look like an
+        # unresponsive gateway. Later reads come from the cache above.
+        async with httpx.AsyncClient(
+            base_url=client.base_url, timeout=180.0
+        ) as probe:
+            response = await probe.get(
+                "/v1/provider-catalog", params={"workspace_root": root}
+            )
+        assert response.status_code == 200, response.text
+        record = next(
+            item
+            for item in response.json()["providers"]
+            if item["health"]["selectable"] and item["catalog"]["models"]
+        )
+        catalog = record["catalog"]
+        cached = {
+            "selection": {
+                "schema_version": 1,
+                "provider_id": record["provider_id"],
+                "execution_mode": record["execution_mode"],
+                "catalog_revision": catalog["state"]["revision"],
+                "entry_id": catalog["models"][0]["entry_id"],
+                "controls": {},
+            },
+            "metadata": {"workspace_root": root},
+        }
+        _CATALOG_FIELD_CACHE[root] = cached
+    return {
+        "selection": dict(cached["selection"]),
+        "metadata": dict(cached["metadata"]),
+    }

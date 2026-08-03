@@ -1,14 +1,14 @@
 """Worker node for LangGraph agent task execution."""
 
+from __future__ import annotations
+
 import json
 import logging
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol, cast
 
 from langchain_core.callbacks import BaseCallbackHandler
-from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import AIMessage, BaseMessage, SystemMessage, ToolMessage
-from langchain_core.runnables import RunnableConfig
 from langgraph.errors import GraphBubbleUp
 from langgraph.types import Command, interrupt
 
@@ -19,17 +19,22 @@ from ...context.token_budget import compact_context, should_compact
 from ...domain_config import domain_config
 from ...thread.errors import WorkerExecutionError
 from ...thread.models import TokenUsageEntry
-from ...thread.state import TeamState
 from ..acp_options import valid_option_ids
-from ..protocols import CostPort, TaskQueuePort
 from ..tools.task_queue import create_mark_task_complete_tool
 
 if TYPE_CHECKING:
+    # Annotation-only: langchain_core.language_models is seconds-expensive at
+    # import (it eagerly probes for transformers); the node receives already
+    # constructed models and never instantiates one.
+    from langchain_core.language_models import BaseChatModel
+    from langchain_core.runnables import RunnableConfig
     from langchain_core.tools import BaseTool
 
     from ...authoring import FeedbackContextReader
     from ...providers._acp_authoring import AuthoringToolBinding
+    from ...thread.state import TeamState
     from ...worker.authoring_binding import AuthoringBindingProvider
+    from ..protocols import CostPort, TaskQueuePort
 
 _logger = logging.getLogger(__name__)
 
@@ -306,7 +311,7 @@ def _wrap_worker_exception(
 async def _collect_queue_tool_results(
     *,
     response: BaseMessage,
-    queue_tool: "BaseTool | None",
+    queue_tool: BaseTool | None,
 ) -> tuple[list[ToolMessage], dict[str, Any]]:
     """Dispatch mark_task_complete tool calls, collecting their Command update.
 
@@ -410,7 +415,7 @@ async def _resolve_worker_tool_calls(
     *,
     messages: list[BaseMessage],
     response: BaseMessage,
-    queue_tool: "BaseTool | None",
+    queue_tool: BaseTool | None,
     model: BaseChatModel,
     autonomous: bool,
     config: RunnableConfig | None,
@@ -639,7 +644,7 @@ async def _interrupt_permission_callback(
 
 def _attach_authoring_tools(
     model: BaseChatModel,
-    binding: "AuthoringToolBinding | None",
+    binding: AuthoringToolBinding | None,
     *,
     autonomous: bool,
 ) -> BaseChatModel:
@@ -669,10 +674,10 @@ def create_worker_node(
     workspace_root: Path | None = None,
     feature_tag: str | None = None,
     task_queue_port: TaskQueuePort | None = None,
-    authoring_binding_provider: "AuthoringBindingProvider | None" = None,
+    authoring_binding_provider: AuthoringBindingProvider | None = None,
     role: str | None = None,
     harness_mcp_servers: list[str] | None = None,
-    feedback_reader: "FeedbackContextReader | None" = None,
+    feedback_reader: FeedbackContextReader | None = None,
     cost_port: CostPort | None = None,
 ) -> WorkerNode:
     """Create a LangGraph worker node with a specific role and model.

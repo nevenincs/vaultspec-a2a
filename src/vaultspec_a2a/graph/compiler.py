@@ -10,22 +10,29 @@ map.  Three topology types are supported:
                      routes back into the loop or finishes.
 """
 
+from __future__ import annotations
+
 import functools
 import logging
-from collections.abc import Callable, Mapping, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol, cast
 
 if TYPE_CHECKING:
-    from collections.abc import Hashable
+    from collections.abc import Callable, Hashable, Mapping, Sequence
+
+    # Annotation-only: importing langchain_core.language_models at module scope
+    # costs seconds (it eagerly probes for transformers), and the compiler only
+    # names BaseChatModel in signatures — the instances it wires come from the
+    # provider factory, which imports the model stack at construction time.
+    from langchain_core.language_models import BaseChatModel
+    from langchain_core.runnables import RunnableConfig
+    from langgraph.checkpoint.base import BaseCheckpointSaver
 
     from ..authoring import FeedbackContextReader
     from ..worker.authoring_binding import AuthoringBindingProvider
+    from .protocols import CostPort, ProviderFactoryProtocol, TaskQueuePort
 
-from langchain_core.language_models import BaseChatModel
-from langchain_core.runnables import RunnableConfig
-from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.errors import GraphRecursionError
 from langgraph.graph import END, START, StateGraph
 from langgraph.types import Command, RetryPolicy
@@ -63,7 +70,6 @@ from .nodes.phase_gate import (
 from .nodes.supervisor import create_plan_approval_node, create_supervisor_node
 from .nodes.vault_reader import build_initial_vault_index, create_mount_node
 from .nodes.worker import WorkerNode, create_worker_node
-from .protocols import CostPort, ProviderFactoryProtocol, TaskQueuePort
 from .web_locators import extract_web_locators
 
 logger = logging.getLogger(__name__)
@@ -786,8 +792,8 @@ def compile_team_graph(
     task_queue_port: TaskQueuePort | None = None,
     cost_port: CostPort | None = None,
     proposal_submitter: DocumentProposalSubmitter | None = None,
-    feedback_reader: "FeedbackContextReader | None" = None,
-    authoring_binding_provider: "AuthoringBindingProvider | None" = None,
+    feedback_reader: FeedbackContextReader | None = None,
+    authoring_binding_provider: AuthoringBindingProvider | None = None,
     model_assignment: dict[str, dict[str, Any]] | None = None,
 ) -> CompiledTeamGraph:
     """Compile the LangGraph orchestration engine from a TeamConfig.
@@ -972,7 +978,7 @@ def _compile_star(
     feature_tag: str | None = None,
     task_queue_port: TaskQueuePort | None = None,
     cost_port: CostPort | None = None,
-    authoring_binding_provider: "AuthoringBindingProvider | None" = None,
+    authoring_binding_provider: AuthoringBindingProvider | None = None,
     frozen_assignment: dict[str, dict[str, Any]] | None = None,
 ) -> None:
     """Wire up a star topology: supervisor -> workers -> supervisor -> END."""
@@ -1145,7 +1151,7 @@ def _compile_pipeline(
     feature_tag: str | None = None,
     task_queue_port: TaskQueuePort | None = None,
     cost_port: CostPort | None = None,
-    authoring_binding_provider: "AuthoringBindingProvider | None" = None,
+    authoring_binding_provider: AuthoringBindingProvider | None = None,
     frozen_assignment: dict[str, dict[str, Any]] | None = None,
 ) -> None:
     """Wire up a pipeline topology: START -> node[0] -> node[1] -> ... -> END.
@@ -1352,7 +1358,7 @@ def _compile_pipeline_loop(
     feature_tag: str | None = None,
     task_queue_port: TaskQueuePort | None = None,
     cost_port: CostPort | None = None,
-    authoring_binding_provider: "AuthoringBindingProvider | None" = None,
+    authoring_binding_provider: AuthoringBindingProvider | None = None,
     frozen_assignment: dict[str, dict[str, Any]] | None = None,
 ) -> None:
     """Wire up a pipeline_loop topology.
@@ -1682,7 +1688,7 @@ def _compile_research_adr(
     workspace_root: Path | None = None,
     autonomous: bool = False,
     proposal_submitter: DocumentProposalSubmitter | None,
-    feedback_reader: "FeedbackContextReader | None" = None,
+    feedback_reader: FeedbackContextReader | None = None,
     frozen_assignment: dict[str, dict[str, Any]] | None = None,
     cost_port: CostPort | None = None,
 ) -> None:

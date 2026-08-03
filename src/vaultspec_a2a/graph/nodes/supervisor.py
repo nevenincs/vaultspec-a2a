@@ -1,11 +1,12 @@
 """Supervisor node for LangGraph agent routing."""
 
+from __future__ import annotations
+
 import logging
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Protocol, cast
+from typing import TYPE_CHECKING, Any, Protocol, cast
 
-from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import BaseMessage, SystemMessage
 from langgraph.constants import TAG_NOSTREAM
 from langgraph.types import interrupt
@@ -17,8 +18,15 @@ from ...context.token_budget import compact_context, should_compact
 from ...domain_config import domain_config
 from ...graph.enums import PipelinePhase
 from ...thread.enums import ApprovalStatus
-from ...thread.state import TeamState
 from .phase_gate import VERDICT_APPROVED, parse_verdict
+
+if TYPE_CHECKING:
+    # Annotation-only: langchain_core.language_models is seconds-expensive at
+    # import (it eagerly probes for transformers); the node receives already
+    # constructed models and never instantiates one.
+    from langchain_core.language_models import BaseChatModel
+
+    from ...thread.state import TeamState
 
 _logger = logging.getLogger(__name__)
 

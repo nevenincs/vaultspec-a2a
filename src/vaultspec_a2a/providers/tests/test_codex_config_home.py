@@ -897,9 +897,11 @@ def test_render_selects_the_provider_table_it_declares() -> None:
         )
     )
     selected = parsed["model_provider"]
-    assert parsed["model_providers"][selected]["base_url"] == (
-        "http://127.0.0.1:19999/v1"
-    )
+    provider = parsed["model_providers"][selected]
+    assert provider["base_url"] == "http://127.0.0.1:19999/v1"
+    # Not cosmetic: the installed app-server rejects the older "chat" value at
+    # config load, so a redirect declaring it fails before reaching any endpoint.
+    assert provider["wire_api"] == "responses"
     # The MCP surface must survive the redirect; the override moves the endpoint,
     # not the harness.
     assert "vaultspec-rag" in parsed["mcp_servers"]

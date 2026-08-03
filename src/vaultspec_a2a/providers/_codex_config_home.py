@@ -220,7 +220,11 @@ def render_codex_config_toml(
             f"[model_providers.{_OVERRIDE_PROVIDER}]\n"
             f"name = {_toml_str(_OVERRIDE_PROVIDER)}\n"
             f"base_url = {_toml_str(base_url_override)}\n"
-            'wire_api = "chat"'
+            # The installed app-server refuses "chat" outright at config load,
+            # which surfaces as a protocol error rather than as anything the
+            # provider said - the redirect has to speak the wire the CLI still
+            # supports or it never reaches an endpoint at all.
+            'wire_api = "responses"'
         )
     for spec in specs:
         name = _required_server_string(spec, "name", server="<unnamed>")

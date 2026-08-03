@@ -180,6 +180,16 @@ EXTERNAL_PREREQUISITES: tuple[ExternalPrerequisite, ...] = (
         probe=None,
     ),
     ExternalPrerequisite(
+        "gateway",
+        what="a reachable a2a gateway, with no engine and no worker required",
+        supply=(
+            "boot this branch's a2a gateway and worker on matching ports and "
+            "export VAULTSPEC_GATEWAY_URL (or leave it to the process registry's "
+            "gateway-dev entry)"
+        ),
+        probe=None,
+    ),
+    ExternalPrerequisite(
         "codex-cli",
         what="the Codex CLI on PATH",
         supply=(

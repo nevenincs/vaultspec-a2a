@@ -39,20 +39,29 @@ __all__ = [
 _TEMPLATES_DIR = Path(".vaultspec") / "templates"
 _SKILLS_DIR = Path(".vaultspec") / "skills"
 
-# The two remaining surfaces a ``vaultspec-core install`` lays down that this
-# verifier previously ignored. They are not optional extras: the framework's
-# document rules - which record grounds a decision, which grounds a plan - are
-# encoded in core's own corpus, and an agent reaches them through these
-# directories rather than through prose restated in a persona. A workspace
-# missing them provisions, passes, dispatches, and produces an agent working
-# without the definitions and servers the run assumes it has.
+# The agent-definition corpus a ``vaultspec-core install`` lays down. It is not
+# an optional extra: ``load_agent_config`` reads
+# ``<workspace>/.vaultspec/agents/<agent_id>.toml`` ahead of the bundled preset,
+# so this directory is the project's own channel for shadowing the
+# orchestrator's defaults. A workspace missing it provisions, passes,
+# dispatches, and silently produces an agent running on defaults the project
+# meant to override.
 #
 # Checked for presence and non-emptiness only. What a correct corpus CONTAINS is
 # core's business, not this verifier's; an empty directory is the failure mode
 # worth catching here, because it is the one an interrupted or partial install
 # leaves behind and the one that reads as "provisioned" to every other check.
+#
+# ``.vaultspec/mcps`` is deliberately NOT checked. A verdict must assert only
+# relationships that exist, and no part of a run reads that corpus: the MCP
+# surface an agent is handed is resolved from the closed, in-package registry
+# keyed by the names a team's ``[team.harness]`` declares, with no discovery
+# path from the workspace. Failing a run on a corpus it never consumes reported
+# a dependency the runtime does not have, and passing one implied the project's
+# declarations reached the agent. Neither was true. Making that corpus a real
+# composition input would be a different decision, taken where the registry is
+# served rather than asserted here.
 _AGENTS_DIR = Path(".vaultspec") / "agents"
-_MCPS_DIR = Path(".vaultspec") / "mcps"
 
 # The canonical authoring templates every placeholder is filled from. A
 # document-authoring harness requires these readable on disk - an early run
@@ -107,10 +116,13 @@ def verify_harness(
     - **skills**: every name in *required_skills* is present under
       ``.vaultspec/skills/`` (a ``<name>/SKILL.md`` skill directory or a
       ``<name>.md`` file);
-    - **agents** and **mcps**: ``.vaultspec/agents`` and ``.vaultspec/mcps``
-      exist and are non-empty - the agent definitions and MCP servers a
-      ``vaultspec-core install`` lays down, which the run assumes are reachable;
+    - **agents**: ``.vaultspec/agents`` exists and is non-empty - the agent
+      definitions ``load_agent_config`` reads ahead of the bundled presets;
     - **tools**: the ``vaultspec-core`` CLI resolves in the agent environment.
+
+    The workspace's ``.vaultspec/mcps`` corpus is not checked: nothing in a run
+    consumes it (see the note on :data:`_AGENTS_DIR`), so a verdict on it would
+    assert a dependency the runtime does not have.
 
     *required_skills* is the declared harness's skills list (empty by default -
     the ``[team.harness]`` schema supplies it); a run that declares no skills is
@@ -141,12 +153,10 @@ def verify_harness(
     if missing_skills:
         reasons.append("declared skills missing: " + ", ".join(missing_skills))
 
-    for surface, directory in (("agents", _AGENTS_DIR), ("mcps", _MCPS_DIR)):
-        if not _corpus_present(root / directory):
-            reasons.append(
-                f"vaultspec-core {surface} corpus is empty or absent "
-                f"(.vaultspec/{surface})"
-            )
+    if not _corpus_present(root / _AGENTS_DIR):
+        reasons.append(
+            "vaultspec-core agents corpus is empty or absent (.vaultspec/agents)"
+        )
 
     if not _cli_resolvable():
         reasons.append("vaultspec-core CLI does not resolve in the agent environment")

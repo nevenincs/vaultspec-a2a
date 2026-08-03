@@ -39,6 +39,7 @@ from typing import TYPE_CHECKING, Any
 from ..graph.enums import PipelinePhase
 from ..graph.nodes.diverge import WEB_LOCATOR_KIND
 from ..graph.nodes.phase_gate import ProposalRevisionRequiredError
+from ..ipc.schemas import canonical_project_root
 from ._envelope import AuthoringResponse, Denial
 from ._errors import AuthoringError
 from ._ids import derive_idempotency_key
@@ -47,6 +48,7 @@ from .discovery import resolve_engine
 from .session import AuthoringSession
 
 if TYPE_CHECKING:
+    import os
     from collections.abc import Mapping, Sequence
 
     from ..thread.state import TeamState
@@ -62,6 +64,7 @@ __all__ = [
     "ProposalDeniedError",
     "RoleConfigInvalidError",
     "SubmitterError",
+    "engine_scope_token",
 ]
 
 #: Literal template placeholders whose presence in a finished body proves the
@@ -107,6 +110,26 @@ _HTML_COMMENT_RE = re.compile(r"<!--.*?-->", re.DOTALL)
 # ## Status section survives to disk and trips `adr-status`; the submit-node refuses
 # it (ADR phase only) and routes the author to rewrite the H1 token.
 _LEGACY_STATUS_HEADING_RE = re.compile(r"^##[ \t]+Status[ \t]*$", re.MULTILINE)
+
+
+def engine_scope_token(project_root: str | os.PathLike[str]) -> str:
+    """Project a run's active project into the engine's authoring scope spelling.
+
+    The engine authorises a mutating authoring command against the scope token of
+    a workspace root: the path with backslashes turned into forward slashes and
+    the Windows extended-length prefix removed. That is the exact identifier a
+    document target's scope is compared against, and it is NOT this repository's
+    canonical project form, which keeps the platform's own separators. Opening a
+    session under the engine's spelling is what makes the two the same string
+    rather than two renderings of one directory that only compare equal by luck.
+
+    Raises:
+        ValueError: If *project_root* is blank or not absolute (raised by the
+            canonical mint this delegates to). A project is supplied by the
+            caller that owns it and is never inferred from a working directory.
+    """
+    posix = canonical_project_root(project_root).replace("\\", "/")
+    return posix.removeprefix("//?/")
 
 
 class SubmitterError(AuthoringError):
@@ -558,9 +581,21 @@ class DocumentProposalSubmitter:
     """Whole-document propose-and-submit for a document phase.
 
     Constructed per run by the worker lifecycle from run-start facts:
-    the engine origin, the run's :class:`RunTokenStore`, the feature tag, and the
-    per-phase authoring specs. Conforms to the phase-gate
-    ``DocumentProposalSubmitter`` Protocol.
+    the engine origin, the run's active project, the run's
+    :class:`RunTokenStore`, the feature tag, and the per-phase authoring specs.
+    Conforms to the phase-gate ``DocumentProposalSubmitter`` Protocol.
+
+    *workspace_root* is the run's active project, and it is REQUIRED. It is what
+    the authoring session is opened under, so the engine has the authoring run's
+    own project to authorise its commands against instead of whatever workspace
+    happens to be active when a command lands - the two coincided only while the
+    operator did not switch projects mid-run. A compiled graph is cached per
+    workspace, so a submitter constructed alongside one is bound to that project
+    for its whole life.
+
+    Required rather than defaulted on purpose: a parameter that may be omitted
+    reads as permission, and the omission would surface as a session quietly
+    opened under no project rather than as a construction that refuses.
     """
 
     def __init__(
@@ -569,6 +604,7 @@ class DocumentProposalSubmitter:
         engine_base_url: str,
         token_store: RunTokenStore,
         phases: Mapping[str, PhaseAuthoringSpec],
+        workspace_root: str | os.PathLike[str],
     ) -> None:
         if not engine_base_url:
             raise EngineUnavailableError(
@@ -577,6 +613,18 @@ class DocumentProposalSubmitter:
         self._engine_base_url = engine_base_url.rstrip("/")
         self._token_store = token_store
         self._phases = dict(phases)
+        self._project_scope = self._resolve_project_scope(workspace_root)
+
+    @staticmethod
+    def _resolve_project_scope(workspace_root: str | os.PathLike[str]) -> str:
+        """Mint the engine-facing scope for *workspace_root*, or fail closed."""
+        try:
+            return engine_scope_token(workspace_root)
+        except ValueError as exc:
+            raise EngineUnavailableError(
+                f"run names no usable active project to bind its authoring "
+                f"session to: {exc}"
+            ) from exc
 
     async def __call__(self, state: TeamState, phase: str) -> str:
         """Propose and submit the phase's document; return its proposal id."""
@@ -597,7 +645,6 @@ class DocumentProposalSubmitter:
             raise RoleConfigInvalidError(
                 f"no authoring configuration for document phase {phase!r}"
             )
-
         bearer = self._token_store.engine_bearer(thread_id)
         if not bearer:
             raise CredentialsMissingError(
@@ -650,9 +697,17 @@ class DocumentProposalSubmitter:
             # add phase + revision so each phase/revision is its own changeset and
             # proposal, and all keys are reproduced byte-for-byte on replay and
             # after a restart.
-            session = AuthoringSession(client, thread_id)
+            #
+            # The session is opened under the RUN's project, not a literal
+            # constant: the engine authorises each mutating command against a
+            # scope, and a session that named none left it authorising against
+            # the workspace active at command time - so an operator switching
+            # projects mid-run fenced this run's proposals against a project that
+            # did not author them.
+            session = AuthoringSession(
+                client, thread_id, project_scope=self._project_scope
+            )
             created_session = await session.create_session(
-                scope="repo",
                 title=f"{feature} authoring",
                 idempotency_key=derive_idempotency_key(thread_id, "create_session"),
             )

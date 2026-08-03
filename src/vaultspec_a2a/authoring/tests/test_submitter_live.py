@@ -17,6 +17,7 @@ real engine state:
 
 from __future__ import annotations
 
+import pathlib
 import uuid
 from typing import TYPE_CHECKING, cast
 
@@ -62,10 +63,17 @@ async def _store_with_role_token(
     return store
 
 
+# The live engine authorises an authoring command against the run's own project,
+# so these tests bind to a real vaultspec workspace - this checkout - rather than
+# a scratch directory the engine would not recognise as one.
+_PROJECT = pathlib.Path(__file__).resolve().parents[4]
+
+
 def _submitter(base_url: str, store: RunTokenStore) -> DocumentProposalSubmitter:
     return DocumentProposalSubmitter(
         engine_base_url=base_url,
         token_store=store,
+        workspace_root=_PROJECT,
         phases={
             "research": PhaseAuthoringSpec(
                 document_role=_RESEARCH_ROLE,

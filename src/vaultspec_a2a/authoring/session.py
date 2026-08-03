@@ -89,14 +89,34 @@ class AuthoringSession:
     run_id:
         Stable run-local identifier used as idempotency-key material and as the
         seed for generated session/changeset ids. Must satisfy the id grammar.
+    project_scope:
+        The project this session's work belongs to, in the engine's scope
+        spelling. It becomes the session's ``scope`` at creation, which is the
+        one field the engine stores verbatim on the session record and therefore
+        the only place a run's project can ride the closed authoring wire. Every
+        mutating proposal verb below refuses while it is unset, so a proposal can
+        never be issued from a session that named no project - the closed wire
+        gives a proposal payload no field of its own, so its binding is the
+        session it carries, and an unpinned session is a proposal fenced against
+        whatever the engine's active workspace happens to be at command time.
+
+        Optional here only so a caller may supply it to :meth:`create_session`
+        instead; one of the two must provide it before any proposal.
     """
 
-    def __init__(self, client: AuthoringClient, run_id: str) -> None:
+    def __init__(
+        self,
+        client: AuthoringClient,
+        run_id: str,
+        *,
+        project_scope: str | None = None,
+    ) -> None:
         self._client = client
         self._run_id = validate_id(run_id, field="run_id")
         self._seq = 0
         self._session_id: str | None = None
         self._engine_run_id: str | None = None
+        self._project_scope = project_scope or None
         # Produced Vaultspec ids, accumulated for thread-state cross-reference.
         self._changeset_ids: list[str] = []
         self._proposal_ids: list[str] = []
@@ -109,6 +129,11 @@ class AuthoringSession:
     def session_id(self) -> str | None:
         """The engine session id once ``create_session`` has run."""
         return self._session_id
+
+    @property
+    def project_scope(self) -> str | None:
+        """The project every command on this session is fenced to."""
+        return self._project_scope
 
     @property
     def engine_run_id(self) -> str | None:
@@ -165,24 +190,73 @@ class AuthoringSession:
         if changeset_id not in self._changeset_ids:
             self._changeset_ids.append(changeset_id)
 
+    def _bind_project(self, scope: str | None) -> str:
+        """Settle the session's project from the binding and the call, or refuse.
+
+        A session bound at construction ignores no caller: an explicit *scope*
+        that agrees is redundant and accepted, one that disagrees is a command
+        trying to fence this run's work to a different project and is refused
+        rather than silently resolved either way.
+        """
+        if self._project_scope is not None:
+            if scope is not None and scope != self._project_scope:
+                raise ValueError(
+                    f"session for run {self._run_id!r} is bound to project "
+                    f"{self._project_scope!r}; refusing to open it under {scope!r}"
+                )
+            return self._project_scope
+        if not scope:
+            raise ValueError(
+                f"session for run {self._run_id!r} names no project: supply "
+                f"project_scope at construction or scope at create_session"
+            )
+        self._project_scope = scope
+        return scope
+
+    def _require_project(self, command: str) -> str:
+        """Return the session's project, refusing an unpinned mutating command.
+
+        A proposal command carries no project of its own - the engine's payloads
+        are closed - so the session's binding is the whole of it. Refusing here
+        keeps an unpinned session from producing work the engine would authorise
+        against whatever workspace is active when the command lands.
+        """
+        if self._project_scope is None:
+            raise RuntimeError(
+                f"{command} requires a project-bound session; run "
+                f"{self._run_id!r} opened none"
+            )
+        return self._project_scope
+
     # ------------------------------------------------------------------
     # Session lifecycle
     # ------------------------------------------------------------------
 
     async def create_session(
-        self, *, scope: str, title: str, idempotency_key: str | None = None
+        self,
+        *,
+        title: str,
+        scope: str | None = None,
+        idempotency_key: str | None = None,
     ) -> AuthoringResponse | Denial:
         """Open the authoring session for this run (``create_session``).
 
         The engine generates the ``session_id`` and returns it in the receipt
         (``data.session_id``); the payload carries only ``scope`` and ``title``.
         A stable ``idempotency_key`` makes this a create-or-resume: a repeat call
-        for the same run returns the same session (the engine dedupes).
+        for the same run returns the same session (the engine dedupes) - which
+        also means the project the session was FIRST opened under is the one it
+        keeps, so a mid-run switch cannot re-scope work already in flight.
+
+        ``scope`` is the session's project. A session constructed with a
+        ``project_scope`` already carries it and needs none here; a caller may
+        supply it instead, but not one that contradicts the binding.
         """
+        effective_scope = self._bind_project(scope)
         result = await self._client.post_command(
             "/v1/sessions",
             command="create_session",
-            payload={"scope": scope, "title": title},
+            payload={"scope": effective_scope, "title": title},
             idempotency_key=self._resolve_key("create_session", idempotency_key),
         )
         if isinstance(result, AuthoringResponse) and isinstance(result.data, dict):
@@ -231,6 +305,7 @@ class AuthoringSession:
         """Create a proposal changeset (``create_proposal``)."""
         if self._session_id is None:
             raise RuntimeError("create_session must run before create_proposal")
+        self._require_project("create_proposal")
         validate_id(changeset_id, field="changeset_id")
         result = await self._client.post_command(
             "/v1/proposals",
@@ -293,9 +368,10 @@ class AuthoringSession:
         operations: list[dict[str, Any]],
         idempotency_key: str | None = None,
     ) -> AuthoringResponse | Denial:
+        command = "append_draft" if verb == "append" else "replace_draft"
+        self._require_project(command)
         validate_id(changeset_id, field="changeset_id")
         validate_id(expected_revision, field="expected_revision")
-        command = "append_draft" if verb == "append" else "replace_draft"
         return await self._client.post_command(
             f"/v1/proposals/{changeset_id}/{verb}",
             command=command,
@@ -323,6 +399,7 @@ class AuthoringSession:
         opened approval). It is captured from the receipt into the run's
         produced-id references so thread state can match the engine's records.
         """
+        self._require_project("submit_for_review")
         validate_id(changeset_id, field="changeset_id")
         validate_id(expected_revision, field="expected_revision")
         result = await self._client.post_command(
@@ -346,6 +423,7 @@ class AuthoringSession:
         idempotency_key: str | None = None,
     ) -> AuthoringResponse | Denial:
         """Rebase a proposal onto the latest base revision (``rebase``)."""
+        self._require_project("rebase")
         validate_id(changeset_id, field="changeset_id")
         validate_id(expected_revision, field="expected_revision")
         return await self._client.post_command(

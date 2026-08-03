@@ -173,6 +173,7 @@ async def test_compiled_document_graph_receives_conventions_via_runtime_config(
         engine_base_url=live_engine.base_url,
         token_store=token_store,
         phases=phase_specs,
+        workspace_root=workspace,
     )
     team = load_team_config(_RESEARCH_ADR_PRESET)
     agent_configs = {

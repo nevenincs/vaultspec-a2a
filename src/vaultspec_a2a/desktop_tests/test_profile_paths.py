@@ -140,28 +140,30 @@ def test_relative_app_home_is_refused_when_armed(tmp_path: Path) -> None:
         Settings()
 
 
-def test_unarmed_state_remains_launch_relative(tmp_path: Path) -> None:
-    """Without arming, the database path keeps its pre-existing launch-relative form."""
+def test_a_launch_relative_database_url_is_refused(tmp_path: Path) -> None:
+    """A relative database URL is rejected rather than resolved per launch dir.
+
+    This asserted the opposite: that an unarmed profile KEPT its launch-relative
+    form, and that the same URL read from two directories yielded two different
+    files. That behaviour is exactly the hazard the settings validator now
+    refuses - the gateway and the CLI resolve against their own working
+    directories, so one relative URL silently becomes two databases and each
+    process is certain it holds the only one.
+
+    The refusal is the contract now, so the drift the old test pinned as
+    expected is what this one proves impossible. Both launch directories are
+    still exercised, because the defect only ever showed itself as a difference
+    between two of them.
+    """
     launch_a = tmp_path / "launch-a"
     launch_b = tmp_path / "launch-b"
     launch_a.mkdir()
     launch_b.mkdir()
 
-    # ``database_path`` resolves the relative URL against the working directory at
-    # access time, so it is read inside each launch directory.
-    with _working_directory(launch_a):
-        from_a = Settings(database_url="sqlite+aiosqlite:///vaultspec.db")
-        db_a = from_a.database_path
-    with _working_directory(launch_b):
-        from_b = Settings(database_url="sqlite+aiosqlite:///vaultspec.db")
-        db_b = from_b.database_path
-
-    assert from_a.desktop_app_home is None
-    assert from_b.desktop_app_home is None
-    # Launch-relative resolution is unchanged: the path tracks the working dir.
-    assert db_a != db_b
-    assert db_a.is_relative_to(launch_a.resolve())
-    assert db_b.is_relative_to(launch_b.resolve())
+    for launch in (launch_a, launch_b):
+        with _working_directory(launch), pytest.raises(ValidationError) as raised:
+            Settings(database_url="sqlite+aiosqlite:///vaultspec.db")
+        assert "must be absolute" in str(raised.value)
 
 
 def test_discovery_path_matches_the_discovery_authority(tmp_path: Path) -> None:

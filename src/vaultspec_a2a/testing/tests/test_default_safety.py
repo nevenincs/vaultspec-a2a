@@ -128,6 +128,14 @@ def test_second_session_is_admitted_degraded(tmp_path: Path) -> None:
             "-m",
             "pytest",
             str(suite / "test_hold.py"),
+            # Named explicitly: these suites live outside the checkout,
+            # and the plugin loads from the repository root conftest rather
+            # than a pytest11 entry point, so conftest discovery from the
+            # test file never reaches it. Without this the holder registers
+            # no session lease at all and the wait below stalls against a
+            # peer that was never admitted.
+            "-p",
+            "vaultspec_a2a.testing.plugin",
             "-p",
             "no:cacheprovider",
             "-q",
@@ -154,6 +162,13 @@ def test_second_session_is_admitted_degraded(tmp_path: Path) -> None:
                 "-m",
                 "pytest",
                 str(suite / "test_quick.py"),
+                # The admitting run needs the plugin for the same reason the
+                # holder does, and more pointedly: the worker-count verdict this
+                # test reads comes from the plugin's own report header, so
+                # without it there is no header to read and no admission to
+                # observe.
+                "-p",
+                "vaultspec_a2a.testing.plugin",
                 "-p",
                 "no:cacheprovider",
                 "-n",

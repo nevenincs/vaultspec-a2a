@@ -38,8 +38,6 @@ dependencies = [
   "alembic>=1.15.1",
   "click>=8.1",
   "langsmith>=0.3.1",
-  "torch>=2.13.0",
-  "vaultspec-rag[mcp]",
 ]
 
 [project.optional-dependencies]
@@ -49,6 +47,18 @@ server = [
   "opentelemetry-exporter-otlp-proto-grpc>=1.39.1",
   "psycopg[binary,pool]>=3.2.9",
 ]
+# Semantic search over the vault and the codebase. NOT a runtime dependency of
+# the gateway: no module here imports `vaultspec_rag` or `torch`, and the presets
+# that use it name `vaultspec-rag` as an out-of-process MCP SERVER rather than
+# importing anything. This project orchestrates agents; it runs no model itself
+# and needs no tensor runtime.
+#
+# Kept out of the base install because it is not free. `vaultspec-rag` pulls
+# `sentence-transformers`, which pulls `transformers`, and `langchain_core`
+# imports `transformers` at module scope inside a try/except purely to record
+# whether it is available - so merely HAVING it installed added roughly thirteen
+# seconds to any import that reached the language-model package, in a process
+# that never used a tokenizer.
 rag = [
   "torch>=2.4",
   "vaultspec-rag[mcp]>=0.3.8",
@@ -169,7 +179,13 @@ url = "https://download.pytorch.org/whl/cu130"
 explicit = true
 
 [tool.vaultspec-rag.mcp-extra]
-location = "[project].dependencies"
+# Points at the optional extra, not the base dependency list. The entry was
+# originally injected here into `[project].dependencies`, which made a
+# development search tool - and the tensor runtime behind it - mandatory for
+# every install of an agent-orchestration service that imports neither. This
+# key is the tool's own bookkeeping, so it has to name the extra or the entry
+# gets re-added to the base list on the next managed sync.
+location = "[project].optional-dependencies.rag"
 managed = "vaultspec-rag[mcp]"
 added = true
 [build-system]

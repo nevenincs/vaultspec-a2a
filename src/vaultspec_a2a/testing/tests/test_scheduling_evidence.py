@@ -72,6 +72,16 @@ def _run_pytest(
             "-m",
             "pytest",
             str(suite_dir),
+            # Loaded explicitly because this runs OUTSIDE the checkout. The
+            # plugin is deliberately not a pytest11 entry point - that would
+            # auto-load it into every consumer's session - so the repository
+            # root conftest loads it instead, and a suite generated into a temp
+            # directory never sees that conftest. Without this the mini-suites
+            # run with no resource layer at all, and every assertion that a
+            # violation is REFUSED passes for the wrong reason: nothing was
+            # there to refuse it.
+            "-p",
+            "vaultspec_a2a.testing.plugin",
             "-p",
             "no:cacheprovider",
             "-q",

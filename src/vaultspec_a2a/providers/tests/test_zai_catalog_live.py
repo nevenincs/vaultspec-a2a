@@ -12,6 +12,7 @@ value reached the gateway before the prompt was sent.
 from __future__ import annotations
 
 import os
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
@@ -25,7 +26,6 @@ from ..provider_catalog import AuthenticationState, CatalogStatus, ProviderCatal
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
-    from pathlib import Path
 
     from .._json_contract import JsonObject
 
@@ -56,7 +56,7 @@ async def test_zai_catalog_selection_is_confirmed_by_one_minimal_turn(
     assert settings.zai_auth_token and settings.zai_auth_token.strip(), (
         "Settings did not resolve a Z.ai auth token for the production catalog path"
     )
-    discovery = await ProviderFactory().catalog_registration(key).discover()
+    discovery = await ProviderFactory().catalog_registration(key, Path.cwd()).discover()
 
     assert discovery.authentication is AuthenticationState.AUTHENTICATED, (
         "Z.ai catalog authentication was not confirmed: "

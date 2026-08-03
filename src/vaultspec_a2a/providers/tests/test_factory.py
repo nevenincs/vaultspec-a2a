@@ -35,7 +35,7 @@ def get_model_attr(model_obj: BaseChatModel) -> str | None:
 
 
 def test_catalog_registrations_are_execution_mode_specific() -> None:
-    registrations = ProviderFactory().catalog_registrations()
+    registrations = ProviderFactory().catalog_registrations(Path.cwd())
     assert tuple(registration.key for registration in registrations) == (
         ProviderCatalogKey("claude", f"claude-agent-acp:{settings.acp_backend}"),
         ProviderCatalogKey("codex", "codex-app-server"),
@@ -46,7 +46,9 @@ def test_catalog_registrations_are_execution_mode_specific() -> None:
         ProviderCatalogKey("zhipu", "zhipu-openai-compatible-api"),
     )
     with pytest.raises(ValueError, match="no catalog registration"):
-        ProviderFactory().catalog_registration(ProviderCatalogKey("openai", "api"))
+        ProviderFactory().catalog_registration(
+            ProviderCatalogKey("openai", "api"), Path.cwd()
+        )
 
 
 @pytest.mark.asyncio
@@ -60,7 +62,7 @@ def test_catalog_registrations_are_execution_mode_specific() -> None:
 async def test_unverified_catalog_lanes_are_truthfully_unavailable(
     key: ProviderCatalogKey,
 ) -> None:
-    discovery = await ProviderFactory().catalog_registration(key).discover()
+    discovery = await ProviderFactory().catalog_registration(key, Path.cwd()).discover()
     assert discovery.catalog.key == key
     assert discovery.catalog.state.status is CatalogStatus.UNAVAILABLE
     assert discovery.catalog.models == ()

@@ -12,12 +12,9 @@ from __future__ import annotations
 import json
 import shutil
 import sys
-from typing import TYPE_CHECKING
+from pathlib import Path
 
 import pytest
-
-if TYPE_CHECKING:
-    from pathlib import Path
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import (
     AIMessage,
@@ -287,6 +284,7 @@ async def test_early_app_server_exit_reports_redacted_bounded_stderr_tail(
     )
     model = CodexChatModel(
         command=[sys.executable, "-c", command],
+        workspace_root=str(Path.cwd()),
         cwd=str(tmp_path),
         codex_home=str(codex_home),
         timeout=10.0,
@@ -429,7 +427,7 @@ async def _notifier_client(
 
 
 async def _drain(client: _CodexAppServerClient) -> None:
-    model = CodexChatModel()
+    model = CodexChatModel(workspace_root=str(Path.cwd()))
     async for _ in model._consume_turn(client, "thread-1"):
         pass
 
@@ -477,7 +475,7 @@ async def test_a_retry_that_succeeds_leaves_no_failure_behind() -> None:
         ]
     )
     try:
-        model = CodexChatModel()
+        model = CodexChatModel(workspace_root=str(Path.cwd()))
         chunks = [c async for c in model._consume_turn(client, "thread-1")]
     finally:
         await client.aclose()

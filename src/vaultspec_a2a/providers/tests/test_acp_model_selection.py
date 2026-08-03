@@ -81,7 +81,6 @@ def _config(desired_model: str | None) -> AcpModelConfig:
         agent_config=None,
         permission_callback=None,
         workspace_root=None,
-        cwd=None,
         command=["echo"],
         env_vars={},
         session_id=None,
@@ -113,9 +112,7 @@ async def test_native_control_uses_its_advertised_session_option_id(
         }
     ]
     task = asyncio.create_task(
-        _select_desired_config_options(
-            echo_context, config, _SESSION_ID, advertised
-        )
+        _select_desired_config_options(echo_context, config, _SESSION_ID, advertised)
     )
     frame = await read_acp_frame(
         echo_context.stdout, AcpRequestId.SESSION_SET_CONFIG_OPTION, timeout=_TIMEOUT

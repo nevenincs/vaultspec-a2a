@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+import tempfile
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -55,6 +57,18 @@ async def session_factory(
 ) -> async_sessionmaker[AsyncSession]:
     """Provide an async session factory bound to the test engine."""
     return async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+
+
+# A follow-up inherits the active project its run was created with, so a thread
+# seeded for a dispatch-behaviour test needs a real one: without it the message
+# service refuses before reaching the behaviour under test. The directory is
+# real because the refusal is about presence, not shape.
+_ACTIVE_PROJECT = tempfile.mkdtemp(prefix="vaultspec-active-project-")
+
+
+def _active_project_metadata() -> str:
+    """Return thread metadata naming a real active project."""
+    return json.dumps({"workspace_root": _ACTIVE_PROJECT})
 
 
 @pytest.mark.asyncio
@@ -130,6 +144,7 @@ async def test_a_definitely_undelivered_followup_records_why_it_did_not_arrive(
             title="Definite non-delivery",
             repair_status="healthy",
             execution_readiness="healthy",
+            metadata=_active_project_metadata(),
         )
         await session.commit()
 

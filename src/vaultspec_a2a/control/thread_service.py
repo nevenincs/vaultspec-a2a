@@ -389,16 +389,29 @@ def process_metadata(
     metadata: ThreadMetadata | None,
     thread_id: str,
     team_preset: str | None,
-) -> tuple[Path | None, str | None, str | None]:
+) -> tuple[Path, str, str]:
     """Validate and enrich thread metadata.
 
     Returns ``(workspace_root, nickname, metadata_json)``.
 
+    This is the admission seam for the active project. Every run that becomes
+    durable passes through here, so the requirement is enforced once, at the
+    point a run is created, rather than left to the layers below - where the
+    absence used to resolve into whatever directory the worker happened to be
+    started in, siting agent subprocesses and their filesystem sandboxes in this
+    service's own tree.
+
     Raises:
-        ValueError: If ``workspace_root`` is not an existing directory.
+        ValueError: If the metadata envelope is absent, or if its
+            ``workspace_root`` is not an existing directory.
     """
     if metadata is None:
-        return None, None, None
+        msg = (
+            "run requires an active project: metadata.workspace_root is missing. "
+            "The active project is supplied by the caller that owns it and is "
+            "never inferred from the serving process."
+        )
+        raise ValueError(msg)
 
     import pathlib
 

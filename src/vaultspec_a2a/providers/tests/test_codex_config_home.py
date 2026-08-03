@@ -768,6 +768,7 @@ async def test_turn_failure_after_build_cleans_credential_home(
         harness_mcp_servers=["vaultspec-rag"],
         codex_home=str(base),
         timeout=10.0,
+        workspace_root=str(tmp_path),
     )
     pattern = os.path.join(str(_active_codex_leak_root()), "vaultspec-codex-home-*")
     before = set(glob.glob(pattern))

@@ -21,7 +21,12 @@ from ..control.config import settings
 from ..graph.acp_options import option_id_of, valid_option_ids
 from ..utils.process import ProcessContainment, ProcessContainmentError
 from ..workspace.environment import resolve_env_vars
-from ._acp_types import AcpModelConfig, AcpRpcId, AcpSessionContext
+from ._acp_types import (
+    AcpModelConfig,
+    AcpRpcId,
+    AcpSessionContext,
+    require_workspace_root,
+)
 from ._json_contract import JsonObject, JsonValue
 from ._subprocess import attach_process_containment
 from ._subprocess import kill_process_tree as _kill_process_tree
@@ -109,7 +114,9 @@ def _number(value: object, *, field: str) -> float:
 
 def sandbox_path(path: str, config: AcpModelConfig) -> Path:
     """Resolve and sandbox a path to the agent cwd."""
-    cwd = Path(config.workspace_root or config.cwd or str(Path.cwd()))
+    cwd = require_workspace_root(
+        config.workspace_root, surface="agent filesystem sandbox root"
+    )
     resolved = (cwd / path).resolve()
     if not resolved.is_relative_to(cwd.resolve()):
         raise ValueError(f"Path {path!r} escapes sandbox")
@@ -512,10 +519,14 @@ async def on_terminal_create(
         raw_cwd = (
             requested_cwd
             if isinstance(requested_cwd, str) and requested_cwd
-            else config.workspace_root or config.cwd or str(Path.cwd())
+            else str(
+                require_workspace_root(
+                    config.workspace_root, surface="agent terminal cwd"
+                )
+            )
         )
-        sandbox_root = Path(
-            config.workspace_root or config.cwd or str(Path.cwd())
+        sandbox_root = require_workspace_root(
+            config.workspace_root, surface="agent terminal sandbox root"
         ).resolve()
         resolved_cwd = Path(raw_cwd).resolve()
         if not resolved_cwd.is_relative_to(sandbox_root):

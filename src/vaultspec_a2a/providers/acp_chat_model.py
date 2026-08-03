@@ -68,6 +68,7 @@ from ._acp_types import (
     AcpSessionContext,
     PermissionCallback,
     RpcHandlerMap,
+    require_workspace_root,
 )
 from ._cleanup import CleanupStep, run_independent_cleanups
 from ._json_contract import JsonObject, JsonValue
@@ -169,10 +170,6 @@ class AcpChatModel(BaseChatModel):
             "default prompt for human-in-loop runs."
         ),
     )
-    cwd: str | None = Field(
-        default=None,
-        description="Working directory for the agent session.",
-    )
     permission_callback: PermissionCallback | None = Field(
         default=None,
         description="Optional async callback for custom permission handling.",
@@ -268,7 +265,6 @@ class AcpChatModel(BaseChatModel):
             agent_config=self.agent_config,
             permission_callback=self.permission_callback,
             workspace_root=self.workspace_root,
-            cwd=self.cwd,
             command=self.command,
             env_vars=dict(self.env_vars),
             session_id=self.session_id,
@@ -342,7 +338,9 @@ class AcpChatModel(BaseChatModel):
         # and strips none. Provider-specific config (e.g. Z.ai's
         # ANTHROPIC_BASE_URL/ANTHROPIC_AUTH_TOKEN retarget) rides self.env_vars
         # as an additive overlay from ProviderFactory.
-        _ws_path = Path(self.workspace_root or self.cwd or str(Path.cwd()))
+        _ws_path = require_workspace_root(
+            self.workspace_root, surface="ACP environment resolution"
+        )
         env = resolve_env_vars(_ws_path)
         env.update(self.env_vars)
         # Bypass the adapter's bundled cli.js — drive the same installed claude
@@ -422,7 +420,11 @@ class AcpChatModel(BaseChatModel):
             process = await _spawn_acp_process(
                 self.command,
                 env,
-                self.workspace_root or self.cwd or str(Path.cwd()),
+                str(
+                    require_workspace_root(
+                        self.workspace_root, surface="ACP subprocess spawn"
+                    )
+                ),
                 use_exec=self.use_exec,
                 metadata=runtime_log_extra(
                     self._config,
@@ -850,7 +852,11 @@ class AcpChatModel(BaseChatModel):
             "Sending authenticate RPC (token redacted, length=%d)",
             len(token),
         )
-        env = resolve_env_vars(Path(self.workspace_root or self.cwd or str(Path.cwd())))
+        env = resolve_env_vars(
+            require_workspace_root(
+                self.workspace_root, surface="ACP authentication environment"
+            )
+        )
         env.update(self.env_vars)
         return await authenticate_rpc(
             ctx=None,

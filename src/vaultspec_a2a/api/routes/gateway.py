@@ -1910,6 +1910,10 @@ async def run_message_endpoint(
 
     if result.failure_type == FailureType.NOT_FOUND:
         raise HTTPException(status_code=404, detail="Run not found")
+    if result.failure_type == FailureType.NO_ACTIVE_PROJECT:
+        # Same status the run-creation seam returns for the same missing
+        # invariant, so one rule reads identically at both entry points.
+        raise HTTPException(status_code=422, detail=result.error_detail)
     if result.failure_type in (
         FailureType.INPUT_REQUIRED,
         FailureType.TERMINAL,

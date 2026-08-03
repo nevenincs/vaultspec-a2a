@@ -9,6 +9,8 @@ the worker's synchronous dispatch-ID admission boundary.
 from __future__ import annotations
 
 import asyncio
+import json
+import tempfile
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any, cast
@@ -135,6 +137,18 @@ def _install_receipt_graph(
     )
 
 
+# A follow-up inherits the active project its run was created with, so a thread
+# seeded for a dispatch-behaviour test needs a real one: without it the message
+# service refuses before reaching the behaviour under test. The directory is
+# real because the refusal is about presence, not shape.
+_ACTIVE_PROJECT = tempfile.mkdtemp(prefix="vaultspec-active-project-")
+
+
+def _active_project_metadata() -> str:
+    """Return thread metadata naming a real active project."""
+    return json.dumps({"workspace_root": _ACTIVE_PROJECT})
+
+
 async def _running_thread(
     sessions: async_sessionmaker[AsyncSession],
     thread_id: str,
@@ -147,6 +161,7 @@ async def _running_thread(
             thread_id=thread_id,
             status=ThreadStatus.RUNNING,
             team_preset=team_preset,
+            metadata=_active_project_metadata(),
         )
         await db.commit()
 

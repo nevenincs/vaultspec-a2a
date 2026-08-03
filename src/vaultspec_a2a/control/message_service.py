@@ -150,13 +150,33 @@ async def send_followup_message(
     await db.commit()
 
     # -- Metadata extraction ---------------------------------------------
+    # A follow-up inherits the active project the run was created with; it is
+    # never re-derived and never defaulted. Degrading an unreadable or absent
+    # workspace root to None here used to dispatch the turn anyway, and the
+    # provider layer then sited the agent - and its filesystem sandbox - in
+    # whatever directory the worker was started in. Refuse instead.
     workspace_root: str | None = None
     if thread_metadata:
         try:
             meta = json.loads(thread_metadata)
-            workspace_root = meta.get("workspace_root")
-        except (json.JSONDecodeError, AttributeError):
-            pass
+        except (json.JSONDecodeError, TypeError):
+            meta = None
+        if isinstance(meta, dict):
+            candidate = meta.get("workspace_root")
+            if isinstance(candidate, str) and candidate:
+                workspace_root = candidate
+    if workspace_root is None:
+        return MessageResult(
+            action_id=claim.action_id,
+            thread_id=thread_id,
+            thread_status=thread_status,
+            dispatched=False,
+            error_detail=(
+                "run carries no active project: its stored metadata names no "
+                "workspace_root, so a follow-up cannot be sited. Start a new run."
+            ),
+            failure_type=FailureType.NO_ACTIVE_PROJECT,
+        )
 
     # -- Dispatch construction & send ------------------------------------
     dispatch = DispatchRequest(

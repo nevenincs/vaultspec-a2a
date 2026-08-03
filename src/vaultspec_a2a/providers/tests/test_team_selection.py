@@ -189,9 +189,7 @@ def test_restart_prefers_modern_selection_over_legacy_profile() -> None:
         (_selection(catalog_revision="old"), "stale catalog revision"),
         (_selection(entry_id="missing"), "unknown catalog entry"),
         (
-            _selection(
-                controls=(ControlSelection("reasoning", "invented"),)
-            ),
+            _selection(controls=(ControlSelection("reasoning", "invented"),)),
             "unknown native-control option",
         ),
         (
@@ -267,9 +265,7 @@ def test_replay_normalizes_implicit_and_explicit_default_identically() -> None:
     )
     explicit, _, _ = normalize_replay_selection(
         record=frozen.to_record(),
-        selection=_selection(
-            controls=(ControlSelection("reasoning", "low"),)
-        ),
+        selection=_selection(controls=(ControlSelection("reasoning", "low"),)),
         overrides={},
         fallbacks=(),
     )

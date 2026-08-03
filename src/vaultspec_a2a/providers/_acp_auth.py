@@ -9,7 +9,6 @@ import json
 import logging
 from collections.abc import Mapping
 from contextlib import suppress
-from pathlib import Path
 from typing import Never
 
 from ..control.config import settings
@@ -60,7 +59,9 @@ def runtime_log_extra(
         "auth_mode": config.auth_mode,
         "use_exec": config.use_exec,
         "workspace_root_present": bool(config.workspace_root),
-        "cwd": config.workspace_root or config.cwd or str(Path.cwd()),
+        # Telemetry never fabricates a directory: an unsited lane is reported
+        # as absent rather than as whatever the serving process was started in.
+        "cwd": config.workspace_root or "<no-active-project>",
     }
     if process is not None:
         extra["process_pid"] = process.pid

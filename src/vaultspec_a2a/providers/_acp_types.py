@@ -8,6 +8,7 @@ import asyncio
 import time
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass, field
+from pathlib import Path
 
 from langchain_core.outputs import ChatGenerationChunk
 
@@ -24,6 +25,31 @@ type AcpResponseFutures = dict[int, AcpResponseFuture]
 PermissionCallback = Callable[[str, JsonObject, list[JsonObject]], Awaitable[str]]
 
 
+def require_workspace_root(value: str | None, *, surface: str) -> Path:
+    """Return the run's workspace root, or refuse to invent one.
+
+    Every directory an agent lane touches - the subprocess spawn directory, the
+    environment resolution root, the session working directory, and the
+    filesystem and terminal sandbox roots - is the active project the run was
+    created with. There is no default. The absent case used to resolve to the
+    serving process's own working directory, which put agent execution and its
+    sandbox boundary inside this service's tree; a sandbox root derived from
+    ambient process state is not a boundary at all.
+
+    Reaching this raise means a run was admitted without an active project,
+    which the run-creation seam refuses, so it indicates a construction path
+    that bypassed it rather than a user error.
+    """
+    if not value:
+        msg = (
+            f"{surface} requires the run's workspace root; none was supplied. "
+            "The active project is carried from run creation and is never "
+            "derived from the serving process."
+        )
+        raise ValueError(msg)
+    return Path(value)
+
+
 @dataclass(frozen=True)
 class AcpModelConfig:
     """Frozen snapshot of read-only ACP model configuration.
@@ -36,7 +62,6 @@ class AcpModelConfig:
     agent_config: AgentConfig | None
     permission_callback: PermissionCallback | None
     workspace_root: str | None
-    cwd: str | None
     command: list[str]
     # repr=False keeps injected auth tokens out of the frozen config's default
     # dataclass repr (env_vars redaction audit).

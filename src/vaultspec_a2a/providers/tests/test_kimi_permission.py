@@ -32,7 +32,6 @@ def _config(
         agent_config=None,
         permission_callback=permission_callback,
         workspace_root=None,
-        cwd=None,
         command=["kimi", "acp"],
         env_vars={},
         session_id=None,

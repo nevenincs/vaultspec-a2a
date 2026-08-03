@@ -26,6 +26,7 @@ from ._acp_types import (
     AcpSessionContext,
     InitializeResult,
     SessionSetupResult,
+    require_workspace_root,
 )
 from ._json_contract import JsonObject, JsonValue
 from .acp_exceptions import AcpErrorCode, AcpSessionError
@@ -427,7 +428,9 @@ async def setup_session(
     Writes session-scoped mutables (``tool_calls``, ``agent_modes``) to
     ``ctx`` internally.
     """
-    working_dir = config.workspace_root or config.cwd or str(Path.cwd())
+    working_dir = str(
+        require_workspace_root(config.workspace_root, surface="ACP session cwd")
+    )
     method = "session/new"
     mcp_servers = session_surface_mcp_servers(config)
     params: JsonObject = {"cwd": working_dir, "mcpServers": mcp_servers}

@@ -64,30 +64,6 @@ TEST_DIRS = frozenset(
 #: the reason it is still open. Delete an entry when its module is fixed; do not
 #: add one without an owner for the work.
 DEFERRED: dict[str, str] = {
-    "providers/factory.py": (
-        "catalog discovery falls back to the repository root; the refusal seam "
-        "is pending an architecture decision"
-    ),
-    "providers/acp_chat_model.py": (
-        "agent working directory falls back to the process working directory; "
-        "pending the same decision"
-    ),
-    "providers/codex_chat_model.py": (
-        "agent working directory falls back to the process working directory; "
-        "pending the same decision"
-    ),
-    "providers/_acp_session.py": (
-        "agent working directory falls back to the process working directory; "
-        "pending the same decision"
-    ),
-    "providers/_acp_rpc_handlers.py": (
-        "agent working directory falls back to the process working directory; "
-        "pending the same decision"
-    ),
-    "providers/_acp_auth.py": (
-        "agent working directory falls back to the process working directory; "
-        "pending the same decision"
-    ),
     "lifecycle/manager.py": (
         "the managed-process registry seats a serve command at the repository "
         "root; the registry is development harness shipped inside the package "

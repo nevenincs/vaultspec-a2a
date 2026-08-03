@@ -43,8 +43,11 @@ logger = logging.getLogger(__name__)
 
 # Resolve the claude-agent-acp entry point from the project-level node_modules.
 # VAULTSPEC_PROJECT_ROOT controls the base; see Settings.project_root.
+# project_root resolves THIS SERVICE's own installed assets here, never a place
+# to put data and never a directory an agent runs in - the two roles the
+# storage-anchor gate exists to separate.
 _CLAUDE_ACP_JS = (
-    settings.project_root
+    settings.project_root  # storage-anchor-ok
     / "node_modules"
     / "@agentclientprotocol"
     / "claude-agent-acp"
@@ -226,7 +229,7 @@ def _classify_gemini_command(
         }
 
     local_entry = (
-        settings.project_root
+        settings.project_root  # storage-anchor-ok
         / "node_modules"
         / "@google"
         / "gemini-cli"
@@ -260,7 +263,7 @@ def _classify_gemini_command(
             "command_target": system_gemini,
         }
 
-    local_bin = settings.project_root / "node_modules" / ".bin"
+    local_bin = settings.project_root / "node_modules" / ".bin"  # storage-anchor-ok
     candidate_name = "gemini.cmd" if os.name == "nt" else "gemini"
     local_gemini = local_bin / candidate_name
     if local_gemini.exists():
@@ -901,15 +904,19 @@ class ProviderFactory:
     """Factory for instantiating LangChain chat models for different providers."""
 
     def catalog_registrations(
-        self, workspace_root: Path | None = None
+        self, workspace_root: Path
     ) -> tuple[ProviderCatalogRegistration, ...]:
         """Return each external catalog lane with its exact discovery adapter.
 
         Registrations deliberately contain no model values. A lane without a
         verified enumeration surface remains present but unavailable, rather than
         inheriting an API or ACP catalog from a different execution mode.
+
+        The workspace root is required: discovery spawns real provider
+        subprocesses, and a lane discovered against this service's own tree
+        describes a different machine state than the one the run will execute in.
         """
-        discovery_root = workspace_root or settings.project_root
+        discovery_root = workspace_root
         claude = ProviderCatalogKey(
             Provider.CLAUDE.value, f"claude-agent-acp:{settings.acp_backend}"
         )
@@ -944,10 +951,10 @@ class ProviderFactory:
         )
 
     def catalog_registration(
-        self, key: ProviderCatalogKey
+        self, key: ProviderCatalogKey, workspace_root: Path
     ) -> ProviderCatalogRegistration:
         """Resolve a served lane exactly; unknown modes cannot borrow an adapter."""
-        for registration in self.catalog_registrations():
+        for registration in self.catalog_registrations(workspace_root):
             if registration.key == key:
                 return registration
         raise ValueError(
@@ -1069,9 +1076,7 @@ class ProviderFactory:
             for control_id, value in selected_controls.items():
                 field = control_id.partition(":")[0]
                 if field not in {"reasoning_effort", "service_tier"}:
-                    raise ValueError(
-                        f"Unsupported Codex native control {control_id!r}"
-                    )
+                    raise ValueError(f"Unsupported Codex native control {control_id!r}")
                 if field in codex_controls:
                     raise ValueError(f"Duplicate Codex native control {field!r}")
                 codex_controls[field] = value
@@ -1203,9 +1208,7 @@ class ProviderFactory:
             kimi_effort: str | None = None
             for control_id, value in selected_controls.items():
                 if control_id.partition(":")[0] != "thinking_effort":
-                    raise ValueError(
-                        f"Unsupported Kimi native control {control_id!r}"
-                    )
+                    raise ValueError(f"Unsupported Kimi native control {control_id!r}")
                 if kimi_effort is not None:
                     raise ValueError("Duplicate Kimi thinking-effort control")
                 kimi_effort = value

@@ -3,8 +3,8 @@ tags:
   - '#plan'
   - '#provider-error-taxonomy'
 date: '2026-08-02'
-modified: '2026-08-02'
-body_hash: 'sha256:7d9fd79fa5f9f3bc66889fb2a4f97a5fcce7f3177d594562f383b6178822e92c'
+modified: '2026-08-03'
+body_hash: 'sha256:0ba2395f6db08666e8b6dec530a4919dc182beffbdb570784df510a499c071ab'
 tier: L3
 related:
   - '[[2026-08-02-provider-error-taxonomy-adr]]'
@@ -112,7 +112,7 @@ Removes the superseded dead vocabulary and proves a real provider failure surfac
 - [x] `W01.P06.S42` - Withdraw the removed vocabulary from the thread package surface; `src/vaultspec_a2a/thread/__init__.py`.
 - [x] `W01.P06.S43` - Replace the usage-limit substring sniff with the typed condition; `src/vaultspec_a2a/service_tests/test_claude_web_grounding_live.py`.
 - [x] `W01.P06.S44` - Add a scripted failure scenario preset for the integration-verification ask; `src/vaultspec_a2a/team/presets/teams`.
-- [ ] `W01.P06.S45` - Prove a live provider failure surfaces a typed condition end to end; `src/vaultspec_a2a/service_tests/test_provider_condition_live.py`.
+- [x] `W01.P06.S45` - Prove a live provider failure surfaces a typed condition end to end; `src/vaultspec_a2a/service_tests/test_provider_condition_live.py`.
 
 ## Wave `W02` - dashboard condition surfacing
 

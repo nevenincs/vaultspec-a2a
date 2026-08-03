@@ -5,12 +5,11 @@ tags:
 date: '2026-08-02'
 modified: '2026-08-03'
 body_schema: 'body-v1'
-body_hash: 'sha256:eef808963e869e4fd98a99c2857b72ab7263c42e531bcf2c740f9195ea8b329b'
+body_hash: 'sha256:b3009b89b17d7e39e34e4a4ca1253324c931b27c6f92bc17a15bb068355d34bb'
 step_id: 'S45'
 related:
   - "[[2026-08-02-provider-error-taxonomy-plan]]"
 ---
-
 # Prove a live provider failure surfaces a typed condition end to end
 
 ## Scope
@@ -172,3 +171,62 @@ against a live stack. All are closed without a production change:
 The admitted codex lane therefore SUCCEEDS on every input this system will accept
 from a client, which is a good property of the product and the precise reason the
 failure direction cannot be exercised from outside it.
+
+## Closed, 2026-08-03: the refusal half proven three times over
+
+The unproven half is now proven against a real HTTP refusal, and the row is
+closed. Three distinct conditions were driven end to end on the admitted codex
+lane, each read back off `run-status` by a client that attached NO stream:
+
+| Endpoint answered | `provider_condition` served |
+| ----------------- | --------------------------- |
+| `429`             | `throttled`                 |
+| `401`             | `unauthenticated`           |
+| `402`             | `credits_exhausted`         |
+
+Three rather than one on purpose. A single value proves a wire; three prove the
+status table is actually consulted, which a lucky constant could have faked.
+Every run reached terminal `failed` carrying a durable condition, so the
+invariant now holds in both directions - a completed run carries none, a refused
+run carries the right one.
+
+The traffic was real rather than inferred from the assertion: the standing
+endpoint logged a `POST /v1/responses` from the codex app-server for each run,
+and the preserved cause chain names the lane and the fault
+(`WorkerExecutionError: worker=... model=codex/gpt-5.6-sol <- _CodexProtocolError`).
+
+### What made it reachable
+
+The route the previous entry named as the remaining option: the per-run codex
+config home now accepts a base URL, absent by default. Nothing about the home's
+suppression property changed - it still writes exactly the declared servers and
+still overrides ambient configuration. Catalog discovery is unaffected by the
+redirect, which is what makes the arrangement usable at all: the lane stayed
+selectable with seven entries while every API call it made was refused.
+
+### Three further defects found by running it
+
+Each stopped the proof before any provider was reached, and each was a real
+defect rather than an environmental quirk.
+
+- The redirect first declared `wire_api = "chat"`, which the installed
+  app-server refuses at config load. The run then failed on a protocol error
+  rather than on anything a provider said - a false negative that would have
+  read as a broken taxonomy.
+- This module rode a preset declaring an authoring bridge, which is refused at
+  run-start with 422 for a missing per-role actor token. The bridge-free probe
+  preset is now the topology, which is what it was built for.
+- The honest-skip path named an external prerequisite id that was never
+  declared, so a missing gateway raised a key error instead of reporting the
+  chain as unproven. That branch is how this module tells the truth when it
+  cannot run; crashing there is worse than failing.
+
+### Finding raised, not fixed here
+
+On the `401` and `402` runs the human-readable failure reason reads
+`_CodexProtocolError: Reconnecting... 1/5` - it names a retry step rather than
+the refusal. Only the `429` path carried its status into the message. The TYPED
+condition is correct in all three, which is the campaign's thesis holding
+exactly where it should: classification does not depend on the prose. But a
+client showing the reason verbatim will show something misleading beside a
+correct condition. Queued rather than fixed inside this Step.

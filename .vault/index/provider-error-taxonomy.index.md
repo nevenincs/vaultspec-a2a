@@ -3,10 +3,10 @@ generated: true
 tags:
   - '#index'
   - '#provider-error-taxonomy'
-date: '2026-08-02'
-modified: '2026-08-02'
+date: '2026-08-03'
+modified: '2026-08-03'
 body_schema: 'body-v1'
-body_hash: 'sha256:8cbb19900040018fdc11efe32b3b02fb284b51e6183b87bb2522f717bc3be16a'
+body_hash: 'sha256:576cb14d851b477397ac90e091e33e4719b5ed8df7f055dc7662b1ed4fedf00b'
 related:
   - '[[2026-08-02-provider-error-taxonomy-W01-P01-S01]]'
   - '[[2026-08-02-provider-error-taxonomy-W01-P01-S02]]'
@@ -32,9 +32,12 @@ related:
   - '[[2026-08-02-provider-error-taxonomy-W01-P03-S22]]'
   - '[[2026-08-02-provider-error-taxonomy-W01-P03-S23]]'
   - '[[2026-08-02-provider-error-taxonomy-W01-P03-S24]]'
+  - '[[2026-08-02-provider-error-taxonomy-W01-P03-S58]]'
+  - '[[2026-08-02-provider-error-taxonomy-W01-P04-S25]]'
   - '[[2026-08-02-provider-error-taxonomy-W01-P04-S26]]'
   - '[[2026-08-02-provider-error-taxonomy-W01-P04-S27]]'
   - '[[2026-08-02-provider-error-taxonomy-W01-P04-S28]]'
+  - '[[2026-08-02-provider-error-taxonomy-W01-P04-S60]]'
   - '[[2026-08-02-provider-error-taxonomy-W01-P05-S29]]'
   - '[[2026-08-02-provider-error-taxonomy-W01-P05-S30]]'
   - '[[2026-08-02-provider-error-taxonomy-W01-P05-S31]]'
@@ -47,13 +50,16 @@ related:
   - '[[2026-08-02-provider-error-taxonomy-W01-P05-S38]]'
   - '[[2026-08-02-provider-error-taxonomy-W01-P05-S39]]'
   - '[[2026-08-02-provider-error-taxonomy-W01-P05-S40]]'
+  - '[[2026-08-02-provider-error-taxonomy-W01-P05-S59]]'
   - '[[2026-08-02-provider-error-taxonomy-W01-P06-S41]]'
   - '[[2026-08-02-provider-error-taxonomy-W01-P06-S42]]'
   - '[[2026-08-02-provider-error-taxonomy-W01-P06-S43]]'
   - '[[2026-08-02-provider-error-taxonomy-W01-P06-S44]]'
+  - '[[2026-08-02-provider-error-taxonomy-W01-P06-S45]]'
   - '[[2026-08-02-provider-error-taxonomy-adr]]'
   - '[[2026-08-02-provider-error-taxonomy-plan]]'
   - '[[2026-08-02-provider-error-taxonomy-research]]'
+  - '[[2026-08-03-provider-error-taxonomy-research]]'
 ---
 
 # `provider-error-taxonomy` feature index
@@ -92,9 +98,12 @@ Auto-generated index of all documents tagged with `#provider-error-taxonomy`.
 - `2026-08-02-provider-error-taxonomy-W01-P03-S22` - Declare the condition on the run-status response schema
 - `2026-08-02-provider-error-taxonomy-W01-P03-S23` - Project the condition onto the run-status response
 - `2026-08-02-provider-error-taxonomy-W01-P03-S24` - Prove the condition survives a reload through run-status alone
+- `2026-08-02-provider-error-taxonomy-W01-P03-S58` - Project the repair reason onto the run-status response
+- `2026-08-02-provider-error-taxonomy-W01-P04-S25` - Derive the recoverable flag from the condition instead of the catch branch
 - `2026-08-02-provider-error-taxonomy-W01-P04-S26` - Bind the condition to the node retry classifier
 - `2026-08-02-provider-error-taxonomy-W01-P04-S27` - Prefer a lane-supplied retry hint over inferred retryability
 - `2026-08-02-provider-error-taxonomy-W01-P04-S28` - Prove throttled and overloaded conditions retry under the existing backoff policy
+- `2026-08-02-provider-error-taxonomy-W01-P04-S60` - Refuse a retry once the lane has already relayed output
 - `2026-08-02-provider-error-taxonomy-W01-P05-S29` - Record a condition and reason on the shared dispatch failure transition
 - `2026-08-02-provider-error-taxonomy-W01-P05-S30` - Pass the dispatch failure reason from run creation
 - `2026-08-02-provider-error-taxonomy-W01-P05-S31` - Record a durable reason where an undelivered follow-up settles
@@ -107,10 +116,12 @@ Auto-generated index of all documents tagged with `#provider-error-taxonomy`.
 - `2026-08-02-provider-error-taxonomy-W01-P05-S38` - Carry status and condition on the terminal replay frame
 - `2026-08-02-provider-error-taxonomy-W01-P05-S39` - Protect terminal and error frames from backpressure eviction
 - `2026-08-02-provider-error-taxonomy-W01-P05-S40` - Prove no failed run persists without a condition across dispatch and executor paths
+- `2026-08-02-provider-error-taxonomy-W01-P05-S59` - Drain the worker failure stash even when the settle path dies
 - `2026-08-02-provider-error-taxonomy-W01-P06-S41` - Remove the dead severity and recovery-action vocabulary
 - `2026-08-02-provider-error-taxonomy-W01-P06-S42` - Withdraw the removed vocabulary from the thread package surface
 - `2026-08-02-provider-error-taxonomy-W01-P06-S43` - Replace the usage-limit substring sniff with the typed condition
 - `2026-08-02-provider-error-taxonomy-W01-P06-S44` - Add a scripted failure scenario preset for the integration-verification ask
+- `2026-08-02-provider-error-taxonomy-W01-P06-S45` - Prove a live provider failure surfaces a typed condition end to end
 
 ### plan
 
@@ -119,3 +130,4 @@ Auto-generated index of all documents tagged with `#provider-error-taxonomy`.
 ### research
 
 - `2026-08-02-provider-error-taxonomy-research` - `provider-error-taxonomy` research: `surfacing provider failure conditions to a client`
+- `2026-08-03-provider-error-taxonomy-research` - `provider-error-taxonomy` research: `{topic}`

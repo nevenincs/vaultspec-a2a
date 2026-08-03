@@ -8,7 +8,9 @@ initialisation through Alembic.
 import logging
 import sqlite3
 from collections.abc import AsyncGenerator
+from dataclasses import dataclass
 from pathlib import Path
+from typing import Literal
 
 from fastapi import Request
 from sqlalchemy import event, text
@@ -26,6 +28,8 @@ logger = logging.getLogger(__name__)
 
 
 __all__ = [
+    "WalCheckpointResult",
+    "checkpoint_wal",
     "close_db",
     "get_db",
     "get_engine",
@@ -38,6 +42,35 @@ __all__ = [
 # Module-level singletons (set via ``init_db``)
 _engine: AsyncEngine | None = None
 _session_factory: async_sessionmaker[AsyncSession] | None = None
+
+# Two settings are deliberately NOT in the connect posture below. Both were
+# proposed as fixes for a database that only ever grows; neither survives
+# measurement, and the reasons are recorded here because the absences are the
+# decision.
+#
+# ``wal_autocheckpoint`` is left at SQLite's default of 1000 pages. It is already
+# in force - the default is a working ceiling, not an unset knob - and under
+# sustained writes with no reader holding a snapshot the log settles near 4 MiB
+# and stays there. Restating the default in code would change no behaviour and
+# could not be tested apart from it. The ceiling's real limit is that it holds
+# only while no connection sits in an open READ TRANSACTION: SQLite cannot
+# checkpoint past the oldest live reader snapshot, so a held read transaction
+# pins every frame written after it and the log then grows linearly for as long
+# as it is held. No autocheckpoint value defends against that - only not holding
+# the transaction does - which is why ``checkpoint_wal`` below reports the
+# condition instead of trying to tune around it.
+#
+# ``auto_vacuum`` cannot be set here at all: the ``journal_mode=WAL`` in the
+# connect listener writes the database header, and once the header exists
+# ``auto_vacuum`` is
+# fixed for the life of the file - a later pragma is accepted and silently leaves
+# it at NONE. Changing it on an existing install demands a whole-file VACUUM
+# rewrite, which is what ``admin migrate --fix`` already offers as an explicit,
+# operator-timed act. INCREMENTAL would not earn the trade either: measured
+# against a store whose rows had all been deleted, ``incremental_vacuum``
+# returned a single 4 KiB page where a full VACUUM returned essentially the whole
+# 8 MiB file. Returning space to the operating system therefore stays an
+# administrative verb rather than a cost on every commit.
 
 
 def _set_wal_mode(dbapi_conn: sqlite3.Connection, _connection_record: object) -> None:
@@ -61,6 +94,87 @@ def _set_wal_mode(dbapi_conn: sqlite3.Connection, _connection_record: object) ->
     cursor.execute(f"PRAGMA busy_timeout={settings.sqlite_busy_timeout_ms}")
     cursor.execute("PRAGMA foreign_keys=ON")
     cursor.close()
+
+
+CheckpointMode = Literal["PASSIVE", "FULL", "RESTART", "TRUNCATE"]
+
+# Interpolating the mode into the statement is only safe because it is checked
+# against this set first; SQLite does not accept a bound parameter in a PRAGMA.
+_CHECKPOINT_MODES: frozenset[str] = frozenset(
+    ("PASSIVE", "FULL", "RESTART", "TRUNCATE")
+)
+
+
+@dataclass(frozen=True, slots=True)
+class WalCheckpointResult:
+    """The outcome of one ``PRAGMA wal_checkpoint``.
+
+    SQLite reports a checkpoint it could not finish by returning ``busy=1`` with
+    the statement still succeeding - no exception, no warning. A caller that
+    discards the row cannot tell a log that was truncated from one that was left
+    exactly as it found it, which is how a reclaim path comes to report success
+    while reclaiming nothing.
+    """
+
+    blocked: bool
+    log_pages: int
+    checkpointed_pages: int
+
+    @property
+    def fully_checkpointed(self) -> bool:
+        """True when every frame in the log was written back to the database."""
+        return not self.blocked and self.log_pages == self.checkpointed_pages
+
+
+def checkpoint_wal(
+    connection: sqlite3.Connection,
+    *,
+    mode: CheckpointMode = "TRUNCATE",
+) -> WalCheckpointResult:
+    """Checkpoint the write-ahead log, reporting whether it actually completed.
+
+    ``TRUNCATE`` both writes the log back into the database and resets the file
+    to zero length, which is the only mode that returns the log's space to the
+    operating system.
+
+    Args:
+        connection: An open SQLite connection to the database to checkpoint.
+        mode: The checkpoint mode to request.
+
+    Returns:
+        The parsed ``(busy, log, checkpointed)`` row.  A database not in WAL mode
+        reports ``-1`` page counts, which is a successful no-op rather than a
+        failure - there is no log to checkpoint.
+
+    Raises:
+        ValueError: If ``mode`` is not a SQLite checkpoint mode.
+    """
+    if mode not in _CHECKPOINT_MODES:
+        msg = f"Unknown SQLite checkpoint mode: {mode!r}"
+        raise ValueError(msg)
+
+    row = connection.execute(f"PRAGMA wal_checkpoint({mode})").fetchone()
+    if row is None:
+        # Defensive: every SQLite version in support returns a row here.
+        return WalCheckpointResult(blocked=False, log_pages=-1, checkpointed_pages=-1)
+
+    busy, log_pages, checkpointed_pages = (int(value) for value in row[:3])
+    result = WalCheckpointResult(
+        blocked=bool(busy),
+        log_pages=log_pages,
+        checkpointed_pages=checkpointed_pages,
+    )
+    if result.blocked:
+        logger.warning(
+            "SQLite %s checkpoint was blocked: %d of %d write-ahead log pages "
+            "were written back and the log was not reset. A connection is "
+            "holding an open read transaction, and the log will keep growing "
+            "until it is released.",
+            mode,
+            result.checkpointed_pages,
+            result.log_pages,
+        )
+    return result
 
 
 def _resolve_database_url(database: Path | str | None) -> str:

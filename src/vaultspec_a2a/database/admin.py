@@ -125,10 +125,19 @@ def _administrative_engine(url: str) -> Engine:
 
 
 def _action_migrate(fix: bool) -> None:
-    """Run pending Alembic migrations, optionally with WAL cleanup and VACUUM."""
+    """Run pending Alembic migrations, optionally with WAL cleanup and VACUUM.
+
+    This is the only path in the project that returns freed pages to the
+    operating system, so it is also the only path whose success report an
+    operator has to be able to trust.  A blocked checkpoint is reported as the
+    partial result it is: SQLite signals it in the returned row rather than by
+    raising, and the previous implementation discarded that row and announced
+    completion either way.
+    """
     import sqlite3
 
     from ..control.config import settings
+    from .session import checkpoint_wal
 
     _migrate_to_head(settings.database_url)
     print("Migrated to head.")
@@ -143,7 +152,20 @@ def _action_migrate(fix: bool) -> None:
 
     conn = sqlite3.connect(str(db_path))
     try:
-        conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+        result = checkpoint_wal(conn)
+        if result.blocked:
+            # VACUUM needs a lock the same reader is denying, so attempting it
+            # here would only trade this precise diagnosis for a bare
+            # "database is locked".
+            print(
+                f"WAL checkpoint blocked: {result.checkpointed_pages} of "
+                f"{result.log_pages} log pages were written back and the log "
+                "was not truncated.  A process is holding an open read "
+                "transaction; stop the service and re-run to reclaim space.  "
+                "VACUUM skipped.",
+                file=sys.stderr,
+            )
+            raise SystemExit(1)
         conn.execute("VACUUM")
         conn.commit()
         print("WAL checkpoint and VACUUM complete.")
@@ -156,6 +178,8 @@ def _action_snapshot() -> None:
     import sqlite3
     from datetime import UTC, datetime
 
+    from .session import checkpoint_wal
+
     db_path = _get_db_path()
     if not db_path.exists():
         print(f"Database not found: {db_path}", file=sys.stderr)
@@ -167,7 +191,12 @@ def _action_snapshot() -> None:
     src_conn = sqlite3.connect(str(db_path))
     dst_conn = sqlite3.connect(str(dest))
     try:
-        src_conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+        # The backup API copies committed content whether or not it still lives
+        # in the log, so a blocked checkpoint here costs a larger source file
+        # rather than a wrong snapshot.  Routing it through the helper still logs
+        # that the log could not be reset, which is the condition an operator
+        # wants named the first time it appears.
+        checkpoint_wal(src_conn)
         src_conn.backup(dst_conn)
     finally:
         dst_conn.close()

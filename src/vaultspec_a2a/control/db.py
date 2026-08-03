@@ -29,14 +29,12 @@ __all__ = ["main"]
 
 import argparse
 import sys
-from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from alembic.config import Config as AlembicConfig
+    from pathlib import Path
 
-_REPO_ROOT = Path(__file__).resolve().parent.parent.parent.parent
-_ALEMBIC_INI = _REPO_ROOT / "alembic.ini"
+    from alembic.config import Config as AlembicConfig
 
 
 # ---------------------------------------------------------------------------
@@ -44,14 +42,27 @@ _ALEMBIC_INI = _REPO_ROOT / "alembic.ini"
 # ---------------------------------------------------------------------------
 
 
-def _alembic_cfg() -> tuple[AlembicConfig, object]:
-    from alembic.config import Config as AlembicConfig
+def _alembic_cfg(database_url: str) -> AlembicConfig:
+    """Build the Alembic configuration for the migration action.
 
-    from ..control.config import settings
+    Delegates to the database package's programmatic builder - the project's one
+    migration-configuration authority, shared with service startup and the
+    desktop path - which resolves the revision scripts from installed package
+    data.  Reading a configuration file instead would tie this module to a
+    checkout: the repo-root ``alembic.ini`` is not part of the distribution, and
+    the script location it names is relative to the working directory rather
+    than to the installed package.
+    """
+    from ..database import build_migration_config
 
-    cfg = AlembicConfig(str(_ALEMBIC_INI))
-    cfg.set_main_option("sqlalchemy.url", settings.database_url)
-    return cfg, settings
+    return build_migration_config(database_url)
+
+
+def _migrate_to_head(database_url: str) -> None:
+    """Apply every pending revision to the database named by ``database_url``."""
+    from alembic import command
+
+    command.upgrade(_alembic_cfg(database_url), "head")
 
 
 def _get_db_path() -> Path:
@@ -78,10 +89,9 @@ def _get_db_path() -> Path:
 
 def _action_migrate(fix: bool) -> None:
     """Run pending Alembic migrations, optionally with WAL cleanup and VACUUM."""
-    from alembic import command
+    from ..control.config import settings
 
-    cfg, _ = _alembic_cfg()
-    command.upgrade(cfg, "head")
+    _migrate_to_head(settings.database_url)
     print("Migrated to head.")
 
     if fix:

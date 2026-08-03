@@ -74,8 +74,12 @@ from pydantic import TypeAdapter, ValidationError
 
 from ..acceptance import certified_gateway
 from ..authoring.discovery import SERVICE_JSON_ENV, resolve_engine_with_retry
-from ..graph.enums import MODEL_MAP, Model, Provider
 from ..team.team_config import load_team_config
+from ._provider_catalog_live import (
+    LIVE_PROVIDER_CATALOG_SELECTION_ENVIRON,
+    live_provider_catalog_selector_is_configured,
+    selection_from_served_catalog,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
@@ -86,7 +90,6 @@ if TYPE_CHECKING:
 # The preset that declares a questionnaire. Its questions are read from the
 # preset itself below, never restated here.
 _CLARIFY_PRESET = "vaultspec-adr-research-clarify"
-_CODEX_PROFILE = "codex-all"
 
 # Every role the document-authoring topology runs needs an actor token at
 # run-start; the roster is derived from the preset so a role added tomorrow is
@@ -422,11 +425,65 @@ def _read_frame(
     )
 
 
+def _served_catalog(gateway: CertifiedGateway) -> dict[str, object]:
+    """Read the gateway's own served catalog for the run's workspace."""
+    with gateway.client(timeout=120.0) as client:
+        response = client.get(
+            "/v1/provider-catalog",
+            params={"workspace_root": str(_WORKSPACE_ROOT)},
+        )
+    assert response.status_code == 200, response.text
+    return _json_object(response.json(), at="served provider catalog")
+
+
+def _served_in_process_selection(gateway: CertifiedGateway) -> dict[str, object]:
+    """Resolve the served in-process lane's selection, or skip naming the gap.
+
+    The loop's ONE substitution is the model, and under the explicit-selection
+    contract the substitution is expressed as a selection naming the served
+    in-process lane - the freeze wins outright at compilation, so a selection
+    naming any other served lane would hand every document role to a real
+    external provider. Until the served catalog advertises the in-process lane,
+    that selection cannot be expressed and this loop cannot run honestly.
+    """
+    catalog = _served_catalog(gateway)
+    lanes = [
+        record
+        for record in _json_object_list(
+            catalog.get("providers"), at="served catalog providers"
+        )
+        if record.get("provider_id") in {"mock", "deterministic"}
+        and _required_object(record, "health", at="served lane")["selectable"]
+        and _required_object(record, "catalog", at="served lane")["models"]
+    ]
+    if not lanes:
+        pytest.skip(
+            "the served provider catalog advertises no selectable in-process "
+            "lane, so the loop's deterministic model substitution cannot be "
+            "selected without freezing a real external provider; supply the "
+            "in-process lane serving for the deterministic backend"
+        )
+    lane = lanes[0]
+    lane_catalog = _required_object(lane, "catalog", at="served in-process lane")
+    state = _required_object(lane_catalog, "state", at="served in-process lane")
+    models = _json_object_list(
+        lane_catalog.get("models"), at="served in-process lane models"
+    )
+    return {
+        "schema_version": 1,
+        "provider_id": lane["provider_id"],
+        "execution_mode": lane["execution_mode"],
+        "catalog_revision": state["revision"],
+        "entry_id": models[0]["entry_id"],
+        "controls": {},
+    }
+
+
 def _start_document_run(
     gateway: CertifiedGateway,
     run_id: str,
     *,
-    profile_id: str | None = None,
+    selection: dict[str, object],
 ) -> httpx.Response:
     """Start a run on the declaring preset with a token for every declared role."""
     body: dict[str, object] = {
@@ -436,6 +493,7 @@ def _start_document_run(
         "message": "Plan a right-side monitor panel.",
         "autonomous": True,
         "feature_tag": _FEATURE_TAG,
+        "selection": selection,
         "metadata": {
             "feature_tag": _FEATURE_TAG,
             "workspace_root": str(_WORKSPACE_ROOT),
@@ -445,8 +503,6 @@ def _start_document_run(
             "engine_bearer": _ENGINE_BEARER,
         },
     }
-    if profile_id is not None:
-        body["profile_id"] = profile_id
     with gateway.client(timeout=90.0) as client:
         return client.post("/v1/runs", json=body)
 
@@ -475,7 +531,9 @@ def test_clarification_loop_parks_discloses_answers_and_resumes(
         tmp_path,
         VAULTSPEC_WORKER_READY_TIMEOUT_SECONDS=_WORKER_READY_BUDGET_SECONDS,
     ) as gateway:
-        started = _start_document_run(gateway, run_id)
+        started = _start_document_run(
+            gateway, run_id, selection=_served_in_process_selection(gateway)
+        )
         assert started.status_code == 201, started.text
 
         # The subscription is established BEFORE the run can park, so the nudge
@@ -600,7 +658,9 @@ def test_answering_a_question_the_run_is_not_parked_on_is_refused(
         tmp_path,
         VAULTSPEC_WORKER_READY_TIMEOUT_SECONDS=_WORKER_READY_BUDGET_SECONDS,
     ) as gateway:
-        started = _start_document_run(gateway, run_id)
+        started = _start_document_run(
+            gateway, run_id, selection=_served_in_process_selection(gateway)
+        )
         assert started.status_code == 201, started.text
 
         parked = _await_parked(gateway, run_id, budget=_PARK_BUDGET)
@@ -649,14 +709,23 @@ def test_concurrent_continuations_elect_one_all_low_codex_winner(
     are separately provider-behaviour concerns and can legitimately exceed the
     suite watchdog when the researchers exercise their tools.
 
-    Spend is bounded before launch from the served frozen assignment: every
-    active role must report provider ``codex`` and capability ``low``. Losing
-    requests never start another run, and the winner is cancelled immediately
-    after the worker proves the continuation reached the real graph.  A separate
-    production-factory live turn certifies completed Codex output without
-    coupling this concurrency proof to five independent research turns.
+    Spend is bounded before launch by the OPERATOR: the billable turn runs only
+    under an explicitly configured live catalog selection, validated against
+    the served catalog, and every active role's frozen assignment must
+    reproduce that exact selection. Losing requests never start another run,
+    and the winner is cancelled immediately after the worker proves the
+    continuation reached the real graph.  A separate production-factory live
+    turn certifies completed Codex output without coupling this concurrency
+    proof to five independent research turns.
     """
     _require_codex_substrates(external_prerequisite)
+    if not live_provider_catalog_selector_is_configured():
+        pytest.skip(
+            "no explicit live catalog selection is configured for this "
+            "billable Codex election; set "
+            + ", ".join(LIVE_PROVIDER_CATALOG_SELECTION_ENVIRON)
+            + " from the currently served catalog"
+        )
 
     run_id = f"clarify-codex-load-{uuid.uuid4().hex[:12]}"
     markers = [
@@ -671,10 +740,15 @@ def test_concurrent_continuations_elect_one_all_low_codex_winner(
         tmp_path,
         VAULTSPEC_WORKER_READY_TIMEOUT_SECONDS=_WORKER_READY_BUDGET_SECONDS,
     ) as gateway:
+        selection = selection_from_served_catalog(_served_catalog(gateway))
+        assert selection.provider_id == "codex", (
+            "this election certifies the Codex continuation lane; the "
+            "configured live selection names a different provider"
+        )
         started = _start_document_run(
             gateway,
             run_id,
-            profile_id=_CODEX_PROFILE,
+            selection=selection.model_dump(mode="json"),
         )
         assert started.status_code == 201, started.text
 
@@ -686,23 +760,25 @@ def test_concurrent_continuations_elect_one_all_low_codex_winner(
             pending, "request_id", at="Codex load pending clarification"
         )
 
-        # This is the persisted assignment served by run-status, not the
-        # profile's display label or a test-side re-resolution of TOML.
-        assert parked.get("profile_id") == _CODEX_PROFILE
-        assignments = _json_object_list(
-            parked.get("assignments"), at="Codex load frozen assignments"
+        # This is the persisted freeze served by run-status, not the request
+        # echoed back or a test-side re-resolution: every active role must
+        # reproduce the operator's exact selection.
+        frozen = _required_object(
+            parked, "frozen_assignment", at="Codex load parked run-status"
         )
-        by_agent = {
-            _required_text(item, "agent_id", at="frozen role assignment"): item
+        assignments = _json_object_list(
+            frozen.get("assignments"), at="Codex load frozen assignments"
+        )
+        by_role = {
+            _required_text(item, "role_id", at="frozen role assignment"): item
             for item in assignments
         }
-        assert set(by_agent) == set(_required_roles())
-        assert all(item.get("provider_id") == "codex" for item in by_agent.values())
-        assert all(item.get("capability") == "low" for item in by_agent.values())
-        assert all(
-            item.get("model_name") == MODEL_MAP[Provider.CODEX][Model.LOW]
-            for item in by_agent.values()
-        )
+        assert set(by_role) == set(_required_roles())
+        for item in by_role.values():
+            assert item.get("provider_id") == selection.provider_id
+            assert item.get("execution_mode") == selection.execution_mode
+            assert item.get("catalog_revision") == selection.catalog_revision
+            assert item.get("entry_id") == selection.entry_id
 
         barrier = threading.Barrier(len(markers))
 

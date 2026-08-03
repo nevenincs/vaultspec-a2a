@@ -31,10 +31,11 @@ spread across scenario files.
 from __future__ import annotations
 
 from contextlib import contextmanager
-from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from dataclasses import dataclass, field
+from typing import TYPE_CHECKING, Any
 
 import httpx
+import pytest
 
 from ..tests.gateway_boot import (
     GatewayBootError,
@@ -51,6 +52,12 @@ if TYPE_CHECKING:
     import subprocess
     from collections.abc import Iterator
     from pathlib import Path
+
+# The provider ids of the in-process lanes: the only lanes an EXECUTING
+# certification run may freeze, because the frozen selection wins outright at
+# compilation and any other served lane would hand every role to a real
+# external provider. Mirrors the execution-side in-process declaration.
+_IN_PROCESS_PROVIDER_IDS = frozenset({"mock", "deterministic"})
 
 __all__ = [
     "DEFAULT_REQUIRED_ROLE",
@@ -74,16 +81,103 @@ class CertifiedGateway:
     The verb helpers shape the exact public-surface requests once so scenarios
     read as assertions on real responses. Every helper presents the real
     attach-control credential; none uses the test-only authentication bypass.
+
+    Run-start requires an explicit catalog selection revalidated against the
+    catalog served for the run's workspace, so the run-bearing helpers resolve
+    one from this stack's own served catalog and site every run in the stack's
+    dedicated workspace directory. The resolution is cached per handle: prepare
+    and release must present byte-identical bodies for the release binding to
+    match, and one stack should pay its cold catalog build once.
     """
 
     base_url: str
     attach_token: str
     app_home: Path
+    workspace_root: Path
+    _run_fields: dict[str, Any] | None = field(default=None, init=False, repr=False)
 
     @property
     def auth_header(self) -> dict[str, str]:
         """The real attach-control Authorization header the dashboard presents."""
         return {"Authorization": f"Bearer {self.attach_token}"}
+
+    # -- explicit catalog selection -------------------------------------------
+
+    def run_fields(self, *, executes: bool) -> dict[str, Any]:
+        """The selection and metadata fields every run verb now requires.
+
+        ``executes`` states whether the verb ultimately dispatches work. A
+        non-executing verb (prepare, release) may freeze any served selectable
+        lane - nothing runs, so nothing spends. An executing verb (start,
+        commit) must freeze an in-process lane: the frozen selection wins
+        outright at compilation, so any other served lane would hand every
+        role to a real external provider, and deterministic certification must
+        never spend. Until the served catalog advertises an in-process lane,
+        executing scenarios skip, naming the missing serving - never a run
+        that quietly bills whichever provider the host has installed.
+        """
+        fields = self._resolved_run_fields()
+        if executes and fields["provider_id"] not in _IN_PROCESS_PROVIDER_IDS:
+            pytest.skip(
+                "the served provider catalog advertises no selectable "
+                "in-process lane, so an executing certification run cannot be "
+                "selected without freezing a real external provider; supply "
+                "the in-process lane serving for the deterministic backend"
+            )
+        return {
+            "selection": fields["selection"],
+            "metadata": {"workspace_root": str(self.workspace_root)},
+        }
+
+    def _resolved_run_fields(self) -> dict[str, Any]:
+        """Resolve and cache one served selection, in-process lane first."""
+        if self._run_fields is not None:
+            return self._run_fields
+        # The first catalog read for a workspace builds it cold, probing every
+        # registered lane; its budget is deliberately its own rather than a
+        # verb helper's.
+        with self.client(timeout=240.0) as client:
+            response = client.get(
+                "/v1/provider-catalog",
+                params={"workspace_root": str(self.workspace_root)},
+            )
+        if response.status_code != 200:
+            raise GatewayBootError(
+                f"the certification stack could not serve its provider "
+                f"catalog: {response.status_code} {response.text}"
+            )
+        lanes = [
+            record
+            for record in response.json()["providers"]
+            if record["health"]["selectable"] and record["catalog"]["models"]
+        ]
+        if not lanes:
+            pytest.skip(
+                "the served provider catalog advertises no selectable lane at "
+                "all on this host, so no run verb can present a valid "
+                "selection; supply the in-process lane serving for the "
+                "deterministic backend"
+            )
+        lane = next(
+            (
+                record
+                for record in lanes
+                if record["provider_id"] in _IN_PROCESS_PROVIDER_IDS
+            ),
+            lanes[0],
+        )
+        self._run_fields = {
+            "provider_id": lane["provider_id"],
+            "selection": {
+                "schema_version": 1,
+                "provider_id": lane["provider_id"],
+                "execution_mode": lane["execution_mode"],
+                "catalog_revision": lane["catalog"]["state"]["revision"],
+                "entry_id": lane["catalog"]["models"][0]["entry_id"],
+                "controls": {},
+            },
+        }
+        return self._run_fields
 
     def client(self, *, timeout: float = 30.0) -> httpx.Client:
         """A synchronous authenticated client bound to the gateway base URL."""

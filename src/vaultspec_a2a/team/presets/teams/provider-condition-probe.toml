@@ -1,0 +1,44 @@
+[team]
+id           = "provider-condition-probe"
+display_name = "Provider Condition Probe"
+description  = """
+Test support, not a product topology. One worker, no supervisor, no authoring
+bridge: it exists so a run can reach a real provider lane and be REFUSED by it,
+which is the only way to exercise a typed provider condition end to end.
+
+It claims no capability of its own. Whatever the run's provider selection names
+is what it runs on, and its single turn asks for one word - the point is the
+refusal, not the answer. It authors nothing and reads nothing.
+
+The absent authoring bridge is the whole reason this exists. A bridged preset
+requires per-role actor tokens minted by the engine, so a run cannot even be
+created without one; a probe that needs an engine session cannot prove a
+provider-lane failure on a gateway alone.
+"""
+
+[team.topology]
+type  = "pipeline"
+order = ["vaultspec-coder"]
+
+[team.permissions]
+auto_approve = true
+
+[team.persona]
+directive = """
+Answer in a single word. Perform no tool calls, write no files, and read
+nothing. This turn exists to reach the provider, not to produce work.
+"""
+
+[team.graph]
+step_timeout_seconds = 120
+recursion_limit      = 4
+
+# No authoring bridge and no workspace surfaces: this preset must be startable
+# with a gateway and a worker alone. Adding either would reintroduce the engine
+# dependency this preset exists to avoid.
+[team.harness]
+required_surfaces = []
+authoring_bridge  = false
+
+[[team.workers]]
+agent_id = "vaultspec-coder"

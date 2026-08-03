@@ -593,3 +593,41 @@ markers have no heartbeat refresher (VERIFIED: zero `utime` calls in
 `lifecycle/registry.py` against one plus a refresher thread in
 `testing/leases.py`), so every held port decays at the 300s TTL inside a
 40-minute suite.
+
+### desktop-admission-refuses-three-commit-heavy-runs | medium | open
+
+Three `desktop_tests/test_run_admission.py` cases refuse with `run admission is
+not execution-ready` where they expect a 201:
+`test_concurrent_prepare_bounds_capacity_and_commit_is_reservation_bound`,
+`test_exact_commit_replay_role_binding_release_and_race_are_linearized`, and
+`test_pre_durability_commit_failure_restores_reservation_for_release`.
+
+NOT the explicit-selection migration. Both stages now carry a properly derived
+selection and four siblings in the same file pass on the same helpers; these
+three were failing before that work and still fail after it.
+
+Narrowed, not guessed. `AdmissionBroker.prepare` refuses unless ALL THREE of
+`worker_state == ready`, `provider_eligibility == eligible`, and
+`run_admission == ready` hold (`control/admission.py:228-241`). Provider
+eligibility is NOT the cause: `_eligible_provider_names()` returns
+`['claude', 'codex', 'kimi']` on this host, so that leg is satisfied. The
+refusal therefore comes from worker state or the composed admission verdict,
+both of which turn on a reachable worker.
+
+Two facts sharpen it. The sibling that EXPECTS this refusal
+(`test_prepare_refuses_when_real_worker_is_not_execution_ready`) passes, so the
+refusal path itself works. And the three failures are exactly the commit-heavy
+cases - concurrent prepares, a replayed commit, and a post-authorization
+conflict - while the prepare-only and timeout cases pass. That points at worker
+reachability under repeated or concurrent demand rather than at first-demand
+startup.
+
+Hypotheses tried and rejected: catalog cold-probe latency shifting the timing
+(warming the catalog at arm time changed nothing), and a per-workspace catalog
+difference (two of the three anchor on cwd, one on a temp workspace).
+
+What would settle it is the readiness payload itself. `PrepareOutcome` carries
+the probed `AdmissionReadiness`, but the HTTP refusal discloses only the reason
+string, so the failing leg is invisible to the test. Surfacing the three facts
+on the 503 - or logging them at refusal - would turn this from an inference into
+a reading, and is worth doing regardless of this defect.

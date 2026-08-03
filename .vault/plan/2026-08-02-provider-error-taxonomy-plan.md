@@ -4,7 +4,7 @@ tags:
   - '#provider-error-taxonomy'
 date: '2026-08-02'
 modified: '2026-08-03'
-body_hash: 'sha256:94c4edfeb6e70528e8bd6587128a8a815d5d188a36d990c854ff12d154fa114c'
+body_hash: 'sha256:e5478fb5909b5face4fb98181d03837e302e7f07fdd19f9758ed4510fc173216'
 tier: L3
 related:
   - '[[2026-08-02-provider-error-taxonomy-adr]]'
@@ -146,7 +146,7 @@ Carries the condition from the a2a payload through the stores into the agent pan
 
 Proves a real provider failure raised in a2a renders as its typed condition in the running dashboard.
 
-- [ ] `W02.P09.S57` - Prove a real a2a provider failure renders its condition in the panel; `frontend/src/stores/server/agent/a2aTeam.live.test.ts`.
+- [x] `W02.P09.S57` - Prove a real a2a provider failure renders its condition in the panel; `frontend/src/stores/server/agent/a2aTeam.live.test.ts`.
 
 ## Parallelization
 

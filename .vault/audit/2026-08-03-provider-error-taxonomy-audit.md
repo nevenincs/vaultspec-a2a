@@ -5,7 +5,7 @@ tags:
 date: '2026-08-03'
 modified: '2026-08-03'
 body_schema: 'body-v1'
-body_hash: 'sha256:f450c67bf1893895b85c6e4f6c21f749fd06916422ad108a3bb9e921ef510053'
+body_hash: 'sha256:22e2882536848c679607fb7d7cf16e5e6cb2b564da998df6d1093b7b370c491e'
 related:
   - "[[2026-08-02-provider-error-taxonomy-plan]]"
   - "[[2026-08-02-provider-error-taxonomy-adr]]"
@@ -303,6 +303,29 @@ that every failed run recorded BEFORE the field existed now presents as having
 reported no cause. That reading is honest - those runs genuinely have no recorded
 classification - and is recorded here as intended rather than as a defect, so a
 later reader does not mistake it for a migration gap.
+
+### consuming-suite-carries-two-intermittent-tests | medium | Two tests flip between runs, which is the same failure as a test that cannot fail
+
+Observed across four full runs of the consuming repository's suite: one live
+authoring test and one reduced-motion test each failed, passed, and failed again
+with the same assertion, while three other failures were deterministic. Neither
+flaky test touches anything this campaign changed.
+
+Recorded at this severity because a test that flips is not merely noisy - it
+trains readers to discount a red, which is the same end state as a test that
+cannot fail, reached from the opposite direction. This campaign spent
+considerable effort ensuring its own assertions bite; a suite that teaches people
+to ignore failures erodes that from the outside. Belongs to whoever owns those
+surfaces.
+
+### catalog-freshness-window-makes-an-arranged-proof-skip-not-fail | low | A cold catalog reads as an unarranged machine
+
+The served catalog carries a freshness window that the consuming selection
+algebra enforces. An arranged machine left idle past that window will SKIP the
+cross-repository proof with "no selectable lane" rather than fail it. That is
+correct behaviour - a proof with no lane cannot run - but the message describes an
+unarranged machine when the real cause is a cold catalog. Recorded so nobody
+concludes the chain has broken; re-probe the catalog before diagnosing.
 
 ## Recommendations
 

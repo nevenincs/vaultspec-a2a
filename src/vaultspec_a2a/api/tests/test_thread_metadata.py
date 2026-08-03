@@ -76,9 +76,12 @@ class TestCreateThreadWithMetadata:
                         "message": "Implement auth flow",
                         "metadata": metadata,
                         "run_id": "thread-meta-01",
-                        "selection": catalog_run_fields(
-                            client, workspace_root=metadata["workspace_root"]
-                        )["selection"],
+                        # Resolved against a REAL workspace on purpose: this
+                        # test's workspace_root is deliberately bogus, and the
+                        # refusal under test is the run's, not the catalog
+                        # lookup's. Deriving the selection from the bad path
+                        # would fail earlier, for a different reason.
+                        "selection": catalog_run_fields(client)["selection"],
                     },
                 )
 
@@ -180,7 +183,16 @@ class TestCreateThreadWithMetadata:
                 assert resp2.status_code == 409
 
     def test_legacy_thread_backward_compat(self, session_factory, checkpointer) -> None:
-        """Threads without metadata work exactly as before."""
+        """A run that declares no nickname is auto-named rather than left null.
+
+        This asserted a null nickname, which described a run carrying no
+        metadata at all. That state is no longer reachable: run-start requires
+        an explicit catalog selection, a selection is revalidated against the
+        catalog served for its workspace, and the workspace is carried in
+        metadata - so every run now has metadata whether or not the caller
+        cared about it. The gateway names such a run itself, which is the
+        behaviour worth pinning here.
+        """
         app, _agg = _make_app(session_factory, checkpointer)
 
         with TestClient(app, raise_server_exceptions=True) as client:
@@ -197,7 +209,9 @@ class TestCreateThreadWithMetadata:
 
         assert resp.status_code == 201
         data = resp.json()
-        assert data["nickname"] is None
+        assert isinstance(data["nickname"], str) and data["nickname"], (
+            "a run with no caller-supplied nickname must still be named"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -262,10 +276,14 @@ class TestListThreadsWithMetadata:
         summaries, _total = _list_summaries(session_factory, checkpointer)
         assert len(summaries) == 1
         t = next(iter(summaries.values()))
-        assert t["nickname"] is None
-        assert t["feature_tag"] is None
-        assert t["source_branch"] is None
-        assert t["callee"] is None
+        # The gateway names every run, so the listing's nickname is populated
+        # even when the caller supplied none. The fields the caller genuinely
+        # did not declare are the ones that stay empty, and they are what this
+        # row is asserting.
+        assert t["nickname"]
+        assert not t["feature_tag"]
+        assert not t["source_branch"]
+        assert not t["callee"]
 
 
 # ---------------------------------------------------------------------------
@@ -311,13 +329,15 @@ class TestGetMetadataEndpoint:
     def test_metadata_is_absent_for_a_run_started_without_any(
         self, session_factory, checkpointer
     ) -> None:
-        """A run with no metadata reads back as null metadata, not as an error.
+        """A run that declared nothing of its own still reads back, not 404s.
 
-        The retired metadata route answered 404 here, because absent metadata
-        left it with no resource to serve. The history verb has one: the run
-        itself. Reporting the absence in the body rather than as a not-found is
-        the better contract - a caller reading a real run's record must not have
-        to distinguish "no such run" from "that run declared no metadata".
+        The point survives the explicit-selection contract, but its subject
+        moved. Metadata can no longer be absent - the selection is revalidated
+        against the catalog served for its workspace, and the workspace rides in
+        metadata - so what is asserted now is that a run which declared no
+        SOURCE of its own reads back with those fields empty rather than
+        answering not-found. The retired metadata route 404'd here; the history
+        verb has a resource to serve and must use it.
         """
         app, _agg = _make_app(session_factory, checkpointer)
 

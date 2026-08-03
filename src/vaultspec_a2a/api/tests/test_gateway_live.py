@@ -112,6 +112,26 @@ async def _first_selectable_catalog_selection(
     )
 
 
+async def _run_fields(client: httpx.AsyncClient) -> dict[str, object]:
+    """Return the run-start fields an explicit catalog selection now requires.
+
+    Deterministic for a given served catalog, which is what makes it safe in
+    this module: several tests here post the SAME body twice to prove a replay
+    converges, or vary one field to prove a conflict is detected. A selection
+    that differed per call would turn every replay into a conflict and quietly
+    invert what those tests assert.
+    """
+    # Read the catalog on its OWN budget rather than the caller's. Every client
+    # in this module is built with a 10s timeout, which exists to assert the
+    # gateway answers its verbs promptly; the first catalog read in a process
+    # also probes each provider lane and legitimately takes longer than that.
+    # Borrowing the caller's budget made a cold probe look like an unresponsive
+    # gateway. Subsequent reads are served from the catalog's own cache.
+    async with httpx.AsyncClient(base_url=client.base_url, timeout=120.0) as probe:
+        selection, workspace_root = await _first_selectable_catalog_selection(probe)
+    return {"selection": selection, "metadata": {"workspace_root": workspace_root}}
+
+
 async def _seed_permission(
     session_factory: SessionFactory, *, thread_id: str, request_id: str
 ) -> None:
@@ -157,9 +177,11 @@ async def test_run_history_is_the_wide_read_that_run_status_deliberately_is_not(
         start = await client.post(
             "/v1/runs",
             json={
+                "run_id": "gwlive-01",
                 "team_preset": _PRESET,
                 "message": "remember this",
                 "autonomous": True,
+                **await _run_fields(client),
             },
         )
         assert start.status_code == 201
@@ -205,7 +227,13 @@ async def test_archive_and_team_status_are_reachable_on_the_versioned_surface(
     ):
         start = await client.post(
             "/v1/runs",
-            json={"team_preset": _PRESET, "message": "work", "autonomous": True},
+            json={
+                "run_id": "gwlive-02",
+                "team_preset": _PRESET,
+                "message": "work",
+                "autonomous": True,
+                **await _run_fields(client),
+            },
         )
         assert start.status_code == 201
         run_id = start.json()["run_id"]
@@ -260,6 +288,7 @@ async def test_a_follow_up_turn_reaches_the_run_that_run_start_cannot_address(
                 "message": "first turn",
                 "autonomous": True,
                 "run_id": "r-followup",
+                **await _run_fields(client),
             },
         )
         assert start.status_code == 201
@@ -274,6 +303,7 @@ async def test_a_follow_up_turn_reaches_the_run_that_run_start_cannot_address(
                 "message": "first turn",
                 "autonomous": True,
                 "run_id": "r-followup",
+                **await _run_fields(client),
             },
         )
         assert replay.status_code == 201
@@ -328,7 +358,13 @@ async def test_the_versioned_verb_answers_a_permission_and_refuses_a_foreign_one
         async def _start(message: str) -> str:
             resp = await client.post(
                 "/v1/runs",
-                json={"team_preset": _PRESET, "message": message, "autonomous": True},
+                json={
+                    "run_id": "gwlive-05",
+                    "team_preset": _PRESET,
+                    "message": message,
+                    "autonomous": True,
+                    **await _run_fields(client),
+                },
             )
             assert resp.status_code == 201
             return resp.json()["run_id"]
@@ -561,6 +597,7 @@ async def test_five_verbs_over_live_socket(
         start = await client.post(
             "/v1/runs",
             json={
+                "run_id": "gwlive-06",
                 "team_preset": _PRESET,
                 "message": "build it",
                 "autonomous": True,
@@ -568,6 +605,7 @@ async def test_five_verbs_over_live_socket(
                     "tokens": {"coder": "tok-coder"},
                     "engine_bearer": "bearer",
                 },
+                **await _run_fields(client),
             },
         )
         assert start.status_code == 201
@@ -999,7 +1037,13 @@ async def test_run_envelope_and_presets_list_agree_on_provider_readiness(
 
         start = await client.post(
             "/v1/runs",
-            json={"team_preset": _PRESET, "message": "work", "autonomous": True},
+            json={
+                "run_id": "gwlive-07",
+                "team_preset": _PRESET,
+                "message": "work",
+                "autonomous": True,
+                **await _run_fields(client),
+            },
         )
         assert start.status_code == 201
         run_id = start.json()["run_id"]
@@ -1046,11 +1090,13 @@ async def test_run_start_threads_feedback_batch_id_to_worker(
         start = await client.post(
             "/v1/runs",
             json={
+                "run_id": "gwlive-08",
                 "team_preset": _PRESET,
                 "message": "revise the draft",
                 "autonomous": True,
                 "feedback_batch_id": "feedback-batch:deadbeefcafe",
                 "metadata": {"workspace_root": str(tmp_path)},
+                "selection": (await _run_fields(client))["selection"],
             },
         )
         assert start.status_code == 201, start.text
@@ -1076,10 +1122,12 @@ async def test_run_start_without_feedback_batch_id_dispatches_none(
         start = await client.post(
             "/v1/runs",
             json={
+                "run_id": "gwlive-09",
                 "team_preset": _PRESET,
                 "message": "build it",
                 "autonomous": True,
                 "metadata": {"workspace_root": str(tmp_path)},
+                "selection": (await _run_fields(client))["selection"],
             },
         )
         assert start.status_code == 201, start.text
@@ -1099,20 +1147,37 @@ async def test_run_start_refusals_over_live_socket(
     ):
         # Empty prompt -> 422, no dispatch.
         empty = await client.post(
-            "/v1/runs", json={"team_preset": _PRESET, "message": "   "}
+            "/v1/runs",
+            json={
+                "run_id": "gwlive-10",
+                "team_preset": _PRESET,
+                "message": "   ",
+                **await _run_fields(client),
+            },
         )
         assert empty.status_code == 422
 
         # Unknown / unloadable preset -> 422, no silent draft.
         unknown = await client.post(
-            "/v1/runs", json={"team_preset": "no-such-preset", "message": "go"}
+            "/v1/runs",
+            json={
+                "run_id": "gwlive-11",
+                "team_preset": "no-such-preset",
+                "message": "go",
+                **await _run_fields(client),
+            },
         )
         assert unknown.status_code == 422
 
         # Document-authoring preset without a target feature -> 422.
         no_feature = await client.post(
             "/v1/runs",
-            json={"team_preset": "vaultspec-adr-research", "message": "research it"},
+            json={
+                "run_id": "gwlive-12",
+                "team_preset": "vaultspec-adr-research",
+                "message": "research it",
+                **await _run_fields(client),
+            },
         )
         assert no_feature.status_code == 422
         assert "feature" in no_feature.json()["detail"]
@@ -1121,6 +1186,7 @@ async def test_run_start_refusals_over_live_socket(
         thin_bundle = await client.post(
             "/v1/runs",
             json={
+                "run_id": "gwlive-13",
                 "team_preset": "vaultspec-adr-research",
                 "message": "research it",
                 "feature_tag": "edge-feature",
@@ -1128,6 +1194,7 @@ async def test_run_start_refusals_over_live_socket(
                     "tokens": {"vaultspec-researcher": "tok-r"},
                     "engine_bearer": "bearer",
                 },
+                **await _run_fields(client),
             },
         )
         assert thin_bundle.status_code == 422
@@ -1148,6 +1215,7 @@ async def test_run_start_refusals_over_live_socket(
                     "team_preset": _PRESET,
                     "message": "go",
                     "run_id": invalid_run_id,
+                    **await _run_fields(client),
                 },
             )
             assert invalid_id.status_code == 422, invalid_run_id
@@ -1166,6 +1234,7 @@ async def test_run_start_refusals_over_live_socket(
                 "team_preset": _PRESET,
                 "message": "go",
                 "run_id": "run-0123456789abcdef0123456789abcdef",
+                **await _run_fields(client),
             },
         )
         assert dashboard_id.status_code == 201
@@ -1191,11 +1260,17 @@ async def test_run_start_client_id_is_dispatch_exactly_once(
             "autonomous": True,
             "run_id": "client-run-0001",
         }
-        first = await client.post("/v1/runs", json=payload)
+        first = await client.post(
+            "/v1/runs",
+            json={"run_id": "gwlive-16", **payload, **await _run_fields(client)},
+        )
         assert first.status_code == 201
         assert first.json()["run_id"] == "client-run-0001"
 
-        second = await client.post("/v1/runs", json=payload)
+        second = await client.post(
+            "/v1/runs",
+            json={"run_id": "gwlive-17", **payload, **await _run_fields(client)},
+        )
         assert second.status_code == 201
         assert second.json()["run_id"] == "client-run-0001"
 
@@ -1220,14 +1295,22 @@ async def test_run_id_reservation_is_visible_before_dispatch_ack(
         _live_server(app) as base,
         httpx.AsyncClient(base_url=base, timeout=10.0) as client,
     ):
-        first = asyncio.create_task(client.post("/v1/runs", json=payload))
+        first = asyncio.create_task(
+            client.post(
+                "/v1/runs",
+                json={"run_id": "gwlive-18", **payload, **await _run_fields(client)},
+            )
+        )
         await asyncio.wait_for(worker.dispatch_received.wait(), timeout=5.0)
 
         status = await client.get(f"/v1/runs/{payload['run_id']}")
         assert status.status_code == 200
         assert status.json()["status"] == "submitted"
 
-        replay = await client.post("/v1/runs", json=payload)
+        replay = await client.post(
+            "/v1/runs",
+            json={"run_id": "gwlive-19", **payload, **await _run_fields(client)},
+        )
         assert replay.status_code == 201
         assert replay.json()["run_id"] == payload["run_id"]
         assert len(worker.dispatches) == 1
@@ -1525,27 +1608,38 @@ async def test_run_start_freezes_and_discloses_profile(
     ):
         start = await client.post(
             "/v1/runs",
-            json={"team_preset": _PRESET, "message": "go", "autonomous": True},
+            json={
+                "run_id": "gwlive-20",
+                "team_preset": _PRESET,
+                "message": "go",
+                "autonomous": True,
+                **await _run_fields(client),
+            },
         )
         assert start.status_code == 201, start.text
         body = start.json()
-        # The default profile is frozen and disclosed with its assignments.
-        assert body["profile_id"] == "team-defaults"
-        assert body["assignments"], "run-start must disclose effective assignments"
-        first = body["assignments"][0]
+        # What gets frozen and disclosed is the SELECTION. `profile_id` was the
+        # old name for this fact and is no longer a run-start field at all, so
+        # asserting it here would pin a contract the gateway stopped offering.
+        frozen = body["frozen_assignment"]
+        assert frozen, "run-start must disclose what it froze"
+        # The effective assignments live INSIDE the freeze now. The top-level
+        # `assignments` list is empty for a selection-driven run, so reading it
+        # would assert nothing while appearing to check the disclosure.
+        assert frozen["assignments"], "the freeze must name its assignments"
+        first = frozen["assignments"][0]
         assert first["provider_id"]
         assert "api_key" not in start.text.lower() and "token" not in start.text.lower()
 
         # The dispatch carries the frozen assignment for the worker to compile against.
         dispatched = worker.dispatches[-1]
-        assert dispatched["profile_id"] == "team-defaults"
         assert dispatched["model_assignment"], "frozen assignment must reach dispatch"
 
         # run-status reproduces the frozen profile + assignments from run metadata.
         status = await client.get(f"/v1/runs/{body['run_id']}")
         assert status.status_code == 200
         sbody = status.json()
-        assert sbody["profile_id"] == "team-defaults"
+        assert sbody["frozen_assignment"], "run-status must reproduce the freeze"
         assert sbody["assignments"]
 
 
@@ -1561,11 +1655,21 @@ async def test_run_start_rejects_unknown_profile(
     ):
         resp = await client.post(
             "/v1/runs",
-            json={"team_preset": _PRESET, "message": "go", "profile_id": "ghost"},
+            json={
+                "run_id": "gwlive-21",
+                "team_preset": _PRESET,
+                "message": "go",
+                "profile_id": "ghost",
+                **await _run_fields(client),
+            },
         )
+        # `profile_id` was removed when selections became explicit. The contract
+        # forbids unknown fields rather than ignoring them, so a caller still
+        # sending the retired one is told, instead of silently getting a run
+        # configured by something other than what it asked for.
         assert resp.status_code == 422
-        assert "profile" in resp.json()["detail"].lower()
-        assert worker.dispatches == [], "an unknown profile must not dispatch"
+        assert "profile_id" in resp.text
+        assert worker.dispatches == [], "a refused body must not dispatch"
 
 
 @pytest.mark.asyncio(loop_scope="function")
@@ -1583,19 +1687,34 @@ async def test_run_start_conflicts_on_profile_change_retry(
             "message": "go",
             "run_id": "rid-conflict",
         }
-        first = await client.post("/v1/runs", json=payload)
-        assert first.status_code == 201
-        assert first.json()["profile_id"] == "team-defaults"
-
-        # Same run id, different profile -> conflict, not a replay.
-        conflict = await client.post(
-            "/v1/runs", json={**payload, "profile_id": "other-profile"}
+        first = await client.post(
+            "/v1/runs",
+            json={"run_id": "gwlive-22", **payload, **await _run_fields(client)},
         )
-        assert conflict.status_code == 409
-        assert "already started with profile" in conflict.json()["detail"]
+        assert first.status_code == 201
+        frozen = first.json()["frozen_assignment"]
+        assert frozen
+
+        # Same run id, DIFFERENT body -> conflict, not a replay. The field that
+        # used to vary here was `profile_id`, which no longer exists; what a
+        # retry can now change about a run's identity is its message, and the
+        # gateway must refuse that exactly as it refused a changed profile.
+        conflict = await client.post(
+            "/v1/runs",
+            json={
+                **payload,
+                "message": "a different intention",
+                **await _run_fields(client),
+            },
+        )
+        assert conflict.status_code == 409, conflict.text
+        assert "different request body" in conflict.json()["detail"]
 
         # Same run id, same (default) profile -> idempotent replay returns the run.
-        replay = await client.post("/v1/runs", json=payload)
+        replay = await client.post(
+            "/v1/runs",
+            json={"run_id": "gwlive-24", **payload, **await _run_fields(client)},
+        )
         assert replay.status_code == 201
         assert replay.json()["run_id"] == first.json()["run_id"]
 
@@ -1632,18 +1751,23 @@ async def test_run_start_replays_a_rotated_bundle_and_conflicts_on_a_changed_bod
                 "engine_bearer": "bearer-minted",
             },
         }
-        first = await client.post("/v1/runs", json=payload)
+        first = await client.post(
+            "/v1/runs",
+            json={"run_id": "gwlive-25", **payload, **await _run_fields(client)},
+        )
         assert first.status_code == 201, first.text
 
         # Same run id, same work, FRESHLY MINTED credentials -> the original run.
         rotated = await client.post(
             "/v1/runs",
             json={
+                "run_id": "gwlive-26",
                 **payload,
                 "actor_tokens": {
                     "tokens": {"coder": "tok-rotated"},
                     "engine_bearer": "bearer-rotated",
                 },
+                **await _run_fields(client),
             },
         )
         assert rotated.status_code == 201, rotated.text
@@ -1654,12 +1778,14 @@ async def test_run_start_replays_a_rotated_bundle_and_conflicts_on_a_changed_bod
         conflict = await client.post(
             "/v1/runs",
             json={
+                "run_id": "gwlive-27",
                 **payload,
                 "message": "a different intention",
                 "actor_tokens": {
                     "tokens": {"coder": "tok-rotated"},
                     "engine_bearer": "bearer-rotated",
                 },
+                **await _run_fields(client),
             },
         )
         assert conflict.status_code == 409, conflict.text
@@ -1677,7 +1803,10 @@ async def test_run_start_replays_a_rotated_bundle_and_conflicts_on_a_changed_bod
 
         # An identical replay (the original body) still returns the original run,
         # proving the 409 was the changed body - not a blanket rejection.
-        replay = await client.post("/v1/runs", json=payload)
+        replay = await client.post(
+            "/v1/runs",
+            json={"run_id": "gwlive-28", **payload, **await _run_fields(client)},
+        )
         assert replay.status_code == 201, replay.text
         assert replay.json()["run_id"] == "rid-body-conflict"
 
@@ -1693,8 +1822,14 @@ async def test_run_start_idempotency_is_race_safe(
         httpx.AsyncClient(base_url=base, timeout=10.0) as client,
     ):
         payload = {"team_preset": _PRESET, "message": "go", "run_id": "rid-race"}
+        # Resolved ONCE, outside the racing comprehension. Awaiting inside it
+        # would make the argument an async generator rather than the iterable of
+        # coroutines gather expects, and every racer must post a byte-identical
+        # body for the idempotency this test is asserting to be the thing under
+        # test rather than five different requests.
+        raced_body = {**payload, **await _run_fields(client)}
         results = await asyncio.gather(
-            *(client.post("/v1/runs", json=payload) for _ in range(5))
+            *(client.post("/v1/runs", json=raced_body) for _ in range(5))
         )
         # No request races into a 5xx; every one resolves to the same single run.
         assert all(r.status_code == 201 for r in results), [
@@ -1781,14 +1916,28 @@ async def test_modern_selection_insert_race_and_direct_replay_disclose_same_free
             await barrier.exec_driver_sql("BEGIN IMMEDIATE")
             try:
                 left = asyncio.create_task(
-                    client.post("/v1/runs", json={**nickname_base, "run_id": left_id})
+                    client.post(
+                        "/v1/runs",
+                        json={
+                            **nickname_base,
+                            "run_id": left_id,
+                            **await _run_fields(client),
+                        },
+                    )
                 )
                 await _wait_until(
                     lambda: gate.is_active(left_id),
                     what="the first nickname request to pass its read",
                 )
                 right = asyncio.create_task(
-                    client.post("/v1/runs", json={**nickname_base, "run_id": right_id})
+                    client.post(
+                        "/v1/runs",
+                        json={
+                            **nickname_base,
+                            "run_id": right_id,
+                            **await _run_fields(client),
+                        },
+                    )
                 )
                 await _wait_until(
                     lambda: checked_out() >= baseline + 2,
@@ -1855,10 +2004,12 @@ async def test_concurrent_same_run_id_different_bodies_conflicts(
     app, _agg, worker, _cp = make_app(session_factory, checkpointer)
     gate = admission_gate(app)
     run_id = "rid-race-conflict"
+    # The run id is deliberately SHARED and the message deliberately differs:
+    # that pairing is the whole subject, since the loser of the insert race must
+    # be refused precisely because its body differs from the winner's.
     shared = {
         "team_preset": _PRESET,
         "run_id": run_id,
-        "profile_id": "team-defaults",
         "autonomous": True,
     }
     first_body = {**shared, "message": "first intention"}
@@ -1873,10 +2024,23 @@ async def test_concurrent_same_run_id_different_bodies_conflicts(
             httpx.AsyncClient(base_url=base, timeout=30.0) as client,
         ):
             barrier = await engine.connect()
+            # Resolved ONCE and shared by both racers and the replay below.
+            # The replay must be byte-identical to the winner's body for
+            # the gateway to answer it idempotently; resolving twice would
+            # be equal in practice but would leave that guarantee to luck.
+            race_fields = await _run_fields(client)
             baseline = checked_out()
             await barrier.exec_driver_sql("BEGIN IMMEDIATE")
             try:
-                first = asyncio.create_task(client.post("/v1/runs", json=first_body))
+                first = asyncio.create_task(
+                    client.post(
+                        "/v1/runs",
+                        json={
+                            **first_body,
+                            **race_fields,
+                        },
+                    )
+                )
                 # Admission happens after the check-then-act read and before the
                 # insert, so an active run id proves the first request read an
                 # absent run and is now held at the barrier.
@@ -1884,7 +2048,15 @@ async def test_concurrent_same_run_id_different_bodies_conflicts(
                     lambda: gate.is_active(run_id),
                     what="the first request to pass its read",
                 )
-                second = asyncio.create_task(client.post("/v1/runs", json=second_body))
+                second = asyncio.create_task(
+                    client.post(
+                        "/v1/runs",
+                        json={
+                            **second_body,
+                            **race_fields,
+                        },
+                    )
+                )
                 # A second leased connection proves the second request is issuing
                 # DB work of its own - its read, which can only miss while the
                 # barrier bars every insert.
@@ -1905,7 +2077,9 @@ async def test_concurrent_same_run_id_different_bodies_conflicts(
                 winning_body = second_body
             # The refusal is specific to the colliding body, not a blanket
             # rejection of the raced id: the winner's own request still replays.
-            replay = await client.post("/v1/runs", json=winning_body)
+            replay = await client.post(
+                "/v1/runs", json={**winning_body, **race_fields}
+            )
 
     assert sorted(r.status_code for r in (winner, loser)) == [201, 409], [
         winner.text,

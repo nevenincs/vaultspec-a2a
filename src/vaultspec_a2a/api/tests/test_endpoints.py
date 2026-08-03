@@ -45,7 +45,7 @@ from ...database.models import (
 )
 from ...streaming.aggregator import EventAggregator
 from ...thread.enums import ControlActionResultStatus, ControlActionType, ThreadStatus
-from .conftest import make_app
+from .conftest import catalog_run_fields, make_app
 
 type SessionFactory = async_sessionmaker[AsyncSession]
 type JsonValue = str | int | float | bool | list[JsonValue] | JsonObject | None
@@ -88,6 +88,8 @@ class TestCreateThread:
                     "team_preset": _BUNDLE_FREE_PRESET,
                     "message": "Hello",
                     "title": "Test thread",
+                    "run_id": "endpoints-run-01",
+                    **catalog_run_fields(client),
                 },
             )
         assert resp.status_code == 201
@@ -107,6 +109,8 @@ class TestCreateThread:
                 json={
                     "message": "Hello",
                     "team_preset": _BUNDLE_FREE_PRESET,
+                    "run_id": "endpoints-run-02",
+                    **catalog_run_fields(client),
                 },
             )
         assert resp.status_code == 201
@@ -134,6 +138,8 @@ class TestCreateThread:
                     json={
                         "message": "Hello",
                         "team_preset": _BUNDLE_FREE_PRESET,
+                        "run_id": "endpoints-run-03",
+                        **catalog_run_fields(client),
                     },
                 )
             assert resp.status_code == 201
@@ -152,7 +158,12 @@ class TestCreateThread:
         with TestClient(app, raise_server_exceptions=True) as client:
             resp = client.post(
                 "/v1/runs",
-                json={"team_preset": _BUNDLE_FREE_PRESET, "message": oversized},
+                json={
+                    "team_preset": _BUNDLE_FREE_PRESET,
+                    "message": oversized,
+                    "run_id": "endpoints-run-04",
+                    **catalog_run_fields(client),
+                },
             )
         assert resp.status_code == 422
 
@@ -218,6 +229,11 @@ class TestListThreads:
                         "team_preset": _BUNDLE_FREE_PRESET,
                         "message": title,
                         "title": title,
+                        # Varies with the loop: this site posts TWICE, and a
+                        # shared id would make the second call a replay of the
+                        # first, leaving one run where the listing expects two.
+                        "run_id": f"endpoints-run-05-{title.replace(' ', '-')}",
+                        **catalog_run_fields(client),
                     },
                 )
                 assert started.status_code == 201, started.text
@@ -715,7 +731,12 @@ class TestThreadState:
         with TestClient(app, raise_server_exceptions=True) as client:
             create_resp = client.post(
                 "/v1/runs",
-                json={"team_preset": _BUNDLE_FREE_PRESET, "message": "Hello"},
+                json={
+                    "team_preset": _BUNDLE_FREE_PRESET,
+                    "message": "Hello",
+                    "run_id": "endpoints-run-06",
+                    **catalog_run_fields(client),
+                },
             )
             thread_id = create_resp.json()["run_id"]
             resp = client.get(f"/v1/runs/{thread_id}/history")
@@ -1282,7 +1303,12 @@ class TestSendMessage:
         with TestClient(app, raise_server_exceptions=True) as client:
             create_resp = client.post(
                 "/v1/runs",
-                json={"team_preset": _BUNDLE_FREE_PRESET, "message": "Hello"},
+                json={
+                    "team_preset": _BUNDLE_FREE_PRESET,
+                    "message": "Hello",
+                    "run_id": "endpoints-run-07",
+                    **catalog_run_fields(client),
+                },
             )
             thread_id = create_resp.json()["run_id"]
             worker.clear()  # Clear the create dispatch if any
@@ -1339,7 +1365,12 @@ class TestSendMessage:
         with TestClient(app, raise_server_exceptions=True) as client:
             create_resp = client.post(
                 "/v1/runs",
-                json={"team_preset": _BUNDLE_FREE_PRESET, "message": "Hello"},
+                json={
+                    "team_preset": _BUNDLE_FREE_PRESET,
+                    "message": "Hello",
+                    "run_id": "endpoints-run-08",
+                    **catalog_run_fields(client),
+                },
             )
             assert create_resp.status_code == 201
             thread_id = create_resp.json()["run_id"]
@@ -1388,6 +1419,8 @@ class TestSendMessage:
                 json={
                     "message": "Hello",
                     "team_preset": _BUNDLE_FREE_PRESET,
+                    "run_id": "endpoints-run-09",
+                    **catalog_run_fields(client),
                 },
             )
             assert create_resp.status_code == 201
@@ -1415,7 +1448,12 @@ class TestSendMessage:
         with TestClient(app, raise_server_exceptions=True) as client:
             create_resp = client.post(
                 "/v1/runs",
-                json={"team_preset": _BUNDLE_FREE_PRESET, "message": "Hello"},
+                json={
+                    "team_preset": _BUNDLE_FREE_PRESET,
+                    "message": "Hello",
+                    "run_id": "endpoints-run-10",
+                    **catalog_run_fields(client),
+                },
             )
             thread_id = create_resp.json()["run_id"]
             resp = client.post(
@@ -1857,7 +1895,12 @@ class TestPermissionRespond:
             # Create a thread first so the permission endpoint can find it.
             create_resp = client.post(
                 "/v1/runs",
-                json={"team_preset": _BUNDLE_FREE_PRESET, "message": "permission test"},
+                json={
+                    "team_preset": _BUNDLE_FREE_PRESET,
+                    "message": "permission test",
+                    "run_id": "endpoints-run-11",
+                    **catalog_run_fields(client),
+                },
             )
             assert create_resp.status_code == 201
             thread_id = create_resp.json()["run_id"]
@@ -1932,7 +1975,12 @@ class TestPermissionRespond:
         with TestClient(app, raise_server_exceptions=True) as client:
             create_resp = client.post(
                 "/v1/runs",
-                json={"team_preset": _BUNDLE_FREE_PRESET, "message": "permission test"},
+                json={
+                    "team_preset": _BUNDLE_FREE_PRESET,
+                    "message": "permission test",
+                    "run_id": "endpoints-run-12",
+                    **catalog_run_fields(client),
+                },
             )
             assert create_resp.status_code == 201
             thread_id = create_resp.json()["run_id"]
@@ -2009,6 +2057,8 @@ class TestPermissionRespond:
                 json={
                     "message": "Hello",
                     "team_preset": _BUNDLE_FREE_PRESET,
+                    "run_id": "endpoints-run-13",
+                    **catalog_run_fields(client),
                 },
             )
             assert create_resp.status_code == 201
@@ -2054,6 +2104,8 @@ class TestPermissionRespond:
                 json={
                     "team_preset": _BUNDLE_FREE_PRESET,
                     "message": "unknown permission request",
+                    "run_id": "endpoints-run-14",
+                    **catalog_run_fields(client),
                 },
             )
             assert started.status_code == 201, started.text
@@ -2075,7 +2127,12 @@ class TestPermissionRespond:
         with TestClient(app, raise_server_exceptions=True) as client:
             create_resp = client.post(
                 "/v1/runs",
-                json={"team_preset": _BUNDLE_FREE_PRESET, "message": "permission test"},
+                json={
+                    "team_preset": _BUNDLE_FREE_PRESET,
+                    "message": "permission test",
+                    "run_id": "endpoints-run-15",
+                    **catalog_run_fields(client),
+                },
             )
             assert create_resp.status_code == 201
             thread_id = create_resp.json()["run_id"]
@@ -2115,7 +2172,12 @@ class TestPermissionRespond:
         with TestClient(app, raise_server_exceptions=True) as client:
             create_resp = client.post(
                 "/v1/runs",
-                json={"team_preset": _BUNDLE_FREE_PRESET, "message": "permission test"},
+                json={
+                    "team_preset": _BUNDLE_FREE_PRESET,
+                    "message": "permission test",
+                    "run_id": "endpoints-run-16",
+                    **catalog_run_fields(client),
+                },
             )
             assert create_resp.status_code == 201
             thread_id = create_resp.json()["run_id"]
@@ -2184,7 +2246,12 @@ class TestPermissionRespond:
         with TestClient(app, raise_server_exceptions=True) as client:
             create_resp = client.post(
                 "/v1/runs",
-                json={"team_preset": _BUNDLE_FREE_PRESET, "message": "permission test"},
+                json={
+                    "team_preset": _BUNDLE_FREE_PRESET,
+                    "message": "permission test",
+                    "run_id": "endpoints-run-17",
+                    **catalog_run_fields(client),
+                },
             )
             assert create_resp.status_code == 201
             thread_id = create_resp.json()["run_id"]
@@ -2230,7 +2297,12 @@ class TestPermissionRespond:
         with TestClient(app, raise_server_exceptions=True) as client:
             create_resp = client.post(
                 "/v1/runs",
-                json={"team_preset": _BUNDLE_FREE_PRESET, "message": "permission test"},
+                json={
+                    "team_preset": _BUNDLE_FREE_PRESET,
+                    "message": "permission test",
+                    "run_id": "endpoints-run-18",
+                    **catalog_run_fields(client),
+                },
             )
             assert create_resp.status_code == 201
             thread_id = create_resp.json()["run_id"]
@@ -2306,7 +2378,12 @@ class TestPermissionRespond:
         with TestClient(app, raise_server_exceptions=True) as client:
             create_resp = client.post(
                 "/v1/runs",
-                json={"team_preset": _BUNDLE_FREE_PRESET, "message": "permission test"},
+                json={
+                    "team_preset": _BUNDLE_FREE_PRESET,
+                    "message": "permission test",
+                    "run_id": "endpoints-run-19",
+                    **catalog_run_fields(client),
+                },
             )
             assert create_resp.status_code == 201
             thread_id = create_resp.json()["run_id"]
@@ -2370,6 +2447,8 @@ class TestPermissionRespond:
                 json={
                     "team_preset": _BUNDLE_FREE_PRESET,
                     "message": "plan approval test",
+                    "run_id": "endpoints-run-20",
+                    **catalog_run_fields(client),
                 },
             )
             assert create_resp.status_code == 201
@@ -2429,6 +2508,8 @@ class TestPermissionRespond:
                 json={
                     "team_preset": _BUNDLE_FREE_PRESET,
                     "message": "plan approval notes test",
+                    "run_id": "endpoints-run-21",
+                    **catalog_run_fields(client),
                 },
             )
             assert create_resp.status_code == 201
@@ -2612,6 +2693,8 @@ class TestDeleteThread:
                 json={
                     "team_preset": _BUNDLE_FREE_PRESET,
                     "message": "plan approval relay test",
+                    "run_id": "endpoints-run-22",
+                    **catalog_run_fields(client),
                 },
             )
             assert create_resp.status_code == 201
@@ -2699,7 +2782,12 @@ class TestDeleteThread:
         with TestClient(app, raise_server_exceptions=True) as client:
             create_resp = client.post(
                 "/v1/runs",
-                json={"team_preset": _BUNDLE_FREE_PRESET, "message": "permission test"},
+                json={
+                    "team_preset": _BUNDLE_FREE_PRESET,
+                    "message": "permission test",
+                    "run_id": "endpoints-run-23",
+                    **catalog_run_fields(client),
+                },
             )
             assert create_resp.status_code == 201
             thread_id = create_resp.json()["run_id"]
@@ -2775,6 +2863,8 @@ class TestDeleteThread:
                 json={
                     "team_preset": _BUNDLE_FREE_PRESET,
                     "message": "permission dispatch failure",
+                    "run_id": "endpoints-run-24",
+                    **catalog_run_fields(client),
                 },
             )
             assert create_resp.status_code == 201
@@ -2859,6 +2949,8 @@ class TestDeleteThread:
                 json={
                     "team_preset": _BUNDLE_FREE_PRESET,
                     "message": "permission dispatch ambiguity",
+                    "run_id": "endpoints-run-25",
+                    **catalog_run_fields(client),
                 },
             )
             assert create_resp.status_code == 201
@@ -2930,7 +3022,12 @@ class TestDeleteThread:
         with TestClient(app, raise_server_exceptions=True) as client:
             create_resp = client.post(
                 "/v1/runs",
-                json={"team_preset": _BUNDLE_FREE_PRESET, "message": "permission test"},
+                json={
+                    "team_preset": _BUNDLE_FREE_PRESET,
+                    "message": "permission test",
+                    "run_id": "endpoints-run-26",
+                    **catalog_run_fields(client),
+                },
             )
             assert create_resp.status_code == 201
             thread_id = create_resp.json()["run_id"]
@@ -2980,7 +3077,12 @@ class TestDeleteThread:
         with TestClient(app, raise_server_exceptions=True) as client:
             create_resp = client.post(
                 "/v1/runs",
-                json={"team_preset": _BUNDLE_FREE_PRESET, "message": "permission test"},
+                json={
+                    "team_preset": _BUNDLE_FREE_PRESET,
+                    "message": "permission test",
+                    "run_id": "endpoints-run-27",
+                    **catalog_run_fields(client),
+                },
             )
             assert create_resp.status_code == 201
             thread_id = create_resp.json()["run_id"]
@@ -3018,6 +3120,8 @@ class TestCreateThreadAutonomous:
                 json={
                     "team_preset": _BUNDLE_FREE_PRESET,
                     "message": "Hello, supervised mode",
+                    "run_id": "endpoints-run-28",
+                    **catalog_run_fields(client),
                 },
             )
         assert resp.status_code == 201
@@ -3038,6 +3142,8 @@ class TestCreateThreadAutonomous:
                     "team_preset": _BUNDLE_FREE_PRESET,
                     "message": "Hello, autonomous mode",
                     "autonomous": True,
+                    "run_id": "endpoints-run-29",
+                    **catalog_run_fields(client),
                 },
             )
         assert resp.status_code == 201
@@ -3058,6 +3164,8 @@ class TestCreateThreadAutonomous:
                     "message": "Run autonomously",
                     "team_preset": _BUNDLE_FREE_PRESET,
                     "autonomous": True,
+                    "run_id": "endpoints-run-30",
+                    **catalog_run_fields(client),
                 },
             )
         assert resp.status_code == 201
@@ -3084,6 +3192,8 @@ class TestCreateThreadAutonomous:
                     "message": "Run with team default",
                     "team_preset": _BUNDLE_FREE_PRESET,
                     # autonomous not set — should inherit auto_approve=True from preset
+                    "run_id": "endpoints-run-31",
+                    **catalog_run_fields(client),
                 },
             )
         assert resp.status_code == 201
@@ -3120,6 +3230,8 @@ class TestCancelThread:
                 json={
                     "team_preset": _BUNDLE_FREE_PRESET,
                     "message": "cancel dispatch failure",
+                    "run_id": "endpoints-run-32",
+                    **catalog_run_fields(client),
                 },
             )
             assert create_resp.status_code == 201
@@ -3179,6 +3291,8 @@ class TestCancelThread:
                 json={
                     "team_preset": _BUNDLE_FREE_PRESET,
                     "message": "cancel dispatch ambiguity",
+                    "run_id": "endpoints-run-33",
+                    **catalog_run_fields(client),
                 },
             )
             assert create_resp.status_code == 201

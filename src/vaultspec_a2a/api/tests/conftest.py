@@ -231,6 +231,25 @@ class _InProcessWorker:
 type AppFixture = tuple[FastAPI, EventAggregator, _InProcessWorker, AsyncSqliteSaver]
 
 
+_SESSION_CATALOG_SERVICE: Any = None
+
+
+def _session_catalog_service() -> Any:
+    """Return the process-wide provider catalog service.
+
+    Built once and reused. See the note at its injection site in `make_app` for
+    why per-app construction was the wrong default.
+    """
+    global _SESSION_CATALOG_SERVICE
+    if _SESSION_CATALOG_SERVICE is None:
+        from datetime import timedelta
+
+        from ...providers.provider_catalog_service import ProviderCatalogService
+
+        _SESSION_CATALOG_SERVICE = ProviderCatalogService(ttl=timedelta(hours=6))
+    return _SESSION_CATALOG_SERVICE
+
+
 def make_app(
     session_factory: SessionFactory,
     checkpointer: AsyncSqliteSaver,
@@ -260,6 +279,20 @@ def make_app(
 
     worker = _InProcessWorker()
 
+    # ONE catalog service for the whole session, not one per app.
+    #
+    # The service owns a real TTL cache, but `make_app` builds a fresh app per
+    # test, so a per-app service threw that cache away and re-probed every
+    # provider lane on every test - measured at ~15s each, which dominated the
+    # runtime of every suite that starts a run. The probe result is a property
+    # of the machine and workspace, not of the app under test, so rebuilding it
+    # per test is pure waste rather than isolation.
+    #
+    # Sharing the real production object keeps the real code path: the cache
+    # being exercised is the one that ships, its TTL is simply widened past the
+    # length of a suite so a long run does not re-probe mid-flight.
+    app.state.provider_catalog_service = _session_catalog_service()
+
     # Store singletons in app.state so WebSocket handlers can read them
     app.state.aggregator = aggregator
     app.state.checkpointer = checkpointer
@@ -285,3 +318,59 @@ def make_app(
     app.state.db_session_factory = session_factory
 
     return app, aggregator, worker, checkpointer
+
+
+_CATALOG_FIELD_CACHE: dict[str, dict[str, Any]] = {}
+
+
+def catalog_run_fields(
+    client: Any, *, workspace_root: str | None = None
+) -> dict[str, Any]:
+    """Return the run-start fields an explicit catalog selection now requires.
+
+    Run-start refuses a body without a ``selection``, and revalidates that
+    selection against the catalog SERVED FOR ITS WORKSPACE - so a hand-written
+    reference is refused even when its shape is perfect. This derives one from
+    the live served catalog the way a real client must: read the catalog, take a
+    lane the gateway actually reports as selectable, and reference that lane's
+    own revision and entry.
+
+    A canned literal would be the tempting shortcut and would be wrong twice
+    over: it would break whenever the catalog's revision moved, and it would let
+    a test assert against a lane the gateway would never serve. Deriving keeps
+    the fixture honest about what the gateway is offering at that moment.
+
+    ``workspace_root`` is returned alongside because the same gate refuses a
+    selection with no existing workspace to anchor it in.
+    """
+    root = workspace_root or str(Path.cwd())
+    cached = _CATALOG_FIELD_CACHE.get(root)
+    if cached is not None:
+        return {
+            "selection": dict(cached["selection"]),
+            "metadata": dict(cached["metadata"]),
+        }
+    response = client.get("/v1/provider-catalog", params={"workspace_root": root})
+    assert response.status_code == 200, response.text
+    record = next(
+        item
+        for item in response.json()["providers"]
+        if item["health"]["selectable"] and item["catalog"]["models"]
+    )
+    catalog = record["catalog"]
+    fields: dict[str, Any] = {
+        "selection": {
+            "schema_version": 1,
+            "provider_id": record["provider_id"],
+            "execution_mode": record["execution_mode"],
+            "catalog_revision": catalog["state"]["revision"],
+            "entry_id": catalog["models"][0]["entry_id"],
+            "controls": {},
+        },
+        "metadata": {"workspace_root": root},
+    }
+    _CATALOG_FIELD_CACHE[root] = fields
+    return {
+        "selection": dict(fields["selection"]),
+        "metadata": dict(fields["metadata"]),
+    }

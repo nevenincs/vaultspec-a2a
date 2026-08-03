@@ -39,6 +39,7 @@ import subprocess
 import sys
 import time
 from contextlib import contextmanager
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import httpx
@@ -71,11 +72,11 @@ from ..tests.gateway_boot import (
     seed_credentials,
     spawn_until_ready,
 )
+from ._catalog import catalog_selection
 from .test_run_admission import _ATTACH, _OWNERSHIP
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
-    from pathlib import Path
 
 _CLI_MODULE = "vaultspec_a2a.cli.main"
 _PRESET = "mock-success-single"
@@ -137,15 +138,21 @@ def _worker_ipc_secret(app_home: Path) -> str:
 
 def _prepare(base: str, run_id: str) -> tuple[int, dict[str, Any]]:
     """Drive one authenticated prepare, which spawns the gateway-owned worker."""
+    auth = f"Bearer {_ATTACH}"
+    workspace = str(Path.cwd())
     with httpx.Client(base_url=base, timeout=120.0) as client:
         resp = client.post(
             "/v1/runs",
-            headers={"Authorization": f"Bearer {_ATTACH}"},
+            headers={"Authorization": auth},
             json={
                 "team_preset": _PRESET,
                 "stage": "prepare",
                 "autonomous": True,
                 "run_id": run_id,
+                # The workspace anchors the selection, which run start
+                # revalidates against the catalog served for it.
+                "metadata": {"workspace_root": workspace},
+                "selection": catalog_selection(base, auth, workspace),
             },
         )
     try:

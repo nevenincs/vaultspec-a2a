@@ -24,6 +24,7 @@ import socket
 import subprocess
 import sys
 import time
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
 import httpx
@@ -47,6 +48,7 @@ from ..tests.gateway_boot import (
 )
 from ..utils import kill_pid_tree_async
 from ..utils.process import ProcessContainment
+from ._catalog import catalog_selection
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -275,6 +277,7 @@ def test_desktop_worker_tree_contained_and_reaped_on_graceful_shutdown(
     )
     try:
         # First demand spawns the gateway-owned worker inside its containment.
+        _workspace = str(Path.cwd())
         with httpx.Client(base_url=base, timeout=60.0) as client:
             start = client.post(
                 "/v1/runs",
@@ -283,6 +286,13 @@ def test_desktop_worker_tree_contained_and_reaped_on_graceful_shutdown(
                     "team_preset": _PRESET,
                     "message": "build it",
                     "autonomous": True,
+                    "run_id": "owned-process-tree-01",
+                    # The workspace anchors the selection, which run start
+                    # revalidates against the catalog served for it.
+                    "metadata": {"workspace_root": _workspace},
+                    "selection": catalog_selection(
+                        base, auth["Authorization"], _workspace
+                    ),
                     "actor_tokens": {
                         "tokens": {"coder": "tok-coder"},
                         "engine_bearer": "bearer",

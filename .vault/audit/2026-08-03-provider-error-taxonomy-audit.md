@@ -5,7 +5,7 @@ tags:
 date: '2026-08-03'
 modified: '2026-08-03'
 body_schema: 'body-v1'
-body_hash: 'sha256:5bb91be6f481bb11f75e8083e8613cae8a1b3f6b78a2cabfe553870308360859'
+body_hash: 'sha256:ecb5399e83476da651bfad79dc0bac76995b6f4782e9825a026a9a44808af3f2'
 related:
   - "[[2026-08-02-provider-error-taxonomy-plan]]"
   - "[[2026-08-02-provider-error-taxonomy-adr]]"
@@ -102,19 +102,67 @@ execution mode. Running a successful turn on a lane does not admit it; a human
 attests the evidence and edits the declaration. Any future work that finds itself
 wanting to edit that table to make a test pass has misread the rule.
 
-### verification-brief-omitted-a-gate-that-crosses-package-boundaries | medium | A module-size gate scanning one language lives in another language's package, so a single-surface phase never runs it
+### verification-brief-substituted-a-hand-copied-list-for-the-declared-gate | CORRECTED, medium | The gate was never hidden; it was simply not invoked
 
-Found by one executing agent flagging a red gate in another's lane, not by either
-phase's own verification. The consuming repository's module-size gate is a script
-in the frontend package, and it scans the engine's source as well at a hard
-ceiling with nothing grandfathered. An engine-only phase that runs only the
-language-native commands therefore cannot see it, and one landed a file over the
-ceiling.
+CORRECTION. This entry previously claimed the module-size gate was invisible to
+an engine phase because it lives in the frontend package. That was WRONG, and the
+truth is less comfortable. The repository's gate table declares the engine lint
+target as formatting, a workspace-wide lint with warnings fatal, AND the module
+scanner. Invoking the declared engine gate has always run all three. Nothing was
+hidden.
 
-The defect is in the brief rather than in the execution: the verification list
-named the language-native commands and stopped. Recorded here because the general
-shape recurs - a gate whose home package does not match the surface it governs is
-invisible to anyone reasoning about verification by surface.
+What actually happened is that the verification brief hand-listed language-native
+commands instead of naming the declared entry point. That is the same failure the
+repository's own continuous-integration configuration warns about in its header:
+a gate reimplemented elsewhere cannot be verified to match the gate it claims to
+mirror, and calling the same entry point is the only thing that can. The brief
+reimplemented the gate in prose and reproduced the outcome exactly.
+
+The remedy is therefore NOT to add the missing command to a list - that would
+repeat the mistake with a longer list. It is that a phase runs the declared gate
+entry point, and a brief names that entry point rather than enumerating what it
+happens to contain.
+
+A second consequence surfaced with the correction: the hand-copied lint was also
+WEAKER than the declared one, scoped to a single crate's library target with
+warnings non-fatal, where the declared gate is workspace-wide across all targets
+with warnings fatal. A hand-copied gate does not merely risk omitting a check; it
+silently relaxes the ones it does include.
+
+### declared-engine-test-gate-has-not-run-on-this-host | medium | Every engine result on this machine is a scoped subset of the declared gate
+
+The declared engine test gate is a workspace-wide run. It was deliberately not
+run here, because building the integration binaries exhausts the linker on this
+platform, and every engine number reported during this campaign is therefore a
+scoped subset. The subset is real evidence and it is green; it is simply not the
+gate. Recorded so that no one later reads those counts as the declared gate
+having passed. It runs on the project's own continuous-integration runners.
+
+### frontend-has-no-engine-free-test-tier | medium | Every frontend test spawns a live engine, so no one can verify frontend work independently
+
+The frontend test configuration applies the live-engine global setup to the WHOLE
+suite, so even a single component test spawns a real engine process. There is no
+unit tier to fall back to. The setup does attach instead of spawning when an
+existing service is named, but the configuration also states that all files share
+one engine with mutable state - so attaching points every test at whatever
+engine is offered and mutates it.
+
+The practical consequence is a verification monopoly: frontend work can only be
+verified by whoever currently holds an engine, and a second party cannot
+independently confirm it without either fighting for ports or mutating the first
+party's stack. That is a structural obstacle to review, not a preference.
+
+### no-git-hooks-installed-in-this-worktree | low | Every commit in this campaign was ungated locally
+
+The consuming repository declares pre-commit hooks, and none are installed in the
+worktree this campaign worked in - only the shipped samples are present. Every
+commit made here, by every party, went in without local gating, and continuous
+integration is the first thing that will see any of it.
+
+Deliberately NOT remedied mid-campaign. Installing them now would begin stamping
+another writer's in-flight documents on every commit, which is a known deadlock
+in this tree, and it is a repository configuration decision that belongs to the
+owner rather than to a phase executing inside it.
 
 ### vocabulary-is-declared-in-three-places | low | Two of the three copies are gated against each other; the third was not
 

@@ -11,6 +11,7 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
+from pathlib import Path
 from typing import TYPE_CHECKING, NoReturn
 
 import pytest
@@ -440,3 +441,55 @@ def pytest_sessionfinish(session: pytest.Session) -> None:
     """Fail the session when a guaranteed prerequisite produced a skip instead."""
     if _declared_prerequisite_skips():
         session.exitstatus = pytest.ExitCode.TESTS_FAILED
+
+
+# ---------------------------------------------------------------------------
+# Schema materialization - one DDL run per session, not one per test
+# ---------------------------------------------------------------------------
+
+_SCHEMA_TEMPLATE: Path | None = None
+
+
+def schema_template() -> Path:
+    """Return a SQLite file carrying the full schema, built once per session.
+
+    ``Base.metadata.create_all`` costs ~340ms and is byte-identical on every
+    call, so running it per test was the single largest fixture cost in the
+    suite - larger than the tests themselves in the api package. It is a pure
+    function of the model metadata, so nothing about a test can change its
+    result and nothing is isolated by repeating it.
+
+    Callers copy this file rather than share it: each test still gets its own
+    real database with real DDL-created tables, so isolation is unchanged. Only
+    the way the schema is MATERIALIZED changes - a 5ms file copy instead of a
+    340ms DDL replay.
+    """
+    global _SCHEMA_TEMPLATE
+    if _SCHEMA_TEMPLATE is None:
+        import tempfile
+
+        from sqlalchemy import create_engine
+
+        from .database.models import Base
+
+        target = Path(tempfile.mkdtemp(prefix="vaultspec-schema-")) / "template.db"
+        # Built through the SYNCHRONOUS driver deliberately: callers are async
+        # fixtures already inside a running loop, and `asyncio.run` cannot nest.
+        # The emitted DDL is identical either way - the schema is a property of
+        # the metadata, not of the driver that writes it.
+        engine = create_engine(f"sqlite:///{target}")
+        try:
+            Base.metadata.create_all(engine)
+        finally:
+            engine.dispose()
+        _SCHEMA_TEMPLATE = target
+    return _SCHEMA_TEMPLATE
+
+
+def materialize_schema(db_path: Path) -> Path:
+    """Give *db_path* the full schema by copying the session template."""
+    import shutil
+
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copyfile(schema_template(), db_path)
+    return db_path

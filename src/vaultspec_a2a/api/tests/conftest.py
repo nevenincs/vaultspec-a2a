@@ -34,10 +34,10 @@ from sqlalchemy.ext.asyncio import (
     create_async_engine,
 )
 
+from ...conftest import materialize_schema
 from ...control.circuit_breaker import WorkerCircuitBreaker
 from ...control.config import settings
 from ...control.worker_management import LazyWorkerSpawner
-from ...database.models import Base
 from ...streaming.aggregator import EventAggregator
 from ..app import create_app
 
@@ -88,10 +88,12 @@ async def engine(
 ) -> AsyncIterator[AsyncEngine]:
     """File-backed async SQLAlchemy engine with all tables created."""
     case_dir = tmp_path_factory.mktemp("api-test-db")
-    db_file = case_dir / "test.db"
+    # Copy the session schema template instead of replaying the DDL. The DDL is
+    # byte-identical every time and cost ~340ms - more than this package's tests
+    # spent doing their actual work. The database is still per-test and still
+    # real; only its materialization changes.
+    db_file = materialize_schema(case_dir / "test.db")
     eng = create_async_engine(f"sqlite+aiosqlite:///{db_file}")
-    async with eng.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
     yield eng
     await eng.dispose()
 

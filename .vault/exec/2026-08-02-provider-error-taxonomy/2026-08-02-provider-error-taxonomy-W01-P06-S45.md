@@ -5,7 +5,7 @@ tags:
 date: '2026-08-02'
 modified: '2026-08-03'
 body_schema: 'body-v1'
-body_hash: 'sha256:6733304288432101e7dd8ca4872a3295cebb9c14c378a241401da002fad251cb'
+body_hash: 'sha256:eef808963e869e4fd98a99c2857b72ab7263c42e531bcf2c740f9195ea8b329b'
 step_id: 'S45'
 related:
   - "[[2026-08-02-provider-error-taxonomy-plan]]"
@@ -161,6 +161,13 @@ against a live stack. All are closed without a production change:
   window. The run-start message is bounded at 65,536 characters, roughly sixteen
   thousand tokens, which is far short of any current context window. The bound is
   correct and should not be raised to make this reachable.
+
+- Supply a codex config home pointing at a refusing endpoint. The env builder does
+  honour a configured home, but the turn then ALWAYS emits a worker-owned
+  config.toml and redirects the home to it, deliberately suppressing the
+  operator's ambient configuration; the configured home is only a source to copy
+  auth from. That suppression is a security property and must not be weakened to
+  make this reachable.
 
 The admitted codex lane therefore SUCCEEDS on every input this system will accept
 from a client, which is a good property of the product and the precise reason the

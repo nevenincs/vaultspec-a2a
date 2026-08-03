@@ -507,3 +507,66 @@ async def test_an_unannounced_error_still_ends_the_turn_immediately() -> None:
     finally:
         await client.aclose()
     assert caught.value.condition is ProviderCondition.UNAUTHENTICATED
+
+
+@pytest.mark.asyncio
+async def test_a_forwarded_status_survives_a_terminal_frame_that_carries_none() -> None:
+    """The refusal's cause must not be lost to the frame that ends the turn.
+
+    Observed live: a `402` refusal reached the app-server, whose attempt frames
+    forwarded the status, but whose terminal frame was one of the payload-free
+    variants. Taking the terminal frame's word alone reported the floor member
+    for a refusal whose cause had already been stated on the wire.
+    """
+    client = await _notifier_client(
+        [
+            _error_frame("Reconnecting... 1/5", 402, will_retry=True),
+            {
+                "method": "error",
+                "params": {
+                    "error": {
+                        "message": "unexpected status 402 Payment Required",
+                        "codexErrorInfo": "other",
+                    },
+                    "willRetry": False,
+                },
+            },
+        ]
+    )
+    try:
+        with pytest.raises(_CodexProtocolError) as caught:
+            await _drain(client)
+    finally:
+        await client.aclose()
+    # The message is the terminal frame's, which is the truthful account of how
+    # the turn ended...
+    assert caught.value.message == "unexpected status 402 Payment Required"
+    # ...and the condition is the one an earlier frame actually forwarded.
+    assert caught.value.condition is ProviderCondition.CREDITS_EXHAUSTED
+
+
+@pytest.mark.asyncio
+async def test_a_terminal_frame_that_classifies_itself_is_never_overridden() -> None:
+    """Retention is a fallback, not a preference.
+
+    A terminal frame carrying its own discriminator is the better evidence, and
+    an earlier attempt must never talk over it - otherwise a refusal that
+    CHANGED between attempts would be reported as whatever it used to be.
+    """
+    client = await _notifier_client(
+        [
+            _error_frame("Reconnecting... 1/5", 402, will_retry=True),
+            _error_frame(
+                "exceeded retry limit, last status: 429",
+                429,
+                will_retry=False,
+                variant="responseTooManyFailedAttempts",
+            ),
+        ]
+    )
+    try:
+        with pytest.raises(_CodexProtocolError) as caught:
+            await _drain(client)
+    finally:
+        await client.aclose()
+    assert caught.value.condition is ProviderCondition.THROTTLED

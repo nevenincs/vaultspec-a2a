@@ -227,6 +227,37 @@ def _turn_failure(
     )
 
 
+def _carry_condition(
+    failure: _CodexProtocolError, observed: _CodexProtocolError | None
+) -> _CodexProtocolError:
+    """Return *failure*, restoring a discriminator its own frame does not carry.
+
+    The app-server's error union splits in two: a handful of variants are
+    objects that forward the provider's HTTP status, and the rest are bare
+    strings with no payload at all. A provider refusal routinely arrives as one
+    of the payload-free ones, so the frame that ENDS the turn can be
+    unclassifiable while the attempts that preceded it forwarded the actual
+    status. Taking the terminal frame's word alone in that case reports the
+    floor member for a refusal whose cause was observed moments earlier.
+
+    So the message always comes from the terminal frame, which is the truthful
+    account of how the turn ended, and the condition falls back to what an
+    earlier frame actually forwarded - never the reverse, and never when the
+    terminal frame classified itself.
+    """
+    if (
+        observed is None
+        or failure.condition is not ProviderCondition.UNKNOWN
+        or observed.condition is ProviderCondition.UNKNOWN
+    ):
+        return failure
+    return _CodexProtocolError(
+        failure.message,
+        condition=observed.condition,
+        will_retry=failure.will_retry,
+    )
+
+
 def _failed_turn_error(turn: JsonObject, status: JsonValue) -> _CodexProtocolError:
     """Build a protocol failure from one non-completed turn.
 
@@ -835,9 +866,16 @@ class CodexChatModel(BaseChatModel):
                     # is how a refused credential came to be described as
                     # "Reconnecting... 1/5". Hold it as the fallback for a stream
                     # that ends without ever stating a result, and keep reading.
-                    deferred = failure
+                    # An attempt that named a condition is kept over one that did
+                    # not, since it is the only frame that may ever carry the
+                    # provider's forwarded status.
+                    if (
+                        deferred is None
+                        or deferred.condition is ProviderCondition.UNKNOWN
+                    ):
+                        deferred = failure
                     continue
-                raise failure
+                raise _carry_condition(failure, deferred)
             elif method == "turn/completed":
                 if params.get("threadId") not in (None, thread_id):
                     continue
@@ -846,5 +884,5 @@ class CodexChatModel(BaseChatModel):
                 )
                 status = turn.get("status")
                 if status != "completed":
-                    raise _failed_turn_error(turn, status)
+                    raise _carry_condition(_failed_turn_error(turn, status), deferred)
                 return

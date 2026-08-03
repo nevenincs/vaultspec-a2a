@@ -17,8 +17,8 @@ from typing import TYPE_CHECKING
 
 from sqlalchemy import create_engine, inspect, text
 
-from ...control.db import _CHECKPOINT_TABLES, _CLEAR_ORDER
-from ...database.models import (
+from ..admin import _CHECKPOINT_TABLES, _CLEAR_ORDER, _administrative_engine
+from ..models import (
     ArtifactModel,
     Base,
     ControlActionModel,
@@ -107,3 +107,54 @@ def test_a_database_without_checkpoint_tables_is_tolerated(tmp_path: Path) -> No
 
     assert not present.intersection(_CHECKPOINT_TABLES)
     engine.dispose()
+
+
+def test_the_administrative_engine_enforces_foreign_keys(tmp_path: Path) -> None:
+    """The destructive path gets the safety net the application engine has.
+
+    ``foreign_keys`` is per-connection and OFF by default, so the truncation
+    engine used to run without it: a wrong delete order would have orphaned child
+    rows silently instead of being refused. The previous version of this suite
+    had to issue the pragma itself, which was the tell.
+    """
+    database = tmp_path / "pragma.db"
+    engine = _administrative_engine(f"sqlite:///{database}")
+    try:
+        with engine.connect() as conn:
+            assert conn.execute(text("PRAGMA foreign_keys")).scalar_one() == 1
+            assert conn.execute(text("PRAGMA busy_timeout")).scalar_one() > 0
+    finally:
+        engine.dispose()
+
+
+def test_foreign_keys_are_enforced_against_a_real_violation(tmp_path: Path) -> None:
+    """The pragma is load-bearing: a parent-first delete must be refused.
+
+    Asserting the pragma reads back as ``1`` proves it was set; this proves it
+    does something. Without it SQLite accepts the delete and leaves the child
+    row pointing at a thread that no longer exists.
+    """
+    from sqlalchemy.exc import IntegrityError
+    from sqlalchemy.orm import Session
+
+    database = tmp_path / "violation.db"
+    setup = create_engine(f"sqlite:///{database}")
+    Base.metadata.create_all(setup)
+    with Session(setup) as session:
+        session.add(ThreadModel(id="t1", status="running"))
+        session.flush()
+        session.add(ArtifactModel(id="a1", thread_id="t1", type="file", path="x.txt"))
+        session.commit()
+    setup.dispose()
+
+    engine = _administrative_engine(f"sqlite:///{database}")
+    try:
+        raised = False
+        try:
+            with engine.begin() as conn:
+                conn.execute(text("DELETE FROM threads"))
+        except IntegrityError:
+            raised = True
+        assert raised, "deleting a referenced parent was not refused"
+    finally:
+        engine.dispose()

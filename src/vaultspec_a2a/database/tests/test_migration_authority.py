@@ -1,4 +1,4 @@
-"""The db tooling must migrate an installed distribution, not just a checkout.
+"""The admin tooling must migrate an installed distribution, not just a checkout.
 
 The migration action used to read a configuration file resolved four parents up
 from ``__file__``.  That arithmetic only lands on a repository root when the
@@ -25,9 +25,9 @@ from alembic.script import ScriptDirectory
 
 import vaultspec_a2a
 
-from ...control import db as control_db
-from ...database import migration_script_location
-from ...database.models import Base
+from .. import admin as database_admin
+from ..migrate import migration_script_location
+from ..models import Base
 
 _PACKAGE_ROOT = Path(vaultspec_a2a.__file__).resolve().parent
 
@@ -35,7 +35,7 @@ _PACKAGE_ROOT = Path(vaultspec_a2a.__file__).resolve().parent
 def _head_revision() -> str:
     """Return the single head of the packaged revision chain."""
     heads = ScriptDirectory.from_config(
-        control_db._alembic_cfg("sqlite+aiosqlite:///:memory:")
+        database_admin._alembic_cfg("sqlite+aiosqlite:///:memory:")
     ).get_heads()
     assert len(heads) == 1, f"expected one head, found {sorted(heads)}"
     return heads[0]
@@ -55,14 +55,14 @@ def _tables(database: Path) -> set[str]:
 
 def test_the_migration_config_reads_no_file_outside_the_package() -> None:
     """A configuration file is a checkout artefact; the wheel ships without one."""
-    cfg = control_db._alembic_cfg("sqlite+aiosqlite:///runtime.db")
+    cfg = database_admin._alembic_cfg("sqlite+aiosqlite:///runtime.db")
 
     assert cfg.config_file_name is None
 
 
 def test_the_revision_scripts_resolve_from_installed_package_data() -> None:
     """The script location must be an absolute path inside the installed package."""
-    cfg = control_db._alembic_cfg("sqlite+aiosqlite:///runtime.db")
+    cfg = database_admin._alembic_cfg("sqlite+aiosqlite:///runtime.db")
     script_location = cfg.get_main_option("script_location")
 
     assert script_location is not None
@@ -78,7 +78,7 @@ def test_the_revision_scripts_resolve_from_installed_package_data() -> None:
 def test_the_caller_database_url_is_the_one_that_gets_migrated() -> None:
     """The URL handed in is the URL Alembic binds, escaping and all."""
     url = "sqlite+aiosqlite:///C:/Vault Spec/runtime%25.db"
-    cfg = control_db._alembic_cfg(url)
+    cfg = database_admin._alembic_cfg(url)
 
     assert cfg.get_main_option("sqlalchemy.url") == url
 
@@ -87,7 +87,7 @@ def test_no_module_constant_points_outside_the_installed_package() -> None:
     """A checkout-relative constant is the defect itself; none may survive here."""
     escaping = {
         name: value
-        for name, value in vars(control_db).items()
+        for name, value in vars(database_admin).items()
         if isinstance(value, Path) and not value.resolve().is_relative_to(_PACKAGE_ROOT)
     }
 
@@ -103,7 +103,7 @@ def test_a_real_upgrade_reaches_head_and_builds_the_declared_schema(
     """The action's own seam migrates a real database to the real head revision."""
     database = tmp_path / "tooling.db"
 
-    control_db._migrate_to_head(f"sqlite+aiosqlite:///{database}")
+    database_admin._migrate_to_head(f"sqlite+aiosqlite:///{database}")
 
     tables = _tables(database)
     assert tables >= set(Base.metadata.tables)
@@ -126,6 +126,6 @@ def test_a_real_upgrade_survives_a_percent_in_the_database_directory(
     directory.mkdir()
     database = directory / "tooling.db"
 
-    control_db._migrate_to_head(f"sqlite+aiosqlite:///{database}")
+    database_admin._migrate_to_head(f"sqlite+aiosqlite:///{database}")
 
     assert _tables(database) >= set(Base.metadata.tables)

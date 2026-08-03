@@ -1,7 +1,7 @@
 """The synchronous URLs the admin and destructive CLI paths run on must be real.
 
-``control.db`` builds a synchronous engine straight from ``database_sync_url`` and
-``checkpoint_sync_url`` — including inside ``db clear``, which deletes rows. The
+``database.admin`` builds a synchronous engine straight from ``database_sync_url``
+and ``checkpoint_sync_url`` — including inside ``clear``, which deletes rows. The
 derivation used to be a substring replace of ``+asyncpg`` with ``+psycopg``, which
 is a silent no-op on a URL that declares no driver at all. The shipped
 ``.env.example`` documented exactly such a URL for the checkpoint store, so an

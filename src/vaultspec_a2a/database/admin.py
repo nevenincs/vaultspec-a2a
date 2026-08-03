@@ -1,26 +1,31 @@
-"""Database dev-tooling operations.
+"""Database administration verbs: migrate, snapshot, restore, clear.
 
 Invoked via::
 
-    python -m vaultspec_a2a.control.db <action> [args]
+    python -m vaultspec_a2a.database.admin <action> [args]
+
+These operate on the store rather than on a domain, so they live beside
+:mod:`vaultspec_a2a.database.migrate` — the migration-configuration authority
+they route through — rather than in ``control``, whose other modules are domain
+orchestration layered over the repository functions.
 
 Actions
 -------
 migrate [--fix]
-    Run pending Alembic migrations.  With ``--fix`` also clears stale WAL
-    locks and runs VACUUM afterwards.
+    Apply pending revisions.  With ``--fix`` also truncates the write-ahead log
+    and runs ``VACUUM``, which is the only path in this project that returns
+    freed pages to the operating system.
 
 snapshot [list]
-    Without sub-command: create a timestamped SQLite backup alongside the
-    live database file.
-    With ``list``: print all available snapshots.
+    Without a sub-command: copy the live database to a timestamped file beside
+    it.  With ``list``: enumerate those copies.
 
 restore --name FILE [--yes]
-    Restore the database from a named snapshot file.  Refuses to operate
-    while any service process is listening on a configured port.
+    Overwrite the live database from a named snapshot.  Refuses while a service
+    is listening on a configured port.
 
 clear --yes
-    Delete all application data rows (preserves schema).
+    Delete every application row, and the checkpoint state, preserving schema.
 """
 
 from __future__ import annotations
@@ -32,9 +37,11 @@ import sys
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    import sqlite3
     from pathlib import Path
 
     from alembic.config import Config as AlembicConfig
+    from sqlalchemy.engine import Engine
 
 
 # ---------------------------------------------------------------------------
@@ -53,7 +60,7 @@ def _alembic_cfg(database_url: str) -> AlembicConfig:
     the script location it names is relative to the working directory rather
     than to the installed package.
     """
-    from ..database import build_migration_config
+    from .migrate import build_migration_config
 
     return build_migration_config(database_url)
 
@@ -82,6 +89,36 @@ def _get_db_path() -> Path:
     return db_path
 
 
+def _apply_sqlite_pragmas(dbapi_conn: sqlite3.Connection, _record: object) -> None:
+    """Enforce foreign keys and a busy timeout on an administrative connection.
+
+    The application engine gets these from its own connect listener, which is
+    bound to that engine and cannot be reused here - the verbs below need a
+    SYNCHRONOUS engine, and the listener is attached to the async one.  Applying
+    the same set explicitly keeps this path from being the one posture that
+    differs, which matters most for the destructive verbs: ``foreign_keys`` is
+    per-connection and OFF by default, so without it SQLite would silently
+    orphan child rows if the delete order were ever wrong, and ``busy_timeout``
+    decides whether a locked database waits or fails immediately.
+    """
+    from ..control.config import settings
+
+    cursor = dbapi_conn.cursor()
+    cursor.execute("PRAGMA foreign_keys=ON")
+    cursor.execute(f"PRAGMA busy_timeout={settings.sqlite_busy_timeout_ms:d}")
+    cursor.close()
+
+
+def _administrative_engine(url: str) -> Engine:
+    """Return a synchronous engine carrying the project's SQLite pragmas."""
+    from sqlalchemy import create_engine, event
+
+    engine = create_engine(url)
+    if engine.dialect.name == "sqlite":
+        event.listen(engine, "connect", _apply_sqlite_pragmas)
+    return engine
+
+
 # ---------------------------------------------------------------------------
 # Action implementations
 # ---------------------------------------------------------------------------
@@ -89,26 +126,29 @@ def _get_db_path() -> Path:
 
 def _action_migrate(fix: bool) -> None:
     """Run pending Alembic migrations, optionally with WAL cleanup and VACUUM."""
+    import sqlite3
+
     from ..control.config import settings
 
     _migrate_to_head(settings.database_url)
     print("Migrated to head.")
 
-    if fix:
-        import sqlite3
+    if not fix:
+        return
 
-        db_path = _get_db_path()
-        if db_path.exists():
-            conn = sqlite3.connect(str(db_path))
-            try:
-                conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
-                conn.execute("VACUUM")
-                conn.commit()
-                print("WAL checkpoint and VACUUM complete.")
-            finally:
-                conn.close()
-        else:
-            print("Database file not found; skipping WAL fix.", file=sys.stderr)
+    db_path = _get_db_path()
+    if not db_path.exists():
+        print("Database file not found; skipping WAL fix.", file=sys.stderr)
+        return
+
+    conn = sqlite3.connect(str(db_path))
+    try:
+        conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+        conn.execute("VACUUM")
+        conn.commit()
+        print("WAL checkpoint and VACUUM complete.")
+    finally:
+        conn.close()
 
 
 def _action_snapshot() -> None:
@@ -180,6 +220,8 @@ def _action_restore(name: str, yes: bool) -> None:
 
     db_path = _get_db_path()
     snapshot_path = db_path.parent / name
+    # Rejects both a ``..`` escape and an absolute path: joining an absolute
+    # name replaces the base, and the resolved result then fails this check.
     if not snapshot_path.resolve().is_relative_to(db_path.parent.resolve()):
         print("Invalid snapshot name.", file=sys.stderr)
         raise SystemExit(1)
@@ -202,7 +244,7 @@ def _action_restore(name: str, yes: bool) -> None:
 # ``authoring_event_cursor`` carries a foreign key to ``threads``, so deleting the
 # parent first would be refused wherever foreign keys are enforced.
 #
-# The previous list covered four of these nine and no checkpoint state, so a
+# A previous list covered four of these nine and no checkpoint state, so a
 # "clear" left control actions, permission requests, queued tasks, execution
 # state, the authoring cursor, and every conversation checkpoint in place - and
 # reported success. An incomplete truncation that announces completion is worse
@@ -220,8 +262,6 @@ _CLEAR_ORDER: tuple[str, ...] = (
     "threads",
 )
 
-_ALLOWED_TABLES = frozenset(_CLEAR_ORDER)
-
 # LangGraph owns these; they hold the only durable copy of agent conversation
 # content, so a clear that spares them leaves the bulk of the data behind.
 _CHECKPOINT_TABLES: tuple[str, ...] = ("writes", "checkpoints")
@@ -236,18 +276,21 @@ def _action_clear(yes: bool) -> None:
         )
         raise SystemExit(1)
 
-    from sqlalchemy import create_engine, text
+    from sqlalchemy import text
 
     from ..control.config import settings
 
-    engine = create_engine(settings.database_sync_url)
+    # The table names are this module's own constants and never reach here from
+    # input, which is what makes interpolating them into the statement safe.
+    engine = _administrative_engine(settings.database_sync_url)
     cleared: list[str] = []
-    with engine.begin() as conn:
-        for table in _CLEAR_ORDER:
-            if table not in _ALLOWED_TABLES:
-                raise ValueError(f"table {table!r} not in allowlist")
-            conn.execute(text(f"DELETE FROM {table}"))
-            cleared.append(table)
+    try:
+        with engine.begin() as conn:
+            for table in _CLEAR_ORDER:
+                conn.execute(text(f"DELETE FROM {table}"))
+                cleared.append(table)
+    finally:
+        engine.dispose()
     cleared.extend(_clear_checkpoint_store())
     print(f"Cleared {len(cleared)} tables.")
 
@@ -261,11 +304,11 @@ def _clear_checkpoint_store() -> list[str]:
     tables. A missing table is therefore skipped rather than treated as an error,
     while a present one is always cleared.
     """
-    from sqlalchemy import create_engine, inspect, text
+    from sqlalchemy import inspect, text
 
     from ..control.config import settings
 
-    engine = create_engine(settings.checkpoint_sync_url)
+    engine = _administrative_engine(settings.checkpoint_sync_url)
     cleared: list[str] = []
     try:
         present = set(inspect(engine).get_table_names())
@@ -287,12 +330,11 @@ def _clear_checkpoint_store() -> list[str]:
 
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="python -m vaultspec_a2a.control.db",
-        description="Database dev-tooling operations.",
+        prog="python -m vaultspec_a2a.database.admin",
+        description="Database administration operations.",
     )
     sub = parser.add_subparsers(dest="action", metavar="ACTION")
 
-    # migrate
     migrate_p = sub.add_parser("migrate", help="Run pending Alembic migrations.")
     migrate_p.add_argument(
         "--fix",
@@ -304,7 +346,6 @@ def _build_parser() -> argparse.ArgumentParser:
         ),
     )
 
-    # snapshot / snapshot list
     snapshot_p = sub.add_parser(
         "snapshot",
         help="Create a timestamped snapshot, or manage snapshots.",
@@ -312,7 +353,6 @@ def _build_parser() -> argparse.ArgumentParser:
     snapshot_sub = snapshot_p.add_subparsers(dest="snapshot_cmd", metavar="SUBCMD")
     snapshot_sub.add_parser("list", help="List available snapshots.")
 
-    # restore
     restore_p = sub.add_parser("restore", help="Restore database from a snapshot.")
     restore_p.add_argument(
         "--name",
@@ -329,7 +369,6 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Confirm destructive operation.",
     )
 
-    # clear
     clear_p = sub.add_parser(
         "clear", help="Delete all application data (keeps schema)."
     )

@@ -4,13 +4,12 @@ tags:
   - '#current-project-binding'
 date: '2026-08-03'
 modified: '2026-08-03'
-body_hash: 'sha256:6e3d2dcaa126c9eae0510f77239d92da82899c97e5f8d564d76ae0a05bde6433'
+body_hash: 'sha256:f9a130e4d9d6452c3856e2049d8ce660d1dafe3948824e3fd036653276b6eb23'
 tier: L2
 related:
   - '[[2026-08-03-current-project-binding-adr]]'
   - '[[2026-08-03-current-project-binding-research]]'
 ---
-
 
 # `current-project-binding` plan
 
@@ -34,18 +33,24 @@ Enforcement needs something to enforce against. This phase mints the project onc
 - [ ] `P02.S07` - mint the active project once at admission in one canonical form; `src/vaultspec_a2a/control/thread_service.py`.
 - [ ] `P02.S08` - carry the minted project across dispatch instead of the raw path string; `src/vaultspec_a2a/ipc/schemas.py`.
 - [ ] `P02.S09` - resolve the resolved-versus-stored spelling split so one workspace yields one graph cache entry; `src/vaultspec_a2a/worker/graph_lifecycle.py`.
-- [ ] `P02.S10` - declare a third trust axis on every registry entry stating whether it is root-pinnable; `src/vaultspec_a2a/providers/_acp_mcp.py`.
-- [ ] `P02.S11` - refuse composition of a server that cannot be pinned rather than surfacing it unpinned; `src/vaultspec_a2a/providers/_acp_mcp.py`.
-- [ ] `P02.S12` - add the per-run pinning seam that carries the project to a pinnable server, separate from the frozen registry; `src/vaultspec_a2a/providers/_acp_mcp.py`.
-- [ ] `P02.S13` - prove a pinned server receives the bound project and an unpinnable one refuses composition; `src/vaultspec_a2a/providers/tests/test_harness_mcp_pinning.py`.
+- [x] `P02.S10` - declare a third trust axis on every registry entry stating whether it is root-pinnable; `src/vaultspec_a2a/providers/_acp_mcp.py`.
+- [x] `P02.S11` - refuse composition of a server that cannot be pinned rather than surfacing it unpinned; `src/vaultspec_a2a/providers/_acp_mcp.py`.
+- [x] `P02.S12` - add the per-run pinning seam that carries the project to a pinnable server, separate from the frozen registry; `src/vaultspec_a2a/providers/_acp_mcp.py`.
+- [x] `P02.S13` - prove a pinned server receives the bound project and an unpinnable one refuses composition; `src/vaultspec_a2a/providers/tests/test_harness_mcp_pinning.py`.
+- [ ] `P02.S20` - populate the documented but never written workspace root on graph input so the state key stops being dead capability; `src/vaultspec_a2a/worker/graph_lifecycle.py`.
+- [ ] `P02.S21` - pass the bound project into harness server composition at the worker node site; `src/vaultspec_a2a/graph/nodes/worker.py`.
+- [ ] `P02.S22` - pass the bound project into harness server composition at the research graph site; `src/vaultspec_a2a/graph/compiler.py`.
+- [ ] `P02.S23` - hoist a pinned server declared environment into the spawn environment on the strict claude lane; `src/vaultspec_a2a/providers/acp_chat_model.py`.
+- [ ] `P02.S24` - prove a pinned server project reaches the spawned child rather than only the registry spec; `src/vaultspec_a2a/providers/tests/test_harness_mcp_pinning.py`.
+- [ ] `P02.S25` - pass the bound project into codex harness spec rendering where the model carries names across the seam; `src/vaultspec_a2a/providers/codex_chat_model.py`.
 
 ### Phase `P03` - reconcile the remaining identity gaps
 
 The places where project identity is lost, assumed, or implied but absent: the authoring write channel bound to engine-global state, crash recovery that dispatches without a project, and harness surfaces verified but never consumed.
 
 - [ ] `P03.S14` - carry the bound project on the authoring session rather than a literal scope constant; `src/vaultspec_a2a/authoring/submitter.py`.
-- [ ] `P03.S15` - carry the bound project on each authoring proposal payload; `src/vaultspec_a2a/authoring/session.py`.
+- [ ] `P03.S15` - prove a session is never reused across projects so every proposal inherits a session scope that is the bound project; `src/vaultspec_a2a/authoring/session.py`.
 - [ ] `P03.S16` - refuse an absent project early and typed in crash recovery, matching the follow-up path; `src/vaultspec_a2a/control/direct_control_recovery.py`.
 - [ ] `P03.S17` - reconcile harness verification with the surface a run actually consumes; `src/vaultspec_a2a/context/harness.py`.
-- [ ] `P03.S18` - prove the authoring session and every proposal carry the bound project; `src/vaultspec_a2a/authoring/tests/test_authoring_scope_binding.py`.
+- [ ] `P03.S18` - prove the authoring session carries the bound project in the engine own scope spelling and that proposals inherit it; `src/vaultspec_a2a/authoring/tests/test_authoring_scope_binding.py`.
 - [ ] `P03.S19` - prove crash recovery refuses a thread whose stored metadata names no project; `src/vaultspec_a2a/control/tests/test_direct_control_recovery.py`.

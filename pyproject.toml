@@ -134,7 +134,7 @@ tooling = [
   "tenacity>=9.0.0",
   "tomlkit>=0.15.0",
   "ty>=0.0.15",
-  "vaultspec-core>=0.1.48,<0.2",
+  "vaultspec-core>=0.1.56,<0.2",
   # Dead-code detection. Advisory: it infers reachability it cannot always see,
   # so a finding is a lead to confirm rather than a verdict.
   "vulture>=2.16",
@@ -150,7 +150,7 @@ dev = [
 # caller (the dashboard release pipeline), not by ordinary development.
 freeze = [
   "pyinstaller>=6.11",
-  "vaultspec-core>=0.1.48,<0.2",
+  "vaultspec-core>=0.1.56,<0.2",
 ]
 all = [
   { include-group = "docs" },

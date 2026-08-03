@@ -12,6 +12,7 @@ assert on the rows and checkpoints that survive.
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
@@ -19,6 +20,8 @@ import pytest_asyncio
 from langgraph.checkpoint.base import empty_checkpoint
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+
+from ...conftest import materialize_schema
 
 if TYPE_CHECKING:
     from langchain_core.runnables import RunnableConfig
@@ -34,16 +37,15 @@ from ...control.repositories import (
 )
 from ...control.thread_service import delete_thread_service
 from ...database import create_artifact, create_thread, get_thread
-from ...database.models import Base, ThreadDeletionSagaModel
+from ...database.models import ThreadDeletionSagaModel
 from ...thread.enums import CleanupKind, ThreadStatus
 
 
 @pytest_asyncio.fixture
 async def session_factory(tmp_path_factory: pytest.TempPathFactory):
     case_dir = tmp_path_factory.mktemp("deletion-saga-control-db")
+    materialize_schema(Path(case_dir / "test.db"))
     engine = create_async_engine(f"sqlite+aiosqlite:///{case_dir / 'test.db'}")
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
     yield async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
     await engine.dispose()
 

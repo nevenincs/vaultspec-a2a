@@ -1,6 +1,7 @@
 """Focused replay/idempotency tests for worker->gateway event handlers."""
 
 import json
+from pathlib import Path
 
 import pytest
 import pytest_asyncio
@@ -8,6 +9,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
+from ...conftest import materialize_schema
 from ...control.action_lease import claim_control_action
 from ...control.drain import DrainGate
 from ...control.event_handlers import (
@@ -23,7 +25,7 @@ from ...database import (
     record_permission_response_submission,
     set_thread_approval_state,
 )
-from ...database.models import Base, ControlActionModel, ThreadModel
+from ...database.models import ControlActionModel, ThreadModel
 from ...streaming.aggregator import EventAggregator
 from ...thread.enums import ControlActionType
 
@@ -85,9 +87,8 @@ async def engine(tmp_path_factory: pytest.TempPathFactory):
     """Create a file-backed engine for replay-focused control tests."""
     case_dir = tmp_path_factory.mktemp("control-event-handler-db")
     db_file = case_dir / "test.db"
+    materialize_schema(Path(db_file))
     eng = create_async_engine(f"sqlite+aiosqlite:///{db_file}")
-    async with eng.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
     yield eng
     await eng.dispose()
 

@@ -14,6 +14,7 @@ import asyncio
 import json
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
 import anyio
@@ -28,6 +29,8 @@ from sqlalchemy.ext.asyncio import (
     async_sessionmaker,
     create_async_engine,
 )
+
+from ...conftest import materialize_schema
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator, AsyncIterator
@@ -59,7 +62,6 @@ from ...database import (
     record_permission_request,
     update_thread_status,
 )
-from ...database.models import Base
 from ...thread.enums import ControlActionType, PermissionRequestStatus, ThreadStatus
 from ...worker.app import create_worker_app
 from ...worker.executor import Executor
@@ -72,9 +74,8 @@ async def session_factory(
 ) -> AsyncIterator[async_sessionmaker[AsyncSession]]:
     """A real file-backed aiosqlite session factory with the schema created."""
     db_file = tmp_path / "subscriber.db"
+    materialize_schema(Path(db_file))
     engine = create_async_engine(f"sqlite+aiosqlite:///{db_file}")
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
     yield async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
     await engine.dispose()
 

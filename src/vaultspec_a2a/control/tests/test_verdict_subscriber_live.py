@@ -39,6 +39,7 @@ from __future__ import annotations
 
 import uuid
 from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
 import anyio
@@ -64,6 +65,7 @@ from ...authoring import (
     mint_actor_token,
     verdict_from_event,
 )
+from ...conftest import materialize_schema
 from ...control.action_lease import claim_control_action
 from ...control.circuit_breaker import WorkerCircuitBreaker
 from ...control.event_handlers import relay_event
@@ -81,7 +83,6 @@ from ...database import (
     record_permission_request,
     update_thread_status,
 )
-from ...database.models import Base
 from ...thread.enums import ControlActionType, PermissionRequestStatus, ThreadStatus
 from ...worker.app import create_worker_app
 from ...worker.executor import Executor
@@ -313,9 +314,8 @@ async def test_live_verdict_round_trip_parks_and_resumes(
 
     # --- a2a side: seed a parked run per proposal on a real checkpointer ---
     db_file = tmp_path / "rt.db"
+    materialize_schema(Path(db_file))
     db_engine = create_async_engine(f"sqlite+aiosqlite:///{db_file}")
-    async with db_engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
     session_factory = async_sessionmaker(
         db_engine, class_=AsyncSession, expire_on_commit=False
     )
@@ -568,9 +568,8 @@ async def test_live_missed_reject_is_recovered_by_parked_reconcile(
 
     # --- a2a side: seed the parked run, NEVER processing the reject event ---
     db_file = tmp_path / "mr.db"
+    materialize_schema(Path(db_file))
     db_engine = create_async_engine(f"sqlite+aiosqlite:///{db_file}")
-    async with db_engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
     session_factory = async_sessionmaker(
         db_engine, class_=AsyncSession, expire_on_commit=False
     )
@@ -694,9 +693,8 @@ async def test_live_running_clobbered_parked_run_is_recovered_by_parked_reconcil
     assert mine[0]["approval"]["stale"] is False
 
     db_file = tmp_path / "cl.db"
+    materialize_schema(Path(db_file))
     db_engine = create_async_engine(f"sqlite+aiosqlite:///{db_file}")
-    async with db_engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
     session_factory = async_sessionmaker(
         db_engine, class_=AsyncSession, expire_on_commit=False
     )
@@ -806,9 +804,8 @@ async def test_live_running_with_fresh_resume_claim_is_not_re_driven(
     )
 
     db_file = tmp_path / "fc.db"
+    materialize_schema(Path(db_file))
     db_engine = create_async_engine(f"sqlite+aiosqlite:///{db_file}")
-    async with db_engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
     session_factory = async_sessionmaker(
         db_engine, class_=AsyncSession, expire_on_commit=False
     )

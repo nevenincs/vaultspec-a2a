@@ -13,12 +13,14 @@ from __future__ import annotations
 
 import hashlib
 import json
+from pathlib import Path
 
 import httpx
 import pytest
 import pytest_asyncio
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
+from ...conftest import materialize_schema
 from ...control.circuit_breaker import WorkerCircuitBreaker
 from ...control.permission_service import respond_to_permission
 from ...control.worker_management import LazyWorkerSpawner
@@ -28,7 +30,7 @@ from ...database import (
     get_permission_request,
     record_permission_request,
 )
-from ...database.models import Base, ControlActionModel
+from ...database.models import ControlActionModel
 from ...streaming.aggregator import EventAggregator
 from ...thread.enums import ControlActionResultStatus, ThreadStatus
 
@@ -46,9 +48,8 @@ async def engine(tmp_path_factory: pytest.TempPathFactory):
     """A file-backed engine so a second session reads only committed state."""
     case_dir = tmp_path_factory.mktemp("permission-rejection-db")
     db_file = case_dir / "test.db"
+    materialize_schema(Path(db_file))
     eng = create_async_engine(f"sqlite+aiosqlite:///{db_file}")
-    async with eng.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
     yield eng
     await eng.dispose()
 

@@ -95,8 +95,7 @@ async def test_invalid_frozen_selection_fails_only_its_thread_and_sweep_continue
         assert corrupt is not None
         assert corrupt.status == ThreadStatus.FAILED.value
         assert (
-            corrupt.failure_reason
-            == "persisted provider catalog selection is invalid"
+            corrupt.failure_reason == "persisted provider catalog selection is invalid"
         )
         assert valid is not None
         assert valid.status == ThreadStatus.RECONCILING.value

@@ -23,6 +23,7 @@ import subprocess
 import sys
 import threading
 import time
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
 import uvicorn
@@ -30,7 +31,7 @@ from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from ...api.tests.conftest import make_app
-from ...database.models import Base
+from ...conftest import materialize_schema
 from ...lifecycle.discovery import service_json_path, write_service_json
 
 if TYPE_CHECKING:
@@ -106,9 +107,8 @@ class _GatewayFixture:
         self._loop.close()
 
     async def _make_engine(self) -> Any:
+        materialize_schema(Path(self._tmp / "test.db"))
         engine = create_async_engine(f"sqlite+aiosqlite:///{self._tmp / 'test.db'}")
-        async with engine.begin() as conn:
-            await conn.run_sync(Base.metadata.create_all)
         return engine
 
 

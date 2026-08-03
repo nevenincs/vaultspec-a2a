@@ -22,8 +22,8 @@ from sqlalchemy.ext.asyncio import (
     create_async_engine,
 )
 
+from ....conftest import materialize_schema
 from ....database import create_thread, seed_task_queue
-from ....database.models import Base
 from ....worker.task_queue_port import SqlTaskQueuePort
 from ...nodes.vault_reader import create_mount_node
 from ...tools.task_queue import create_mark_task_complete_tool
@@ -92,9 +92,8 @@ class _VaultWriteWatcher:
 async def file_engine(tmp_path: Path) -> AsyncGenerator[AsyncEngine]:
     """File-backed async engine (shared across the port's separate sessions)."""
     db_file = tmp_path / "service.db"
+    materialize_schema(Path(db_file.as_posix()))
     eng = create_async_engine(f"sqlite+aiosqlite:///{db_file.as_posix()}")
-    async with eng.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
     yield eng
     await eng.dispose()
 

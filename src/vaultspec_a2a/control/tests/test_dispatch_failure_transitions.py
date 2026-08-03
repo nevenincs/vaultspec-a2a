@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 import httpx
@@ -16,6 +17,7 @@ from sqlalchemy.ext.asyncio import (
 )
 
 from ...api.tests.clarification_harness import park_clarification
+from ...conftest import materialize_schema
 from ...control.circuit_breaker import WorkerCircuitBreaker
 from ...control.clarification_service import respond_to_clarification
 from ...control.message_service import send_followup_message
@@ -25,7 +27,6 @@ from ...database import (
     create_thread,
     get_thread,
 )
-from ...database.models import Base
 from ...providers.conditions import ProviderCondition
 from ...thread.clarification import ClarificationAnswers
 from ...thread.dispatch_policy import FailureType
@@ -33,7 +34,6 @@ from ...thread.enums import ThreadStatus
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
-    from pathlib import Path
 
 
 @pytest_asyncio.fixture
@@ -43,9 +43,8 @@ async def engine(
     """Create a file-backed engine for dispatch-failure tests."""
     case_dir = tmp_path_factory.mktemp("dispatch-failure-db")
     db_file = case_dir / "test.db"
+    materialize_schema(Path(db_file))
     eng = create_async_engine(f"sqlite+aiosqlite:///{db_file}")
-    async with eng.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
     yield eng
     await eng.dispose()
 

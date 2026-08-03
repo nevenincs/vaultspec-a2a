@@ -15,6 +15,7 @@ from langgraph.graph import END, StateGraph
 from langgraph.types import Command
 from pydantic import PrivateAttr
 
+from ....conftest import materialize_schema
 from ....thread.state import TeamState
 from ...nodes.worker import create_worker_node
 
@@ -285,13 +286,11 @@ async def test_worker_dispatches_mark_complete_command_through_graph(
     )
 
     from ....database import create_thread, seed_task_queue
-    from ....database.models import Base
     from ....worker.task_queue_port import SqlTaskQueuePort
 
     db_file = tmp_path / "queue.db"
+    materialize_schema(Path(db_file.as_posix()))
     engine = create_async_engine(f"sqlite+aiosqlite:///{db_file.as_posix()}")
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
     session_factory = async_sessionmaker(
         engine, class_=AsyncSession, expire_on_commit=False
     )

@@ -209,6 +209,7 @@ class CertifiedGateway:
                     "stage": "prepare",
                     "run_id": run_id,
                     "autonomous": True,
+                    **self.run_fields(executes=False),
                 },
             )
 
@@ -229,6 +230,7 @@ class CertifiedGateway:
                     "reservation_id": reservation_id,
                     "run_id": run_id,
                     "autonomous": True,
+                    **self.run_fields(executes=False),
                 },
             )
 
@@ -254,6 +256,7 @@ class CertifiedGateway:
                         "tokens": {role: "tok-certification"},
                         "engine_bearer": "bearer",
                     },
+                    **self.run_fields(executes=True),
                 },
             )
 
@@ -314,6 +317,12 @@ def certified_gateway(
     """
     app_home = workdir / "app-home"
     app_home.mkdir(parents=True, exist_ok=True)
+    # Every run this stack starts is sited in one real directory: the run-start
+    # verb requires the active project, and the catalog it revalidates against is
+    # served per workspace, so the handle and the runs it drives must name the
+    # same one.
+    workspace_root = workdir / "workspace"
+    workspace_root.mkdir(parents=True, exist_ok=True)
     seed_credentials(app_home, attach=attach_token, ownership=ownership_capability)
     seat_valid_database(app_home)
 
@@ -349,7 +358,10 @@ def certified_gateway(
 
     try:
         yield CertifiedGateway(
-            base_url=base, attach_token=attach_token, app_home=app_home
+            base_url=base,
+            attach_token=attach_token,
+            app_home=app_home,
+            workspace_root=workspace_root,
         )
     finally:
         reap_gateway(proc)

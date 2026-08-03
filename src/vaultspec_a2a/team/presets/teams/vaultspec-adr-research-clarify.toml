@@ -75,17 +75,14 @@ model    = { provider = "deterministic" }
 [[team.workers]]
 agent_id = "vaultspec-synthesist"
 model    = { provider = "deterministic" }
-capability = "high"
 
 [[team.workers]]
 agent_id = "vaultspec-adr-author"
 model    = { provider = "deterministic" }
-capability = "high"
 
 [[team.workers]]
 agent_id = "vaultspec-plan-author"
 model    = { provider = "deterministic" }
-capability = "high"
 
 [[team.workers]]
 agent_id = "vaultspec-doc-reviewer"

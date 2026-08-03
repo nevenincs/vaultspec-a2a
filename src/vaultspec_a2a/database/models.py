@@ -343,7 +343,16 @@ class PermissionLogModel(Base):
 
     id: Mapped[str] = mapped_column(primary_key=True)
     thread_id: Mapped[str] = mapped_column(ForeignKey("threads.id"))
-    agent_id: Mapped[str] = mapped_column()
+    # WHO is not knowable at the decision seam, in either sense. The agent whose
+    # tool call was gated is never captured upstream — the interrupt payload
+    # carries tool name, input, and options but no agent — and the responder is
+    # not threaded through as an authenticated identity. Nullable rather than
+    # NOT NULL for the reason provider_condition states above: a required column
+    # here forces either a fabricated attribution or no record at all, and an
+    # unattributed decision still answers which tool call was approved on which
+    # run, with which option, when. Attributing the requesting agent means
+    # widening the interrupt payload and the request row, which is its own step.
+    agent_id: Mapped[str | None] = mapped_column(default=None)
     tool_name: Mapped[str] = mapped_column()
     action: Mapped[str] = mapped_column()
     option_id: Mapped[str | None] = mapped_column(default=None)

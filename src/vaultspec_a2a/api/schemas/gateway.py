@@ -362,11 +362,13 @@ class RunStartResponse(BaseModel):
     # Whether the run was accepted as eligible to dispatch (always True on a 201;
     # ineligible requests are refused with a 4xx before reaching this response).
     eligible: bool = True
-    # model-profiles: the profile the run was frozen with and its effective
-    # per-role assignment (additive v1). Absent on the idempotent-replay short
-    # path where the response is reconstructed from the existing run row.
-    profile_id: str | None = None
-    assignments: list[RoleAssignmentSummary] = Field(default_factory=list)
+    # The complete execution authority the run was frozen with - the single
+    # disclosure of what will produce this run's work. The retired profile pair
+    # (`profile_id`, `assignments`) is deliberately absent here: a request that
+    # could start a profile-driven run no longer parses, so on this response
+    # those fields could only ever disclose a confident emptiness. Runs frozen
+    # under the legacy profiles remain readable through run-status, which keeps
+    # both shapes.
     frozen_assignment: FrozenTeamAssignmentSummary | None = None
 
 
@@ -413,8 +415,8 @@ class RunCommitResponse(BaseModel):
     lease_id: str
     semantic_status: str = "starting"
     nickname: str | None = None
-    profile_id: str | None = None
-    assignments: list[RoleAssignmentSummary] = Field(default_factory=list)
+    # As on RunStartResponse: the freeze is the one start-surface disclosure;
+    # the legacy profile pair is unreachable through the commit schema.
     frozen_assignment: FrozenTeamAssignmentSummary | None = None
 
 

@@ -76,12 +76,9 @@ class TestCreateThreadWithMetadata:
                         "message": "Implement auth flow",
                         "metadata": metadata,
                         "run_id": "thread-meta-01",
-                        # Resolved against a REAL workspace on purpose: this
-                        # test's workspace_root is deliberately bogus, and the
-                        # refusal under test is the run's, not the catalog
-                        # lookup's. Deriving the selection from the bad path
-                        # would fail earlier, for a different reason.
-                        "selection": catalog_run_fields(client)["selection"],
+                        "selection": catalog_run_fields(client, workspace_root=ws)[
+                            "selection"
+                        ],
                     },
                 )
 
@@ -107,12 +104,17 @@ class TestCreateThreadWithMetadata:
                     "message": "Hello",
                     "metadata": metadata,
                     "run_id": "thread-meta-02",
-                    "selection": catalog_run_fields(
-                        client, workspace_root=metadata["workspace_root"]
-                    )["selection"],
+                    # Resolved against a REAL workspace on purpose: this test's
+                    # workspace_root is deliberately bogus, and the refusal
+                    # under test is the run's. The catalog verb refuses a
+                    # nonexistent workspace with its own 422, so deriving the
+                    # selection from the bad path would fail earlier, inside
+                    # the fixture, for a different reason.
+                    "selection": catalog_run_fields(client)["selection"],
                 },
             )
         assert resp.status_code == 422
+        assert "existing directory" in resp.text
 
     def test_create_thread_auto_generates_nickname(
         self, session_factory, checkpointer
@@ -326,29 +328,31 @@ class TestGetMetadataEndpoint:
             assert data["feature_tag"] == "auth-flow"
             assert data["source_repo"] == "github.com/org/repo"
 
-    def test_metadata_is_absent_for_a_run_started_without_any(
+    def test_metadata_reads_back_minted_for_a_run_that_declared_none(
         self, session_factory, checkpointer
     ) -> None:
-        """A run that declared nothing of its own still reads back, not 404s.
+        """A run that declared nothing of its own reads back what was minted.
 
-        The point survives the explicit-selection contract, but its subject
-        moved. Metadata can no longer be absent - the selection is revalidated
-        against the catalog served for its workspace, and the workspace rides in
-        metadata - so what is asserted now is that a run which declared no
-        SOURCE of its own reads back with those fields empty rather than
-        answering not-found. The retired metadata route 404'd here; the history
-        verb has a resource to serve and must use it.
+        This once asserted null metadata for a metadata-less run. That state is
+        unreachable now: the selection is revalidated against the catalog
+        served for its workspace, the workspace rides in metadata, and a run
+        without it is refused before anything durable exists - so every run has
+        metadata whether or not the caller cared. What the history verb must
+        therefore serve for a minimal run is the MINTED envelope: the admitted
+        workspace and the gateway-assigned nickname present, and the source
+        fields the caller genuinely never declared empty rather than invented.
         """
         app, _agg = _make_app(session_factory, checkpointer)
 
         with TestClient(app, raise_server_exceptions=True) as client:
+            fields = catalog_run_fields(client)
             create_resp = client.post(
                 "/v1/runs",
                 json={
                     "team_preset": _BUNDLE_FREE_PRESET,
                     "message": "Hello",
                     "run_id": "thread-meta-10",
-                    **catalog_run_fields(client),
+                    **fields,
                 },
             )
             assert create_resp.status_code == 201, create_resp.text
@@ -356,7 +360,17 @@ class TestGetMetadataEndpoint:
             resp = client.get(f"/v1/runs/{thread_id}/history")
 
         assert resp.status_code == 200
-        assert resp.json()["metadata"] is None
+        data = resp.json()["metadata"]
+        assert data is not None, "every admitted run carries minted metadata"
+        assert (
+            Path(data["workspace_root"]).resolve()
+            == Path(fields["metadata"]["workspace_root"]).resolve()
+        )
+        assert data["nickname"]
+        assert not data["feature_tag"]
+        assert not data["source_repo"]
+        assert not data["source_branch"]
+        assert not data["callee"]
 
     def test_history_404_nonexistent_thread(
         self, session_factory, checkpointer

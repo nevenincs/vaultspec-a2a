@@ -355,22 +355,25 @@ async def test_the_versioned_verb_answers_a_permission_and_refuses_a_foreign_one
         httpx.AsyncClient(base_url=base, timeout=10.0) as client,
     ):
 
-        async def _start(message: str) -> str:
+        async def _start(run_id: str, message: str) -> str:
+            # Each start needs its OWN stable id: the two runs here are distinct
+            # intentions, and reusing one id would turn the second start into a
+            # changed-body replay the gateway rightly refuses with a 409.
             resp = await client.post(
                 "/v1/runs",
                 json={
-                    "run_id": "gwlive-05",
+                    "run_id": run_id,
                     "team_preset": _PRESET,
                     "message": message,
                     "autonomous": True,
                     **await _run_fields(client),
                 },
             )
-            assert resp.status_code == 201
+            assert resp.status_code == 201, resp.text
             return resp.json()["run_id"]
 
-        owner = await _start("owns the permission")
-        stranger = await _start("owns nothing")
+        owner = await _start("gwlive-05", "owns the permission")
+        stranger = await _start("gwlive-06", "owns nothing")
         request_id = f"{owner}:req-live"
         await _seed_permission(session_factory, thread_id=owner, request_id=request_id)
 
@@ -1004,17 +1007,24 @@ async def test_run_envelope_and_presets_list_agree_on_provider_readiness(
     """One question, one answer: readiness cannot differ by which verb is asked.
 
     ``RoleAssignmentSummary`` is constructed in exactly two places - the preset
-    listing, which probes readiness live, and the run envelope, which is
-    assembled from the frozen assignment. The run envelope set every field but
-    ``provider_ready`` and so inherited the model's ``False`` default: a run
-    started on a provider the listing had just advertised as ready came back
-    reporting it unready. A Pydantic default cannot fail, which is exactly why
-    nothing caught it.
+    listing, which probes readiness live, and the run-status envelope of a run
+    frozen under the retired profiles, which is rebuilt from persisted metadata.
+    The envelope once set every field but ``provider_ready`` and so inherited
+    the model's ``False`` default: a run started on a provider the listing had
+    just advertised as ready came back reporting it unready. A Pydantic default
+    cannot fail, which is exactly why nothing caught it.
 
-    The assertion is agreement between the two disclosures, with each side
-    independently anchored to the production probe so they cannot pass by being
-    wrong in the same way.
+    A start can no longer produce that envelope - a new run's authority is its
+    frozen selection, and its legacy disclosure is empty by construction - but
+    runs frozen before the catalog contract remain readable through run-status,
+    so the profile-frozen run here is seeded durably, the way such runs actually
+    exist: as rows this service must keep answering for. The assertion is
+    agreement between the two disclosures, with each side independently anchored
+    to the production probe so they cannot pass by being wrong in the same way.
     """
+    from ...database.thread_repository import create_thread
+    from ...thread.enums import ThreadStatus
+
     app, _agg, _worker, _cp = make_app(session_factory, checkpointer)
     async with (
         _live_server(app) as base,
@@ -1035,45 +1045,56 @@ async def test_run_envelope_and_presets_list_agree_on_provider_readiness(
             probed = probe_provider_readiness(Provider(assignment["provider_id"]))
             assert assignment["provider_ready"] is probed.ready
 
-        start = await client.post(
-            "/v1/runs",
-            json={
-                "run_id": "gwlive-07",
-                "team_preset": _PRESET,
-                "message": "work",
-                "autonomous": True,
-                **await _run_fields(client),
-            },
-        )
-        assert start.status_code == 201
-        run_id = start.json()["run_id"]
+        # A run frozen under the profile the listing just disclosed. Only the
+        # frozen identity facts are persisted - readiness never is, which is the
+        # whole point: the envelope must probe it at read time, not replay a
+        # stored verdict or a model default.
+        run_id = "gwlive-07-legacy"
+        frozen_roles: JsonObject = {
+            str(agent_id): {
+                "role_id": entry["role_id"],
+                "provider": entry["provider_id"],
+                "capability": entry.get("capability"),
+                "model_name": entry.get("model_name"),
+                "fallback": entry.get("fallback_providers", []),
+                "source": entry.get("source", "team_default"),
+            }
+            for agent_id, entry in listed.items()
+        }
+        legacy_metadata: JsonObject = {
+            "model_profile": {
+                "profile_id": preset["default_profile_id"],
+                "digest": "0" * 64,
+                "roles": frozen_roles,
+            }
+        }
+        async with session_factory() as session:
+            await create_thread(
+                session,
+                thread_id=run_id,
+                status=ThreadStatus.RUNNING,
+                title="profile-frozen run",
+                team_preset=_PRESET,
+                metadata=json.dumps(legacy_metadata),
+            )
+            await session.commit()
 
         status = await client.get(f"/v1/runs/{run_id}")
         assert status.status_code == 200
 
-        # Both run-envelope disclosures - the start response and the polled
-        # status read, which rebuilds from persisted metadata - must answer for
-        # a role's provider exactly as the listing did.
-        for source, envelope in (
-            ("run-start", start.json()),
-            ("run-status", status.json()),
-        ):
-            disclosed = {a["agent_id"]: a for a in envelope["assignments"]}
-            assert set(disclosed) == set(listed), source
-            for agent_id, assignment in disclosed.items():
-                assert assignment["provider_id"] == listed[agent_id]["provider_id"], (
-                    source
-                )
-                assert (
-                    assignment["provider_ready"] is listed[agent_id]["provider_ready"]
-                ), source
+        envelope = status.json()
+        assert envelope["profile_id"] == preset["default_profile_id"]
+        disclosed = {a["agent_id"]: a for a in envelope["assignments"]}
+        assert set(disclosed) == set(listed)
+        for agent_id, assignment in disclosed.items():
+            assert assignment["provider_id"] == listed[agent_id]["provider_id"]
+            assert assignment["provider_ready"] is listed[agent_id]["provider_ready"]
 
 
 @pytest.mark.asyncio(loop_scope="function")
 async def test_run_start_threads_feedback_batch_id_to_worker(
     session_factory: SessionFactory,
     checkpointer: AsyncSqliteSaver,
-    tmp_path: Path,
 ) -> None:
     """The opaque feedback_batch_id threads run-start -> metadata -> worker dispatch.
 
@@ -1081,6 +1102,12 @@ async def test_run_start_threads_feedback_batch_id_to_worker(
     run-start body carries it, the gateway folds it onto the run metadata, and the
     dispatch the worker receives carries it verbatim - the same path active_feature
     rides. a2a never parses the id; retrieval is the worker's engine read.
+
+    Sited in the shared workspace `_run_fields` resolves against: a selection is
+    revalidated against the catalog served FOR ITS WORKSPACE, and pointing the
+    run at a fresh temporary directory forces a cold per-workspace catalog build
+    inside this request's 10s budget - a slow catalog then reads as a gateway
+    failure in a test about feedback-id threading.
     """
     app, _agg, worker, _cp = make_app(session_factory, checkpointer)
     async with (
@@ -1095,8 +1122,7 @@ async def test_run_start_threads_feedback_batch_id_to_worker(
                 "message": "revise the draft",
                 "autonomous": True,
                 "feedback_batch_id": "feedback-batch:deadbeefcafe",
-                "metadata": {"workspace_root": str(tmp_path)},
-                "selection": (await _run_fields(client))["selection"],
+                **await _run_fields(client),
             },
         )
         assert start.status_code == 201, start.text
@@ -1111,7 +1137,6 @@ async def test_run_start_threads_feedback_batch_id_to_worker(
 async def test_run_start_without_feedback_batch_id_dispatches_none(
     session_factory: SessionFactory,
     checkpointer: AsyncSqliteSaver,
-    tmp_path: Path,
 ) -> None:
     """A run with no feedback batch dispatches a null id (non-feedback run)."""
     app, _agg, worker, _cp = make_app(session_factory, checkpointer)
@@ -1126,8 +1151,7 @@ async def test_run_start_without_feedback_batch_id_dispatches_none(
                 "team_preset": _PRESET,
                 "message": "build it",
                 "autonomous": True,
-                "metadata": {"workspace_root": str(tmp_path)},
-                "selection": (await _run_fields(client))["selection"],
+                **await _run_fields(client),
             },
         )
         assert start.status_code == 201, start.text
@@ -1635,12 +1659,17 @@ async def test_run_start_freezes_and_discloses_profile(
         dispatched = worker.dispatches[-1]
         assert dispatched["model_assignment"], "frozen assignment must reach dispatch"
 
-        # run-status reproduces the frozen profile + assignments from run metadata.
+        # run-status reproduces the freeze from run metadata, byte-for-byte the
+        # authority run-start disclosed. The legacy pair it still carries for
+        # profile-frozen runs stays empty here: this run never had a profile.
         status = await client.get(f"/v1/runs/{body['run_id']}")
         assert status.status_code == 200
         sbody = status.json()
-        assert sbody["frozen_assignment"], "run-status must reproduce the freeze"
-        assert sbody["assignments"]
+        assert sbody["frozen_assignment"] == frozen, (
+            "run-status must reproduce the freeze run-start disclosed"
+        )
+        assert sbody["profile_id"] is None
+        assert sbody["assignments"] == []
 
 
 @pytest.mark.asyncio(loop_scope="function")
@@ -1733,19 +1762,21 @@ async def test_run_start_replays_a_rotated_bundle_and_conflicts_on_a_changed_bod
     carrying a different prompt is a NEW INTENTION wearing an old id and is
     refused, so it is never silently discarded as an idempotent replay.
 
-    The profile is held equal to the frozen default throughout so the digest
-    branch - not the profile branch - is the one exercised.
+    The catalog selection is held equal throughout - `_run_fields` is
+    deterministic for a served catalog - so the digest branch is exercised by
+    the one field that varies, the prompt.
     """
     app, _agg, worker, _cp = make_app(session_factory, checkpointer)
     async with (
         _live_server(app) as base,
         httpx.AsyncClient(base_url=base, timeout=10.0) as client,
     ):
+        # Every post below shares this run id ON PURPOSE: the test is about
+        # what a second request wearing an existing id is allowed to mean.
         payload = {
             "team_preset": _PRESET,
             "message": "go",
             "run_id": "rid-body-conflict",
-            "profile_id": "team-defaults",
             "actor_tokens": {
                 "tokens": {"coder": "tok-minted"},
                 "engine_bearer": "bearer-minted",
@@ -1753,7 +1784,7 @@ async def test_run_start_replays_a_rotated_bundle_and_conflicts_on_a_changed_bod
         }
         first = await client.post(
             "/v1/runs",
-            json={"run_id": "gwlive-25", **payload, **await _run_fields(client)},
+            json={**payload, **await _run_fields(client)},
         )
         assert first.status_code == 201, first.text
 
@@ -1761,7 +1792,6 @@ async def test_run_start_replays_a_rotated_bundle_and_conflicts_on_a_changed_bod
         rotated = await client.post(
             "/v1/runs",
             json={
-                "run_id": "gwlive-26",
                 **payload,
                 "actor_tokens": {
                     "tokens": {"coder": "tok-rotated"},
@@ -1773,12 +1803,11 @@ async def test_run_start_replays_a_rotated_bundle_and_conflicts_on_a_changed_bod
         assert rotated.status_code == 201, rotated.text
         assert rotated.json()["run_id"] == "rid-body-conflict"
 
-        # Same run id, same profile, DIFFERENT prompt -> fingerprint conflict,
+        # Same run id, same selection, DIFFERENT prompt -> fingerprint conflict,
         # and the rotated bundle does not buy it a replay either.
         conflict = await client.post(
             "/v1/runs",
             json={
-                "run_id": "gwlive-27",
                 **payload,
                 "message": "a different intention",
                 "actor_tokens": {
@@ -1805,7 +1834,7 @@ async def test_run_start_replays_a_rotated_bundle_and_conflicts_on_a_changed_bod
         # proving the 409 was the changed body - not a blanket rejection.
         replay = await client.post(
             "/v1/runs",
-            json={"run_id": "gwlive-28", **payload, **await _run_fields(client)},
+            json={**payload, **await _run_fields(client)},
         )
         assert replay.status_code == 201, replay.text
         assert replay.json()["run_id"] == "rid-body-conflict"
@@ -1915,14 +1944,14 @@ async def test_modern_selection_insert_race_and_direct_replay_disclose_same_free
             baseline = checked_out()
             await barrier.exec_driver_sql("BEGIN IMMEDIATE")
             try:
+                # `nickname_base` already carries the selection AND the metadata
+                # naming the shared nickname; spreading `_run_fields` on top
+                # would replace that metadata with the helper's nickname-free
+                # envelope and dissolve the very collision under test.
                 left = asyncio.create_task(
                     client.post(
                         "/v1/runs",
-                        json={
-                            **nickname_base,
-                            "run_id": left_id,
-                            **await _run_fields(client),
-                        },
+                        json={**nickname_base, "run_id": left_id},
                     )
                 )
                 await _wait_until(
@@ -1932,11 +1961,7 @@ async def test_modern_selection_insert_race_and_direct_replay_disclose_same_free
                 right = asyncio.create_task(
                     client.post(
                         "/v1/runs",
-                        json={
-                            **nickname_base,
-                            "run_id": right_id,
-                            **await _run_fields(client),
-                        },
+                        json={**nickname_base, "run_id": right_id},
                     )
                 )
                 await _wait_until(
@@ -2077,9 +2102,7 @@ async def test_concurrent_same_run_id_different_bodies_conflicts(
                 winning_body = second_body
             # The refusal is specific to the colliding body, not a blanket
             # rejection of the raced id: the winner's own request still replays.
-            replay = await client.post(
-                "/v1/runs", json={**winning_body, **race_fields}
-            )
+            replay = await client.post("/v1/runs", json={**winning_body, **race_fields})
 
     assert sorted(r.status_code for r in (winner, loser)) == [201, 409], [
         winner.text,

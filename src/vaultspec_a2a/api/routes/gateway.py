@@ -337,7 +337,6 @@ class _RunDispatchResult:
     thread_id: str
     status: str
     nickname: str | None
-    profile_id: str | None
     frozen: Any | None
     replayed: bool
 
@@ -373,14 +372,11 @@ async def _create_run_core(
     # existing run rather than starting a second one (dispatch-exactly-once).
     existing = await get_thread(db, body.run_id)
     if existing is not None:
-        existing_profile = _replay_identity_or_conflict(
-            existing.id, existing.thread_metadata, body
-        )
+        _replay_identity_or_conflict(existing.id, existing.thread_metadata, body)
         return _RunDispatchResult(
             thread_id=existing.id,
             status=existing.status,
             nickname=existing.nickname,
-            profile_id=existing_profile,
             frozen=_read_persisted_team_selection(existing.thread_metadata),
             replayed=True,
         )
@@ -518,14 +514,11 @@ async def _create_run_core(
                 # replay gets: same run id plus the same request is the winner's
                 # run replayed, and a colliding body is a different intention that
                 # must be refused rather than answered with someone else's run.
-                winner_profile = _replay_identity_or_conflict(
-                    winner.id, winner.thread_metadata, body
-                )
+                _replay_identity_or_conflict(winner.id, winner.thread_metadata, body)
                 return _RunDispatchResult(
                     thread_id=winner.id,
                     status=winner.status,
                     nickname=winner.nickname,
-                    profile_id=winner_profile,
                     frozen=_read_persisted_team_selection(winner.thread_metadata),
                     replayed=True,
                 )
@@ -560,7 +553,6 @@ async def _create_run_core(
             thread_id=result.thread_id,
             status=result.status,
             nickname=result.nickname,
-            profile_id=None,
             frozen=frozen,
             replayed=False,
         )
@@ -592,8 +584,6 @@ async def _run_direct_start(
         status=result.status,
         nickname=result.nickname,
         eligible=True,
-        profile_id=result.profile_id,
-        assignments=await _disclose_frozen(result.frozen),
         frozen_assignment=_modern_frozen_disclosure(result.frozen),
     )
 
@@ -701,9 +691,7 @@ async def _run_commit_locked(
     if existing is not None:
         canonical_body = _canonical_replay_body(existing.thread_metadata, body)
         commit_digest = request_digest(canonical_body, prepared=False)
-        existing_frozen = _read_persisted_frozen(existing.thread_metadata)
         existing_modern = _read_persisted_team_selection(existing.thread_metadata)
-        existing_profile = existing_frozen.profile_id if existing_frozen else None
         binding = _persisted_lease_binding(existing.thread_metadata)
         if binding is None:
             raise HTTPException(
@@ -727,10 +715,6 @@ async def _run_commit_locked(
             status=existing.status,
             lease_id=binding.lease_id,
             nickname=existing.nickname,
-            profile_id=existing_profile,
-            assignments=(
-                await _disclose_frozen(existing_frozen) if existing_frozen else []
-            ),
             frozen_assignment=_modern_frozen_disclosure(existing_modern),
         )
     ws_root = _prepare_workspace_root(body)
@@ -840,8 +824,6 @@ async def _run_commit_locked(
         status=result.status,
         lease_id=outcome.lease_id,
         nickname=result.nickname,
-        profile_id=result.profile_id,
-        assignments=await _disclose_frozen(result.frozen),
         frozen_assignment=_modern_frozen_disclosure(result.frozen),
     )
 
@@ -1055,7 +1037,7 @@ def _persisted_request_digest(metadata_json: str | None) -> str | None:
 
 def _replay_identity_or_conflict(
     run_id: str, metadata_json: str | None, body: RunStartRequest
-) -> str | None:
+) -> None:
     """Refuse a same-run-id request that is not a replay of the durable run.
 
     The single encoding of run-start replay identity, applied wherever a request
@@ -1065,12 +1047,11 @@ def _replay_identity_or_conflict(
     one? - and a second encoding of the answer would be free to drift from the
     first.
 
-    Two things are compared. The frozen model profile is already immutable on the
-    durable run, so a request naming a different one can never be served. Beyond
-    that single field, every other behaviour-affecting field - the prompt, the
-    preset, the feature tag, the feedback batch - is folded into the persisted
-    replay fingerprint, so a differing request is refused rather than silently
-    answered with the durable run and its distinct intention discarded.
+    Every behaviour-affecting field - the prompt, the preset, the feature tag,
+    the feedback batch, and the canonicalized catalog selection - is folded into
+    the persisted replay fingerprint, so a differing request is refused rather
+    than silently answered with the durable run and its distinct intention
+    discarded.
 
     Credential VALUES are deliberately not part of that fingerprint. A replay
     returns the ORIGINAL run and never adopts the retry's bundle, and
@@ -1081,18 +1062,13 @@ def _replay_identity_or_conflict(
     stored fingerprint is compared under the rule it was written with, so a run
     created before that classification still replays.
 
-    Returns:
-        The run's persisted profile id, or ``None`` when the run carries no
-        frozen profile record.
-
     Raises:
-        HTTPException: 409 when the profile or the request fingerprint differs.
+        HTTPException: 409 when the request fingerprint differs.
     """
-    existing_profile = _persisted_profile_id(metadata_json)
     # ``None`` means the digest is unknown - an older run, or one whose id this
     # service minted - not that the request was empty; refusing on it would
-    # break a legitimate replay. Such a request is compared on the frozen
-    # profile alone, which is narrower rather than absent.
+    # break a legitimate replay. Such a request passes the identity check
+    # unfingerprinted, which is narrower rather than absent.
     persisted_digest = _persisted_request_digest(metadata_json)
     canonical_body = _canonical_replay_body(metadata_json, body)
     if persisted_digest is not None and not replay_digest_matches(
@@ -1106,7 +1082,6 @@ def _replay_identity_or_conflict(
                 "original run"
             ),
         )
-    return existing_profile
 
 
 def _persist_lease(metadata_json: str | None, binding: _RunLeaseBinding) -> str:
@@ -1267,12 +1242,6 @@ def _modern_frozen_disclosure(
     if not isinstance(frozen, FrozenTeamSelection):
         return None
     return FrozenTeamAssignmentSummary.model_validate(frozen.disclosure())
-
-
-def _persisted_profile_id(metadata_json: str | None) -> str | None:
-    """Read only the persisted profile id from thread metadata, or None."""
-    frozen = _read_persisted_frozen(metadata_json)
-    return frozen.profile_id if frozen is not None else None
 
 
 def _frozen_disclosure(frozen: Any) -> list[RoleAssignmentSummary]:

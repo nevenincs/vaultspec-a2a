@@ -44,7 +44,11 @@ from mcp import ClientSession
 from mcp.client.stdio import StdioServerParameters, stdio_client
 
 from ..thread.errors import HarnessToolContractError
-from ._acp_mcp import declared_harness_tools, is_known_harness_server
+from ._acp_mcp import (
+    declared_harness_tools,
+    harness_server_exact_surface,
+    is_known_harness_server,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
@@ -171,6 +175,7 @@ async def verify_declared_tool_contract(
     command: str,
     args: Sequence[str],
     declared: Sequence[str],
+    exact_surface: bool = False,
     env: Mapping[str, str] | None = None,
     timeout: float = CONTRACT_PROBE_TIMEOUT_SECONDS,
 ) -> None:
@@ -240,6 +245,34 @@ async def verify_declared_tool_contract(
                     f"that serves them."
                     f"{_stderr_tail(captured_stderr)}"
                 )
+
+            # Serving MORE than was declared is also a contract break, because for
+            # a server whose RESTRICTED LAUNCH is the safety case the extra tools
+            # are the unsafe ones. A registry entry that lost its restricting
+            # argument would start the full server, still satisfy the check above,
+            # and hand the model every verb the restriction existed to withhold -
+            # a silently widened surface that reads as a passing verification.
+            #
+            # Declared-equals-served is the assertion, not declared-subset-of; the
+            # strict session surface mounts exactly what a server offers, so what
+            # the run may CALL is bounded by the permission layer while what it is
+            # HANDED is bounded only here.
+            undeclared = (
+                [tool for tool in served if tool not in declared]
+                if exact_surface
+                else []
+            )
+            if undeclared:
+                raise HarnessToolContractError(
+                    f"harness MCP server {name!r} serves tool(s) it does not "
+                    f"declare: {', '.join(sorted(undeclared))}. Launched as "
+                    f"{launch!r}. A server that offers more than the registry "
+                    f"declares is refused rather than surfaced: the undeclared "
+                    f"tools reach the model's tool list even though the run may "
+                    f"not call them. Either the launch lost a restricting "
+                    f"argument, or the registry declaration is stale."
+                    f"{_stderr_tail(captured_stderr)}"
+                )
         _verified.add(key)
 
 
@@ -276,6 +309,7 @@ async def verify_harness_mcp_contract(
             command=command,
             args=_launch_args(spec, name=name),
             declared=declared_harness_tools(name),
+            exact_surface=harness_server_exact_surface(name),
             env=env,
             timeout=timeout,
         )

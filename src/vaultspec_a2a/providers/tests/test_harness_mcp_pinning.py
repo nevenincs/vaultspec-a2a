@@ -82,6 +82,7 @@ def _declared_entry(name: str, root_pin: str | None) -> FrozenJsonObject:
                 "read_only": True,
                 "network_egress": False,
                 "root_pin": root_pin,
+                "exact_surface": False,
             }
         }
     )
@@ -149,6 +150,7 @@ def test_registry_construction_refuses_a_malformed_root_pin(
                     "read_only": True,
                     "network_egress": False,
                     "root_pin": declared,
+                    "exact_surface": False,
                 }
             }
         )

@@ -49,6 +49,7 @@ if TYPE_CHECKING:
     from langchain_core.language_models import BaseChatModel
 
 __all__ = [
+    "CORE_MCP_REQUIREMENT",
     "NATIVE_READ_TOOL_NAMES",
     "NATIVE_TOOL_EGRESS",
     "NATIVE_WEB_TOOL_BOUNDS",
@@ -65,6 +66,7 @@ __all__ = [
     "declared_harness_tools",
     "harness_allowed_tool_names",
     "harness_server_egresses",
+    "harness_server_exact_surface",
     "harness_server_root_pin",
     "harness_spawn_env",
     "is_known_harness_server",
@@ -161,7 +163,16 @@ class HarnessMcpResolution:
 _LAUNCH_SPEC_KEYS = ("name", "command", "args", "env")
 _TRUST_AXES = ("read_only", "network_egress")
 _ROOT_PIN_AXIS = "root_pin"
+_EXACT_SURFACE_AXIS = "exact_surface"
 RAG_MCP_REQUIREMENT = "vaultspec-rag[mcp]"
+# The restricted launch is served from 0.1.56 onward. NO version constraint,
+# per the registry's standing policy (asserted by its own test): the boundary
+# is the SERVED SURFACE, checked before every launch. An older resolution
+# rejects `--read-only` and is refused at the contract seam rather than
+# surfaced wide. Operationally that means a stale `uvx` cache fails the lane
+# loudly and repeatedly until it refreshes - accepted as fail-loud, and the
+# reason a2a's own dependency floor names 0.1.56.
+CORE_MCP_REQUIREMENT = "vaultspec-core"
 
 
 def _declare_registry(
@@ -222,6 +233,15 @@ def _declare_registry(
                 f"{pin!r}; the axis names the environment variable carrying the "
                 "pin, or is null when the server cannot be pinned"
             )
+        if not isinstance(value.get(_EXACT_SURFACE_AXIS), bool):
+            raise ConfigError(
+                f"harness registry entry {name!r} does not declare "
+                f"{_EXACT_SURFACE_AXIS!r}; state whether the server's safety rests "
+                "on a RESTRICTED LAUNCH, in which case the contract check asserts "
+                "served-equals-declared so a lost restricting argument is a refused "
+                "launch rather than a silently widened surface - omission is never "
+                "read as permission"
+            )
     frozen = freeze_json(entries)
     if not isinstance(frozen, MappingProxyType):
         raise ConfigError("harness MCP registry must freeze to a JSON object")
@@ -249,6 +269,47 @@ _KNOWN_MCP_SERVERS: FrozenJsonObject = _declare_registry(
             # is a separate boundary, refused at the permission layer until the
             # server locks its stdio session to its launch root.
             "root_pin": "VAULTSPEC_RAG_ROOT",
+            # The served surface legitimately exceeds this declaration: the search
+            # server also mounts index-rebuild and index-clean verbs. That is
+            # tolerable because those mutate a recoverable index under the search
+            # storage root, never the vault, so the declaration is an allowlist
+            # rather than the safety case.
+            "exact_surface": False,
+            "runtime_acquisition": True,
+            "desktop_available": False,
+        },
+        "vaultspec-core": {
+            "name": "vaultspec-core",
+            "command": "uvx",
+            # ``--read-only`` is the whole admission case. Unrestricted, this
+            # server registers document scaffolding, body edits, plan mutation and
+            # a gateway that subprocesses any cataloged verb - a writable vault
+            # MCP, which a live incident proved an agent will use to write into the
+            # vault behind every deny that guards the filesystem path. The
+            # restricted launch registers only non-mutating handlers, so no
+            # write-capable tool exists in the process to be handed or approved.
+            "args": ["--from", CORE_MCP_REQUIREMENT, "vaultspec-mcp", "--read-only"],
+            # Exactly what the restricted launch registers. ``check`` is safe to
+            # declare ONLY here: unrestricted it takes a repair argument that a
+            # tool-name allowlist cannot see, while the read-only launch registers
+            # a validation-only signature and rejects a smuggled repair argument
+            # server-side.
+            "tools": ["status", "find", "check", "discover"],
+            "read_only": True,
+            # Local stdio server over the pinned project's own records; no
+            # outbound request leaves the agent host on its behalf.
+            "network_egress": False,
+            # Bound ONCE at launch: the entrypoint takes no target argument, so
+            # this variable is the whole channel, and the tool surface carries no
+            # per-call project parameter at all. That makes the binding stronger
+            # than a per-call default - there is no argument through which a run
+            # could address another project.
+            "root_pin": "VAULTSPEC_TARGET_DIR",
+            # The restriction IS the safety case, so serving more than is declared
+            # means the restriction is gone. Asserting equality turns a lost
+            # ``--read-only`` into a refused launch instead of a silently restored
+            # write surface that still passes a subset check.
+            "exact_surface": True,
             "runtime_acquisition": True,
             "desktop_available": False,
         },
@@ -392,6 +453,22 @@ def harness_server_root_pin(name: str) -> str | None:
         ConfigError: If *name* is not a known harness server.
     """
     return _declared_root_pin(name, _registry_entry(name))
+
+
+def harness_server_exact_surface(name: str) -> bool:
+    """Return whether *name*'s served surface must EQUAL its declaration.
+
+    True for a server whose safety case is a restricted launch: the tools it
+    would serve unrestricted are precisely the ones the restriction withholds, so
+    serving more than was declared means the restriction is gone. False for a
+    server that legitimately mounts more than a run declares, where the
+    declaration is only the allowlist.
+
+    Raises:
+        ConfigError: If *name* is not a known harness server.
+    """
+    value = _registry_entry(name).get(_EXACT_SURFACE_AXIS)
+    return bool(value)
 
 
 def _launch_spec(name: str, entry: FrozenJsonObject) -> JsonObject:

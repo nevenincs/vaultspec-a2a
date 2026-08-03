@@ -102,6 +102,7 @@ def _entry(**overrides: JsonValue) -> JsonObject:
         # Fully declared on every axis, so a case about one axis is never
         # answered by a refusal from another.
         "root_pin": "CANDIDATE_ROOT",
+        "exact_surface": False,
     }
     entry.update(overrides)
     for key, value in list(entry.items()):

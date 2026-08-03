@@ -3,8 +3,8 @@ tags:
   - '#adr'
   - '#agent-harness-provisioning'
 date: '2026-07-15'
-modified: '2026-08-02'
-body_hash: 'sha256:fc7c3baa1678f577c1b0d66458bad3216fb3de6a6e4e4687f8b38da073e149e1'
+modified: '2026-08-03'
+body_hash: 'sha256:0b8e01b2bed2ae07a177f8e4bcc57276e79c542749e85302b03cc5a1850b941f'
 related:
   - '[[2026-07-14-adr-authoring-orchestration-adr]]'
   - '[[2026-07-15-model-profiles-adr]]'
@@ -12,6 +12,7 @@ related:
   - '[[2026-07-15-graph-agent-framework-harness-adr]]'
   - '[[2026-07-17-tool-cores-adr]]'
 ---
+
 # `agent-harness-provisioning` adr: `the agent harness contract: skills, personas, rules, templates, and tools provisioned and verified per run` | (**status:** `accepted`)
 
 ## Problem Statement
@@ -111,3 +112,41 @@ The unarmed clause is a deliberate narrowing of interactive parity: before it, e
 **Billing note.** `27dc0dac` removed the token-channel-conditional `ANTHROPIC_API_KEY` pop in the provider layer. The protection did not lapse: the workspace env scrub (`resolve_env_vars`) removes `ANTHROPIC_API_KEY` and the other provider secrets from every agent subprocess unconditionally, so a stray key cannot silently downgrade the operator's flat-rate login to metered billing, while the lane still injects no credential of its own.
 
 **Scope notes.** The `.vault/**` sink-side write deny at the fs-RPC chokepoint is unchanged and still carries the second defense layer; strict-MCP closes the MCP-tool bypass at the surface. The kimi and gemini lanes keep session advertisement (env-normalized) without a strict analogue - neither exposes the claudeCode option namespace - and their armed grounding delivery remains without completed-turn proof, so armed presets on those lanes stay unservable under the proven-lane admission rule. The non-kimi autonomous permission branch still auto-approves the first offered option for any tool outside the static allowlist (`_acp_rpc_handlers.py`, D7 note); strict-MCP narrows its MCP blast radius to declared servers only, and closing the asymmetry remains the approval-shape ADR's open decision.
+
+## Amendment (2026-08-03, read-only core launch clarifies the S10 invariant)
+
+**Context.** The S10 refinements bound the invariant "a writable vault MCP is never
+part of an authoring run's declared harness" after a live agent scaffolded into the
+vault through a user-global writable vaultspec MCP, and the 2026-07-18 refinement named
+a workspace-scope `vaultspec-core` server as the same hole through another registration
+scope. Both records predate an upstream restricted launch: at the time, any
+`vaultspec-mcp` process mounted nine verbs including scaffold, edit, plan mutation, and
+a gateway that subprocesses every cataloged verb. `vaultspec-core` 0.1.56 adds a
+`--read-only` launch that registers only non-mutating handlers, leaving no
+write-capable tool in the process.
+
+**Decision.** The invariant adjudicates the MOUNTED SERVER, not the auto-permit list:
+"writable vault MCP" means a server process whose registered tool surface can mutate
+the vault. A `vaultspec-mcp --read-only` launch is therefore not a writable vault MCP
+and may join a declared harness under the registry's three trust axes. Declaring a read
+subset of a WRITE-CAPABLE launch does not satisfy the invariant and remains forbidden:
+the mounted write verbs would be handed to the model with only the permission layer
+between them and the vault - a single unbacked layer, because the vault write-deny at
+the filesystem-RPC chokepoint structurally cannot see an MCP-tool write (the original
+incident's mechanism), and because a supervised run's human rung could approve such a
+call. The rag precedent of serving more than it declares does not transfer to core: the
+search server's undeclared verbs mutate a recoverable index outside the vault, while
+core's mutate the vault itself - the recorded incident's target. The scope note of the
+2026-08-02 amendment recording first-offered-option auto-approval on non-kimi lanes is
+superseded: the autonomous rung now refuses any uncovered call uniformly on every lane,
+which this admission takes as its second defense layer, never its first.
+
+**Consequences.** Agents authoring under the graph submitter gain deterministic
+structured vault reads through a server that cannot write the vault by construction,
+closing part of the per-role grounding Opens item without touching the write-path
+invariant: the graph submitter and the engine review lane remain the only agent write
+paths. The admission inherits the registry's fail-loud posture - an entry that loses
+its read-only argument must be refused where the contract is verified, not discovered
+in an incident - and the burden of proving the surface stays trimmed lives with the
+harness contract check, which must hold served-equals-declared for any entry whose
+safety case is a restricted launch mode.

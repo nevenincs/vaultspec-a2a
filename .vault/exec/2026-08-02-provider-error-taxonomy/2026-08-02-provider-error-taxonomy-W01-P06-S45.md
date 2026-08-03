@@ -5,7 +5,7 @@ tags:
 date: '2026-08-02'
 modified: '2026-08-03'
 body_schema: 'body-v1'
-body_hash: 'sha256:8e8fe8d0a7ee6376f4742f910d6fe2a47e53f8a43a6cad34ad1bd0c750f1e834'
+body_hash: 'sha256:b3be7e9c198b633bc0c8d57366aad42f3427fd1e79e0ea4db11c7bc9d7ca7337'
 step_id: 'S45'
 related:
   - "[[2026-08-02-provider-error-taxonomy-plan]]"
@@ -113,9 +113,21 @@ environment variable, so pointing it at a refusing endpoint needs a production
 change rather than configuration. The two ACP lanes DO honour a base-URL
 override, but both report `admission=not_admitted` for their agent-acp execution
 modes - "no exact completed-turn proof; evidence from another execution mode is
-not inherited" - so neither can be selected. The cheaper finish is therefore to
-complete one ordinary turn on the claude agent-acp mode so that lane becomes
-admitted, then arm it with a base-URL override; that needs no production edit.
+not inherited" - so neither can be selected.
+
+A correction to the obvious next thought, because it cost time to learn: running
+a turn does NOT admit a lane. Catalog admission is a literal, hand-edited,
+deny-by-default table keyed by (provider, execution mode), and only the codex
+app-server mode is listed. Nothing at runtime writes to it. So making an ACP lane
+selectable means proving a completed turn on that exact mode and then EDITING the
+declaration - which is the governing rule working as designed, since the whole
+point is that a human attests the evidence rather than a process inferring it.
+
+Both remaining routes therefore need a production change: either a test-only way
+to point the per-run codex config home at a chosen base URL, or a live
+completed-turn proof on an ACP mode followed by a declaration edit. Neither is a
+configuration tweak, and the second touches the admission surface itself, which
+should not be edited to make a test pass.
 
 THREE OBSTACLES WERE REMOVED GETTING HERE, and each was a real defect rather than
 an environmental quirk. The simulator advertised no model selector, so a

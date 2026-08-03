@@ -5,7 +5,7 @@ tags:
 date: '2026-08-03'
 modified: '2026-08-03'
 body_schema: 'body-v1'
-body_hash: 'sha256:f2ff10013cd815e84fb68f6c9133f890c39082d0abc9e369c44c83563bb76f57'
+body_hash: 'sha256:5bb91be6f481bb11f75e8083e8613cae8a1b3f6b78a2cabfe553870308360859'
 related:
   - "[[2026-08-02-provider-error-taxonomy-plan]]"
   - "[[2026-08-02-provider-error-taxonomy-adr]]"
@@ -131,6 +131,32 @@ list at its own compile time.
 Surfaced while checking this campaign's own files for compliance after the gate
 finding above. Both predate this work and belong to other lanes; recorded so the
 observation is not lost, not claimed as this campaign's to fix.
+
+### catalog-read-budget-is-shorter-than-cold-discovery | high | The consumer times out listing providers on a cold workspace, and a retry hides it
+
+Found by driving the cross-repository path by hand rather than by reading code.
+The consuming engine budgets the provider-catalog verb with its FAST READ ceiling
+of fifteen seconds, on the stated reasoning that a listing read is quick. This
+side does not treat it as a listing read: a cold catalog enumerates lanes by
+actually consulting the provider tooling. Measured on this host, a cold
+enumeration took 16.3 seconds and the engine returned a timeout; the immediately
+following call returned in well under a second from cache.
+
+The two sides therefore disagree about what this verb COSTS, not about what it
+returns. That disagreement is worse than a plain timeout because the failure is
+self-concealing: the attempt that fails also warms the cache, so a human who
+retries sees it work and a test that calls twice never sees it at all. The first
+provider listing on any cold workspace is the one that fails, which is exactly
+the moment a person is trying to choose a lane.
+
+Consequence for this campaign specifically: a run cannot be started through the
+consumer without a catalog selection, so on a cold workspace the product cannot
+reach a provider lane at all - and therefore cannot surface a provider condition,
+which is the capability this campaign exists to deliver.
+
+The margin also makes this worse than the numbers suggest. 16.3 against 15 is not
+a comfortable overrun to tune away; a slower host, a colder cache, or one more
+served lane widens it, while a warm host hides it entirely.
 
 ## Recommendations
 

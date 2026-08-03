@@ -10,28 +10,33 @@ real run observes it.
 
 from __future__ import annotations
 
+import shutil
 import subprocess
 import sys
-from typing import TYPE_CHECKING
+from pathlib import Path
 
 import pytest
-
-if TYPE_CHECKING:
-    from pathlib import Path
 
 
 def _run_collect(directory: Path) -> subprocess.CompletedProcess[str]:
     """Collect *directory* in a real pytest subprocess with the plugin loaded.
 
     ``-p no:cacheprovider`` keeps the probe from writing a cache into the
-    temporary tree; the plugin itself arrives through its pytest11 entry
-    point, exactly as every real run receives it.
+    temporary tree. The plugin is named EXPLICITLY because this collects a
+    directory outside the checkout: it is not a pytest11 entry point (that
+    would auto-load it into every consumer's session), so it arrives through
+    the repository root conftest, and conftest discovery walks up from the test
+    file rather than the working directory. Without naming it these probes
+    collected with no plugin present - so every "collection does not crash"
+    assertion held trivially, proving nothing about the hook they name.
     """
     return subprocess.run(
         [
             sys.executable,
             "-m",
             "pytest",
+            "-p",
+            "vaultspec_a2a.testing.plugin",
             "-p",
             "no:cacheprovider",
             "--collect-only",
@@ -132,35 +137,51 @@ def test_collection_survives_with_and_without_claims(
     assert result.returncode == 0, f"{result.stdout}\n{result.stderr}"
 
 
-def test_plugin_survives_a_wholesale_addopts_override(tmp_path: Path) -> None:
+def test_plugin_survives_a_wholesale_addopts_override() -> None:
     """A lane that replaces addopts entirely still runs under the plugin.
 
     The toolchain's service target reaches the service tier by overriding
     ``addopts`` wholesale (``--override-ini``), which once silently disabled
     every lease, group, and admission because the plugin rode in addopts. The
-    plugin now loads through its pytest11 entry point; this guard drives the
-    same override shape and proves a plugin-only fixture still resolves, so
-    the bypass cannot regress unnoticed.
+    plugin is deliberately NOT a pytest11 entry point - that would auto-load it
+    into every consumer's pytest session, refusing their distribution choices
+    and writing leases under their home - so the repository root conftest loads
+    it instead.
+
+    That is why the guard suite is written INSIDE the checkout. Conftest
+    discovery walks up from the TEST FILE, not from the working directory, so a
+    suite in a temp directory never reaches the root conftest and runs with no
+    plugin at all. Written there, this guard passed or failed for reasons
+    having nothing to do with addopts - which is the same false-subject defect
+    it exists to catch.
     """
-    (tmp_path / "test_guard.py").write_text(
-        "def test_guard(resource_leases) -> None:\n    assert resource_leases == {}\n"
+    repo_root = Path(__file__).resolve().parents[4]
+    guard_dir = repo_root / ".pytest-addopts-guard"
+    guard_dir.mkdir(exist_ok=True)
+    guard = guard_dir / "test_guard.py"
+    guard.write_text(
+        "def test_guard(resource_leases) -> None:\n    assert resource_leases == {}\n",
+        encoding="utf-8",
     )
-    completed = subprocess.run(
-        [
-            sys.executable,
-            "-m",
-            "pytest",
-            str(tmp_path),
-            "--override-ini",
-            "addopts=--durations=10 --showlocals -ra --capture=sys",
-            "-p",
-            "no:cacheprovider",
-            "-q",
-        ],
-        capture_output=True,
-        text=True,
-        cwd=str(tmp_path),
-        timeout=180,
-        check=False,
-    )
+    try:
+        completed = subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "pytest",
+                str(guard),
+                "--override-ini",
+                "addopts=--durations=10 --showlocals -ra --capture=sys",
+                "-p",
+                "no:cacheprovider",
+                "-q",
+            ],
+            capture_output=True,
+            text=True,
+            cwd=str(repo_root),
+            timeout=180,
+            check=False,
+        )
+    finally:
+        shutil.rmtree(guard_dir, ignore_errors=True)
     assert completed.returncode == 0, completed.stdout + completed.stderr

@@ -44,12 +44,17 @@ class SqlCostPort:
         *,
         thread_id: str,
         agent_id: str,
-        provider: str,
-        model: str,
+        provider: str | None,
+        model: str | None,
         input_tokens: int,
         output_tokens: int,
     ) -> None:
-        """Persist one invocation's token accounting and commit."""
+        """Persist one invocation's token accounting and commit.
+
+        A ``None`` lane or model is stored as SQL ``NULL`` — the honest encoding
+        of "the invoked instance never declared this" for a free-text column,
+        and the counterpart of the ``UNKNOWN`` member a closed enum would use.
+        """
         async with self._session_factory() as session:
             await append_cost_record(
                 session,

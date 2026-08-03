@@ -174,19 +174,19 @@ def _resolve_effective_worker_model(
     )
 
 
-def _describe_worker_model(model: BaseChatModel) -> str:
-    """Name the provider lane and concrete model a worker turn actually ran on.
+def _worker_model_identity(model: BaseChatModel) -> tuple[str | None, str | None]:
+    """Return the ``(lane, model_id)`` a worker turn actually ran on.
 
-    The class name a worker used to report - ``AcpChatModel`` - names neither:
-    the same class serves every ACP lane with a redirected base URL, so a failure
-    report built from it could not distinguish which vendor was called, let alone
-    which model. Both facts are already on the resolved model instance; this reads
-    them off the SAME instance the turn invoked rather than the provider that was
-    requested, because a fallback chain means those can differ and only the
-    former is a fact about the run.
+    Both facts are read off the SAME instance the turn invoked rather than the
+    provider that was requested, because a fallback chain means those can differ
+    and only the former is a fact about the run.
 
-    Degrades rather than guesses: a model declaring neither (the in-process mock,
-    a hosted API model) falls back to its class name, which is at least true.
+    This is the single source for the pair. :func:`_describe_worker_model`
+    renders it for humans and the accounting writer stores it as data; neither
+    recovers the components by splitting the rendered string, which would break
+    on the vendor-prefixed model ids that legitimately contain a slash. Either
+    element is ``None`` when the instance does not declare it — an unknown lane
+    is reported as unknown rather than guessed.
     """
     lane = _bounded_model_identity(getattr(model, "provider", None))
     model_id: str | None = None
@@ -194,6 +194,24 @@ def _describe_worker_model(model: BaseChatModel) -> str:
         model_id = _bounded_model_identity(getattr(model, attribute, None))
         if model_id is not None:
             break
+    return lane, model_id
+
+
+def _describe_worker_model(model: BaseChatModel) -> str:
+    """Name the provider lane and concrete model a worker turn actually ran on.
+
+    The class name a worker used to report - ``AcpChatModel`` - names neither:
+    the same class serves every ACP lane with a redirected base URL, so a failure
+    report built from it could not distinguish which vendor was called, let alone
+    which model.
+
+    Degrades rather than guesses: a model declaring neither (the in-process mock,
+    a hosted API model) falls back to its class name, which is at least true.
+    That fallback is a DISPLAY affordance for a human-readable failure reason and
+    is deliberately not reused by the accounting writer, where a class name in a
+    provider column would read as a lane that never existed.
+    """
+    lane, model_id = _worker_model_identity(model)
     if lane is not None and model_id is not None:
         return f"{lane}/{model_id}"
     return lane or model_id or type(model).__name__
@@ -480,25 +498,27 @@ async def _record_turn_usage(
 
     Accounting is strictly observational: a database hiccup here must not
     destroy a completed unit of real work, so the write is best-effort and
-    logged rather than raised. The provider and model are read off the SAME
-    instance that ran the turn, for the reason given in
-    :func:`_describe_worker_model` — a fallback chain makes the requested lane
-    and the executed lane different facts.
+    logged rather than raised.
+
+    The lane and model come from :func:`_worker_model_identity` as a PAIR, not
+    by splitting the rendered display string, which would misparse the
+    vendor-prefixed model ids that legitimately contain a slash. An undeclared
+    lane or model is stored as SQL ``NULL``: the measured token counts are real
+    and worth keeping, so the row is written rather than dropped, but the
+    identity is recorded as genuinely unknown. ``type(model).__name__`` is
+    deliberately NOT substituted here — a class name in a provider column would
+    be indistinguishable from a real lane, which is the same fabricated-fact
+    problem that keeps ``estimated_cost`` unwritten.
     """
     if cost_port is None or not isinstance(thread_id, str) or not thread_id:
         return
-    lane = _bounded_model_identity(getattr(model, "provider", None))
-    model_id: str | None = None
-    for attribute in ("desired_model", "model_name", "model"):
-        model_id = _bounded_model_identity(getattr(model, attribute, None))
-        if model_id is not None:
-            break
+    lane, model_id = _worker_model_identity(model)
     try:
         await cost_port.record_usage(
             thread_id=thread_id,
             agent_id=worker_name,
-            provider=lane or type(model).__name__,
-            model=model_id or type(model).__name__,
+            provider=lane,
+            model=model_id,
             input_tokens=usage.input_tokens,
             output_tokens=usage.output_tokens,
         )

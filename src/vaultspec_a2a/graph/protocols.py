@@ -93,6 +93,10 @@ class CostPort(Protocol):
     lane in this project reports one and no rate table exists to derive one; a
     price parameter here would invite a fabricated number to be passed as a
     measured fact.
+
+    ``provider`` and ``model`` are optional for the same reason: a lane the
+    invoked instance never declared is passed as ``None`` and stored as unknown,
+    rather than back-filled with a stand-in that would read as a real lane.
     """
 
     async def record_usage(
@@ -100,8 +104,8 @@ class CostPort(Protocol):
         *,
         thread_id: str,
         agent_id: str,
-        provider: str,
-        model: str,
+        provider: str | None,
+        model: str | None,
         input_tokens: int,
         output_tokens: int,
     ) -> None:

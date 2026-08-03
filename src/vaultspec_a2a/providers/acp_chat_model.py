@@ -48,7 +48,11 @@ from ..team.team_config import AgentConfig
 from ..utils.enums import AcpRequestId
 from ..workspace.environment import resolve_env_vars
 from ._acp_auth import authenticate_rpc, runtime_log_extra
-from ._acp_authoring import config_home_authoring_entry
+from ._acp_authoring import (
+    AUTHORING_MCP_SERVER_NAME,
+    config_home_authoring_entry,
+)
+from ._acp_mcp import harness_spawn_env
 from ._acp_protocol import process_stdout_loop
 from ._acp_rpc_handlers import (
     on_fs_read_text_file,
@@ -404,6 +408,15 @@ class AcpChatModel(BaseChatModel):
                 self._config.mcp_servers
             )
             env.update(bridge_env)
+            # Every OTHER advertised spec's env is projected the same way and
+            # was never hoisted, so a pinned harness server reached the CLI as a
+            # dangling reference and started with its pin unset - looking pinned
+            # while resolving its project from the inherited directory.
+            env.update(
+                harness_spawn_env(
+                    self._config.mcp_servers, exclude=AUTHORING_MCP_SERVER_NAME
+                )
+            )
 
         if self.command and Path(self.command[0]).stem.lower() == "gemini":
             await refresh_gemini_token(env=env)

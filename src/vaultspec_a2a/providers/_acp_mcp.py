@@ -66,6 +66,7 @@ __all__ = [
     "harness_allowed_tool_names",
     "harness_server_egresses",
     "harness_server_root_pin",
+    "harness_spawn_env",
     "is_known_harness_server",
     "pin_harness_mcp_servers",
     "reject_duplicate_identities",
@@ -865,6 +866,41 @@ def pin_harness_mcp_servers(
             )
         pinned.append(shaped)
     return pinned
+
+
+def harness_spawn_env(
+    specs: Sequence[JsonObject], *, exclude: str | None = None
+) -> dict[str, str]:
+    """Return the real env values a strict session's placeholders expand from.
+
+    On the strict claude lane every advertised spec's env VALUES are replaced
+    with ``${NAME}`` references before the surface is serialized onto the CLI
+    argv, and the CLI expands each reference from its own process environment at
+    config parse time. A reference whose value was never hoisted therefore
+    expands to nothing: the server starts with the variable unset, which for a
+    pinned harness server means it falls back to resolving its own project from
+    the directory it inherited - exactly the inheritance the pin exists to
+    replace, and silently, because the spec still LOOKS pinned.
+
+    The authoring bridge hoists its own values through its gatekeeper, which
+    validates the bridge spec as it splits them off; pass its name as *exclude*
+    so this never second-guesses that authority.
+    """
+    hoisted: dict[str, str] = {}
+    for spec in specs:
+        if exclude is not None and spec.get("name") == exclude:
+            continue
+        env = spec.get("env")
+        if not isinstance(env, list):
+            continue
+        for item in env:
+            if not isinstance(item, dict):
+                continue
+            name = item.get("name")
+            value = item.get("value")
+            if isinstance(name, str) and isinstance(value, str):
+                hoisted[name] = value
+    return hoisted
 
 
 def codex_mcp_server_specs(

@@ -30,6 +30,7 @@ from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 
 from ...thread.errors import ConfigError
+from .._acp_authoring import AUTHORING_MCP_SERVER_NAME
 from .._acp_mcp import (
     _KNOWN_MCP_SERVERS,
     _declare_registry,
@@ -39,9 +40,13 @@ from .._acp_mcp import (
     codex_mcp_server_specs,
     compose_harness_mcp_servers,
     harness_server_root_pin,
+    harness_spawn_env,
     pin_harness_mcp_servers,
     resolve_harness_mcp_servers,
 )
+from .._acp_session import session_surface_mcp_servers
+from .._acp_types import AcpModelConfig
+from .._json_contract import JsonObject
 from ..acp_chat_model import AcpChatModel
 
 if TYPE_CHECKING:
@@ -306,9 +311,7 @@ def test_compose_pins_beside_an_existing_bridge_without_touching_it(
     assert by_name["vaultspec-authoring"]["env"] == [
         {"name": "VAULTSPEC_AUTHORING_RUN_ID", "value": "run-1"}
     ]
-    assert by_name[RAG]["env"] == [
-        {"name": RAG_PIN_VARIABLE, "value": str(tmp_path)}
-    ]
+    assert by_name[RAG]["env"] == [{"name": RAG_PIN_VARIABLE, "value": str(tmp_path)}]
 
 
 def test_composition_never_invents_a_project_pin() -> None:
@@ -424,3 +427,82 @@ async def test_the_declared_channel_is_the_servers_own_root_authority(
     )
     assert project in reported, reported
     assert str(launch_root) not in reported, reported
+
+
+def _strict_config(specs: list[JsonObject]) -> AcpModelConfig:
+    """A minimal claude-family config, which is what makes the surface strict."""
+    return AcpModelConfig(
+        agent_config=None,
+        permission_callback=None,
+        workspace_root=None,
+        command=["claude"],
+        env_vars={},
+        session_id=None,
+        mcp_servers=specs,
+        use_exec=False,
+        provider="claude",
+        runtime_authority=None,
+        acp_backend="node",
+        command_origin=None,
+        command_kind=None,
+        command_executable=None,
+        command_target=None,
+        auth_mode=None,
+    )
+
+
+class TestThePinReachesTheSpawnedChild:
+    """The pin is only real if the value arrives where the server reads it.
+
+    On the strict claude lane the advertised surface carries ``${NAME}``
+    references rather than values, because the surface is serialized onto the
+    CLI argv. The CLI expands each reference from its own process environment at
+    config parse time, so a reference whose value was never hoisted expands to
+    nothing and the server starts with its pin unset - falling back to the
+    directory it inherited while the spec still looks pinned.
+    """
+
+    def test_the_hoist_carries_the_pinned_value_the_surface_only_references(
+        self, tmp_path: Path
+    ) -> None:
+        variable = harness_server_root_pin(RAG)
+        assert variable is not None
+
+        pinned = pin_harness_mcp_servers(
+            [_launch_spec(RAG, _shipped_entry(RAG))], project_root=str(tmp_path)
+        )
+        surface = session_surface_mcp_servers(_strict_config(pinned))
+        first = surface[0]
+        assert isinstance(first, dict)
+        advertised_env = first["env"]
+        assert isinstance(advertised_env, list)
+        advertised: dict[str, str] = {}
+        for item in advertised_env:
+            assert isinstance(item, dict)
+            name, value = item["name"], item["value"]
+            assert isinstance(name, str) and isinstance(value, str)
+            advertised[name] = value
+        assert advertised[variable] == f"${{{variable}}}", (
+            "the strict surface must carry a reference, never the value"
+        )
+
+        hoisted = harness_spawn_env(pinned, exclude=AUTHORING_MCP_SERVER_NAME)
+        assert hoisted[variable] == str(tmp_path), (
+            "the reference the CLI expands must resolve to the run's project"
+        )
+
+    def test_the_authoring_bridge_is_left_to_its_own_gatekeeper(self) -> None:
+        """Its values are split off by the validator that admits it."""
+        bridge: JsonObject = {
+            "name": AUTHORING_MCP_SERVER_NAME,
+            "command": "python",
+            "args": ["-m", "whatever"],
+            "env": [{"name": "VAULTSPEC_AUTHORING_TOKEN", "value": "a-real-token"}],
+        }
+        hoisted = harness_spawn_env([bridge], exclude=AUTHORING_MCP_SERVER_NAME)
+        assert hoisted == {}, "the bridge hoists through its own authority"
+
+    def test_an_unpinned_composition_hoists_nothing(self) -> None:
+        """No project means no pin, and therefore no value to carry."""
+        unpinned = [_launch_spec(RAG, _shipped_entry(RAG))]
+        assert harness_spawn_env(unpinned, exclude=AUTHORING_MCP_SERVER_NAME) == {}

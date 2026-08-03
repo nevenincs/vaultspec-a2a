@@ -23,6 +23,11 @@ if TYPE_CHECKING:
     from langchain_core.runnables import RunnableConfig
 
 SIMULATOR_PATH = Path(__file__).parent.parent / "acp_simulator.py"
+
+# The ACP lane now requires the run's active project at construction - it is no
+# longer inferred from the serving process - so these integration models name a
+# real directory the way a dispatched run does.
+_PROJECT = Path(__file__).resolve().parents[4]
 PYTHON_EXE = sys.executable
 
 
@@ -100,6 +105,7 @@ async def test_worker_execution_integration() -> None:
     model = AcpChatModel(
         command=[PYTHON_EXE, str(SIMULATOR_PATH), "--response", "HelloWorld"],
         env_vars={},
+        workspace_root=str(_PROJECT),
     )
     node = create_worker_node(
         model=model,
@@ -121,6 +127,7 @@ async def test_worker_context_compaction_integration() -> None:
     model = AcpChatModel(
         command=[PYTHON_EXE, str(SIMULATOR_PATH), "--response", "Compacted"],
         env_vars={},
+        workspace_root=str(_PROJECT),
     )
     node = create_worker_node(
         model=model,
@@ -144,6 +151,7 @@ async def test_worker_error_handling_integration() -> None:
     model = AcpChatModel(
         command=[PYTHON_EXE, str(SIMULATOR_PATH), "--error", "Internal agent failure"],
         env_vars={},
+        workspace_root=str(_PROJECT),
     )
     node = create_worker_node(
         model=model,
@@ -202,6 +210,7 @@ async def test_worker_turn_clears_consumed_approval_residue() -> None:
     model = AcpChatModel(
         command=[PYTHON_EXE, str(SIMULATOR_PATH), "--response", "approved once"],
         env_vars={},
+        workspace_root=str(_PROJECT),
     )
     node = create_worker_node(
         model=model,

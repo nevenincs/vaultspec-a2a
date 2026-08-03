@@ -779,8 +779,17 @@ def create_worker_node(
             harness_allowed = (
                 harness_allowed_tool_names(harness_mcp_servers) if autonomous else None
             )
+            # The run's project pins every harness server it surfaces. Without
+            # it a composed grounding server resolves its own project from the
+            # directory it inherits, which is the undeclared inheritance the pin
+            # replaces. Absent, composition stays unpinned rather than inventing
+            # a root - a default here would be that same inheritance, spelled
+            # invisibly.
             effective_model = compose_harness_mcp_servers(
-                effective_model, harness_mcp_servers, allowed_tools=harness_allowed
+                effective_model,
+                harness_mcp_servers,
+                allowed_tools=harness_allowed,
+                project_root=str(workspace_root) if workspace_root else None,
             )
         from ...providers._acp_mcp import compose_native_read_tools
         from ...providers.lane_admission import web_tool_names_for

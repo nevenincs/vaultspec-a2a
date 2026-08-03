@@ -1633,8 +1633,19 @@ def _make_research_producer(
             harness_allowed = (
                 harness_allowed_tool_names(harness_mcp_servers) if autonomous else None
             )
+            # The run's project pins every harness server it surfaces. Without
+            # it a composed grounding server resolves its own project from the
+            # directory it inherits, which is the undeclared inheritance the pin
+            # replaces. Absent, composition stays unpinned rather than inventing
+            # a root - a default here would be that same inheritance, spelled
+            # invisibly.
             effective_model = compose_harness_mcp_servers(
-                model, harness_mcp_servers, allowed_tools=harness_allowed
+                model,
+                harness_mcp_servers,
+                allowed_tools=harness_allowed,
+                project_root=(
+                    str(effective_workspace_root) if effective_workspace_root else None
+                ),
             )
         response = await effective_model.ainvoke(messages, config=config)
         claim = str(response.content)

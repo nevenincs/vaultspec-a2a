@@ -51,7 +51,6 @@ from ._catalog import catalog_selection
 
 if TYPE_CHECKING:
     import subprocess
-    from pathlib import Path
 
 _ATTACH = "attach-credential-settlement-1234567890abcdef"
 _OWNERSHIP = "ownership-capability-settlement-fedcba0987654321"

@@ -25,7 +25,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, cast
+from typing import Any, cast
 
 import httpx
 import pytest
@@ -49,9 +49,6 @@ from ..tests.gateway_boot import (
 from ..utils import kill_pid_tree_async
 from ..utils.process import ProcessContainment
 from ._catalog import catalog_selection
-
-if TYPE_CHECKING:
-    from pathlib import Path
 
 # A "provider" that launches three long-lived children modelling the authoring,
 # projected-project, and harness MCP descendants, prints their pids, then sleeps.

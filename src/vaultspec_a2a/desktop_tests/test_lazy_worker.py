@@ -47,7 +47,6 @@ from ._catalog import catalog_selection
 
 if TYPE_CHECKING:
     import subprocess
-    from pathlib import Path
 
 _ATTACH = "attach-credential-lazyworker-1234567890abcdef"
 _OWNERSHIP = "ownership-capability-lazyworker-fedcba0987654321"

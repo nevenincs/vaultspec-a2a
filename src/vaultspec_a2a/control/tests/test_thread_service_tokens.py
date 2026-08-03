@@ -65,6 +65,7 @@ def _capturing_worker(captured: dict[str, Any]) -> FastAPI:
 @pytest.mark.asyncio
 async def test_run_start_threads_tokens_to_worker_but_never_persists_them(
     session_factory,
+    tmp_path: Path,
 ) -> None:
     captured: dict[str, Any] = {}
     spawner = LazyWorkerSpawner(
@@ -96,7 +97,7 @@ async def test_run_start_threads_tokens_to_worker_but_never_persists_them(
                 nickname=None,
                 metadata=None,
                 metadata_json=None,
-                workspace_root=None,
+                workspace_root=tmp_path,
                 actor_tokens=bundle,
             ),
             circuit_breaker=circuit_breaker,

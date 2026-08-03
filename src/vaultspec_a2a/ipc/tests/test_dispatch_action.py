@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from ...ipc.schemas import DispatchRequest, to_dispatch_action
@@ -22,7 +24,14 @@ def test_narrows_each_dispatch_action_to_its_wire_literal(
     narrowed = to_dispatch_action(action)
     assert narrowed == expected
     # The narrowed value is accepted by the wire contract without coercion.
-    request = DispatchRequest(action=narrowed, thread_id="t1", recursion_limit=25)
+    # Every action is given a project: an ingest that names none is a protocol
+    # error, and the narrowing under test is about the action, not the project.
+    request = DispatchRequest(
+        action=narrowed,
+        thread_id="t1",
+        workspace_root=str(Path.cwd()),
+        recursion_limit=25,
+    )
     assert request.action == expected
 
 

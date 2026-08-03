@@ -37,6 +37,7 @@ its sibling.
 
 from __future__ import annotations
 
+import pathlib
 import uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -93,6 +94,10 @@ if TYPE_CHECKING:
     from ...worker.graph_lifecycle import RegisteredCompiledGraph
 
 _CACHE_KEY = ("verdict-loop-live", None, False)
+
+# Every dispatch names an active project, as a real one does. This package's own
+# directory is real, absolute, and present on either platform.
+_WORKSPACE = str(pathlib.Path(__file__).resolve().parent)
 
 
 @pytest_asyncio.fixture
@@ -255,6 +260,7 @@ async def test_live_engine_verdict_resumes_a_real_graph_through_the_real_worker(
             # --- real ingest through the real worker HTTP route ---
             ingest = DispatchRequest(
                 action="ingest",
+                workspace_root=_WORKSPACE,
                 thread_id=thread_id,
                 content="drive to the gate",
                 team_preset="verdict-loop-live",

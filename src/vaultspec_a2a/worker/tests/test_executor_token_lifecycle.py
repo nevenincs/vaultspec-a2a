@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import json
 import logging
+import pathlib
 from typing import TYPE_CHECKING, Any
 
 import httpx
@@ -39,6 +40,9 @@ if TYPE_CHECKING:
     from ...thread.state import TeamState
     from ..graph_lifecycle import RegisteredCompiledGraph
 
+# Every dispatch names an active project, as a real one does. This package's own
+# directory is real, absolute, and present on either platform.
+_WORKSPACE = str(pathlib.Path(__file__).resolve().parent)
 _CODER_TOKEN = "secret-coder-token"
 _REVIEWER_TOKEN = "secret-reviewer-token"
 _BEARER = "secret-machine-bearer"
@@ -108,6 +112,7 @@ async def test_tokens_injected_during_run_and_dropped_after() -> None:
             )
             req = DispatchRequest(
                 action="ingest",
+                workspace_root=_WORKSPACE,
                 thread_id=thread_id,
                 content="build it",
                 team_preset="token-preset",
@@ -180,6 +185,7 @@ async def test_tokens_retained_through_interrupt_and_dropped_on_resume() -> None
 
             ingest = DispatchRequest(
                 action="ingest",
+                workspace_root=_WORKSPACE,
                 thread_id=thread_id,
                 content="build it",
                 team_preset="gate-preset",
@@ -224,6 +230,7 @@ async def test_cancel_of_parked_run_drops_tokens_at_terminal() -> None:
             await executor.handle_dispatch(
                 DispatchRequest(
                     action="ingest",
+                    workspace_root=_WORKSPACE,
                     thread_id=thread_id,
                     content="build it",
                     team_preset="gate-preset",
@@ -266,6 +273,7 @@ async def test_tokens_absent_from_durable_checkpoint() -> None:
             )
             req = DispatchRequest(
                 action="ingest",
+                workspace_root=_WORKSPACE,
                 thread_id=thread_id,
                 content="build it",
                 team_preset="token-preset",
@@ -304,6 +312,7 @@ async def test_tokens_absent_from_logs_during_dispatch(
             )
             req = DispatchRequest(
                 action="ingest",
+                workspace_root=_WORKSPACE,
                 thread_id=thread_id,
                 content="build it",
                 team_preset="token-preset",

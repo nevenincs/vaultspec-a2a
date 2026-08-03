@@ -22,7 +22,12 @@ from pydantic import TypeAdapter, ValidationError
 
 from ..database import get_session_factory, list_threads, update_thread_status
 from ..domain_config import domain_config
-from ..ipc.schemas import DispatchRequest, DispatchResponse, to_dispatch_action
+from ..ipc.schemas import (
+    DispatchRequest,
+    DispatchResponse,
+    canonical_project_root,
+    to_dispatch_action,
+)
 from ..providers.team_selection import (
     TeamSelectionError,
     frozen_team_selection_from_record,
@@ -376,12 +381,38 @@ async def redispatch_reconciling_threads(
                         thread.id,
                     )
                     continue
+                # A reconciling thread inherits the active project it was created
+                # with; the sweep never re-derives one. Refusing HERE, per thread,
+                # is what keeps the sweep going: constructing the dispatch without
+                # a project raises inside the ingest validator, and that exception
+                # aborts the whole pass, so one unrecoverable thread would strand
+                # every healthy one behind it.
                 workspace_root_value = meta.get("workspace_root")
-                workspace_root = (
-                    workspace_root_value
-                    if isinstance(workspace_root_value, str)
-                    else None
-                )
+                try:
+                    if not isinstance(workspace_root_value, str):
+                        msg = "stored metadata names no active project"
+                        raise ValueError(msg)
+                    workspace_root = canonical_project_root(workspace_root_value)
+                except ValueError:
+                    await update_thread_status(
+                        db,
+                        thread.id,
+                        ThreadStatus.FAILED,
+                        failure_reason=(
+                            "run carries no active project: its stored metadata "
+                            "names no workspace_root, so it cannot be re-sited"
+                        ),
+                    )
+                    await db.commit()
+                    _log_redispatch_failure_ladder(
+                        failure_counts,
+                        failure_thread_ids,
+                        "no_active_project",
+                        thread.id,
+                        "Refusing to re-dispatch thread %s with no active project",
+                        thread.id,
+                    )
+                    continue
                 dispatch = DispatchRequest(
                     action=to_dispatch_action(ControlActionType.INGEST),
                     thread_id=thread.id,

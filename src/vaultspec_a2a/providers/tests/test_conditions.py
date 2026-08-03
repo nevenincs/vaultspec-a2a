@@ -60,14 +60,25 @@ if TYPE_CHECKING:
 
     from .._json_contract import JsonObject
 
-# Emits the given frames on stdout, then stays alive so the reader is not racing
-# an EOF. The turn consumer ends the process by raising, and the client reaps it.
+# Emits the given frames on stdout and then CLOSES it, which is what tells the
+# consumer the turn produced no further result.
+#
+# This used to linger instead, on the reasoning that the consumer always ends the
+# process by raising. That holds only for a frame set carrying a terminal
+# outcome. A `willRetry` error is an ATTEMPT, not an outcome: the consumer
+# deliberately defers it and keeps reading, because raising there once reported a
+# refused credential as "Reconnecting... 1/5". For such a set nothing ever
+# raised, so the reader waited on a frame the script had already decided never to
+# send - a hung test, not a slow one.
+#
+# Closing does not race the reader: every frame is written and flushed first, and
+# a closed pipe delivers what it holds before it reports EOF.
 _FRAME_SERVER = r"""
-import json, sys, time
+import json, sys
 for frame in json.loads(sys.argv[1]):
     sys.stdout.write(json.dumps(frame) + "\n")
     sys.stdout.flush()
-time.sleep(30)
+sys.stdout.close()
 """
 
 

@@ -52,6 +52,7 @@ from ..utils import package_version
 from ..utils.enums import CodexWebSearchMode
 from ..workspace.environment import resolve_env_vars
 from ._acp_mcp import codex_mcp_server_specs
+from ._acp_types import require_workspace_root
 from ._cleanup import CleanupStep, run_independent_cleanups
 from ._codex_config_home import (
     build_codex_config_home,
@@ -343,6 +344,12 @@ def _usage_metadata(breakdown: JsonObject) -> UsageMetadata:
     )
 
 
+# Put on the notification queue when the reader reaches end-of-stream, so a turn
+# consumer waiting for its next frame learns the provider is gone instead of
+# sitting out the full idle budget. Identity-compared, never parsed.
+_STREAM_CLOSED: JsonObject = {"__codex_stream_closed__": True}
+
+
 class _CodexAppServerClient:
     """Minimal JSON-RPC-over-stdio client for a spawned ``codex app-server``.
 
@@ -456,6 +463,13 @@ class _CodexAppServerClient:
             # the only startup diagnostic behind a generic connection error.
             if self._pending:
                 self._fail_pending(await self._unexpected_eof_error())
+            # Requests are not the only thing that can be waiting. A turn
+            # consumer blocks on the NOTIFICATION queue, which an EOF used to
+            # leave untouched - so a provider that exited without a terminal
+            # frame stranded the turn for the whole idle budget and then
+            # reported a timeout, describing a process that had already been
+            # gone for ten minutes. Announce the close on that channel too.
+            self.notifications.put_nowait(_STREAM_CLOSED)
 
     def _dispatch(self, message: JsonObject) -> None:
         raw_id = message.get("id")
@@ -566,7 +580,6 @@ class CodexChatModel(BaseChatModel):
     model_name: str | None = None
     effort: str | None = None
     service_tier: str | None = None
-    cwd: str | None = None
     workspace_root: str | None = None
     codex_home: str | None = None
     # Per-model override of the deployment's web-search posture, resolved against
@@ -730,7 +743,9 @@ class CodexChatModel(BaseChatModel):
 
     def _workspace(self) -> Path:
         """Return the one precedence-resolved workspace path for a Codex turn."""
-        return Path(self.workspace_root or self.cwd or str(Path.cwd()))
+        return require_workspace_root(
+            self.workspace_root, surface="Codex turn workspace"
+        )
 
     def _build_env(self, workspace: Path) -> dict[str, str]:
         """Return the subprocess env: scrubbed base plus an optional CODEX_HOME.
@@ -897,6 +912,20 @@ class CodexChatModel(BaseChatModel):
                     client.notifications.get(),
                     timeout=idle_limit if idle_limit > 0 else None,
                 )
+                if message is _STREAM_CLOSED:
+                    # The provider is gone and never stated a result. If it
+                    # announced a retry on the way out, that attempt is the
+                    # truest thing anyone said about this turn - report it
+                    # rather than a bare "stream ended", which describes the
+                    # transport and not the failure the operator is chasing.
+                    if deferred is not None:
+                        raise _carry_condition(deferred, None)
+                    # Otherwise reuse the SAME diagnostic the request path
+                    # builds for an early exit: the child's real status and its
+                    # bounded, redacted stderr tail. A bare "stream ended" here
+                    # would describe the transport and throw away the only
+                    # evidence of why the provider left.
+                    raise await client._unexpected_eof_error()
             except TimeoutError:
                 # A lane that announced a retry and then went quiet has already
                 # told us why it was struggling. Reporting the silence instead

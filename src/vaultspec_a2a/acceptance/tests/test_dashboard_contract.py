@@ -106,7 +106,20 @@ def test_authenticated_start_creates_a_dispatched_run(
     assert body["run_id"] == run_id
     assert body["eligible"] is True
     assert body["status"]
-    assert body["profile_id"]
+
+    # The one execution authority a start discloses is the frozen assignment; the
+    # retired profile pair is deliberately absent from this response rather than
+    # served empty, so asserting a `profile_id` here would demand a field the
+    # contract removed. What must hold is that every required role was frozen to
+    # the lane this stack selected - the in-process one, which cannot spend.
+    assert "profile_id" not in body
+    frozen = body["frozen_assignment"]
+    assert frozen["digest"]
+    assignments = frozen["assignments"]
+    assert {item["role_id"] for item in assignments} == {DEFAULT_REQUIRED_ROLE}
+    assert all(
+        item["provider_id"] == gateway.selected_provider_id for item in assignments
+    )
 
     # The durable run exists (unlike a prepare) - status resolves it.
     status = gateway.status(run_id)

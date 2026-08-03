@@ -31,6 +31,12 @@ from ..thread.errors import ConfigError
 from ..workspace.environment import resolve_env_vars
 from .acp_catalog import discover_acp_catalog
 from .codex_catalog import discover_codex_catalog
+from .in_process_catalog import (
+    IN_PROCESS_EXECUTION_MODES,
+    discover_in_process_catalog,
+    in_process_lane_serving_armed,
+    served_in_process_lanes,
+)
 from .kimi_catalog import discover_kimi_catalog
 from .openai_catalog import discover_openai_compatible_catalog
 from .provider_catalog import (
@@ -843,6 +849,25 @@ async def _discover_openai_catalog(key: ProviderCatalogKey) -> ProviderCatalogDi
     )
 
 
+async def _discover_in_process_catalog(
+    key: ProviderCatalogKey,
+) -> ProviderCatalogDiscovery:
+    """Adapt the computed in-process catalog to the registration contract.
+
+    The health evidence is asserted rather than observed, and every value is a
+    fact about this build: the provider is compiled into this process, so it is
+    configured and its transport is a function call; it holds no credential, so
+    authentication is not applicable rather than unknown.
+    """
+    discovered = discover_in_process_catalog(key)
+    return ProviderCatalogDiscovery(
+        discovered.catalog,
+        discovered.authentication,
+        configured=HealthState.AVAILABLE,
+        transport=HealthState.AVAILABLE,
+    )
+
+
 async def _discover_unverified_catalog(
     key: ProviderCatalogKey,
 ) -> ProviderCatalogDiscovery:
@@ -913,9 +938,9 @@ class ProviderFactory:
     """Factory for instantiating LangChain chat models for different providers."""
 
     def catalog_registrations(
-        self, workspace_root: Path
+        self, workspace_root: Path, *, serve_in_process_lanes: bool | None = None
     ) -> tuple[ProviderCatalogRegistration, ...]:
-        """Return each external catalog lane with its exact discovery adapter.
+        """Return each catalog lane with its exact discovery adapter.
 
         Registrations deliberately contain no model values. A lane without a
         verified enumeration surface remains present but unavailable, rather than
@@ -924,8 +949,21 @@ class ProviderFactory:
         The workspace root is required: discovery spawns real provider
         subprocesses, and a lane discovered against this service's own tree
         describes a different machine state than the one the run will execute in.
+
+        ``serve_in_process_lanes`` arms the in-process lanes, which are hidden by
+        default. ``None`` consults the deployment's environment declaration, which
+        is what the served gateway path does; an explicit value is the same
+        decision made by a caller that already knows its own posture, so the
+        policy is exercisable without reaching into the process environment.
+        The in-process registrations come last, so arming them cannot reorder the
+        external lanes a client already enumerates.
         """
         discovery_root = workspace_root
+        armed = (
+            in_process_lane_serving_armed()
+            if serve_in_process_lanes is None
+            else serve_in_process_lanes
+        )
         claude = ProviderCatalogKey(
             Provider.CLAUDE.value, f"claude-agent-acp:{settings.acp_backend}"
         )
@@ -937,6 +975,17 @@ class ProviderFactory:
             Provider.ZAI.value, f"zai-claude-agent-acp:{settings.acp_backend}"
         )
         zhipu = ProviderCatalogKey(Provider.ZHIPU.value, "zhipu-openai-compatible-api")
+        in_process = tuple(
+            # ``key=key`` binds this iteration's lane into the callback; a bare
+            # closure over the loop variable would give every registration the
+            # last lane's identity, and the loader fences a mismatched key.
+            ProviderCatalogRegistration(
+                key, lambda key=key: _discover_in_process_catalog(key)
+            )
+            for key in served_in_process_lanes(
+                armed=armed, mock_api_base=settings.mock_api_base
+            )
+        )
         return (
             ProviderCatalogRegistration(
                 claude, lambda: _discover_claude_catalog(claude, discovery_root)
@@ -957,13 +1006,20 @@ class ProviderFactory:
             ProviderCatalogRegistration(
                 zhipu, lambda: _discover_unverified_catalog(zhipu)
             ),
+            *in_process,
         )
 
     def catalog_registration(
-        self, key: ProviderCatalogKey, workspace_root: Path
+        self,
+        key: ProviderCatalogKey,
+        workspace_root: Path,
+        *,
+        serve_in_process_lanes: bool | None = None,
     ) -> ProviderCatalogRegistration:
         """Resolve a served lane exactly; unknown modes cannot borrow an adapter."""
-        for registration in self.catalog_registrations(workspace_root):
+        for registration in self.catalog_registrations(
+            workspace_root, serve_in_process_lanes=serve_in_process_lanes
+        ):
             if registration.key == key:
                 return registration
         raise ValueError(
@@ -1026,6 +1082,13 @@ class ProviderFactory:
                     raise ValueError("backend conflicts with frozen execution_mode")
                 backend = frozen_backend
             expected_modes = {
+                # The in-process lanes read their modes from the serving
+                # declaration, so a frozen selection and the catalog that issued
+                # it cannot disagree about what the lane is called.
+                Provider.DETERMINISTIC: IN_PROCESS_EXECUTION_MODES[
+                    Provider.DETERMINISTIC
+                ],
+                Provider.MOCK: IN_PROCESS_EXECUTION_MODES[Provider.MOCK],
                 Provider.CODEX: "codex-app-server",
                 Provider.CLAUDE: f"claude-agent-acp:{backend or settings.acp_backend}",
                 Provider.ZAI: f"zai-claude-agent-acp:{backend or settings.acp_backend}",

@@ -44,6 +44,12 @@ _DISPLAY_NAMES = {
     Provider.OPENAI: "OpenAI",
     Provider.ZAI: "Z.ai",
     Provider.ZHIPU: "Zhipu AI",
+    # The in-process lanes name themselves as such wherever they are displayed.
+    # They are served only to a deployment that armed them, but a served lane is
+    # a lane a human can read, and one that returns fixed or replayed content
+    # must not be presentable as an ordinary provider.
+    Provider.DETERMINISTIC: "Deterministic (in-process)",
+    Provider.MOCK: "Mock (in-process tape replay)",
 }
 
 

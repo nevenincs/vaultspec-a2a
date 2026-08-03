@@ -129,6 +129,16 @@ class CertifiedGateway:
             "metadata": {"workspace_root": str(self.workspace_root)},
         }
 
+    @property
+    def selected_provider_id(self) -> str:
+        """The provider id this stack's runs are frozen to.
+
+        Exposed so a scenario can assert that a started run was frozen to the
+        lane the harness actually selected, rather than restating a literal that
+        would keep passing if the resolution ever picked something else.
+        """
+        return str(self._resolved_run_fields()["provider_id"])
+
     def _resolved_run_fields(self) -> dict[str, Any]:
         """Resolve and cache one served selection, in-process lane first."""
         if self._run_fields is not None:
@@ -334,6 +344,12 @@ def certified_gateway(
         env = armed_gateway_env(
             app_home, gateway_port=gateway_port, worker_port=worker_port
         )
+        # Arm the in-process lane serving this stack exists to certify against.
+        # The lanes are hidden by default so no product deployment can offer
+        # fixed content beside a real provider; certification is exactly the
+        # deployment that must select one, because an executing run here may
+        # never spend. Set before *extra_env* so a caller can still override it.
+        env["VAULTSPEC_SERVE_IN_PROCESS_LANES"] = "true"
         if settlement_url is not None:
             env["VAULTSPEC_DESKTOP_SETTLEMENT_URL"] = settlement_url
         env.update(extra_env)

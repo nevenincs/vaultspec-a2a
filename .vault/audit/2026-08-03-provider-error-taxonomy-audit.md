@@ -5,7 +5,7 @@ tags:
 date: '2026-08-03'
 modified: '2026-08-03'
 body_schema: 'body-v1'
-body_hash: 'sha256:a0dd7852c90bf47811d6592f48dd70c520e44265dd90c9f8363a77bafff09afc'
+body_hash: 'sha256:f2ff10013cd815e84fb68f6c9133f890c39082d0abc9e369c44c83563bb76f57'
 related:
   - "[[2026-08-02-provider-error-taxonomy-plan]]"
   - "[[2026-08-02-provider-error-taxonomy-adr]]"
@@ -101,6 +101,36 @@ admission declaration is a deny-by-default literal keyed by provider and
 execution mode. Running a successful turn on a lane does not admit it; a human
 attests the evidence and edits the declaration. Any future work that finds itself
 wanting to edit that table to make a test pass has misread the rule.
+
+### verification-brief-omitted-a-gate-that-crosses-package-boundaries | medium | A module-size gate scanning one language lives in another language's package, so a single-surface phase never runs it
+
+Found by one executing agent flagging a red gate in another's lane, not by either
+phase's own verification. The consuming repository's module-size gate is a script
+in the frontend package, and it scans the engine's source as well at a hard
+ceiling with nothing grandfathered. An engine-only phase that runs only the
+language-native commands therefore cannot see it, and one landed a file over the
+ceiling.
+
+The defect is in the brief rather than in the execution: the verification list
+named the language-native commands and stopped. Recorded here because the general
+shape recurs - a gate whose home package does not match the surface it governs is
+invisible to anyone reasoning about verification by surface.
+
+### vocabulary-is-declared-in-three-places | low | Two of the three copies are gated against each other; the third was not
+
+The closed vocabulary now exists as an enum here, a constant in the consuming
+engine's shared contract module, and a constant in the consuming frontend. The
+first two are gated in both directions by a source-reading agreement assertion.
+The frontend copy was ungated and could drift from both; closing that leg is
+assigned. Worth stating plainly that three declarations is the cost of two
+process boundaries, not an accident to be refactored away - each side needs the
+list at its own compile time.
+
+### oversize-modules-outside-this-campaign | low | Two provider modules exceed the repository's module ceiling, neither touched by this work
+
+Surfaced while checking this campaign's own files for compliance after the gate
+finding above. Both predate this work and belong to other lanes; recorded so the
+observation is not lost, not claimed as this campaign's to fix.
 
 ## Recommendations
 

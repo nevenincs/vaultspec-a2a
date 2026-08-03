@@ -4,7 +4,7 @@ tags:
   - '#provider-error-taxonomy'
 date: '2026-08-02'
 modified: '2026-08-03'
-body_hash: 'sha256:477413a2ce4606e24a1b5e426373118ce305ae829fc1545a77dbdb0a7804d7ac'
+body_hash: 'sha256:a1729119532195350a59e26fbfe4732649213d9a6ca7100ee3481113557e64bd'
 tier: L3
 related:
   - '[[2026-08-02-provider-error-taxonomy-adr]]'
@@ -129,6 +129,7 @@ Teaches the dashboard engine to model, validate, persist and forward the conditi
 - [x] `W02.P07.S48` - Persist and read back the condition on a failed run; `engine/crates/vaultspec-api/src/authoring/session/mod.rs`.
 - [x] `W02.P07.S49` - Forward the condition on the a2a ops route; `engine/crates/vaultspec-api/src/routes/ops/a2a.rs`.
 - [x] `W02.P07.S50` - Prove the condition round-trips through the session store; `engine/crates/vaultspec-api/src/authoring/session/tests.rs`.
+- [x] `W02.P07.S63` - Budget the catalog read for the live discovery it actually performs, not as a fast listing read; `engine/crates/vaultspec-api/src/routes/ops/a2a.rs`.
 
 ### Phase `W02.P08` - adapter and panel surfacing
 

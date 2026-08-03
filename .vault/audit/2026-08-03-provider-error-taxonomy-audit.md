@@ -5,7 +5,7 @@ tags:
 date: '2026-08-03'
 modified: '2026-08-03'
 body_schema: 'body-v1'
-body_hash: 'sha256:ecb5399e83476da651bfad79dc0bac76995b6f4782e9825a026a9a44808af3f2'
+body_hash: 'sha256:f72309d72c466e590f294a9abf25516d58cf17a48b0e96caca5854f84b020b3c'
 related:
   - "[[2026-08-02-provider-error-taxonomy-plan]]"
   - "[[2026-08-02-provider-error-taxonomy-adr]]"
@@ -180,7 +180,7 @@ Surfaced while checking this campaign's own files for compliance after the gate
 finding above. Both predate this work and belong to other lanes; recorded so the
 observation is not lost, not claimed as this campaign's to fix.
 
-### catalog-read-budget-is-shorter-than-cold-discovery | high | The consumer times out listing providers on a cold workspace, and a retry hides it
+### catalog-read-budget-is-shorter-than-cold-discovery | RESOLVED, was high | The consumer timed out listing providers on a cold workspace, and a retry hid it
 
 Found by driving the cross-repository path by hand rather than by reading code.
 The consuming engine budgets the provider-catalog verb with its FAST READ ceiling
@@ -196,6 +196,21 @@ self-concealing: the attempt that fails also warms the cache, so a human who
 retries sees it work and a test that calls twice never sees it at all. The first
 provider listing on any cold workspace is the one that fails, which is exactly
 the moment a person is trying to choose a lane.
+
+RESOLVED. The catalog verb now carries its own discovery budget on the consuming
+side, sized against the measured cold cost AND against the emitting side's own
+per-read ceiling, so the consumer no longer gives up while the emitter is still
+inside one bounded read. The premise was confirmed from the emitting side's
+source rather than from one host's timings: lanes are enumerated concurrently by
+spawning each lane's tooling, and the five-minute catalog cache matches the
+observed sixteen-seconds-then-nothing exactly. The emitting side needed no change
+- its behaviour was correct and the consumer was wrong about the cost.
+
+Two design points worth keeping. The shared fast-read budget was deliberately not
+widened, because it also governs verbs that genuinely are fast reads, and the
+guarding test asserts those remain equal to each other so that the tempting wrong
+fix fails. And a hung lane is still not covered, by design and by comment: a
+browser-facing verb cannot wait on a startup ceiling measured in minutes.
 
 Consequence for this campaign specifically: a run cannot be started through the
 consumer without a catalog selection, so on a cold workspace the product cannot

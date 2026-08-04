@@ -5,7 +5,7 @@ tags:
 date: '2026-08-04'
 modified: '2026-08-04'
 body_schema: 'body-v1'
-body_hash: 'sha256:656410d5cf92b98685b361f39869df6ea183a611049d79503e8ce3340cbdec65'
+body_hash: 'sha256:21f5bff2c32ac45a7dfe477bf00b2ee70b22078e7c83318971495adb64fd3e20'
 related: []
 ---
 
@@ -6617,3 +6617,81 @@ than assumed: persistence hardening MAY legitimately be stricter than an in-memo
 contract, and that is a reading, not a substitution. It also repeats a bare role
 cap three times, once inside its own message - the error-message restatement
 defect, now at its third address.
+
+### the-excluded-asset-sweep-is-EMPTY | high | a recorded negative, and the method that makes it trustworthy
+
+**No shipped module resolves a wheel-excluded asset by a fixed path.** The
+question is answered and closed with no code written, which was the stated
+acceptable outcome.
+
+The negative is trustworthy because of how it was reached rather than because it
+is comfortable:
+
+- The exclusion patterns were read from build configuration at runtime and matched
+  with **the same matcher the build system itself uses**, so classification is the
+  build's semantics rather than an approximation of them.
+- Recall was deliberately wide: every shipped module's string literals were tested
+  against each excluded asset's full path, every trailing fragment, its basename,
+  **and its bare stem** - because presets are addressed by stem, so a stem literal
+  joined onto a directory would be a fixed-path resolution.
+- **Floors were asserted and the run aborts below them**: 813 files classified, 257
+  shipped modules visited against a floor of 200, 71 excluded assets against a
+  floor of 10, 541 distinct reference forms tested. Zero modules were undecodable,
+  and an undecodable one would have been counted and named rather than skipped.
+
+**The brief understated the excluded set, and the condition it carried is what
+caught it.** The card named four asset patterns; the configuration carries thirty
+patterns over seventy-one asset files. A hand-copied list would have swept a
+subset and returned **the same clean EMPTY** - which is the failure mode that
+matters on an exhaustiveness question, because a wrong answer and a right one look
+identical.
+
+**This is the second brief in this campaign to hand-copy the thing it demanded be
+derived.** The first was the wheel-boundary guard's exclusion list. Both times the
+lane's derivation caught the orchestrator's copy. The instruction is sound and the
+author of it keeps failing to follow it.
+
+**Nine raw hits, all triaged to name collisions** - a response key, an enumeration
+member, five agent identifiers in an in-process scenario table, a model name used
+as a URL segment, and a supervisor identifier colliding with a tape filename. No
+path join, no open, in any of them.
+
+**And a quantified version of the guard-mistraining argument:** eight of the nine
+hits were correct code, and the one shape a static matcher would key on - a bare
+stem literal - is precisely how correct code names an identifier. A matcher built
+on this evidence would run about eighty-nine percent false. That is no longer an
+argument from principle; it is a measured false-positive rate.
+
+### the-inverse-polarity-nobody-asked-about | medium | clean, recorded so it is not re-derived
+
+The lane checked a case the brief did not contain, and recorded the negative.
+
+The build also **relocates** a schema file INTO the package. So the same defect
+with the sign flipped is possible: a shipped module reading that file at its
+repository path would break in a wheel by the identical mechanism, silently
+finding nothing.
+
+**There is no such reader.** The module that owns that schema GENERATES it from
+its own model definition, and the committed file is an exported snapshot rather
+than an input. Nothing reads it, so the relocation has nothing to break.
+
+Recorded because a negative that is not written down gets re-derived - and because
+"the exclusion direction" was the framing of the whole question, while a build that
+also relocates has two directions.
+
+### a-docstring-that-names-the-threat-and-guards-a-narrower-one | high | sharpens the boarded enforcement
+
+The declared-surface enforcement recorded above needs one correction, supplied by
+the lane that found the original gap: the check must compare the **command** as
+well as the arguments against the registry entry. A known name pointing at a
+different command is the same bypass.
+
+**And the existing code already names that scenario.** The duplicate-identity
+refusal's docstring states that a reviewed name can never be silently redeclared
+with a different command - while the code enforces that only against DUPLICATES,
+not against divergence from the registry entry itself.
+
+So the threat is described accurately, in the right file, by the function nearest
+to it, and the enforcement covers a narrower case than the description. **Eighth
+instance of prose asserting more than its subject enforces**, and the second one
+found inside this same subsystem within an hour.

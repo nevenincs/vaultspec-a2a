@@ -880,3 +880,131 @@ DISTINCT concept serving scope-enforcement comparison rather than wire
 transport. Worker interprocess bearer verification and worker health probing
 were already confirmed single-homed by an earlier sweep and are not
 re-litigated here.
+
+### correction-bounded-poll-loop-has-an-eighth-site | high | supersedes the seven-site count in engine discovery
+
+`resolve_engine_with_retry` in `src/vaultspec_a2a/authoring/discovery.py` is an
+eighth production declaration of the bounded wall-clock poll shape the earlier
+`bounded-wall-clock-poll-loop` finding inventoried as seven sites. It is not a
+test helper: `src/vaultspec_a2a/worker/graph_lifecycle.py` calls it twice, off
+the thread pool, at the two points a run must resolve a live engine before it
+can submit or bridge authoring work, with its own docstring stating plainly
+that it exists because the engine's health endpoint measurably stalls for
+several seconds while its scope watcher rebuilds. It declares its own interval
+(`delay_seconds=2.0`) and attempt count (`attempts=4`), a fourth private
+constant alongside the seven the original finding named. This does not change
+that finding's verdict - DUPLICATE, no shared `poll_until` primitive exists
+anywhere in the tree - it only corrects the count and names the site the
+earlier sweep's search terms did not reach. Recorded as a correction rather
+than a rewrite, per this audit's own rule against rewriting settled entries.
+
+### service-json-candidate-list-reimplemented-in-control | medium | canonical builder is private, so a caller re-derived it
+
+`src/vaultspec_a2a/authoring/discovery.py` builds the engine discovery
+candidate list - the `VAULTSPEC_ENGINE_SERVICE_JSON` env override, then
+`~/.vaultspec/service.json` - in a private, unexported `_candidates()`
+function. `src/vaultspec_a2a/control/health.py`'s
+`probe_engine_discovery_freshness` imports `SERVICE_JSON_ENV`,
+`heartbeat_is_fresh`, and `read_service_json` from that same module - it is
+clearly aware of the canonical source - but reconstructs the two-entry
+candidate list inline, statement for statement, rather than importing a
+shared builder, because none is exported. Verdict DUPLICATE on the ordered
+candidate-list construction, not on the freshness classification (which
+`control/health.py` does correctly per its own distinct non-blocking, no-HTTP
+contract). The fix is narrow and stays inside the discovery module: export the
+existing `_candidates()` (or a thin public alias) so the control-side caller
+imports the ordering instead of restating it; both files agree today only
+because nobody has yet changed the env-override-then-home order in one and
+forgotten the other. Recorded rather than actioned because the consuming
+call site is in `control/`, outside this sweep's domain.
+
+### reviewer-verdict-vocabulary-blocked-from-merging-by-layering | medium | one vocabulary, two declarations, a real import-cycle wall between them
+
+`VERDICT_APPROVED` / `VERDICT_REJECTED` / `VERDICT_REQUEST_CHANGES` -
+`"approved"` / `"rejected"` / `"request_changes"` - are declared as three
+identical module-level string constants in both
+`src/vaultspec_a2a/authoring/lifecycle.py` and
+`src/vaultspec_a2a/graph/nodes/phase_gate.py`. This is not an oversight: the
+latter module's own docstring states the gate is built as a `Protocol` seam
+"decoupled from the authoring package" on purpose, and the decoupling is not
+optional - `src/vaultspec_a2a/authoring/submitter.py` already imports
+`ProposalRevisionRequiredError` FROM `graph.nodes.phase_gate`, so the reverse
+import phase_gate.py would need to reuse authoring's constants does not exist
+to take: it would close an import cycle. Verdict DUPLICATE on the value, but
+correctly DISTINCT in its current form given the dependency direction as it
+stands today - flattening this into one import would require extracting the
+three-string vocabulary into a leaf module beneath both `graph.nodes` and
+`authoring` (a role comparable to `graph/enums.py`, which `authoring` already
+imports without cycling), a change that touches `graph/`, outside this
+sweep's domain. Recorded so a future consolidation does not "fix" this by
+naively importing one from the other and reintroducing the cycle it avoids.
+
+### dispatcher-injected-fields-declared-at-two-resolution-stages | medium | untested parity between a tool-name map and a command map
+
+The set of fields the run dispatcher owns and silently overwrites on a
+proposal command is declared independently in two places, keyed by two
+different vocabularies. `src/vaultspec_a2a/protocols/mcp/tools/authoring_bridge.py`'s
+`_INJECTED_FIELDS_BY_TOOL` maps the catalog's semantic TOOL names
+(`propose_changeset`, `validate_proposal`, `request_approval`, `cancel`,
+`request_apply`) to the fields hidden from that tool's advertised schema.
+`src/vaultspec_a2a/authoring/catalog.py`'s `make_tool_dispatch._apply_injection`
+maps the resolved engine COMMAND names (`create_proposal`, `append_draft`,
+`replace_draft`, `validate_proposal`, `submit_for_review`, `cancel_proposal`,
+`request_apply`) to the fields it actually strips and overwrites at dispatch
+time - a single tool name like `propose_changeset` resolves to three different
+commands depending on the model-supplied `operation`, each with a different
+injected set in the command map, while the tool-name map applies one fixed set
+across all three. The bridge module's own comment says the two "MUST stay
+consistent," but no test asserts it, and grepping both symbols found no shared
+call site. Consequence is currently latent, not live: the engine's served
+catalog for `propose_changeset` already excludes `expected_revision` from its
+schema `properties` (verified against the fixture at
+`src/vaultspec_a2a/protocols/mcp/tests/catalog.json`, whose own `description`
+field independently states `expected_revision` is "Injected below the model"
+alongside `session_id`/`changeset_id`, a THIRD, prose-only assertion of the
+same fact), so there is nothing to leak today. But the tool-name map does not
+list `expected_revision` for `propose_changeset`, unlike the command map,
+which injects it for the `append_draft`/`replace_draft` resolution - if a
+future engine catalog exposes `expected_revision` as a real property on that
+tool's schema, `_deep_strip_injected` would not remove it and the model would
+see a dispatcher-owned field as though it were free to set, silently discarded
+at dispatch. Verdict DUPLICATE on the injection policy across two resolution
+stages, not actioned: the two maps operate at genuinely different points
+(schema-authoring-time hiding by tool name versus dispatch-time value
+overwrite by resolved command) and collapsing them risks conflating "what the
+model is shown" with "what the model cannot forge," which the campaign brief
+names as exactly the mechanism-versus-policy distinction to preserve. The
+narrower, safe fix is a parity test asserting every command-map entry's field
+set is a superset of its resolving tool's schema-map entry.
+
+### authoring-and-protocols-swept-and-found-clean | low | eleven modules confirmed single-homed
+
+Recorded for the negative space in this sweep's domain. `authoring/contract.py`
+(the document-authoring role/topology leaf), `authoring/_ids.py` (id validation
+and idempotency-key derivation - confirmed the sole declaration by four
+differently-phrased semantic searches), `authoring/_envelope.py` and
+`authoring/_errors.py` (the shared-envelope and typed-error decoding, each
+consumed rather than restated by every caller), `authoring/session.py` (the
+proposal-verb lifecycle), `authoring/catalog.py`'s fetch/parse/execute
+mechanism, `authoring/discovery.py`'s heartbeat and record-parsing logic
+(distinct by design and documented as such from `lifecycle/discovery.py`, the
+producer-side authority it mirrors), `protocols/mcp/tools/schema_normalize.py`
+(confirmed the single normalization seam by
+`protocols/mcp/tools/authoring_bridge.py`'s own docstring and by search), and
+`protocols/mcp/authoring_stdio.py`'s `ENV_*` names (the sole declaration site;
+`providers/_acp_authoring.py` imports them rather than restating the strings)
+are each single-homed. `authoring/feedback_reader.py`'s `render_feedback_batch`
+looks, by name, like a third mounting mechanism alongside
+`graph/nodes/vault_reader.py`'s document and task-queue mounts, but it is
+DISTINCT by injection site, not merely by content: the vault/queue mounts wrap
+every block in a shared `_DOC_SEPARATOR`/`_DOC_FOOTER` header inside
+`mounted_context`, while feedback grounding rides into the worker's system-
+message construction (`graph/nodes/worker.py`'s `_build_worker_messages`)
+through an entirely separate parameter, never touching the mount header
+format. `authoring/submitter.py`'s body-link and frontmatter scan mirrors
+vaultspec-core's own check by necessity (a cross-repository boundary, not a
+same-tree duplicate) and is already regression-locked by
+`authoring/tests/test_core_grounding_parity.py` against drift. Breadth not
+established beyond the modules read: `authoring/tests/` and
+`protocols/mcp/tests/` internals were not swept for their own duplication
+against each other.

@@ -635,6 +635,14 @@ def _compile_worker_node(
     that topology silently failing to disclose which model it ran, in exactly
     the way that fix existed to close.
 
+    The team harness is resolved HERE rather than passed in, for that same
+    reason: it is read off the ``team_config`` all three topologies already hand
+    over, so there is one resolution site instead of three that must agree. It
+    was previously read only by ``_compile_research_adr``, which left a preset
+    declaring ``[team.harness] mcp_servers`` on any other topology compiling to
+    a worker that never advertised it - a declaration the config layer parsed,
+    validated, and then dropped on the floor.
+
     Deliberately stops short of ``builder.add_node``. pipeline_loop wraps
     exactly one returned node - its own loop node - in ``_wrap_loop_node``
     before adding it, which needs a seam between "node built" and "node added"
@@ -654,6 +662,11 @@ def _compile_worker_node(
         provider_factory=provider_factory,
         frozen_assignment=frozen_assignment,
     )
+    # Flat and team-level, exactly as the research_adr path reads it: the harness
+    # schema carries no per-role MCP field, so every worker of the team gets the
+    # team's declaration. Empty when no harness is declared, which composes to a
+    # no-op rather than to some inherited default.
+    harness = team_config.effective_harness()
     worker_node = create_worker_node(
         model,
         _composed_worker_prompt(agent_cfg, model),
@@ -665,6 +678,7 @@ def _compile_worker_node(
         cost_port=cost_port,
         authoring_binding_provider=authoring_binding_provider,
         role=agent_cfg.role,
+        harness_mcp_servers=list(harness.mcp_servers) if harness is not None else [],
     )
     metadata = _agent_node_metadata(agent_cfg, used_provider, capability, model_name)
     return worker_node, metadata

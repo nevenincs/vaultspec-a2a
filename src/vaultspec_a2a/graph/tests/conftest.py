@@ -16,9 +16,10 @@ _PACKAGE_DIR = str(__import__("pathlib").Path(__file__).resolve().parent)
 _MIDDLEWARE_FILES = frozenset(
     {"test_worker_integration.py", "test_worker_authoring_wiring.py"}
 )
-# Layer-1 tests that still perform real I/O (a live SQLite checkpointer here) —
-# they keep ``core`` but are NOT pure, so the orthogonal ``unit`` marker is withheld.
-_IMPURE_CORE_FILES = frozenset({"test_compiler.py"})
+# Layer-1 tests that still perform real I/O — a live SQLite checkpointer, or real
+# ACP subprocesses driven through a compiled graph. They keep ``core`` but are NOT
+# pure, so the orthogonal ``unit`` marker is withheld.
+_IMPURE_CORE_FILES = frozenset({"test_compiler.py", "test_harness_topology_reach.py"})
 
 
 def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:

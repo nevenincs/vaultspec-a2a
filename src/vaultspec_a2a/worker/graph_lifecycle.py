@@ -137,12 +137,18 @@ def assert_armed_authoring_attachable(
     so a provider with no attachment surface at all is refused with a served
     compile-time reason before the run ever starts — never a live-run timeout.
 
-    A no-op when *harness* does not arm the authoring bridge (a per-worker
-    resolution scoped to authoring_bridge specifically: the
-    harness-mcp_servers-only case is
-    already proven to reach every known provider's own delivery mechanism -
-    ``with_mcp_servers`` or ``with_harness_mcp_servers`` - via
-    ``compose_harness_mcp_servers``, so it is out of scope here).
+    A no-op when *harness* does not arm the authoring bridge. The scope is
+    authoring_bridge specifically because the mcp_servers-only case fails
+    SOFTLY: ``compose_harness_mcp_servers`` returns a model with no delivery
+    mechanism unchanged rather than raising, so there is no per-turn error for a
+    compile-time gate to pull forward. That is a weaker guarantee than a gate,
+    and it is deliberately not restated as one here - this docstring previously
+    claimed the mcp_servers path was "already proven to reach every known
+    provider", which was untrue on three of the four topologies at the time it
+    was written, because only the research_adr compiler read the declaration at
+    all. The forwarding now happens in every worker-compiling topology; what
+    remains unguarded here is a lane whose model exposes neither delivery
+    surface, and that stays a silent no-op by design rather than by omission.
     """
     if harness is None or not harness.authoring_bridge:
         return

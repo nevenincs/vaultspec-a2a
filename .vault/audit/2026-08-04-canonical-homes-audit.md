@@ -5,7 +5,7 @@ tags:
 date: '2026-08-04'
 modified: '2026-08-04'
 body_schema: 'body-v1'
-body_hash: 'sha256:1f097d1a1f371122f9c123c03deeb23feb8cce92aae6e033797e2f6e01854d9a'
+body_hash: 'sha256:00692ea865dc1d8512a7bc369aca9abb345c38405701b793de833c7b64197785'
 related: []
 ---
 
@@ -1562,6 +1562,38 @@ silently inside a test file. Recorded as open.
 This is the second time a lane has declined to strengthen something on the
 grounds that the strengthening would be dishonest, and both times the refusal
 surfaced a better finding than the change would have.
+
+### ten-inline-narrowings-were-seven-and-five | high | the count was never the question
+
+The open question was whether ten inline restatements of a narrowing invariant
+were bypasses of the canonical helper or idiomatic local narrowing. Derived from
+bodies rather than counted: thirteen matching lines are one home, SEVEN bypasses
+and FIVE distinct sites, and the split falls exactly on a package boundary.
+
+One site settles the question by itself. A module narrows a result THROUGH the
+helper, then two lines later inlines the identical check on the next field of
+that same result. Not a module lacking access, not a writer disagreeing with the
+posture - the same author not reaching for it a second time. A neighbouring site
+corroborates by annotating its result with the helper's exact return type,
+written out by hand.
+
+The five that stay are blocked by layering rather than preference, and each
+blocker was verified: the owning package exports none of this, and the consuming
+package imports nothing from it at all, so routing them would mint a
+cross-package dependency that does not exist. Their values also arrive as an
+untyped mapping off HTTP envelopes rather than the closed JSON type the helper
+takes. This is the "cannot import it" case rather than "simply did not", and the
+distinction decides it.
+
+Two details a count would have destroyed. One neighbouring site degrades to
+NOTHING rather than to an empty object, so the fallback is not even locally
+uniform. And the frontmatter site is the last of four identical degradations
+inside one parser - extracting only that one to a foreign helper would leave the
+function half-speaking two vocabularies, which is less coherent, not more.
+
+Recorded because the campaign's standing question - one concept in many places,
+or several sharing a shape - resolved into BOTH answers within one grep, and only
+reading bodies separated them.
 
 ## Recommendations
 

@@ -22,6 +22,7 @@ if TYPE_CHECKING:
 
 from ..thread.enums import (
     ACTIVE_STATUSES,
+    NON_ACTIVE_STATUSES,
     ApprovalStatus,
     ControlActionType,
     RepairStatus,
@@ -231,17 +232,21 @@ async def list_threads(
 
 
 async def list_non_terminal_threads(session: AsyncSession) -> Sequence[ThreadModel]:
-    """Return all threads that still require orchestration attention."""
+    """Return all threads that still require orchestration attention.
+
+    Excludes every member of ``NON_ACTIVE_STATUSES`` - the terminal outcomes
+    plus ``ARCHIVED`` and ``DELETING`` - rather than a hand-typed subset. A
+    thread mid-teardown is a lifecycle sink with no valid outbound transition
+    (see ``thread.transitions``), so it must stay invisible to this sweep the
+    same way it is invisible to discovery; scoring it for repair alongside a
+    genuinely in-flight run risked a startup reconciliation pass raising
+    ``InvalidTransitionError`` against a row the deletion saga owns.
+    """
     stmt = (
         select(ThreadModel)
         .where(
             ThreadModel.status.not_in(
-                [
-                    ThreadStatus.COMPLETED.value,
-                    ThreadStatus.FAILED.value,
-                    ThreadStatus.CANCELLED.value,
-                    ThreadStatus.ARCHIVED.value,
-                ]
+                sorted(status.value for status in NON_ACTIVE_STATUSES)
             )
         )
         .order_by(ThreadModel.created_at.asc())

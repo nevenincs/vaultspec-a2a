@@ -714,3 +714,27 @@ to the remaining raise sites in that window will name this one in a single run.
 Every hypothesis formed by reading this path has been wrong; the instrument has
 been right twice.
 
+**Narrowed further, same session.** Exhaustive read of every raise reachable
+between entering `_run_commit_locked` and `broker.commit`: `_prepare_workspace_root`
+raises nothing, `_load_preset_or_refuse` raises only 422 twice, and
+`_validate_and_freeze_selection_or_refuse` raises 422 three times and 503 exactly
+once - the catalog scope bound already disproven by instrumentation. The
+eligibility gate is disproven. So NO 503 source exists in that window.
+
+The refusal therefore cannot precede `broker.commit`; it must follow it. That
+inverts where the defect lives: `broker.commit` is not refusing an unknown
+reservation, execution continues into `_create_run_core`, and the 503 comes from
+the drain/admission gate at `:456` - whose reason string,
+"run-admission reservation capacity is exhausted", is exactly what the gateway
+log shows.
+
+If that holds, the defect is not an ordering question at all: a commit naming a
+reservation that never existed is being treated as admissible, and only the
+concurrency bound stops it. The test's expectation of 409 is then correct and
+the broker is wrong, which is the opposite of what the withdrawn finding above
+concluded.
+
+Still stated as an inference, because the one thing not yet observed is
+`broker.commit`'s own outcome for a bogus id. Logging that outcome answers it
+outright, and is the single remaining step.
+

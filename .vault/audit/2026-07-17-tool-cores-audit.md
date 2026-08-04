@@ -911,3 +911,95 @@ defect in the desktop lane rather than a test expectation problem.
 The ADR ordering question raised at the top of this thread remains open on its
 own merits, but it is NOT what these three tests are failing on.
 
+
+## Closed (2026-08-04): the worker was never gone, only busy
+
+Both candidates above were wrong, and the disclosure that settled it was the one
+missing all along: `probe_worker_health` swallowed every transport exception
+without naming it. With the exception typed, the failing probe reports
+`ReadTimeout`, not `ConnectError` - the connection was established and accepted,
+the worker simply did not answer inside the two-second budget.
+
+An unauthenticated probe fired from the TEST process, on its own fresh client,
+times out at the same instant and answers normally one second later. That rules
+out the gateway's pooled client and rules out the worker dying: the worker is
+alive, listening, and unresponsive for a window.
+
+The window is the first ingest. The worker logs `dispatch_accepted` and then
+nothing for 7.4 seconds, until `Instantiating ProviderFactory`. Resolving a
+provider and compiling the graph makes the whole process unresponsive for that
+long, and any admission request arriving inside it was refused as if no worker
+existed.
+
+The fix is at the reading, not the timing. A refused connection OBSERVES absence;
+a read that outran its budget observes nothing. `WorkerHealthProbe` now carries
+that distinction, and admission acts on absence only where absence was observed -
+an indeterminate probe defers to the worker's own heartbeat. Landed in
+`dc7c9272` with a real accept-and-never-answer server pinning the classification.
+
+### Findings raised by this investigation
+
+- **HIGH - `control/event_handlers.py:74`.** When no session factory is injected,
+  the terminal-event handler substitutes the ambient application factory. An app
+  that seats no database therefore performs a durable write against whatever the
+  process default resolves to, rather than skipping the write it has no store
+  for. Observed as `sqlite3.OperationalError: no such table: threads` failing
+  `api/tests/test_internal.py::TestInternalEvents::test_batch_with_aggregator_only_returns_ok`,
+  which is a truthful test of an app with a relay target and no database. Same
+  ambient-default class as the production-boundary campaign. NOT the
+  `workspace_root` migration, and not owned by the lane currently editing that
+  file.
+- **MEDIUM - worker first-ingest stall.** 7.4 seconds of provider resolution and
+  graph compilation leave the worker's whole process unresponsive. The admission
+  fix makes it non-fatal, not absent: `/health`, the watchdog, and any second
+  dispatch all wait on it. The compile path is documented as synchronous work
+  inside an `async def`, so the work is on the loop by construction.
+- **MEDIUM - `utils/logging.py:178`.** The JSON formatter indexes
+  `record.exc_info` unconditionally and raises `TypeError: 'bool' object is not
+  subscriptable` when a record carries `exc_info=True`, which the OTel exporter
+  produces. Every such record is lost to a logging error. File is held
+  uncommitted by another lane; not edited here.
+- **LOW - telemetry default in tests.** Workers boot with an OTLP endpoint of
+  `198.51.100.1:4317`, a blackhole address, so gRPC export retries with ten-second
+  deadlines and floods worker stderr through the whole run.
+- **LOW - flaky under back-to-back gateway boots.**
+  `desktop_tests/test_lazy_worker.py` and four `api/tests/test_thread_metadata.py`
+  cases each failed once and passed on isolation and on re-run - the metadata ones
+  on a Windows temp-directory pin, `os.rmdir` refused on an already-empty
+  directory. Not reproduced deterministically.
+
+## Closed (2026-08-04): run start no longer absorbs a cold catalog build
+
+Measured, not estimated: a cold `records()` for one workspace took over a minute
+on this host, with several ACP lanes timing out inside it. Run start awaited that
+with no bound, so a caller could not distinguish a building catalog from a hung
+gateway.
+
+Reachable in production rather than hypothetical - a gateway restart, or the
+workspace scope evicted under its bounded capacity, between the client's catalog
+read and the start that revalidates against it.
+
+Bounded in `194627d2`. The build is shielded rather than cancelled, which is the
+load-bearing half: cancelling would make every retry pay the same cold cost and
+never converge. The refusal is a genuine "not yet".
+
+## Decided (2026-08-04): where the opinionated default lives
+
+The open question was whether A2A's own default should be surfaced as a model
+NAME or as a low/medium/high tier. The accepted catalog record answers it: no
+centrally maintained model-tier mapping may exist in production source, and a
+tier is exactly that mapping. So: by name.
+
+Effort is a separate axis that already belongs to the provider - each lane's
+native controls carry the provider's own default option - and is not A2A's to
+decide.
+
+The default itself is a RULE over what a lane advertises, never a list of names:
+capability vocabulary first, the provider's own enumeration order otherwise. A
+lane that starts advertising a new model gets a recommendation for it with no
+repository release, which is the whole difference from the static map this
+replaces. Served as `recommended_entry_id` beside the catalog rather than inside
+it, because the opinion is A2A's and not the lane's. Landed in `7a4ac75b`.
+
+This unblocks the persona-policy cleanup: with a served recommendation, presets
+have no remaining reason to carry provider or capability policy.

@@ -51,13 +51,14 @@ from ..desktop._filesystem_authority import (
     resolve_directory_authority,
 )
 from ..desktop._platform_acl import (
+    confirm_opened_secret,
+    unfollowed_read_flags,
+)
+from ..desktop._platform_acl import (
     harden_credential_path as _harden_credential_path,
 )
 from ..desktop._platform_acl import (
     restrict_windows_file as _restrict_windows_file,
-)
-from ..desktop._platform_acl import (
-    windows_file_is_restricted as _windows_file_is_restricted,
 )
 from ..utils.atomic_write import atomic_write_text
 from ..utils.coercion import coerce_int
@@ -180,7 +181,7 @@ def _read_handoff_credential(discovery_path: Path, reference: object) -> str | N
                     return None
                 descriptor = os.open(
                     "service.token",
-                    os.O_RDONLY | os.O_NOFOLLOW | getattr(os, "O_CLOEXEC", 0),
+                    unfollowed_read_flags(),
                     dir_fd=leased.dir_fd,
                 )
                 named = os.stat(
@@ -194,17 +195,7 @@ def _read_handoff_credential(discovery_path: Path, reference: object) -> str | N
                 named = expected.stat(follow_symlinks=False)
             try:
                 opened = os.fstat(descriptor)
-                if (
-                    not stat.S_ISREG(named.st_mode)
-                    or not stat.S_ISREG(opened.st_mode)
-                    or (named.st_dev, named.st_ino) != (opened.st_dev, opened.st_ino)
-                ):
-                    return None
-                if os.name == "posix" and (
-                    opened.st_uid != os.geteuid() or opened.st_mode & 0o077
-                ):
-                    return None
-                if not _windows_file_is_restricted(expected):
+                if not confirm_opened_secret(descriptor, named=named, path=expected):
                     return None
                 with os.fdopen(descriptor, "r", encoding="utf-8") as handle:
                     descriptor = -1

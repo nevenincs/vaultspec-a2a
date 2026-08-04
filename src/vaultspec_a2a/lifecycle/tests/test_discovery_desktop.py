@@ -17,10 +17,10 @@ import time
 from typing import TYPE_CHECKING
 
 from ...authoring.discovery import HEARTBEAT_STALE_MS
+from ...desktop._platform_acl import windows_file_is_restricted
 from ...lifecycle.discovery import (
     DESKTOP_DISCOVERY_VERSION,
     DesktopDiscoveryState,
-    _windows_file_is_restricted,
     classify_desktop_discovery,
     desktop_record_process_is_live,
     read_desktop_discovery,
@@ -58,7 +58,7 @@ def test_publication_leaves_its_parent_owner_restricted(tmp_path: Path) -> None:
         assert path.parent.stat().st_mode & 0o077 == 0
         assert path.parent.stat().st_mode & 0o100, "the parent must stay traversable"
     else:
-        assert _windows_file_is_restricted(path.parent)
+        assert windows_file_is_restricted(path.parent)
 
 
 def test_round_trip_preserves_every_field(tmp_path: Path) -> None:

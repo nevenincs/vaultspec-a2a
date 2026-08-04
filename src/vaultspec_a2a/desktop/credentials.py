@@ -32,8 +32,10 @@ from pathlib import Path
 from ..artifacts import ArtifactDeclaration, RetentionDisposition
 from ..utils.atomic_write import atomic_write_text
 from ._platform_acl import (
+    confirm_opened_secret,
     credential_file_is_owner_restricted,
     harden_credential_path,
+    unfollowed_read_flags,
 )
 
 __all__ = [
@@ -180,19 +182,14 @@ def _read_owner_restricted_secret(path: Path, *, plane: CredentialPlane) -> str:
     if named.st_size > _MAX_CREDENTIAL_BYTES:
         raise CredentialError(f"{plane.value} credential file exceeds its size bound")
 
-    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_BINARY", 0)
     try:
-        descriptor = os.open(path, flags)
+        descriptor = os.open(path, unfollowed_read_flags())
     except OSError as exc:
         raise CredentialError(
             f"{plane.value} credential file cannot be opened"
         ) from exc
     try:
-        opened = os.fstat(descriptor)
-        if not stat.S_ISREG(opened.st_mode) or (opened.st_dev, opened.st_ino) != (
-            named.st_dev,
-            named.st_ino,
-        ):
+        if not confirm_opened_secret(descriptor, named=named, path=path):
             raise CredentialError(
                 f"{plane.value} credential file changed identity while opening"
             )

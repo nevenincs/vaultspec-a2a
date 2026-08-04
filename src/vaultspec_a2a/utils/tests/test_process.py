@@ -22,6 +22,7 @@ from ...lifecycle.manager import _await_listener
 from ...testing.ports import free_port
 from ...utils.process import (
     ListenerOwnership,
+    _win_tree_kill,
     classify_listener_ownership,
     kill_pid_tree_async,
     listener_belongs_to,
@@ -131,6 +132,40 @@ async def test_kill_pid_tree_on_an_already_dead_pid_is_success() -> None:
 async def test_kill_pid_tree_nonpositive_pid_is_success() -> None:
     assert await kill_pid_tree_async(0) is True
     assert await kill_pid_tree_async(-1) is True
+
+
+@pytest.mark.skipif(
+    sys.platform != "win32",
+    reason="only the Windows path shells out to taskkill; POSIX signals with "
+    "os.kill, which does not block, so it has no wait to bound",
+)
+@pytest.mark.asyncio
+async def test_the_taskkill_wait_is_bounded_by_the_callers_kill_budget() -> None:
+    """A killer that outlives the budget is felled rather than waited on.
+
+    ``taskkill`` normally returns in well under a second, but nothing here
+    guarantees that: a wedged one must not hang the caller - and every
+    synchronous caller reaches this through ``lifecycle.manager.tree_kill``'s
+    ``asyncio.run`` wrapper, which has no escape from a hang of its own. Handing
+    the seam an already-spent budget drives the timeout branch against a real
+    ``taskkill`` process rather than a stand-in. The assertion is the property
+    the bound is for: the call comes back on its own budget instead of waiting
+    on the killer, felling it and bounding the reap at 1.0s (the literal in
+    :func:`_win_tree_kill`'s except branch) rather than the pathological case
+    in the wild.
+    """
+    child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(120)"])
+    try:
+        spent = time.monotonic()
+        await _win_tree_kill(child.pid, timeout=0.0)
+        elapsed = time.monotonic() - spent
+        assert elapsed <= 3.0
+    finally:
+        await kill_pid_tree_async(child.pid)
+        deadline = time.monotonic() + 10.0
+        while time.monotonic() < deadline and is_pid_alive(child.pid):
+            time.sleep(0.05)
+        assert not is_pid_alive(child.pid)
 
 
 # A process that binds a fresh loopback port, prints it, then holds it open.

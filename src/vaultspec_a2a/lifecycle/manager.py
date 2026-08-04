@@ -17,6 +17,7 @@ removable, so ``kill`` never has to fight another owner's live claim.
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import logging
 import os
@@ -29,7 +30,7 @@ from typing import TYPE_CHECKING
 from ..artifacts import ArtifactDeclaration, RetentionDisposition
 from ..authoring.discovery import SERVICE_JSON_ENV as _ENGINE_SERVICE_JSON_ENV
 from ..control.config import GATEWAY_URL_ENV, INTERNAL_TOKEN_ENV, WORKER_URL_ENV
-from ..utils.process import detached_spawn_kwargs
+from ..utils.process import detached_spawn_kwargs, kill_pid_tree_async
 from .procs_config import ProcsConfig, ProcsConfigError, load_procs_config
 from .registry import (
     NAME_ENV,
@@ -79,9 +80,10 @@ __all__ = [
 ]
 
 _OWNER_ENV = "VAULTSPEC_PROCS_OWNER"
-_KILL_POLL_INTERVAL = 0.1
+# The SIGKILL-escalation budget tree_kill's sync wrapper passes to the shared
+# async kill primitive's kill_timeout - kept here as this synchronous surface's
+# own declared second phase rather than left implicit in the async default.
 _KILL_ESCALATION_WAIT = 5.0
-_TASKKILL_REAP_WAIT = 1.0
 
 # A spawned process's redirect file is a raw append-mode file, not a Python
 # logging handler, so it cannot rotate on its own — a long-lived dev instance
@@ -170,91 +172,29 @@ def _confirm_terminated(pid: int, *, timeout: float = 10.0) -> bool:
     return not _is_pid_alive(pid)
 
 
-def _win_taskkill_tree(pid: int, *, deadline: float) -> None:
-    """Fell *pid*'s tree with ``taskkill /T /F``, bounded by *deadline*.
-
-    ``taskkill /F`` is authoritative and normally returns in well under a
-    second, but it can wedge - and a wedged one must never hang the caller.
-    Every synchronous teardown verb reaches this, and one of them (``serve_up``)
-    holds port reservations whose release runs in a ``finally`` a hung call never
-    reaches. So the wait draws from the caller's own kill budget and the killer
-    itself is felled when that budget runs out, leaving the liveness poll to
-    report the real outcome.
-    """
-    try:
-        killer = subprocess.Popen(
-            ["taskkill", "/T", "/F", "/PID", str(pid)],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-        )
-    except OSError:
-        return
-    try:
-        killer.wait(timeout=max(deadline - time.monotonic(), 0.0))
-    except subprocess.TimeoutExpired:
-        killer.kill()
-        with contextlib.suppress(subprocess.TimeoutExpired):
-            killer.wait(timeout=_TASKKILL_REAP_WAIT)
-
-
 def tree_kill(pid: int, *, timeout: float = 10.0) -> bool:
     """Kill *pid* and its whole process tree, returning ``True`` once it is dead.
 
-    Windows uses ``taskkill /T /F /PID`` (a bare terminate orphans grandchildren
-    on Windows). POSIX has no whole-tree signal, so it snapshots the descendants
-    before signalling anything - killing the root first would sever the parent
-    links the walk needs - and escalates ``SIGTERM`` then ``SIGKILL`` across the
-    root and that snapshot. A pid that is already dead is a success.
+    A thin synchronous wrapper over :func:`~..utils.process.kill_pid_tree_async`,
+    the single asynchronous escalation this project owns (Windows
+    ``taskkill /T /F``; POSIX snapshot-then-``SIGTERM``-then-``SIGKILL``) - this
+    module used to carry an independent ~70-line synchronous copy of that same
+    algorithm, which is exactly the duplication a shared kill primitive exists to
+    prevent. Every caller here bottoms out in a Click CLI command or a pytest
+    fixture, never a running event loop, so ``asyncio.run`` is safe at every call
+    site.
 
-    *timeout* bounds the whole Windows path, not just the confirmation: the
-    ``taskkill`` wait and the liveness poll that follows it share one deadline,
-    so a wedged killer spends the caller's budget rather than blocking forever.
-    POSIX signalling does not block, so there *timeout* bounds the poll and a
-    further :data:`_KILL_ESCALATION_WAIT` covers the ``SIGKILL`` escalation.
+    *timeout* maps onto the async primitive's ``term_timeout`` - the SIGTERM/
+    graceful-wait budget - and :data:`_KILL_ESCALATION_WAIT` is passed
+    explicitly as ``kill_timeout`` (the SIGKILL-escalation budget) rather than
+    left to the async default, so this seam states its own second phase instead
+    of silently inheriting whatever the async side happens to default to.
     """
-    if pid <= 0 or not _is_pid_alive(pid):
-        return True
-    targets = [pid]
-    deadline = time.monotonic() + timeout
-    if sys.platform == "win32":
-        _win_taskkill_tree(pid, deadline=deadline)
-    else:
-        import signal
-
-        from ..utils.process import posix_descendant_pids
-
-        targets = [pid, *posix_descendant_pids(pid)]
-        _signal_all(targets, signal.SIGTERM)
-    while time.monotonic() < deadline:
-        if not _any_pid_alive(targets):
-            return True
-        time.sleep(_KILL_POLL_INTERVAL)
-    if sys.platform != "win32":
-        import signal
-
-        _signal_all(targets, signal.SIGKILL)
-        # SIGKILL is immediate but not instantaneous: give the kernel a bounded
-        # window to tear the processes down before reporting the outcome.
-        kill_deadline = time.monotonic() + _KILL_ESCALATION_WAIT
-        while time.monotonic() < kill_deadline:
-            if not _any_pid_alive(targets):
-                return True
-            time.sleep(_KILL_POLL_INTERVAL)
-    return not _any_pid_alive(targets)
-
-
-def _any_pid_alive(pids: list[int]) -> bool:
-    return any(_is_pid_alive(pid) for pid in pids)
-
-
-def _signal_all(pids: list[int], signal_number: int) -> None:
-    """Send *signal_number* to each pid, skipping any that is not ours to signal."""
-    own_pid = os.getpid()
-    for target in pids:
-        if target <= 1 or target == own_pid:
-            continue
-        with contextlib.suppress(ProcessLookupError, PermissionError, OSError):
-            os.kill(target, signal_number)
+    return asyncio.run(
+        kill_pid_tree_async(
+            pid, term_timeout=timeout, kill_timeout=_KILL_ESCALATION_WAIT
+        )
+    )
 
 
 def _subst(value: str, *, port: int, workspace: str) -> str:

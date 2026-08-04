@@ -27,6 +27,7 @@ import os
 import socket
 import subprocess
 import sys
+from dataclasses import dataclass
 from enum import StrEnum
 from typing import TYPE_CHECKING, Any
 
@@ -34,10 +35,12 @@ if TYPE_CHECKING:
     from collections.abc import Mapping
 
 __all__ = [
+    "DetachedSpawnFlags",
     "ListenerOwnership",
     "ProcessContainment",
     "ProcessContainmentError",
     "classify_listener_ownership",
+    "detached_spawn_kwargs",
     "kill_pid_tree_async",
     "listener_belongs_to",
     "parse_netstat_listener_pid",
@@ -83,6 +86,37 @@ _JOBOBJECT_EXTENDED_LIMIT_INFORMATION_CLASS = 9  # JobObjectExtendedLimitInforma
 _JOBOBJECT_BASIC_ACCOUNTING_INFORMATION_CLASS = 1  # JobObjectBasicAccountingInformation
 _PROCESS_TERMINATE = 0x0001
 _PROCESS_SET_QUOTA = 0x0100
+
+
+@dataclass(frozen=True, slots=True)
+class DetachedSpawnFlags:
+    """The ``subprocess.Popen`` flag pair that detaches a child from this process."""
+
+    creationflags: int
+    start_new_session: bool
+
+
+def detached_spawn_kwargs() -> DetachedSpawnFlags:
+    """Return the flags that detach a spawned child from this process.
+
+    Windows gets a new process group (``CREATE_NEW_PROCESS_GROUP``); POSIX gets a
+    new session (``start_new_session=True``). This is the bare flag decision only
+    - it carries no containment or teardown of its own, unlike
+    :class:`ProcessContainment`'s Job-Object-backed containment, which a caller
+    that also needs whole-tree reaping without a per-pid walk should use instead.
+    A caller that only needs the child to survive this process's exit (killing it
+    later by pid or pid-tree) wants this narrower flag pair.
+
+    Both fields are always populated (with the inactive platform's neutral value)
+    rather than returned as a sparse mapping, so a caller passes both explicitly
+    to ``subprocess.Popen`` - splatting a dict of kwargs into ``Popen`` defeats its
+    overloaded constructor's static resolution.
+    """
+    if sys.platform == "win32":
+        return DetachedSpawnFlags(
+            creationflags=subprocess.CREATE_NEW_PROCESS_GROUP, start_new_session=False
+        )
+    return DetachedSpawnFlags(creationflags=0, start_new_session=True)
 
 
 def pid_is_live(pid: int) -> bool:

@@ -29,6 +29,7 @@ from typing import TYPE_CHECKING
 from ..artifacts import ArtifactDeclaration, RetentionDisposition
 from ..authoring.discovery import SERVICE_JSON_ENV as _ENGINE_SERVICE_JSON_ENV
 from ..control.config import GATEWAY_URL_ENV, INTERNAL_TOKEN_ENV, WORKER_URL_ENV
+from ..utils.process import detached_spawn_kwargs
 from .procs_config import ProcsConfig, ProcsConfigError, load_procs_config
 from .registry import (
     NAME_ENV,
@@ -366,12 +367,7 @@ def spawn(
         log_handle if log_handle is not None else subprocess.DEVNULL
     )
     child_env = {**os.environ, **env} if env is not None else None
-    if sys.platform == "win32":
-        creationflags = subprocess.CREATE_NEW_PROCESS_GROUP
-        start_new_session = False
-    else:
-        creationflags = 0
-        start_new_session = True
+    flags = detached_spawn_kwargs()
     try:
         return subprocess.Popen(
             command,
@@ -379,8 +375,8 @@ def spawn(
             stdout=stdout,
             stderr=subprocess.STDOUT,
             stdin=subprocess.DEVNULL,
-            creationflags=creationflags,
-            start_new_session=start_new_session,
+            creationflags=flags.creationflags,
+            start_new_session=flags.start_new_session,
             env=child_env,
         )
     finally:

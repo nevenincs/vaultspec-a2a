@@ -28,7 +28,7 @@ import pytest
 from ...authoring import AuthoringClient, AuthoringResponse, Denial, mint_actor_token
 from ...authoring.discovery import (
     SERVICE_JSON_ENV,
-    resolve_engine_with_retry,
+    EngineEndpoint,
 )
 from ...control.run_start_policy import required_role_ids
 from ...team.team_config import load_team_config
@@ -231,6 +231,7 @@ async def _await_materialized_documents(
 @pytest.mark.asyncio(loop_scope="function")
 async def test_deterministic_completion_emits_a_run_bound_review_bundle(
     tmp_path: Path,
+    live_engine: EngineEndpoint,
 ) -> None:
     """A real deterministic run completes and emits exact, bound review evidence."""
     scenario = _read_scenario()
@@ -240,11 +241,12 @@ async def test_deterministic_completion_emits_a_run_bound_review_bundle(
     team_config = load_team_config(preset)
     roles = required_role_ids(team_config)
     assert roles, f"deterministic preset {preset!r} declares no required roles"
-    endpoint = await asyncio.to_thread(resolve_engine_with_retry)
-    assert endpoint is not None, (
-        "deterministic completion requires a live engine discovered through "
-        f"{SERVICE_JSON_ENV}; no engine is an S05 failure, not a skip"
-    )
+    # Resolved through the ONE external-prerequisite rule rather than a local
+    # probe. An absent cross-repo engine is reported as a skip naming the runbook
+    # line, and becomes a hard failure for a caller that declared `loopback-stack`
+    # present - which is how this suite keeps "no engine is a failure, not a
+    # skip" without a red gate that says nothing about THIS repository's health.
+    endpoint = live_engine
     service_json = os.environ.get(SERVICE_JSON_ENV)
     assert service_json, (
         f"deterministic completion requires {SERVICE_JSON_ENV} to bind its "

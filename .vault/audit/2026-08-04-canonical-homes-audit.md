@@ -5,7 +5,7 @@ tags:
 date: '2026-08-04'
 modified: '2026-08-04'
 body_schema: 'body-v1'
-body_hash: 'sha256:1f6019b57dd07ebdc9e66325062a71aef4a097e91f25f4be0a7c48cf3eb2cd4b'
+body_hash: 'sha256:837d9fdd9dcd2c0d0433a4d42d46dab5c8ac6dee0535070a7f3d616f7a91f3e5'
 related: []
 ---
 
@@ -4093,3 +4093,69 @@ distinction is that these guards assert an invariant that must hold, while the
 rejected rows would have asserted a name a rename defeats or a count that
 mislabels settled decisions as debt. Guards are not the problem; guards pinned to
 spellings are.
+
+### a-closure-grep-nobody-ran-is-an-assertion | high | indicts this campaign's own process
+
+This campaign requires a closure grep in every commit message as proof that the
+old declarations were deleted. A lane then caught its OWN printed grep failing to
+reproduce: it was written against a bare assignment while the declaration carried
+a type annotation, so the pattern matched nothing. The claim was true and the
+printed proof did not prove it.
+
+That makes the requirement theatre in exactly the cases it exists for. A reader
+auditing the campaign later runs the pasted command, gets no output, and cannot
+distinguish "the deletion succeeded and the regex is wrong" from "the deletion
+never happened" - and the second is the one the requirement was invented to catch.
+
+**Rule, now standing: run the closure grep and paste its ACTUAL OUTPUT, never a
+regex you believe should match.** A proof nobody executed is an assertion wearing
+a proof's syntax. The corrected form was verified independently and returns
+exactly one hit at the new home.
+
+Recorded at high severity despite changing no production code, because it is a
+defect in the campaign's evidence standard rather than in the codebase, and every
+closure claim made before it rests on the same unchecked step. The lane was right
+not to rewrite history to hide it.
+
+### a-bound-restated-inside-an-error-message | high | DUPLICATE, the sharpest form
+
+Re-deriving the workspace-root inventory turned up a tenth site the original nine
+missed: the bound spelled out again inside the validator's error message string.
+
+It is the sharpest restatement in the set because it is **the only one that can
+drift into a LIE rather than into a wrong check.** Every other copy, when it
+diverges, rejects the wrong inputs - bad, but self-evidently a bug once observed.
+This one keeps rejecting correctly while TELLING THE CALLER THE WRONG LIMIT, so
+the caller retries against a number the system does not enforce and cannot
+discover the real one from the message. A wrong check fails loudly at the caller;
+a wrong explanation sends them somewhere else.
+
+It also sits directly beneath a named constant it does not use, and the correct
+pattern - composing the sentence from the constant by interpolation - already
+exists two modules away and was not copied.
+
+Recorded also as evidence for the method section's claim that counts are
+hypotheses: the inventory's nine were all real and all correct, and were still not
+all of them. **A count can be wrong by being incomplete even when every entry in
+it is right**, which is the failure mode a confident inventory hides best -
+nothing about checking the nine would have revealed the tenth.
+
+### the-same-two-modules-did-it-twice | high | DUPLICATE, out of the original scope
+
+The feature-tag bound repeats the workspace-root pattern exactly: a column that is
+the real authority, two separately-named module constants that do not reference
+each other, and an inline restatement in a route parameter.
+
+What makes it worth its own entry is that it is **the same two modules and the
+same pair of naming decisions**, made independently a second time. This is not one
+oversight that happened to recur; it is a habit with a stable signature - each
+module reaches a bound, decides it deserves a local name, does not look for an
+existing one, and picks the value from the column by reading rather than by
+importing.
+
+A third occurrence of the same number sits in one of those files and is DISTINCT
+in subject: its authority is a grammar regex rather than a column. It is recorded
+here precisely so it is not swept into the same constant on the strength of
+sharing a value - the trap this campaign has now hit from both directions, since
+six other sites sharing this cluster's other number were also correctly ruled
+DISTINCT.

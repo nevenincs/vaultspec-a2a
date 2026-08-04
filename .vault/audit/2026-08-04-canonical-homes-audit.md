@@ -5,7 +5,7 @@ tags:
 date: '2026-08-04'
 modified: '2026-08-04'
 body_schema: 'body-v1'
-body_hash: 'sha256:4ce3688b9d8d05385c93a62b010ae4530c1727308c23d953bc18469931a56bdd'
+body_hash: 'sha256:94eb172dd1ddc1d66277cc5541c3127f93a8d61942f2c3165506820a981349f5'
 related: []
 ---
 
@@ -6958,3 +6958,76 @@ the VALUE is decided, not a second name for the same decision.**
 
 Worth a decision on style; not worth a sweep. Recorded so a later pass does not
 count aliases as shadows and inflate its inventory.
+
+### the-gap-was-spawn-not-merely-admit | critical | the boarded scope understated it
+
+The declared-surface closure is now enforced: a registry-known name must carry the
+registry's own command and arguments. Verified - the comparison is consulted at
+both seams, and the closure grep proves itself by matching a surviving term in the
+same run.
+
+**The boarded scope was wrong about severity in the direction that matters.** I
+recorded the consequence as an entry being *admitted* with a borrowed name. The
+lane found a second seam that runs **on every lane and BEFORE the session
+allowlist** - which is itself restricted to one provider - and which also read the
+launch off the passed mapping. **Without closing it, the divergent command is
+genuinely SPAWNED, and then admitted.** Execution, not just advertisement.
+
+**The lane's evidence is honest in a way that is easy to misread, and it said so
+itself.** Two of its before-state refusals are NOT the property: the verifier
+spawned the attacker command and refused only because it *failed to serve*. So it
+built a **real stdio server answering all three declared tools**, giving the
+served-tool contract nothing to object to - and that line is the true before-state:
+**fully admitted at both seams.**
+
+A lane that reported only the first two refusals could have claimed the property
+was already half-held. It constructed the case that removed its own strongest
+apparent evidence.
+
+### a-partition-asserted-as-one-rather-than-a-judgement-repeated | high | technique
+
+Strict equality was **not** right for every field, which the brief asked to be
+checked rather than assumed. The environment legitimately varies per run - no
+registry entry declares one, a per-run project is appended after the launch is
+rendered, and every value is then rewritten into a placeholder. **Comparing it
+would have refused every pinned run: a defect the fix would have introduced.**
+
+The interesting part is what was done with that answer. Rather than excluding the
+field and explaining why in prose, the lane **stated the split as a partition of
+the full launch key set and asserted the partition** - identity keys plus variant
+keys must equal the whole.
+
+So a launch field added later cannot be silently left uncompared. It must be
+**classified**, and the assertion fails until it is. That converts a judgement
+someone made once into a structural obligation on everyone after - which is the
+difference between a decision recorded in prose and one the code enforces, and it
+is the thing this campaign has been asking for in every other form.
+
+### the-comparison-is-bound-to-one-of-two-renderers | high | reported, not fixed
+
+The comparison compares against the same renderer that produces every resolved
+spec, so it cannot become a second opinion about what the registry declares. That
+is correct for the transport it covers.
+
+**A second renderer exists.** Another function independently reassembles command,
+arguments and tools off the same frozen entry for a different transport. No live
+gap - both read the same frozen source - but **a divergence in how that second
+transport assembles a launch would not be caught by a comparison bound to the
+first.**
+
+Recorded because it is the campaign's own shape at one remove: not two
+declarations of a value, but **two renderings of one declaration**, with an
+enforcement bound to one of them. The enforcement is only as complete as the
+renderer it trusts.
+
+### the-repr-escaped-the-evidence | low | a real measurement worth one line
+
+One red cost the lane time for a platform-real reason: the message embeds a value
+through a representation that **escapes a Windows path's separators**, so the raw
+string is legitimately absent from the message. The assertion compares against the
+representation the message actually embeds.
+
+Recorded because it is the same class as the inert flag and the identity compare -
+**a platform behaviour that must be measured rather than reasoned about** - and
+because an assertion searching for the raw string would have failed while the code
+was correct, which is the false negative that wastes the most time.

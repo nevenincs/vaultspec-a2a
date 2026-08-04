@@ -69,21 +69,41 @@ def deterministic_model_assignment(team_config: Any) -> dict[str, dict[str, Any]
     Bundled presets no longer declare a provider or capability: a run chooses
     both at start from the catalog its execution lane serves, and freezes the
     result per role. A compile therefore has nothing to resolve from
-    configuration alone and refuses, which is correct behaviour and exactly what
-    the served-catalog retirement intends.
+    configuration alone and refuses, which is correct and is what the
+    served-catalog retirement intends.
 
-    Tests that are about GRAPH SHAPE - node sets, edges, timeouts, retry policy -
-    should not each re-derive that. They state the one thing the compiler is
-    missing, keyed by ``agent_id`` as the compiler looks it up, and pin every
-    role to the in-process deterministic lane so a structural assertion never
-    depends on a credential, a network, or a served catalog.
+    Built through the CANONICAL producer rather than by hand. `FrozenAssignment`
+    already declares itself the complete frozen execution assignment the compiler
+    consumes, so re-deriving that shape here would be a second declaration of one
+    concept - and this helper was exactly that until the canonical-homes sweep
+    caught it.
+
+    The deterministic pinning stays an explicit POLICY of this helper, not a
+    default hidden inside the producer. Structural tests - node sets, edges,
+    timeouts, retry policy - must never acquire a served lane to assert a graph
+    shape, because that spends money to prove something about topology.
     """
-    return {
-        ref.agent_id: {
-            "provider": Provider.DETERMINISTIC.value,
-            "capability": Model.MID.value,
-            "model_name": "deterministic",
-            "fallback": [],
-        }
+    from ...providers.model_profiles import (
+        AssignmentSource,
+        ProfileAssignment,
+        RoleAssignment,
+        freeze_assignment,
+    )
+
+    roles = [
+        RoleAssignment(
+            role_id=ref.agent_id,
+            agent_id=ref.agent_id,
+            provider=Provider.DETERMINISTIC,
+            capability=Model.MID,
+            model_name="deterministic",
+            fallback_providers=[],
+            provider_source=AssignmentSource.TEAM_DEFAULT,
+            capability_source=AssignmentSource.TEAM_DEFAULT,
+        )
         for ref in team_config.workers
-    }
+    ]
+    frozen = freeze_assignment(
+        ProfileAssignment(profile_id="team-defaults", roles=roles)
+    )
+    return frozen.compiler_map()

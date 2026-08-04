@@ -2350,3 +2350,68 @@ split this audit already protects for `checkpoint_pragmas()`'s callers.
 Recorded rather than actioned: `desktop/` is a different package outside this
 sweep's scope, and a shared helper would need a home neither module obviously
 owns without crossing that boundary - a call for whoever holds both sides.
+
+### anchor-path-cap-contradicts-its-own-description | high | a third instance of the vault-index-cap defect class
+
+Asked to check whether any OTHER `domain_config.py` setting's description
+disagrees with how its consumers apply it, following the ruling on
+`vault-index-cap-contradicts-its-own-description`. It does: `anchor_path_cap`
+(default 10) is described as "Maximum anchor paths returned by the workspace
+anchoring module" - singular, total-shaped, same as the language that turned
+out wrong for `vault_index_cap`. Its sole consumer,
+`src/vaultspec_a2a/context/anchoring.py`'s `build_anchoring_context`, applies
+it PER DOC TYPE inside a loop over `vault_index.items()`:
+`visible = paths[: domain_config.anchor_path_cap]`, once per stage, with no
+running total across stages. With the same six stages this campaign has
+tracked all sweep long, that is up to 60 paths surfaced under a setting that
+claims 10 - and this block runs on EVERY node invocation once a feature is
+active (`build_anchoring_context` is injected at message position [1] per
+turn), not once per run the way `context_refs` is, so the same shape of
+contradiction recurs on a tighter loop. `mount_token_ceiling` and
+`min_remaining_tokens_for_mount` were checked as the two settings most likely
+to share this defect, given they gate the largest injected block
+(`graph/nodes/vault_reader.py`'s mount loop) - both are CORRECTLY applied as a
+single running total across the whole turn, including the task-queue block,
+matching their descriptions exactly; they are the contrasting clean case that
+shows this is a per-field defect, not a systemic one. Not actioned, for the
+same reason the lead gave for the sibling finding: making the cap a true
+total would reduce what an agent sees, and making the description admit
+per-stage application would legitimise a bound six times its stated number,
+and choosing between those is a product decision about grounding breadth,
+not a mechanical one. Breadth not fully re-established beyond this and the
+mount-budget pair: the aggregator/debounce settings
+(`debounce_map_max_entries`, `chunk_buffer_max_bytes`, `event_queue_maxsize`,
+`tool_arg_truncate_len`) were spot-checked against their `streaming/`
+consumers and found consistent with their descriptions on a light pass, but
+`streaming/` is another sweep's domain and was not read in full here.
+
+### cli-artifacts-telemetry-swept-and-found-clean | low | no unhomed artifact declaration, and the CLI is not another bearer-header site
+
+Recorded for the negative space in this sweep's domain, answering the two
+specific leads directly. First: whether the CLI hand-rolls anything the
+gateway already owns. It does not. `src/vaultspec_a2a/cli/main.py`'s
+`_request` helper builds its headers by calling
+`gateway_auth.gateway_auth_headers(url)` and merging with `setdefault` -
+it never formats an `Authorization` header itself - and
+`src/vaultspec_a2a/cli/service.py`'s authenticated shutdown call does the
+same. The CLI is therefore NOT an additional site for the low-priority
+`bearer-header-string-template` finding; `src/vaultspec_a2a/gateway_auth.py`
+(the shared credential-selection boundary the CLI and the MCP bridge both
+consume) was already counted among that finding's declaring sites, not the
+CLI itself. `_base_url` reads `settings.gateway_url` rather than re-deriving
+it, and `_emit`'s JSON-render-and-exit-nonzero shape has no second
+declaration anywhere in `cli/` - `cli/service.py`'s admin-shutdown call
+checks a status code directly instead, a different response contract for a
+different purpose, not a near-duplicate of `_emit`. Second: whether any
+package declares a durable artifact without going through
+`artifacts.ArtifactDeclaration`. None was found among the local writes this
+sweep could reach - `cli/provision.py`'s workspace corpus,
+`cli/service.py`'s app-home and store-parent `mkdir` calls (which fall under
+`desktop/profile.py`'s already-declared `APP_HOME_STATE_TREE_DECLARATION`),
+and `telemetry/` (which writes nothing to local disk at all - every signal
+leaves over OTLP/gRPC to a collector) are all either declared or write
+nothing durable. The absence of a central declaration registry is
+deliberate, stated in `artifacts/__init__.py`'s own docstring
+("cannot drift away from the call site it describes"), not a gap to close.
+Eighteen modules across the tree already consume the vocabulary; this sweep
+added none and removed none.

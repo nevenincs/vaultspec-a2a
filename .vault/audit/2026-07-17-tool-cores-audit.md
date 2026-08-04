@@ -1003,3 +1003,20 @@ it, because the opinion is A2A's and not the lane's. Landed in `7a4ac75b`.
 
 This unblocks the persona-policy cleanup: with a served recommendation, presets
 have no remaining reason to carry provider or capability policy.
+
+### Correction (2026-08-04): the first catalog budget was below the real worst case
+
+The bound shipped at eight seconds and refused legitimate work. Each desktop test
+boots its own gateway, so each starts cold, and running them back to back loads
+the host enough that a build the suite would have completed is refused instead.
+
+Raised to 120 seconds, above the ~74s cold build measured here. The bound still
+does its job - it converts an unbounded wait into a bounded, retryable one - but
+it now bounds a HUNG build rather than a slow one.
+
+- **MEDIUM - failed lane discovery is not cached.** A lane whose discovery raises
+  leaves nothing in the per-lane cache, so every later read retries it at full
+  cost. That is why a second read after a warm one is not fast on a host where
+  several ACP lanes time out, and it is what made a small budget look reasonable
+  and behave badly. A negative cache entry with its own short expiry would make
+  the warm path actually warm.

@@ -1,0 +1,207 @@
+{
+  "run_history": {
+    "api_version": "v1",
+    "metadata": {
+      "callee": "",
+      "context_refs": [],
+      "feature_tag": "s05-deterministic-55df818bd2ea42de889c9120c472dff9",
+      "feedback_batch_id": "",
+      "nickname": "deterministic-completion-55df818bd2ea42de889c9120c472dff9",
+      "source_branch": "",
+      "source_repo": "",
+      "workspace_root": "C:\\Users\\hello\\AppData\\Local\\Temp\\vaultspec-s05-engine-e46d9c14e78743afbe9d15582998eb0e"
+    },
+    "run_id": "deterministic-completion-55df818bd2ea42de889c9120c472dff9",
+    "state": {
+      "agents": [],
+      "approval_request_id": null,
+      "approval_status": null,
+      "artifacts": [],
+      "checkpoint_created_at": "2026-08-02T08:00:27.229444Z",
+      "checkpoint_id": "1f18e483-91ea-6351-800e-36ea9c64feaa",
+      "checkpoint_parent_id": "1f18e483-551b-6e09-800d-643ffc8f128f",
+      "checkpoint_source": "loop",
+      "checkpoint_step": 14,
+      "checkpoint_updated_channels": [
+        "gate_phase",
+        "gate_verdict",
+        "next",
+        "routing_error"
+      ],
+      "degraded_reasons": [
+        "terminal_thread_pending_permission_residue"
+      ],
+      "execution_readiness": "needs_reconciliation",
+      "execution_tasks": [],
+      "failure_reason": null,
+      "history_depth": 2,
+      "last_sequence": 0,
+      "messages": [
+        {
+          "agent_id": null,
+          "content": "## Project Context\n- **Workspace:** C:\\Users\\hello\\AppData\\Local\\Temp\\vaultspec-s05-engine-e46d9c14e78743afbe9d15582998eb0e\n- **Feature:** s05-deterministic-55df818bd2ea42de889c9120c472dff9",
+          "message_id": "ff5e4cf5-d21e-4052-aaa7-1932a61cfcd1",
+          "role": "system",
+          "timestamp": "2026-08-02T08:00:27.750282Z"
+        },
+        {
+          "agent_id": null,
+          "content": "Run the deterministic research-to-ADR completion scenario.",
+          "message_id": "7cc2f19d-cbd4-4de2-b284-cdc1e0b25e4b",
+          "role": "user",
+          "timestamp": "2026-08-02T08:00:27.750290Z"
+        },
+        {
+          "agent_id": "synthesis",
+          "content": "---\ntags:\n  - '#research'\n  - '#acceptance-harness'\n---\n\n# `acceptance-harness` research: `research_adr acceptance`\n\nDeterministic research synthesis for `research_adr acceptance`, produced by the in-process acceptance provider.\n\n## Findings\n\n- The research_adr phase machine parks a proposal at the research gate.\n- The verdict is driven over the engine review surface, not in-graph.\n- Materialization is proven by the apply receipt plus the on-disk file.\n",
+          "message_id": "lc_run--019fc17c-9758-77c1-bd68-9767f58f5146",
+          "role": "assistant",
+          "timestamp": "2026-08-02T08:00:27.750294Z"
+        },
+        {
+          "agent_id": "research_review",
+          "content": "PASS",
+          "message_id": "lc_run--019fc17c-975e-7a71-b891-4019adc78f06",
+          "role": "assistant",
+          "timestamp": "2026-08-02T08:00:27.750297Z"
+        },
+        {
+          "agent_id": "adr_author",
+          "content": "---\ntags:\n  - '#adr'\n  - '#acceptance-harness'\n---\n\n# `acceptance-harness` adr: `research_adr acceptance` | (**status:** `accepted`)\n\n## Problem Statement\n\nProve the Research -> ADR contract end to end for `research_adr acceptance`.\n\n## Decision\n\nAdopt the deterministic acceptance harness as the standing proof that a prompt materializes exactly two governed documents on disk.\n\n## Consequences\n\nThe harness is provider-agnostic; real providers are proven by the same driver against a live profile.\n",
+          "message_id": "lc_run--019fc17c-bc4b-7871-9b68-2a65691b8492",
+          "role": "assistant",
+          "timestamp": "2026-08-02T08:00:27.750299Z"
+        },
+        {
+          "agent_id": "adr_review",
+          "content": "PASS",
+          "message_id": "lc_run--019fc17c-bc57-73e3-b310-00208ffdd798",
+          "role": "assistant",
+          "timestamp": "2026-08-02T08:00:27.750301Z"
+        },
+        {
+          "agent_id": "plan_author",
+          "content": "---\ntags:\n  - '#plan'\n  - '#acceptance-harness'\ntier: 'L1'\n---\n\n# `acceptance-harness` plan\n\n## Description\n\nSequence the work the in-run ADR decided for `research_adr acceptance`, produced by the in-process acceptance provider. The plan re-argues nothing; it names the ordered Steps that carry the decision into the codebase.\n\n## Steps\n\n- [ ] `S01` - wire the plan phase behind the ADR gate; `src/vaultspec_a2a/graph/compiler.py`.\n- [ ] `S02` - extend the served capability declaration; `src/vaultspec_a2a/team/team_config.py`.\n\n## Parallelization\n\nBoth Steps touch one topology definition and carry hard ordering; run them in sequence.\n\n## Verification\n\nThe compiled graph parks on the plan gate after the ADR gate returns an approved verdict, and the served capability list names the plan document.\n",
+          "message_id": "lc_run--019fc17c-e43d-7143-937f-1c835447a97a",
+          "role": "assistant",
+          "timestamp": "2026-08-02T08:00:27.750303Z"
+        },
+        {
+          "agent_id": "plan_review",
+          "content": "PASS",
+          "message_id": "lc_run--019fc17c-e448-7771-b1ba-d442c522887a",
+          "role": "assistant",
+          "timestamp": "2026-08-02T08:00:27.750305Z"
+        }
+      ],
+      "next_nodes": [],
+      "pause_cause": null,
+      "pending_clarification": null,
+      "pending_interrupt_count": 0,
+      "pending_permissions": [],
+      "pending_write_channels": [],
+      "pending_write_count": 0,
+      "plan": [],
+      "repair_status": "needs_reconciliation",
+      "replay_status": "durable",
+      "snapshot_complete": false,
+      "status": "completed",
+      "task_count": 0,
+      "thread_id": "deterministic-completion-55df818bd2ea42de889c9120c472dff9",
+      "tool_calls": []
+    }
+  },
+  "run_id": "deterministic-completion-55df818bd2ea42de889c9120c472dff9",
+  "scenario_id": "w01-p02-s05-deterministic-research-adr",
+  "terminal_status": {
+    "api_version": "v1",
+    "approval_request_id": null,
+    "approval_status": null,
+    "assignments": [
+      {
+        "agent_id": "vaultspec-researcher",
+        "capability": "mid",
+        "fallback_providers": [],
+        "model_name": "deterministic",
+        "provider_id": "deterministic",
+        "provider_ready": true,
+        "resolution_error": null,
+        "role_id": "researcher",
+        "source": "worker"
+      },
+      {
+        "agent_id": "vaultspec-synthesist",
+        "capability": "high",
+        "fallback_providers": [],
+        "model_name": "deterministic",
+        "provider_id": "deterministic",
+        "provider_ready": true,
+        "resolution_error": null,
+        "role_id": "synthesist",
+        "source": "worker"
+      },
+      {
+        "agent_id": "vaultspec-adr-author",
+        "capability": "high",
+        "fallback_providers": [],
+        "model_name": "deterministic",
+        "provider_id": "deterministic",
+        "provider_ready": true,
+        "resolution_error": null,
+        "role_id": "adr-author",
+        "source": "worker"
+      },
+      {
+        "agent_id": "vaultspec-plan-author",
+        "capability": "high",
+        "fallback_providers": [],
+        "model_name": "deterministic",
+        "provider_id": "deterministic",
+        "provider_ready": true,
+        "resolution_error": null,
+        "role_id": "plan-author",
+        "source": "worker"
+      },
+      {
+        "agent_id": "vaultspec-doc-reviewer",
+        "capability": "mid",
+        "fallback_providers": [],
+        "model_name": "deterministic",
+        "provider_id": "deterministic",
+        "provider_ready": true,
+        "resolution_error": null,
+        "role_id": "doc-reviewer",
+        "source": "worker"
+      }
+    ],
+    "authoring_session_id": null,
+    "changeset_ids": [],
+    "checkpoint_id": "1f18e483-91ea-6351-800e-36ea9c64feaa",
+    "degraded_reasons": [
+      "terminal_thread_pending_permission_residue"
+    ],
+    "execution_readiness": "needs_reconciliation",
+    "failure_reason": null,
+    "feature_tag": "s05-deterministic-55df818bd2ea42de889c9120c472dff9",
+    "last_sequence": 0,
+    "lease_id": null,
+    "pending_clarification": null,
+    "profile_id": "team-defaults",
+    "proposal_ids": [
+      "proposal:1c3c91bcef434949e129c1b3645ba32d287ca780",
+      "proposal:c3773a1f46311970622761d16256b95098f9fdcd",
+      "proposal:fdc9184530b86f6ab218d7926a51be371afe25d4"
+    ],
+    "repair_status": "needs_reconciliation",
+    "reservation_id": null,
+    "roles": [],
+    "run_id": "deterministic-completion-55df818bd2ea42de889c9120c472dff9",
+    "semantic_phase": "completed",
+    "status": "completed",
+    "topology": {
+      "active_agent": null,
+      "pause_cause": null,
+      "team_preset": "vaultspec-adr-research-deterministic"
+    }
+  }
+}

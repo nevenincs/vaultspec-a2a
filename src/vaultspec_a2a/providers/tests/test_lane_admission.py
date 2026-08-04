@@ -172,16 +172,21 @@ class TestDeclaration:
             assert is_lane_admissible(provider) is False
 
     def test_declared_lanes_are_admissible(self) -> None:
+        # DETERMINISTIC is deliberately NOT here: it is admitted through
+        # IN_PROCESS_LANES instead, because no external transport exists to
+        # complete a turn against, so the completed-turn standard cannot be
+        # applied to it at all.
         assert set(PROVEN_TURN_LANES) == {
             Provider.CLAUDE,
             Provider.CODEX,
             Provider.ZAI,
         }
+        assert {Provider.MOCK, Provider.DETERMINISTIC} == IN_PROCESS_LANES
         for provider in (*PROVEN_TURN_LANES, *IN_PROCESS_LANES):
             assert is_lane_admissible(provider) is True
 
     def test_every_provider_is_classified(self) -> None:
-        """No enum member is unaccounted for: it is proven, in-process, or refused."""
+        """No enum member is unaccounted for: proven, supplemental, or refused."""
         for provider in Provider:
             admissible = is_lane_admissible(provider)
             declared = provider in PROVEN_TURN_LANES or provider in IN_PROCESS_LANES
@@ -322,11 +327,7 @@ class TestWebDeclaration:
         assert "completed-turn proof" in str(excinfo.value)
 
     def test_an_in_process_lane_can_never_be_web_proven(self) -> None:
-        """Turn-admissible is not enough: the in-process lanes hold no turn proof.
-
-        They spawn no CLI, so there is nothing there to retrieve with, and the
-        implication rejects them even though ``is_lane_admissible`` admits them.
-        """
+        """An in-process lane has no provider retrieval boundary to prove."""
         for lane in IN_PROCESS_LANES:
             assert is_lane_admissible(lane) is True
             with pytest.raises(ConfigError):
@@ -336,7 +337,7 @@ class TestWebDeclaration:
 
     def test_a_turn_proven_lane_is_accepted_by_the_implication(self) -> None:
         """The guard refuses incoherent pairs, not every pair."""
-        for lane in PROVEN_TURN_LANES:
+        for lane in set(PROVEN_TURN_LANES) - set(IN_PROCESS_LANES):
             _require_web_proof_implies_turn_proof(
                 {lane: WebLaneProof(test="t::t", proves="p")}, PROVEN_TURN_LANES
             )

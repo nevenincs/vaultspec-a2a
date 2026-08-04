@@ -1,0 +1,13 @@
+[agent]
+id           = "deterministic-cancel-window"
+display_name = "Deterministic Cancellation Window"
+role         = "coder"
+description  = "In-process ProviderFactory scenario that remains cancellably in flight."
+
+[agent.persona]
+system_prompt = "Enter the programmed deterministic cancellation window."
+
+[agent.model]
+provider   = "deterministic"
+capability = "mid"
+

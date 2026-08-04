@@ -15,6 +15,9 @@ from ..deterministic_chat_model import (
     _role_of,
 )
 from ..factory import ProviderFactory
+from ..lane_admission import (
+    IN_PROCESS_LANES,
+)
 
 
 def _agent(agent_id: str) -> AgentConfig:
@@ -43,7 +46,8 @@ def test_enum_and_maps_wired() -> None:
 
 
 def test_factory_returns_first_class_base_chat_model() -> None:
-    """The factory dispatches Provider.DETERMINISTIC to a BaseChatModel."""
+    """The production factory resolves the permanent completion floor."""
+    assert Provider.DETERMINISTIC in IN_PROCESS_LANES
     model = _model("vaultspec-researcher")
     assert isinstance(model, BaseChatModel)
 

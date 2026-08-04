@@ -1,0 +1,10 @@
+{
+  "authored_output": {
+    "agent_id": "adr_author",
+    "content": "---\ntags:\n  - '#adr'\n  - '#acceptance-harness'\n---\n\n# `acceptance-harness` adr: `research_adr acceptance` | (**status:** `accepted`)\n\n## Problem Statement\n\nProve the Research -> ADR contract end to end for `research_adr acceptance`.\n\n## Decision\n\nAdopt the deterministic acceptance harness as the standing proof that a prompt materializes exactly two governed documents on disk.\n\n## Consequences\n\nThe harness is provider-agnostic; real providers are proven by the same driver against a live profile.\n"
+  },
+  "feature_tag": "acceptance-harness",
+  "message": "Run the deterministic research-to-ADR completion scenario.",
+  "scenario_id": "w01-p02-s05-deterministic-research-adr",
+  "team_preset": "vaultspec-adr-research-deterministic"
+}

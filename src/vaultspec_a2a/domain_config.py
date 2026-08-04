@@ -187,13 +187,16 @@ class DomainConfig(BaseModel):
         ),
     )
     run_start_catalog_budget_seconds: float = Field(
-        default=8.0,
+        default=120.0,
         description=(
             "Wall-clock budget a run start will wait for the provider catalog of its "
-            "workspace. A COLD catalog probes every registered lane - subprocess "
-            "spawns and network calls - and can take tens of seconds, which a run "
-            "start must never absorb silently. On expiry the build continues in the "
-            "background and the caller is refused retryably, so the retry is warm."
+            "workspace before refusing retryably. On expiry the build continues in "
+            "the background, so the retry is served warm rather than paying the cold "
+            "cost again. This bounds a HUNG build, not a slow one: a cold build "
+            "probes every registered lane over subprocess spawns and network calls, "
+            "was measured above a minute on a loaded host, and a lane whose discovery "
+            "fails is not cached - so a later read retries it at full cost. A budget "
+            "under that legitimate worst case refuses work that would have succeeded."
         ),
     )
 

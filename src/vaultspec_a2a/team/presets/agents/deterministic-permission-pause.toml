@@ -1,0 +1,13 @@
+[agent]
+id           = "deterministic-permission-pause"
+display_name = "Deterministic Permission Pause"
+role         = "coder"
+description  = "In-process ProviderFactory scenario that pauses through the generic permission callback."
+
+[agent.persona]
+system_prompt = "Request the programmed deterministic permission decision."
+
+[agent.model]
+provider   = "deterministic"
+capability = "mid"
+

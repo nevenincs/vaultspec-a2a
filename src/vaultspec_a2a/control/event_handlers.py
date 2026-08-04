@@ -240,6 +240,7 @@ async def _handle_terminal_event(
             expire_pending_permission_requests,
             get_latest_control_action,
             mark_control_action_applied,
+            set_thread_approval_state,
             set_thread_repair_state,
             update_thread_status,
         )
@@ -265,7 +266,7 @@ async def _handle_terminal_event(
         )
 
         async with factory() as db:
-            await update_thread_status(
+            thread = await update_thread_status(
                 db,
                 thread_id,
                 ThreadStatus(status_str),
@@ -273,6 +274,15 @@ async def _handle_terminal_event(
                 provider_condition=provider_condition,
             )
             await expire_pending_permission_requests(db, thread_id=thread_id)
+            if thread is not None:
+                await set_thread_approval_state(
+                    db,
+                    thread_id,
+                    approval_status=None,
+                    approval_request_id=None,
+                    approval_reason=None,
+                    approval_response_action_id=None,
+                )
             latest_cancel = await get_latest_control_action(
                 db, thread_id=thread_id, action_type=ControlActionType.CANCEL
             )

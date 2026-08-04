@@ -22,6 +22,7 @@ from ....graph.enums import (
     ToolKind,
 )
 from ....thread.enums import ThreadStatus
+from ....thread.models import PlanEntry
 from .. import (
     AgentStatusEvent,
     AgentSummary,
@@ -34,7 +35,6 @@ from .. import (
     MessageSnapshot,
     PermissionOption,
     PermissionRequestEvent,
-    PlanEntry,
     PlanEntryPriority,
     PlanEntryStatus,
     PlanUpdateEvent,

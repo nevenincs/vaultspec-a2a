@@ -19,10 +19,10 @@ from typing import Any
 
 import pytest
 
+from ...authoring.discovery import SERVICE_JSON_ENV
 from ...control.config import GATEWAY_URL_ENV, INTERNAL_TOKEN_ENV, WORKER_URL_ENV
 from ..discovery import is_pid_alive
 from ..manager import (
-    _ENGINE_SERVICE_JSON_ENV,
     LifecycleError,
     _build_cwd_for,
     _serve_cwd_for,
@@ -595,11 +595,11 @@ def test_serve_env_injects_engine_service_json_only_when_set() -> None:
         owner="s",
         engine_service_json="C:/seat/service.json",
     )
-    assert with_seat[_ENGINE_SERVICE_JSON_ENV] == "C:/seat/service.json"
+    assert with_seat[SERVICE_JSON_ENV] == "C:/seat/service.json"
     assert with_seat["VAULTSPEC_WORKER_PORT"] == "18110"
     # An unset seat injects nothing (records predating the field keep prior behaviour).
     without = _serve_env(role, port=18110, workspace="ws", name="w1", owner="s")
-    assert _ENGINE_SERVICE_JSON_ENV not in without
+    assert SERVICE_JSON_ENV not in without
 
 
 def _pairing_role() -> RoleConfig:

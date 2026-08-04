@@ -18,7 +18,8 @@ from ...graph.enums import (
     ToolKind,
 )
 from ...thread.enums import ThreadStatus
-from .events import PlanEntry, ToolCallContent, ToolCallLocation
+from ...thread.models import PlanEntry
+from .events import ToolCallContent, ToolCallLocation
 
 __all__ = [
     "ArtifactSnapshot",

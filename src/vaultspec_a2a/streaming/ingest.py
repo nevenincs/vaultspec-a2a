@@ -23,12 +23,12 @@ from ..thread.errors import describe_exception_chain
 from .buffering import BufferingManager
 from .emitters import EventEmitters
 from .transformer import (
-    StreamableGraph,
     _GraphInterrupt,
     _GraphRecursionError,
     emit_interrupt_events,
     process_langgraph_event,
 )
+from .types import StreamableGraph
 
 __all__ = ["IngestManager", "IngestStallTimeoutError"]
 

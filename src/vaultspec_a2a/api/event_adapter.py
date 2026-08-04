@@ -27,6 +27,7 @@ from ..graph.events import (
     ToolCallUpdate,
 )
 from ..streaming.sse_frames import enforce_progress_allowlist
+from ..thread.models import PlanEntry
 from ..thread.snapshots import coerce_model, coerce_provider
 
 if TYPE_CHECKING:
@@ -44,7 +45,6 @@ from .schemas.events import (
     MessageChunkEvent,
     PermissionOption,
     PermissionRequestEvent,
-    PlanEntry,
     PlanUpdateEvent,
     ServerEvent,
     TeamStatusEvent,

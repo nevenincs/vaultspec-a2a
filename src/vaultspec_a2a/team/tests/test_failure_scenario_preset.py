@@ -83,8 +83,8 @@ def test_every_worker_runs_on_the_serverless_in_process_lane() -> None:
     points a stage at another lane fails here instead of quietly turning the
     scenario into something only a provisioned machine can run.
     """
+    from ...graph.enums import Provider
     from ...providers.lane_admission import IN_PROCESS_LANES
-    from ...team.team_config import Provider
 
     team_config = load_team_config(_PRESET)
     lanes = {

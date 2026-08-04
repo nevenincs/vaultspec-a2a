@@ -8,6 +8,14 @@ sub-modules directly::
         ServerEvent,
         ThreadStateSnapshot,
     )
+
+Only types this subpackage OWNS are re-exported. Domain types that these models
+merely carry as field types are not, however visible they are on the wire:
+``PlanEntry`` is serialized inside ``PlanUpdateEvent`` and
+``ThreadStateSnapshot`` yet belongs to ``vaultspec_a2a.thread.models``, exactly
+as ``ThreadStatus``, ``ToolKind``, and ``Provider`` do to their own modules.
+Re-exporting one here would give it a second declared home. Import them from
+theirs, as ``enums.py`` says for the domain enums.
 """
 
 from .base import EventEnvelope as EventEnvelope
@@ -22,7 +30,6 @@ from .events import HeartbeatEvent as HeartbeatEvent
 from .events import MessageChunkEvent as MessageChunkEvent
 from .events import PermissionOption as PermissionOption
 from .events import PermissionRequestEvent as PermissionRequestEvent
-from .events import PlanEntry as PlanEntry
 from .events import PlanUpdateEvent as PlanUpdateEvent
 from .events import ServerEvent as ServerEvent
 from .events import TeamStatusEvent as TeamStatusEvent
@@ -54,7 +61,6 @@ __all__ = [
     "MessageSnapshot",
     "PermissionOption",
     "PermissionRequestEvent",
-    "PlanEntry",
     "PlanEntryPriority",
     "PlanEntryStatus",
     "PlanUpdateEvent",

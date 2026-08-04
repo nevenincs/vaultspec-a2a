@@ -5,7 +5,7 @@ tags:
 date: '2026-08-04'
 modified: '2026-08-04'
 body_schema: 'body-v1'
-body_hash: 'sha256:539edc357e1ea7ae7c14ab66407497ce8e35be0664acebb5b1c21ae0e412b397'
+body_hash: 'sha256:46b8aeca3ec4aa37c74d9e4cbd9f0cd42a3f7afe7d3ba8f5a11c0f4248bf6f69'
 related: []
 ---
 
@@ -519,6 +519,96 @@ differs. That renderer is deliberately non-recursive and prefers a structured
 message precisely because stringifying an exception can fold in a wrapped cause
 or a vendor payload - a protection a naive "just stringify it" consolidation
 would undo.
+
+### correction-selection-cluster-is-eleven-sites | critical | supersedes the six-site count and its framing
+
+The opening entry counted six derivations and described four competing policies.
+Both are wrong and are corrected here. There are about eleven sites across nine
+files that actually read a served catalog and pick an entry, found with a sharp
+discriminator - who READS and PICKS - rather than who mentions the vocabulary.
+Four were on nobody's list, including a second derivation inside the same API
+test configuration file that already held one. Two were created during this
+campaign by the lane now fixing them, which is recorded because a campaign that
+adds to the fragmentation it is removing needs to say so.
+
+The framing correction matters more than the count. There are not four policies;
+there are two orthogonal axes - a candidate filter (any selectable, in-process
+only, operator-named) and an entry choice (first advertised, or operator-named).
+"First selectable" and "in-process first" are the same policy under different
+filters. So the mechanism can be one function taking both axes as explicit
+arguments, and no call site loses a distinction. Consolidation is more feasible
+than the earlier entry assumed, not less.
+
+And the decisive finding: TEN of the eleven sites take the first advertised
+entry, which is precisely what the production resolver refuses by name - it never
+ranks entries, never reads a display name as a price signal, and never falls back
+to the first one, because a run's artifacts are produced by what the caller
+chose. So the test-side derivation that reads its lane from operator-supplied
+values is not one of several equals; it is the only one already obeying the
+production rule, and the other ten are one defect repeated. This reframes the
+work from deduplication to raising ten sites to a discipline production already
+states. Preserving "first selectable" as a co-equal policy would have enshrined
+the defect. The agreed constraint: first-advertised-entry is legal ONLY together
+with an in-process-only filter, where the billing and provenance concern does not
+apply; any external lane must name its entry. That makes the dangerous
+combination inexpressible rather than discouraged.
+
+### credential-seeding-final-inventory | medium | four declaring sites, one protected negative
+
+Supersedes both earlier counts. One production writer mints the worker
+interprocess secret per gateway boot and is the only credential this repository
+writes at all - attach and ownership are created outside it. One canonical test
+fixture writes and hardens the pair in a single call and has twelve consumers
+across the acceptance, service and desktop suites. Two narrow single-site
+duplicates exist: one writes only the attach half and bundles a discovery-record
+write, the other reimplements the fixture's per-file write-and-harden step
+locally so a test can seed each plane independently. Both are DUPLICATE, and the
+second suggests the fixture's inner single-file step should be extractable so
+both can call it. The protected negative is precise: inline unhardened writes at
+two places exist to prove the loader fails closed on a file whose permissions are
+wrong and on a reparse point. Routing them through any hardening helper destroys
+the property under test. Application-home layout is separately clean - one
+authority for state paths, one for credential subpaths, consumed consistently.
+
+### three-clock-domains-must-not-merge | medium | heartbeat staleness is declared three times, all DISTINCT
+
+Recorded as a protection because the names invite exactly the wrong merge. One
+declaration compares wall-clock epoch milliseconds from an untrusted wire field
+and guards against absent, infinite and future-skewed values because the number
+crosses a process boundary. A second compares wall-clock epoch milliseconds from
+an internally written, statically typed record with a role-specific threshold and
+needs no such guard. A third measures monotonic deltas against an in-process
+timestamp for a same-process watchdog. These cannot be unified on principle
+rather than convenience: monotonic time is process-local and meaningless across a
+wire, and wall-clock time is meaningless for a watchdog whose whole point is
+immunity to system clock steps. Three clock domains, three correct answers.
+Related and also DISTINCT: the freshness helper's home looks misplaced at first
+reading, and is not - it is sited where it is specifically to avoid an import
+cycle, and the module says so.
+
+### readiness-is-consumed-not-re-derived | low | the ladder has one home and its consumers ask it
+
+Swept as consumed rather than as declared, which is the question that matters for
+a single home. The staleness classifier is delegated to by every production
+consumer, and the two sites that call the bare liveness primitive instead need
+only that fact as a precondition rather than the staleness verdict - correct, not
+a re-derivation. The readiness ladder states in its own docstring that it is the
+single place readiness is computed so the surfaces cannot drift, and its
+consumers re-probe live rather than re-deriving the ladder locally. No local
+re-derivation found anywhere in the domain.
+
+### a-second-inference-presented-as-fact | medium | method finding, same class as the first
+
+The lane fixing the selection cluster was accused of writing to the vault against
+instruction. It had not. None of its commits touch the vault, and the two
+documents attributed to it were first added the previous day in a commit
+preserving in-flight work across lanes. The accusation came from a stamp-refresh
+that modified those files, and from inferring authorship because the command that
+touched them was mine. That is the same failure as the earlier port-probe verdict
+- an inference stated as a fact - and it was corrected only because the accused
+answered with the commit list rather than accepting it. Recorded because two
+instances in one campaign is a pattern, not an accident, and because a
+correction that arrives only when someone pushes back is not a working practice.
 
 ## Recommendations
 

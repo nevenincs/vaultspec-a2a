@@ -2476,6 +2476,81 @@ deliberate, stated in `artifacts/__init__.py`'s own docstring
 Eighteen modules across the tree already consume the vocabulary; this sweep
 added none and removed none.
 
+### team-selection-is-distinct-from-the-catalog-selection-cluster | medium | protected, not a twelfth site
+
+Checked deliberately before touching `src/vaultspec_a2a/providers/team_selection.py`,
+per the standing instruction not to re-litigate `correction-selection-cluster-is-eleven-sites`
+without care. That cluster's discriminator is sharp: who READS a served catalog
+and PICKS an entry on a caller's behalf. `team_selection.py` never picks. Its
+two entry points, `freeze_team_selection` and `normalize_replay_selection`,
+both take a `SelectionReference` the CALLER already named (provider_id,
+execution_mode, catalog_revision, entry_id) and either validate it against live
+catalog records (`_normalize_reference` - unknown lane, not selectable, stale
+revision, unknown entry, unknown control option all refuse) or validate a
+replay against what was previously accepted, with zero "first", "sorted", or
+default-to-first-selectable logic anywhere in the file - confirmed by reading
+it whole, not by name-matching. It is in fact the CONSUMER-SIDE enforcement of
+the rule the eleven-site cluster measures every other site against: "a run's
+artifacts are produced by what the caller chose," never a rank or a display
+name. `api/routes/gateway.py`'s `_validate_and_freeze_selection_or_refuse`
+calls straight into it. Verdict DISTINCT, recorded so a later sweep does not
+fold this in as a twelfth site by name association alone.
+
+### acp-json-narrower-trio-has-two-shapes-under-one-name | medium | one pair duplicated verbatim, a third same-named function is unrelated
+
+`src/vaultspec_a2a/providers/acp_chat_model.py` and
+`src/vaultspec_a2a/providers/_acp_rpc_handlers.py` each declare `_json_object`
+and `_json_object_list` with byte-identical bodies (docstring wording aside):
+degrade a malformed value to `{}` or filter a list down to its dict entries,
+never raising. Verdict DUPLICATE, confirmed by direct comparison of both
+bodies - the lenient-degrade behaviour is identical, not merely similarly
+named. Both sit outside this sweep's three assigned files
+(`_acp_authoring.py`, `model_profiles.py`, `team_selection.py`), so recorded
+rather than actioned; a shared private helper in one of the two modules (or a
+new co-located leaf) would close it cleanly since neither variance nor policy
+distinguishes the pair.
+
+Named alongside it because the collision is real and would mislead a
+name-based search: `_acp_authoring.py` also declares a function called
+`_json_object_list`, and it is NOT a third copy of the pair above. Its
+signature is `(spec: JsonObject, field: str) -> list[JsonObject]` - it reads
+one named field off an already-typed object and RAISES `ConfigError` naming
+the field when the shape is wrong, the opposite failure mode from the
+lenient-degrade pair. That difference is load-bearing: `_acp_authoring.py`
+validates an authoring-bridge spec at a config-admission boundary, where a
+malformed field must refuse loudly, not silently degrade to an empty list.
+`_json_contract.py` (`providers/_json_contract.py`, already imported by
+`_acp_authoring.py` for `JsonObject`/`JsonValue`) offers single-value raising
+narrowers (`json_object`, `json_list`, `json_text`) in a third style again -
+they narrow a bare value and raise `TypeError`, an internal-invariant signal,
+never `ConfigError`. Three genuinely different failure postures under
+overlapping names in one package; none of the three should be merged into
+either of the others, and the name collision alone is the hazard worth
+recording.
+
+### frozen-assignment-digest-idiom-restated-across-schema-versions | low | breadth not established beyond two sites
+
+`model_profiles.py::freeze_assignment` (the legacy profile-based frozen
+assignment) and `team_selection.py::_digest_record` (the modern schema-v1
+catalog-based frozen assignment) both compute a content digest the same way:
+`json.dumps(record, sort_keys=True, separators=(",", ":"))` encoded and passed
+through `hashlib.sha256(...).hexdigest()`. The two records digested are
+genuinely different shapes belonging to the two coexisting schema versions
+`graph/compiler.py` already parses by branching on `schema_version` (recorded
+elsewhere in this audit's graph-domain findings) - RunStartResponse's own
+docstring states both must stay readable, so this is not a migration to
+collapse. Only the digest MECHANISM is duplicated, not the record it digests.
+Grepped for the same `sort_keys=True, separators=` idiom paired with
+`hashlib.sha256`: it recurs at least eight more times elsewhere in
+`providers/` alone (`acp_catalog.py`, `codex_catalog.py`, `in_process_catalog.py`,
+`kimi_catalog.py`, `openai_catalog.py`, `provider_catalog.py`, each for its own
+catalog-entry or revision fingerprint) plus sites in `api/`, `database/`, and
+`thread/`. Verdict DUPLICATE on the mechanism, low severity because the
+convention itself has NOT drifted anywhere checked - every site uses the same
+canonicalisation - so a shared one-line helper would remove typing, not fix a
+disagreement. Breadth beyond the two files this sweep owns is not established
+and is recorded as such rather than asserted.
+
 ### process-tree-kill-caller-inventory-and-consolidation-shape | high | full caller set established, decision escalated rather than implemented
 
 Follow-up to `process-tree-kill-declared-twice`, done on instruction to

@@ -42,12 +42,12 @@ from sqlalchemy.ext.asyncio import (
     create_async_engine,
 )
 
-from ...api.schemas.enums import ServerEventType
 from ...api.schemas.events import (
     MAX_PERMISSION_DESCRIPTION_CHARS,
     MAX_TOOL_CALL_CHARS,
     PermissionRequestEvent,
 )
+from ...graph.enums import ServerEventType
 from ...thread.enums import ControlActionResultStatus, RepairStatus, ThreadStatus
 from ..migrate import build_migration_config
 from ..models import Base, ControlActionModel, ThreadModel

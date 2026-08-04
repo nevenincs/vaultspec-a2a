@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import pytest
 
-from ...api.schemas import ServerEventType
+from ...graph.enums import ServerEventType
 from ..sse_frames import (
     _ALWAYS_SAFE_KEYS,
     _PROGRESS_CATALOG,

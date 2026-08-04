@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import asdict
 from typing import TYPE_CHECKING
 
+from ..graph.enums import ServerEventType
 from ..graph.events import (
     AgentStatus,
     ArtifactUpdate,
@@ -41,27 +42,27 @@ def _event_type(event: object) -> str | None:
     """
     match event:
         case AgentStatus():
-            return "agent_status"
+            return ServerEventType.AGENT_STATUS
         case ArtifactUpdate():
-            return "artifact_update"
+            return ServerEventType.ARTIFACT_UPDATE
         case ClarificationPending():
-            return "clarification_pending"
+            return ServerEventType.CLARIFICATION_PENDING
         case ErrorOccurred():
-            return "error"
+            return ServerEventType.ERROR
         case MessageChunk():
-            return "message_chunk"
+            return ServerEventType.MESSAGE_CHUNK
         case PermissionRequest():
-            return "permission_request"
+            return ServerEventType.PERMISSION_REQUEST
         case PlanUpdate():
-            return "plan_update"
+            return ServerEventType.PLAN_UPDATE
         case TeamStatus():
-            return "team_status"
+            return ServerEventType.TEAM_STATUS
         case ThoughtChunk():
-            return "thought_chunk"
+            return ServerEventType.THOUGHT_CHUNK
         case ToolCallStart():
-            return "tool_call_start"
+            return ServerEventType.TOOL_CALL_START
         case ToolCallUpdate():
-            return "tool_call_update"
+            return ServerEventType.TOOL_CALL_UPDATE
         case _:
             return None
 

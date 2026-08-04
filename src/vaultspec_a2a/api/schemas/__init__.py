@@ -13,7 +13,6 @@ sub-modules directly::
 from .base import EventEnvelope as EventEnvelope
 from .enums import PlanEntryPriority as PlanEntryPriority
 from .enums import PlanEntryStatus as PlanEntryStatus
-from .enums import ServerEventType as ServerEventType
 from .events import AgentStatusEvent as AgentStatusEvent
 from .events import AgentSummary as AgentSummary
 from .events import ArtifactUpdateEvent as ArtifactUpdateEvent
@@ -60,7 +59,6 @@ __all__ = [
     "PlanEntryStatus",
     "PlanUpdateEvent",
     "ServerEvent",
-    "ServerEventType",
     "TeamStatusEvent",
     "ThoughtChunkEvent",
     "ThreadStateSnapshot",

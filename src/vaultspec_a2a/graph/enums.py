@@ -23,11 +23,51 @@ __all__ = [
     "PermissionType",
     "PipelinePhase",
     "Provider",
+    "ServerEventType",
     "ToolCallStatus",
     "ToolKind",
     "is_rejection_response",
     "research_adr_semantic_phase",
 ]
+
+
+class ServerEventType(StrEnum):
+    """Discriminator for server-to-client progress-stream events.
+
+    Sited here rather than beside the wire schemas because both sides of the
+    worker-to-gateway boundary need it: the schema package types its frames on
+    it, and the interprocess serializer decides a frame's kind from it. It had
+    been declared once as an API-only enum and restated as eleven string
+    literals in that serializer - a closed vocabulary copied by hand, which is
+    how an event kind added on one side and missed on the other relays with no
+    kind at all. The serializer's own docstring records that happening.
+    """
+
+    AGENT_STATUS = "agent_status"
+    MESSAGE_CHUNK = "message_chunk"
+    THOUGHT_CHUNK = "thought_chunk"
+    TOOL_CALL_START = "tool_call_start"
+    TOOL_CALL_UPDATE = "tool_call_update"
+    PERMISSION_REQUEST = "permission_request"
+    # Snake_case because this is a FRAME KIND, and every frame kind is snake_case.
+    # The originating specification writes it hyphenated, but that is its house
+    # style for naming things rather than evidence about the token: it hyphenates
+    # the edge verbs too, and those genuinely ARE hyphenated on the wire
+    # (``/ops/a2a/run-start`` is a real URL). So two spellings coexist here on
+    # purpose - edge verbs hyphenated, progress-stream frame kinds snake_case -
+    # and this member belongs to the second family. Do not "align" the verbs to
+    # match it; that would break the edge. A consumer-visible spelling stays a
+    # one-line change here if the hyphen ever proves literal for frame kinds too.
+    CLARIFICATION_PENDING = "clarification_pending"
+    ARTIFACT_UPDATE = "artifact_update"
+    PLAN_UPDATE = "plan_update"
+    TEAM_STATUS = "team_status"
+    ERROR = "error"
+    # No graph event produces this one: it is a transport-level keepalive the
+    # stream emits on its own. So this vocabulary is deliberately WIDER than the
+    # serializer's dispatch, and a reader comparing the two must not treat the
+    # difference as a missing case.
+    HEARTBEAT = "heartbeat"
 
 
 class PipelinePhase(StrEnum):

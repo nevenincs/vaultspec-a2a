@@ -15,12 +15,12 @@ from ...graph.enums import (
     Model,
     PermissionOptionKind,
     Provider,
+    ServerEventType,
     ToolCallStatus,
     ToolKind,
 )
 from ...thread.models import PlanEntry
 from .base import EventEnvelope
-from .enums import ServerEventType
 
 __all__ = [
     "MAX_PERMISSION_DESCRIPTION_CHARS",

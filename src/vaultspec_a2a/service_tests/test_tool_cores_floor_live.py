@@ -57,8 +57,8 @@ from typing import TYPE_CHECKING
 import httpx
 import pytest
 
-from ..api.schemas.enums import ServerEventType
 from ..control.run_start_policy import required_role_ids
+from ..graph.enums import ServerEventType
 from ..team.team_config import load_team_config
 from ..testing.payloads import json_object
 from .test_pw7_acceptance import (

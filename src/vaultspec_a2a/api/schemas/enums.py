@@ -1,6 +1,6 @@
 """Wire-protocol enums for the frontend-backend contract.
 
-API-only enums (``ServerEventType``, ``PlanEntryStatus``,
+API-only enums (``PlanEntryStatus``,
 ``PlanEntryPriority``) remain local — they are wire-protocol concerns, not
 domain concepts.
 
@@ -17,34 +17,7 @@ from enum import StrEnum
 __all__ = [
     "PlanEntryPriority",
     "PlanEntryStatus",
-    "ServerEventType",
 ]
-
-
-class ServerEventType(StrEnum):
-    """Discriminator for server-to-client progress-stream events."""
-
-    AGENT_STATUS = "agent_status"
-    MESSAGE_CHUNK = "message_chunk"
-    THOUGHT_CHUNK = "thought_chunk"
-    TOOL_CALL_START = "tool_call_start"
-    TOOL_CALL_UPDATE = "tool_call_update"
-    PERMISSION_REQUEST = "permission_request"
-    # Snake_case because this is a FRAME KIND, and every frame kind is snake_case.
-    # The originating specification writes it hyphenated, but that is its house
-    # style for naming things rather than evidence about the token: it hyphenates
-    # the edge verbs too, and those genuinely ARE hyphenated on the wire
-    # (``/ops/a2a/run-start`` is a real URL). So two spellings coexist here on
-    # purpose - edge verbs hyphenated, progress-stream frame kinds snake_case -
-    # and this member belongs to the second family. Do not "align" the verbs to
-    # match it; that would break the edge. A consumer-visible spelling stays a
-    # one-line change here if the hyphen ever proves literal for frame kinds too.
-    CLARIFICATION_PENDING = "clarification_pending"
-    ARTIFACT_UPDATE = "artifact_update"
-    PLAN_UPDATE = "plan_update"
-    TEAM_STATUS = "team_status"
-    ERROR = "error"
-    HEARTBEAT = "heartbeat"
 
 
 class PlanEntryStatus(StrEnum):

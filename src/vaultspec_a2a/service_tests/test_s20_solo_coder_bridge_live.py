@@ -49,7 +49,7 @@ import httpx
 import pytest
 from pydantic import TypeAdapter, ValidationError
 
-from ..api.schemas.enums import ServerEventType
+from ..graph.enums import ServerEventType
 from ..providers._json_contract import JsonObject
 from ..testing.payloads import json_object
 from .test_pw7_acceptance import (

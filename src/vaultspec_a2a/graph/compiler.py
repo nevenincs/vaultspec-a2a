@@ -599,6 +599,64 @@ def _agent_node_metadata(
     }
 
 
+def _compile_worker_node(
+    worker_ref: Any,
+    agent_cfg: Any,
+    team_config: Any,
+    workspace_root: Path | None,
+    *,
+    provider_factory: ProviderFactoryProtocol,
+    frozen_assignment: dict[str, dict[str, Any]] | None,
+    autonomous: bool,
+    feature_tag: str | None,
+    task_queue_port: TaskQueuePort | None,
+    cost_port: CostPort | None,
+    authoring_binding_provider: AuthoringBindingProvider | None,
+) -> tuple[WorkerNode, dict[str, str]]:
+    """Resolve one worker's model and build its compiled node plus node metadata.
+
+    Shared by the star, pipeline, and pipeline_loop topologies, which otherwise
+    each wrote this exact resolve-compose-build-metadata step out in full - not
+    hypothetical duplication: the model-name disclosure fix had to touch all
+    three call sites identically, and a miss at any one of them would have meant
+    that topology silently failing to disclose which model it ran, in exactly
+    the way that fix existed to close.
+
+    Deliberately stops short of ``builder.add_node``. pipeline_loop wraps
+    exactly one returned node - its own loop node - in ``_wrap_loop_node``
+    before adding it, which needs a seam between "node built" and "node added"
+    that a helper owning ``add_node`` could only offer back as a callback
+    parameter every caller would have to remember to pass correctly. The mount
+    node each topology inserts around its worker, and the edge each draws out
+    of it, differ enough between topologies (star edges the worker back to the
+    supervisor; pipeline and pipeline_loop insert the mount before add_node
+    rather than after) that they stay topology-owned rather than folded in here
+    - that wiring is each topology's actual subject, not shared duplication.
+    """
+    model, used_provider, capability, model_name = _resolve_model_for_worker(
+        worker_ref,
+        agent_cfg,
+        team_config,
+        workspace_root,
+        provider_factory=provider_factory,
+        frozen_assignment=frozen_assignment,
+    )
+    worker_node = create_worker_node(
+        model,
+        _composed_worker_prompt(agent_cfg, model),
+        name=agent_cfg.id,
+        autonomous=autonomous,
+        workspace_root=workspace_root,
+        feature_tag=feature_tag,
+        task_queue_port=task_queue_port,
+        cost_port=cost_port,
+        authoring_binding_provider=authoring_binding_provider,
+        role=agent_cfg.role,
+    )
+    metadata = _agent_node_metadata(agent_cfg, used_provider, capability, model_name)
+    return worker_node, metadata
+
+
 def _wire_diverge_stage(
     builder: StateGraph,
     *,
@@ -1103,32 +1161,23 @@ def _compile_star(
                 f"Ensure the agent TOML exists and is loaded."
             )
         agent_cfg = agent_configs[worker_ref.agent_id]
-        model, used_provider, capability, frozen_model = _resolve_model_for_worker(
+        worker_node, node_metadata = _compile_worker_node(
             worker_ref,
             agent_cfg,
             team_config,
             workspace_root,
             provider_factory=provider_factory,
             frozen_assignment=frozen_assignment,
-        )
-        worker_node = create_worker_node(
-            model,
-            _composed_worker_prompt(agent_cfg, model),
-            name=agent_cfg.id,
             autonomous=autonomous,
-            workspace_root=workspace_root,
             feature_tag=feature_tag,
             task_queue_port=task_queue_port,
             cost_port=cost_port,
             authoring_binding_provider=authoring_binding_provider,
-            role=agent_cfg.role,
         )
         builder.add_node(
             agent_cfg.id,
             worker_node,
-            metadata=_agent_node_metadata(
-                agent_cfg, used_provider, capability, frozen_model
-            ),
+            metadata=node_metadata,
             retry_policy=_NODE_RETRY_POLICY,
         )
         builder.add_edge(agent_cfg.id, "supervisor")
@@ -1241,25 +1290,18 @@ def _compile_pipeline(
                 f"Pipeline node {agent_id!r} has no matching WorkerRef in "
                 f"team {team_config.id!r}."
             )
-        model, used_provider, capability, frozen_model = _resolve_model_for_worker(
+        worker_node, node_metadata = _compile_worker_node(
             worker_ref,
             agent_cfg,
             team_config,
             workspace_root,
             provider_factory=provider_factory,
             frozen_assignment=frozen_assignment,
-        )
-        worker_node = create_worker_node(
-            model,
-            _composed_worker_prompt(agent_cfg, model),
-            name=agent_cfg.id,
             autonomous=autonomous,
-            workspace_root=workspace_root,
             feature_tag=feature_tag,
             task_queue_port=task_queue_port,
             cost_port=cost_port,
             authoring_binding_provider=authoring_binding_provider,
-            role=agent_cfg.role,
         )
         # Insert mount node between pipeline stages.
         mount_fn = create_mount_node(workspace_root, task_queue_port)
@@ -1268,9 +1310,7 @@ def _compile_pipeline(
         builder.add_node(
             agent_cfg.id,
             worker_node,
-            metadata=_agent_node_metadata(
-                agent_cfg, used_provider, capability, frozen_model
-            ),
+            metadata=node_metadata,
             retry_policy=_NODE_RETRY_POLICY,
         )
         builder.add_edge(mount_id, agent_cfg.id)
@@ -1429,25 +1469,18 @@ def _compile_pipeline_loop(
                 f"Pipeline-loop node {agent_id!r} has no matching WorkerRef in "
                 f"team {team_config.id!r}."
             )
-        model, used_provider, capability, frozen_model = _resolve_model_for_worker(
+        worker_node, node_metadata = _compile_worker_node(
             worker_ref,
             agent_cfg,
             team_config,
             workspace_root,
             provider_factory=provider_factory,
             frozen_assignment=frozen_assignment,
-        )
-        worker_node = create_worker_node(
-            model,
-            _composed_worker_prompt(agent_cfg, model),
-            name=agent_cfg.id,
             autonomous=autonomous,
-            workspace_root=workspace_root,
             feature_tag=feature_tag,
             task_queue_port=task_queue_port,
             cost_port=cost_port,
             authoring_binding_provider=authoring_binding_provider,
-            role=agent_cfg.role,
         )
         if agent_id == loop_node_id:
             worker_node = _wrap_loop_node(worker_node)
@@ -1459,9 +1492,7 @@ def _compile_pipeline_loop(
         builder.add_node(
             agent_cfg.id,
             worker_node,
-            metadata=_agent_node_metadata(
-                agent_cfg, used_provider, capability, frozen_model
-            ),
+            metadata=node_metadata,
             retry_policy=_NODE_RETRY_POLICY,
         )
         builder.add_edge(mount_id, agent_cfg.id)

@@ -5,7 +5,7 @@ tags:
 date: '2026-08-04'
 modified: '2026-08-04'
 body_schema: 'body-v1'
-body_hash: 'sha256:90564b7aa1acad110f1e82b3e60822af2f7ca4868dfa4e01d43c0a77396b4664'
+body_hash: 'sha256:a10d1043e938818ea8b79b5567eae8946c842645ecfd9974e4b3a48c7501fdba'
 related: []
 ---
 
@@ -1798,6 +1798,41 @@ Checked and ruled DISTINCT rather than folded in: the lifecycle ownership
 capability check. It compares a bare value from a custom capability header with
 no `Bearer` prefix, on a different credential plane, and its resemblance is the
 constant-time compare alone.
+
+### the-atomic-writer-cluster-closed-one-module-early | high | DUPLICATE
+
+The atomic-write rehoming produced a canonical writer with four consumers, and
+the desktop credential mint is not among them. It hand-rolls the whole sequence -
+sibling temp, harden, rename-with-retry, unlink on any failure - beside a shared
+module that already does it.
+
+The duplication is exact where it is checkable. Its retry budget is declared
+independently at the SAME value as the canonical module's, so the two agree today
+by coincidence and a tuning change to either diverges silently with nothing
+failing. Its rename helper reimplements the canonical retry-on-sharing-violation
+loop. And the Windows rationale for that retry - that the rename is atomic but a
+reader holding the target open can briefly deny it - is written out in both
+modules, which is the signature of a copy rather than of two independent
+solutions to one problem.
+
+One part is genuinely NOT expressible against the canonical home today, and the
+finding is recorded with that stated rather than as a flat "should have imported
+it": the credential mint hardens through a platform helper that applies POSIX
+mode bits OR a Windows private DACL, while the canonical writer's hardening
+parameter takes an integer mode. A DACL is not an int, so this caller could not
+have passed its requirement through the existing signature.
+
+That argues for extending the canonical home with a hardening HOOK applied to the
+temporary file before the rename, not for keeping a second implementation. The
+inexpressible part is the hardening alone; the temp-and-rename, the retry loop
+and the retry budget - everything else the fork exists to carry - are duplicated
+with no such justification.
+
+Recorded as the third instance of one pattern this campaign keeps finding: a
+cluster reported closed that converted the sites which fit the new home and left
+the site that needed the home to grow. The vocabulary cluster and this one failed
+the same way, which is why closure now requires a grep proving no site still
+reaches the old declaration.
 
 ## Recommendations
 

@@ -186,6 +186,16 @@ class DomainConfig(BaseModel):
             "expires and frees its bounded slot when no commit binds it."
         ),
     )
+    run_start_catalog_budget_seconds: float = Field(
+        default=8.0,
+        description=(
+            "Wall-clock budget a run start will wait for the provider catalog of its "
+            "workspace. A COLD catalog probes every registered lane - subprocess "
+            "spawns and network calls - and can take tens of seconds, which a run "
+            "start must never absorb silently. On expiry the build continues in the "
+            "background and the caller is refused retryably, so the retry is warm."
+        ),
+    )
 
 
 class DomainSettingsConfig(BaseSettings, DomainConfig):

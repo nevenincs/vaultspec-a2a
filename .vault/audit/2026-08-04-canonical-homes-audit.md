@@ -6432,3 +6432,35 @@ masking credential-bearing arguments at composition, never a looser regex.
 That dependency is the finding. A safety property that rests on a closure
 invariant elsewhere is only as durable as that invariant, and nothing currently
 connects the two.
+
+### epoch-ms-convergence-half-executed-and-the-other-half-refused-on-a-cycle | low | The blocker is a dependency direction, not the name collision the ruling assumed, and dissolving it would cost machinery to share one arithmetic line
+
+The ruling was to converge the epoch-millisecond clock inside `lifecycle/`
+only, using module-qualified access to dissolve a name collision. Half executed,
+half refused, and both halves corrected the ruling's premise.
+
+`lifecycle/singleton.py` converged - but it never had the collision the ruling
+assumed. There is no `now_ms` parameter in that module, so a plain import works
+and no qualification was needed. Converged anyway on the stated principle, with
+the replaced expression confirmed byte-identical to the canonical body.
+
+`lifecycle/discovery.py` did NOT converge, and the reason is not a naming
+problem at all. `registry.py` imports `is_pid_alive` and `port_has_listener`
+FROM `discovery.py` at module top level, so the dependency already runs
+registry-to-discovery. An import the other way is a genuine circular import, and
+module-qualified spelling does not help: qualification resolves a name
+collision, not a dependency direction.
+
+The file does carry an idiom that would work - it already defers two
+`singleton` imports into function bodies to avoid a symmetric cycle. **Declined
+deliberately.** That idiom exists where a real dependency is genuinely needed;
+spending it to share `int(time.time() * 1000)` would add an indirection and a
+per-call import to avoid restating one arithmetic line. By the same principle
+that scoped this ruling - a copy earns consolidation when it carries a DECISION
+that can drift, not when it spells a fixed convention - the cycle is the signal
+rather than the obstacle. Four inline computations stand; the `_ms` suffix on
+every consuming field name is what keeps unit drift loud.
+
+The lane surfaced the cycle and the available workaround and asked rather than
+applying it, which is why this is a decision on the record instead of machinery
+nobody would have questioned later.

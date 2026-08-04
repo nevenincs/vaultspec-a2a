@@ -4,7 +4,7 @@ tags:
   - '#ecosystem-artifact-lifecycle'
 date: '2026-07-21'
 modified: '2026-08-04'
-body_hash: 'sha256:baa859642ad6e5efb32976d3dce81acbeea4caba9569c5b73c3ec781fff278db'
+body_hash: 'sha256:3eb3b337f45266867fee95242033e3de3b9247d11a49adfc36a81f79dca2a1b0'
 tier: L3
 related:
   - '[[2026-07-21-ecosystem-artifact-lifecycle-adr]]'
@@ -138,8 +138,8 @@ a2a's durable trace records what an agent SAID, not what it DID. Verified on the
 
 The ADR is still proposed, so this is an in-place body amendment rather than a supersession. Layer 3 is redirected rather than struck, because striking it would discard a valid concern along with its wrong instrument, and keeping it conditional on a posture nobody intends to change would leave dead text. The ephemeral thread posture is ratified in the same pass: it is inherited rather than chosen, but it is correct, and stating why turns an accident into a decision with a recorded reversal condition.
 
-- [ ] `W04.P10.S30` - Amend Layer 3 in place to name the a2a-owned trace and redirect the obligation at the said-versus-did gap; `.vault/adr/2026-07-21-ecosystem-artifact-lifecycle-adr.md`.
-- [ ] `W04.P10.S31` - Ratify the ephemeral thread posture as a decision and record its reversal condition; `.vault/adr/2026-07-21-ecosystem-artifact-lifecycle-adr.md, src/vaultspec_a2a/providers/codex_chat_model.py`.
+- [x] `W04.P10.S30` - Amend Layer 3 in place to name the a2a-owned trace and redirect the obligation at the said-versus-did gap; `.vault/adr/2026-07-21-ecosystem-artifact-lifecycle-adr.md`.
+- [x] `W04.P10.S31` - Ratify the ephemeral thread posture as a decision and record its reversal condition; `.vault/adr/2026-07-21-ecosystem-artifact-lifecycle-adr.md, src/vaultspec_a2a/providers/codex_chat_model.py`.
 
 ## Parallelization
 

@@ -5,7 +5,7 @@ tags:
 date: '2026-08-04'
 modified: '2026-08-04'
 body_schema: 'body-v1'
-body_hash: 'sha256:837d9fdd9dcd2c0d0433a4d42d46dab5c8ac6dee0535070a7f3d616f7a91f3e5'
+body_hash: 'sha256:a7819bfdf4f77c0f1c093b5d9c91a56c458b3ff6bb8dc0c676c4ecdf12d71350'
 related: []
 ---
 
@@ -4214,3 +4214,60 @@ schema modules, the graph compiler, the streaming transformer, and the
 thread/team/ipc/context/mcp/tools packages. Coverage should be steered by where
 the campaign has NOT been, and that is not the same as where the code is
 newest or least familiar.
+
+### the-fork-was-better-than-the-home-in-two-ways | critical | inverts a campaign assumption
+
+Folding the credential mint into the canonical writer did not simply retire a
+worse copy. The fork carried TWO protections the canonical home lacked, and both
+had to be moved INTO the home or the consolidation would have weakened the caller:
+
+- **Refusing to follow a symlink** at the temporary path. Without it, a link
+  planted at the predictable temporary name redirects a write the caller
+  specifically asked to keep private.
+- **Opening in binary mode.** Verified empirically on Windows: the canonical
+  writer's permission-bearing path called `os.open` without the binary flag, so it
+  opened in TEXT mode and translated line endings - while its own docstring
+  claimed it "writes bytes directly". The audited, canonical, four-consumer home
+  was not writing the bytes it was given, on this platform, for every
+  credential-bearing record.
+
+**This inverts an assumption the campaign has been running on.** The working model
+was that a duplicate is a worse copy of a better home, so consolidation is a
+strict improvement and the only risk is missing a site. Here the duplicate was
+BETTER in two respects, one of them a live latent defect in the home, and neither
+was discoverable until someone tried to merge them.
+
+So consolidation must audit in BOTH directions. Moving a caller into a home
+without asking what the caller knew that the home does not is how a fold silently
+DOWNGRADES a security property - and it would have downgraded one here, quietly,
+with every check green.
+
+This is the deeper form of the tell already recorded ("if the remaining sites each
+carry a local workaround, the home is too narrow"). The refinement: a local
+workaround is not always a workaround. Sometimes it is the only correct
+implementation in the codebase, and the canonical home is the copy that drifted.
+
+**Corollary worth stating plainly.** The latent defect was found because a caller
+with STRICT byte requirements was folded in. A home is only proven to the standard
+of its most demanding consumer, so folding the hardest caller last means the home
+goes longest unaudited - and every existing consumer inherited the defect in the
+meantime. Two lifecycle records were being written with translated line endings
+against a contract that promised otherwise.
+
+### one-function-two-branches-two-security-postures | high | asymmetry inside a canonical home
+
+Reported by the lane that closed the cluster and deliberately not fixed there,
+since it is outside that cluster.
+
+The canonical writer's two branches now disagree about symlink protection: the
+permission-bearing path refuses a planted link at the temporary name, the plain
+path follows it, because the latter uses the builtin open. One function, one
+name, one docstring, two security postures selected by whether an unrelated
+argument was passed.
+
+Currently latent - every plain-path caller writes non-secret records - so it is
+recorded rather than escalated. But it is the shape this campaign exists to
+remove: a single canonical home whose guarantee depends on which branch you land
+in, discoverable only by reading the implementation. A caller reasoning from the
+function's name and docstring cannot know which posture it gets.
+

@@ -5,7 +5,7 @@ tags:
 date: '2026-08-04'
 modified: '2026-08-04'
 body_schema: 'body-v1'
-body_hash: 'sha256:d42b1b6d81c06c0339587ab0c309357174104f52ba34b452f68abdc424310c09'
+body_hash: 'sha256:fc54081c70fd7881951bb49a22f6f2fbd9116fa44c97f7d842f785846fa29a48'
 related: []
 ---
 
@@ -1686,6 +1686,79 @@ The non-vacuity table filed with it also corrects this audit's earlier framing.
 deleted readers against the test inputs shows one returned all three
 crash-inducing values and the other two of three, so BOTH resume paths could
 strand a run holding a claim with no dispatch.
+
+### worker-liveness-stamp-has-five-writers-and-no-owner | critical | DUPLICATE
+
+The gateway's worker-liveness signal is written at FIVE production sites and read
+at two, and nothing declares it. Writers: the internal WebSocket connection-open
+stamp; the WebSocket heartbeat arm, which also records active threads; the HTTP
+heartbeat route, which also records active threads; the post-dispatch mark in the
+API utility module; and a closure handed to the worker watchdog at app assembly.
+Readers: the health projection and the worker-management staleness rule, BOTH
+reaching the attribute through a defaulted `getattr`.
+
+The defensive read is the symptom, not the defence. Five ad-hoc writers stamping
+an attribute that no module declares means neither reader may assume it exists,
+so both degrade silently when it does not - and "worker is unreachable" is
+exactly what a silent degradation here produces. This is the same signal the
+worker-reachability work earlier in this campaign hardened at the READ side;
+hardening a read whose write side has five uncoordinated authors buys much less
+than it appears to.
+
+The WebSocket heartbeat arm and the HTTP heartbeat route are the strict
+duplicate: the same operation - accept a worker heartbeat payload, stamp
+liveness, record the active-thread list - written twice against two transports,
+differing only in the transport label they log. A change to what a heartbeat must
+carry, or to what accepting one implies, has to be made twice with nothing making
+the two agree.
+
+The prose already concedes the coupling it cannot enforce: the post-dispatch
+mark's docstring states that the value it writes "is identical in shape to the
+timestamp written by POST /internal/heartbeat". That is a cross-site invariant
+asserted in a comment instead of expressed in code - and it is already stale,
+naming one of the four other writers.
+
+Canonical home: worker management, which already owns the staleness rule that
+gives the value meaning. One recording function taking the optional active-thread
+list, consumed by all five writers, letting both readers stop guarding against
+their own codebase.
+
+### the-two-heartbeats-share-a-wire-name-and-differ-in-contract | medium | name collision
+
+Two unrelated signals are both called `heartbeat` on the wire. The client-facing
+SSE keepalive is fully canonical - a declared event model, the shared event-type
+enum member, an allowlist entry - and carries `server_uptime_seconds`. The
+worker-to-gateway IPC heartbeat is an undeclared raw dict carrying `worker_id`,
+`active_threads` and `uptime_seconds`, dispatched by string literal at the
+receiving end.
+
+Not a duplicate: different transports, audiences and payloads, so they must not
+be merged. The finding is that one contract is declared and the other is not,
+while both answer to the same wire token - and their uptime fields differ by a
+prefix, the kind of near-miss that reads as a typo and is actually two contracts.
+
+Reachability checked before severity was assigned: the IPC heartbeat cannot reach
+the SSE allowlist, because its receiving arm stamps state and does not relay. So
+this is latent, not live - recorded at medium on that basis. What keeps it latent
+is a dispatch arm, not a type distinction, and the allowlist keys purely on the
+shared token: were the IPC payload ever relayed, every field it carries would be
+silently dropped as unlisted, leaving a typed frame with no content.
+
+### wire-vocabulary-cluster-was-closed-one-file-early | high | MISPLACED
+
+The event-type vocabulary rehoming converted the IPC serializer's eleven literals
+to the shared enum and stopped there. Five production sites still hand-copy the
+twelfth member's value: the worker's heartbeat producer, the receiving `case`
+dispatch, the SSE emitter's event name, the allowlist catalog key, and the shared
+test frame reader.
+
+Recorded as its own finding because a partially converted vocabulary is worse
+than an unconverted one. The enum exists and has the member, so a reader checking
+whether this vocabulary is canonical finds the declaration and stops - while the
+actual wire path is still literal-driven end to end. The `case` dispatch is the
+sharp edge: change the enum value and the serializer follows it while the
+dispatch silently stops matching, dropping worker heartbeats into the fall-through
+and starving the liveness signal the previous finding describes.
 
 ## Recommendations
 

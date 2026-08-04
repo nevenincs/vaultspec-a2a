@@ -315,7 +315,10 @@ async def _lifespan(app: FastAPI) -> AsyncGenerator[None]:
             session_factory = get_session_factory()
             async with session_factory() as db:
                 app.state.repair_summary = await reconcile_threads_on_startup(
-                    db, checkpointer, strategy=settings.repair_strategy
+                    db,
+                    checkpointer,
+                    strategy=settings.repair_strategy,
+                    retain_repair_boots=settings.repair_journal_retention_boots,
                 )
                 await db.commit()
         else:

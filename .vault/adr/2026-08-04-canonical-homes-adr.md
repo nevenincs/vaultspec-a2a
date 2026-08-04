@@ -5,7 +5,7 @@ tags:
 date: '2026-08-04'
 modified: '2026-08-04'
 body_schema: 'body-v1'
-body_hash: 'sha256:04200b748c7180654e39e82d8380f8a7e5eb7a7ad66c32fe8719fa98a8af4b0e'
+body_hash: 'sha256:78d602e5cd1ce1b98012368af8c46c9bd1c42a3d5728166e2309a156a0676af6'
 related:
   - "[[2026-08-04-canonical-homes-audit]]"
 ---
@@ -138,6 +138,37 @@ test-support code onto a production import path is a layering change. And whethe
 this rule is promoted to a rule source is unresolved; the audit argues for it and
 the promotion itself must go through the owning verbs rather than by editing a
 generated projection.
+
+### Resolved: where a production-and-test shared mechanism belongs
+
+The first concrete instance forced this, and the answer was already in the build
+configuration rather than needing to be decided. Measured rather than reasoned:
+the `testing/` package is EXCLUDED from the wheel by an explicit denylist, and no
+production module imports it - its only importers are the excluded test trees and
+an acceptance harness, which is itself test tier.
+
+So the layering worry recorded above does not apply: admitting shared test
+mechanisms to `testing/` does not put test-support code on a production import
+path, because that package is not on one. `testing/` is the canonical home for a
+mechanism shared between test tiers. A mechanism shared between production AND
+test remains a different question, and the lane resolver case that raised it is
+still open - what is settled here is the test-to-test case, which is what the
+campaign keeps producing.
+
+**The more useful finding is what makes that answer true, and what does not keep
+it true.** The exclusion comment asserts that the package's "only importers are
+the test trees" - a cross-site invariant stated in build-configuration prose, with
+nothing enforcing it. A production module importing `testing/` would import
+perfectly in a source checkout and raise only in an installed wheel, so the
+violation is invisible exactly where development happens and fatal exactly where
+it is not observed.
+
+That is the same defect class this ADR exists to remove, one layer out: a rule
+expressed in a comment because nothing in the code could express it. It deserves a
+guard, and unlike the three guards this campaign has examined and rejected, this
+one would assert an INVARIANT rather than a spelling - no production module
+imports the test-execution package - which is exactly the distinction that
+separates a guard worth having from debt wearing a guard's clothes.
 
 Expect the campaign to keep finding defects rather than only cost. It already has
 - a decoder omitting a type check its siblings perform, on a value that sites an

@@ -42,6 +42,7 @@ from pathlib import Path
 from ..artifacts import ArtifactDeclaration, RetentionDisposition
 from ..utils.atomic_write import atomic_write_text
 from .discovery import is_pid_alive
+from .registry import now_ms
 
 __all__ = [
     "ARTIFACT_DECLARATIONS",
@@ -596,7 +597,7 @@ def acquire_singleton(app_home: Path, *, owner: str | None = None) -> RuntimeSin
         pid=os.getpid(),
         owner=principal,
         start_fingerprint=current_process_fingerprint(),
-        acquired_at_ms=int(time.time() * 1000),
+        acquired_at_ms=now_ms(),
     )
     try:
         _write_record(record_path, record)

@@ -5,7 +5,7 @@ tags:
 date: '2026-08-04'
 modified: '2026-08-04'
 body_schema: 'body-v1'
-body_hash: 'sha256:d5d69a12943376e8b32286b3471d6bf8e98a3412ae42c19051e78508974b60c8'
+body_hash: 'sha256:e1edcb0c62ef09e0444ce6698184ba345367ed64ef8a97437bfb6b94b78e2050'
 related: []
 ---
 
@@ -854,6 +854,49 @@ catalog route test is also a strict improvement - asserting the external lanes a
 an ordered PREFIX with in-process lanes following tests the factory's stated
 invariant, that in-process registrations come last and cannot reorder the
 external lanes a client already enumerates, which nothing asserted before.
+
+### a-copied-vocabulary-grew-a-member-that-never-existed | high | the ruling demonstrated, not argued
+
+The terminal-status wire vocabulary - the STRINGS a consumer needs when
+comparing a decoded database column, JSON body or relay frame, as opposed to the
+enum members the authority holds - was derived independently at nine sites, four
+of them production. Two of those sites spelled the same comprehension two
+different ways in one module. Two test tiers had each grown their own NAMED
+constant for it, and two more had given up on the vocabulary entirely and written
+the literals out.
+
+One of those hand-written variants waited on a status of "error". The lifecycle
+enumeration has never had such a member - verified against the enumeration
+itself, which holds submitted, running, input-required, cancelling, cancelled,
+completed, failed, archived, repair-needed and reconciling. So that arm could
+never fire. Harmless where it sat, and precisely the failure mode in miniature: a
+vocabulary copied by hand acquires members the real one does not have, and
+nothing tells you. This is the campaign's ruling demonstrated in the wild rather
+than argued from principle.
+
+The consolidated value now sits beside the authority it derives from, following a
+precedent already next door where a sibling map is derived rather than restated
+for the same reason. Two sites also gain correctness rather than only losing a
+copy: one rebuilt its set on every call inside per-thread projection code, and
+another ran a membership test against a list.
+
+Two candidates in the same cluster were checked before collapsing, which is the
+part worth copying. A settlement payload's status field was traced to its schema
+and found to be typed as the same enumeration, so routing it through is correct
+rather than a coupling of two vocabularies that may legitimately diverge. And a
+list that could have mattered to a database query construct was confirmed to be
+used only for a membership test, so narrowing it is behaviour-identical.
+
+### a-gate-result-ages-out-in-a-shared-tree | medium | method finding
+
+A lane reported a clean whole-tree type check; the repository showed two
+diagnostics minutes later, in a file that lane held uncommitted. Nothing was
+misreported - the gate was run and it passed, and then work continued in the same
+tree and the result aged out. In a tree with several concurrent writers a gate
+result is true only for the commit it immediately precedes, so gates belong
+LAST, immediately before staging, not first. Recorded beside the other method
+findings because it is the same class as the bare-commit failure: a discipline
+that is correct in a single-writer tree and insufficient in a shared one.
 
 ## Recommendations
 

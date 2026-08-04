@@ -5,7 +5,7 @@ tags:
 date: '2026-08-04'
 modified: '2026-08-04'
 body_schema: 'body-v1'
-body_hash: 'sha256:23e2db5a4914a7b80d3c3b6e7f7c8693ab36afc3acb38c3645cb56ec3e5cb163'
+body_hash: 'sha256:7834a503cde54892de7e84c9ce4794105cf8842045c3ead84a8b2deafc32f25a'
 related: []
 ---
 
@@ -4914,3 +4914,81 @@ no matching reference. Every comparable guard in this area raises `ConfigError`,
 so the `ValueError` is the outlier. Not touched during the extraction that found
 it, because guard typing is a separate question from where the shared block
 lives; recorded so it is decided rather than inherited.
+
+### correction-the-fork-was-better-in-ONE-way-not-two | critical | withdraws half of an inverted-assumption finding
+
+An entry above records that the credential mint carried TWO protections the
+canonical writer lacked, and generalises from it that "in every respect we have
+measured, the duplicate was the better-tended copy". **Half of that is withdrawn.**
+
+The byte-mode half stands and is not softened: the home genuinely was not writing
+the bytes it was given on this platform, while its docstring said otherwise.
+
+The symlink-refusal half does not hold. **That flag does not exist on Windows** -
+the guarded lookup evaluates to zero - so the fork's link protection was equally
+inert on the platform this desktop product ships to. Verified with a real link
+planted at the temporary name: the fork's own flag set wrote a secret straight
+through the link and published it.
+
+So the fork's author INTENDED more than the home and, on POSIX, delivered it. On
+Windows they delivered the same non-protection in more convincing-looking code.
+That is not a better-tended copy. It is a copy carrying an **UNPROVEN**
+protection, which is a different and more dangerous artifact, because it reads as
+diligence and survives review on exactly that basis.
+
+**This sharpens the corollary rather than weakening it.** The recorded form was
+that a home is only proven to the standard of its most demanding consumer. The
+mechanism underneath is narrower and worse: that flag sat in the fork with NO TEST
+EVER PLANTING A LINK. Consolidation then propagated the unproven protection INTO
+the canonical home, where it stayed unproven - surviving the very fold that was
+supposed to audit it - until a later task finally tested it.
+
+**Unproven protections migrate through consolidation exactly as fast as real ones,
+and they arrive wearing the home's authority.** A guarantee that was merely
+plausible in a corner of the tree becomes, after a fold, a guarantee the canonical
+module appears to make. That is the campaign's own machinery amplifying an
+unverified claim, and it is the strongest argument yet for the rule that a fold
+must audit in both directions by MEASUREMENT rather than by reading flags.
+
+### the-prescribed-fix-would-have-rebuilt-the-defect-one-level-down | high | a brief correctly refused
+
+The task closing that asymmetry prescribed passing a custom opener so both write
+paths refuse a link. The lane did not ship it, and was right not to.
+
+That fix closes the asymmetry on POSIX and leaves Windows exactly as exposed,
+while the module's prose would then claim the guarantee for the whole function -
+which is the docstring-asserting-an-absent-guarantee shape this audit already
+recorded as its own class, reintroduced by the repair.
+
+What shipped instead is two mechanisms in one shared opener, because neither
+platform is covered by one: the atomic flag where it exists, and an explicit
+link/junction inspection everywhere including Windows. The inspection is raceable
+between check and open - precisely the gap the atomic flag closes where it exists
+- so both are applied, neither is sufficient alone, and the docstring says so
+rather than implying a uniform guarantee.
+
+Severity stated honestly by the lane rather than inflated: the exposure is bounded
+by the parent directory, which is hardened owner-only before the mint, so planting
+the link already requires roughly the privilege it would gain. A real hole in the
+writer's STATED CONTRACT, not a live remote exploit.
+
+Recorded because a lane refusing its own brief's prescription, on evidence, is the
+behaviour this campaign most needs and least reliably gets.
+
+### the-authority-is-not-always-the-column | high | corrects a ruling generalised from one cluster
+
+A brief named a database column as the authority for a length bound, by analogy
+with the cluster where that was correct. The analogy breaks, and the constraint
+that breaks it is measurable: a wire-schema module cannot import the model module
+without pulling the ORM into it, costed in an existing docstring at roughly
++0.67 seconds and +360 modules on a cold import.
+
+**A canonical home that a consumer cannot afford to import is not a canonical home
+for that consumer.** The declaration belongs in a leaf constants module both sides
+already depend on, with the column spelled from it - the same direction as every
+other resolution here: move the declaration DOWN, never import upward.
+
+Two lanes reached this separation independently, including the same defence of why
+an identically-valued run-id bound is a DIFFERENT subject: it is a grammar's length
+expressed as a count, not the width of any column. Independent convergence on a
+subject boundary is stronger evidence than either derivation alone.

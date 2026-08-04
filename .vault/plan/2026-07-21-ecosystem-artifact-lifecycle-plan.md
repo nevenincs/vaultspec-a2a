@@ -4,7 +4,7 @@ tags:
   - '#ecosystem-artifact-lifecycle'
 date: '2026-07-21'
 modified: '2026-08-04'
-body_hash: 'sha256:3eb3b337f45266867fee95242033e3de3b9247d11a49adfc36a81f79dca2a1b0'
+body_hash: 'sha256:d0de92f2d5f9151c1856a169e93a8a2a446833a1bdf23d81d3496a971fdbd7d5'
 tier: L3
 related:
   - '[[2026-07-21-ecosystem-artifact-lifecycle-adr]]'
@@ -124,7 +124,7 @@ Layer 3 shipped against a premise that observation has since disproved: no provi
 The user asked for the provider-based retention observations to be investigated explicitly, and they are the load-bearing unknown: the redirect is only correct if provider-native files genuinely are not a2a's to own. Codex is settled by observation. The ACP family - Claude, Z.ai, and Kimi, which share one chat model - writes into the operator's REAL config home, which is persistence outside a2a's ownership rather than an absence, and nobody has established what lands there or whether it is enumerable. Gemini and Kimi read operator-configured home paths whose contents were never inspected at all.
 
 - [x] `W04.P08.S25` - Inventory what the ACP family persists in the operator's real config home, and whether a2a can enumerate it; `src/vaultspec_a2a/providers/acp_chat_model.py, src/vaultspec_a2a/providers/_config_home_roots.py`.
-- [ ] `W04.P08.S26` - Establish whether the Gemini and Kimi configured homes retain session content nobody has inspected; `src/vaultspec_a2a/providers/factory.py, src/vaultspec_a2a/providers/kimi_catalog.py`.
+- [x] `W04.P08.S26` - Establish whether the Gemini and Kimi configured homes retain session content nobody has inspected; `src/vaultspec_a2a/providers/factory.py, src/vaultspec_a2a/providers/kimi_catalog.py`.
 - [ ] `W04.P08.S27` - Declare or refuse a retention statement for each lane's persistence, through the existing artifact declaration home; `src/vaultspec_a2a/artifacts/retention.py, src/vaultspec_a2a/providers/_config_home_roots.py`.
 
 ### Phase `W04.P09` - Inventory the action events the trace drops

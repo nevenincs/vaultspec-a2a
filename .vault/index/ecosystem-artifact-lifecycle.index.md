@@ -6,7 +6,7 @@ tags:
 date: '2026-08-04'
 modified: '2026-08-04'
 body_schema: 'body-v1'
-body_hash: 'sha256:957d69fe0c4af5ed1a79881cc07d9db8bd43562feeeeea3dc84b9eca5d850650'
+body_hash: 'sha256:94f45663b468d14bcdabd20552045f0055badad812f8156e1c9d45269adedf35'
 related:
   - '[[2026-07-21-ecosystem-artifact-lifecycle-W01-P01-S01]]'
   - '[[2026-07-21-ecosystem-artifact-lifecycle-W01-P01-S02]]'
@@ -33,6 +33,7 @@ related:
   - '[[2026-07-21-ecosystem-artifact-lifecycle-W03-P07-S21]]'
   - '[[2026-07-21-ecosystem-artifact-lifecycle-W03-P07-S22]]'
   - '[[2026-07-21-ecosystem-artifact-lifecycle-W04-P08-S25]]'
+  - '[[2026-07-21-ecosystem-artifact-lifecycle-W04-P08-S26]]'
   - '[[2026-07-21-ecosystem-artifact-lifecycle-W04-P10-S30]]'
   - '[[2026-07-21-ecosystem-artifact-lifecycle-W04-P10-S31]]'
   - '[[2026-07-21-ecosystem-artifact-lifecycle-adr]]'
@@ -82,6 +83,7 @@ Auto-generated index of all documents tagged with `#ecosystem-artifact-lifecycle
 - `2026-07-21-ecosystem-artifact-lifecycle-W03-P07-S21` - Add teardown that removes the service test runtime directory after a run
 - `2026-07-21-ecosystem-artifact-lifecycle-W03-P07-S22` - Add ignore rules for the generated artifacts that currently escape them
 - `2026-07-21-ecosystem-artifact-lifecycle-W04-P08-S25` - Inventory what the ACP family persists in the operator's real config home, and whether a2a can enumerate it
+- `2026-07-21-ecosystem-artifact-lifecycle-W04-P08-S26` - Establish whether the Gemini and Kimi configured homes retain session content nobody has inspected
 - `2026-07-21-ecosystem-artifact-lifecycle-W04-P10-S30` - Amend Layer 3 in place to name the a2a-owned trace and redirect the obligation at the said-versus-did gap
 - `2026-07-21-ecosystem-artifact-lifecycle-W04-P10-S31` - Ratify the ephemeral thread posture as a decision and record its reversal condition
 

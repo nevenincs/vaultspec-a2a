@@ -16,23 +16,44 @@ from __future__ import annotations
 
 from typing import Any
 
+import pytest
 from fastapi.testclient import TestClient
 
+from ...testing.catalog_selection import named_lane_selection
 from .conftest import catalog_run_fields, make_app
 
 
-def _catalog_entries(client: TestClient, workspace_root: str) -> tuple[str, list[Any]]:
-    """Return a selectable lane's revision and its available model entries."""
+def _multi_entry_lane(
+    client: TestClient, workspace_root: str
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Return the served payload and a lane advertising more than one entry.
+
+    Choosing the LANE is the only part of this that cannot be shared: the claim
+    needs two entries a caller can tell apart, which most lanes cannot supply,
+    and a mechanism that ranked lanes by entry count would be choosing models on
+    a caller's behalf - the thing the production resolver refuses to do. The
+    lane is returned whole so both selections below are built from one record.
+    """
     response = client.get(
         "/v1/provider-catalog", params={"workspace_root": workspace_root}
     )
     assert response.status_code == 200, response.text
-    record = next(
-        item
-        for item in response.json()["providers"]
-        if item["health"]["selectable"] and len(item["catalog"]["models"]) > 1
+    payload = response.json()
+    lane = next(
+        (
+            item
+            for item in payload["providers"]
+            if item["health"]["selectable"] and len(item["catalog"]["models"]) > 1
+        ),
+        None,
     )
-    return record["catalog"]["state"]["revision"], record["catalog"]["models"]
+    if lane is None:
+        pytest.skip(
+            "no served lane advertises more than one selectable entry, so an "
+            "override cannot name a DIFFERENT entry than the run-wide selection "
+            "and this claim cannot be tested honestly"
+        )
+    return payload, lane
 
 
 def _frozen_assignment(client: TestClient, run_id: str) -> dict[str, Any]:
@@ -59,21 +80,31 @@ class TestRoleOverrideAuthority:
         it cannot pass if the override is dropped, and it cannot pass by
         accident, because the two entries are read from the same served catalog
         rather than invented here.
+
+        Both selections are built from ONE lane record. Assembling them by
+        copying a selection and splicing another lane's revision and entry over
+        it produced a reference whose provider named one lane and whose revision
+        and entry named another - refused at admission as a 422, and passing
+        only for as long as the two lanes happened to coincide.
         """
         app, _agg, _worker, _cp = make_app(session_factory, checkpointer)
 
         with TestClient(app, raise_server_exceptions=True) as client:
-            fields = catalog_run_fields(client)
-            metadata = dict(fields["metadata"])
+            metadata = dict(catalog_run_fields(client)["metadata"])
             workspace_root = metadata["workspace_root"]
-            revision, entries = _catalog_entries(client, workspace_root)
+            payload, lane = _multi_entry_lane(client, workspace_root)
+            entries = lane["catalog"]["models"]
 
-            baseline = dict(fields["selection"])
-            baseline["catalog_revision"] = revision
-            baseline["entry_id"] = entries[0]["entry_id"]
+            def _on_lane(entry_id: str) -> dict[str, Any]:
+                return named_lane_selection(
+                    payload,
+                    provider_id=lane["provider_id"],
+                    execution_mode=lane["execution_mode"],
+                    entry_id=entry_id,
+                )
 
-            overridden = dict(baseline)
-            overridden["entry_id"] = entries[1]["entry_id"]
+            baseline = _on_lane(entries[0]["entry_id"])
+            overridden = _on_lane(entries[1]["entry_id"])
             assert overridden["entry_id"] != baseline["entry_id"]
 
             response = client.post(

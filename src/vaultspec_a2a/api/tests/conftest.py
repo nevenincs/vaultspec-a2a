@@ -39,6 +39,7 @@ from ...control.circuit_breaker import WorkerCircuitBreaker
 from ...control.config import settings
 from ...control.worker_management import LazyWorkerSpawner
 from ...streaming.aggregator import EventAggregator
+from ...testing.catalog_selection import in_process_selection
 from ..app import create_app
 
 type SessionFactory = async_sessionmaker[AsyncSession]
@@ -237,10 +238,22 @@ _SESSION_CATALOG_SERVICE: Any = None
 
 
 def _session_catalog_service() -> Any:
-    """Return the process-wide provider catalog service.
+    """Return the process-wide provider catalog service, serving in-process lanes.
 
     Built once and reused. See the note at its injection site in `make_app` for
     why per-app construction was the wrong default.
+
+    The in-process lanes are armed through the CONSTRUCTOR, never the process
+    environment. These suites spawn real gateway subprocesses, and the
+    environment is inherited: arming a lane process-wide for this service would
+    silently rearm it for every child and change the lane inventory served to
+    tests that have nothing to do with selection. The argument declares this
+    caller's posture and reaches nothing else.
+
+    Arming at all is what lets the run-bearing fixtures below select a lane that
+    bills nothing. Unarmed, the only selectable lane on a developer machine
+    holding a live provider session is that real provider - so every suite that
+    starts a run was freezing a metered lane to assert on gateway plumbing.
     """
     global _SESSION_CATALOG_SERVICE
     if _SESSION_CATALOG_SERVICE is None:
@@ -248,7 +261,9 @@ def _session_catalog_service() -> Any:
 
         from ...providers.provider_catalog_service import ProviderCatalogService
 
-        _SESSION_CATALOG_SERVICE = ProviderCatalogService(ttl=timedelta(hours=6))
+        _SESSION_CATALOG_SERVICE = ProviderCatalogService(
+            ttl=timedelta(hours=6), serve_in_process_lanes=True
+        )
     return _SESSION_CATALOG_SERVICE
 
 
@@ -332,14 +347,15 @@ def catalog_run_fields(
 
     Run-start refuses a body without a ``selection``, and revalidates that
     selection against the catalog SERVED FOR ITS WORKSPACE - so a hand-written
-    reference is refused even when its shape is perfect. This derives one from
-    the live served catalog the way a real client must: read the catalog, take a
-    lane the gateway actually reports as selectable, and reference that lane's
-    own revision and entry.
+    reference is refused even when its shape is perfect. The reference is read
+    from the live served catalog the way a real client must, through the shared
+    selection mechanism, which returns an IN-PROCESS lane and refuses to return
+    any other. These suites assert on gateway plumbing, so the lane that answers
+    must be the one that bills nothing.
 
     A canned literal would be the tempting shortcut and would be wrong twice
     over: it would break whenever the catalog's revision moved, and it would let
-    a test assert against a lane the gateway would never serve. Deriving keeps
+    a test assert against a lane the gateway would never serve. Reading keeps
     the fixture honest about what the gateway is offering at that moment.
 
     ``workspace_root`` is returned alongside because the same gate refuses a
@@ -354,21 +370,8 @@ def catalog_run_fields(
         }
     response = client.get("/v1/provider-catalog", params={"workspace_root": root})
     assert response.status_code == 200, response.text
-    record = next(
-        item
-        for item in response.json()["providers"]
-        if item["health"]["selectable"] and item["catalog"]["models"]
-    )
-    catalog = record["catalog"]
     fields: dict[str, Any] = {
-        "selection": {
-            "schema_version": 1,
-            "provider_id": record["provider_id"],
-            "execution_mode": record["execution_mode"],
-            "catalog_revision": catalog["state"]["revision"],
-            "entry_id": catalog["models"][0]["entry_id"],
-            "controls": {},
-        },
+        "selection": in_process_selection(response.json()),
         "metadata": {"workspace_root": root},
     }
     _CATALOG_FIELD_CACHE[root] = fields
@@ -412,21 +415,8 @@ async def async_catalog_run_fields(
             timeout=180.0,
         )
         assert response.status_code == 200, response.text
-        record = next(
-            item
-            for item in response.json()["providers"]
-            if item["health"]["selectable"] and item["catalog"]["models"]
-        )
-        catalog = record["catalog"]
         cached = {
-            "selection": {
-                "schema_version": 1,
-                "provider_id": record["provider_id"],
-                "execution_mode": record["execution_mode"],
-                "catalog_revision": catalog["state"]["revision"],
-                "entry_id": catalog["models"][0]["entry_id"],
-                "controls": {},
-            },
+            "selection": in_process_selection(response.json()),
             "metadata": {"workspace_root": root},
         }
         _CATALOG_FIELD_CACHE[root] = cached

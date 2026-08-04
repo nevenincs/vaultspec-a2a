@@ -5,7 +5,7 @@ tags:
 date: '2026-08-04'
 modified: '2026-08-04'
 body_schema: 'body-v1'
-body_hash: 'sha256:71af0585333f087054ed3627e3ff0ba6d492cb10b8117d650bec75ba0ad7b9f0'
+body_hash: 'sha256:23650220a5b6a214a075a252f92143b69e101f4b74b8a36372eb2a0a2724312a'
 related: []
 ---
 
@@ -1833,6 +1833,52 @@ cluster reported closed that converted the sites which fit the new home and left
 the site that needed the home to grow. The vocabulary cluster and this one failed
 the same way, which is why closure now requires a grep proving no site still
 reaches the old declaration.
+
+### a-cap-whose-comment-says-matching-is-the-point | high | DUPLICATE
+
+The streamed permission-description cap is declared as a named constant on the
+schema side, with a comment stating that its value is "matched deliberately" to
+the durable control writer's, and that "matching is the point rather than a
+coincidence: the streamed frame and the row a reload replays from must not
+disagree about how much of a description exists, or a panel would show text live
+that vanishes on refresh."
+
+The durable writer it names slices at a BARE LITERAL and does not import that
+constant. So the invariant is documented on one side and magic-numbered on the
+other, and nothing makes the two agree.
+
+This is the strongest form of the prose-asserted-invariant pattern found so far,
+because the comment states the exact user-visible bug that divergence produces.
+Someone raising the streamed cap satisfies every check in the repository and ships
+the "text that vanishes on refresh" the comment was written to prevent - the
+comment cannot fail, and the literal it points at does not know it is being
+pointed at.
+
+Canonical home: the schema constant is the natural authority since it is already
+named and exported. The durable writer imports it.
+
+### the-workspace-root-length-bound-is-declared-nine-times | high | DUPLICATE
+
+The maximum workspace-root length is stated at nine production sites: the database
+column width, two separately named module constants that do not reference each
+other, an inline comparison beside one of those constants, and five literal
+occurrences in route query parameters and containment checks.
+
+The real authority is the column width - exceeding it is a write failure, not a
+validation refusal - so every other site is restating a database constraint from
+memory. The two named constants are the tell: two modules each decided the bound
+deserved a name, neither found the other, and both picked the same value, so they
+agree today by coincidence exactly as the atomic-writer retry budgets did.
+
+The failure mode is asymmetric and worth stating. Lowering the column without
+lowering the eight restatements turns an accepted request into a write failure
+deep in a transaction; raising the restatements without raising the column does
+the same. Only tightening every restatement in lockstep is safe, which is the
+definition of a constraint that should be declared once.
+
+Excluded deliberately: the two occurrences inside a schema migration. A migration
+records what the schema was when it ran, so a literal there is correct and must
+not be replaced with an import that would rewrite history when the constant moves.
 
 ## Recommendations
 

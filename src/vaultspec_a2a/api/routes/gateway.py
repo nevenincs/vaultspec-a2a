@@ -75,6 +75,7 @@ from ...control.thread_state_service import (
 )
 from ...database import (
     get_db,
+    get_permission_logs_by_thread,
     get_permission_request,
     get_thread,
     get_thread_metadata,
@@ -152,6 +153,7 @@ from ..schemas.gateway import (
     RunMessageRequest,
     RunMessageResponse,
     RunPendingPermission,
+    RunPermissionDecision,
     RunPermissionRespondRequest,
     RunPermissionRespondResponse,
     RunPrepareResponse,
@@ -1876,12 +1878,29 @@ async def run_history_endpoint(
                 "metadata model; reporting it absent",
                 run_id,
             )
+    # The settled counterpart to the snapshot's PENDING permissions. A gate leaves
+    # the pending list as soon as it is answered, and a terminal run expires
+    # whatever was still outstanding, so a decision a human actually made was
+    # durable in the audit log and readable on no surface at all. This is the wide
+    # read - reporting the record is its job.
+    decisions = await get_permission_logs_by_thread(db, run_id)
+
     return RunHistoryResponse(
         run_id=run_id,
         state=snapshot_to_wire(snapshot),
         metadata=metadata,
         transcript_available=capture.transcript is TranscriptAvailability.AVAILABLE,
         transcript_status=capture.transcript,
+        permission_decisions=[
+            RunPermissionDecision(
+                tool_name=decision.tool_name,
+                action=decision.action,
+                option_id=decision.option_id,
+                agent_id=decision.agent_id,
+                responded_at=decision.responded_at,
+            )
+            for decision in decisions
+        ],
     )
 
 

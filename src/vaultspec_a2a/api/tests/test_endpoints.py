@@ -30,6 +30,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from ...control.config import settings
 from ...control.permission_service import permission_response_action_key
 from ...database import (
+    append_permission_log,
     create_artifact,
     create_control_action,
     create_thread,
@@ -721,6 +722,63 @@ class TestThreadState:
         with TestClient(app, raise_server_exceptions=True) as client:
             resp = client.get("/v1/runs/nonexistent/history")
         assert resp.status_code == 404
+
+    def test_history_discloses_a_settled_permission_decision(
+        self, session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
+    ) -> None:
+        """A decision a human made survives on the record after the gate closes.
+
+        The pending list is not enough on its own: a gate leaves it the moment it
+        is answered, and a terminal run expires whatever was still outstanding. So
+        a run could be read WHOLE with no trace that anyone had approved anything,
+        while the audit log held the decision the entire time. This drives the real
+        repository writer and asserts the wide read reports it.
+
+        The tool INPUT is deliberately not part of the projection, so reviewing
+        what a run was permitted to do never requires reading what it was asked to
+        do; the assertions below pin the disclosed shape rather than the row.
+        """
+        app, _agg, _worker, _cp = make_app(session_factory, checkpointer)
+
+        with TestClient(app, raise_server_exceptions=True) as client:
+            create_resp = client.post(
+                "/v1/runs",
+                json={
+                    "team_preset": _BUNDLE_FREE_PRESET,
+                    "message": "Hello",
+                    "run_id": "endpoints-run-permission-history",
+                    **catalog_run_fields(client),
+                },
+            )
+            thread_id = create_resp.json()["run_id"]
+
+            async def _record() -> None:
+                async with session_factory() as session:
+                    await append_permission_log(
+                        session,
+                        thread_id=thread_id,
+                        agent_id=None,
+                        tool_name="write_file",
+                        action="approved",
+                        option_id="allow_once",
+                    )
+                    await session.commit()
+
+            asyncio.run(_record())
+
+            resp = client.get(f"/v1/runs/{thread_id}/history")
+
+        assert resp.status_code == 200
+        decisions = resp.json()["permission_decisions"]
+        assert len(decisions) == 1, decisions
+        decision = decisions[0]
+        assert decision["tool_name"] == "write_file"
+        assert decision["action"] == "approved"
+        assert decision["option_id"] == "allow_once"
+        # Unattributed is a real record, not a gap: the interrupt payload carries
+        # no agent, so the alternative would be inventing one.
+        assert decision["agent_id"] is None
+        assert decision["responded_at"]
 
     def test_returns_snapshot_for_existing_thread(
         self, session_factory: SessionFactory, checkpointer: AsyncSqliteSaver

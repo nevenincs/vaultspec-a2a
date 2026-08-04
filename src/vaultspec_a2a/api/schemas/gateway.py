@@ -629,6 +629,26 @@ class RunCancelResponse(BaseModel):
     idempotency_key: str | None = None
 
 
+class RunPermissionDecision(BaseModel):
+    """One permission decision this run settled, as the audit log recorded it.
+
+    Answers which tool call was approved or refused, with which option, and when.
+    Carries no tool INPUT and no prompt text, so a caller reviewing what a run was
+    permitted to do never has to read what it was asked to do.
+
+    ``agent_id`` is nullable because it is genuinely not knowable at the decision
+    seam rather than merely unset: the interrupt payload carries the tool, its
+    input, and the options, but no agent. An unattributed decision is still a real
+    record, and the alternative is fabricating attribution.
+    """
+
+    tool_name: str
+    action: str
+    option_id: str | None = None
+    agent_id: str | None = None
+    responded_at: datetime
+
+
 class RunHistoryResponse(BaseModel):
     """The full read of one run, including terminal and archived ones.
 
@@ -646,6 +666,12 @@ class RunHistoryResponse(BaseModel):
     read as "this run had no conversation" when the truth is that its
     conversation could not be read. They are the transcript's counterpart to the
     snapshot's own ``snapshot_complete`` / ``degraded_reasons`` pairing.
+
+    ``permission_decisions`` is the settled counterpart to the snapshot's PENDING
+    permissions. A gate leaves the pending list the moment it is answered or the
+    run ends, so without this the record of a decision a human actually made was
+    durable in the audit log and readable nowhere - a run could be reviewed whole
+    with no trace that anyone had approved anything.
     """
 
     api_version: Literal["v1"] = _API_VERSION
@@ -654,6 +680,7 @@ class RunHistoryResponse(BaseModel):
     metadata: ThreadMetadata | None = None
     transcript_available: bool
     transcript_status: TranscriptAvailability
+    permission_decisions: list[RunPermissionDecision] = Field(default_factory=list)
 
 
 class RunArchiveResponse(BaseModel):

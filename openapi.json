@@ -3365,6 +3365,13 @@
           },
           "transcript_status": {
             "$ref": "#/components/schemas/TranscriptAvailability"
+          },
+          "permission_decisions": {
+            "items": {
+              "$ref": "#/components/schemas/RunPermissionDecision"
+            },
+            "type": "array",
+            "title": "Permission Decisions"
           }
         },
         "type": "object",
@@ -3375,7 +3382,7 @@
           "transcript_status"
         ],
         "title": "RunHistoryResponse",
-        "description": "The full read of one run, including terminal and archived ones.\n\nDeliberately distinct from run-status, which is the BOUNDED recovery\nsnapshot an engine reconciles from. This is the wide read - transcript,\nagents, plan, pending answers, and the run's metadata - for a consumer that\nwants the whole record rather than the authority fields.\n\nThe state snapshot is embedded by reference rather than restated field by\nfield, so the two cannot drift apart as the snapshot evolves.\n\nThe transcript is the one part of the record this verb cannot always\ndeliver, because it lives only in the checkpoint. ``transcript_available``\nand ``transcript_status`` say so outright, so ``state.messages`` is never\nread as \"this run had no conversation\" when the truth is that its\nconversation could not be read. They are the transcript's counterpart to the\nsnapshot's own ``snapshot_complete`` / ``degraded_reasons`` pairing."
+        "description": "The full read of one run, including terminal and archived ones.\n\nDeliberately distinct from run-status, which is the BOUNDED recovery\nsnapshot an engine reconciles from. This is the wide read - transcript,\nagents, plan, pending answers, and the run's metadata - for a consumer that\nwants the whole record rather than the authority fields.\n\nThe state snapshot is embedded by reference rather than restated field by\nfield, so the two cannot drift apart as the snapshot evolves.\n\nThe transcript is the one part of the record this verb cannot always\ndeliver, because it lives only in the checkpoint. ``transcript_available``\nand ``transcript_status`` say so outright, so ``state.messages`` is never\nread as \"this run had no conversation\" when the truth is that its\nconversation could not be read. They are the transcript's counterpart to the\nsnapshot's own ``snapshot_complete`` / ``degraded_reasons`` pairing.\n\n``permission_decisions`` is the settled counterpart to the snapshot's PENDING\npermissions. A gate leaves the pending list the moment it is answered or the\nrun ends, so without this the record of a decision a human actually made was\ndurable in the audit log and readable nowhere - a run could be reviewed whole\nwith no trace that anyone had approved anything."
       },
       "RunMessageRequest": {
         "properties": {
@@ -3497,6 +3504,53 @@
         ],
         "title": "RunPendingPermission",
         "description": "A permission awaiting an answer, addressed by the run that raised it."
+      },
+      "RunPermissionDecision": {
+        "properties": {
+          "tool_name": {
+            "type": "string",
+            "title": "Tool Name"
+          },
+          "action": {
+            "type": "string",
+            "title": "Action"
+          },
+          "option_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Option Id"
+          },
+          "agent_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Agent Id"
+          },
+          "responded_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Responded At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "tool_name",
+          "action",
+          "responded_at"
+        ],
+        "title": "RunPermissionDecision",
+        "description": "One permission decision this run settled, as the audit log recorded it.\n\nAnswers which tool call was approved or refused, with which option, and when.\nCarries no tool INPUT and no prompt text, so a caller reviewing what a run was\npermitted to do never has to read what it was asked to do.\n\n``agent_id`` is nullable because it is genuinely not knowable at the decision\nseam rather than merely unset: the interrupt payload carries the tool, its\ninput, and the options, but no agent. An unattributed decision is still a real\nrecord, and the alternative is fabricating attribution."
       },
       "RunPermissionRespondRequest": {
         "properties": {

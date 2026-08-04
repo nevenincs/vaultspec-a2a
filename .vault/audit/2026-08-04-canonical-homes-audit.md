@@ -2055,3 +2055,36 @@ all. The fix is a shared `TypedDict` (or frozen dataclass) for the classified-
 command result, with `FALLBACK_CLI_NAME` as a named constant the dispatcher and
 the two discovery functions import instead of retyping the string, so a missed
 key or a typo'd sentinel fails a type check instead of a runtime lookup.
+
+### correction-two-functions-share-the-name-canonical-project-root | medium | a naming collision my own earlier entry missed
+
+My own `worker-ipc-domain-swept-and-found-clean` entry described
+`providers/_acp_types.py`'s project-root reduction as "a documented DISTINCT
+concept" without noting that it is declared under the IDENTICAL name as the
+wire-side authority: both are named `canonical_project_root`.
+`ipc/schemas.py::canonical_project_root` mints the run's active-project
+spelling for the dispatch wire - strict (raises on blank or non-absolute), uses
+`os.path.realpath` (symlink resolution, no case-folding), and its own docstring
+calls itself "the single site that turns any spelling of a directory into the
+run's canonical one." `providers/_acp_types.py::canonical_project_root`
+reduces a project path for the ACP permission layer's scope-containment
+comparison - non-strict (a path the OS cannot even resolve still yields a key
+via an `os.path.abspath` fallback rather than raising), additionally strips the
+Windows extended-length prefix, and additionally case-folds via
+`os.path.normcase` for case-insensitive filesystems - and its own docstring
+makes the parallel claim: "the single form enforcement compares against."
+Neither module imports the other; confirmed by an exhaustive grep across the
+tree, no import edge exists between them in either direction and every
+consumer of each traces back to its own file. Verdict DISTINCT-with-a-naming-
+hazard, the same shape as `admission-state-name-collision`, but sharper:
+unlike that pair's genuinely unrelated vocabularies, these two do closely
+related work - canonicalize a directory spelling to one comparable form -
+under the identical name, with actually different canonicalization rules: one
+case-folds, one does not; one raises on an unresolvable path, one never does.
+A reviewer reading either docstring's "the single form" claim in isolation has
+no reason to suspect a second, differently-behaved function of the same name
+exists one layer over. No rename is proposed here, consistent with this
+audit's convention for a naming hazard rather than a merge candidate; recorded
+so a future sweep does not import the wrong one by IDE autocomplete, or
+discover the collision by way of a cross-layer comparison that silently
+disagrees on case-folding.

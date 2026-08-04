@@ -81,7 +81,9 @@ def _running_gateway(
                 app_home,
                 gateway_port=gateway_port,
                 worker_port=worker_port,
-                extra=extra_env,
+                # Every run this module admits selects an in-process lane
+                # (see ``_catalog.py``); the gateway must serve one to select.
+                extra={"VAULTSPEC_SERVE_IN_PROCESS_LANES": "true", **extra_env},
             ),
             log_handle=log_handle,
             new_session=True,

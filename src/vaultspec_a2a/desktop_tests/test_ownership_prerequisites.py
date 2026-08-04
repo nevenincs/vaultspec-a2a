@@ -111,6 +111,10 @@ def _armed_serve(
                 gateway_port=gateway_port,
                 worker_port=worker_port,
                 auto_spawn_worker=auto_spawn,
+                # ``test_ownership_prerequisites_never_identify_a_worker`` admits
+                # a run against the in-process mock lane (see ``_catalog.py``);
+                # the gateway must serve one to select.
+                extra={"VAULTSPEC_SERVE_IN_PROCESS_LANES": "true"},
             ),
             stdout=log_handle,
             stderr=subprocess.STDOUT,

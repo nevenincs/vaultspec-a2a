@@ -264,7 +264,12 @@ def test_desktop_worker_tree_contained_and_reaped_on_graceful_shutdown(
             script=_GATEWAY,
             gateway_port=gateway_port,
             env=armed_gateway_env(
-                app_home, gateway_port=gateway_port, worker_port=worker_port
+                app_home,
+                gateway_port=gateway_port,
+                worker_port=worker_port,
+                # This module admits runs against the in-process mock lane
+                # (see ``_catalog.py``); the gateway must serve one to select.
+                extra={"VAULTSPEC_SERVE_IN_PROCESS_LANES": "true"},
             ),
             log_handle=log_handle,
         )

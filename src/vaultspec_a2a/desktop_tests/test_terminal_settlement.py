@@ -211,7 +211,10 @@ def test_terminal_settlement_authenticates_with_attach_retries_and_revokes_once(
                 extra={
                     "VAULTSPEC_DESKTOP_SETTLEMENT_URL": (
                         f"http://127.0.0.1:{receiver_port}/settle"
-                    )
+                    ),
+                    # This module admits runs against the in-process mock lane
+                    # (see ``_catalog.py``); the gateway must serve one to select.
+                    "VAULTSPEC_SERVE_IN_PROCESS_LANES": "true",
                 },
             ),
             log_handle=log_handle,

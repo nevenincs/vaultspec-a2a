@@ -3,13 +3,11 @@
 from __future__ import annotations
 
 import os
-from contextlib import contextmanager
 from typing import TYPE_CHECKING
 
 import click
 
 from ...cli.main import main
-from ...control.config import settings
 from ...desktop._platform_acl import harden_credential_path
 from ...desktop.credentials import ATTACH_CREDENTIAL_NAME
 from ...desktop.profile import derive_state_paths
@@ -18,24 +16,13 @@ from ...lifecycle.discovery import (
     service_json_path,
     write_desktop_discovery,
 )
+from ...testing import settings_override as _settings_override
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
     from pathlib import Path
 
 _TOKEN = "attach-credential-token-a0b1c2d3e4f5a6b7"
-
-
-@contextmanager
-def _settings_override(**updates: object) -> Iterator[None]:
-    originals = {name: getattr(settings, name) for name in updates}
-    for name, value in updates.items():
-        setattr(settings, name, value)
-    try:
-        yield
-    finally:
-        for name, value in originals.items():
-            setattr(settings, name, value)
 
 
 def _seed_desktop_authority(app_home: Path, a2a_home: Path, *, port: int) -> None:

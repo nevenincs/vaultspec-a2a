@@ -9,37 +9,17 @@ resident engine.
 
 from __future__ import annotations
 
-import contextlib
-import os
 import shlex
 import sys
 from pathlib import Path
-from typing import TYPE_CHECKING
 
 import pytest
 
+from ...testing import armed_environment as _environ
 from ..engine_serve import EngineSeatError, engine_command, resolve_data_seat, serve
-
-if TYPE_CHECKING:
-    from collections.abc import Iterator
 
 _SERVE_CMD_ENV = "VAULTSPEC_ENGINE_SERVE_CMD"
 _PROCS_HOME_ENV = "VAULTSPEC_PROCS_HOME"
-
-
-@contextlib.contextmanager
-def _environ(**overrides: str) -> Iterator[None]:
-    """Set env vars for the block and restore prior values afterwards (no mock)."""
-    saved = {key: os.environ.get(key) for key in overrides}
-    os.environ.update(overrides)
-    try:
-        yield
-    finally:
-        for key, prior in saved.items():
-            if prior is None:
-                os.environ.pop(key, None)
-            else:
-                os.environ[key] = prior
 
 
 def test_resolve_data_seat_accepts_existing_dir_and_refuses_ambiguous(tmp_path) -> None:

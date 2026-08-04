@@ -19,6 +19,11 @@ from .endpoints import (
     resolve_service,
     resolve_worker_url,
 )
+from .environment import (
+    armed_desktop_app_home,
+    armed_environment,
+    settings_override,
+)
 from .leases import (
     LEASE_TTL_MS,
     Lease,
@@ -83,6 +88,8 @@ __all__ = [
     "ResourceDiedError",
     "ResourceSpec",
     "allocate_free_ports",
+    "armed_desktop_app_home",
+    "armed_environment",
     "declared_claims",
     "effective_worker_count",
     "exclusive_keys",
@@ -100,5 +107,6 @@ __all__ = [
     "resolve_service",
     "resolve_spec",
     "resolve_worker_url",
+    "settings_override",
     "wait_for",
 ]

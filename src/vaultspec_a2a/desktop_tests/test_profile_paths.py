@@ -36,6 +36,7 @@ from ..providers.factory import (
     capsule_acp_entry,
     capsule_node_executable,
 )
+from ..testing import armed_environment
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -58,17 +59,8 @@ def _build_capsule(root: Path) -> Path:
 @contextmanager
 def _armed_env(app_home: str, capsule_root: str) -> Iterator[None]:
     """Arm the desktop environment variables, restoring the prior values after."""
-    updates = {_APP_HOME_ENV: app_home, _CAPSULE_ENV: capsule_root}
-    prior = {key: os.environ.get(key) for key in updates}
-    os.environ.update(updates)
-    try:
+    with armed_environment(**{_APP_HOME_ENV: app_home, _CAPSULE_ENV: capsule_root}):
         yield
-    finally:
-        for key, value in prior.items():
-            if value is None:
-                os.environ.pop(key, None)
-            else:
-                os.environ[key] = value
 
 
 @contextmanager

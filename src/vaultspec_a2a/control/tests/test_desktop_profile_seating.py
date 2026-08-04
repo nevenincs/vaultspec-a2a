@@ -8,7 +8,6 @@ environment afterwards.
 
 from __future__ import annotations
 
-import os
 from contextlib import contextmanager
 from typing import TYPE_CHECKING
 
@@ -17,6 +16,7 @@ from pydantic import ValidationError
 
 from ...control.config import Settings
 from ...desktop.profile import derive_state_paths
+from ...testing import armed_environment
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -28,15 +28,8 @@ _APP_HOME_ENV = "VAULTSPEC_DESKTOP_APP_HOME"
 @contextmanager
 def _armed_env(app_home: str) -> Iterator[None]:
     """Set the desktop application-home environment variable, then restore it."""
-    prior = os.environ.get(_APP_HOME_ENV)
-    os.environ[_APP_HOME_ENV] = app_home
-    try:
+    with armed_environment(**{_APP_HOME_ENV: app_home}):
         yield
-    finally:
-        if prior is None:
-            os.environ.pop(_APP_HOME_ENV, None)
-        else:
-            os.environ[_APP_HOME_ENV] = prior
 
 
 def test_armed_profile_seats_every_mutable_path_under_app_home(tmp_path: Path) -> None:

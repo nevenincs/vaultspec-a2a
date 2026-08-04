@@ -21,25 +21,23 @@ rather than skipped, and the portable contract tests carry the invariant there.
 from __future__ import annotations
 
 import asyncio
-import contextlib
 import sys
 from typing import TYPE_CHECKING
 
 import pytest
 
-from ...control.config import settings
 from ...control.worker_management import (
     GATEWAY_LIFETIME_ID,
     LazyWorkerSpawner,
     _await_worker_ready,
     _spawn_worker_owned,
 )
+from ...testing import armed_desktop_app_home as _armed_desktop
 from ...utils.process import ProcessContainment
 from .test_unready_worker_reap import _await_gone, _force_cleanup, _spawn_tree
 from .test_worker_provenance import _worker_like
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
     from pathlib import Path
 
 # Enough iterations that a one-handle-per-call leak is unmistakable against the
@@ -47,24 +45,6 @@ if TYPE_CHECKING:
 # well under one-per-iteration so the assertion cannot pass on a real leak.
 _LEAK_ITERATIONS = 40
 _LEAK_TOLERANCE = 10
-
-
-@contextlib.contextmanager
-def _armed_desktop(app_home: Path) -> Iterator[None]:
-    """Arm the desktop profile for the duration of the block.
-
-    ``desktop_profile_armed`` is a read-only property derived from
-    ``desktop_app_home``, so arming means setting the field the property reads -
-    a real attribute swap on the live settings object, restored on exit, which is
-    the sanctioned seam used across this suite.
-    """
-    original = settings.desktop_app_home
-    settings.desktop_app_home = app_home
-    try:
-        assert settings.desktop_profile_armed is True
-        yield
-    finally:
-        settings.desktop_app_home = original
 
 
 def _owned_body(generation: int) -> dict[str, object]:

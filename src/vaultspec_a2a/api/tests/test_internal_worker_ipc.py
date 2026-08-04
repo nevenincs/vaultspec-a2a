@@ -2,36 +2,17 @@
 
 from __future__ import annotations
 
-from contextlib import contextmanager
-from typing import TYPE_CHECKING
-
 import httpx
 import pytest
 from fastapi import FastAPI
 from httpx import ASGITransport
 
 from ...api.internal import internal_router
-from ...control.config import settings
+from ...testing import settings_override as _settings_override
 from ...utils.enums import Environment
-
-if TYPE_CHECKING:
-    from collections.abc import Iterator
 
 _WORKER_IPC = "worker-ipc-credential-0123456789abcdef"
 _ATTACH = "attach-credential-abcdef0123456789ffff"
-
-
-@contextmanager
-def _settings_override(**updates: object) -> Iterator[None]:
-    """Temporarily override settings attributes, restoring them on exit."""
-    originals = {name: getattr(settings, name) for name in updates}
-    for name, value in updates.items():
-        setattr(settings, name, value)
-    try:
-        yield
-    finally:
-        for name, value in originals.items():
-            setattr(settings, name, value)
 
 
 def _internal_app() -> FastAPI:

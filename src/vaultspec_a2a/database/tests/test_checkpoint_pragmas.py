@@ -18,7 +18,7 @@ from typing import TYPE_CHECKING
 import pytest
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
-from ...control.config import settings
+from ...testing import settings_override as _settings_override
 from ..checkpoint_schema import (
     checkpoint_pragmas,
     install_checkpoint_schema_identity,
@@ -28,23 +28,6 @@ from ..checkpoints import open_checkpointer
 
 if TYPE_CHECKING:
     from pathlib import Path
-
-
-class _SettingsOverride:
-    """Temporarily override settings attributes for a test (save/restore)."""
-
-    def __init__(self, **updates: object) -> None:
-        self._updates = updates
-        self._originals: dict[str, object] = {}
-
-    def __enter__(self) -> None:
-        for name, value in self._updates.items():
-            self._originals[name] = getattr(settings, name)
-            setattr(settings, name, value)
-
-    def __exit__(self, *_args: object) -> None:
-        for name, value in self._originals.items():
-            setattr(settings, name, value)
 
 
 async def _create_langgraph_store(path: Path) -> None:
@@ -74,7 +57,7 @@ async def test_saver_connection_carries_the_configured_posture(
     the default so a regression to a literal cannot pass.
     """
     db_file = runtime_dir / "posture.sqlite"
-    with _SettingsOverride(
+    with _settings_override(
         checkpoint_backend="sqlite",
         checkpoint_database_url=f"sqlite+aiosqlite:///{db_file}",
         sqlite_busy_timeout_ms=7321,

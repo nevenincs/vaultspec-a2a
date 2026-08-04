@@ -9,7 +9,6 @@ cannot execute a single statement.
 
 from __future__ import annotations
 
-import contextlib
 import shutil
 import sqlite3
 from typing import TYPE_CHECKING, Any, cast
@@ -21,31 +20,13 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 
 from ...control.config import settings
 from ...control.health import assemble_desktop_readiness
+from ...testing import armed_desktop_app_home as _armed_desktop
 from .conftest import make_app
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
     from pathlib import Path
 
     from fastapi import FastAPI
-
-
-@contextlib.contextmanager
-def _armed_desktop(app_home: Path) -> Iterator[None]:
-    """Arm the desktop profile for the duration of the block.
-
-    ``desktop_profile_armed`` is a read-only property derived from
-    ``desktop_app_home``, so arming means setting the field the property reads -
-    a real attribute swap on the live settings object, restored on exit, which is
-    the sanctioned seam used across this suite.
-    """
-    original = settings.desktop_app_home
-    settings.desktop_app_home = app_home
-    try:
-        assert settings.desktop_profile_armed is True
-        yield
-    finally:
-        settings.desktop_app_home = original
 
 
 async def _armed_health(app: FastAPI) -> dict[str, Any]:

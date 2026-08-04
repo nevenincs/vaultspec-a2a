@@ -17,19 +17,14 @@ it on a driver this project actually depends on.
 
 from __future__ import annotations
 
-import os
 import pathlib
-from contextlib import contextmanager
-from typing import TYPE_CHECKING
 
 import pytest
 from pydantic import ValidationError
 from sqlalchemy import create_engine
 
 from ...control.config import Settings
-
-if TYPE_CHECKING:
-    from collections.abc import Iterator
+from ...testing import armed_environment as _environment
 
 # The synchronous drivers this project declares in pyproject.toml. psycopg2 is
 # absent from that list, and ``aiosqlite`` is asynchronous, so an engine landing on
@@ -48,25 +43,6 @@ _ENV_EXAMPLE = pathlib.Path(__file__).resolve().parents[3].parent / ".env.exampl
 # operator uncomments wholesale. Reading it back is the only way to test what is
 # actually shipped rather than what this module would have written.
 _POSTGRES_BLOCK_HEADING = "# Uncomment for Postgres production"
-
-
-@contextmanager
-def _environment(**values: str | None) -> Iterator[None]:
-    """Apply environment values (``None`` removes), then restore the prior state."""
-    prior = {name: os.environ.get(name) for name in values}
-    try:
-        for name, value in values.items():
-            if value is None:
-                os.environ.pop(name, None)
-            else:
-                os.environ[name] = value
-        yield
-    finally:
-        for name, previous in prior.items():
-            if previous is None:
-                os.environ.pop(name, None)
-            else:
-                os.environ[name] = previous
 
 
 def _assert_synchronously_connectable(url: str) -> None:

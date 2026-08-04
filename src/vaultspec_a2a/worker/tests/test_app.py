@@ -6,27 +6,10 @@ from contextlib import asynccontextmanager
 
 from fastapi.testclient import TestClient
 
-from ...control.config import settings
 from ...ipc.schemas import DispatchRequest
+from ...testing import settings_override as _settings_override
 from ...utils.enums import Environment
 from ..app import create_worker_app
-
-
-class _SettingsOverride:
-    """Temporarily override settings attributes for a test."""
-
-    def __init__(self, **updates: object) -> None:
-        self._updates = updates
-        self._originals: dict[str, object] = {}
-
-    def __enter__(self) -> None:
-        for name, value in self._updates.items():
-            self._originals[name] = getattr(settings, name)
-            setattr(settings, name, value)
-
-    def __exit__(self, *_args: object) -> None:
-        for name, value in self._originals.items():
-            setattr(settings, name, value)
 
 
 def _make_app_without_lifespan():
@@ -46,7 +29,7 @@ def test_dispatch_rejects_missing_internal_token_outside_development() -> None:
         recursion_limit=25,
     )
     with (
-        _SettingsOverride(
+        _settings_override(
             environment=Environment.TESTING, internal_token="secret-token"
         ),
         TestClient(app, raise_server_exceptions=False) as client,
@@ -66,7 +49,7 @@ def test_dispatch_rejects_missing_token_configuration_outside_development() -> N
         recursion_limit=25,
     )
     with (
-        _SettingsOverride(
+        _settings_override(
             environment=Environment.TESTING,
             internal_token=None,
         ),
@@ -87,7 +70,7 @@ def test_dispatch_rejects_invalid_internal_token() -> None:
         recursion_limit=25,
     )
     with (
-        _SettingsOverride(
+        _settings_override(
             environment=Environment.DEVELOPMENT, internal_token="secret-token"
         ),
         TestClient(app, raise_server_exceptions=False) as client,
@@ -110,7 +93,7 @@ def test_admin_shutdown_rejects_missing_internal_token() -> None:
     """
     app = _make_app_without_lifespan()
     with (
-        _SettingsOverride(
+        _settings_override(
             environment=Environment.TESTING, internal_token="secret-token"
         ),
         TestClient(app, raise_server_exceptions=False) as client,
@@ -125,7 +108,7 @@ def test_admin_shutdown_rejects_invalid_internal_token() -> None:
     """The eviction-path kill endpoint must reject a wrong bearer token."""
     app = _make_app_without_lifespan()
     with (
-        _SettingsOverride(
+        _settings_override(
             environment=Environment.DEVELOPMENT, internal_token="secret-token"
         ),
         TestClient(app, raise_server_exceptions=False) as client,
@@ -143,7 +126,7 @@ def test_health_rejects_missing_internal_token() -> None:
     """Worker /health requires the worker IPC credential when one is configured."""
     app = _make_app_without_lifespan()
     with (
-        _SettingsOverride(
+        _settings_override(
             environment=Environment.TESTING, internal_token="secret-token"
         ),
         TestClient(app, raise_server_exceptions=False) as client,
@@ -158,7 +141,7 @@ def test_health_rejects_invalid_internal_token() -> None:
     """Worker /health rejects a wrong worker IPC bearer."""
     app = _make_app_without_lifespan()
     with (
-        _SettingsOverride(
+        _settings_override(
             environment=Environment.DEVELOPMENT, internal_token="secret-token"
         ),
         TestClient(app, raise_server_exceptions=False) as client,
@@ -172,7 +155,7 @@ def test_health_accepts_valid_internal_token() -> None:
     """The paired gateway's bearer passes the worker /health gate."""
     app = _make_app_without_lifespan()
     with (
-        _SettingsOverride(
+        _settings_override(
             environment=Environment.DEVELOPMENT, internal_token="secret-token"
         ),
         TestClient(app, raise_server_exceptions=False) as client,
@@ -187,7 +170,7 @@ def test_health_open_in_development_without_token() -> None:
     """A DEVELOPMENT worker with no token leaves /health open (bearer rule)."""
     app = _make_app_without_lifespan()
     with (
-        _SettingsOverride(environment=Environment.DEVELOPMENT, internal_token=None),
+        _settings_override(environment=Environment.DEVELOPMENT, internal_token=None),
         TestClient(app, raise_server_exceptions=False) as client,
     ):
         resp = client.get("/health")

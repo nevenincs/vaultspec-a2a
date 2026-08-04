@@ -745,13 +745,24 @@ async def _record_permission_transition(
     )
 
     team_preset: str | None = thread_record.team_preset
+    # The stored value is validated, not merely fetched. This is the workspace a
+    # resumed run executes in, and the sibling that reads it for dispatch records
+    # what a bad one costs: degrading it used to dispatch the turn anyway and let
+    # the provider layer site the agent - and its filesystem sandbox - in whatever
+    # directory the worker happened to start in. The annotation here said
+    # ``str | None`` while the read admitted any JSON value, so a stored number or
+    # object flowed through untouched and only failed further downstream, if at
+    # all.
     workspace_root: str | None = None
     if thread_record.thread_metadata:
         try:
             meta = json.loads(thread_record.thread_metadata)
-            workspace_root = meta.get("workspace_root")
-        except (json.JSONDecodeError, AttributeError):
-            pass
+        except json.JSONDecodeError:
+            meta = None
+        if isinstance(meta, dict):
+            candidate = meta.get("workspace_root")
+            if isinstance(candidate, str) and candidate:
+                workspace_root = candidate
 
     resume_value = permission_resume_value(
         permission.pause_reason_type,

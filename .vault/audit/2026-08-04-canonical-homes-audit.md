@@ -765,6 +765,73 @@ nearest shape rather than the canonical home. That is the same mechanism the
 inventory attributes to the older clusters, which suggests the rule is not yet
 enforceable enough to bind a writer working at speed.
 
+### terminal-status-map-now-derived | high | closes the vocabulary finding, verified and fixed
+
+Re-verified the terminal-status-vocabulary finding recorded above against
+current HEAD before touching anything, per this domain's own caution about
+grep chains proving absence: the map in `src/vaultspec_a2a/thread/snapshots.py`
+was still hand-typed with the same three literal keys, and its test in
+`src/vaultspec_a2a/thread/tests/test_snapshots.py` still asserted a fourth
+independent literal set rather than comparing against the authority. No fifth
+derivation surfaced anywhere in the permission/control domain during this
+sweep. ACTIONED: the map now comprehends over `TERMINAL_STATUSES`
+(`src/vaultspec_a2a/thread/enums.py`) instead of restating its members, and
+the test now asserts membership against that same authority. The container
+stays a `dict[str, str]` rather than collapsing to the frozenset, unchanged
+from the prior finding's guidance, because `control/event_handlers.py` reads
+it with `.get(payload_status)` against an untrusted wire value, not membership
+alone. Verified by running `src/vaultspec_a2a/thread/tests/` (226 passed) and
+`src/vaultspec_a2a/control/tests/` (345 passed, 17 deselected `live`-marked)
+in full, plus a whole-tree `ty check src/vaultspec_a2a`, which surfaced only
+five pre-existing diagnostics in `authoring/tests/` and
+`src/vaultspec_a2a/testing/listeners.py` — outside this domain and unrelated
+to the change (an undefined `health_listener` fixture name and a stale
+`@override` on `do_GET`), left unowned here since they are out of scope for
+this sweep.
+
+### permission-fsm-control-domain-swept-clean | low | rejection verdict, control-action journal, and clarification contract are single-homed
+
+Reported because a domain sweep that finds one live defect and stops looks
+incomplete rather than thorough. Several clusters were tested with four or
+more independently-phrased searches each, per this domain's own method, and
+found single-homed with no competing declaration anywhere in
+`src/vaultspec_a2a/thread/` or `src/vaultspec_a2a/control/`.
+
+The rejection verdict this domain's own history warns about is still exactly
+one predicate: `is_rejection_response` in `src/vaultspec_a2a/graph/enums.py`,
+wrapped once by `response_is_rejection` in
+`src/vaultspec_a2a/thread/permission_fsm.py`, and consumed by both
+`compute_progress_applied_effects` and `control/permission_service.py`'s
+`_response_verdict`, whose own docstring states outright that stamping the
+verdict from anywhere else is what let a rejection be recorded as an
+approval. No third derivation was found. The clarification typed-interrupt
+contract (request, answer, continuation, and decline shapes, plus their
+bounds) lives once in `src/vaultspec_a2a/thread/clarification.py` and is
+consumed, not restated, by `control/clarification_service.py` and the
+checkpoint projection in `thread/snapshots.py` — consistent with this
+project's binding rule that the checkpoint is the sole disclosure authority
+for a pending clarification. The control-action journal and its lease
+(reservation, claim, commit, release, settle) are declared once in
+`src/vaultspec_a2a/database/permission_repository.py` and wrapped once in
+`src/vaultspec_a2a/control/action_lease.py`'s `claim_control_action` /
+`release_definite_non_delivery`, both consumed identically by
+`permission_service.py`, `clarification_service.py`, and (for the crash-
+recovery replay path) `direct_control_recovery.py`, with the definite-vs-
+ambiguous non-delivery POLICY correctly staying an argument
+(`FailureType`) rather than being decided inside the helper. ACP option-id
+extraction from a durable JSON column is a two-layer single chain:
+`graph/acp_options.py` owns the identity rule, `control/permission_options.py`
+is a thin adapter over the durable column shape, and `permission_service.py`
+is the only caller. `permission_resume_value` and
+`permission_response_action_key` each have exactly one declaration. The four
+permission/control enums (`ApprovalStatus`, `PermissionRequestStatus`,
+`ControlActionResultStatus`, `ControlActionType`) are declared exactly once,
+in `thread/enums.py`. `supersede_permission_requests` has one declaration and
+one caller. Not established: `cancel_service.py` and `message_service.py`
+were read only where they share the action-lease mechanism with this domain;
+their own dispatch-failure state-restoration logic was not swept, since
+cancellation and message follow-up sit outside this domain's assignment.
+
 ### compile-one-worker-node-restated-per-topology | medium | one compile step, four independent copies inside one file
 
 `src/vaultspec_a2a/graph/compiler.py` already extracts the diverge/fan-out

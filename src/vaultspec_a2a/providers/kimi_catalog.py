@@ -26,6 +26,7 @@ from ._json_contract import JsonObject, JsonValue
 from ._stdio_rpc import OutputBudget, cancel_task
 from ._subprocess import kill_process_tree, spawn_acp_process
 from .provider_catalog import (
+    MAX_OPTIONS,
     AuthenticationState,
     CatalogState,
     CatalogStatus,
@@ -46,7 +47,6 @@ __all__ = [
 
 _MAX_MODELS: Final = 256
 _MAX_CONTROLS: Final = 32
-_MAX_OPTIONS: Final = 128
 _CATALOG_TTL: Final = timedelta(minutes=5)
 _JSON_OBJECT: TypeAdapter[JsonObject] = TypeAdapter(JsonObject)
 
@@ -114,7 +114,7 @@ def _thinking_control(
     efforts = _string_list(
         model.get("supportEfforts"),
         field="supportEfforts",
-        limit=_MAX_OPTIONS,
+        limit=MAX_OPTIONS,
     )
     if not efforts:
         return None

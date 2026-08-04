@@ -31,6 +31,7 @@ from ._json_contract import JsonObject, JsonValue
 from ._stdio_rpc import OutputBudget, cancel_task, drain_stderr, read_response
 from ._subprocess import kill_process_tree, spawn_acp_process
 from .provider_catalog import (
+    MAX_OPTIONS,
     AuthenticationState,
     CatalogState,
     CatalogStatus,
@@ -54,7 +55,6 @@ _MAX_FRAMES_PER_RESPONSE: Final = 64
 _MAX_PAGES: Final = 16
 _MAX_MODELS: Final = 256
 _MAX_CONTROLS: Final = 32
-_MAX_OPTIONS: Final = 128
 _MODEL_PAGE_SIZE: Final = 100
 _CATALOG_TTL: Final = timedelta(minutes=5)
 _JSON_OBJECT: TypeAdapter[JsonObject] = TypeAdapter(JsonObject)
@@ -150,9 +150,9 @@ def _control(
                 description=description,
             )
         )
-    if len(options) > _MAX_OPTIONS:
+    if len(options) > MAX_OPTIONS:
         raise CodexCatalogProtocolError(
-            f"Codex model {field!r} options exceed {_MAX_OPTIONS} items"
+            f"Codex model {field!r} options exceed {MAX_OPTIONS} items"
         )
     default_option_id = (
         local_id(namespace, default_value)
@@ -174,7 +174,7 @@ def _reasoning_values(model: JsonObject) -> tuple[tuple[str, str, str | None], .
         _objects(
             model.get("supportedReasoningEfforts"),
             field="supportedReasoningEfforts",
-            limit=_MAX_OPTIONS,
+            limit=MAX_OPTIONS,
         )
     ):
         value = _FIELDS.required_text(
@@ -192,7 +192,7 @@ def _service_tier_values(
     if isinstance(service_tiers, list) and service_tiers:
         values: list[tuple[str, str, str | None]] = []
         for index, option in enumerate(
-            _objects(service_tiers, field="serviceTiers", limit=_MAX_OPTIONS)
+            _objects(service_tiers, field="serviceTiers", limit=MAX_OPTIONS)
         ):
             value = _FIELDS.required_text(
                 option.get("id"), field=f"serviceTiers[{index}].id"
@@ -208,7 +208,7 @@ def _service_tier_values(
     speed_tiers = model.get("additionalSpeedTiers")
     if speed_tiers is None:
         return ()
-    if not isinstance(speed_tiers, list) or len(speed_tiers) > _MAX_OPTIONS:
+    if not isinstance(speed_tiers, list) or len(speed_tiers) > MAX_OPTIONS:
         raise CodexCatalogProtocolError(
             "Codex catalog field 'additionalSpeedTiers' must be a bounded list"
         )

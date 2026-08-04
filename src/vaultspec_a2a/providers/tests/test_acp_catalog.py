@@ -14,6 +14,7 @@ from ..acp_catalog import (
     catalog_from_session_result,
 )
 from ..provider_catalog import (
+    MAX_OPTIONS,
     AuthenticationState,
     CatalogStatus,
     ControlKind,
@@ -211,9 +212,10 @@ def test_control_and_option_bounds_fail_as_protocol_errors() -> None:
         )
 
     options: list[JsonObject] = [
-        {"value": f"choice-{index}", "name": f"Choice {index}"} for index in range(129)
+        {"value": f"choice-{index}", "name": f"Choice {index}"}
+        for index in range(MAX_OPTIONS + 1)
     ]
-    with pytest.raises(AcpCatalogProtocolError, match="exceeds 128 items"):
+    with pytest.raises(AcpCatalogProtocolError, match=f"exceeds {MAX_OPTIONS} items"):
         catalog_from_session_result(
             cast(
                 "JsonObject",

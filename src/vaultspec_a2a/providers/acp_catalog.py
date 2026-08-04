@@ -33,6 +33,7 @@ from ._stdio_rpc import OutputBudget, cancel_task, drain_stderr, read_response
 from ._subprocess import kill_process_tree, spawn_acp_process
 from .acp_exceptions import AcpErrorCode, AcpSessionError
 from .provider_catalog import (
+    MAX_OPTIONS,
     AuthenticationState,
     CatalogState,
     CatalogStatus,
@@ -55,7 +56,6 @@ _MAX_FRAME_BYTES: Final = 1_048_576
 _MAX_FRAMES: Final = 64
 _MAX_MODELS: Final = 256
 _MAX_CONTROLS: Final = 32
-_MAX_OPTIONS: Final = 128
 _CATALOG_TTL: Final = timedelta(minutes=5)
 _SUPPORTED_CONTROL_CATEGORIES: Final = frozenset({"thought_level", "model_config"})
 _JSON_OBJECT: TypeAdapter[JsonObject] = TypeAdapter(JsonObject)
@@ -213,7 +213,7 @@ def _control_from_option(
         )
     choices: list[NativeControlOption] = []
     for choice in _flatten_options(
-        option.get("options"), field=f"{config_id}.options", limit=_MAX_OPTIONS
+        option.get("options"), field=f"{config_id}.options", limit=MAX_OPTIONS
     ):
         value = _option_value(choice)
         if value is None:

@@ -238,12 +238,22 @@ exclude = [
   "src/vaultspec_a2a/team/presets/teams/*-mock.toml",
   "src/vaultspec_a2a/team/presets/teams/vaultspec-adr-research-deterministic.toml",
   # Certification-only lanes that the mock-* patterns above do not match by
-  # name. Both are scripted fixtures - a forced failure scenario and a
-  # bridge-free provider-condition probe - so they belong with the other
-  # certification variants: available in source and Compose, absent from a
-  # product wheel.
+  # name. Every one is a scripted fixture - forced failure, a bridge-free
+  # provider-condition probe, and the in-process scenarios that drive a tool
+  # call, a supervised permission pause, and a cancellation window - so they
+  # belong with the other certification variants: available in source and
+  # Compose, absent from a product wheel. The agent halves are listed beside
+  # their teams because a scenario agent is no more shippable than the scenario
+  # that names it.
   "src/vaultspec_a2a/team/presets/teams/deterministic-failure.toml",
   "src/vaultspec_a2a/team/presets/teams/provider-condition-probe.toml",
+  "src/vaultspec_a2a/team/presets/teams/deterministic-cancel-window.toml",
+  "src/vaultspec_a2a/team/presets/teams/deterministic-permission-pause.toml",
+  "src/vaultspec_a2a/team/presets/teams/deterministic-tool-call.toml",
+  "src/vaultspec_a2a/team/presets/agents/deterministic-failure.toml",
+  "src/vaultspec_a2a/team/presets/agents/deterministic-cancel-window.toml",
+  "src/vaultspec_a2a/team/presets/agents/deterministic-permission-pause.toml",
+  "src/vaultspec_a2a/team/presets/agents/deterministic-tool-call.toml",
 ]
 
 [tool.hatch.build.targets.wheel.force-include]

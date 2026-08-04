@@ -24,6 +24,8 @@ from ...providers import AcpPromptError, ProviderCondition
 from ...providers.codex_chat_model import _turn_failure
 from ...providers.conditions import condition_from_acp_error, condition_is_retryable
 from ...providers.factory import ProviderFactory
+from ...providers.lane_admission import IN_PROCESS_LANES
+from ...providers.model_profiles import resolve_role_assignment
 from ...team.team_config import (
     TeamConfig,
     TopologyConfig,
@@ -141,26 +143,41 @@ async def test_compile_graph_structure(
 
 
 @pytest.mark.parametrize("preset_id", sorted(discover_team_preset_ids()))
-def test_bundled_preset_workers_resolve_to_chat_models(
+def test_bundled_preset_workers_resolve_only_on_an_in_process_lane(
     preset_id: str,
 ) -> None:
-    """Every shipped worker resolves through the production factory as a chat model."""
+    """A shipped worker resolves WITHOUT a frozen selection only in process.
+
+    Both branches are asserted rather than just the resolving one, because the
+    refusal is the part that regressed silently before. An external lane's models
+    are named by the catalog that provider serves and frozen per role at run
+    start, so resolving one from configuration alone would mean inventing a model
+    identifier the provider never advertised. The in-process lanes are exempt
+    because no catalog exists to enumerate them.
+    """
     team = load_team_config(preset_id)
     factory = ProviderFactory()
 
     for worker_ref in team.workers:
         agent_config = load_agent_config(worker_ref.agent_id)
-        model, _provider, _capability = _resolve_model_for_worker(
-            worker_ref,
-            agent_config,
-            team,
-            provider_factory=factory,
-        )
+        assignment = resolve_role_assignment(worker_ref, agent_config, team, None)
 
-        assert isinstance(model, BaseChatModel), (
-            f"{preset_id}:{worker_ref.agent_id} resolved {type(model).__name__}, "
-            "not a BaseChatModel"
-        )
+        if assignment.provider in IN_PROCESS_LANES:
+            model, _provider, _capability = _resolve_model_for_worker(
+                worker_ref, agent_config, team, provider_factory=factory
+            )
+            assert isinstance(model, BaseChatModel), (
+                f"{preset_id}:{worker_ref.agent_id} resolved "
+                f"{type(model).__name__}, not a BaseChatModel"
+            )
+            continue
+
+        # Surfaced at the compiler seam as fallback exhaustion; the cause beneath
+        # it is the factory refusing to invent an implicit default.
+        with pytest.raises(ValueError, match="All providers exhausted"):
+            _resolve_model_for_worker(
+                worker_ref, agent_config, team, provider_factory=factory
+            )
 
 
 # ---------------------------------------------------------------------------

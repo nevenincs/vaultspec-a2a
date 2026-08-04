@@ -4308,3 +4308,83 @@ rather than duplicated. Neither would have appeared in any structural scan at
 any floor. Remaining effort belongs on semantic search for concepts answered
 independently, and on divergence between sites that already agree in shape -
 not on finding more copies.
+
+### correction-the-copy-was-more-factored-than-the-original | medium | sharpens the copy-direction evidence
+
+An earlier entry here states that the credential mint and the canonical writer
+defined a same-named private function "with the same body shape and the same two
+constants". The last clause is wrong, and the true shape is better evidence than
+the claim it replaces.
+
+Verified against the pre-fold baseline: the COPY declared two named constants -
+the retry budget and the sleep interval. The canonical home declared one named
+constant and left the interval as a bare literal in its sleep call. Same name,
+same body shape, same values; not a symmetric pair.
+
+So the copy was MORE FACTORED than the original. That is the giveaway, and it
+settles the direction of transcription: someone reading the canonical module
+extracted its inline literal into a name while copying it. A copy that merely
+drifted would be equally or less factored than its source; improving the thing you
+are duplicating is the signature of deliberate transcription by someone who had
+the original open and thought about it.
+
+Recorded as a correction rather than an edit because the campaign's convention is
+that withdrawn and amended claims stay visible. It also stands beside the finding
+that the fork carried two protections the home lacked: in both respects the
+duplicate was the better-tended copy, which is the opposite of the model this
+campaign began with.
+
+### a-docstring-narrating-someone-elses-convergence | medium | method hazard, second variant
+
+A lane grounding itself found a module whose docstring already narrates publishing
+through "the shared writer", which reads as proof that the fold it was dispatched
+to perform had already happened. It had not. That module is a DIFFERENT consumer
+which converged earlier; the target was still the last writer standing outside.
+
+This is the second variant of the same trap and it is harder to see than the
+first. The uncommitted-edits case at least requires a concurrent writer, and
+`git show HEAD:` settles it. Here the text is committed, accurate, and long-
+standing - it is simply ABOUT A DIFFERENT SUBJECT. No baseline check disambiguates
+it, because nothing is wrong with it.
+
+**What settles it is asking which consumer the sentence is about, not whether the
+sentence is true.** In a codebase where several callers converge on one home at
+different times, prose describing convergence accumulates in the callers that
+already moved - so the more successful a canonical home is, the more surrounding
+text will suggest that any given holdout has already adopted it.
+
+Recorded because both variants were hit within an hour, in opposite directions,
+by different lanes: one nearly reported an unfinished fold as done, the other
+nearly reported another lane's in-flight work as long-standing prior art.
+
+### the-orchestrator-dispatch-list-went-stale-twice | high | Two of five assigned clusters were already fixed, and a third assignment named a site that did not exist - in both cases the lane caught it because the brief required verification
+
+Two dispatches in this campaign carried target lists that were wrong at the
+moment they were sent:
+
+- A lane was told to consolidate five provider-catalog clusters. Two of them -
+  the `_local_id` trio and the `_display` pair - had already been consolidated
+  into `_catalog_fields.py` by commits that landed BEFORE the dispatch. Only
+  three were live work.
+- An earlier lane was told a named helper existed in a module that has never
+  declared it, and the site that actually caused the failure was not on the
+  list at all.
+
+The cause is the same both times and it is an orchestration defect, not a lane
+defect. The target lists were derived from a scan snapshot and then dispatched
+without being re-derived against `HEAD`. In a tree with several lanes committing
+concurrently, a duplication inventory is stale almost immediately: the very
+campaign that produces the list is also consuming it.
+
+What prevented both from becoming wasted or destructive work is that each brief
+required the lane to VERIFY the finding before acting, and to say so if a
+judgement did not survive contact with the source. Both lanes did exactly that -
+one checked `git log` and `git diff` and reported the clusters already resolved,
+the other grepped for the exact symbol and reported it absent. Neither
+"corrected" the brief silently, and neither implemented against it blindly.
+
+The practice to keep: a dispatch list is a HYPOTHESIS, and the brief must say so.
+Re-deriving the inventory at dispatch time would reduce the error but cannot
+eliminate it while lanes commit in parallel, so the durable fix is the
+instruction rather than fresher input. An agent told to execute a list will
+execute a stale one; an agent told to verify first reports the staleness back.

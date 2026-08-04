@@ -6339,3 +6339,34 @@ Recorded because the lane raised the conflict rather than letting the ruling sta
 unmentioned over a tree that contradicted it. That is the expensive direction to
 report in - it invites having your own landed work reverted - and it is the only
 reason the record and the tree now agree.
+
+### desktop-test-group-reproduced-and-closed | low | Re-derived at three floors; the spawn helpers are binding shims and the port probe is a genuine sub-floor duplicate whose consolidation would create a third home
+
+Closes the entry that had been carried as "truncated in the scan output and its
+partner could not be re-derived". Re-scanned scoped to `desktop_tests/` at
+floors 20, 30, and 40. Three groups exist below the guard's floors and none at
+40, so the standing guard is correctly silent.
+
+**The two `_spawn` groups are DISTINCT.** Five modules declare a local `_spawn`,
+and every one of them is a thin wrapper over the already-canonical
+`spawn_gateway` plus `armed_gateway_env`. What differs is exactly the
+environment POLICY each test exists to exercise - one keeps the worker cold
+because the credential planes are its subject, another serves in-process lanes
+because its module admits runs against the mock lane - and each states its reason
+in a comment at the call site. This is the binding-shim class the structural
+guard's own docstring names: the residue of a consolidation that already
+happened, not a consolidation waiting to happen. Sharing them would move the
+distinguishing policy into a parameter and make each test's subject less visible.
+
+**The `_port_listening` pair is a genuine DUPLICATE, and is still not worth
+moving yet.** Two modules declare a byte-identical loopback connect probe. The
+nearest existing home, `service_tests/_net.py::tape_server_listening`, is NOT
+that function: it takes a base URL rather than a port and uses `connect_ex`
+rather than a timed `create_connection`. Consolidating the desktop pair on its
+own would create a THIRD declaration of "is something listening on this
+address", which is the shape this campaign exists to remove. The honest move is
+to converge all three onto one probe with an explicit input contract, or to
+leave all three alone - and that is a larger decision than this entry.
+
+Recorded rather than actioned, and closed either way: the finding is reproduced,
+its two halves have verdicts, and it is no longer an open unknown.

@@ -5,7 +5,7 @@ tags:
 date: '2026-08-04'
 modified: '2026-08-04'
 body_schema: 'body-v1'
-body_hash: 'sha256:79e30ecd1cd5ba7e8b616a293d030e197f7c12ab8c495eb2368e92f6b0b026ae'
+body_hash: 'sha256:6b50e7ece310b80ee2a19f913cc115d5e8b7f40cee956cfd578ad420afb29fde'
 related: []
 ---
 
@@ -1360,6 +1360,56 @@ Which yields the standing property worth stating plainly: in this tree, type-che
 and test results have a shelf life of MINUTES. Two diagnostics observed from the
 orchestrator's own run vanished on re-run, from a lane mid-edit in the same
 files. Gates belong immediately before staging and nowhere else.
+
+### a-lying-name-and-the-workarounds-around-it | critical | duplication hiding a live defect
+
+The owner-restriction authority is genuinely single-homed - the platform DACL
+machinery is restated nowhere, verified across every restriction site in the
+tree. But its file-restricting entry point applied the file mode
+unconditionally on POSIX, while FOUR callers pass a directory. Its Windows branch
+had always handled directories; the asymmetry was POSIX-only, and every caller
+had answered it separately - one branching around the authority entirely on
+POSIX, one open-coding the restriction twice, and one calling it unmodified.
+
+That third caller is a live defect. The file mode on a directory strips the
+traversal bit, so nothing beneath it can be opened - and the system call REPORTS
+SUCCESS, so the error guard sitting beside it never fires. The profile arms
+clean and the state directory holding thread content, the permission-decision log
+and the checkpoint store becomes unreachable later, far from the cause.
+
+This is the name-collision class again, in its most expensive form: a name
+promising a narrower contract than its callers relied on. The finding worth
+carrying is how it was detected - not by the failure, which is silent, but by
+noticing that every caller had built a workaround. The workarounds are what a
+lying name looks like from the outside, and they are visible long before the
+defect is.
+
+Fixed by deciding the mode at the authority rather than at each call site, and
+renaming the entry point so it no longer claims to handle only files. The old
+name is deleted.
+
+### assert-the-decision-when-you-cannot-run-the-platform | high | method finding
+
+The defect above lives on a platform the executing host cannot run. A test gated
+to that platform would have SKIPPED there and reported coverage it did not have -
+which, in a campaign that has repeatedly caught stale greens, is the worst
+available outcome. The lane instead asserted the mode DECISION rather than the
+resulting permission bits: the directory answer must carry the traversal bit, the
+file answer must not, and neither may admit group or other access. That runs
+everywhere and cannot be vacuously satisfied.
+
+Recorded as method because the choice generalises past platforms: when the
+environment cannot exercise the consequence, assert the decision that produces
+it, rather than writing a test whose skip is indistinguishable from a pass.
+
+### discovery-heartbeat-directory-unrestricted-on-windows | medium | open, security-relevant
+
+Surfaced by the same sweep and not fixed in it. One of two discovery write paths
+creates its parent directory with a POSIX mode and then applies a POSIX-only
+restriction, with no Windows branch at all - while its sibling publication path
+receives a verified private access-control entry. So on the platform this product
+targets first, that parent directory is left unrestricted. Queued rather than
+absorbed into the commit that found it.
 
 ## Recommendations
 

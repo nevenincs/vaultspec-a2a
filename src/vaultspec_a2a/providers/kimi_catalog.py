@@ -20,12 +20,18 @@ from pydantic import TypeAdapter, ValidationError
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
-from ._catalog_fields import CatalogFieldReader, display_text, local_id
+from ._catalog_fields import (
+    CatalogFieldReader,
+    display_label,
+    display_text,
+    local_id,
+)
 from ._cleanup import CleanupStep, run_independent_cleanups
 from ._json_contract import JsonObject, JsonValue
 from ._stdio_rpc import OutputBudget, cancel_task
 from ._subprocess import kill_process_tree, spawn_acp_process
 from .provider_catalog import (
+    MAX_CAPABILITIES,
     MAX_CONTROLS,
     MAX_MODELS,
     MAX_OPTIONS,
@@ -138,7 +144,7 @@ def _thinking_control(
     return NativeControl(
         control_id=control_id,
         kind=ControlKind.THOUGHT_LEVEL,
-        display_name=f"Thinking effort for {display_name}"[:256],
+        display_name=display_label(f"Thinking effort for {display_name}"),
         options=options,
         default_option_id=default_option_id,
     )
@@ -205,7 +211,7 @@ def catalog_from_provider_list(
         capabilities = _string_list(
             raw_model.get("capabilities"),
             field=f"{alias}.capabilities",
-            limit=64,
+            limit=MAX_CAPABILITIES,
         )
         entry_id = local_id(f"{key.provider_id}:{key.execution_mode}:model", alias)
         display_name = display_text(raw_model.get("displayName"), alias)

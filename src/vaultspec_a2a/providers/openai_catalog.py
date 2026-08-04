@@ -18,7 +18,12 @@ from typing import Final
 import httpx
 from pydantic import TypeAdapter, ValidationError
 
-from ._catalog_fields import CatalogFieldReader, local_id, model_list_revision
+from ._catalog_fields import (
+    CatalogFieldReader,
+    display_label,
+    local_id,
+    model_list_revision,
+)
 from ._json_contract import JsonObject
 from .provider_catalog import (
     MAX_MODELS,
@@ -201,7 +206,7 @@ def catalog_from_model_list(
         ModelCatalogEntry(
             entry_id=_entry_id(key, model_value),
             provider_value=model_value,
-            display_name=model_value[:256],
+            display_name=display_label(model_value),
         )
         for model_value in sorted(model_values)
     )

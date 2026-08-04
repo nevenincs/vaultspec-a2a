@@ -22,6 +22,7 @@ if TYPE_CHECKING:
 from ..utils import package_version
 from ._catalog_fields import (
     CatalogFieldReader,
+    display_label,
     display_text,
     local_id,
     optional_description,
@@ -162,7 +163,7 @@ def _control(
     return NativeControl(
         control_id=control_id,
         kind=kind,
-        display_name=f"{display_name} for {model_name}"[:256],
+        display_name=display_label(f"{display_name} for {model_name}"),
         options=tuple(options),
         default_option_id=default_option_id,
     )

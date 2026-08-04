@@ -28,6 +28,8 @@ import json
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Final
 
+from .provider_catalog import MAX_DISPLAY_LENGTH
+
 if TYPE_CHECKING:
     from ._json_contract import JsonValue
     from ._stdio_rpc import ProtocolErrorFactory
@@ -35,6 +37,7 @@ if TYPE_CHECKING:
 
 __all__ = [
     "CatalogFieldReader",
+    "display_label",
     "display_text",
     "local_id",
     "model_list_revision",
@@ -43,7 +46,6 @@ __all__ = [
 ]
 
 _MAX_FIELD_CHARS: Final = 1_024
-_MAX_DISPLAY_CHARS: Final = 256
 
 
 def optional_text(value: JsonValue | None) -> str | None:
@@ -53,15 +55,32 @@ def optional_text(value: JsonValue | None) -> str | None:
     )
 
 
+def display_label(text: str) -> str:
+    """Bound a display name to what the catalog contract will accept.
+
+    Truncation is the lane's posture and refusal is the model's: a provider
+    shipping an over-long label, or a lane composing one out of parts that are
+    each legal, must not cost the whole catalog. The bound is the model's to
+    declare, because a lane cutting SHORTER silently shortens a name the model
+    accepts, and one cutting LONGER hands over a value the model rejects.
+
+    Trailing space is stripped afterwards because the model requires a bounded
+    string AND an already-normalized one, and a cut landing on a space satisfies
+    the first while breaking the second - a whole catalog lost to a bare
+    ``ValueError`` from a dataclass constructor.
+    """
+    return text[:MAX_DISPLAY_LENGTH].rstrip()
+
+
 def display_text(value: JsonValue | None, fallback: str) -> str:
     """Prefer the provider's display string, falling back to its raw value."""
-    return (optional_text(value) or fallback)[:_MAX_DISPLAY_CHARS]
+    return display_label(optional_text(value) or fallback)
 
 
 def optional_description(value: JsonValue | None) -> str | None:
     """Keep a provider description only when it is present and normalized."""
     text = optional_text(value)
-    return None if text is None else text[:_MAX_FIELD_CHARS]
+    return None if text is None else text[:_MAX_FIELD_CHARS].rstrip()
 
 
 def local_id(namespace: str, provider_value: str) -> str:

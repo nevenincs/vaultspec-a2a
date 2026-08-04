@@ -211,6 +211,28 @@ def test_create_worker_ipc_credential_is_per_boot(tmp_path: Path) -> None:
     assert worker_path.read_text(encoding="utf-8") == second
 
 
+def test_the_minted_secret_is_published_restricted_and_byte_exact(
+    tmp_path: Path,
+) -> None:
+    """The mint's two guarantees must survive publishing through a shared writer.
+
+    Owner-restriction is applied to the temporary before the rename, so the
+    credential is never reachable under its real name unprotected; on Windows
+    that restriction is a private access-control list, so this asserts the
+    platform predicate rather than a permission mode.  And the file must hold
+    the secret's exact bytes: the gateway-worker pair compares what it reads
+    back against what was minted, so a single translated byte breaks the pair.
+    """
+    credentials_dir = tmp_path / "credentials"
+
+    secret = create_worker_ipc_credential(credentials_dir)
+
+    worker_path = credential_paths(credentials_dir).worker_ipc_path
+    assert credential_file_is_owner_restricted(worker_path)
+    assert worker_path.read_bytes() == secret.encode("utf-8")
+    assert sorted(credentials_dir.glob("*.tmp")) == []
+
+
 def test_a_failed_mint_leaves_no_temporary_secret_behind(tmp_path: Path) -> None:
     """A mint that cannot publish must not strand a live secret in a temporary.
 
@@ -241,7 +263,7 @@ def test_the_mint_temporary_is_named_for_the_writing_process(tmp_path: Path) -> 
     """
     credentials_dir = tmp_path / "credentials"
     credentials_dir.mkdir()
-    expected = credentials_dir / f".{WORKER_IPC_CREDENTIAL_NAME}.{os.getpid()}.tmp"
+    expected = credentials_dir / f"{WORKER_IPC_CREDENTIAL_NAME}.{os.getpid()}.tmp"
     expected.mkdir()
 
     with pytest.raises(OSError):

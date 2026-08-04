@@ -105,6 +105,77 @@ def test_a_non_os_failure_mid_write_still_removes_the_temporary(
     assert _temporaries(tmp_path) == []
 
 
+def test_the_hardening_hook_runs_on_the_temporary_before_the_rename(
+    tmp_path: Path,
+) -> None:
+    """A file must be protected before it is reachable under its real name.
+
+    The hook exists for an owner-restriction no permission bits can express, and
+    a restriction applied after the rename would leave a genuine window in which
+    another local principal could open the published file.  So the hook records
+    what the filesystem actually looked like at the moment it ran: the target
+    absent, and the temporary already holding the finished bytes.
+    """
+    target = tmp_path / "record.json"
+    observed: list[tuple[Path, bool, str]] = []
+
+    def observe(candidate: Path) -> None:
+        observed.append(
+            (candidate, target.exists(), candidate.read_text(encoding="utf-8"))
+        )
+
+    atomic_write_text(target, "protected-content", mode=0o600, harden=observe)
+
+    expected_temporary = tmp_path / f"record.json.{os.getpid()}.tmp"
+    assert observed == [(expected_temporary, False, "protected-content")]
+    assert target.read_text(encoding="utf-8") == "protected-content"
+    assert _temporaries(tmp_path) == []
+
+
+def test_a_refused_hardening_publishes_nothing_and_leaves_no_residue(
+    tmp_path: Path,
+) -> None:
+    """A file that could not be protected must never become the published file.
+
+    Fail-closed hardening is the reason the hook exists: the real implementation
+    raises when a Windows access-control list does not read back restricted.
+    What that costs must be the publication, never the protection - so the prior
+    content survives and no readable temporary is left where the new one was.
+    """
+    target = tmp_path / "worker-ipc.cred"
+    target.write_text("previous-secret", encoding="utf-8")
+
+    def refuse(candidate: Path) -> None:
+        raise OSError(f"could not restrict {candidate}")
+
+    with pytest.raises(OSError):
+        atomic_write_text(target, "unprotectable-secret", mode=0o600, harden=refuse)
+
+    assert target.read_text(encoding="utf-8") == "previous-secret"
+    assert _temporaries(tmp_path) == []
+
+
+def test_the_permission_bearing_path_writes_its_bytes_untranslated(
+    tmp_path: Path,
+) -> None:
+    """Asking for permission bits must not also change the bytes on disk.
+
+    Windows opens a descriptor in text mode unless told otherwise, so this path
+    expanded every newline while the path without permission bits wrote them
+    through: one function with two byte-level contracts, diverging only on the
+    platform this service ships to.  A secret published this way is compared
+    byte for byte by whoever reads it back.
+    """
+    plain = tmp_path / "plain.json"
+    restricted = tmp_path / "restricted.json"
+
+    atomic_write_text(plain, "first\nsecond\n")
+    atomic_write_text(restricted, "first\nsecond\n", mode=0o600)
+
+    assert restricted.read_bytes() == b"first\nsecond\n"
+    assert restricted.read_bytes() == plain.read_bytes()
+
+
 def test_the_temporary_is_named_for_the_writing_process(tmp_path: Path) -> None:
     """Two publishers must not collide on the temporary file itself.
 

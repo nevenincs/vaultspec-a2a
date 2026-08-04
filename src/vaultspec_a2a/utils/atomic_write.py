@@ -28,12 +28,13 @@ that.  Measured, the cost was +27 modules and ~62ms; from ``utils``, which that
 provider leaf already loads in full, it is +1 module and unmeasurable.  A home
 nothing can reach is not a canonical home.
 
-ONE writer elsewhere still keeps its own copy, for a reason this cannot solve by
-moving: the desktop worker interprocess-communication mint has to apply an
-owner-restricting access-control list to the temporary file *between* the fsync
-and the rename, and this deliberately offers no seam there.  That is the
-documented exception, not drift - and any second copy without a reason of its own
-belongs here instead.
+The desktop worker interprocess-communication mint publishes here too.  It kept
+its own copy of this loop for as long as it had nowhere to say the one thing it
+needs: its owner-restriction has to land on the temporary file *between* the
+fsync and the rename, and on Windows that restriction is a discretionary
+access-control list rather than permission bits, which no integer parameter can
+carry.  The hardening callable is that seam.  There is now no second copy of this
+pattern, and a new one would belong here instead.
 """
 
 from __future__ import annotations
@@ -44,6 +45,7 @@ import time
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
     from pathlib import Path
 
 __all__ = ["REPLACE_RETRY_SECONDS", "atomic_write_text"]
@@ -56,6 +58,25 @@ briefly deny it.  Retrying over a short window turns a spurious failure into a
 successful publication; the operation stays all-or-nothing either way.
 """
 
+_RESTRICTED_WRITE_FLAGS = (
+    os.O_WRONLY
+    | os.O_CREAT
+    | os.O_TRUNC
+    | getattr(os, "O_NOFOLLOW", 0)
+    | getattr(os, "O_BINARY", 0)
+)
+"""Descriptor flags for the write path that carries explicit permission bits.
+
+``O_NOFOLLOW`` refuses a temporary that is already a symlink, so nothing planted
+at the predictable temporary name can redirect a write the caller asked to keep
+private; Windows has no such flag, so a caller that must also refuse a link at
+the *target* checks for one itself.  ``O_BINARY`` is not redundant despite the
+write going
+through a descriptor: Windows opens a descriptor in text mode by default and
+would expand every newline, so without it this path would not write the bytes it
+was given.
+"""
+
 
 def atomic_write_text(
     path: Path,
@@ -64,6 +85,7 @@ def atomic_write_text(
     encoding: str = "utf-8",
     retry_seconds: float = REPLACE_RETRY_SECONDS,
     mode: int | None = None,
+    harden: Callable[[Path], None] | None = None,
     newline: str | None = "",
 ) -> None:
     """Publish *text* at *path* atomically, leaving no temporary file behind.
@@ -86,7 +108,17 @@ def atomic_write_text(
                 this for a credential-bearing record so the bytes are never briefly
                 world-readable between creation and rename; omitting it takes the
                 process umask.  Ignored on Windows, where access is governed by the
-                parent directory's access-control list rather than mode bits.
+                parent directory's access-control list rather than mode bits.  This
+                path opens the temporary refusing to follow a link and without
+                line-ending translation, so a planted symlink cannot redirect a
+                privileged write and the bytes land exactly as given.
+            harden: Applied to the temporary file once its bytes are durable and
+                before the rename, so the published file is already restricted at
+                the instant it becomes reachable under its real name.  It exists
+                because owner-restriction is not always an integer: on Windows it
+                is a discretionary access-control list, which *mode* cannot carry.
+                Raising from here fails the publication and removes the temporary,
+                so a file that could not be protected is never published.
             newline: Line-ending translation for the temporary file, as ``open``
                 takes it.  The default writes ``
     `` through untranslated, which is
@@ -108,12 +140,14 @@ def atomic_write_text(
                 handle.flush()
                 os.fsync(handle.fileno())
         else:
-            descriptor = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, mode)
+            descriptor = os.open(tmp, _RESTRICTED_WRITE_FLAGS, mode)
             try:
                 os.write(descriptor, text.encode(encoding))
                 os.fsync(descriptor)
             finally:
                 os.close(descriptor)
+        if harden is not None:
+            harden(tmp)
         _replace_with_retry(tmp, path, retry_seconds=retry_seconds)
     except BaseException:
         # Includes KeyboardInterrupt and SystemExit: an interrupted publication

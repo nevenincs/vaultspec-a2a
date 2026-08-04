@@ -5,7 +5,7 @@ tags:
 date: '2026-08-04'
 modified: '2026-08-04'
 body_schema: 'body-v1'
-body_hash: 'sha256:82a8683158a355f8094cbea9ad81721f7272bd062cd9671977fd10bb0f586575'
+body_hash: 'sha256:5ec0d684b3a2137d4c87d5664ef600cd9199d4f945d076dd0fe84f75f3a58df9'
 related: []
 ---
 
@@ -1073,6 +1073,53 @@ This also converges with the untyped-narrowing cluster recorded earlier - ten
 production declarations under four private names across four layers. That cluster
 named this same module as its natural home. The two are one home, approached from
 the test tier and the production tier independently.
+
+### correction-the-narrowing-ruling-would-have-dropped-validation | critical | the worst near-miss in this campaign
+
+The ruling recorded above - converge the test-tier narrowing onto the production
+closed-JSON contract and keep its error vocabulary - is WRONG and is reversed
+here. It would have caused real harm, and it was made from a fact verified by
+checking the wrong file for the wrong property.
+
+Three things are true and none of them were established before the ruling. The
+module cited as pinning the production vocabulary declares no local narrowing at
+all: it imports the production helpers, so its assertions target those, not a
+test-tier family. A different module - unchecked at the time - declares two local
+helpers and self-tests them with five assertions matching on the locator, so the
+ASSERTION vocabulary is the one with real coverage. And decisively the two are
+not the same operation: the production helper is an isinstance narrowing over an
+already-typed union with no validation, while the test-tier helpers run a
+recursive validator over an untyped decoded payload.
+
+So the ordered convergence would have replaced deep payload validation with a
+shallow cast across nine files. Test rigour would have dropped silently and no
+type checker would have objected. That is exactly the flattening this inventory
+exists to prevent, ordered by the person maintaining it, and caught only because
+the implementing lane re-derived from source instead of executing the
+instruction.
+
+The corrected shape: a canonical narrowing pair in the test-support package
+raising the assertion vocabulary and returning the precise recursive object type,
+which leaves the already-precise sites untouched and treats the looser ones as
+the drift - declared as a tightening rather than discovered as one. Two
+behavioural variants stay separate: one PARSES raw bytes rather than narrowing a
+decoded value, and one treats an absent value as an empty list. Neither becomes a
+flag on the shared function.
+
+The earlier DISTINCT flag on this pair was right, but the reason first given -
+"different subject" - was too weak to protect it. The durable reason is
+"different operations on different input types", and only that phrasing would
+have stopped the ruling this entry reverses.
+
+### graph-compiler-swept-and-clean | low | the discipline is already applied there
+
+Reported as a clean verdict rather than a manufactured move. The control-character
+stripper has one home and is imported by its consumers; the length caps are
+DERIVED from the wire models rather than restated, and the test imports the
+deriver rather than repeating the numbers. That area already applies the practice
+this campaign is installing elsewhere, which is worth recording both as coverage
+and as evidence the practice is achievable in this codebase rather than
+aspirational.
 
 ## Recommendations
 

@@ -758,6 +758,17 @@ async def _run_commit_locked(
         provider_eligibility=readiness.provider_eligibility,
     )
     if not execution.eligible:
+        # Same disclosure the prepare refusal carries: a commit 503 otherwise
+        # says only that something was ineligible, which cannot be told apart
+        # from a refusal about the reservation itself.
+        logger.warning(
+            "run commit refused as ineligible: reason=%s worker_reachable=%s "
+            "provider_eligibility=%s reservation=%s",
+            execution.reason,
+            worker_reachable,
+            readiness.provider_eligibility.value,
+            reservation_id,
+        )
         await _release_ineligible_reservation(broker, reservation_id, canonical_body)
         raise HTTPException(status_code=503, detail=execution.reason)
 

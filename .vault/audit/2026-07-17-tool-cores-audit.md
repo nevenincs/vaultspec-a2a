@@ -632,7 +632,7 @@ string, so the failing leg is invisible to the test. Surfacing the three facts
 on the 503 - or logging them at refusal - would turn this from an inference into
 a reading, and is worth doing regardless of this defect.
 
-### commit-refusal-order-contradicts-the-bogus-reservation-expectation | medium | open
+### commit-refusal-order-contradicts-the-bogus-reservation-expectation | medium | WITHDRAWN
 
 With the cold-start race closed, the three desktop admission failures moved to a
 single remaining subject: a commit naming a reservation that does not exist
@@ -663,3 +663,27 @@ and this session already shipped one change that contradicted an ADR after
 verifying it against behaviour instead of against the record. The decision is
 whether the ADR's "eligibility first" applies to requests that reference no
 capacity, and it belongs in an amendment rather than in a reordering.
+
+**WITHDRAWN (same session, before anyone acted on it).** The reasoning above is
+wrong and is kept only so the error is legible.
+
+It asserted that the 503 comes from the eligibility gate at
+`api/routes/gateway.py:760` firing ahead of the reservation check at `:767`, and
+concluded that an ADR-mandated ordering conflicted with the test. Instrumenting
+that gate disproved it: the commit refusal logs NOTHING there, so eligibility is
+satisfied and that branch is never taken. Worker state and provider eligibility
+both report ready once the cold-start race is closed.
+
+The 503 therefore originates earlier in `_run_commit_locked`, before
+`broker.commit` is ever reached. The remaining candidate is
+`_validate_and_freeze_selection_or_refuse` (`:740`), which answers 503 on
+`ProviderCatalogScopeCapacityError` - a bounded per-workspace scope count in the
+catalog service - and these suites start many gateways. That is a hypothesis,
+not a finding; it has not been observed.
+
+The lesson is the one this audit already records twice against other work:
+severity and cause were inferred from a plausible reading of nearby code rather
+than from an observation, and the reading was confident enough to be committed.
+The disclosure that disproved it took three lines. Instrument first, conclude
+second.
+

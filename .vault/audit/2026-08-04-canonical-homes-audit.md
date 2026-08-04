@@ -4840,3 +4840,77 @@ seven unrelated fields to a role limit.
 Held rather than dispatched: another lane currently owns that file for the
 identity-validation fix, and two writers in one schema module is the shape of an
 earlier incident in this project.
+
+### research-adr-topology-discloses-no-agents-at-all | critical | Its six worker nodes are added without metadata, and the extractor skips nodes that carry none - so that topology's whole roster is invisible on every agent surface
+
+Found while extracting the shared worker-node compilation, and it is a strictly
+larger version of the model-disclosure gap closed earlier today.
+
+Every other topology adds its worker nodes with `metadata=`. The six worker
+`add_node` calls in `_compile_research_adr` pass only `retry_policy` - verified
+by AST, no metadata keyword at any of them. `node_metadata_from_graph` skips a
+node whose metadata is empty ("Nodes carrying no metadata are skipped entirely",
+by design, so structural nodes do not pad the payload). A node that is skipped
+there never reaches the subscriber cache, so it never appears in
+`get_node_summaries`, `build_agent_descriptor`, or anything projecting from
+them.
+
+The consequence is not a missing field. It is that the document-authoring
+topology discloses NO AGENTS - not on `/team/status`, not in the `team_status`
+broadcast, not in the run snapshot. A run of that topology reports an empty
+roster while executing a full one.
+
+And the data is available at the call site and discarded, exactly as in the
+earlier disclosure defect: the resolver returns provider, capability, and the
+frozen catalog model, and this topology binds all three to underscore-prefixed
+throwaway names. Same shape, same file, one topology over - which is the
+argument for the extraction that surfaced it.
+
+### the-structural-guard-cannot-see-a-shared-sub-block | high | The worker-node duplication was real, was extracted, and the guard passes identically before and after
+
+Established empirically rather than argued: the guard was run against both
+revisions - pre-extraction source restored from HEAD, then the extraction
+restored, with a byte-exactness check on the restore - and it PASSES BOTH.
+
+The cause is structural. `_structural_groups` hashes whole FUNCTION bodies. This
+duplication was a sub-block repeated inside three otherwise-different functions,
+so there was never a matching pair of function shapes for it to find, at any
+floor.
+
+This is a third documented blind spot, alongside the two already recorded (it
+cannot see a clone that diverged; it flags binding shims). The pattern across
+all three is worth stating plainly: the guard proves the absence of one specific
+thing - whole-function copies above a size floor - and that is narrower than
+"this codebase has no duplication". Every consequential finding in this campaign
+so far has come from a method the guard cannot replace.
+
+### document-authoring-topology-asked-three-ways-in-one-module | medium | One function calls the canonical predicate and its two siblings inline the comparison; they agree only because the vocabulary currently has one member
+
+`team/team_config.py` imports `is_document_authoring_topology` from the
+authoring contract, where the vocabulary is a frozenset. `TeamConfig.is_document_authoring`
+calls it, and its docstring states the reason: the topologies are defined once
+in the contract. The two sibling functions that ask the same question -
+`authoring_capability` and `supported_capabilities` - inline
+`== TopologyType.RESEARCH_ADR` instead.
+
+Nothing is observably wrong today, because the frozenset has exactly one member,
+so membership and equality are indistinguishable. The exposure is purely on
+GROWTH: adding a second document-authoring topology to the frozenset - the
+obviously correct place to add one - updates the predicate caller and silently
+leaves the two inline sites answering "coding" and an empty capability list. Both
+feed the preset listing served to the dashboard, so a new document-authoring
+preset would advertise itself as a plain coding preset.
+
+This is the closed-vocabulary-grown-additively shape already recorded here for
+the terminal-status vocabulary. The fix is mechanical - the canonical predicate
+is already imported in the file and accepts the type these functions already
+hold.
+
+### two-guards-one-condition-two-error-types | low | The pipeline and pipeline-loop topologies raise different exceptions for the identical missing-worker condition
+
+`_compile_pipeline` raises `ValueError` where `_compile_pipeline_loop` raises
+`ConfigError` for the same guard - a topology-order entry naming a worker with
+no matching reference. Every comparable guard in this area raises `ConfigError`,
+so the `ValueError` is the outlier. Not touched during the extraction that found
+it, because guard typing is a separate question from where the shared block
+lives; recorded so it is decided rather than inherited.

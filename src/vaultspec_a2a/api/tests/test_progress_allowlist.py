@@ -17,50 +17,22 @@ a permitted-field assertion, so an empty or dropped frame cannot satisfy it.
 from __future__ import annotations
 
 import asyncio
-import contextlib
-import json
-from typing import TYPE_CHECKING
 
 import httpx
 import pytest
-import uvicorn
 
 from ...control.config import settings
 from ...streaming.aggregator import EventAggregator
 from ...streaming.sse_frames import MAX_PROGRESS_CONTENT_CHARS
+from ...testing.sse import read_frame
 from ...thread.enums import ThreadStatus
-from .conftest import make_app
-
-if TYPE_CHECKING:
-    from collections.abc import AsyncIterator
+from .conftest import _live_server, make_app
 
 _SERVICE_TOKEN = "discovery-service-token"
 _ARTIFACT_BODY = "SECRET-ARTIFACT-BODY-8f21c9"
 _DIFF_BODY = "SECRET-EDIT-DIFF-3a7be1"
 _METADATA_BODY = "SECRET-METADATA-VALUE-19dd73"
 _PLAN_BODY = "SECRET-PLAN-PROSE-64c1af"
-
-
-@contextlib.asynccontextmanager
-async def _live_server(app) -> AsyncIterator[str]:
-    """Serve *app* on an ephemeral loopback port and yield its base URL."""
-    config = uvicorn.Config(
-        app, host="127.0.0.1", port=0, log_level="warning", lifespan="on"
-    )
-    server = uvicorn.Server(config)
-    task = asyncio.create_task(server.serve())
-    try:
-        for _ in range(500):
-            if server.started and server.servers:
-                break
-            await asyncio.sleep(0.01)
-        assert server.started and server.servers, "uvicorn did not start"
-        port = server.servers[0].sockets[0].getsockname()[1]
-        yield f"http://127.0.0.1:{port}"
-    finally:
-        server.should_exit = True
-        with contextlib.suppress(asyncio.TimeoutError):
-            await asyncio.wait_for(task, timeout=5.0)
 
 
 def _secured(session_factory, checkpointer, aggregator: EventAggregator):
@@ -86,34 +58,6 @@ async def _await_subscriber(agg: EventAggregator) -> None:
             return
         await asyncio.sleep(0.01)
     raise AssertionError("stream subscriber never registered")
-
-
-async def _read_frame(
-    lines: AsyncIterator[str], *, wanted: str, timeout: float = 5.0
-) -> tuple[dict, str]:
-    """Read SSE frames until one whose ``type`` matches; return it and its raw text.
-
-    Heartbeat frames are skipped. The raw ``data:`` text is returned alongside the
-    parsed payload so a caller can assert against the encoded bytes, not only the
-    decoded structure.
-    """
-
-    async def _scan() -> tuple[dict, str]:
-        buffer: list[str] = []
-        async for raw in lines:
-            line = raw.rstrip("\r")
-            if line.startswith("data: "):
-                buffer.append(line.removeprefix("data: "))
-                continue
-            if line == "" and buffer:
-                raw_block = "".join(buffer)
-                payload = json.loads(raw_block)
-                buffer = []
-                if payload.get("type") == wanted:
-                    return payload, raw_block
-        raise AssertionError(f"stream ended before a {wanted!r} frame")
-
-    return await asyncio.wait_for(_scan(), timeout=timeout)
 
 
 @pytest.mark.asyncio(loop_scope="function")
@@ -151,7 +95,9 @@ async def test_authenticated_stream_excludes_artifact_body_keeps_identity(
             },
         )
 
-        frame, raw_block = await _read_frame(lines, wanted="artifact_update")
+        frame, raw_block = await read_frame(
+            lines, wanted="artifact_update", timeout=5.0
+        )
 
     # Forbidden body absent (parsed and in the encoded bytes)...
     assert "content" not in frame
@@ -203,7 +149,9 @@ async def test_authenticated_stream_excludes_edit_diff_keeps_tool_metadata(
             },
         )
 
-        frame, raw_block = await _read_frame(lines, wanted="tool_call_update")
+        frame, raw_block = await read_frame(
+            lines, wanted="tool_call_update", timeout=5.0
+        )
 
     assert "content" not in frame
     assert _DIFF_BODY not in raw_block
@@ -246,7 +194,7 @@ async def test_authenticated_stream_bounds_the_token_delta(
             },
         )
 
-        frame, _raw = await _read_frame(lines, wanted="message_chunk")
+        frame, _raw = await read_frame(lines, wanted="message_chunk", timeout=5.0)
 
     # The permitted token stream is present but bounded to the per-frame cap.
     assert isinstance(frame["content"], str)
@@ -296,7 +244,9 @@ async def test_authenticated_stream_keeps_the_consumer_read_lifecycle_fields(
                 "metadata": {"leaked": _METADATA_BODY},
             },
         )
-        status_frame, status_raw = await _read_frame(lines, wanted="agent_status")
+        status_frame, status_raw = await read_frame(
+            lines, wanted="agent_status", timeout=5.0
+        )
 
         agg.relay_payload(
             run_id,
@@ -315,7 +265,9 @@ async def test_authenticated_stream_keeps_the_consumer_read_lifecycle_fields(
                 ],
             },
         )
-        team_frame, team_raw = await _read_frame(lines, wanted="team_status")
+        team_frame, team_raw = await read_frame(
+            lines, wanted="team_status", timeout=5.0
+        )
 
         agg.relay_payload(
             run_id,
@@ -328,7 +280,7 @@ async def test_authenticated_stream_keeps_the_consumer_read_lifecycle_fields(
                 "recoverable": True,
             },
         )
-        error_frame, _error_raw = await _read_frame(lines, wanted="error")
+        error_frame, _error_raw = await read_frame(lines, wanted="error", timeout=5.0)
 
     assert status_frame["state"] == "working"
     assert status_frame["node_name"] == "synthesis"
@@ -381,7 +333,9 @@ async def test_authenticated_stream_degrades_an_uncatalogued_frame(
             },
         )
 
-        frame, raw_block = await _read_frame(lines, wanted="some_future_event")
+        frame, raw_block = await read_frame(
+            lines, wanted="some_future_event", timeout=5.0
+        )
 
     assert _ARTIFACT_BODY not in raw_block
     assert _METADATA_BODY not in raw_block
@@ -428,7 +382,7 @@ async def test_authenticated_stream_drops_plan_prose_and_keeps_classification(
             },
         )
 
-        frame, raw_block = await _read_frame(lines, wanted="plan_update")
+        frame, raw_block = await read_frame(lines, wanted="plan_update", timeout=5.0)
 
     assert _PLAN_BODY not in raw_block
     assert frame["entries"] == [{"status": "in_progress", "priority": "high"}]

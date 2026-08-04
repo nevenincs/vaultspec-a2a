@@ -44,18 +44,17 @@ this deterministic certification must never do.
 from __future__ import annotations
 
 import os
-import socket
 import time
 import tomllib
 import uuid
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
-from urllib.parse import urlparse
 
 import pytest
 
 from ..acceptance import certified_gateway
 from ..testing.catalog_selection import NoSelectableLaneError, in_process_selection
+from ._net import tape_server_listening
 
 if TYPE_CHECKING:
     from ..acceptance import CertifiedGateway
@@ -92,15 +91,6 @@ def _preset_roles() -> list[str]:
 
 def _tape_server_base() -> str:
     return (os.environ.get(_TAPE_SERVER_ENV) or "").strip() or _TAPE_SERVER_DEFAULT
-
-
-def _tape_server_listening(base: str) -> bool:
-    parsed = urlparse(base)
-    host = parsed.hostname or "127.0.0.1"
-    port = parsed.port or (443 if parsed.scheme == "https" else 80)
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
-        probe.settimeout(2.0)
-        return probe.connect_ex((host, port)) == 0
 
 
 def _served_in_process_selection(
@@ -153,7 +143,7 @@ def test_advertised_assignment_is_the_assignment_the_worker_executes(
     roles = _preset_roles()
 
     tape_server = _tape_server_base()
-    if not _tape_server_listening(tape_server):
+    if not tape_server_listening(tape_server):
         pytest.skip(
             f"the scripted model backend is unavailable at {tape_server} "
             f"(set {_TAPE_SERVER_ENV} to an existing one, or supply it: "

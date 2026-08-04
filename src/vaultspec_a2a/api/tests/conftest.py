@@ -16,13 +16,14 @@ checkpointer implementation, not a ``MemorySaver`` stub.
 
 import asyncio
 from collections.abc import AsyncGenerator, AsyncIterator
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from pathlib import Path
 from typing import Any, cast
 
 import httpx
 import pytest
 import pytest_asyncio
+import uvicorn
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from httpx import ASGITransport
@@ -424,3 +425,30 @@ async def async_catalog_run_fields(
         "selection": dict(cached["selection"]),
         "metadata": dict(cached["metadata"]),
     }
+
+
+@asynccontextmanager
+async def _live_server(app: FastAPI) -> AsyncIterator[str]:
+    """Serve *app* on an ephemeral loopback port and yield its base URL.
+
+    A real uvicorn server on a real TCP socket, not ``ASGITransport``: an SSE
+    consumer must read frames while the producer is still emitting, and the
+    in-memory transport buffers a whole response before returning one.
+    """
+    config = uvicorn.Config(
+        app, host="127.0.0.1", port=0, log_level="warning", lifespan="on"
+    )
+    server = uvicorn.Server(config)
+    task = asyncio.create_task(server.serve())
+    try:
+        for _ in range(500):
+            if server.started and server.servers:
+                break
+            await asyncio.sleep(0.01)
+        assert server.started and server.servers, "uvicorn did not start"
+        port = server.servers[0].sockets[0].getsockname()[1]
+        yield f"http://127.0.0.1:{port}"
+    finally:
+        server.should_exit = True
+        with suppress(asyncio.TimeoutError):
+            await asyncio.wait_for(task, timeout=5.0)

@@ -16,14 +16,12 @@ text exists on exactly one of the two surfaces, and it is not the droppable one.
 from __future__ import annotations
 
 import asyncio
-import contextlib
 import itertools
 import json
 from typing import TYPE_CHECKING, Any, cast
 
 import httpx
 import pytest
-import uvicorn
 from langchain_core.messages import HumanMessage
 from langgraph.graph import END, START, StateGraph
 
@@ -32,17 +30,16 @@ from ...graph.nodes.clarification import (
     create_clarification_request_node,
 )
 from ...streaming.transformer import emit_interrupt_events
+from ...testing.sse import read_frame
 from ...thread.clarification import (
     ClarificationKind,
     ClarificationQuestion,
     ClarificationRequest,
 )
 from ...thread.state import TeamState
-from .conftest import async_catalog_run_fields, make_app
+from .conftest import _live_server, async_catalog_run_fields, make_app
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator
-
     from ...streaming.types import StreamableGraph
 
 _PRESET = "mock-success-single"
@@ -50,50 +47,6 @@ _RUN_SEQ = itertools.count(1)
 _PROMPT = "Which side should the monitor panel dock to?"
 _OPTIONS = ["dock-right", "dock-left"]
 _REQUEST_ID = "clarify-sse"
-
-
-@contextlib.asynccontextmanager
-async def _live_server(app) -> AsyncIterator[str]:
-    """Serve *app* on an ephemeral port and yield its base URL."""
-    config = uvicorn.Config(
-        app, host="127.0.0.1", port=0, log_level="warning", lifespan="on"
-    )
-    server = uvicorn.Server(config)
-    task = asyncio.create_task(server.serve())
-    try:
-        for _ in range(500):
-            if server.started and server.servers:
-                break
-            await asyncio.sleep(0.01)
-        assert server.started and server.servers, "uvicorn did not start"
-        port = server.servers[0].sockets[0].getsockname()[1]
-        yield f"http://127.0.0.1:{port}"
-    finally:
-        server.should_exit = True
-        with contextlib.suppress(asyncio.TimeoutError):
-            await asyncio.wait_for(task, timeout=5.0)
-
-
-async def _read_event(
-    lines: AsyncIterator[str], *, wanted: str, timeout: float = 10.0
-) -> dict:
-    """Read SSE ``data:`` frames until one whose ``type`` matches *wanted*."""
-
-    async def _scan() -> dict:
-        buffer: list[str] = []
-        async for raw in lines:
-            line = raw.rstrip("\r")
-            if line.startswith("data: "):
-                buffer.append(line.removeprefix("data: "))
-                continue
-            if line == "" and buffer:
-                payload = json.loads("".join(buffer))
-                buffer = []
-                if payload.get("type") == wanted:
-                    return payload
-        raise AssertionError(f"stream ended before a {wanted!r} frame")
-
-    return await asyncio.wait_for(_scan(), timeout=timeout)
 
 
 async def _park_real_run(aggregator, checkpointer, *, thread_id: str) -> None:
@@ -200,7 +153,9 @@ async def test_the_nudge_arrives_on_the_sse_stream_carrying_no_questions(
             await asyncio.sleep(0.2)
             await _park_real_run(aggregator, cp, thread_id=run_id)
 
-            frame = await _read_event(lines, wanted="clarification_pending")
+            frame, _raw = await read_frame(
+                lines, wanted="clarification_pending", timeout=10.0
+            )
 
     assert frame["thread_id"] == run_id
     assert frame["request_id"] == _REQUEST_ID
@@ -245,7 +200,9 @@ async def test_the_questions_live_on_run_status_not_on_the_relay(
             lines = resp.aiter_lines()
             await asyncio.sleep(0.2)
             await _park_real_run(aggregator, cp, thread_id=run_id)
-            frame = await _read_event(lines, wanted="clarification_pending")
+            frame, _raw = await read_frame(
+                lines, wanted="clarification_pending", timeout=10.0
+            )
 
         # A client that never saw the frame recovers everything from here.
         status = await client.get(f"/v1/runs/{run_id}")

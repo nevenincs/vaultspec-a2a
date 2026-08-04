@@ -13,6 +13,7 @@ from ..testing.payloads import (
     required_bool,
     required_text,
 )
+from ._state import select_option_id, thread_state, wait_for_state
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -21,11 +22,6 @@ if TYPE_CHECKING:
 
     from ..providers._json_contract import JsonObject
     from .harness import ServiceStack
-
-
-def _thread_state(stack: ServiceStack, thread_id: str) -> JsonObject:
-    """Read the real service state before inspecting its public fields."""
-    return json_object(stack.get_thread_state(thread_id), at="thread state")
 
 
 def _is_terminal_event(event: JsonObject) -> bool:
@@ -45,27 +41,6 @@ def _is_replayed_terminal_event(event: JsonObject) -> bool:
 def _is_completed_state(state: JsonObject) -> bool:
     """Recognise the final state after the real permission resume."""
     return state.get("status") == "completed"
-
-
-def _select_option_id(
-    request: JsonObject,
-    *,
-    label: str,
-) -> str:
-    target = label.casefold()
-    for option in json_object_list(request.get("options"), at="permission options"):
-        option_id = option.get("option_id")
-        option_name = option.get("name")
-        option_label = option.get("label")
-        for candidate in (option_id, option_name, option_label):
-            if (
-                isinstance(candidate, str)
-                and candidate.casefold() == target
-                and isinstance(option_id, str)
-                and option_id
-            ):
-                return option_id
-    raise AssertionError(f"permission option {label!r} not found: {request}")
 
 
 def _read_sse_frames(
@@ -109,24 +84,6 @@ def _read_sse_frames(
     raise AssertionError(f"timed out waiting for SSE event; events={events!r}")
 
 
-def _wait_for_state(
-    stack: ServiceStack,
-    thread_id: str,
-    predicate: Callable[[JsonObject], bool],
-    *,
-    timeout: float = 120.0,
-) -> JsonObject:
-    deadline = time.monotonic() + timeout
-    last_state: JsonObject | None = None
-    while time.monotonic() < deadline:
-        state = _thread_state(stack, thread_id)
-        last_state = state
-        if predicate(state):
-            return state
-        time.sleep(1.0)
-    raise AssertionError(f"timed out waiting for thread {thread_id}: {last_state}")
-
-
 def _wait_for_pending_permission(
     stack: ServiceStack,
     thread_id: str,
@@ -143,7 +100,7 @@ def _wait_for_pending_permission(
             and state.get("snapshot_complete") is True
         )
 
-    return _wait_for_state(stack, thread_id, _is_resumable_permission, timeout=timeout)
+    return wait_for_state(stack, thread_id, _is_resumable_permission, timeout=timeout)
 
 
 def _trigger_after(
@@ -188,7 +145,7 @@ def test_sse_stream_and_followup_message(service_stack: ServiceStack) -> None:
                 service_stack.respond_permission(
                     required_text(request, "request_id", at="pending permission"),
                     thread_id=thread_id,
-                    option_id=_select_option_id(request, label="approve"),
+                    option_id=select_option_id(request, label="approve"),
                 ),
                 at="permission response",
             )
@@ -221,7 +178,7 @@ def test_sse_stream_and_followup_message(service_stack: ServiceStack) -> None:
     assert any(event.get("status") == "completed" for event in initial_events)
     service_stack.record(f"sse-initial:{thread_id}", initial_events)
 
-    completed = _wait_for_state(
+    completed = wait_for_state(
         service_stack,
         thread_id,
         _is_completed_state,
@@ -256,7 +213,7 @@ def test_sse_stream_and_followup_message(service_stack: ServiceStack) -> None:
         is True
     )
 
-    final_state = _thread_state(service_stack, thread_id)
+    final_state = thread_state(service_stack, thread_id)
     user_messages = [
         message
         for message in json_object_list(

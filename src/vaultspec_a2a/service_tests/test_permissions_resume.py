@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import time
 from typing import TYPE_CHECKING
 
 from ..testing.payloads import (
@@ -11,17 +10,11 @@ from ..testing.payloads import (
     required_bool,
     required_text,
 )
+from ._state import select_option_id, wait_for_state
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
-
     from ..providers._json_contract import JsonObject
     from .harness import ServiceStack
-
-
-def _thread_state(stack: ServiceStack, thread_id: str) -> JsonObject:
-    """Read the real durable thread state before inspecting it."""
-    return json_object(stack.get_thread_state(thread_id), at="thread state")
 
 
 def _pending_permissions(state: JsonObject) -> list[JsonObject]:
@@ -70,45 +63,6 @@ def _is_completed(state: JsonObject) -> bool:
     return state.get("status") == "completed"
 
 
-def _select_option_id(
-    request: JsonObject,
-    *,
-    label: str,
-) -> str:
-    target = label.casefold()
-    for option in json_object_list(request.get("options"), at="permission options"):
-        option_id = option.get("option_id")
-        option_name = option.get("name")
-        option_label = option.get("label")
-        for candidate in (option_id, option_name, option_label):
-            if (
-                isinstance(candidate, str)
-                and candidate.casefold() == target
-                and isinstance(option_id, str)
-                and option_id
-            ):
-                return option_id
-    raise AssertionError(f"permission option {label!r} not found: {request}")
-
-
-def _wait_for_state(
-    stack: ServiceStack,
-    thread_id: str,
-    predicate: Callable[[JsonObject], bool],
-    *,
-    timeout: float = 120.0,
-) -> JsonObject:
-    deadline = time.monotonic() + timeout
-    last_state: JsonObject | None = None
-    while time.monotonic() < deadline:
-        state = _thread_state(stack, thread_id)
-        last_state = state
-        if predicate(state):
-            return state
-        time.sleep(1.0)
-    raise AssertionError(f"timed out waiting for thread {thread_id}: {last_state}")
-
-
 def _wait_for_pending_permission(
     stack: ServiceStack,
     thread_id: str,
@@ -132,7 +86,7 @@ def _wait_for_pending_permission(
             and state.get("snapshot_complete") is True
         )
 
-    return _wait_for_state(stack, thread_id, _matches, timeout=timeout)
+    return wait_for_state(stack, thread_id, _matches, timeout=timeout)
 
 
 def _wait_for_pending_permission_matching(
@@ -159,7 +113,7 @@ def _wait_for_pending_permission_matching(
                 return True
         return False
 
-    return _wait_for_state(stack, thread_id, _matches, timeout=timeout)
+    return wait_for_state(stack, thread_id, _matches, timeout=timeout)
 
 
 def test_permission_request_can_be_resumed_via_public_api(
@@ -183,7 +137,7 @@ def test_permission_request_can_be_resumed_via_public_api(
         service_stack.respond_permission(
             required_text(request, "request_id", at="pending permission"),
             thread_id=thread_id,
-            option_id=_select_option_id(request, label="approve"),
+            option_id=select_option_id(request, label="approve"),
         ),
         at="permission response",
     )
@@ -194,7 +148,7 @@ def test_permission_request_can_be_resumed_via_public_api(
     )
     assert required_bool(response, "applied", at="permission response") is False
 
-    completed = _wait_for_state(
+    completed = wait_for_state(
         service_stack,
         thread_id,
         _is_completed,
@@ -274,7 +228,7 @@ def test_stale_second_permission_response_is_rejected_after_resume(
     paused = _wait_for_pending_permission(service_stack, thread_id)
     request = _first_pending_permission(paused)
 
-    approved_option_id = _select_option_id(request, label="approve")
+    approved_option_id = select_option_id(request, label="approve")
     accepted = json_object(
         service_stack.respond_permission(
             required_text(request, "request_id", at="pending permission"),
@@ -302,7 +256,7 @@ def test_stale_second_permission_response_is_rejected_after_resume(
         == "Permission request is no longer pending"
     )
 
-    completed = _wait_for_state(
+    completed = wait_for_state(
         service_stack,
         thread_id,
         _is_completed,
@@ -360,7 +314,7 @@ def test_invalid_permission_option_keeps_thread_paused_and_recoverable(
         service_stack.respond_permission(
             required_text(request, "request_id", at="pending permission"),
             thread_id=thread_id,
-            option_id=_select_option_id(request, label="approve"),
+            option_id=select_option_id(request, label="approve"),
         ),
         at="resumed permission response",
     )
@@ -370,7 +324,7 @@ def test_invalid_permission_option_keeps_thread_paused_and_recoverable(
         == "accepted_not_applied"
     )
 
-    completed = _wait_for_state(
+    completed = wait_for_state(
         service_stack,
         thread_id,
         _is_completed,
@@ -406,7 +360,7 @@ def test_permission_denial_completes_with_denied_outcome(
         service_stack.respond_permission(
             required_text(request, "request_id", at="pending permission"),
             thread_id=thread_id,
-            option_id=_select_option_id(request, label="deny"),
+            option_id=select_option_id(request, label="deny"),
         ),
         at="denied permission response",
     )
@@ -416,7 +370,7 @@ def test_permission_denial_completes_with_denied_outcome(
         == "accepted_not_applied"
     )
 
-    completed = _wait_for_state(
+    completed = wait_for_state(
         service_stack,
         thread_id,
         _is_completed,
@@ -479,7 +433,7 @@ def test_supervisor_plan_approval_pause_can_resume_through_real_stack(
         service_stack.respond_permission(
             required_text(plan_request, "request_id", at="plan permission"),
             thread_id=thread_id,
-            option_id=_select_option_id(plan_request, label="approve"),
+            option_id=select_option_id(plan_request, label="approve"),
         ),
         at="plan approval response",
     )
@@ -515,7 +469,7 @@ def test_supervisor_plan_approval_pause_can_resume_through_real_stack(
         service_stack.respond_permission(
             required_text(worker_request, "request_id", at="worker permission"),
             thread_id=thread_id,
-            option_id=_select_option_id(worker_request, label="approve"),
+            option_id=select_option_id(worker_request, label="approve"),
         ),
         at="worker approval response",
     )
@@ -528,7 +482,7 @@ def test_supervisor_plan_approval_pause_can_resume_through_real_stack(
         == "accepted_not_applied"
     )
 
-    completed = _wait_for_state(
+    completed = wait_for_state(
         service_stack,
         thread_id,
         _is_completed,
@@ -585,7 +539,7 @@ def test_supervisor_plan_rejection_requires_revision_before_reapproval(
         service_stack.respond_permission(
             required_text(first_request, "request_id", at="first plan permission"),
             thread_id=thread_id,
-            option_id=_select_option_id(first_request, label="reject"),
+            option_id=select_option_id(first_request, label="reject"),
         ),
         at="plan rejection response",
     )

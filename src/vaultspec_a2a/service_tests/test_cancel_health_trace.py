@@ -13,10 +13,9 @@ from ..testing.payloads import (
     required_bool,
     required_text,
 )
+from ._state import wait_for_state
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
-
     from ..providers._json_contract import JsonObject
     from .harness import ServiceStack
 
@@ -30,11 +29,6 @@ def _text_list(value: object, *, at: str) -> list[str]:
         return _TEXT_LIST.validate_python(value, strict=True)
     except ValidationError as exc:
         raise TypeError(f"expected a text list at {at}: {exc}") from exc
-
-
-def _thread_state(stack: ServiceStack, thread_id: str) -> JsonObject:
-    """Read real durable thread state before inspecting it."""
-    return json_object(stack.get_thread_state(thread_id), at="thread state")
 
 
 def _is_active(state: JsonObject) -> bool:
@@ -55,24 +49,6 @@ def _is_completed(state: JsonObject) -> bool:
     return state.get("status") == "completed"
 
 
-def _wait_for_state(
-    stack: ServiceStack,
-    thread_id: str,
-    predicate: Callable[[JsonObject], bool],
-    *,
-    timeout: float = 120.0,
-) -> JsonObject:
-    deadline = time.monotonic() + timeout
-    last_state: JsonObject | None = None
-    while time.monotonic() < deadline:
-        state = _thread_state(stack, thread_id)
-        last_state = state
-        if predicate(state):
-            return state
-        time.sleep(1.0)
-    raise AssertionError(f"timed out waiting for thread {thread_id}: {last_state}")
-
-
 def test_cancel_transitions_to_terminal_cancelled(service_stack: ServiceStack) -> None:
     """A running thread can be cancelled through the public REST API."""
     created = service_stack.create_thread(
@@ -84,7 +60,7 @@ def test_cancel_transitions_to_terminal_cancelled(service_stack: ServiceStack) -
         json_object(created, at="created thread"), "run_id", at="created thread"
     )
 
-    active = _wait_for_state(
+    active = wait_for_state(
         service_stack,
         thread_id,
         _is_active,
@@ -98,7 +74,7 @@ def test_cancel_transitions_to_terminal_cancelled(service_stack: ServiceStack) -
     assert required_bool(cancelling, "cancelled", at="cancel response") is True
     assert required_text(cancelling, "status", at="cancel response") == "cancelling"
 
-    cancelled = _wait_for_state(
+    cancelled = wait_for_state(
         service_stack,
         thread_id,
         _is_cancelled,
@@ -137,7 +113,7 @@ def test_health_and_trace_surface_are_observable(
     thread_id = required_text(
         json_object(created, at="created thread"), "run_id", at="created thread"
     )
-    traced_thread = _wait_for_state(
+    traced_thread = wait_for_state(
         service_stack,
         thread_id,
         _is_completed,

@@ -28,8 +28,8 @@ from typing import TYPE_CHECKING
 import httpx
 import pytest
 
+from ...testing.sse import read_frame
 from ...thread.enums import TERMINAL_STATUS_VALUES
-from ._sse import read_frame
 from .conftest import wait_for_terminal
 
 if TYPE_CHECKING:
@@ -71,7 +71,7 @@ async def test_terminal_replay_is_idempotent_across_reconnects_and_reconciles(
         ):
             assert response.status_code == 200, response
             frame, raw = await read_frame(
-                response.aiter_lines(), wanted="thread_terminal"
+                response.aiter_lines(), wanted="thread_terminal", timeout=30.0
             )
         _assert_positive_frame(frame, raw)
         assert frame["status"] in TERMINAL_STATUS_VALUES

@@ -31,13 +31,13 @@ from typing import TYPE_CHECKING
 import httpx
 import pytest
 
+from ...testing.sse import read_frame
 from ...thread.enums import (
     TERMINAL_STATUS_VALUES,
     TERMINAL_STATUSES,
     ThreadStatus,
 )
 from .. import DEFAULT_REQUIRED_ROLE, DEFAULT_TEAM_PRESET
-from ._sse import read_frame
 from .conftest import wait_for_terminal
 
 if TYPE_CHECKING:
@@ -204,7 +204,9 @@ async def _open_terminal_frame(
     ):
         assert response.status_code == 200, response
         assert response.headers["content-type"].startswith("text/event-stream")
-        return await read_frame(response.aiter_lines(), wanted="thread_terminal")
+        return await read_frame(
+            response.aiter_lines(), wanted="thread_terminal", timeout=30.0
+        )
 
 
 @pytest.mark.asyncio(loop_scope="function")

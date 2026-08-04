@@ -51,18 +51,17 @@ from __future__ import annotations
 import json
 import os
 import re
-import socket
 import time
 import uuid
 from pathlib import Path
 from typing import TYPE_CHECKING
-from urllib.parse import urlparse
 
 import pytest
 import yaml
 
 from ..acceptance import DEFAULT_REQUIRED_ROLE, DEFAULT_TEAM_PRESET, certified_gateway
 from ..testing.payloads import json_object, json_object_list
+from ._net import tape_server_listening
 
 if TYPE_CHECKING:
     from ..acceptance import CertifiedGateway
@@ -146,16 +145,6 @@ def _tape_server_base() -> str:
     return (os.environ.get(_TAPE_SERVER_ENV) or "").strip() or _TAPE_SERVER_DEFAULT
 
 
-def _tape_server_listening(base: str) -> bool:
-    """Whether something is actually accepting connections at *base*."""
-    parsed = urlparse(base)
-    host = parsed.hostname or "127.0.0.1"
-    port = parsed.port or (443 if parsed.scheme == "https" else 80)
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
-        probe.settimeout(2.0)
-        return probe.connect_ex((host, port)) == 0
-
-
 def _await_terminal(
     gateway: CertifiedGateway, run_id: str, *, budget: float
 ) -> JsonObject:
@@ -189,7 +178,7 @@ def test_real_worker_run_reaches_terminal_state_with_scripted_content(
     expected_text = _scripted_final_text()
 
     tape_server = _tape_server_base()
-    if not _tape_server_listening(tape_server):
+    if not tape_server_listening(tape_server):
         pytest.skip(
             f"the scripted model backend is unavailable at {tape_server} "
             f"(set {_TAPE_SERVER_ENV} to an existing one, or supply it: "

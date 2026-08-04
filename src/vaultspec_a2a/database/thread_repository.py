@@ -20,6 +20,7 @@ if TYPE_CHECKING:
     from sqlalchemy.sql import Select
     from sqlalchemy.sql.elements import ColumnElement
 
+from ..thread.constants import MAX_FEATURE_TAG_LENGTH, MAX_WORKSPACE_ROOT_LENGTH
 from ..thread.enums import (
     ACTIVE_STATUSES,
     NON_ACTIVE_STATUSES,
@@ -39,12 +40,7 @@ from ._helpers import (
     _UnsetType,
     save_model,
 )
-from .models import (
-    MAX_WORKSPACE_ROOT_LENGTH,
-    ThreadExecutionStateModel,
-    ThreadModel,
-    _utcnow,
-)
+from .models import ThreadExecutionStateModel, ThreadModel, _utcnow
 
 __all__ = [
     "ActiveThreadProjection",
@@ -73,9 +69,6 @@ class ActiveThreadProjection:
     status: str
     feature_tag: str | None
     created_at: datetime
-
-
-_MAX_DISCOVERY_FEATURE_TAG_LENGTH = 128
 
 
 def _path_safe_run_id_clause() -> ColumnElement[bool]:
@@ -119,10 +112,7 @@ def _discovery_selectors(metadata: str | None) -> tuple[str | None, str | None]:
         workspace = None
     else:
         workspace = normalize_workspace_identity(workspace)
-    if (
-        not isinstance(feature, str)
-        or not 1 <= len(feature) <= _MAX_DISCOVERY_FEATURE_TAG_LENGTH
-    ):
+    if not isinstance(feature, str) or not 1 <= len(feature) <= MAX_FEATURE_TAG_LENGTH:
         feature = None
     return workspace, feature
 
@@ -211,8 +201,16 @@ async def list_threads(
     opts in with ``include_deleting`` for a cleanup or administrative view. The
     filter runs in the query so the total and pagination stay consistent with
     the page.
+
+    Also excludes legacy invalid identifiers, the same predicate
+    ``list_active_thread_page`` already applies before its ``LIMIT``: this is the
+    ``state=all`` history reading behind ``RunSummaryRecord``, which the gateway
+    schema types as ``PathSafeRunId``. Unlike discovery's capped page, this
+    listing has no size ceiling protecting it - one non-conforming row reaching
+    response serialization fails the whole page for every caller, not just the
+    one row - so the exclusion is unconditional rather than opt-in.
     """
-    filters = []
+    filters = [_path_safe_run_id_clause()]
     if status is not None:
         filters.append(ThreadModel.status == status.value)
     if not include_deleting:
@@ -281,8 +279,11 @@ async def list_active_thread_page(
             f"{MAX_WORKSPACE_ROOT_LENGTH} characters"
         )
         raise ValueError(msg)
-    if feature_tag is not None and not 1 <= len(feature_tag) <= 128:
-        msg = "active-thread feature selector must be between 1 and 128 characters"
+    if feature_tag is not None and not 1 <= len(feature_tag) <= MAX_FEATURE_TAG_LENGTH:
+        msg = (
+            "active-thread feature selector must be between 1 and "
+            f"{MAX_FEATURE_TAG_LENGTH} characters"
+        )
         raise ValueError(msg)
     if (after_created_at is None) != (after_id is None):
         msg = "active-thread keyset cursor requires both created_at and id"

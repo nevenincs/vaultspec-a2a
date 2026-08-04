@@ -25,7 +25,7 @@ from datetime import datetime
 from enum import StrEnum
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from ...context.metadata import ThreadMetadata
 from ...thread.actor_tokens import ActorTokenBundle
@@ -286,14 +286,6 @@ class RunStartRequest(BaseModel):
                 raise ValueError("release must not carry actor tokens")
         return self
 
-    @field_validator("run_id")
-    @classmethod
-    def _run_id_must_be_path_safe(cls, value: str) -> str:
-        """Keep client identities addressable by every per-run gateway route."""
-        if _PATH_SAFE_RUN_ID.fullmatch(value) is None:
-            raise ValueError("run_id must be a path-safe token")
-        return value
-
 
 class FrozenNativeControlSummary(BaseModel):
     """One exact provider-native value frozen for historical disclosure."""
@@ -353,7 +345,7 @@ class RunStartResponse(BaseModel):
     """Acknowledge a started run, with its initial semantic status."""
 
     api_version: Literal["v1"] = _API_VERSION
-    run_id: str
+    run_id: PathSafeRunId
     status: str
     nickname: str | None = None
     # Initial product-safe semantic status; the full phase projection is served
@@ -386,7 +378,7 @@ class RunPrepareResponse(BaseModel):
 
     api_version: Literal["v1"] = _API_VERSION
     stage: Literal["prepared"] = "prepared"
-    reservation_id: str
+    reservation_id: ReservationId
     lease_id: LeaseId
     # The roles commit's actor-token bundle must cover, one per required role.
     required_roles: list[str] = Field(default_factory=list, max_length=64)
@@ -410,9 +402,9 @@ class RunCommitResponse(BaseModel):
 
     api_version: Literal["v1"] = _API_VERSION
     stage: Literal["committed"] = "committed"
-    run_id: str
+    run_id: PathSafeRunId
     status: str
-    lease_id: str
+    lease_id: LeaseId
     semantic_status: str = "starting"
     nickname: str | None = None
     # As on RunStartResponse: the freeze is the one start-surface disclosure;
@@ -432,7 +424,7 @@ class RunReleaseResponse(BaseModel):
 class ActiveRunRecord(BaseModel):
     """Minimal durable run identity used to recover a viewing binding."""
 
-    run_id: str = Field(min_length=1, max_length=128)
+    run_id: PathSafeRunId
     status: ThreadStatus
     feature_tag: str | None = Field(default=None, max_length=128)
 
@@ -471,7 +463,7 @@ class RunSummaryRecord(BaseModel):
     invented that the projection cannot fill.
     """
 
-    run_id: str = Field(min_length=1, max_length=128)
+    run_id: PathSafeRunId
     status: ThreadStatus
     feature_tag: str | None = Field(default=None, max_length=128)
     title: str | None = Field(default=None, max_length=200)
@@ -542,7 +534,7 @@ class RunStatusResponse(BaseModel):
     """
 
     api_version: Literal["v1"] = _API_VERSION
-    run_id: str
+    run_id: PathSafeRunId
     status: ThreadStatus
     # Product-safe semantic authoring phase projected from topology position and
     # gate state, so the Rust backend never interprets LangGraph node names.
@@ -620,7 +612,7 @@ class RunCancelResponse(BaseModel):
     """Acknowledge an (idempotent) run-cancel request."""
 
     api_version: Literal["v1"] = _API_VERSION
-    run_id: str
+    run_id: PathSafeRunId
     status: str
     cancelled: bool
     accepted: bool = False
@@ -675,7 +667,7 @@ class RunHistoryResponse(BaseModel):
     """
 
     api_version: Literal["v1"] = _API_VERSION
-    run_id: str
+    run_id: PathSafeRunId
     state: ThreadStateSnapshot
     metadata: ThreadMetadata | None = None
     transcript_available: bool
@@ -687,7 +679,7 @@ class RunArchiveResponse(BaseModel):
     """Acknowledge a run moved to the archived state."""
 
     api_version: Literal["v1"] = _API_VERSION
-    run_id: str
+    run_id: PathSafeRunId
     status: ThreadStatus = ThreadStatus.ARCHIVED
 
 
@@ -703,7 +695,7 @@ class RunPendingPermission(BaseModel):
     """A permission awaiting an answer, addressed by the run that raised it."""
 
     request_id: str
-    run_id: str
+    run_id: PathSafeRunId
     description: str | None = None
     request_status: str
 
@@ -733,7 +725,7 @@ class RunDeleteResponse(BaseModel):
     """
 
     api_version: Literal["v1"] = _API_VERSION
-    run_id: str
+    run_id: PathSafeRunId
     deleted: Literal[True] = True
     cleanup_abandoned: Literal[True] = True
     abandoned_kinds: list[CleanupKind] = Field(min_length=1)
@@ -762,7 +754,7 @@ class RunMessageResponse(BaseModel):
     """
 
     api_version: Literal["v1"] = _API_VERSION
-    run_id: str
+    run_id: PathSafeRunId
     accepted: bool = True
     applied: bool = False
     action_status: str
@@ -804,7 +796,7 @@ class RunPermissionRespondResponse(BaseModel):
     """
 
     api_version: Literal["v1"] = _API_VERSION
-    run_id: str
+    run_id: PathSafeRunId
     request_id: str
     accepted: bool
     applied: bool
@@ -868,7 +860,7 @@ class RunClarificationRespondResponse(BaseModel):
     """
 
     api_version: Literal["v1"] = _API_VERSION
-    run_id: str
+    run_id: PathSafeRunId
     request_id: str
     accepted: bool
     applied: bool = False
@@ -1069,8 +1061,8 @@ class TerminalSettlement(BaseModel):
     """
 
     api_version: Literal["v1"] = _API_VERSION
-    run_id: str = Field(min_length=1, max_length=128)
-    lease_id: str = Field(min_length=1, max_length=128)
+    run_id: PathSafeRunId
+    lease_id: LeaseId
     terminal_status: ThreadStatus
 
 

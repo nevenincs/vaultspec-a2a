@@ -5,7 +5,7 @@ tags:
 date: '2026-08-04'
 modified: '2026-08-04'
 body_schema: 'body-v1'
-body_hash: 'sha256:f0d22658ac26dc71fa1f3ddc6a9f7d9d830cfd43358cce374ff78ce652b3a5ce'
+body_hash: 'sha256:4ce3688b9d8d05385c93a62b010ae4530c1727308c23d953bc18469931a56bdd'
 related: []
 ---
 
@@ -6862,3 +6862,99 @@ would not appear as a call.
 
 Recorded as gaps rather than as clean, which is the reporting discipline this
 campaign asked for from the start: silence reads as swept.
+
+### a-refusal-test-where-a-different-guard-refuses-identically | critical | a new vacuity mechanism, self-caught
+
+The fourth vacuous test caught in this campaign, and the first found by the lane
+that wrote it.
+
+The obvious way to test a read-back bound is to mutate a frozen record and assert
+the refusal. **But that record carries a digest, and a mutated record is refused by
+the checksum - in the same opaque dialect, with the same message, as a bound
+violation.** So the test passed while the bound did nothing.
+
+Proven rather than suspected: widening the bound by a hundred left the naive
+refusal test **green**. The digest was doing all the work.
+
+**This is a vacuity mechanism the campaign had not recorded.** The others were a
+test asserting nothing because there was nothing to bound, a lane bound above the
+model invisible to an over-cap assertion, and a caller whose own guard masked
+whether it was wired. This one is different: **a second, unrelated guard produces
+an indistinguishable refusal**, so the assertion cannot tell which one fired.
+
+The fix is the general answer: rebuild the record through the **production digest
+helper** so the checksum matches, leaving the bound as the only thing that can
+refuse. After which widening it fails exactly the one test it should.
+
+**The rule: when a refusal is asserted, ask what ELSE could produce that same
+refusal.** A test that cannot distinguish two guards is pinned to whichever fires
+first, and the one it names may never run.
+
+### a-lane-corrected-its-own-finding-by-reading | high | the reported defect was not one
+
+The same lane reported, in an earlier pass, that a persistence boundary bounded a
+field below what the model bounds those values at - the pattern this campaign
+calls indefensible. **On reading, it is not that.**
+
+That boundary has **two** readers, not one. One guards identity values, bounded by
+the contract at its text length; the other guards display names only, which the
+contract bounds more tightly, and which the lanes already truncate to that same
+number before anything persists. So the smaller number was the contract's own
+display bound applied to display fields - correct, and merely unnamed.
+
+**The brief's fallback outcome therefore did not apply.** It said that if the
+stricter bound were deliberate, the finding would be that its reason was stated
+nowhere. There was no stricter rule to justify; there were two populations sharing
+one reader. Both are now named in prose.
+
+Recorded because the campaign's own severity language - *a lane bound below the
+model is indefensible* - is exactly the kind of rule that produces confident wrong
+findings when applied before reading. The rule stands. Its application to this site
+did not.
+
+### a-fourth-boundary-on-a-quantity-with-three-owners | high | the real find
+
+Buried under a naming cleanup: a role-count bound that is not a local convention at
+all. The value is a **published constant** already consumed by the gateway schema,
+by admission, and by a **cross-repo agreement test**.
+
+Its own comment states the stakes precisely: the prepare stage bounds the role
+list, the engine mints one token per role, the bundle carries the result - so *a
+run that clears one boundary and not another would be refused at whichever
+boundary disagreed, after the caller had already been told its request was fine.*
+
+**The persistence path was a fourth boundary on that quantity, restating the number
+instead of consuming the constant** - while the same route feeds the same computed
+role list to both it and admission. The harm is exactly what the comment predicts,
+and the independence probe exhibited it: the boundary ADMITS a roster the owner
+then refuses, with a bare dataclass error rather than a safe refusal.
+
+### a-status-line-is-not-a-content-change | high | a hazard this orchestrator has been trusting all campaign
+
+After rewriting a file with identical content, `git status` reported it as
+**modified**. The content was byte-identical - confirmed by hashing the blob and
+comparing against the committed object, rather than by eye.
+
+**Staging on the strength of that status line would have put an untouched
+authority module into a commit** whose subject was elsewhere - the precise
+accident that broke HEAD earlier in this campaign, arrived by a different route.
+
+Recorded at high because this orchestrator has read `git status --short` as
+authoritative for contention and ownership throughout, and it is not: it reports a
+stat-cache difference, not a content difference. **A file showing modified with no
+content change and a file genuinely edited are indistinguishable in that output.**
+The check is to hash the blob.
+
+### an-alias-assigned-from-a-constant-is-not-a-restatement | medium | a class this campaign does NOT retire
+
+Two modules declare private names **assigned from** the public constant rather than
+from its value. Reported, and correctly not fixed.
+
+They cannot drift: the assignment re-derives on every import, so the alias is a
+local spelling of one declaration rather than a second declaration of one value.
+That is categorically weaker than what this campaign retires, and folding it in
+would blur the distinction the campaign rests on - **the defect is a second place
+the VALUE is decided, not a second name for the same decision.**
+
+Worth a decision on style; not worth a sweep. Recorded so a later pass does not
+count aliases as shadows and inflate its inventory.

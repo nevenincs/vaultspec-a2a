@@ -26,6 +26,7 @@ if TYPE_CHECKING:
 
 from langchain_core.messages import AIMessage
 
+from ...streaming.node_metadata import node_metadata_from_graph
 from ...team.team_config import (
     ResearchThreadSpec,
     load_agent_config,
@@ -157,6 +158,60 @@ async def test_research_adr_compiles_expected_node_set(
         "plan_gate",
     } <= node_keys
     assert list(graph.interrupt_before_nodes) == []
+
+
+@pytest.mark.asyncio
+async def test_research_adr_discloses_one_metadata_entry_per_worker(
+    checkpointer: AsyncSqliteSaver,
+    pf: ProviderFactoryProtocol,
+) -> None:
+    """A compiled research_adr graph must disclose its whole roster, not none.
+
+    ``node_metadata_from_graph`` - the real function every disclosure surface
+    (``/team/status``, the ``team_status`` broadcast, the run snapshot) walks -
+    SKIPS a node whose metadata is empty. Every research_adr worker node used
+    to be added with no ``metadata=`` at all, so this topology reported an
+    empty roster while executing a full one; nothing else catches that, since
+    it type-checks clean and every node still runs. Pinned here against the
+    real frozen-catalog compile path, not inferred from types.
+    """
+    team = _research_adr_team(
+        [
+            ResearchThreadSpec(thread_id="codebase"),
+            ResearchThreadSpec(thread_id="prior-art"),
+        ]
+    )
+    graph = compile_team_graph(
+        team_config=team,
+        agent_configs=_agent_configs(team),
+        checkpointer=checkpointer,
+        provider_factory=pf,
+        proposal_submitter=_FakeSubmitter(),
+        model_assignment=deterministic_model_assignment(team),
+    )
+
+    disclosed = node_metadata_from_graph(graph)
+    expected_worker_nodes = {
+        "research_dispatch_researcher_00",
+        "research_dispatch_researcher_01",
+        "synthesis",
+        "research_review",
+        "adr_author",
+        "adr_review",
+        "plan_author",
+        "plan_review",
+    }
+    # This is the assertion that fails without the fix: node_metadata_from_graph
+    # SKIPS a node whose metadata dict is empty, and every one of these used to
+    # be added with no metadata= at all - the whole roster was absent, not just
+    # short a field.
+    assert expected_worker_nodes <= set(disclosed), disclosed
+
+    for node_name in expected_worker_nodes:
+        entry = disclosed[node_name]
+        assert entry["provider"] == "deterministic", (node_name, entry)
+        assert entry["display_name"], (node_name, entry)
+        assert entry["role"], (node_name, entry)
 
 
 @pytest.mark.asyncio

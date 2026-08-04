@@ -664,6 +664,7 @@ def _wire_diverge_stage(
     synthesis_name: str,
     specs: list[dict[str, Any]],
     make_researcher: Callable[[dict[str, Any]], WorkerNode],
+    researcher_metadata: dict[str, str],
 ) -> str:
     """Wire a Send-based diverge stage into ``builder``.
 
@@ -677,7 +678,11 @@ def _wire_diverge_stage(
 
     ``make_researcher`` maps a thread spec to the branch node, so the topology
     supplies model-backed researchers while the fan-out/join structure stays
-    model-agnostic and independently testable.
+    model-agnostic and independently testable. ``researcher_metadata`` is the
+    one caller-built exception to that: every branch shares the same researcher
+    role, provider, and model, so one precomputed metadata dict is applied to
+    each - a per-spec callback would only ever be asked to return the same
+    value, which is a flag in disguise, not a real degree of freedom.
 
     Each researcher carries the same retry policy as every other model-backed
     node. A branch was the lone exception, so a transient provider failure in one
@@ -697,7 +702,12 @@ def _wire_diverge_stage(
     researcher_names: list[str] = []
     for index, spec in enumerate(specs):
         name = researcher_node_name(dispatch_name, index)
-        builder.add_node(name, make_researcher(spec), retry_policy=_NODE_RETRY_POLICY)
+        builder.add_node(
+            name,
+            make_researcher(spec),
+            metadata=researcher_metadata,
+            retry_policy=_NODE_RETRY_POLICY,
+        )
         builder.add_edge(name, synthesis_name)
         researcher_names.append(name)
 
@@ -1597,11 +1607,18 @@ def _resolve_research_adr_models(
     *,
     provider_factory: ProviderFactoryProtocol,
     frozen_assignment: dict[str, dict[str, Any]] | None = None,
-) -> dict[str, BaseChatModel]:
-    """Resolve one model per required research_adr role.
+) -> dict[str, tuple[BaseChatModel, dict[str, str]]]:
+    """Resolve one model, and its node metadata, per required research_adr role.
 
     Raises ConfigError when a required role has no resolved AgentConfig among the
     team's workers.
+
+    The metadata is built here, through the same :func:`_agent_node_metadata`
+    every other topology uses, rather than left for the caller to reconstruct:
+    this is the one place that holds the resolved provider, capability, and
+    frozen catalog model name for each role, and discarding them here - as this
+    function used to - is exactly how research_adr's compiled graph ended up
+    disclosing no agents at all.
     """
     cfg_by_role: dict[str, Any] = {}
     ref_by_role: dict[str, Any] = {}
@@ -1620,9 +1637,9 @@ def _resolve_research_adr_models(
             f"{list(RESEARCH_ADR_ROLES)}."
         )
 
-    models: dict[str, BaseChatModel] = {}
+    resolved: dict[str, tuple[BaseChatModel, dict[str, str]]] = {}
     for role in RESEARCH_ADR_ROLES:
-        models[role], _provider, _capability, _frozen = _resolve_model_for_worker(
+        model, provider, capability, model_name = _resolve_model_for_worker(
             ref_by_role[role],
             cfg_by_role[role],
             team_config,
@@ -1630,7 +1647,11 @@ def _resolve_research_adr_models(
             provider_factory=provider_factory,
             frozen_assignment=frozen_assignment,
         )
-    return models
+        metadata = _agent_node_metadata(
+            cfg_by_role[role], provider, capability, model_name
+        )
+        resolved[role] = (model, metadata)
+    return resolved
 
 
 def _make_research_producer(
@@ -1834,6 +1855,11 @@ def _compile_research_adr(
         provider_factory=provider_factory,
         frozen_assignment=frozen_assignment,
     )
+    researcher_model, researcher_metadata = models["researcher"]
+    synthesist_model, synthesist_metadata = models["synthesist"]
+    doc_reviewer_model, doc_reviewer_metadata = models["doc-reviewer"]
+    adr_author_model, adr_author_metadata = models["adr-author"]
+    plan_author_model, plan_author_metadata = models["plan-author"]
 
     # The team-harness MCP servers are a flat, team-level declaration composed
     # into every document-role model's ACP session (there is no per-role field
@@ -1846,9 +1872,9 @@ def _compile_research_adr(
     ] or [{"thread_id": "primary", "topic": "", "instructions": ""}]
 
     researcher_producer = _make_research_producer(
-        models["researcher"],
+        researcher_model,
         _composed_role_prompt(
-            team_config, agent_configs, "researcher", models["researcher"]
+            team_config, agent_configs, "researcher", researcher_model
         ),
         workspace_root=workspace_root,
         harness_mcp_servers=harness_mcp_servers,
@@ -1861,14 +1887,15 @@ def _compile_research_adr(
         synthesis_name=_RA_SYNTHESIS,
         specs=specs,
         make_researcher=lambda spec: create_researcher_node(spec, researcher_producer),
+        researcher_metadata=researcher_metadata,
     )
 
     builder.add_node(
         _RA_SYNTHESIS,
         create_worker_node(
-            models["synthesist"],
+            synthesist_model,
             _composed_role_prompt(
-                team_config, agent_configs, "synthesist", models["synthesist"]
+                team_config, agent_configs, "synthesist", synthesist_model
             ),
             name=_RA_SYNTHESIS,
             autonomous=autonomous,
@@ -1880,14 +1907,15 @@ def _compile_research_adr(
             # reviewer's batch when a revision run carries a feedback_batch_id.
             feedback_reader=feedback_reader,
         ),
+        metadata=synthesist_metadata,
         retry_policy=_NODE_RETRY_POLICY,
     )
     builder.add_node(
         _RA_RESEARCH_REVIEW,
         create_worker_node(
-            models["doc-reviewer"],
+            doc_reviewer_model,
             _composed_role_prompt(
-                team_config, agent_configs, "doc-reviewer", models["doc-reviewer"]
+                team_config, agent_configs, "doc-reviewer", doc_reviewer_model
             ),
             name=_RA_RESEARCH_REVIEW,
             autonomous=autonomous,
@@ -1896,14 +1924,15 @@ def _compile_research_adr(
             harness_mcp_servers=harness_mcp_servers,
             cost_port=cost_port,
         ),
+        metadata=doc_reviewer_metadata,
         retry_policy=_NODE_RETRY_POLICY,
     )
     builder.add_node(
         _RA_ADR_AUTHOR,
         create_worker_node(
-            models["adr-author"],
+            adr_author_model,
             _composed_role_prompt(
-                team_config, agent_configs, "adr-author", models["adr-author"]
+                team_config, agent_configs, "adr-author", adr_author_model
             ),
             name=_RA_ADR_AUTHOR,
             autonomous=autonomous,
@@ -1915,14 +1944,15 @@ def _compile_research_adr(
             feedback_reader=feedback_reader,
             cost_port=cost_port,
         ),
+        metadata=adr_author_metadata,
         retry_policy=_NODE_RETRY_POLICY,
     )
     builder.add_node(
         _RA_ADR_REVIEW,
         create_worker_node(
-            models["doc-reviewer"],
+            doc_reviewer_model,
             _composed_role_prompt(
-                team_config, agent_configs, "doc-reviewer", models["doc-reviewer"]
+                team_config, agent_configs, "doc-reviewer", doc_reviewer_model
             ),
             name=_RA_ADR_REVIEW,
             autonomous=autonomous,
@@ -1931,14 +1961,15 @@ def _compile_research_adr(
             harness_mcp_servers=harness_mcp_servers,
             cost_port=cost_port,
         ),
+        metadata=doc_reviewer_metadata,
         retry_policy=_NODE_RETRY_POLICY,
     )
     builder.add_node(
         _RA_PLAN_AUTHOR,
         create_worker_node(
-            models["plan-author"],
+            plan_author_model,
             _composed_role_prompt(
-                team_config, agent_configs, "plan-author", models["plan-author"]
+                team_config, agent_configs, "plan-author", plan_author_model
             ),
             name=_RA_PLAN_AUTHOR,
             autonomous=autonomous,
@@ -1950,14 +1981,15 @@ def _compile_research_adr(
             feedback_reader=feedback_reader,
             cost_port=cost_port,
         ),
+        metadata=plan_author_metadata,
         retry_policy=_NODE_RETRY_POLICY,
     )
     builder.add_node(
         _RA_PLAN_REVIEW,
         create_worker_node(
-            models["doc-reviewer"],
+            doc_reviewer_model,
             _composed_role_prompt(
-                team_config, agent_configs, "doc-reviewer", models["doc-reviewer"]
+                team_config, agent_configs, "doc-reviewer", doc_reviewer_model
             ),
             name=_RA_PLAN_REVIEW,
             autonomous=autonomous,
@@ -1966,6 +1998,7 @@ def _compile_research_adr(
             harness_mcp_servers=harness_mcp_servers,
             cost_port=cost_port,
         ),
+        metadata=doc_reviewer_metadata,
         retry_policy=_NODE_RETRY_POLICY,
     )
     # Each gate is split into a submit node (commits the proposal id to the

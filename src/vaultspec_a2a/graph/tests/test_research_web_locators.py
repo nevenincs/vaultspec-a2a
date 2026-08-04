@@ -90,6 +90,7 @@ def _build_graph(producer: ResearchFindingProducer) -> StateGraph:
         synthesis_name="synthesis",
         specs=[{"thread_id": _THREAD_ID, "topic": "web grounding", "instructions": ""}],
         make_researcher=lambda spec: create_researcher_node(spec, producer),
+        researcher_metadata={},
     )
 
     async def synthesis_node(state: TeamState) -> dict[str, Any]:

@@ -814,6 +814,47 @@ error is a boundary failure rather than an inconvenience, and because reporting 
 rather than churning it is the behaviour the campaign wants from a sweep that
 finds a plausible cluster with no safe merge.
 
+### service-cannot-express-a-posture-its-factory-supports | high | the arming tension, and its real cause
+
+Migrating the API suite onto the canonical selection mechanism failed twice, and
+the second failure named the real defect. Arming in-process lanes through the
+process environment leaks into the real gateway subprocesses this suite spawns,
+changing the lane inventory for tests that have nothing to do with selection.
+Scoping the arming to the derivation instead fixes the leak and then fails
+differently, because run start REVALIDATES a selection against a fresh catalog
+read at request time - so a lane armed only for the derivation is gone by the
+time the reference is checked, and the selection names a lane the gateway no
+longer serves. Arming must therefore hold for every read the application
+performs, which is exactly the process-wide scope that leaks.
+
+The cause is not the tension; it is that the catalog service cannot express a
+posture its own factory already supports. The factory takes an explicit
+in-process arming argument and its docstring states that an explicit value is the
+same decision made by a caller that knows its own posture, so the policy is
+exercisable WITHOUT reaching into the process environment. The service drops that
+argument at the single call where it builds registrations, leaving the
+environment as the only transport. Threading it through is completing a declared
+design rather than adding a test-shaped affordance to production, and it removes
+the whole class of problem instead of teaching more sites about an environment
+variable. Recorded because the rejected alternative - unsetting the variable at
+each subprocess spawn site - would have worked while leaving a discovery test
+carrying a selection concern permanently, and environment-as-transport is what
+leaked in the first place.
+
+### the-mechanism-found-a-bug-on-contact | medium | a latent splice, passing by coincidence
+
+The role-override authority test read a catalog revision from one lane and
+grafted it onto a selection naming a different lane. It passed only because both
+happened to resolve to the same lane on a developer box, and failed the moment
+they diverged, with the gateway correctly refusing a stale revision. Recorded
+because it is the strongest evidence that the split-function mechanism earns its
+design: a consolidation that surfaces a real defect the first time it is pointed
+at existing code is doing more than removing copies. The accompanying fix to the
+catalog route test is also a strict improvement - asserting the external lanes as
+an ordered PREFIX with in-process lanes following tests the factory's stated
+invariant, that in-process registrations come last and cannot reorder the
+external lanes a client already enumerates, which nothing asserted before.
+
 ## Recommendations
 
 <!-- Actionable recommendations, each tied to a finding above. An
@@ -1646,3 +1687,44 @@ imprecise about which file carried the site, or names a function this sweep
 did not recognise as the same pattern - recorded as unconfirmed rather than
 silently left standing or rewritten, per this audit's rule against editing a
 settled entry.
+
+### checkpoint-pragma-fix-holds-but-a-fourth-touchpoint-bypasses-it | medium | the "two checkpoint paths" framing is now stale
+
+Following up on `checkpoint-pragma-drift-recurred`: the fix holds. All three
+checkpoint-writing paths this sweep found now call
+`checkpoint_pragmas()` (`src/vaultspec_a2a/database/checkpoint_schema.py`) -
+the LangGraph saver in `src/vaultspec_a2a/database/checkpoints.py`, the
+identity installer inside `checkpoint_schema.py` itself, and
+`src/vaultspec_a2a/desktop/migration.py`'s `_setup_checkpointer`, whose comment
+now narrates the exact prior drift ("This path had restated it and drifted
+anyway: it hardcoded the busy timeout instead of reading the configured one,
+and omitted the foreign-key pragma") as the reason it now imports the helper.
+Good - but a fourth touchpoint on the checkpoint store's connection exists that
+none of the audit's counts named: `src/vaultspec_a2a/database/admin.py`'s
+`_clear_checkpoint_store`, reached from the `admin clear` verb, opens
+`settings.checkpoint_sync_url` through `_administrative_engine`, whose connect
+listener is `_apply_sqlite_pragmas` - a SECOND, independently declared pragma
+set built for the APPLICATION database's synchronous admin connection
+(`foreign_keys=ON` and `busy_timeout`, deliberately omitting `journal_mode=WAL`
+because that pragma is file-header-level and the admin module's own docstring
+reasons the async engine already fixed it for that store). `_administrative_engine`
+is reused verbatim for the checkpoint URL at `admin.py:376`, so the checkpoint
+store's clear path is governed by a declaration that was never written with the
+checkpoint schema in mind and has no relationship to `checkpoint_pragmas()` at
+all.
+
+Verdict DUPLICATE-adjacent rather than a live functional gap today: `foreign_keys`
+and `busy_timeout` ARE applied (satisfying the per-connection half of the
+contract `checkpoint_pragmas()` documents), and `journal_mode` is safe to omit
+in the ordinary sequencing, where the checkpoint file already carries WAL in its
+header from whichever of the three canonical writers created it first - the
+same reasoning `admin.py` already relies on for the application store. The real
+risk is the one this whole cluster keeps illustrating: `checkpoint_pragmas()`'s
+own docstring still says it exists "so the two checkpoint paths cannot drift
+from each other," and that count was already wrong before this sweep - there
+are three canonical writers, plus this fourth path that does not consult the
+declaration at all. If the checkpoint posture ever gains a fourth pragma, three
+call sites pick it up by importing the function and this one does not, silently,
+because it was never wired to notice. The fix is small: `_clear_checkpoint_store`
+resolving its engine's connect listener from `checkpoint_pragmas()` instead of
+`_apply_sqlite_pragmas`, the same way the three canonical writers already do.

@@ -5,7 +5,7 @@ tags:
 date: '2026-08-04'
 modified: '2026-08-04'
 body_schema: 'body-v1'
-body_hash: 'sha256:392e48cf25f57fe48128b88cda94c323cb39f4895d8106b7908fc99fa92d01d7'
+body_hash: 'sha256:656410d5cf92b98685b361f39869df6ea183a611049d79503e8ce3340cbdec65'
 related: []
 ---
 
@@ -6529,3 +6529,91 @@ Recorded at medium rather than high because no live path crosses it today and th
 lane traced every production caller to establish that. The lane declined to
 propose it as work; it is boarded anyway, because the argument that it should be
 enforced is the same argument this campaign was opened on.
+
+### the-posture-question-found-a-live-catalog-losing-bug | critical | agreement at the same value was not sufficient
+
+The truncate-versus-refuse axis was attached to a bound-consolidation task as a
+contract check. **It exposed a live defect that loses whole catalogs**, and the
+consolidation as originally scoped would have shipped that defect wearing the
+canonical constant's authority.
+
+The owner **REFUSES** an over-long display name; every lane **TRUNCATES**. That
+split is correct and was kept - a provider shipping an over-long label, or a lane
+composing one from parts each legal, must not cost the whole catalog. But the
+model demands a display name that is bounded **AND already normalized**, and **a
+cut landing on a space satisfies the first while breaking the second.**
+
+Every lane truncated identically, so every lane died identically: a name whose
+final admitted character is a space produces a bare constructor error two layers
+down, and the caller loses **the entire catalog** - not a discovery refusal naming
+the offending entry, but a `ValueError` about normalization. Reproduced before the
+fix through four real lane entry points. The optional-description path truncated
+the same way at its own bound and lost catalogs the same way. Reachable from any
+provider payload.
+
+**Nothing caught it because the module carrying the shared reader had no test file
+at all.**
+
+**This is the sharpest vindication in the campaign of asking what a copy could
+otherwise have chosen.** A substitution that swapped the literal for the constant
+would have passed every check, satisfied the closure grep, and left the defect in
+place with a canonical constant now vouching for it. Agreement at the same value
+is not sufficient when the two sides differ in POSTURE - the bound and the
+normalization had to travel together, which only reading the model's precondition
+reveals.
+
+The fix keeps the postures split and makes the pair inseparable: one helper
+carries the cut and the normalization, its docstring records why the model's bound
+is the model's to declare (a lane cutting shorter silently shortens a name the
+model accepts; one cutting longer hands over a value the model rejects), and the
+description path re-normalizes after its own cut.
+
+### a-declaration-hides-behind-the-slices-that-use-it | high | why the count was five
+
+The inventory named four truncation sites and was complete as slices. The fifth
+was a **declaration** - a private constant shadowing the public one - which no
+search for the slice pattern can see, and which fed a shared reader with six
+callers across all four lanes.
+
+**A value sweep finds uses; it does not find the declaration behind them.** That
+is the inverse of the dimension collision recorded earlier, where a value sweep
+found sites that were unrelated. Together they bound the technique from both
+sides: searching by value returns things that are not the subject and misses
+things that are.
+
+Line numbers in the inventory had also drifted again - the fourth time this
+campaign. The owning symbol remains the only durable handle.
+
+### the-two-halves-of-the-admitted-case-catch-opposite-drift | high | refines the rule
+
+The admitted case has now caught a fifth vacuous test, and this instance refines
+the rule rather than repeating it.
+
+During one independence probe, **the exact-cap assertion PASSED while that lane was
+bound ABOVE the model** - only the over-cap case caught the drift. So the two
+halves are not "the real assertion plus a sanity check": **they catch opposite
+directions of drift, and either alone is half blind.** A lane bound too high is
+invisible to the admitted case; a lane bound too low is invisible to the refusal.
+
+Also worth keeping, as test design rather than as a finding: the space-cut case was
+swept across five input phases rather than computed against a hand-derived offset,
+because each lane composes a different fixed prefix. Spaces recur every five
+characters, so one phase always lands on the cut whatever the prefix - and the test
+cannot rot when a label's wording changes. **A test pinned to an offset would have
+silently stopped exercising the defect the first time someone reworded a label.**
+
+### two-more-of-the-same-shape-reported-not-fixed | medium | boarded
+
+The same module still declares a private field-length constant against a public one
+of the same value, and restates that number inside a refusal message - the
+third concept in this family. Its normalization half was fixed in the same pass,
+because that half was the same live bug; only the naming remains.
+
+Separately, the team-selection path bounds a persisted field at a quarter of what
+the model bounds those same values at - **a lane bound BELOW the model**, which
+this campaign has already ruled indefensible in the general case, because it
+refuses values the model would accept for a reason stated nowhere. Flagged rather
+than assumed: persistence hardening MAY legitimately be stricter than an in-memory
+contract, and that is a reading, not a substitution. It also repeats a bare role
+cap three times, once inside its own message - the error-message restatement
+defect, now at its third address.

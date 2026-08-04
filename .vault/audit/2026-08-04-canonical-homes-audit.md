@@ -5,7 +5,7 @@ tags:
 date: '2026-08-04'
 modified: '2026-08-04'
 body_schema: 'body-v1'
-body_hash: 'sha256:724083f3464dcd9805f59465578372fcbbc2aa1d1b0992905b9d452483e88c69'
+body_hash: 'sha256:378b3ebe19a442716c9e52fd3ab26833f0703bc7bd794ffe04f10eda735cd049'
 related: []
 ---
 
@@ -4451,3 +4451,35 @@ it did not establish** - it recorded contact, while connectedness is derived. It
 was also the site whose docstring had already drifted. A name that overclaims is
 not worth preserving for the convenience of its callers.
 
+
+### strenum-keyed-lookups-resolve-in-both-directions | medium | reference, settles a recurring doubt
+
+Recorded so no future lane re-derives it or hesitates over it, because it gates
+every conversion of a literal-keyed catalog to a shared vocabulary.
+
+A lane converting a keyed catalog raised the right doubt: `Enum.__hash__` hashes
+the member NAME, so a dict keyed by members and looked up by a raw string could
+miss - and miss SILENTLY, degrading every frame to its identity keys with every
+check green. Measured on this platform against the real enum rather than reasoned
+from the class hierarchy:
+
+    MRO: ServerEventType, StrEnum, str, ReprEnum, Enum, object
+    hash(member) == hash(str): True      member == str: True
+    dict keyed by member, looked up by raw string: RESOLVES
+    dict keyed by string, looked up by member:     RESOLVES
+    __hash__ owner: str.__hash__
+
+`str` precedes `Enum` in the method-resolution order, so the string hash wins and
+both lookup directions resolve. Converting a literal-keyed catalog to members is
+therefore safe, and a mixed catalog - some keys converted, some not - still
+resolves, which is precisely why the partial-conversion disease recorded above is
+INVISIBLE at runtime rather than merely untidy.
+
+The doubt deserved its answer even though the answer was benign. The failure it
+described is real and was avoided by an ordering nobody chose deliberately; had
+those two bases been ordered the other way, the conversion would have broken every
+frame silently. Verifying rather than reasoning is what separates being right for a
+confirmed reason from being right by luck, and this campaign has already recorded
+one case where reasoning about a platform detail was wrong in the same file - the
+canonical writer's permission path was translating line endings while its docstring
+claimed it wrote bytes directly.

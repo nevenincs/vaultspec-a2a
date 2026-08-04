@@ -25,7 +25,8 @@ from pathlib import Path
 
 __all__ = [
     "credential_file_is_owner_restricted",
-    "harden_credential_file",
+    "harden_credential_path",
+    "owner_only_mode",
     "restrict_windows_file",
     "windows_current_user_sid",
     "windows_file_is_restricted",
@@ -209,14 +210,29 @@ def windows_file_is_restricted(path: Path) -> bool:
         kernel32.LocalFree(descriptor)
 
 
-def harden_credential_file(path: Path) -> None:
-    """Restrict *path* to its owner: ``0o600`` on POSIX, a private DACL on Windows.
+def owner_only_mode(path: Path) -> int:
+    """Return the POSIX mode that restricts *path* to its owner.
 
-    Fails closed on Windows if the applied DACL does not read back as owner-
-    restricted so a caller never trusts a file it could not actually protect.
+    A directory needs its execute bit to stay traversable, so the two kinds are
+    not interchangeable: ``0o600`` on a directory strips traversal and makes
+    everything beneath it unreachable, while ``chmod`` itself still reports
+    success. The failure therefore surfaces far from its cause, which is why the
+    distinction is decided here rather than at each call site.
+    """
+    return 0o700 if path.is_dir() else 0o600
+
+
+def harden_credential_path(path: Path) -> None:
+    """Restrict *path* to its owner: POSIX mode bits, or a private DACL on Windows.
+
+    Covers both files and directories, because callers protect both - a
+    credential file, and the state directory whose databases must not be
+    readable beside it. Fails closed on Windows if the applied DACL does not read
+    back as owner-restricted, so a caller never trusts a path it could not
+    actually protect.
     """
     if os.name == "posix":
-        os.chmod(path, 0o600)
+        os.chmod(path, owner_only_mode(path))
         return
     restrict_windows_file(path)
     if not windows_file_is_restricted(path):

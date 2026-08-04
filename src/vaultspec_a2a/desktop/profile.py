@@ -335,7 +335,7 @@ class DesktopProfile:
         recently committed rows, so hardening the files alone would leave the most
         recent data readable.
         """
-        from ._platform_acl import harden_credential_file
+        from ._platform_acl import harden_credential_path
 
         for directory in self.state.provisioned_directories:
             directory.mkdir(parents=True, exist_ok=True)
@@ -343,7 +343,7 @@ class DesktopProfile:
             # (a network share, a mount without ACL support) must not stop the
             # profile from arming — the store still has to work there.
             try:
-                harden_credential_file(directory)
+                harden_credential_path(directory)
             except OSError:
                 logger.warning(
                     "Could not restrict %s to its owner; the databases beneath it "

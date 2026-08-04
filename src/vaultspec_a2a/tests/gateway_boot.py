@@ -56,7 +56,7 @@ from typing import IO, TYPE_CHECKING, Literal
 
 import httpx
 
-from ..desktop._platform_acl import harden_credential_file
+from ..desktop._platform_acl import harden_credential_path
 from ..desktop.credentials import (
     ATTACH_CREDENTIAL_NAME,
     OWNERSHIP_CAPABILITY_NAME,
@@ -383,7 +383,7 @@ def seed_credentials(app_home: Path, *, attach: str, ownership: str) -> Path:
     ):
         path = state.credentials_dir / name
         path.write_text(secret, encoding="utf-8")
-        harden_credential_file(path)
+        harden_credential_path(path)
     return state.credentials_dir
 
 

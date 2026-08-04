@@ -49,7 +49,7 @@ import httpx
 from pydantic import TypeAdapter, ValidationError
 
 from ..control.config import settings
-from ..desktop._platform_acl import harden_credential_file
+from ..desktop._platform_acl import harden_credential_path
 from ..utils.atomic_write import atomic_write_text
 
 __all__ = ["gemini_uses_env_auth", "refresh_gemini_token"]
@@ -151,7 +151,7 @@ def _require_regular_lock_file(path: Path, descriptor: int) -> None:
     opened = os.fstat(descriptor)
     if not stat.S_ISREG(opened.st_mode):
         raise OSError(f"Gemini OAuth lock path is not a regular file: {path}")
-    harden_credential_file(path)
+    harden_credential_path(path)
 
 
 def _try_lock_descriptor(descriptor: int) -> None:

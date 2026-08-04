@@ -34,7 +34,7 @@ from pathlib import Path
 from ..artifacts import ArtifactDeclaration, RetentionDisposition
 from ._platform_acl import (
     credential_file_is_owner_restricted,
-    harden_credential_file,
+    harden_credential_path,
 )
 
 __all__ = [
@@ -257,10 +257,7 @@ def create_worker_ipc_credential(credentials_dir: Path) -> str:
     """
     directory = Path(credentials_dir)
     directory.mkdir(parents=True, exist_ok=True)
-    if os.name == "posix":
-        os.chmod(directory, 0o700)
-    else:
-        harden_credential_file(directory)
+    harden_credential_path(directory)
 
     paths = credential_paths(directory)
     secret = secrets.token_hex(_WORKER_IPC_ENTROPY_BYTES)
@@ -285,7 +282,7 @@ def create_worker_ipc_credential(credentials_dir: Path) -> str:
             os.fsync(descriptor)
         finally:
             os.close(descriptor)
-        harden_credential_file(tmp)
+        harden_credential_path(tmp)
         _replace_with_retry(tmp, target)
     except BaseException:
         # Every failure path, ``KeyboardInterrupt`` and ``SystemExit`` included:

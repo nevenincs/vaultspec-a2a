@@ -10,7 +10,7 @@ import click
 
 from ...cli.main import main
 from ...control.config import settings
-from ...desktop._platform_acl import harden_credential_file
+from ...desktop._platform_acl import harden_credential_path
 from ...desktop.credentials import ATTACH_CREDENTIAL_NAME
 from ...desktop.profile import derive_state_paths
 from ...gateway_auth import gateway_auth_headers
@@ -44,7 +44,7 @@ def _seed_desktop_authority(app_home: Path, a2a_home: Path, *, port: int) -> Non
     state.credentials_dir.mkdir(parents=True, exist_ok=True)
     attach = state.credentials_dir / ATTACH_CREDENTIAL_NAME
     attach.write_text(_TOKEN, encoding="utf-8")
-    harden_credential_file(attach)
+    harden_credential_path(attach)
     write_desktop_discovery(
         service_json_path(a2a_home),
         generation="gateway-auth-test-generation",

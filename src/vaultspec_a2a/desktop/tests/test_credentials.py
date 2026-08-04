@@ -13,7 +13,8 @@ if TYPE_CHECKING:
 
 from ...desktop._platform_acl import (
     credential_file_is_owner_restricted,
-    harden_credential_file,
+    harden_credential_path,
+    owner_only_mode,
 )
 from ...desktop.credentials import (
     ATTACH_CREDENTIAL_NAME,
@@ -33,8 +34,29 @@ def _write_restricted(directory: Path, name: str, content: str) -> Path:
     """Write an owner-restricted credential file the way the dashboard would."""
     path = directory / name
     path.write_text(content, encoding="utf-8")
-    harden_credential_file(path)
+    harden_credential_path(path)
     return path
+
+
+def test_owner_only_mode_keeps_a_directory_traversable(tmp_path: Path) -> None:
+    """A directory must keep its execute bit; a file must not gain one.
+
+    Asserted on the mode decision rather than on the resulting POSIX bits so the
+    distinction is certified on every host. The failure this guards against is
+    silent: chmod succeeds on a directory stripped to 0o600, and the damage only
+    appears later when nothing beneath it can be opened.
+    """
+    directory = tmp_path / "state"
+    directory.mkdir()
+    credential = tmp_path / "attach.token"
+    credential.write_text(_VALID_TOKEN, encoding="utf-8")
+
+    assert owner_only_mode(directory) == 0o700
+    assert owner_only_mode(credential) == 0o600
+    assert owner_only_mode(directory) & 0o100, "a directory must stay traversable"
+    assert not owner_only_mode(credential) & 0o111, "a credential is never executable"
+    assert not owner_only_mode(directory) & 0o077
+    assert not owner_only_mode(credential) & 0o077
 
 
 def test_credential_paths_layout(tmp_path: Path) -> None:
@@ -154,7 +176,7 @@ def test_reparse_credential_rejected(tmp_path: Path) -> None:
     if os.name == "posix":
         real = tmp_path / "real_secret"
         real.write_text(_VALID_TOKEN, encoding="utf-8")
-        harden_credential_file(real)
+        harden_credential_path(real)
         os.symlink(real, link)
     else:
         target = tmp_path / "reparse_target"

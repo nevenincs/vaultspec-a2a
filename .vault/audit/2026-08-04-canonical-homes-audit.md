@@ -5,7 +5,7 @@ tags:
 date: '2026-08-04'
 modified: '2026-08-04'
 body_schema: 'body-v1'
-body_hash: 'sha256:d690b90438f96c0b15954e523bf72c9499f5288bf288e1108f0814120bc14250'
+body_hash: 'sha256:539edc357e1ea7ae7c14ab66407497ce8e35be0664acebb5b1c21ae0e412b397'
 related: []
 ---
 
@@ -426,6 +426,99 @@ verdict; and a confirmation that arrives without a citation into the source is
 not corroboration. The corrected reading was settled by reading the declaration
 at HEAD, which states plainly that the reservation is the primary path and the
 unclaimed probe only a fallback.
+
+### terminal-status-vocabulary-declared-three-times | high | agreement by upkeep, not by construction
+
+Which statuses mean a run stopped running is hand-declared three times. The
+durable lifecycle authority in `src/vaultspec_a2a/thread/enums.py` holds the
+frozen set every production consumer correctly imports. A second declaration in
+`src/vaultspec_a2a/thread/snapshots.py` builds an identity map of the same three
+strings, typed out again rather than derived from the first, and a third literal
+appears in that module's own test, asserted against the second rather than
+against the authority. No test anywhere compares the map's membership to the
+authority's. They agree today by coincidence of upkeep. The consequence is
+specific: the terminal handler documents itself as the run's primary release
+site, where a run leaves the drain gate's active set and receives its durable
+status write, and that path gates on the SECOND declaration. Add a terminal
+status to the authority, miss the map, and a genuinely terminal run silently
+fails to release its slot and skips its durable write - and this project has
+precedent for growing closed vocabularies additively. Verdict DUPLICATE on the
+vocabulary, not on the container: the map does real second work coercing an
+untyped wire value, so it stays a map, but its membership must be derived from
+the authority and the test must compare against the authority rather than a
+fourth literal.
+
+### first-selectable-lane-is-a-billable-footgun | high | a naive consolidation would spend money
+
+Measured under the service harness's own posture: with in-process lanes unarmed,
+seven lanes are served and exactly one is selectable - and on a developer box
+that one is a real, billable provider, because the box happens to hold a live
+session for it. In a credential-less stack the same posture yields zero
+selectable lanes, so the runs are unstartable rather than merely misrouted. This
+turns the "take the first selectable lane" policy from a stylistic choice into a
+hazard: consolidating the six derivation helpers onto it would quietly point
+mock tape-replay certification traffic at a paid lane. It is the sharpest
+argument for the constraint already recorded on that cluster - consolidate the
+mechanism, keep the policy explicit at each call site - and the right shape for
+a test-side policy is to REFUSE anything but an in-process lane and raise naming
+the missing environment declaration, rather than falling through to whatever the
+catalog happened to serve. Related and equally load-bearing: a lane must be
+chosen from what a preset is pinned to rather than from what its name suggests,
+because a mock preset answered by the deterministic lane stops replaying its
+tape while still reporting success - a substitution that looks green and tests
+nothing.
+
+### service-harness-dark-for-four-reasons | high | supersedes the two-field finding above
+
+The earlier entry recorded the shared harness as missing a selection and a run
+identifier. Two further causes are confirmed, both invisible until the first two
+clear. Nine of its eleven call sites pass no metadata envelope at all, and the
+thread service refuses a run whose active project is absent rather than
+inferring one from the serving process. And the harness arms no in-process lane,
+so its gateway serves nothing it may legitimately select. A fifth cause blocks
+verification of all four: the versioned router carries an attach dependency on
+every route, and the harness attaches its credential to the worker client only,
+so every gateway call is refused before any body is examined. Dating: the run
+identifier requirement and the attach gate both landed on 2026-07-19 and predate
+the catalog campaign entirely, so this is not that campaign's doing. Same
+classification as the acceptance lane - broken-on-arm, not broken-now.
+
+### catalog-discovery-output-budget-triplicated | medium | three copies of a stderr meter
+
+Metering a discovery subprocess's standard error volume and killing its tree on
+overflow is implemented three times, once in each provider catalog module, with
+the bodies identical apart from the exception type caught. Verdict DUPLICATE.
+Surfaced by the observability sweep but belonging to the provider catalog lane,
+recorded here so it is not lost between domains.
+
+### terminal-status-in-service-tests | medium | two byte-identical copies with a phantom member
+
+Two service test modules each declare the same terminal-status set and the same
+polling stack - server base, listening probe, await-terminal loop and readiness
+budget - byte for byte. Both sets include a member that is not a status value
+anywhere in production, so the drift is not hypothetical, it is already present.
+Verdict DUPLICATE, test-only blast radius, and the canonical set must be derived
+from the lifecycle authority rather than retyped.
+
+### observability-swept-and-found-clean | low | one home each, and one protection
+
+Logging configuration, the JSON formatter, the correlation filter, telemetry
+provider setup, event debouncing and the progress frame encoder each have
+exactly one home, with the frame encoder additionally guarded by a closed
+allowlist proven by a test that plants secrets and asserts they never cross the
+encode boundary. The structured log-context builders are DISTINCT field
+vocabularies correctly kept apart - merging them would leak dispatch fields into
+provider logs - though the drop-empty-values idiom inside them is written out
+three times and is worth one small helper. Most importantly the safe-to-log and
+safe-to-return boundary was traced through actual data flow rather than by name,
+and no site confuses them: provider standard error is scrubbed at CAPTURE time,
+before it is retained or embedded in an error, so by the time the
+client-visible renderer sees it the credential-shaped substrings are already
+masked, while the local-only debug path may log raw text because its rule
+differs. That renderer is deliberately non-recursive and prefers a structured
+message precisely because stringifying an exception can fold in a wrapped cause
+or a vendor payload - a protection a naive "just stringify it" consolidation
+would undo.
 
 ## Recommendations
 

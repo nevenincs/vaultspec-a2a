@@ -5,7 +5,7 @@ tags:
 date: '2026-08-04'
 modified: '2026-08-04'
 body_schema: 'body-v1'
-body_hash: 'sha256:fb5bdf7784ca820544b17cc1f08036148b33c95ea2cf1c39639cffed029cdbf8'
+body_hash: 'sha256:4775bee0ab56e1efcd69a2166cf77e22534c66a5213911f1910d87f3f8a61e42'
 related: []
 ---
 
@@ -730,6 +730,35 @@ that accepts and never responds, one that answers affirmatively with undecodable
 bytes, one that stalls past a retry window, and stateful stubs that record what
 was asked of them. Folding those together would produce a helper whose options
 are a catalogue of unrelated defects.
+
+### a-mechanism-without-deletions-makes-it-worse | critical | the rule the campaign must execute by
+
+Verified by direct sweep rather than from any report: two clusters genuinely
+deleted their old declarations, and one did not. The canonical selection
+mechanism landed while every derivation it replaces stayed in place, so that
+concept currently has SEVEN declarations where it had six. Landing a home and
+migrating consumers later is not a phased delivery; it is a state strictly worse
+than before, because the maintenance question is still unanswerable and there is
+now one more file to check. The rule this campaign executes by, stated so no
+later reader has to infer it: a cluster is CLOSED only when the old declarations
+are deleted, and every commit deletes the declaration it replaces in the same
+change. A site that cannot migrate because the mechanism lacks its filter is a
+reason to extend the mechanism in that commit, never a reason to leave the site
+behind.
+
+### two-more-uncounted-selection-sites | high | the third sweep still missed sites
+
+The same verification found two derivations that appear on no previous list,
+after three sweeps by two different readers. One lives in a role-override test
+and filters for a lane advertising MORE THAN ONE model, because a test that
+overrides between entries needs two to choose from - a third filter the mechanism
+must express rather than let that site keep its own copy. The other lives in the
+CLI live tests and returns a different shape entirely, an entry rather than a
+selection reference. Neither matches the naming the earlier sweeps keyed on; both
+were found only by searching for what code DOES with the served payload. Recorded
+as a finding about the discriminator, not the sites: a list that has missed
+members three times should be treated as incomplete by default, and any further
+site found is evidence of that rather than a surprise.
 
 ## Recommendations
 

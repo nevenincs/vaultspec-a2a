@@ -31,6 +31,7 @@ from ...database import list_threads
 from ...graph.enums import Provider
 from ...providers.model_profiles import probe_provider_readiness
 from ...streaming.aggregator import EventAggregator
+from ...testing.catalog_selection import in_process_selection
 from ..routes.gateway import admission_gate
 from .conftest import make_app
 
@@ -81,33 +82,22 @@ async def _apply_sql_trace_callback(
 _PRESET = "mock-success-single"
 
 
-async def _first_selectable_catalog_selection(
+async def _in_process_catalog_selection(
     client: httpx.AsyncClient,
 ) -> tuple[JsonObject, str]:
-    """Read one genuinely served lane and return its public selection reference."""
+    """Read one genuinely served in-process lane as a public selection reference.
+
+    In-process rather than merely selectable: these tests assert on gateway
+    verbs - replay, conflict, cancellation - and make no provider claim, so the
+    lane that answers must be one that bills nothing. The suite's catalog
+    service arms those lanes for exactly this reason.
+    """
     workspace_root = str(Path.cwd())
     response = await client.get(
         "/v1/provider-catalog", params={"workspace_root": workspace_root}
     )
     assert response.status_code == 200, response.text
-    providers = response.json()["providers"]
-    record = next(
-        item
-        for item in providers
-        if item["health"]["selectable"] and item["catalog"]["models"]
-    )
-    catalog = record["catalog"]
-    return (
-        {
-            "schema_version": 1,
-            "provider_id": record["provider_id"],
-            "execution_mode": record["execution_mode"],
-            "catalog_revision": catalog["state"]["revision"],
-            "entry_id": catalog["models"][0]["entry_id"],
-            "controls": {},
-        },
-        workspace_root,
-    )
+    return in_process_selection(response.json()), workspace_root
 
 
 async def _run_fields(client: httpx.AsyncClient) -> dict[str, object]:
@@ -126,7 +116,7 @@ async def _run_fields(client: httpx.AsyncClient) -> dict[str, object]:
     # Borrowing the caller's budget made a cold probe look like an unresponsive
     # gateway. Subsequent reads are served from the catalog's own cache.
     async with httpx.AsyncClient(base_url=client.base_url, timeout=120.0) as probe:
-        selection, workspace_root = await _first_selectable_catalog_selection(probe)
+        selection, workspace_root = await _in_process_catalog_selection(probe)
     return {"selection": selection, "metadata": {"workspace_root": workspace_root}}
 
 
@@ -1785,9 +1775,7 @@ async def test_modern_selection_insert_race_and_direct_replay_disclose_same_free
             _live_server(app) as base,
             httpx.AsyncClient(base_url=base, timeout=30.0) as client,
         ):
-            selection, workspace_root = await _first_selectable_catalog_selection(
-                client
-            )
+            selection, workspace_root = await _in_process_catalog_selection(client)
             payload = {
                 "team_preset": _PRESET,
                 "message": "same durable intention",

@@ -5,7 +5,7 @@ tags:
 date: '2026-08-04'
 modified: '2026-08-04'
 body_schema: 'body-v1'
-body_hash: 'sha256:819b2100e4cdf5c425281ef8aefca4b39e7077284314baec0eb5ff30354dbaa1'
+body_hash: 'sha256:79e30ecd1cd5ba7e8b616a293d030e197f7c12ab8c495eb2368e92f6b0b026ae'
 related: []
 ---
 
@@ -1314,6 +1314,52 @@ serialisation seam is used by both sides of the boundary. Recorded as coverage
 and as a second example, after the graph and compiler sweep, that the discipline
 this campaign installs is already present in parts of the codebase rather than
 being imposed on all of it.
+
+### one-name-two-opposite-contracts | critical | worse than duplication, and it read as duplication
+
+The provider catalog cluster closed with a find that outranks its own moves. A
+text-reading helper appears in four catalog modules under one identifier. Three
+of them REFUSE a missing or wrongly-typed value and cap its length. The fourth
+returns nothing instead and applies no cap. Same name, opposite contract.
+
+That is worse than plain duplication and it presents as duplication, which is the
+trap: a reader who learns the name in one module carries a wrong belief into the
+others, and the type checker agrees with them because both signatures are
+plausible. The resolution was to make the name state which contract it is - a
+required reader and an optional one, separately named - rather than to fold four
+things into three-plus-a-special-case. Recorded as the sharpest verdict class in
+this campaign: not DUPLICATE, not DISTINCT, but a name collision hiding a
+contract difference.
+
+A second DISTINCT was protected in the same visit: one lane reads a missing
+collection as empty while another refuses it. Collapsing would have silently
+changed a lane's contract.
+
+The cluster was also wider than issued - four modules, not the three scoped, and
+a home skipping the fourth would have re-created the problem it closed. That is
+the SIXTH inventory in this campaign materially wrong on first issue, and every
+lane that tested the rule has vindicated it.
+
+### two-lanes-in-one-cluster | high | an orchestration failure that briefly broke a module
+
+While one lane executed the catalog cluster, another writer applied part of the
+same planned moves to the same files, leaving a module referencing a name that
+had been deleted without its import wired. The state converged before either
+committed, and the executing lane re-ran every gate against the converged tree
+rather than trusting its earlier green - which is the only reason nothing broken
+landed.
+
+The cause is the assignment axis, again: work is assigned by CONCEPT while
+contention happens by FILE, and in a single shared worktree those are different
+partitions. This is the second occurrence, and the earlier one is already
+recorded; what this adds is that the collision produced actual breakage rather
+than only idle time, and that the defence was a lane distrusting its own passing
+gate.
+
+Which yields the standing property worth stating plainly: in this tree, type-check
+and test results have a shelf life of MINUTES. Two diagnostics observed from the
+orchestrator's own run vanished on re-run, from a lane mid-edit in the same
+files. Gates belong immediately before staging and nowhere else.
 
 ## Recommendations
 

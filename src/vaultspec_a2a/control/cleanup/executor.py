@@ -26,6 +26,7 @@ import pathlib
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, TypeIs
 
+from ...ipc.schemas import canonical_project_root
 from ...thread.enums import CleanupKind
 from ..repositories import (
     CleanupItem,
@@ -81,8 +82,15 @@ def _workspace_root_from_thread(thread: Any) -> pathlib.Path | None:
 
     The root is read from the thread's own metadata so containment is judged
     against the checkout the thread declared, and only an existing directory is
-    returned so a stale or missing root refuses every artifact rather than
-    resolving relative paths against the process working directory.
+    returned so a stale or missing root refuses every artifact.
+
+    A RELATIVE stored root is refused rather than resolved, which this docstring
+    claimed before the code did it: resolving one anchors containment to whatever
+    directory this process happens to be serving from, so a stale root that
+    happens to name an existing path there would go on to decide which artifacts
+    count as contained. The rule is not restated here - the run's project minting
+    function owns "absolute, or refuse", and asking it is what keeps this reader
+    agreeing with every other reader of the same column.
     """
     metadata_json = getattr(thread, "thread_metadata", None)
     if not metadata_json:
@@ -94,9 +102,12 @@ def _workspace_root_from_thread(thread: Any) -> pathlib.Path | None:
     if not _is_json_object(meta):
         return None
     workspace_root_str = meta.get("workspace_root")
-    if not workspace_root_str or not isinstance(workspace_root_str, str):
+    if not isinstance(workspace_root_str, str):
         return None
-    workspace_root = pathlib.Path(workspace_root_str).resolve()
+    try:
+        workspace_root = pathlib.Path(canonical_project_root(workspace_root_str))
+    except ValueError:
+        return None
     if not workspace_root.is_dir():
         return None
     return workspace_root

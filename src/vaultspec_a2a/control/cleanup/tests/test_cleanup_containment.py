@@ -16,6 +16,8 @@ while removal still proceeds for legitimate siblings.
 from __future__ import annotations
 
 import json
+import pathlib
+from contextlib import chdir
 from typing import TYPE_CHECKING
 
 import pytest
@@ -28,8 +30,6 @@ from ....control.cleanup import (
 from ....database.models import ArtifactModel, ThreadModel
 
 if TYPE_CHECKING:
-    import pathlib
-
     from ....control.repositories import CleanupItemResult
 
 
@@ -88,6 +88,41 @@ async def test_absolute_path_outside_the_workspace_is_refused(
     await _run_cleanup(_thread(workspace), [_artifact(str(outsider))])
 
     assert outsider.read_text(encoding="utf-8") == "precious"
+
+
+@pytest.mark.asyncio
+async def test_a_relative_workspace_root_is_refused_rather_than_resolved(
+    tmp_path: pathlib.Path,
+) -> None:
+    """A relative stored root must not be anchored to the serving process's cwd.
+
+    Containment is judged against the checkout the thread declared. A relative
+    root has no such checkout - it names a different directory for every process
+    that reads it - so resolving one would let the gateway's own working
+    directory decide which files count as inside the workspace.
+
+    The test runs from a directory where that relative root DOES name a real
+    workspace holding a real file, which is the only condition under which the
+    old behaviour was destructive: resolve it and the file is contained and gets
+    unlinked. The liveness assertion below is what keeps this honest - without
+    it, a refusal for some unrelated reason would look identical.
+    """
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    target = workspace / "generated.txt"
+    target.write_text("precious", encoding="utf-8")
+    thread = ThreadModel(
+        id="t-cleanup", thread_metadata=json.dumps({"workspace_root": "workspace"})
+    )
+
+    with chdir(tmp_path):
+        assert pathlib.Path("workspace").resolve() == workspace.resolve(), (
+            "the trap must be live: the relative root has to name the real "
+            "workspace from here, or this test proves nothing"
+        )
+        await _run_cleanup(thread, [_artifact("generated.txt")])
+
+    assert target.read_text(encoding="utf-8") == "precious"
 
 
 @pytest.mark.asyncio

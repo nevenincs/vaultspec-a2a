@@ -5,7 +5,7 @@ tags:
 date: '2026-08-04'
 modified: '2026-08-04'
 body_schema: 'body-v1'
-body_hash: 'sha256:46b8aeca3ec4aa37c74d9e4cbd9f0cd42a3f7afe7d3ba8f5a11c0f4248bf6f69'
+body_hash: 'sha256:82e063eafe03ebefff9240788f66738d0f27b449a140aaa4a9da97421d6ef56a'
 related: []
 ---
 
@@ -609,6 +609,35 @@ touched them was mine. That is the same failure as the earlier port-probe verdic
 answered with the commit list rather than accepting it. Recorded because two
 instances in one campaign is a pattern, not an accident, and because a
 correction that arrives only when someone pushes back is not a working practice.
+
+### gateway-mints-a-credential-nobody-can-learn | high | not fragmentation, found by chasing it
+
+The shared service harness could not authenticate to the versioned router at all,
+and the cause is worth recording because it is not what the recipe assumed. The
+gateway falls back to minting a random per-process service token when none is
+configured. That is safe by default and correct for a gateway nobody is meant to
+reach, but it means a harness sharing the process's own machine has no way to
+learn the credential it must present - so the failure surfaces as an
+authorization refusal rather than as a configuration one. An unconfigured
+gateway that refused with a not-configured status would have been diagnosable;
+one that mints a secret and then rejects everyone reads as a broken route. The
+fix is to declare the bearer rather than to seed a desktop credential store, and
+deliberately as a second constant rather than reusing the worker interprocess
+secret, because the configuration is explicit that those planes must never
+alias. Dark since 2026-07-19, same day as the run-identifier requirement.
+Broken-on-arm.
+
+### live-proof-owed-on-two-harness-commits | medium | proven at the seam, not by a run
+
+Recorded so it is not mistaken for completed work. The harness schema fix and the
+authentication fix are both landed and both proven only offline - the first by
+parsing the committed source and validating the body it builds against the
+production request model, the second by comparing the configured bearer against
+what the authenticating path would expect, using the real settings object. Both
+are the right proofs for the seam they target and neither proves a run completes.
+The live run is blocked on an unrelated in-flight rehoming that has left the
+working tree unable to collect the suite. Nothing past that gate has executed
+since 2026-07-19, so more is expected to surface behind it once it clears.
 
 ## Recommendations
 

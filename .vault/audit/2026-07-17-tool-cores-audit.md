@@ -1020,3 +1020,37 @@ it now bounds a HUNG build rather than a slow one.
   several ACP lanes time out, and it is what made a small budget look reasonable
   and behave badly. A negative cache entry with its own short expiry would make
   the warm path actually warm.
+
+## Partially closed (2026-08-04): the ambient database on the durable event path
+
+The HIGH finding above is fixed at its worst edge and blocked at its last one.
+
+Fixed in `e52069a6`: the relay handlers no longer MANUFACTURE a database. They
+ask for the application factory instead of `get_session_factory()`, which creates
+an engine from ambient settings when none was initialized, and they skip the
+durable write loudly when there is none.
+
+That fix uncovered a regression it would otherwise have shipped. `init_db` passed
+an explicit engine, and `get_session_factory` deliberately leaves the singleton
+alone for an explicit engine, so a fully booted gateway reported NO database - and
+the new skip would have dropped every durable projection in silence. Strictly
+worse than the defect. `init_db` now seats the singleton, with both halves pinned:
+initialising seats the process factory, an explicit engine still does not adopt
+the process.
+
+**Still open, and blocked on a contended file.**
+`api/tests/test_internal.py::TestInternalEvents::test_batch_with_aggregator_only_returns_ok`
+passes in isolation (44/44) and fails in a full `api/tests` session. The cause is
+not the handler any more, it is the question the handler is forced to answer:
+"this app declared no database" and "this app did not inject one, use the
+process's" arrive identically as `session_factory=None`. In a full session an
+unrelated test has already seated the process singleton, so the bare app finds a
+database it never had.
+
+Closing it needs the gateway to seat `app.state.db_session_factory` at boot,
+making an app's database an app-level fact, after which the ambient consult can
+be removed entirely. That edit is in `api/app.py`, which is held uncommitted by
+another lane and was not touched.
+
+The `workspace_root` migration in the same file remains that lane's: its
+`_WORKSPACE` edits are uncommitted and passing.

@@ -5,7 +5,7 @@ tags:
 date: '2026-08-04'
 modified: '2026-08-04'
 body_schema: 'body-v1'
-body_hash: 'sha256:c990cf4f4c246163205620480e49b7834512cedfa73628ed18910cbb35e5fd23'
+body_hash: 'sha256:61a028098766a2e9b4ee11969bbafe2804f8c3e564a12f5318391b92b8dc3703'
 related: []
 ---
 
@@ -5616,3 +5616,82 @@ Recorded because the failure is symmetrical and cheap to repeat: a probe that
 demonstrates a refusal proves nothing unless it can show WHICH constraint refused.
 A green probe and a red probe are equally capable of being right for the wrong
 reason.
+
+### none-of-them-was-entitled-to-a-number | high | the sharpest statement of what a fork may keep
+
+Consolidating four declarations of an option-count cap produced the clearest
+answer this campaign has reached to the question it keeps asking - what may a
+caller legitimately keep when its copy is retired.
+
+Each lane refuses over-long option lists EARLY, in its own protocol dialect,
+before the domain object is built. That refusal is an ERROR MAPPING and each lane
+keeps it. **What no lane was entitled to is the NUMBER.**
+
+The argument is exact rather than stylistic. A lane bound ABOVE the model builds a
+control the model then rejects with a bare constructor error - the caller loses its
+dialect and gets an internal failure. A lane bound BELOW the model refuses
+catalogs the model would have accepted, for a reason stated nowhere. **Only exact
+agreement is defensible**, and a value that must agree exactly with another
+module's is that module's to declare.
+
+Same split as the credential-gate consolidation: the RULE moves to one home, the
+MAPPING stays with each caller. That pairing has now resolved three clusters here,
+and it is the general shape - when callers differ in how they REPORT a violation
+but must not differ in WHEN one occurs, the threshold is shared and the reporting
+is not.
+
+No fork carried anything the home lacked, checked before substituting rather than
+assumed - which matters because the two previous clusters where that check was run
+both found something.
+
+### the-damage-demonstrated-rather-than-argued | high | strengthens the derivation-proof technique
+
+The derivation proof recorded earlier - perturb the source of truth, change no
+code, require the consumer to move - was applied by the lane that invented it, to
+a different cluster, and then extended.
+
+First the positive control: the authority alone was moved to a small value with no
+lane touched, and every case still passed, meaning all three lanes now refuse at
+the new threshold. A lane still holding a private copy could not have moved.
+
+Then the extension, which is new: one lane was given its private copy back while
+the authority stayed low. **Exactly one case failed - that lane's - while the
+other two stayed green**, proving the lanes are measured independently rather than
+against each other. And the failure was the PREDICTED HARM itself: a bare
+constructor error raised from the MODEL, because the lane passed an oversized
+collection through instead of refusing it in its own dialect.
+
+So the probe does not merely show that a drifted copy is detectable. **It exhibits
+the exact damage a drifted copy does**, in the form the user would see it. That is
+a stronger artifact than a failing assertion, and it is reusable wherever a
+consolidation claims to prevent a specific harm rather than merely to tidy.
+
+### writing-the-admitted-case-caught-a-test-asserting-nothing | high | third instance, and the cheapest guard against it
+
+The new test drives each lane through its real entry point with real payloads:
+exactly the cap admitted, one more refused in that lane's dialect. **Writing the
+ADMITTED half is what caught that the first payload produced zero controls at
+all** - a session advertising no models yields nothing to bound, so the refusal
+half passed while asserting nothing about the cap.
+
+Third time in this campaign that the admitted case caught a green test asserting
+nothing, after the bound round-trip and the frame-content assertion. The pattern
+is now unambiguous: **a refusal-only test cannot distinguish "the bound refused"
+from "there was nothing to bind"**, and the admitted case is what separates them.
+It costs one assertion and has caught three vacuous tests.
+
+### seven-more-shadows-and-one-that-must-not-be-swept | medium | reported, not fixed
+
+The same disease sits on two neighbouring concepts in the same files - a
+model-count cap shadowed in four modules (one of them a fourth provider the option
+cluster did not touch) and a control-count cap shadowed in three.
+
+**It requires reading rather than sweeping, and one site proves why.** A lane
+deliberately passes the bound PLUS ONE to detect overflow. Local arithmetic on a
+shared bound is legitimate there, and a mechanical substitution that normalised it
+would break an overflow check while looking like a tidy-up.
+
+Recorded also for a smaller reason worth stating: retiring the option cap while
+leaving these makes three files visibly inconsistent - one imported public bound
+sitting beside two private shadows. That inconsistency is an improvement over
+hidden agreement, because it is now discoverable by reading a single file.

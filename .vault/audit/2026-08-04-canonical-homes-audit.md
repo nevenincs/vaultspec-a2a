@@ -5,7 +5,7 @@ tags:
 date: '2026-08-04'
 modified: '2026-08-04'
 body_schema: 'body-v1'
-body_hash: 'sha256:2d1d38d6fb89fd2be1c2ddd49291e9ee366d1dd9dd5a6bda245481d5fe5f9c6b'
+body_hash: 'sha256:82a8683158a355f8094cbea9ad81721f7272bd062cd9671977fd10bb0f586575'
 related: []
 ---
 
@@ -1021,6 +1021,58 @@ commit ahead of batching, and refusing the partial move that would have left one
 declaration alive out of eleven. Recorded as an orchestration finding because the
 cost was real - a productive lane idle twice - and the cause was assignment
 granularity, not any lane's conduct.
+
+### correction-the-assertion-family-was-not-one-cluster | high | the count was mine, and the rule caught it
+
+The entry above described a four-function family as roughly twenty-five
+byte-identical declarations. That was derived by comparing three declarations and
+generalising, and the three happened to share a dialect. Re-derived at commit
+time, the family splits: the two narrowing functions raise one error type in four
+files and a different one in five, one module SELF-TESTS its error type in three
+places so the vocabulary is asserted behaviour rather than incidental drift, one
+variant treats an absent value as an empty list, and the acceptance tier's
+same-named readers take a bare value rather than a body-and-field pair with one
+additionally requiring non-empty text. Four contracts wearing four identical
+names.
+
+Only the provably exact subset was landed: two functions, eight declarations
+across four files, byte-identical bodies and failure text, nothing self-testing
+them, now in one home with the old definitions deleted and seventy-nine call
+sites reaching it. The neighbours were left, and the new module records WHY -
+an unexplained omission is what invites the next reader to finish the job by
+flattening a dialect two suites assert on.
+
+Recorded as a correction because it is the fifth wrong count in this campaign and
+the first raised by the lane that made it, using the rule it had been asking
+others to follow. A re-derivation that catches your own number is the rule
+working; one that only ever catches someone else's is a habit of suspicion.
+
+### the-json-narrowing-home-already-exists | high | and one test already imports it
+
+The open question was whether the test-tier narrowing should raise an assertion
+error rather than a type error, and it is answered by a fact neither side had
+checked: the production closed-JSON contract module ALREADY exports the three
+narrowing functions, and one service test already imports them from it directly.
+So the type-error vocabulary is not a test-suite convention that drifted - it is
+the production contract's own, and the self-tests are asserting that contract
+rather than a local habit.
+
+The ruling follows from the fact rather than from the argument: converge the
+remaining sites onto the existing home and keep its vocabulary. Minting a second
+test-tier family beside a canonical home already in use would manufacture the
+exact fragmentation this campaign exists to remove, and the self-tests then need
+no amendment at all - which is the signal that the move is toward the real home.
+The sites that change error type are a behaviour change and must be declared as
+one, justified as convergence onto an existing production contract rather than a
+new invention. Two carve-outs stay out of it: an optional-list variant is a
+different contract and survives only as its own named function, and the
+acceptance readers' different shape and non-empty requirement need verifying
+before any fold.
+
+This also converges with the untyped-narrowing cluster recorded earlier - ten
+production declarations under four private names across four layers. That cluster
+named this same module as its natural home. The two are one home, approached from
+the test tier and the production tier independently.
 
 ## Recommendations
 

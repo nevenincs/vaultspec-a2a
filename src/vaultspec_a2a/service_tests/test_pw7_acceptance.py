@@ -93,6 +93,7 @@ from ..control.run_start_policy import required_role_ids
 from ..graph.enums import PermissionOptionKind, ToolKind
 from ..team.team_config import load_team_config
 from ..testing import resolve_gateway_url
+from ..testing.catalog_selection import NoSelectableLaneError, in_process_selection
 from ._provider_catalog_live import (
     LIVE_PROVIDER_CATALOG_SELECTION_ENVIRON,
     LIVE_PROVIDER_OVERRIDE_SELECTION_ENVIRON,
@@ -459,47 +460,24 @@ async def _served_catalog(gateway_url: str, workspace_root: str) -> JsonObject:
     return _json_object(response.json(), at="gateway provider-catalog response")
 
 
-def _any_selectable_lane(catalog: JsonObject) -> JsonObject:
-    """Pick any lane the gateway reports selectable, for a provider-agnostic case.
+def _deterministic_selection(catalog: JsonObject) -> JsonObject:
+    """Select an in-process lane for a case that makes no provider claim.
 
-    Used only by the deterministic lanes, whose claim is about the document loop
-    and its gates, not about which provider produced the text. Choosing here is
-    therefore not the model-ranking this suite refuses elsewhere - there is no
-    provider claim to get wrong.
+    The deterministic lanes assert on the document loop and its gates, not on
+    which provider produced the text, so any in-process lane satisfies them.
+    "Any SELECTABLE lane" is a different and much wider thing: on a host holding
+    a live provider session that resolves to a real metered lane, which would
+    have this suite billing a provider for a case whose whole point is that no
+    provider claim is being made. The mechanism cannot return one.
     """
-    providers = _json_object_list(
-        catalog.get("providers"), at="served provider-catalog providers"
-    )
-    lanes = [
-        record
-        for record in providers
-        if _json_object(record.get("health"), at="lane health").get("selectable")
-        and _json_object(record.get("catalog"), at="lane catalog").get("models")
-    ]
-    if not lanes:
+    try:
+        return in_process_selection(catalog)
+    except NoSelectableLaneError as exc:
         pytest.skip(
-            "the served provider catalog advertises no selectable lane on this "
-            "host, so no run can present a valid selection. Arm the in-process "
-            "lane for the deterministic cases by exporting "
-            "VAULTSPEC_SERVE_IN_PROCESS_LANES=true on the gateway, or configure a "
-            "real provider lane."
+            f"a deterministic case cannot present a valid selection: {exc}. "
+            "Cases that DO make a provider claim declare their lane explicitly "
+            "instead."
         )
-    return lanes[0]
-
-
-def _selection_body(lane: JsonObject) -> JsonObject:
-    """Render one served lane into the run-start selection wire."""
-    lane_catalog = _json_object(lane.get("catalog"), at="selected lane catalog")
-    state = _json_object(lane_catalog.get("state"), at="selected lane catalog state")
-    models = _json_object_list(lane_catalog.get("models"), at="selected lane models")
-    return {
-        "schema_version": 1,
-        "provider_id": lane.get("provider_id"),
-        "execution_mode": lane.get("execution_mode"),
-        "catalog_revision": state.get("revision"),
-        "entry_id": models[0].get("entry_id"),
-        "controls": {},
-    }
 
 
 async def _resolve_selection(
@@ -519,7 +497,7 @@ async def _resolve_selection(
     catalog = await _served_catalog(gateway_url, workspace_root)
 
     if case.lane_provider is None and not case.requires_live_selection:
-        return _selection_body(_any_selectable_lane(catalog)), {}
+        return _deterministic_selection(catalog), {}
 
     if not live_provider_catalog_selector_is_configured():
         claim = (

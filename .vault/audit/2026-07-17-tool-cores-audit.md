@@ -738,7 +738,7 @@ Still stated as an inference, because the one thing not yet observed is
 `broker.commit`'s own outcome for a bogus id. Logging that outcome answers it
 outright, and is the single remaining step.
 
-**LOCATED (same session).** Instrumenting `broker.commit`'s own verdict settled
+**LOCATED - WITHDRAWN (same session).** Instrumenting `broker.commit`'s own verdict settled
 it, and disproved the inference immediately above as well. The run logs exactly
 ONE verdict - `committed=True` for the real reservation - and none for the bogus
 one. So `broker.commit` is NOT wrongly admitting an unknown reservation; it is
@@ -762,4 +762,28 @@ Three inferences were drawn from reading this path today and all three were
 wrong - eligibility ordering, catalog scope capacity, and a permissive broker.
 Each was corrected by one instrument, and the instruments cost three lines each.
 The disclosures are retained in the code for that reason.
+
+**The "located" claim above is WITHDRAWN too.** It asserted the refusal comes
+from a gate in the shared part of `run_start_endpoint` before the stage is
+selected. There is no such gate: stage dispatch sits at lines 320-327 with
+nothing preceding it. The gate's existence was inferred from the ABSENCE of a
+broker verdict and then written up as a location.
+
+So the standing facts are only these, each observed:
+
+- The eligibility gate never fires (instrumented).
+- The catalog workspace-scope bound never fires (instrumented).
+- `broker.commit` is never reached for the bogus reservation (instrumented).
+- No 503 is raised anywhere between entering `_run_commit_locked` and
+  `broker.commit`, and nothing gates the stage dispatch above it (read).
+
+Those cannot all be true of the code as read, which means the reading is wrong
+somewhere rather than the observations being wrong. The unexamined candidate is
+`_run_commit` itself (`:659`) - the per-run stripe lock it takes before
+delegating to `_run_commit_locked` - which was checked for `raise` statements
+but not for what it does when a lock cannot be acquired.
+
+Four inferences about this path today, four wrong, every one corrected by an
+instrument. The next person should not read further code: instrument
+`_run_commit`'s entry and exit and let the run say it.
 

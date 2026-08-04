@@ -5,7 +5,7 @@ tags:
 date: '2026-08-04'
 modified: '2026-08-04'
 body_schema: 'body-v1'
-body_hash: 'sha256:d5fa3d3fe487410aa68c19878fb5431b5ccde800443979ed4b501ffc910c1b1b'
+body_hash: 'sha256:2d1d38d6fb89fd2be1c2ddd49291e9ee366d1dd9dd5a6bda245481d5fe5f9c6b'
 related: []
 ---
 
@@ -978,6 +978,49 @@ be right. It is recorded as a candidate for its own decision rather than folded
 into this campaign, because it is a behaviour change to certification timing
 wearing a rehoming's clothes - the same trap as converting the gateway readiness
 budget, which was declined earlier for the same reason.
+
+### json-assertion-helper-family | high | twenty-five declarations, and a name-alike that must not join them
+
+A four-function family for asserting the shape of a service response body -
+narrowing to an object, to a list of objects, to required text, to a required
+object, each taking the value and a locator string - is declared about
+twenty-five times across eleven test files. Duplication was proven rather than
+asserted: three declarations compared side by side are byte-identical apart from
+docstring wording, with the same body, the same error types and the same message
+strings. Two files carry variant parameter spellings of the same functions, which
+is part of why the family was hard to count at all and is folded in rather than
+excluded.
+
+The guardrail matters more than the cluster. A same-named family exists in the
+provider protocol modules and is a DIFFERENT concept: it narrows an optional JSON
+value inside production protocol handling, not a test assertion over a service
+response. A sweep keying on the name would merge production narrowing with test
+assertions - the flattening class this campaign keeps coming close to
+committing. Recorded before the move, so the boundary is written down where the
+mover will see it.
+
+### the-inventory-was-wrong-a-fifth-time | medium | issued as four files, re-derived as eleven
+
+This cluster was handed over as "three service tests plus acceptance" and
+re-derived from source as twenty-five declarations across eleven files. That is
+the fifth count in this campaign to be materially wrong when first issued, across
+four different concepts and several readers. The standing rule holds and is
+earning itself: re-derive immediately before the commit that closes a cluster,
+and treat any list - including one from the orchestrator - as provisional.
+
+### too-many-lanes-in-one-worktree | medium | a coordination finding, and it is the orchestrator's
+
+Three of one lane's last four pickups were already occupied by another lane
+working in the same files, and two clusters were blocked simultaneously: one
+entirely, because a complete move spanned three modules and two were held; one by
+a single file out of eleven. No lane did anything wrong - the assignments were
+made by concept while contention happens by FILE, and in a single shared worktree
+those are different partitions. The mitigations that worked were sequencing
+rather than parallelism: asking the holding lane to land one file as its own
+commit ahead of batching, and refusing the partial move that would have left one
+declaration alive out of eleven. Recorded as an orchestration finding because the
+cost was real - a productive lane idle twice - and the cause was assignment
+granularity, not any lane's conduct.
 
 ## Recommendations
 

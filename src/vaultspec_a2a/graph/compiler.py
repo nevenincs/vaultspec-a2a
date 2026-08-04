@@ -41,6 +41,7 @@ from ..authoring.contract import RESEARCH_ADR_ROLES, is_document_authoring_role
 from ..providers.conditions import ProviderCondition, condition_is_retryable
 from ..thread.clarification import (
     CLARIFICATION_TOPOLOGIES,
+    MAX_REQUEST_ID_CHARS,
     ClarificationRequest,
     topology_honours_clarification,
 )
@@ -372,7 +373,19 @@ def _resolve_model_for_worker(
             # provider the run is actually using.  Reporting the configured
             # primary would be worse than reporting nothing — a null reads as
             # unknown, a confidently wrong provider reads as fact.
-            return model, p, capability, None
+            #
+            # The model name obeys the same rule, which is why it mirrors the
+            # ``model=`` expression above rather than being returned outright:
+            # only the PRIMARY provider was built from the frozen catalog name,
+            # so only it may disclose one.  A fallback was built from the
+            # capability tier and has no catalog identity to report, and naming
+            # the frozen one there would assert a model that never ran.
+            return (
+                model,
+                p,
+                capability,
+                frozen_model_name if p == primary_provider else None,
+            )
         except ValueError as exc:
             logger.warning(
                 "Provider %s unavailable for worker %s: %s",

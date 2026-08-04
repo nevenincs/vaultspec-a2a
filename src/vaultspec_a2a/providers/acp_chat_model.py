@@ -15,7 +15,6 @@ Architecture:
 """
 
 import asyncio
-import json
 import logging
 import shutil
 import sys
@@ -54,6 +53,7 @@ from ._acp_authoring import (
 )
 from ._acp_mcp import harness_spawn_env
 from ._acp_protocol import process_stdout_loop
+from ._acp_request import await_response, issue_request
 from ._acp_rpc_handlers import (
     on_fs_read_text_file,
     on_fs_write_text_file,
@@ -626,18 +626,15 @@ class AcpChatModel(BaseChatModel):
             # session/cancel must be a proper JSON-RPC (with id) and awaited with a
             # 3-second timeout so the subprocess flushes its state before the kill.
             rpc_id = AcpRequestId.SESSION_CANCEL
-            loop = asyncio.get_running_loop()
-            ctx.response_futures[rpc_id] = loop.create_future()
-            req = {
-                "jsonrpc": "2.0",
-                "id": rpc_id,
-                "method": "session/cancel",
-                "params": {"sessionId": self._active_session_id},
-            }
-            async with ctx.stdin_lock:
-                ctx.stdin.write(json.dumps(req).encode("utf-8") + b"\n")
-                await ctx.stdin.drain()
-            await asyncio.wait_for(ctx.response_futures[rpc_id], timeout=3.0)
+            future = await issue_request(
+                ctx.response_futures,
+                stdin=ctx.stdin,
+                stdin_lock=ctx.stdin_lock,
+                rpc_id=rpc_id,
+                method="session/cancel",
+                params={"sessionId": self._active_session_id},
+            )
+            await await_response(future, timeout=3.0)
 
         async def _cancel_background_tasks() -> None:
             for task in list(ctx.background_tasks):
@@ -783,20 +780,16 @@ class AcpChatModel(BaseChatModel):
         """Fork the current session."""
         sid = self._require_session()
         rpc_id = AcpRequestId.SESSION_FORK
-        futures = self._require_response_futures()
-        futures[rpc_id] = asyncio.get_running_loop().create_future()
-        req: JsonObject = {
-            "jsonrpc": "2.0",
-            "id": rpc_id,
-            "method": "session/fork",
-            "params": {"sessionId": sid},
-        }
-        stdin = self._require_stdin()
-        async with self._stdin_lock:
-            stdin.write(json.dumps(req).encode("utf-8") + b"\n")
-            await stdin.drain()
-        resp = await asyncio.wait_for(
-            futures[rpc_id], timeout=settings.acp_startup_timeout_seconds
+        future = await issue_request(
+            self._require_response_futures(),
+            stdin=self._require_stdin(),
+            stdin_lock=self._stdin_lock,
+            rpc_id=rpc_id,
+            method="session/fork",
+            params={"sessionId": sid},
+        )
+        resp = await await_response(
+            future, timeout=settings.acp_startup_timeout_seconds
         )
         return _required_session_id(
             lenient_json_object(resp.get("result")), operation="fork"
@@ -806,21 +799,15 @@ class AcpChatModel(BaseChatModel):
         """List all sessions."""
         self._require_session()
         rpc_id = AcpRequestId.SESSION_LIST
-        futures = self._require_response_futures()
-        futures[rpc_id] = asyncio.get_running_loop().create_future()
-        req: JsonObject = {
-            "jsonrpc": "2.0",
-            "id": rpc_id,
-            "method": "session/list",
-            "params": {},
-        }
-        stdin = self._require_stdin()
-        async with self._stdin_lock:
-            stdin.write(json.dumps(req).encode("utf-8") + b"\n")
-            await stdin.drain()
-        resp = await asyncio.wait_for(
-            futures[rpc_id], timeout=settings.acp_rpc_timeout_seconds
+        future = await issue_request(
+            self._require_response_futures(),
+            stdin=self._require_stdin(),
+            stdin_lock=self._stdin_lock,
+            rpc_id=rpc_id,
+            method="session/list",
+            params={},
         )
+        resp = await await_response(future, timeout=settings.acp_rpc_timeout_seconds)
         return lenient_json_object_list(
             lenient_json_object(resp.get("result")).get("sessions")
         )
@@ -829,21 +816,15 @@ class AcpChatModel(BaseChatModel):
         """Set agent mode."""
         sid = self._require_session()
         rpc_id = AcpRequestId.SESSION_SET_MODE
-        futures = self._require_response_futures()
-        futures[rpc_id] = asyncio.get_running_loop().create_future()
-        req: JsonObject = {
-            "jsonrpc": "2.0",
-            "id": rpc_id,
-            "method": "session/set_mode",
-            "params": {"sessionId": sid, "modeId": mode_id},
-        }
-        stdin = self._require_stdin()
-        async with self._stdin_lock:
-            stdin.write(json.dumps(req).encode("utf-8") + b"\n")
-            await stdin.drain()
-        resp = await asyncio.wait_for(
-            futures[rpc_id], timeout=settings.acp_rpc_timeout_seconds
+        future = await issue_request(
+            self._require_response_futures(),
+            stdin=self._require_stdin(),
+            stdin_lock=self._stdin_lock,
+            rpc_id=rpc_id,
+            method="session/set_mode",
+            params={"sessionId": sid, "modeId": mode_id},
         )
+        resp = await await_response(future, timeout=settings.acp_rpc_timeout_seconds)
         return lenient_json_object(resp.get("result"))
 
     async def authenticate(self, token: str) -> JsonObject:

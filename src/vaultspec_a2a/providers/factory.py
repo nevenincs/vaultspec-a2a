@@ -25,6 +25,7 @@ if TYPE_CHECKING:
 
     from ..team.team_config import AgentConfig
 
+from ..artifacts import ArtifactDeclaration, RetentionDisposition
 from ..control.config import settings
 from ..graph.enums import MODEL_MAP, PROVIDER_DEFAULT_MODELS, Model, Provider
 from ..thread.errors import ConfigError
@@ -49,6 +50,9 @@ from .provider_catalog import (
 )
 
 __all__ = [
+    "ARTIFACT_DECLARATIONS",
+    "GEMINI_SESSION_STORE_DECLARATION",
+    "KIMI_SESSION_STORE_DECLARATION",
     "ProviderCatalogDiscovery",
     "ProviderCatalogRegistration",
     "ProviderFactory",
@@ -57,6 +61,70 @@ __all__ = [
 ]
 
 logger = logging.getLogger(__name__)
+
+
+# Gemini and Kimi keep their own project-partitioned session stores, in homes
+# THIS module decides (``_build_gemini_env`` seats GEMINI_CLI_HOME,
+# ``_build_kimi_env`` seats KIMI_CODE_HOME) and reached by CLIs THIS module
+# spawns. Neither store sits under the sweep root in ``_config_home_roots`` nor
+# matches its prefixes, so no reaper here has ever seen them.
+#
+# The dominant producer is not a run - it is ``catalog_registrations`` below.
+# Every external lane gets a registration whose discovery spawns the real CLI
+# rooted at the caller's workspace, so ONE catalog read spawns Gemini and Kimi
+# against that directory even when the caller wants neither. Each family's store
+# then keys the directory its own way, which is why one declaration cannot cover
+# them and why reclamation is unavailable on both (see each mechanism).
+GEMINI_SESSION_STORE_DECLARATION = ArtifactDeclaration(
+    name="gemini-cli-session-store",
+    root="<GEMINI_CLI_HOME, else operator ~/.gemini>/<project-partitioned tree>/",
+    owner="providers.factory",
+    disposition=RetentionDisposition.PERMANENT,
+    reason=(
+        "permanence is what this project can honestly promise rather than what "
+        "it would choose: the store belongs to the operator's Gemini CLI and "
+        "holds their own interactive sessions alongside anything a spawn here "
+        "produced. The key is the workspace directory's BASENAME with "
+        "underscores sanitized, which is far more collision-prone than a full "
+        "path - an operator's own directory sharing a basename with a discarded "
+        "temporary one is not merely hard to tell apart, it is the SAME entry. "
+        "No reclaim predicate can be built on a key that ambiguous"
+    ),
+    mechanism=(
+        "NOTHING bounds it. No sweep here reaches the home, no age gate applies, "
+        "and no equivalent of the Claude CLI's cleanupPeriodDays has been "
+        "verified for this lane, so growth is one entry per distinct workspace "
+        "basename ever discovered against, retained until an operator deletes it "
+        "by hand. Suppression, not reclamation, is the lever: spawning fewer "
+        "lanes at discovery would stop most entries being minted at all"
+    ),
+)
+
+KIMI_SESSION_STORE_DECLARATION = ArtifactDeclaration(
+    name="kimi-code-session-store",
+    root="<KIMI_CODE_HOME, else operator ~/.kimi-code>/<per-workspace partition>/",
+    owner="providers.factory",
+    disposition=RetentionDisposition.PERMANENT,
+    reason=(
+        "the store is the operator's, and on this lane orphanhood cannot even be "
+        "ESTABLISHED: the partition key is a one-way truncated digest of the "
+        "full working-directory path, so a key cannot be decoded back into the "
+        "directory it names and no reader here can ask whether that directory "
+        "still exists. A reclaim predicate needs a question this key cannot "
+        "answer, which is the strongest form of the argument that declaring, "
+        "not reaping, is the only mechanism that covers every lane"
+    ),
+    mechanism=(
+        "NOTHING bounds it, and nothing here can: see the reason above. Measured "
+        "volume is currently negligible - a single certification window - but "
+        "that is a fact about how rarely the lane is exercised, not a bound"
+    ),
+)
+
+ARTIFACT_DECLARATIONS: tuple[ArtifactDeclaration, ...] = (
+    GEMINI_SESSION_STORE_DECLARATION,
+    KIMI_SESSION_STORE_DECLARATION,
+)
 
 # Resolve the claude-agent-acp entry point from the project-level node_modules.
 # VAULTSPEC_PROJECT_ROOT controls the base; see Settings.project_root.

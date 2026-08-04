@@ -28,7 +28,10 @@ from ...providers import (
     _codex_config_home,
     _config_home_roots,
     acp_chat_model,
+    factory,
 )
+from ...providers.factory import ProviderFactory
+from ...providers.in_process_catalog import IN_PROCESS_EXECUTION_MODES
 from ...service_tests import harness
 from ...testing import leases
 from ...utils import logging as utils_logging
@@ -53,6 +56,7 @@ _DECLARING_MODULES: tuple[ModuleType, ...] = (
     _codex_config_home,
     _config_home_roots,
     acp_chat_model,
+    factory,
     harness,
     utils_logging,
     profile,
@@ -289,6 +293,58 @@ def test_the_acp_transcript_declares_an_enforcer_it_does_not_own() -> None:
     assert declaration.disposition is RetentionDisposition.BOUNDED_BY_AGE
     assert "cleanupPeriodDays" in declaration.mechanism
     assert "operator" in declaration.mechanism.lower()
+
+
+# Every external lane whose discovery or run spawns a real provider CLI leaves
+# that CLI's own state behind somewhere. The value is the mapping, not the list:
+# it records WHICH declaration answers for each family, so a new spawning lane
+# cannot be added without either a declaration or a deliberate edit here.
+_CLI_LANE_DECLARATIONS: dict[str, str] = {
+    "claude": "acp-cli-session-transcript",
+    "zai": "acp-cli-session-transcript",
+    "codex": "ephemeral-provider-home-root",
+    "gemini": "gemini-cli-session-store",
+    "kimi": "kimi-code-session-store",
+}
+"""Provider families that spawn a CLI, and the declaration answering for each."""
+
+_API_ONLY_LANES = frozenset({"openai", "zhipu"})
+"""Lanes reached over HTTP, which spawn nothing and so leave nothing behind."""
+
+
+def test_every_cli_spawning_lane_has_a_declaration_answering_for_it(
+    tmp_path: Path,
+) -> None:
+    """A lane that spawns a CLI and declares nothing is the original defect.
+
+    Building registrations spawns nothing - the discovery adapters are lambdas
+    and are not called here - so this reads the REAL served lane set rather than
+    a copy of it.  A lane added to the factory without a session-store
+    declaration lands in neither map and fails, which is the completeness
+    question the retention vocabulary exists to make answerable.
+    """
+    registrations = ProviderFactory().catalog_registrations(tmp_path)
+    served = {registration.key.provider_id for registration in registrations}
+    external = served - {
+        key.provider_id
+        for key in (registration.key for registration in registrations)
+        if key.execution_mode in IN_PROCESS_EXECUTION_MODES
+    }
+
+    unaccounted = external - set(_CLI_LANE_DECLARATIONS) - _API_ONLY_LANES
+    assert not unaccounted, (
+        f"these served lanes declare no provider-side artifact: {sorted(unaccounted)}"
+    )
+
+    declared = {declaration.name for declaration in _all_declarations()}
+    missing = {
+        lane: name
+        for lane, name in _CLI_LANE_DECLARATIONS.items()
+        if lane in external and name not in declared
+    }
+    assert not missing, (
+        f"these lanes name a declaration that no module exposes: {missing}"
+    )
 
 
 def test_the_discovery_record_declares_its_crash_exposure() -> None:

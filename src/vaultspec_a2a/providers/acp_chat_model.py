@@ -102,11 +102,14 @@ logger = logging.getLogger(__name__)
 
 
 # The spawned CLI writes its own session transcript into the OPERATOR's real
-# config home, partitioned by the directory the session opened in. This lane
-# spawns into the run's active project, so a run's transcript lands in the
-# operator's own partition for that project, beside the sessions their own
-# interactive CLI writes there - it does not mint a partition per run. Nothing
-# here creates, names, opens, or can reach that file; the run is merely what
+# config home, partitioned by the ABSOLUTE path of the directory the session
+# opened in. A RUN spawns into its active project, so a run's transcript lands
+# in the operator's own partition for that project, beside the sessions their
+# interactive CLI writes there, and mints no new partition. Catalog DISCOVERY
+# is the other spawning site and does not share that property: it roots the
+# same CLI at whatever workspace its caller passes, so a caller that passes a
+# temporary directory mints a partition that outlives it. Nothing here creates,
+# names, opens, or can reach the file either way; the spawn is merely what
 # causes it to exist, which is why the declaration sits at the spawning seam.
 #
 # Two measured facts fix the disposition. The CLI bounds the tree itself, and

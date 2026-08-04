@@ -1363,3 +1363,123 @@ standing ruling that retry/backoff sites are separate failure domains each
 entitled to its own settings, it is recorded as DISTINCT rather than folded
 into the wall-clock-poll or retry findings above. No new duplicate declaration
 was found in this domain.
+
+### service-json-candidate-list-now-exported | medium | closes the prior finding, verified and fixed
+
+Re-verified the `service-json-candidate-list-reimplemented-in-control` finding
+recorded above against current HEAD before acting, per this campaign's method:
+`src/vaultspec_a2a/authoring/discovery.py` still built the ordered
+`VAULTSPEC_ENGINE_SERVICE_JSON`-then-home candidate list in a private
+`_candidates()`, and `src/vaultspec_a2a/control/health.py`'s
+`probe_engine_discovery_freshness` still reconstructed the same two-entry list
+inline rather than importing it, agreeing with the canonical order only
+because nobody had changed one without the other. ACTIONED exactly as the
+prior finding proposed: `_candidates()` is renamed to the exported
+`service_json_candidates()` (added to `authoring/discovery.py`'s `__all__`),
+`resolve_engine` now calls the exported name, and `control/health.py` imports
+and calls it instead of restating the two-entry construction. Nothing about
+the freshness classification changed - that half of the prior finding was
+already correct and stays as `control/health.py`'s own distinct
+non-blocking, no-HTTP contract. Verified by running
+`src/vaultspec_a2a/authoring/tests/` filtered to the discovery suites (16
+passed) and `src/vaultspec_a2a/api/tests/test_health_database_probe.py` +
+`test_app.py` (14 passed, covering the `/health` route this function feeds),
+plus a whole-tree `ty check`. The `ty` run is reported with a caveat rather
+than a clean bill: three separate whole-tree runs in this session (by two
+different agents) produced three different diagnostic sets on the same
+nominal HEAD, which is concurrent-writer noise in this shared tree rather than
+a stable signal - none of the three runs' diagnostics named
+`authoring/discovery.py` or `control/health.py`, which is the narrower claim
+actually verified here.
+
+### cancel-vs-message-dispatch-failure-restoration-is-three-distinct-shapes | medium | a self-flagged thread that resolved to DISTINCT, not a fix
+
+Followed up the dispatch-failure state-restoration thread flagged when the
+permission/action-lease sweep closed, covering exactly the files newly in
+scope here: `src/vaultspec_a2a/control/cancel_service.py`,
+`src/vaultspec_a2a/control/message_service.py`, and (for comparison, already
+swept but load-bearing context) `src/vaultspec_a2a/control/
+direct_control_recovery.py`. All three react to a dispatch that could not be
+confirmed delivered, and at first read they look like the same "undo the
+requested-state write" concept spelled three ways. They are not - each
+follows from what `src/vaultspec_a2a/thread/repair_policy.py`'s
+`repair_state_for_action` sets for that action's own `"requested"` phase, and
+that table is not free to change to make the callers converge.
+`MESSAGE_FOLLOWUP_REQUESTED`'s `"requested"` transition sets `repair_status`
+to `HEALTHY` - a no-op resting state - so `message_service.py`'s definite-
+non-delivery arm correctly does the minimal thing: call the already-shared
+`record_undelivered_dispatch` (`control/repair_transitions.py`) to attach a
+repair reason without moving `repair_status` away from where it already
+rests, exactly as `control/clarification_service.py` does for the same
+reason. `CANCEL`'s `"requested"` transition instead sets `repair_status` to
+`CANCEL_PENDING`, a real marker asserting a cancel is in flight - so leaving
+it in place after the worker demonstrably never received the cancel would
+report a "ghost cancel_pending state" (the exact phrase in
+`cancel_service.py`'s own covering test,
+`test_failed_cancel_dispatch_restores_repair_state`, in
+`src/vaultspec_a2a/api/tests/test_endpoints.py`). `cancel_service.py`
+therefore captures a `_PriorRepairState` snapshot before requesting the
+cancel and restores all four fields on definite non-delivery - a genuine undo
+`record_undelivered_dispatch` cannot express, because that helper deliberately
+leaves `repair_status` exactly as the pre-dispatch transition set it.
+`direct_control_recovery.py`'s `_restore_requested_state` is a third shape
+again: during REDRIVE of an already-durable action after a crash, it does not
+undo to "before the original request" (there is no such snapshot to restore
+in a recovery pass) and does not merely attach a reason - it RE-APPLIES the
+same `"requested"` transition (`mark_cancel_requested` /
+`mark_message_followup_requested` / `mark_permission_response_requested`) so
+a redrive that fails to acquire or dispatch leaves the row in the same
+"requested" posture a fresh request would have produced. Verdict: three
+DISTINCT operations, correctly separated, each dictated by its own action
+type's repair-state semantics rather than by which module happened to write
+it. Not actioned, because there is nothing to converge - flattening any pair
+of these would either leave a `CANCEL_PENDING` ghost, silently move a healthy
+follow-up's repair status, or break the redrive path's idempotent re-stamping.
+
+### control-service-domain-partially-swept | low | drain, worker spawn/health, circuit breaker, and the snapshot pipeline are single-homed; one prior finding unconfirmed
+
+`src/vaultspec_a2a/control/drain.py`'s `DrainGate` is the sole admission/drain
+authority, stating so in its own module docstring, with one caller
+(`api/app.py`'s shutdown path and `api/routes/admin.py`'s shutdown endpoint)
+closing it and one reader (`gateway.py`'s admission path) consulting it - no
+second gate found. `probe_worker_health` in
+`src/vaultspec_a2a/control/worker_management.py` is confirmed still the
+single worker-health primitive its own docstring claims: the watchdog, the
+boot/spawn paths, and `control/health.py`'s `/health` route all call the same
+function, and both call sites that assert "healthy" enforce the identical
+exact-200 rule, so they structurally cannot disagree - this re-confirms the
+"one primitive" claim the earlier `swept-and-found-clean` entry made for this
+concept, on the file now newly in scope. `WorkerCircuitBreaker` in
+`circuit_breaker.py` has one declaration, consumed only through
+`control/dispatch.py`'s `safe_dispatch`, the single dispatch entry point
+every service in this domain and the previously-swept permission domain calls
+through. `control/snapshot.py` (`enrich_snapshot_from_state`, from LangGraph
+state), `control/projection.py` (`apply_checkpoint_projection` and durable-vs-
+checkpoint reconciliation), and `control/thread_state_service.py`
+(`capture_thread_state`, the orchestrator) are three cooperating stages of one
+pipeline, not competing declarations of one concept - each is called exactly
+once, in sequence, from `thread_state_service.py`. The `state=active` versus
+`state=all` run-listing split in `api/routes/gateway.py`'s
+`active_runs_endpoint` is explicitly documented in the route's own docstring
+as two different questions (live discovery, capped, versus history, paginated
+and wider) rather than a duplicate, and the `state=all` branch consumes
+`ThreadSummaryData` already reconciled by `control/thread_service.py`'s
+`list_threads_service` rather than re-deriving repair/execution state from
+the raw thread row, so there is no second reconciliation to drift from the
+first.
+
+Not established: an earlier finding on this audit
+(`thread-metadata-decode-reimplemented`) named `control/thread_service.py` as
+one of five sites decoding the durable `thread_metadata` JSON column to
+extract `workspace_root` with inconsistent error handling. Reading
+`thread_service.py` in full for this sweep found only one JSON-decode of that
+column, `_parse_thread_summary_metadata`, and it extracts `feature_tag`,
+`source_branch`, and `callee` for run-listing display - not `workspace_root`,
+and not feeding a dispatch. Every `workspace_root` reference in this file
+traces to `process_metadata`, which validates a typed, already-structured
+inbound request field rather than decoding the durable column. This may mean
+that part of the earlier finding has since been fixed by another lane, was
+imprecise about which file carried the site, or names a function this sweep
+did not recognise as the same pattern - recorded as unconfirmed rather than
+silently left standing or rewritten, per this audit's rule against editing a
+settled entry.

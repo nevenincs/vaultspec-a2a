@@ -885,3 +885,29 @@ throughout. It is that a grep returning nothing is not evidence of absence until
 you have proven you searched the right file. Five withdrawals here trace to one
 unverified lookup.
 
+**Complete, with the refusal's own words (2026-08-04):**
+
+    run commit refused as ineligible: reason=the gateway worker is not
+    execution-ready worker_reachable=False provider_eligibility=eligible
+    reservation=resv-deadbeef...
+
+So the 503 is TRUTHFUL. At the moment of the bogus commit the worker is
+genuinely unreachable, the provider side is fine, and the gateway refuses for
+the reason it states. Nothing is misreporting anything.
+
+That reframes the defect one last time, and away from the ADR question. The
+test's 409 is unreachable not because eligibility is ordered ahead of the
+reservation check, but because the WORKER HAS GONE UNREACHABLE partway through a
+test that earlier committed a run successfully. The same subject as the
+cold-start race fixed earlier today - worker reachability under repeated demand -
+seen from the other end: there the worker was up and reported cold, here it
+reports unreachable after serving a commit.
+
+Two candidates, both cheap to separate with the disclosures already in place:
+the worker is reaped or dies after the first commit, or the probe targets a
+worker URL that stops resolving once the first run settles. Either is a genuine
+defect in the desktop lane rather than a test expectation problem.
+
+The ADR ordering question raised at the top of this thread remains open on its
+own merits, but it is NOT what these three tests are failing on.
+

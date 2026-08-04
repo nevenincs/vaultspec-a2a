@@ -5,7 +5,7 @@ tags:
 date: '2026-08-04'
 modified: '2026-08-04'
 body_schema: 'body-v1'
-body_hash: 'sha256:e97c8c68bfff5a6858b24b2d854d279400db85431727f0d086628b84522094a8'
+body_hash: 'sha256:ee4365a10f86563a6d762b28af00603f8757c9154fcce7d58eb8de2ffbdaccfa'
 related: []
 ---
 
@@ -5286,3 +5286,44 @@ the primitive guarantees and what was confirmed present. This is not the
 docstring-asserting-an-absent-guarantee class recorded above: there the code
 lacked the protection the prose claimed; here the protection is verified and the
 prose is accurate about WHICH property it names.
+
+### head-was-unbuildable-and-every-suite-passed | critical | the sharpest false-green this campaign found
+
+For a period today the repository's HEAD could not be imported. A commit landed a
+module importing two names from a relocated home while the file DECLARING them
+was still uncommitted in another lane's tree. A clean checkout raised
+`ImportError` on the repository module.
+
+**Every test suite in the working tree passed throughout.** The editable install
+resolves the package to the working tree, so every run read the uncommitted file
+that supplied the missing names. Lint passed. Whole-tree type checking passed. The
+one state nobody could observe from inside the tree was the one state that
+shipped.
+
+**The orchestrator's first probe reported HEAD as fine, and was wrong for the same
+reason.** It created a clean checkout of HEAD and imported from it - but the
+editable install won the import, so it measured the working tree while believing
+it measured HEAD. The correct check reads HEAD BLOBS and compares imported names
+against defined names by syntax tree, with no import at all. That probe is the
+proof that a green run in this tree is not evidence about HEAD.
+
+Recorded at critical, and as a METHOD finding rather than an incident. Two rules
+follow:
+
+- **In a multi-writer tree with an editable install, a passing suite says nothing
+  about HEAD.** The only honest check is against committed blobs.
+- **A commit is not self-contained merely because its own files are consistent.**
+  This one was internally coherent and still unbuildable, because its correctness
+  depended on a file in someone else's index.
+
+The repair also demonstrates the check that should have preceded the break: before
+removing a declaration from its old home, parse every blob at HEAD for importers
+of that name from the old location and confirm each one is inside the same commit.
+The lane that landed the fix did exactly that and found three, all its own.
+
+**A detail from that sweep is worth its own line, because it would have produced a
+confident false clean:** one blob in this repository is not decodable under the
+platform's default text encoding, and the naive version of the sweep died on it.
+A sweep that dies partway reports success for every file it never reached. Any
+tree-wide blob scan here must decode byte-safely, and must assert it visited the
+file count it expected.

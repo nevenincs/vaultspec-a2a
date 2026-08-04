@@ -76,7 +76,12 @@ from ..acceptance import certified_gateway
 from ..authoring.discovery import SERVICE_JSON_ENV, resolve_engine_with_retry
 from ..team.team_config import load_team_config
 from ..testing.catalog_selection import NoSelectableLaneError, in_process_selection
-from ..testing.payloads import required_bool, required_text
+from ..testing.payloads import (
+    json_object,
+    json_object_list,
+    required_bool,
+    required_text,
+)
 from ._provider_catalog_live import (
     LIVE_PROVIDER_CATALOG_SELECTION_ENVIRON,
     live_provider_catalog_selector_is_configured,
@@ -88,6 +93,7 @@ if TYPE_CHECKING:
 
     from ..acceptance import CertifiedGateway
     from ..conftest import ExternalPrerequisiteRule
+    from ..providers._json_contract import JsonObject
 
 # The preset that declares a questionnaire. Its questions are read from the
 # preset itself below, never restated here.
@@ -124,43 +130,23 @@ _WORKER_READY_BUDGET_SECONDS = "120"
 
 _PARK_BUDGET = 180.0
 _RESUME_BUDGET = 300.0
-_JSON_OBJECT = TypeAdapter(dict[str, object])
-_JSON_OBJECT_LIST = TypeAdapter(list[dict[str, object]])
 _TEXT_LIST = TypeAdapter(list[str])
 
 
-def _json_object(value: object, *, at: str) -> dict[str, object]:
-    """Narrow one real wire value to an object, or fail at that boundary."""
-    try:
-        return _JSON_OBJECT.validate_python(value)
-    except ValidationError as exc:
-        raise TypeError(f"expected an object at {at}: {exc}") from exc
-
-
-def _json_object_list(value: object, *, at: str) -> list[dict[str, object]]:
-    """Narrow one real wire value to an object list, or fail at that boundary."""
-    try:
-        return _JSON_OBJECT_LIST.validate_python(value)
-    except ValidationError as exc:
-        raise TypeError(f"expected an object list at {at}: {exc}") from exc
-
-
-def _response_object(response: httpx.Response, *, at: str) -> dict[str, object]:
+def _response_object(response: httpx.Response, *, at: str) -> JsonObject:
     """Decode an HTTP response before its contract fields are inspected."""
     decoded: object = response.json()
-    return _json_object(decoded, at=at)
+    return json_object(decoded, at=at)
 
 
-def _required_object(
-    body: dict[str, object], field: str, *, at: str
-) -> dict[str, object]:
+def _required_object(body: JsonObject, field: str, *, at: str) -> JsonObject:
     """Read a required object field from a certified wire response."""
     if field not in body:
         raise AssertionError(f"{at} did not contain required field {field!r}")
-    return _json_object(body[field], at=f"{at}.{field}")
+    return json_object(body[field], at=f"{at}.{field}")
 
 
-def _optional_text_list(body: dict[str, object], field: str, *, at: str) -> list[str]:
+def _optional_text_list(body: JsonObject, field: str, *, at: str) -> list[str]:
     """Read an optional list of text values without accepting malformed options."""
     value = body.get(field)
     if value is None:
@@ -215,7 +201,7 @@ def _require_codex_substrates(rule: ExternalPrerequisiteRule) -> None:
 # ---------------------------------------------------------------------------
 
 
-def _declared_questions() -> list[dict[str, object]]:
+def _declared_questions() -> list[JsonObject]:
     """The preset's own questions, through the production loader.
 
     Read rather than restated so a preset edit moves this expectation with it.
@@ -228,7 +214,7 @@ def _declared_questions() -> list[dict[str, object]]:
             f"preset {_CLARIFY_PRESET!r} declares no questionnaire; this loop has "
             "nothing to certify"
         )
-    return _json_object_list(
+    return json_object_list(
         [q.model_dump(mode="json") for q in team.clarification.questions],
         at="declared clarification questions",
     )
@@ -245,10 +231,10 @@ def _required_roles() -> list[str]:
 
 def _await_parked(
     gateway: CertifiedGateway, run_id: str, *, budget: float
-) -> dict[str, object]:
+) -> JsonObject:
     """Poll the authoritative snapshot until a questionnaire is disclosed."""
     deadline = time.monotonic() + budget
-    last: dict[str, object] = {}
+    last: JsonObject = {}
     while time.monotonic() < deadline:
         response = gateway.status(run_id)
         if response.status_code == 200:
@@ -281,9 +267,7 @@ def _transcript_tail(gateway: CertifiedGateway, run_id: str, *, keep: int = 4) -
             return f"<history unavailable: HTTP {history.status_code}>"
         history_body = _response_object(history, at="thread history transcript")
         state = _required_object(history_body, "state", at="thread history transcript")
-        messages = _json_object_list(
-            state.get("messages"), at="thread history messages"
-        )
+        messages = json_object_list(state.get("messages"), at="thread history messages")
     except (httpx.HTTPError, ValueError, KeyError, TypeError) as exc:
         return f"<history unreadable: {type(exc).__name__}>"
     if not messages:
@@ -312,9 +296,7 @@ def _has_synthesis_turn(gateway: CertifiedGateway, run_id: str) -> bool:
         state = _required_object(
             history_body, "state", at="thread history synthesis check"
         )
-        messages = _json_object_list(
-            state.get("messages"), at="thread history messages"
-        )
+        messages = json_object_list(state.get("messages"), at="thread history messages")
     except (httpx.HTTPError, ValueError, KeyError, TypeError):
         return False
     return any(
@@ -326,7 +308,7 @@ def _has_synthesis_turn(gateway: CertifiedGateway, run_id: str) -> bool:
 
 def _await_resumed_past_fan_out(
     gateway: CertifiedGateway, run_id: str, *, budget: float
-) -> dict[str, object]:
+) -> JsonObject:
     """Poll until the run has genuinely left the questionnaire and done work.
 
     This is the assertion a 200 cannot make. Clearing the pending question is
@@ -344,7 +326,7 @@ def _await_resumed_past_fan_out(
     The narrower claim is the true one.
     """
     deadline = time.monotonic() + budget
-    last: dict[str, object] = {}
+    last: JsonObject = {}
     while time.monotonic() < deadline:
         response = gateway.status(run_id)
         if response.status_code == 200:
@@ -373,9 +355,7 @@ def _await_resumed_past_fan_out(
     )
 
 
-def _read_frame(
-    lines: Iterable[str], *, wanted: str, deadline: float
-) -> dict[str, object]:
+def _read_frame(lines: Iterable[str], *, wanted: str, deadline: float) -> JsonObject:
     """Return the first SSE frame whose ``type`` matches, or raise at *deadline*.
 
     The failure message is deliberately specific about what has ALREADY been
@@ -394,7 +374,7 @@ def _read_frame(
             continue
         if line == "" and buffer:
             decoded: object = json.loads("".join(buffer))
-            payload = _json_object(decoded, at="clarification SSE frame")
+            payload = json_object(decoded, at="clarification SSE frame")
             buffer = []
             kind = str(payload.get("type") or payload.get("event_type") or "<untyped>")
             if kind not in seen:
@@ -411,7 +391,7 @@ def _read_frame(
     )
 
 
-def _served_catalog(gateway: CertifiedGateway) -> dict[str, object]:
+def _served_catalog(gateway: CertifiedGateway) -> JsonObject:
     """Read the gateway's own served catalog for the run's workspace."""
     with gateway.client(timeout=120.0) as client:
         response = client.get(
@@ -419,10 +399,10 @@ def _served_catalog(gateway: CertifiedGateway) -> dict[str, object]:
             params={"workspace_root": str(_WORKSPACE_ROOT)},
         )
     assert response.status_code == 200, response.text
-    return _json_object(response.json(), at="served provider catalog")
+    return json_object(response.json(), at="served provider catalog")
 
 
-def _served_in_process_selection(gateway: CertifiedGateway) -> dict[str, object]:
+def _served_in_process_selection(gateway: CertifiedGateway) -> JsonObject:
     """Resolve the served in-process lane's selection, or skip naming the gap.
 
     The loop's ONE substitution is the model, and under the explicit-selection
@@ -446,10 +426,10 @@ def _start_document_run(
     gateway: CertifiedGateway,
     run_id: str,
     *,
-    selection: dict[str, object],
+    selection: JsonObject,
 ) -> httpx.Response:
     """Start a run on the declaring preset with a token for every declared role."""
-    body: dict[str, object] = {
+    body: JsonObject = {
         "team_preset": _CLARIFY_PRESET,
         "stage": "start",
         "run_id": run_id,
@@ -470,7 +450,7 @@ def _start_document_run(
         return client.post("/v1/runs", json=body)
 
 
-def _history_state(gateway: CertifiedGateway, run_id: str) -> dict[str, object]:
+def _history_state(gateway: CertifiedGateway, run_id: str) -> JsonObject:
     response = gateway.thread_state(run_id)
     assert response.status_code == 200, response.text
     history = _response_object(response, at="run history")
@@ -529,7 +509,7 @@ def test_clarification_loop_parks_discloses_answers_and_resumes(
                 == "clarification_request"
             )
             assert (
-                _json_object_list(
+                json_object_list(
                     pending.get("questions"),
                     at="parked pending clarification.questions",
                 )
@@ -729,7 +709,7 @@ def test_concurrent_continuations_elect_one_all_low_codex_winner(
         frozen = _required_object(
             parked, "frozen_assignment", at="Codex load parked run-status"
         )
-        assignments = _json_object_list(
+        assignments = json_object_list(
             frozen.get("assignments"), at="Codex load frozen assignments"
         )
         by_role = {
@@ -774,7 +754,7 @@ def test_concurrent_continuations_elect_one_all_low_codex_winner(
         assert accepted_body.get("accepted") is True
         assert accepted_body.get("action_status") == "accepted_not_applied"
 
-        replay_body: dict[str, object] = {}
+        replay_body: JsonObject = {}
         replay_deadline = time.monotonic() + 90.0
         while time.monotonic() < replay_deadline:
             with gateway.client(timeout=60.0) as client:
@@ -792,7 +772,7 @@ def test_concurrent_continuations_elect_one_all_low_codex_winner(
         assert replay_body.get("action_status") == "applied"
 
         state = _history_state(gateway, run_id)
-        messages = _json_object_list(
+        messages = json_object_list(
             state.get("messages"), at="Codex continuation transcript"
         )
         contents = [str(message.get("content") or "") for message in messages]

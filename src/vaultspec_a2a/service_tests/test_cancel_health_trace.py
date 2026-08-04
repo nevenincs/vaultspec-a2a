@@ -7,33 +7,21 @@ from typing import TYPE_CHECKING
 
 from pydantic import TypeAdapter, ValidationError
 
-from ..testing.payloads import required_bool, required_text
+from ..testing.payloads import (
+    json_object,
+    json_object_list,
+    required_bool,
+    required_text,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
+    from ..providers._json_contract import JsonObject
     from .harness import ServiceStack
 
 
-_JSON_OBJECT = TypeAdapter(dict[str, object])
-_JSON_OBJECT_LIST = TypeAdapter(list[dict[str, object]])
 _TEXT_LIST = TypeAdapter(list[str])
-
-
-def _json_object(value: object, *, at: str) -> dict[str, object]:
-    """Narrow a real service payload to an object at its public boundary."""
-    try:
-        return _JSON_OBJECT.validate_python(value)
-    except ValidationError as exc:
-        raise TypeError(f"expected an object at {at}: {exc}") from exc
-
-
-def _json_object_list(value: object, *, at: str) -> list[dict[str, object]]:
-    """Narrow a real service payload to an object list at its public boundary."""
-    try:
-        return _JSON_OBJECT_LIST.validate_python(value)
-    except ValidationError as exc:
-        raise TypeError(f"expected an object list at {at}: {exc}") from exc
 
 
 def _text_list(value: object, *, at: str) -> list[str]:
@@ -44,12 +32,12 @@ def _text_list(value: object, *, at: str) -> list[str]:
         raise TypeError(f"expected a text list at {at}: {exc}") from exc
 
 
-def _thread_state(stack: ServiceStack, thread_id: str) -> dict[str, object]:
+def _thread_state(stack: ServiceStack, thread_id: str) -> JsonObject:
     """Read real durable thread state before inspecting it."""
-    return _json_object(stack.get_thread_state(thread_id), at="thread state")
+    return json_object(stack.get_thread_state(thread_id), at="thread state")
 
 
-def _is_active(state: dict[str, object]) -> bool:
+def _is_active(state: JsonObject) -> bool:
     """Recognise a running or advancing thread before cancellation."""
     sequence = state.get("last_sequence")
     return state.get("status") == "running" or (
@@ -57,12 +45,12 @@ def _is_active(state: dict[str, object]) -> bool:
     )
 
 
-def _is_cancelled(state: dict[str, object]) -> bool:
+def _is_cancelled(state: JsonObject) -> bool:
     """Recognise the durable terminal cancellation state."""
     return state.get("status") == "cancelled"
 
 
-def _is_completed(state: dict[str, object]) -> bool:
+def _is_completed(state: JsonObject) -> bool:
     """Recognise the durable completed state used for trace generation."""
     return state.get("status") == "completed"
 
@@ -70,12 +58,12 @@ def _is_completed(state: dict[str, object]) -> bool:
 def _wait_for_state(
     stack: ServiceStack,
     thread_id: str,
-    predicate: Callable[[dict[str, object]], bool],
+    predicate: Callable[[JsonObject], bool],
     *,
     timeout: float = 120.0,
-) -> dict[str, object]:
+) -> JsonObject:
     deadline = time.monotonic() + timeout
-    last_state: dict[str, object] | None = None
+    last_state: JsonObject | None = None
     while time.monotonic() < deadline:
         state = _thread_state(stack, thread_id)
         last_state = state
@@ -93,7 +81,7 @@ def test_cancel_transitions_to_terminal_cancelled(service_stack: ServiceStack) -
         title="service cancel",
     )
     thread_id = required_text(
-        _json_object(created, at="created thread"), "run_id", at="created thread"
+        json_object(created, at="created thread"), "run_id", at="created thread"
     )
 
     active = _wait_for_state(
@@ -104,7 +92,7 @@ def test_cancel_transitions_to_terminal_cancelled(service_stack: ServiceStack) -
     )
     service_stack.record(f"cancel-active:{thread_id}", active)
 
-    cancelling = _json_object(
+    cancelling = json_object(
         service_stack.cancel_thread(thread_id), at="cancel response"
     )
     assert required_bool(cancelling, "cancelled", at="cancel response") is True
@@ -125,19 +113,19 @@ def test_health_and_trace_surface_are_observable(
     service_started_at: float,
 ) -> None:
     """The stack reports health and exports a real Jaeger trace."""
-    health = _json_object(service_stack.health(), at="health response")
+    health = json_object(service_stack.health(), at="health response")
     service_stack.record("health-final", health)
 
     assert required_text(health, "status", at="health response") == "ok"
-    checks = _json_object(health.get("checks"), at="health checks")
+    checks = json_object(health.get("checks"), at="health checks")
     for check_name in ("database", "checkpoint", "worker"):
-        check = _json_object(checks.get(check_name), at=f"health checks.{check_name}")
+        check = json_object(checks.get(check_name), at=f"health checks.{check_name}")
         assert required_text(check, "status", at=f"health checks.{check_name}") == "ok"
     assert required_bool(health, "worker_connected", at="health response") is True
-    sqlite_fallback = _json_object(health.get("sqlite_fallback"), at="sqlite fallback")
+    sqlite_fallback = json_object(health.get("sqlite_fallback"), at="sqlite fallback")
     assert required_bool(sqlite_fallback, "active", at="sqlite fallback") is True
 
-    services = _json_object(service_stack.jaeger_services(), at="Jaeger services")
+    services = json_object(service_stack.jaeger_services(), at="Jaeger services")
     service_names = set(_text_list(services.get("data"), at="Jaeger services.data"))
     assert "vaultspec-a2a" in service_names
 
@@ -147,7 +135,7 @@ def test_health_and_trace_surface_are_observable(
         title="service trace probe",
     )
     thread_id = required_text(
-        _json_object(created, at="created thread"), "run_id", at="created thread"
+        json_object(created, at="created thread"), "run_id", at="created thread"
     )
     traced_thread = _wait_for_state(
         service_stack,
@@ -159,11 +147,11 @@ def test_health_and_trace_surface_are_observable(
 
     start_us = int(service_started_at * 1_000_000)
     found = False
-    traces: dict[str, object] = {}
+    traces: JsonObject = {}
     deadline = time.monotonic() + 30.0
     while time.monotonic() < deadline:
         end_us = int(time.time() * 1_000_000)
-        traces = _json_object(
+        traces = json_object(
             service_stack.jaeger_traces(
                 service="vaultspec-a2a",
                 start_us=start_us,
@@ -172,19 +160,17 @@ def test_health_and_trace_surface_are_observable(
             ),
             at="Jaeger traces",
         )
-        for trace in _json_object_list(traces.get("data"), at="Jaeger traces.data"):
-            processes = _json_object(
-                trace.get("processes"), at="Jaeger trace processes"
-            )
+        for trace in json_object_list(traces.get("data"), at="Jaeger traces.data"):
+            processes = json_object(trace.get("processes"), at="Jaeger trace processes")
             trace_services = {
                 service_name
                 for process in processes.values()
                 for service_name in [
-                    _json_object(process, at="Jaeger process").get("serviceName")
+                    json_object(process, at="Jaeger process").get("serviceName")
                 ]
                 if isinstance(service_name, str)
             }
-            spans = _json_object_list(trace.get("spans"), at="Jaeger trace spans")
+            spans = json_object_list(trace.get("spans"), at="Jaeger trace spans")
             operation_names = {
                 operation_name
                 for span in spans

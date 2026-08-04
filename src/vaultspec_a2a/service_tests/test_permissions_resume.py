@@ -5,61 +5,45 @@ from __future__ import annotations
 import time
 from typing import TYPE_CHECKING
 
-from pydantic import TypeAdapter, ValidationError
-
-from ..testing.payloads import required_bool, required_text
+from ..testing.payloads import (
+    json_object,
+    json_object_list,
+    required_bool,
+    required_text,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
+    from ..providers._json_contract import JsonObject
     from .harness import ServiceStack
 
 
-_JSON_OBJECT = TypeAdapter(dict[str, object])
-_JSON_OBJECT_LIST = TypeAdapter(list[dict[str, object]])
-
-
-def _json_object(value: object, *, at: str) -> dict[str, object]:
-    """Narrow a real service response before reading its public contract."""
-    try:
-        return _JSON_OBJECT.validate_python(value)
-    except ValidationError as exc:
-        raise TypeError(f"expected an object at {at}: {exc}") from exc
-
-
-def _json_object_list(value: object, *, at: str) -> list[dict[str, object]]:
-    """Narrow a real service list before reading its public contract."""
-    try:
-        return _JSON_OBJECT_LIST.validate_python(value)
-    except ValidationError as exc:
-        raise TypeError(f"expected an object list at {at}: {exc}") from exc
-
-
-def _thread_state(stack: ServiceStack, thread_id: str) -> dict[str, object]:
+def _thread_state(stack: ServiceStack, thread_id: str) -> JsonObject:
     """Read the real durable thread state before inspecting it."""
-    return _json_object(stack.get_thread_state(thread_id), at="thread state")
+    return json_object(stack.get_thread_state(thread_id), at="thread state")
 
 
-def _pending_permissions(state: dict[str, object]) -> list[dict[str, object]]:
+def _pending_permissions(state: JsonObject) -> list[JsonObject]:
     """Read the public pending-permissions projection as real objects."""
-    return _json_object_list(state.get("pending_permissions"), at="pending permissions")
+    return json_object_list(state.get("pending_permissions"), at="pending permissions")
 
 
-def _first_pending_permission(state: dict[str, object]) -> dict[str, object]:
+def _first_pending_permission(state: JsonObject) -> JsonObject:
     """Return the one current permission when the state claims to be paused."""
     pending = _pending_permissions(state)
     assert pending, f"paused thread had no pending permission: {state}"
     return pending[0]
 
 
-def _messages(state: dict[str, object]) -> list[dict[str, object]]:
+def _messages(state: JsonObject) -> list[JsonObject]:
     """Read the public message projection as real objects."""
-    return _json_object_list(state.get("messages"), at="thread messages")
+    return json_object_list(state.get("messages"), at="thread messages")
 
 
 def _pending_permission_matching(
-    state: dict[str, object], description_contains: str
-) -> dict[str, object]:
+    state: JsonObject, description_contains: str
+) -> JsonObject:
     """Find the named real pending permission after the state wait established it."""
     needle = description_contains.casefold()
     for permission in _pending_permissions(state):
@@ -71,28 +55,28 @@ def _pending_permission_matching(
     )
 
 
-def _option_ids(permission: dict[str, object]) -> set[str]:
+def _option_ids(permission: JsonObject) -> set[str]:
     """Read the offered permission option identifiers from the real projection."""
     return {
         required_text(option, "option_id", at="permission option")
-        for option in _json_object_list(
+        for option in json_object_list(
             permission.get("options"), at="permission options"
         )
     }
 
 
-def _is_completed(state: dict[str, object]) -> bool:
+def _is_completed(state: JsonObject) -> bool:
     """Recognise a durable completed thread state."""
     return state.get("status") == "completed"
 
 
 def _select_option_id(
-    request: dict[str, object],
+    request: JsonObject,
     *,
     label: str,
 ) -> str:
     target = label.casefold()
-    for option in _json_object_list(request.get("options"), at="permission options"):
+    for option in json_object_list(request.get("options"), at="permission options"):
         option_id = option.get("option_id")
         option_name = option.get("name")
         option_label = option.get("label")
@@ -110,12 +94,12 @@ def _select_option_id(
 def _wait_for_state(
     stack: ServiceStack,
     thread_id: str,
-    predicate: Callable[[dict[str, object]], bool],
+    predicate: Callable[[JsonObject], bool],
     *,
     timeout: float = 120.0,
-) -> dict[str, object]:
+) -> JsonObject:
     deadline = time.monotonic() + timeout
-    last_state: dict[str, object] | None = None
+    last_state: JsonObject | None = None
     while time.monotonic() < deadline:
         state = _thread_state(stack, thread_id)
         last_state = state
@@ -131,10 +115,10 @@ def _wait_for_pending_permission(
     *,
     request_id: str | None = None,
     timeout: float = 120.0,
-) -> dict[str, object]:
+) -> JsonObject:
     """Wait until a permission pause is durably resumable, not just projected."""
 
-    def _matches(state: dict[str, object]) -> bool:
+    def _matches(state: JsonObject) -> bool:
         pending = _pending_permissions(state)
         if not pending:
             return False
@@ -157,12 +141,12 @@ def _wait_for_pending_permission_matching(
     *,
     description_contains: str,
     timeout: float = 120.0,
-) -> dict[str, object]:
+) -> JsonObject:
     """Wait until the named permission request is durably resumable."""
 
     needle = description_contains.casefold()
 
-    def _matches(state: dict[str, object]) -> bool:
+    def _matches(state: JsonObject) -> bool:
         if (
             state.get("status") != "input_required"
             or state.get("execution_readiness") != "paused_resumable"
@@ -188,14 +172,14 @@ def test_permission_request_can_be_resumed_via_public_api(
         title="service permission resume",
     )
     thread_id = required_text(
-        _json_object(created, at="created thread"), "run_id", at="created thread"
+        json_object(created, at="created thread"), "run_id", at="created thread"
     )
 
     paused = _wait_for_pending_permission(service_stack, thread_id)
     service_stack.record(f"permission-paused:{thread_id}", paused)
 
     request = _first_pending_permission(paused)
-    response = _json_object(
+    response = json_object(
         service_stack.respond_permission(
             required_text(request, "request_id", at="pending permission"),
             thread_id=thread_id,
@@ -241,13 +225,13 @@ def test_invalid_permission_option_is_rejected_without_resuming(
         title="service permission invalid option",
     )
     thread_id = required_text(
-        _json_object(created, at="created thread"), "run_id", at="created thread"
+        json_object(created, at="created thread"), "run_id", at="created thread"
     )
 
     paused = _wait_for_pending_permission(service_stack, thread_id)
     request = _first_pending_permission(paused)
 
-    rejected = _json_object(
+    rejected = json_object(
         service_stack.respond_permission(
             required_text(request, "request_id", at="pending permission"),
             thread_id=thread_id,
@@ -284,14 +268,14 @@ def test_stale_second_permission_response_is_rejected_after_resume(
         title="service permission stale response",
     )
     thread_id = required_text(
-        _json_object(created, at="created thread"), "run_id", at="created thread"
+        json_object(created, at="created thread"), "run_id", at="created thread"
     )
 
     paused = _wait_for_pending_permission(service_stack, thread_id)
     request = _first_pending_permission(paused)
 
     approved_option_id = _select_option_id(request, label="approve")
-    accepted = _json_object(
+    accepted = json_object(
         service_stack.respond_permission(
             required_text(request, "request_id", at="pending permission"),
             thread_id=thread_id,
@@ -303,7 +287,7 @@ def test_stale_second_permission_response_is_rejected_after_resume(
         required_bool(accepted, "accepted", at="accepted permission response") is True
     )
 
-    stale = _json_object(
+    stale = json_object(
         service_stack.respond_permission(
             required_text(request, "request_id", at="pending permission"),
             thread_id=thread_id,
@@ -344,7 +328,7 @@ def test_invalid_permission_option_keeps_thread_paused_and_recoverable(
         title="service invalid permission option",
     )
     thread_id = required_text(
-        _json_object(created, at="created thread"), "run_id", at="created thread"
+        json_object(created, at="created thread"), "run_id", at="created thread"
     )
 
     paused = _wait_for_pending_permission(service_stack, thread_id)
@@ -359,7 +343,7 @@ def test_invalid_permission_option_keeps_thread_paused_and_recoverable(
     assert invalid.status_code == 409
     assert (
         required_text(
-            _json_object(invalid.json(), at="invalid permission response"),
+            json_object(invalid.json(), at="invalid permission response"),
             "detail",
             at="invalid permission response",
         )
@@ -372,7 +356,7 @@ def test_invalid_permission_option_keeps_thread_paused_and_recoverable(
         request_id=request_id,
     )
 
-    resumed = _json_object(
+    resumed = json_object(
         service_stack.respond_permission(
             required_text(request, "request_id", at="pending permission"),
             thread_id=thread_id,
@@ -412,13 +396,13 @@ def test_permission_denial_completes_with_denied_outcome(
         title="service permission deny",
     )
     thread_id = required_text(
-        _json_object(created, at="created thread"), "run_id", at="created thread"
+        json_object(created, at="created thread"), "run_id", at="created thread"
     )
 
     paused = _wait_for_pending_permission(service_stack, thread_id)
     request = _first_pending_permission(paused)
 
-    denied = _json_object(
+    denied = json_object(
         service_stack.respond_permission(
             required_text(request, "request_id", at="pending permission"),
             thread_id=thread_id,
@@ -469,7 +453,7 @@ def test_supervisor_plan_approval_pause_can_resume_through_real_stack(
         },
     )
     thread_id = required_text(
-        _json_object(created, at="created thread"), "run_id", at="created thread"
+        json_object(created, at="created thread"), "run_id", at="created thread"
     )
 
     plan_paused = _wait_for_pending_permission_matching(
@@ -491,7 +475,7 @@ def test_supervisor_plan_approval_pause_can_resume_through_real_stack(
         "approve",
         "reject",
     }
-    plan_response = _json_object(
+    plan_response = json_object(
         service_stack.respond_permission(
             required_text(plan_request, "request_id", at="plan permission"),
             thread_id=thread_id,
@@ -527,7 +511,7 @@ def test_supervisor_plan_approval_pause_can_resume_through_real_stack(
         "approve",
         "reject_once",
     }
-    worker_response = _json_object(
+    worker_response = json_object(
         service_stack.respond_permission(
             required_text(worker_request, "request_id", at="worker permission"),
             thread_id=thread_id,
@@ -586,7 +570,7 @@ def test_supervisor_plan_rejection_requires_revision_before_reapproval(
         },
     )
     thread_id = required_text(
-        _json_object(created, at="created thread"), "run_id", at="created thread"
+        json_object(created, at="created thread"), "run_id", at="created thread"
     )
 
     first_plan_pause = _wait_for_pending_permission_matching(
@@ -597,7 +581,7 @@ def test_supervisor_plan_rejection_requires_revision_before_reapproval(
     first_request = _pending_permission_matching(
         first_plan_pause, "Approve plan for feature"
     )
-    rejected = _json_object(
+    rejected = json_object(
         service_stack.respond_permission(
             required_text(first_request, "request_id", at="first plan permission"),
             thread_id=thread_id,

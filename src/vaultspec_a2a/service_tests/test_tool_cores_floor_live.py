@@ -56,11 +56,11 @@ from typing import TYPE_CHECKING
 
 import httpx
 import pytest
-from pydantic import TypeAdapter, ValidationError
 
 from ..api.schemas.enums import ServerEventType
 from ..control.run_start_policy import required_role_ids
 from ..team.team_config import load_team_config
+from ..testing.payloads import json_object
 from .test_pw7_acceptance import (
     _PRESET_LIVE,
     AcceptanceCase,
@@ -73,6 +73,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from ..conftest import ExternalPrerequisiteRule
+    from ..providers._json_contract import JsonObject
 
 # The message frame types that carry an agent's mid-turn narration and output. The
 # read/citation surface here (validated live), not in tool-call frames.
@@ -92,8 +93,6 @@ _OBSERVE_DEADLINE_SECONDS = 900.0
 # claims no particular provider - it certifies the bridge/tool floor, not who
 # produced the text - but it MUST be a real one, which is what
 # requires_live_selection pins.
-
-_JSON_OBJECT = TypeAdapter(dict[str, object])
 
 
 def _pick_named_adr(vault_root: Path) -> Path | None:
@@ -184,15 +183,7 @@ def _vault_write_delta(
     return {"created": created, "modified": modified, "deleted": deleted}
 
 
-def _json_object(value: object, *, at: str) -> dict[str, object]:
-    """Return an SSE JSON object or fail with its observation boundary."""
-    try:
-        return _JSON_OBJECT.validate_python(value)
-    except ValidationError as exc:
-        raise AssertionError(f"expected JSON object at {at}: {exc}") from exc
-
-
-def _message_content(payload: dict[str, object]) -> str | None:
+def _message_content(payload: JsonObject) -> str | None:
     """Return the content of a message/thought chunk frame, else None."""
     if payload.get("type") not in _MESSAGE_FRAMES:
         return None
@@ -314,7 +305,7 @@ async def test_document_agent_reads_named_adr_midturn_and_cites(
                                 "malformed SSE JSON at grounding floor stream: "
                                 f"{body!r}"
                             ) from exc
-                        payload = _json_object(decoded, at="grounding floor SSE stream")
+                        payload = json_object(decoded, at="grounding floor SSE stream")
                         content = _message_content(payload)
                         if content:
                             output_parts.append(content)
@@ -485,7 +476,7 @@ async def test_document_agent_invokes_rag_search_midturn_and_cites(
                             raise AssertionError(
                                 f"malformed SSE JSON at semantic tool stream: {body!r}"
                             ) from exc
-                        payload = _json_object(decoded, at="semantic tool SSE stream")
+                        payload = json_object(decoded, at="semantic tool SSE stream")
                         content = _message_content(payload)
                         if content:
                             output_parts.append(content)

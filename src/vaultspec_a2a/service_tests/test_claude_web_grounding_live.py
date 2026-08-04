@@ -77,8 +77,10 @@ from pydantic import TypeAdapter, ValidationError
 
 from ..control.run_start_policy import required_role_ids
 from ..graph.nodes.diverge import WEB_LOCATOR_KIND
+from ..providers._json_contract import JsonObject
 from ..providers.conditions import ProviderCondition, condition_from_acp_error
 from ..team.team_config import load_team_config
+from ..testing.payloads import json_object, json_object_list
 from .test_pw7_acceptance import (
     _GATEWAY_AUTH_HEADERS,
     _MODE_MANUAL,
@@ -151,9 +153,7 @@ _POLL_SECONDS = 15.0
 #: asserting the one it would prefer to report.
 _RATE_REFUSAL_CONDITION = ProviderCondition.THROTTLED
 
-JsonObject = dict[str, object]
 _JSON_OBJECT = TypeAdapter(JsonObject)
-_JSON_OBJECT_LIST = TypeAdapter(list[JsonObject])
 _OBJECT_LIST = TypeAdapter(list[object])
 
 
@@ -166,22 +166,6 @@ class _WriterMessage(Protocol):
 
     @property
     def content(self) -> object: ...
-
-
-def _json_object(value: object, *, at: str) -> JsonObject:
-    """Read an observed object or fail at the service/checkpoint boundary."""
-    try:
-        return _JSON_OBJECT.validate_python(value)
-    except ValidationError as exc:
-        raise AssertionError(f"expected JSON object at {at}: {exc}") from exc
-
-
-def _json_object_list(value: object, *, at: str) -> list[JsonObject]:
-    """Read an observed object list or fail at the service/checkpoint boundary."""
-    try:
-        return _JSON_OBJECT_LIST.validate_python(value)
-    except ValidationError as exc:
-        raise AssertionError(f"expected JSON object list at {at}: {exc}") from exc
 
 
 def _object_list(value: object, *, at: str) -> list[object]:
@@ -213,7 +197,7 @@ def _fetch_live_commit_shas() -> set[str]:
     except (httpx.HTTPError, json.JSONDecodeError, ValueError):
         logger.warning("could not resolve live commit SHAs from %s", _LIVE_SHA_URL)
         return set()
-    entries = _json_object_list(payload, at="live GitHub commit response")
+    entries = json_object_list(payload, at="live GitHub commit response")
     shas: set[str] = set()
     for entry in entries:
         sha = entry.get("sha")
@@ -334,7 +318,7 @@ async def _read_checkpointed_state(run_id: str) -> JsonObject:
         return {}
     # ``channel_values`` is declared on the checkpoint contract, so an invalid shape
     # is a broken checkpoint rather than an empty observation to silently tolerate.
-    return _json_object(
+    return json_object(
         tuple_.checkpoint.get("channel_values"), at="checkpoint channels"
     )
 
@@ -365,7 +349,7 @@ async def _read_evidence(run_id: str) -> _Evidence:
     findings = (
         []
         if raw_findings is None
-        else _json_object_list(raw_findings, at="checkpoint research findings")
+        else json_object_list(raw_findings, at="checkpoint research findings")
     )
     messages = [
         message
@@ -642,19 +626,19 @@ def test_web_locator_urls_reads_the_finding_contract_shape() -> None:
 def test_json_reader_rejects_a_non_object_github_commit_payload() -> None:
     """The live GitHub response must be an object list, never a scalar object."""
     with pytest.raises(AssertionError, match="live GitHub commit response"):
-        _json_object_list({"sha": "not a list"}, at="live GitHub commit response")
+        json_object_list({"sha": "not a list"}, at="live GitHub commit response")
 
 
 def test_json_reader_rejects_malformed_checkpoint_channels() -> None:
     """Checkpoint channels must remain an object before evidence is projected."""
     with pytest.raises(AssertionError, match="checkpoint channels"):
-        _json_object(["not checkpoint channels"], at="checkpoint channels")
+        json_object(["not checkpoint channels"], at="checkpoint channels")
 
 
 def test_json_reader_rejects_malformed_checkpoint_findings() -> None:
     """Research findings must remain a list of objects at the checkpoint boundary."""
     with pytest.raises(AssertionError, match="checkpoint research findings"):
-        _json_object_list(["not a research finding"], at="checkpoint research findings")
+        json_object_list(["not a research finding"], at="checkpoint research findings")
 
 
 def test_json_reader_rejects_malformed_checkpoint_messages() -> None:
@@ -665,9 +649,7 @@ def test_json_reader_rejects_malformed_checkpoint_messages() -> None:
 
 def test_web_locator_urls_rejects_a_non_list_locator_collection() -> None:
     """Only individual malformed locators are tolerant; their collection is not."""
-    findings: list[dict[str, object]] = [
-        {"claim": "grounded", "locators": {"url": PROOF_URL}}
-    ]
+    findings: list[JsonObject] = [{"claim": "grounded", "locators": {"url": PROOF_URL}}]
     with pytest.raises(AssertionError, match="finding locators"):
         _web_locator_urls(findings)
 

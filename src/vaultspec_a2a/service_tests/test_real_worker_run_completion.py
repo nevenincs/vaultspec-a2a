@@ -60,12 +60,13 @@ from urllib.parse import urlparse
 
 import pytest
 import yaml
-from pydantic import TypeAdapter, ValidationError
 
 from ..acceptance import DEFAULT_REQUIRED_ROLE, DEFAULT_TEAM_PRESET, certified_gateway
+from ..testing.payloads import json_object, json_object_list
 
 if TYPE_CHECKING:
     from ..acceptance import CertifiedGateway
+    from ..providers._json_contract import JsonObject
 
 # The scripted backend the mock provider proxies to. The compose service publishes
 # it on this loopback port; an environment that already runs one points at it with
@@ -104,22 +105,6 @@ _TERMINAL_STATUSES = frozenset({"completed", "failed", "cancelled", "error"})
 # worker that never executes a graph produce the scripted content below, so this
 # buys tolerance without buying leniency.
 _WORKER_READY_BUDGET_SECONDS = "120"
-_JSON_OBJECT = TypeAdapter(dict[str, object])
-_JSON_OBJECT_LIST = TypeAdapter(list[dict[str, object]])
-
-
-def _json_object(value: object, *, at: str) -> dict[str, object]:
-    try:
-        return _JSON_OBJECT.validate_python(value)
-    except ValidationError as exc:
-        raise TypeError(f"expected an object at {at}: {exc}") from exc
-
-
-def _json_object_list(value: object, *, at: str) -> list[dict[str, object]]:
-    try:
-        return _JSON_OBJECT_LIST.validate_python(value)
-    except ValidationError as exc:
-        raise TypeError(f"expected an object list at {at}: {exc}") from exc
 
 
 def _scripted_final_text() -> str:
@@ -129,7 +114,7 @@ def _scripted_final_text() -> str:
     empty or missing expectation would turn the content assertion below into one
     that cannot fail, which is the exact failure mode this test exists to end.
     """
-    tape = _json_object(
+    tape = json_object(
         yaml.safe_load(_TAPE_PATH.read_text(encoding="utf-8")), at="scripted tape"
     )
     body = tape.get("response_body")
@@ -173,14 +158,14 @@ def _tape_server_listening(base: str) -> bool:
 
 def _await_terminal(
     gateway: CertifiedGateway, run_id: str, *, budget: float
-) -> dict[str, object]:
+) -> JsonObject:
     """Poll the authoritative status snapshot until the run stops running."""
     deadline = time.monotonic() + budget
-    last: dict[str, object] = {}
+    last: JsonObject = {}
     while time.monotonic() < deadline:
         response = gateway.status(run_id)
         if response.status_code == 200:
-            last = _json_object(response.json(), at="terminal run status")
+            last = json_object(response.json(), at="terminal run status")
             if last.get("status") in _TERMINAL_STATUSES:
                 return last
         time.sleep(1.0)
@@ -227,11 +212,9 @@ def test_real_worker_run_reaches_terminal_state_with_scripted_content(
 
         history = gateway.thread_state(run_id)
         assert history.status_code == 200, history.text
-        history_body = _json_object(history.json(), at="thread history")
-        state = _json_object(history_body.get("state"), at="thread history state")
-        messages = _json_object_list(
-            state.get("messages"), at="thread history messages"
-        )
+        history_body = json_object(history.json(), at="thread history")
+        state = json_object(history_body.get("state"), at="thread history state")
+        messages = json_object_list(state.get("messages"), at="thread history messages")
 
     # The graph really ran the model: the worker's own turn is present, and its
     # content is exactly what the tape scripts - not merely non-empty.

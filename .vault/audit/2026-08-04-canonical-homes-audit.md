@@ -5,7 +5,7 @@ tags:
 date: '2026-08-04'
 modified: '2026-08-04'
 body_schema: 'body-v1'
-body_hash: 'sha256:ff8bb5b591787c115f7b326daa4a1a1321ca2fcc580a9db468b150c7bd6ed4cd'
+body_hash: 'sha256:8400eff50b6f422ed48101f2770d70ec1503fd76d064732c825f16e5d0bbf0c0'
 related: []
 ---
 
@@ -5121,3 +5121,51 @@ the reader has been trained to skim past.
 The correction that avoids it here is small and worth copying: the
 do-not-sweep-mechanically warning is placed ABOVE the facts rather than below
 them, so nobody reaches the pattern before reaching its exception.
+
+### an-outbound-bound-below-its-column-changes-an-identifier | critical | a failure mode every brief here missed
+
+Every bound cluster in this audit was framed as an INBOUND admission check, where
+a restatement drifting low means the wrong inputs get refused - bad, but loudly
+and at the caller. Re-deriving the feature-tag inventory turned up three wire-model
+sites, and two of them are OUTBOUND records that replay a stored tag from the
+column.
+
+**On an outbound path the same drift does something categorically worse: it
+TRUNCATES a stored value on the way out.** A caller does not see a refusal. It
+sees an identifier that has silently *changed* - and it is an identifier, so
+whatever it does next with the shortened value addresses something that does not
+exist, or worse, something else.
+
+A wrong inbound bound rejects work that should have been accepted. A wrong
+outbound bound hands back a corrupted key while reporting success. The second is
+not a stricter version of the first; it is a different defect wearing the same
+number.
+
+Recorded at critical, and recorded as a gap in the METHOD rather than only in the
+inventory: nothing in the briefs issued here would have caught it, because every
+one of them described these bounds as validation. The question that finds it is
+not "where else is this bound stated" but **"which direction does this bound face,
+and what does a value that violates it become?"** - a rejection, a truncation, or
+a lie.
+
+The inventory that missed them was the sixth this campaign has issued that was
+short. Consistent with the standing finding that a count can be wrong by being
+incomplete even when every entry in it is right - but this one was incomplete in a
+way that also concealed a severity.
+
+### the-error-message-restatement-is-a-habit-with-an-address | medium | second instance, same function
+
+The bound-spelled-into-an-error-message defect has now been found TWICE in the
+same function, two lines apart, for two different subjects. The first was found by
+re-deriving one inventory; the second by re-deriving the next one, at the site the
+first had predicted.
+
+That upgrades it from a defect to a locatable habit: whoever writes validation in
+that module states the limit in prose beside the check, and does it again for each
+new field. Recorded because a habit with an address is cheap to sweep - any future
+bound work in that module should read its error strings first - and because it is
+the clearest instance of the campaign's claim that a restatement can drift into a
+LIE rather than a wrong answer.
+
+The correct pattern was already two modules away, composing the sentence from the
+constant by interpolation, and was not copied either time.

@@ -35,7 +35,7 @@ from fastapi import (
     Response,
 )
 from fastapi.responses import JSONResponse, StreamingResponse
-from pydantic import TypeAdapter, ValidationError
+from pydantic import ValidationError
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -115,6 +115,7 @@ from ...thread.enums import (
     TranscriptAvailability,
 )
 from ...thread.errors import NicknameConflictError
+from ...utils.coercion import coerce_object_mapping
 from .._utils import mark_worker_connected, trace_headers
 from ..dependencies import (
     get_aggregator,
@@ -185,7 +186,6 @@ logger = logging.getLogger(__name__)
 _DEGRADED_CHECK_STATUSES: frozenset[str] = frozenset(
     {"error", "open", "down", "restarting", "half_open", "timeout"}
 )
-_JSON_OBJECT = TypeAdapter(dict[str, object])
 
 
 def provider_catalog_service(app: FastAPI) -> ProviderCatalogService:
@@ -197,14 +197,6 @@ def provider_catalog_service(app: FastAPI) -> ProviderCatalogService:
     return service
 
 
-def _object_mapping(value: object) -> dict[str, object] | None:
-    """Narrow an unstructured value to an object-keyed mapping."""
-    try:
-        return _JSON_OBJECT.validate_python(value)
-    except ValidationError:
-        return None
-
-
 def _metadata_object(metadata_json: str | None) -> dict[str, object] | None:
     """Decode durable metadata only when it is a JSON object."""
     if not metadata_json:
@@ -213,7 +205,7 @@ def _metadata_object(metadata_json: str | None) -> dict[str, object] | None:
         decoded: object = json.loads(metadata_json)
     except (json.JSONDecodeError, TypeError):
         return None
-    return _object_mapping(decoded)
+    return coerce_object_mapping(decoded)
 
 
 def _string_field(record: dict[str, object], field: str) -> str | None:
@@ -1254,9 +1246,8 @@ def _persisted_lease_id(metadata_json: str | None) -> str | None:
         return binding.lease_id
     data = _metadata_object(metadata_json)
     lease = data.get(_RUN_LEASE_METADATA_KEY) if data is not None else None
-    try:
-        lease_object = _JSON_OBJECT.validate_python(lease)
-    except ValidationError:
+    lease_object = coerce_object_mapping(lease)
+    if lease_object is None:
         return None
     lease_id = lease_object.get("lease_id")
     if (
@@ -1277,9 +1268,8 @@ def _persisted_lease_binding(metadata_json: str | None) -> _RunLeaseBinding | No
     data = _metadata_object(metadata_json)
     if data is None:
         return None
-    try:
-        lease = _JSON_OBJECT.validate_python(data.get(_RUN_LEASE_METADATA_KEY))
-    except ValidationError:
+    lease = coerce_object_mapping(data.get(_RUN_LEASE_METADATA_KEY))
+    if lease is None:
         return None
     lease_id = lease.get("lease_id")
     reservation_id = lease.get("reservation_id")
@@ -2564,10 +2554,10 @@ async def service_state_endpoint(
         # serves the same payload and must not carry it.
         include_pairing=True,
     )
-    checks = _object_mapping(full.get("checks")) or {}
-    database_check = _object_mapping(checks.get("database")) or {}
-    checkpoint_check = _object_mapping(checks.get("checkpoint")) or {}
-    worker_check = _object_mapping(checks.get("worker")) or {}
+    checks = coerce_object_mapping(full.get("checks")) or {}
+    database_check = coerce_object_mapping(checks.get("database")) or {}
+    checkpoint_check = coerce_object_mapping(checks.get("checkpoint")) or {}
+    worker_check = coerce_object_mapping(checks.get("worker")) or {}
     database_ready = _string_field(database_check, "status") == "ok"
     checkpoint_ready = _string_field(checkpoint_check, "status") == "ok"
     worker_ready = _string_field(worker_check, "status") == "ok"
@@ -2595,7 +2585,7 @@ async def service_state_endpoint(
     # degradation signals.
     degraded_reasons: list[str] = []
     for name, check_value in checks.items():
-        check = _object_mapping(check_value)
+        check = coerce_object_mapping(check_value)
         if check is None:
             continue
         status_value = _string_field(check, "status")

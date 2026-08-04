@@ -23,7 +23,8 @@ from pathlib import Path
 from typing import TYPE_CHECKING, override
 
 import httpx
-from pydantic import TypeAdapter, ValidationError
+
+from ..utils.coercion import coerce_object_mapping
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -57,7 +58,6 @@ _DESKTOP_PROFILE = "desktop"
 # not as an available service (mirrors the engine's HEARTBEAT_STALE_MS).
 HEARTBEAT_STALE_MS = 120_000
 _STALE_MS = HEARTBEAT_STALE_MS
-_JSON_OBJECT = TypeAdapter(dict[str, object])
 
 
 def read_service_json(path: Path) -> dict[str, object] | None:
@@ -71,10 +71,7 @@ def read_service_json(path: Path) -> dict[str, object] | None:
         decoded: object = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return None
-    try:
-        return _JSON_OBJECT.validate_python(decoded)
-    except ValidationError:
-        return None
+    return coerce_object_mapping(decoded)
 
 
 def _parse_heartbeat_ms(value: object) -> int | None:
@@ -170,9 +167,8 @@ def parse_discovery_record(info: Mapping[str, object]) -> DiscoveryRecordView | 
         and info.get("profile") == _DESKTOP_PROFILE
     ):
         endpoint_value = info.get("endpoint")
-        try:
-            endpoint = _JSON_OBJECT.validate_python(endpoint_value)
-        except ValidationError:
+        endpoint = coerce_object_mapping(endpoint_value)
+        if endpoint is None:
             return None
         port = _coerce_port(endpoint.get("port"))
         if port is None:

@@ -76,6 +76,20 @@ class ControlActionReservation:
 _IN_CLAUSE_CHUNK = 500
 """Bound on identifiers per ``IN`` clause, under every backend's parameter cap."""
 
+_OUTSTANDING_PERMISSION_STATUSES: tuple[str, str] = (
+    PermissionRequestStatus.PENDING.value,
+    PermissionRequestStatus.ANSWERED_PENDING_APPLY.value,
+)
+"""Every status a permission request holds before it is settled.
+
+Declared once so the four functions below that ask "which requests still need
+attention" cannot drift apart on what "outstanding" means. Two of them
+(``supersede_permission_requests``, ``expire_pending_permission_requests``)
+always mean both members; the other two toggle ``ANSWERED_PENDING_APPLY`` in
+or out via ``include_answered_pending_apply``, so the toggle stays an explicit
+argument at those call sites rather than being folded into this constant.
+"""
+
 
 def _encode_payload(payload: dict[str, object] | None) -> str | None:
     if payload is None:
@@ -145,9 +159,11 @@ async def get_pending_permission_requests(
     thread_id: str | None = None,
     include_answered_pending_apply: bool = True,
 ) -> Sequence[PermissionRequestModel]:
-    statuses = [PermissionRequestStatus.PENDING.value]
-    if include_answered_pending_apply:
-        statuses.append(PermissionRequestStatus.ANSWERED_PENDING_APPLY.value)
+    statuses = (
+        _OUTSTANDING_PERMISSION_STATUSES
+        if include_answered_pending_apply
+        else (PermissionRequestStatus.PENDING.value,)
+    )
     stmt = select(PermissionRequestModel).where(
         PermissionRequestModel.request_status.in_(statuses)
     )
@@ -170,9 +186,11 @@ async def get_threads_with_pending_permission_requests(
     membership test over the whole backlog, so it is issued as one query per
     chunk instead.
     """
-    statuses = [PermissionRequestStatus.PENDING.value]
-    if include_answered_pending_apply:
-        statuses.append(PermissionRequestStatus.ANSWERED_PENDING_APPLY.value)
+    statuses = (
+        _OUTSTANDING_PERMISSION_STATUSES
+        if include_answered_pending_apply
+        else (PermissionRequestStatus.PENDING.value,)
+    )
 
     unique_ids = list(dict.fromkeys(thread_ids))
     found: set[str] = set()
@@ -252,12 +270,7 @@ async def supersede_permission_requests(
     """Mark earlier pending permission requests as superseded."""
     stmt = select(PermissionRequestModel).where(
         PermissionRequestModel.thread_id == thread_id,
-        PermissionRequestModel.request_status.in_(
-            [
-                PermissionRequestStatus.PENDING.value,
-                PermissionRequestStatus.ANSWERED_PENDING_APPLY.value,
-            ]
-        ),
+        PermissionRequestModel.request_status.in_(_OUTSTANDING_PERMISSION_STATUSES),
     )
     if pause_reason_type is not None:
         stmt = stmt.where(PermissionRequestModel.pause_reason_type == pause_reason_type)
@@ -280,12 +293,7 @@ async def expire_pending_permission_requests(
 ) -> int:
     stmt = select(PermissionRequestModel).where(
         PermissionRequestModel.thread_id == thread_id,
-        PermissionRequestModel.request_status.in_(
-            [
-                PermissionRequestStatus.PENDING.value,
-                PermissionRequestStatus.ANSWERED_PENDING_APPLY.value,
-            ]
-        ),
+        PermissionRequestModel.request_status.in_(_OUTSTANDING_PERMISSION_STATUSES),
     )
     permissions = (await session.execute(stmt)).scalars().all()
     for permission in permissions:

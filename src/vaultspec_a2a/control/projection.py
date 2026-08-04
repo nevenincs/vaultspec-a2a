@@ -11,6 +11,7 @@ from ..database import (
     get_pending_permission_requests,
     get_thread_execution_state,
 )
+from ..utils.coercion import coerce_object_list, coerce_object_mapping
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
@@ -43,7 +44,6 @@ from ..thread.snapshots import (
 
 _PLAN_APPROVAL_PAUSE_CAUSES = PLAN_APPROVAL_PAUSE_CAUSES
 _JSON_LIST_ADAPTER = TypeAdapter(list[object])
-_JSON_OBJECT_ADAPTER = TypeAdapter(dict[str, object])
 
 
 def _decode_json_list(raw: str | None, *, field_name: str) -> list[object]:
@@ -60,22 +60,6 @@ def _decode_json_list(raw: str | None, *, field_name: str) -> list[object]:
     except ValidationError as exc:
         msg = f"{field_name} must decode to a list"
         raise ValueError(msg) from exc
-
-
-def _json_object(value: object) -> dict[str, object] | None:
-    """Return a typed JSON object, or discard an unreadable sibling value."""
-    try:
-        return _JSON_OBJECT_ADAPTER.validate_python(value)
-    except ValidationError:
-        return None
-
-
-def _json_list(value: object) -> list[object] | None:
-    """Return a typed JSON list, or discard an unreadable sibling value."""
-    try:
-        return _JSON_LIST_ADAPTER.validate_python(value)
-    except ValidationError:
-        return None
 
 
 def _mark_execution_state_stale(snapshot: ThreadStateData) -> None:
@@ -160,7 +144,7 @@ def _permission_data_from_model(
         tool_call = PermissionType.PLAN_APPROVAL.value
     options: list[PermissionOptionData] = []
     for raw_option in raw_options:
-        option = _json_object(raw_option)
+        option = coerce_object_mapping(raw_option)
         if option is None:
             continue
         options.append(
@@ -193,16 +177,16 @@ def _coerce_permission_kind(value: object) -> PermissionOptionKind:
 def _permission_data_from_interrupt(
     interrupt: ProjectedInterrupt,
 ) -> PermissionData | None:
-    payload = _json_object(interrupt.payload)
+    payload = coerce_object_mapping(interrupt.payload)
     if payload is None:
         return None
     if interrupt.interrupt_type == "permission_request":
         tool_name = str(payload.get("tool_name", "unknown"))
-        raw_options = _json_list(payload.get("options", []))
+        raw_options = coerce_object_list(payload.get("options", []))
         options: list[PermissionOptionData] = []
         if raw_options is not None:
             for option in raw_options:
-                typed_option = _json_object(option)
+                typed_option = coerce_object_mapping(option)
                 if typed_option is None:
                     continue
                 options.append(
@@ -241,7 +225,7 @@ def _permission_data_from_interrupt(
 
     if interrupt.interrupt_type == "plan_approval_request":
         feature = str(payload.get("feature", "unknown"))
-        plan_paths = _json_list(payload.get("plan_paths", []))
+        plan_paths = coerce_object_list(payload.get("plan_paths", []))
         exec_worker = str(payload.get("exec_worker", "unknown"))
         plan_summary = (
             f"{len(plan_paths)} plan document(s)" if plan_paths else "no plan documents"
@@ -400,7 +384,7 @@ def project_execution_state_model(
     raw_tasks = _decode_json_list(model.tasks_json, field_name="tasks_json")
     execution_tasks: list[ExecutionTaskData] = []
     for raw_task in raw_tasks:
-        task_data = _json_object(raw_task)
+        task_data = coerce_object_mapping(raw_task)
         if task_data is None:
             continue
         try:

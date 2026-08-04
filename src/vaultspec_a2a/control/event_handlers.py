@@ -32,6 +32,7 @@ from ..thread.snapshots import (
     is_terminal_event,
 )
 from ..thread.terminal_effects import compute_terminal_effects
+from ..utils.coercion import coerce_object_mapping
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -121,14 +122,6 @@ def _option_mappings(value: object) -> list[dict[str, object]]:
         return _OPTION_MAPPINGS.validate_python(value)[:50]
     except ValidationError:
         return []
-
-
-def _object_mapping(value: object) -> dict[str, object] | None:
-    """Validate a nested JSON-object value at the boundary."""
-    try:
-        return _JSON_OBJECT.validate_python(value)
-    except ValidationError:
-        return None
 
 
 def _durable_provider_condition(value: object, *, status: ThreadStatus) -> str | None:
@@ -223,7 +216,7 @@ async def _read_run_lease(
     data = _json_object(thread.thread_metadata)
     if data is None:
         return None
-    lease = _object_mapping(data.get(_RUN_LEASE_METADATA_KEY))
+    lease = coerce_object_mapping(data.get(_RUN_LEASE_METADATA_KEY))
     if lease is None:
         return None
     lease_id: object = lease.get("lease_id")

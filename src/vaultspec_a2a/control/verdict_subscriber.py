@@ -27,8 +27,7 @@ import asyncio
 import json
 import logging
 import time
-from collections.abc import Mapping, Sequence
-from typing import TYPE_CHECKING, TypedDict, TypeGuard
+from typing import TYPE_CHECKING, TypedDict
 
 from ..authoring import (
     VERDICT_APPROVED,
@@ -55,11 +54,12 @@ from ..database import (
 from ..ipc.schemas import DispatchRequest, to_dispatch_action
 from ..thread.dispatch_policy import evaluate_dispatch_failure
 from ..thread.enums import ControlActionType, ThreadStatus
+from ..utils.coercion import coerce_object_list, coerce_object_mapping
 from .action_lease import claim_control_action, release_definite_non_delivery
 from .dispatch import safe_dispatch
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Mapping
 
     import httpx
     from langchain_core.runnables import RunnableConfig
@@ -96,39 +96,10 @@ class _RecoveryProposal(TypedDict):
     approval: Mapping[str, object] | None
 
 
-def _object_mapping(value: object) -> Mapping[str, object] | None:
-    """Return a string-keyed object mapping after validating an ingress value."""
-    return value if _is_string_object_mapping(value) else None
-
-
-def _is_object_mapping(value: object) -> TypeGuard[Mapping[object, object]]:
-    """Validate a mapping before inspecting its key type."""
-    return isinstance(value, Mapping)
-
-
-def _is_string_object_mapping(value: object) -> TypeGuard[Mapping[str, object]]:
-    """Validate a mapping-shaped decoded JSON or checkpoint payload."""
-    if not _is_object_mapping(value):
-        return False
-    return all(isinstance(key, str) for key in value)
-
-
-def _object_sequence(value: object) -> Sequence[object] | None:
-    """Return a non-text sequence after validating an ingress value."""
-    return value if _is_object_sequence(value) else None
-
-
-def _is_object_sequence(value: object) -> TypeGuard[Sequence[object]]:
-    """Validate a non-text sequence at an untyped payload boundary."""
-    return not isinstance(value, (str, bytes, bytearray)) and isinstance(
-        value, Sequence
-    )
-
-
 def _json_object_mapping(value: str) -> Mapping[str, object] | None:
     """Decode JSON metadata only when it is a string-keyed object."""
     loaded: object = json.loads(value)
-    return _object_mapping(loaded)
+    return coerce_object_mapping(loaded)
 
 
 def _verdict_resume_idempotency_key(proposal_id: str) -> str:
@@ -435,9 +406,9 @@ class VerdictSubscriber:
         if checkpoint_tuple is None:
             return None
         checkpoint: object = getattr(checkpoint_tuple, "checkpoint", None)
-        checkpoint_mapping = _object_mapping(checkpoint)
+        checkpoint_mapping = coerce_object_mapping(checkpoint)
         values = (
-            _object_mapping(checkpoint_mapping.get("channel_values"))
+            coerce_object_mapping(checkpoint_mapping.get("channel_values"))
             if checkpoint_mapping is not None
             else None
         )
@@ -591,9 +562,9 @@ class VerdictSubscriber:
         if checkpoint_tuple is None:
             return set()
         checkpoint: object = getattr(checkpoint_tuple, "checkpoint", None)
-        checkpoint_mapping = _object_mapping(checkpoint)
+        checkpoint_mapping = coerce_object_mapping(checkpoint)
         values = (
-            _object_mapping(checkpoint_mapping.get("channel_values"))
+            coerce_object_mapping(checkpoint_mapping.get("channel_values"))
             if checkpoint_mapping is not None
             else None
         )
@@ -602,7 +573,7 @@ class VerdictSubscriber:
         out: set[str] = set()
         for field in _STATE_ID_FIELDS:
             value = values.get(field)
-            items = _object_sequence(value)
+            items = coerce_object_list(value)
             if items is not None:
                 out.update(item for item in items if isinstance(item, str) and item)
         return out
@@ -772,23 +743,23 @@ def _iter_recovery_proposals(data: object) -> list[_RecoveryProposal]:
     changeset status alone does not surface.
     """
     out: list[_RecoveryProposal] = []
-    payload = _object_mapping(data)
+    payload = coerce_object_mapping(data)
     if payload is None:
         return out
-    snapshot = _object_mapping(payload.get("snapshot"))
+    snapshot = coerce_object_mapping(payload.get("snapshot"))
     if snapshot is None:
         return out
     proposals = snapshot.get("proposals")
-    proposal_mapping = _object_mapping(proposals)
+    proposal_mapping = coerce_object_mapping(proposals)
     items = (
-        _object_sequence(proposal_mapping.get("items"))
+        coerce_object_list(proposal_mapping.get("items"))
         if proposal_mapping is not None
-        else _object_sequence(proposals)
+        else coerce_object_list(proposals)
     )
     if items is None:
         return out
     for item in items:
-        item_mapping = _object_mapping(item)
+        item_mapping = coerce_object_mapping(item)
         if item_mapping is None:
             continue
         status = item_mapping.get("status")
@@ -798,7 +769,7 @@ def _iter_recovery_proposals(data: object) -> list[_RecoveryProposal]:
         changeset_id = item_mapping.get("changeset_id")
         if isinstance(changeset_id, str) and changeset_id:
             ids.add(changeset_id)
-        approval_obj = _object_mapping(item_mapping.get("approval"))
+        approval_obj = coerce_object_mapping(item_mapping.get("approval"))
         if approval_obj is not None:
             proposal_id = approval_obj.get("proposal_id")
             if isinstance(proposal_id, str) and proposal_id:
@@ -810,7 +781,7 @@ def _iter_recovery_proposals(data: object) -> list[_RecoveryProposal]:
 
 def _recovery_high_water(data: object) -> int | None:
     """Read ``latest_outbox_seq`` from a recovery-snapshot payload, if present."""
-    payload = _object_mapping(data)
+    payload = coerce_object_mapping(data)
     if payload is not None:
         value = payload.get("latest_outbox_seq")
         if isinstance(value, int) and not isinstance(value, bool):

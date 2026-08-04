@@ -13,8 +13,6 @@ from collections.abc import Collection, Mapping
 from datetime import datetime
 from typing import TYPE_CHECKING, Any, Protocol, TypeGuard
 
-from pydantic import TypeAdapter, ValidationError
-
 from ..domain_config import domain_config
 from ..ipc.schemas import (
     ExecutionStateProjectionPayload,
@@ -22,6 +20,7 @@ from ..ipc.schemas import (
 )
 from ..providers import ProviderCondition
 from ..thread.enums import TERMINAL_STATUSES, ThreadStatus
+from ..utils.coercion import coerce_object_mapping
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
@@ -33,7 +32,6 @@ if TYPE_CHECKING:
 __all__ = ["StateProjector"]
 
 logger = logging.getLogger(__name__)
-_OBJECT_MAPPING = TypeAdapter(dict[str, object])
 
 
 class _ExecutionStateSnapshot(Protocol):
@@ -84,17 +82,9 @@ def _is_execution_state_snapshot(value: object) -> TypeGuard[_ExecutionStateSnap
     )
 
 
-def _object_mapping(value: object) -> Mapping[str, object] | None:
-    """Narrow unstructured LangGraph metadata to an object-keyed mapping."""
-    try:
-        return _OBJECT_MAPPING.validate_python(value)
-    except ValidationError:
-        return None
-
-
 def _interrupt_type(interrupt: object) -> str | None:
     """Return the declared interrupt type when LangGraph supplies one."""
-    payload = _object_mapping(getattr(interrupt, "value", interrupt))
+    payload = coerce_object_mapping(getattr(interrupt, "value", interrupt))
     if payload is None:
         return None
     raw_type = payload.get("type")
@@ -179,9 +169,19 @@ def _checkpoint_id(config: Mapping[str, object] | None) -> str | None:
     configurable = config.get("configurable")
     if configurable is None:
         return None
-    configurable_metadata = _object_mapping(configurable)
-    if configurable_metadata is None or not isinstance(configurable, Mapping):
+    if not isinstance(configurable, Mapping):
         raise TypeError("Checkpoint configurable metadata must be a mapping")
+    # The canonical narrower is strict, so it refuses a Mapping that is not a
+    # dict. This site is the one place that must not inherit that refusal: it
+    # already tested for Mapping rather than dict, which is a statement that a
+    # LangGraph config may arrive as one, and letting the strict refusal reach
+    # the raise above would report "must be a mapping" about a value that is a
+    # mapping. Widening explicitly here keeps the tolerance visible instead of
+    # hiding it inside a lenient shared narrower every other caller would then
+    # silently inherit.
+    configurable_metadata = coerce_object_mapping(dict(configurable))
+    if configurable_metadata is None:
+        raise TypeError("Checkpoint configurable metadata must be string-keyed")
     checkpoint_id = configurable_metadata.get("checkpoint_id")
     return str(checkpoint_id) if checkpoint_id is not None else None
 

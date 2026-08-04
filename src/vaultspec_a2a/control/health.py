@@ -32,11 +32,11 @@ import time
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from pydantic import TypeAdapter, ValidationError
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 from ..database import inspect_sqlite_database, verify_wal_mode
+from ..utils.coercion import coerce_object_mapping
 from .config import settings
 from .worker_management import LazyWorkerSpawner, WorkerState, probe_worker_health
 
@@ -71,15 +71,6 @@ _MEMORY_PATH = Path(":memory:")
 _JOURNAL_PROBE_TIMEOUT_SECONDS = 5.0
 
 logger = logging.getLogger(__name__)
-_OBJECT_MAPPING = TypeAdapter(dict[str, object])
-
-
-def _object_mapping(value: object) -> Mapping[str, object] | None:
-    """Narrow an unstructured app-state value to an object-keyed mapping."""
-    try:
-        return _OBJECT_MAPPING.validate_python(value)
-    except ValidationError:
-        return None
 
 
 def probe_engine_discovery_freshness() -> bool | None:
@@ -392,7 +383,7 @@ def assemble_health_status(
 
     # --- Repair summary ---
     repair_summary_value: object = getattr(app_state, "repair_summary", None)
-    repair_summary = _object_mapping(repair_summary_value)
+    repair_summary = coerce_object_mapping(repair_summary_value)
     if repair_summary is None:
         repair_summary = {
             "repair_backlog": 0,

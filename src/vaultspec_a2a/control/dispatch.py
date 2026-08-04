@@ -33,6 +33,7 @@ from ..providers.team_selection import (
     frozen_team_selection_from_record,
 )
 from ..thread.enums import ControlActionType, ThreadStatus
+from ..utils.coercion import coerce_object_mapping
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -58,16 +59,7 @@ logger = logging.getLogger(__name__)
 # first occurrence logs in full, every Nth repeat thereafter logs in full, the
 # rest only advance the counter a batch-end summary reports.
 _REDISPATCH_LOG_EVERY_N = 5
-_STRING_KEYED_MAPPING = TypeAdapter(dict[str, object])
 _STRING_LIST = TypeAdapter(list[str])
-
-
-def _string_keyed_mapping(value: object) -> dict[str, object] | None:
-    """Validate an untrusted JSON value as a string-keyed mapping."""
-    try:
-        return _STRING_KEYED_MAPPING.validate_python(value, strict=True)
-    except ValidationError:
-        return None
 
 
 def _string_list(value: object) -> list[str] | None:
@@ -88,19 +80,19 @@ def _frozen_model_assignment(
         return None, frozen.compiler_map()
 
     frozen_record = metadata.get("model_profile")
-    frozen_record_mapping = _string_keyed_mapping(frozen_record)
+    frozen_record_mapping = coerce_object_mapping(frozen_record)
     if frozen_record_mapping is None:
         return None, {}
 
     profile_value = frozen_record_mapping.get("profile_id")
     profile_id = profile_value if isinstance(profile_value, str) else None
-    roles_value = _string_keyed_mapping(frozen_record_mapping.get("roles"))
+    roles_value = coerce_object_mapping(frozen_record_mapping.get("roles"))
     if roles_value is None:
         return profile_id, {}
 
     assignment: dict[str, dict[str, object]] = {}
     for agent_id, role_value in roles_value.items():
-        role_mapping = _string_keyed_mapping(role_value)
+        role_mapping = coerce_object_mapping(role_value)
         if role_mapping is None:
             continue
         provider = role_mapping.get("provider")
@@ -348,7 +340,7 @@ async def redispatch_reconciling_threads(
                 if thread.thread_metadata:
                     try:
                         raw_metadata: object = json.loads(thread.thread_metadata)
-                        parsed_metadata = _string_keyed_mapping(raw_metadata)
+                        parsed_metadata = coerce_object_mapping(raw_metadata)
                         if parsed_metadata is not None:
                             meta = parsed_metadata
                     except json.JSONDecodeError:

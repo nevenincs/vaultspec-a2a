@@ -5,7 +5,7 @@ tags:
 date: '2026-08-04'
 modified: '2026-08-04'
 body_schema: 'body-v1'
-body_hash: 'sha256:fae4dfa09db79922cb1fc3c785d26ffaa60c1b45f0024f25da7690d5016f9539'
+body_hash: 'sha256:1f097d1a1f371122f9c123c03deeb23feb8cce92aae6e033797e2f6e01854d9a'
 related: []
 ---
 
@@ -1517,6 +1517,51 @@ single type diagnostic that vanished on re-run.
 Recorded as a reporting standard because this campaign has repeatedly been misled
 by results that were true when taken and false minutes later, and because
 "flake" is the word that ends an investigation.
+
+### the-blind-spot-is-one-member-of-a-set | critical | the general form, and it is not about platforms
+
+The guard weakness first found as "pinned to one platform's spelling" has a
+general form, established after auditing every row: the defect is a pattern
+pinned to ONE MEMBER OF A SET THE CONCEPT RANGES OVER. Platform was incidental.
+The three instances differ in shape and are the same fault - one platform of two,
+one stage of six, one spelling of an assignment where the prevailing house style
+supplies a second.
+
+The question that finds it is therefore not "is this platform-specific?" but
+**"what else could a writer have chosen here?"** That reframing is the durable
+output of this sweep, and it applies to any invariant expressed as a literal
+rather than as the property it stands for.
+
+Ratios matter and were measured: the process-tree row guarded one half of its
+concept; the vault stage row guarded one SIXTH, pinning a single stage name where
+a restatement beginning at any of the other five passes untouched. Both reported
+green throughout.
+
+One row was audited and deliberately left alone, which is what makes the sweep
+credible: a row pinning a private name looked like the same weakness and is not,
+because its actual risk is the function being made public again rather than
+copied - and de-privatisation already flips its count and fails it. A sweep that
+"fixed" four of four would have been manufacturing.
+
+### a-guard-refused-because-the-concept-is-not-consolidated | high | the honest non-fix
+
+The fourth row pins a function by name, so a copy under another name passes. That
+is a genuine weakness and it was NOT repaired, for a reason worth more than the
+repair: the invariant it would have to pin - narrow to an object, degrade to
+empty rather than raise - occurs INLINE in ten modules across the authoring,
+context and provider packages. A row asserting a count of ten would assert
+nothing and would need revising on every ordinary edit, which is the
+guard-file-as-noise failure this campaign has been careful to avoid.
+
+So the finding is not about the guard. It is that this concept is **less
+consolidated than "one declaration" reads**: a canonical helper exists and nine
+inline restatements sit beside it. Whether those are a bypass of the helper or
+merely idiomatic narrowing is a judgement that belongs in the open, not settled
+silently inside a test file. Recorded as open.
+
+This is the second time a lane has declined to strengthen something on the
+grounds that the strengthening would be dishonest, and both times the refusal
+surfaced a better finding than the change would have.
 
 ## Recommendations
 

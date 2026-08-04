@@ -22,6 +22,7 @@ branch - starving exactly the liveness signal the first property protects.
 from __future__ import annotations
 
 import json
+from datetime import UTC, datetime
 from types import SimpleNamespace
 
 import httpx
@@ -292,23 +293,72 @@ def test_the_ws_dispatch_is_bound_to_the_declared_heartbeat_value() -> None:
     assert record.active_threads == ["t-real"]
 
 
-def test_the_progress_catalog_keys_the_heartbeat_by_its_declaration() -> None:
-    """The SSE allowlist entry follows the enum rather than a copy of its value.
+def test_a_real_heartbeat_reaches_the_wire_with_its_fields_intact() -> None:
+    """The acceptance bar for the catalog conversion: CONTENT, not the key.
 
-    A stranded catalog key is silent: the frame keeps encoding, and only its
-    catalogued fields disappear.
+    The per-event catalog is an ALLOWLIST, and an allowlist is invisible to the
+    type system. Its contract is projection by omission, never refusal: a frame
+    whose kind misses the catalog is rebuilt from the always-safe identity keys
+    and emitted anyway. So a lookup that stopped matching would raise nothing,
+    fail no type check, and still satisfy any test asserting only that a frame of
+    this kind appeared - it would simply arrive materially empty.
+
+    The negative control runs FIRST so the allowlist is proven live before the
+    positive case leans on it. A catalog that passed everything through would
+    otherwise satisfy the survival assertion while enforcing nothing.
     """
+    from ...api.schemas.events import HeartbeatEvent
+    from ...streaming.sse_frames import encode_sse_frame, enforce_progress_allowlist
+
+    uncatalogued = enforce_progress_allowlist(
+        {"type": "definitely_not_catalogued", "server_uptime_seconds": 99.5}
+    )
+    assert "server_uptime_seconds" not in uncatalogued, (
+        "the allowlist is not enforcing; the survival assertion below proves nothing"
+    )
+
+    # A StrEnum member hashes as its VALUE (str wins the MRO), so the catalog
+    # matches whichever side the lookup arrives on. Asserted rather than assumed:
+    # Enum.__hash__ hashes the member NAME, and inheriting that instead would
+    # strand every converted key silently.
+    for probe in (ServerEventType.HEARTBEAT.value, ServerEventType.HEARTBEAT):
+        projected = enforce_progress_allowlist(
+            {"type": probe, "server_uptime_seconds": 99.5}
+        )
+        assert projected.get("server_uptime_seconds") == 99.5, (
+            f"catalog lookup missed for {probe!r} - frame would arrive empty"
+        )
+
+    # The real producer's own frame, through the real encode boundary.
+    heartbeat = HeartbeatEvent(
+        timestamp=datetime.now(UTC),
+        server_uptime_seconds=42.5,
+    )
+    raw = encode_sse_frame(
+        heartbeat.model_dump(mode="json"),
+        event=ServerEventType.HEARTBEAT,
+        thread_id="t-probe",
+    )
+    text = raw.decode("utf-8")
+    decoded = json.loads(
+        "".join(
+            line.removeprefix("data: ")
+            for line in text.splitlines()
+            if line.startswith("data: ")
+        )
+    )
+    assert decoded["server_uptime_seconds"] == 42.5
+    assert decoded["type"] == ServerEventType.HEARTBEAT.value
+
+
+def test_no_declared_event_kind_is_catalogued_under_a_hand_copied_literal() -> None:
+    """No catalog entry is left stranded behind a respelling of its declaration."""
     from ...streaming.sse_frames import _PROGRESS_CATALOG
 
     assert ServerEventType.HEARTBEAT in _PROGRESS_CATALOG
-    keyed_by_member = [
-        key for key in _PROGRESS_CATALOG if isinstance(key, ServerEventType)
-    ]
-    assert ServerEventType.HEARTBEAT in keyed_by_member
-    # Every catalogued kind the enum declares is keyed by the member, so no entry
-    # is left behind if a value is respelled.
+    declared = set(ServerEventType)
     for key in _PROGRESS_CATALOG:
-        if key in set(ServerEventType):
+        if key in declared:
             assert isinstance(key, ServerEventType), (
                 f"{key!r} is a declared event kind keyed by a hand-copied literal"
             )

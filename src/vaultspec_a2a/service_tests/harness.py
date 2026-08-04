@@ -19,6 +19,11 @@ import httpx
 from ..artifacts import ArtifactDeclaration, RetentionDisposition
 from ..control.config import settings
 from ..lifecycle.manager import tree_kill
+from ..testing.catalog_selection import (
+    IN_PROCESS_PROVIDER_IDS,
+    NoSelectableLaneError,
+    in_process_selection,
+)
 from ..testing.ports import free_port
 from ..tests.gateway_boot import GatewayBootError
 
@@ -31,12 +36,6 @@ _WatchedProcess = tuple[str, "subprocess.Popen[str]", Path]
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 COMPOSE_FILE = REPO_ROOT / "service" / "docker-compose.integration.yml"
-
-# The lanes that execute inside the gateway process. This stack holds no
-# provider credential, so these are the only lanes its runs may select - named
-# here rather than imported so a serving-policy change upstream cannot silently
-# widen what a certification run is allowed to bill.
-_IN_PROCESS_PROVIDER_IDS = frozenset({"deterministic", "mock"})
 
 
 def _preset_in_process_provider(team_preset: str) -> str | None:
@@ -56,7 +55,7 @@ def _preset_in_process_provider(team_preset: str) -> str | None:
     declared = [worker.model.provider for worker in config.workers]
     declared.append(config.defaults.provider)
     for provider in declared:
-        if provider is not None and provider.value in _IN_PROCESS_PROVIDER_IDS:
+        if provider is not None and provider.value in IN_PROCESS_PROVIDER_IDS:
             return provider.value
     return None
 
@@ -785,42 +784,21 @@ class ServiceStack:
                 "/v1/provider-catalog", params={"workspace_root": workspace_root}
             )
             resp.raise_for_status()
-            providers = cast("list[dict[str, Any]]", resp.json()["providers"])
+            payload = resp.json()
 
-        served = [
-            record
-            for record in providers
-            if record["health"]["selectable"] and record["catalog"]["models"]
-        ]
-        in_process = [
-            record
-            for record in served
-            if record["provider_id"] in _IN_PROCESS_PROVIDER_IDS
-        ]
-        if not in_process:
-            raise GatewayBootError(
-                "this stack's gateway serves no selectable in-process lane, so a "
-                f"{team_preset!r} run cannot present a valid selection. The "
-                "gateway environment must set VAULTSPEC_SERVE_IN_PROCESS_LANES "
-                "(and MOCK_API_BASE for the mock lane). Selectable lanes served: "
-                f"{[record['provider_id'] for record in served]}"
+        # The lane the preset is pinned to, so a mock preset keeps replaying its
+        # tape rather than being answered by the deterministic lane. Refusing a
+        # non-in-process lane is the mechanism's own guarantee now, not this
+        # file's: it will not hand back a billable lane even if one is the only
+        # selectable thing this stack serves.
+        try:
+            selection = in_process_selection(
+                payload, prefer_provider_id=_preset_in_process_provider(team_preset)
             )
-        # Prefer the lane the preset itself is pinned to, so a mock preset keeps
-        # replaying its tape rather than being answered by the deterministic lane.
-        preferred = _preset_in_process_provider(team_preset)
-        record = next(
-            (item for item in in_process if item["provider_id"] == preferred),
-            in_process[0],
-        )
-        catalog = record["catalog"]
-        selection = {
-            "schema_version": 1,
-            "provider_id": record["provider_id"],
-            "execution_mode": record["execution_mode"],
-            "catalog_revision": catalog["state"]["revision"],
-            "entry_id": catalog["models"][0]["entry_id"],
-            "controls": {},
-        }
+        except NoSelectableLaneError as exc:
+            raise GatewayBootError(
+                f"a {team_preset!r} run cannot present a valid selection: {exc}"
+            ) from exc
         self._selection_cache[cache_key] = selection
         # Copied per call so a caller mutating its body cannot reach the cache
         # and silently change what every later run in the session selects.

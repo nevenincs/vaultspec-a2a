@@ -4,7 +4,7 @@ tags:
   - '#ecosystem-artifact-lifecycle'
 date: '2026-07-21'
 modified: '2026-08-04'
-body_hash: 'sha256:d0de92f2d5f9151c1856a169e93a8a2a446833a1bdf23d81d3496a971fdbd7d5'
+body_hash: 'sha256:006876dc14d8267b2af810d562464d1686ebd6e4d71114da45901fff4905687d'
 tier: L3
 related:
   - '[[2026-07-21-ecosystem-artifact-lifecycle-adr]]'
@@ -131,7 +131,7 @@ The user asked for the provider-based retention observations to be investigated 
 
 a2a's durable trace records what an agent SAID, not what it DID. Verified on the Codex lane: the turn consumer handles agent-message deltas, usage, and errors, and every other item event falls through unhandled, so an autonomous allowlisted command leaves no durable mark. Only human-gated actions are recorded. The equivalent question on the ACP family is unestablished - tool-call updates reach the live stream, but whether they reach any durable store was never checked. The inventory precedes the seam choice deliberately: choosing a capture point against an unverified inventory is the failure this project keeps finding.
 
-- [ ] `W04.P09.S28` - Inventory which provider action events reach a durable store versus only the live stream, per lane; `src/vaultspec_a2a/providers/codex_chat_model.py, src/vaultspec_a2a/providers/acp_chat_model.py, src/vaultspec_a2a/streaming/aggregator.py`.
+- [x] `W04.P09.S28` - Inventory which provider action events reach a durable store versus only the live stream, per lane; `src/vaultspec_a2a/providers/codex_chat_model.py, src/vaultspec_a2a/providers/acp_chat_model.py, src/vaultspec_a2a/streaming/aggregator.py`.
 - [ ] `W04.P09.S29` - Choose the action-event capture seam and bound it, or record why capture is refused; `src/vaultspec_a2a/streaming/aggregator.py, src/vaultspec_a2a/artifacts/retention.py`.
 
 ### Phase `W04.P10` - Amend the record to match what was found

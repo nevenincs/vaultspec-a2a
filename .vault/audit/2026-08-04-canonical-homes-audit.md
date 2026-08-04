@@ -5,7 +5,7 @@ tags:
 date: '2026-08-04'
 modified: '2026-08-04'
 body_schema: 'body-v1'
-body_hash: 'sha256:6b50e7ece310b80ee2a19f913cc115d5e8b7f40cee956cfd578ad420afb29fde'
+body_hash: 'sha256:94e305cebe67451b24e33f8a7d0089c64b3565979df9aa17dd32e6f687f6becd'
 related: []
 ---
 
@@ -1410,6 +1410,60 @@ restriction, with no Windows branch at all - while its sibling publication path
 receives a verified private access-control entry. So on the platform this product
 targets first, that parent directory is left unrestricted. Queued rather than
 absorbed into the commit that found it.
+
+### correction-the-tree-kill-cluster-was-already-closed | high | an inventory wrong by being stale
+
+The process-tree kill cluster was recorded as two independent implementations of
+one escalation, roughly seventy duplicated lines. That was true when the sweep
+found it and false when it was assigned: the synchronous twin had already been
+reduced to a four-line wrapper over the one escalation, in a commit that removed
+over a hundred lines and added coverage. Confirmed an ancestor of HEAD.
+
+Seventh inventory in this campaign materially wrong on first issue, and the first
+wrong by being STALE rather than incomplete. Every earlier correction ADDED
+sites; this one removed a cluster entirely. So the standing rule needs its
+converse stated: re-derivation is not only a guard against undercounting, it is a
+guard against a list describing a world that no longer exists. The instruction
+here quoted a sweep's finding without checking whether the same sweep had since
+fixed it.
+
+Making no production change was the correct outcome, and is recorded as such -
+a lane sent to find something to move would have found a wrapper and improved it.
+
+Two things confirmed in passing. The contract difference predicted for this
+cluster was real: the synchronous seam maps its single timeout onto the terminate
+phase only, so its worst case exceeds its nominal budget - and that was already
+written into the docstring rather than left to be discovered. And a third
+function that resembles both is not a duplicate at all: it prefers the operating
+system's containment and delegates only when a process has none.
+
+### a-guard-pinned-to-one-platforms-spelling | high | half a concept guarded, and it looked green
+
+The standing structural guard already pinned this concept - by matching one
+platform's command literal. A re-derivation written for the other platform
+carries no such literal and passes untouched. Half the concept was covered and
+the row reported green, which is the same failure class as a platform-gated test
+whose skip is indistinguishable from a pass.
+
+The repair pins the load-bearing STEP rather than a spelling: on the platform
+with no whole-tree signal, descendants must be walked BEFORE the root is
+signalled, because signalling the root first severs the parent links the walk
+reads. A re-derivation that signals first still terminates the root, so it looks
+like it worked while leaving grandchildren alive - precisely the copy that would
+never announce itself.
+
+Two generalisations follow. Any guard row keyed to a platform-specific literal, a
+vendor spelling, or one implementation's incidental token has the same blind
+spot, and the remaining rows should be audited on that criterion. And a guard
+must be proven non-vacuous: this one was, by driving the scanning helper directly
+- returning the expected module for a present pattern, nothing for an absent one,
+and a large count for a trivially common one - rather than by planting a decoy
+file in the source tree, which other lanes would have seen mid-run.
+
+Note also what the guard's existence means for the open question this feature's
+decision record deferred: whether the rule is enforceable rather than
+conventional is being answered in practice, by a structural test that fails when
+a concept regains a second declaration.
 
 ## Recommendations
 

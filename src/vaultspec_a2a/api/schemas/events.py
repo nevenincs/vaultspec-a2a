@@ -19,11 +19,11 @@ from ...graph.enums import (
     ToolCallStatus,
     ToolKind,
 )
+from ...thread.constants import MAX_PERMISSION_DESCRIPTION_CHARS
 from ...thread.models import PlanEntry
 from .base import EventEnvelope
 
 __all__ = [
-    "MAX_PERMISSION_DESCRIPTION_CHARS",
     "MAX_TOOL_CALL_CHARS",
     # Event models
     "AgentStatusEvent",
@@ -54,13 +54,6 @@ __all__ = [
 # ---------------------------------------------------------------------------
 # Bounded caller-controlled text
 # ---------------------------------------------------------------------------
-
-#: Cap on a streamed permission description, matched deliberately to the 4096
-#: the durable control writer already truncates to before persisting the same
-#: text. Matching is the point rather than a coincidence: the streamed frame and
-#: the row a reload replays from must not disagree about how much of a
-#: description exists, or a panel would show text live that vanishes on refresh.
-MAX_PERMISSION_DESCRIPTION_CHARS = 4096
 
 #: Cap on the tool identifier a permission request names. Tool names are
 #: identifiers, sized alongside the other bounded identifiers on this wire.

@@ -1,6 +1,7 @@
 """Focused replay/idempotency tests for worker->gateway event handlers."""
 
 import json
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -9,6 +10,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
+from ...api.schemas.events import PermissionRequestEvent
 from ...conftest import materialize_schema
 from ...control.action_lease import claim_control_action
 from ...control.drain import DrainGate
@@ -26,7 +28,9 @@ from ...database import (
     set_thread_approval_state,
 )
 from ...database.models import ControlActionModel, ThreadModel
+from ...graph.enums import ServerEventType
 from ...streaming.aggregator import EventAggregator
+from ...thread.constants import MAX_PERMISSION_DESCRIPTION_CHARS
 from ...thread.enums import ControlActionType
 
 
@@ -596,3 +600,60 @@ async def test_terminal_db_failure_releases_and_clears_public_state() -> None:
         assert aggregator.get_subscriptions(client_id) == frozenset()
     finally:
         await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_persisted_description_matches_what_the_stream_showed(
+    session_factory,
+) -> None:
+    """The durable row holds exactly what the operator was streamed.
+
+    Two readers truncate the same worker-supplied text at different times: this
+    handler before writing the row, and the wire model when the frame is built.
+    A reload re-reads the row, so a stream permitted to carry more than the row
+    stores would show text live that vanishes on refresh - which is the bug the
+    shared bound exists to prevent, and the one a second declaration reopens.
+
+    Driven end to end against a real migrated SQLite database and the real wire
+    model, from a single pathological description, so the two truncations are
+    compared rather than each compared to a number written down twice.
+    """
+    async with session_factory() as session:
+        thread = await create_thread(
+            session, title="Bounded Description", status="running"
+        )
+        await session.commit()
+
+    oversize = "d" * (MAX_PERMISSION_DESCRIPTION_CHARS * 3)
+    # The trap has to be live: a description already within the bound would let
+    # this pass with both truncations removed.
+    assert len(oversize) > MAX_PERMISSION_DESCRIPTION_CHARS
+
+    await _handle_permission_event(
+        thread.id,
+        {
+            "type": "permission_request",
+            "request_id": "bounded-description",
+            "description": oversize,
+            "options": [],
+        },
+        session_factory=session_factory,
+    )
+
+    async with session_factory() as session:
+        stored = await get_permission_request(session, "bounded-description")
+
+    streamed = PermissionRequestEvent(
+        type=ServerEventType.PERMISSION_REQUEST,
+        thread_id=thread.id,
+        agent_id="agent-1",
+        timestamp=datetime.now(UTC),
+        sequence=1,
+        request_id="bounded-description",
+        description=oversize,
+        options=[],
+    )
+
+    assert stored is not None
+    assert len(stored.description) < len(oversize)
+    assert stored.description == streamed.description

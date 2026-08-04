@@ -20,6 +20,7 @@ from pydantic import TypeAdapter, ValidationError
 
 from ..ipc.schemas import ExecutionStateProjectionPayload
 from ..providers import ProviderCondition
+from ..thread.constants import MAX_PERMISSION_DESCRIPTION_CHARS
 from ..thread.enums import InvalidTransitionError, ThreadStatus
 from ..thread.permission_fsm import (
     compute_permission_request_effects,
@@ -425,7 +426,13 @@ async def _persist_permission_request(
         except_request_id=request_id,
     )
     description_value = payload.get("description")
-    description = description_value[:4096] if isinstance(description_value, str) else ""
+    # The same declaration the streamed permission frame truncates at, so the
+    # row a reload replays from cannot hold less than the operator was shown.
+    description = (
+        description_value[:MAX_PERMISSION_DESCRIPTION_CHARS]
+        if isinstance(description_value, str)
+        else ""
+    )
     allowed_options = _option_mappings(payload.get("options"))
     await record_permission_request(
         db,

@@ -26,7 +26,6 @@ Pydantic models.
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
@@ -43,17 +42,18 @@ from sqlalchemy.ext.asyncio import (
 )
 
 from ...api.schemas.events import (
-    MAX_PERMISSION_DESCRIPTION_CHARS,
     MAX_TOOL_CALL_CHARS,
     PermissionRequestEvent,
 )
 from ...graph.enums import ServerEventType
+from ...thread.constants import MAX_PERMISSION_DESCRIPTION_CHARS
 from ...thread.enums import ControlActionResultStatus, RepairStatus, ThreadStatus
 from ..migrate import build_migration_config
 from ..models import Base, ControlActionModel, ThreadModel
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator, Iterator
+    from pathlib import Path
 
 # The four partial indexes revision 0009 created descending, and the ordering it
 # gave each one. Newest-first listing is the access pattern they exist for, so
@@ -359,20 +359,3 @@ class TestPermissionTextIsBounded:
         event = _permission_event(description="fine", tool_call=None)
 
         assert event.tool_call is None
-
-    def test_description_bound_matches_the_durable_writer(self) -> None:
-        """The streamed cap equals the cap the control writer persists at.
-
-        A reload re-reads the durable row, so a stream permitted to carry more
-        than the row stores would show text that disappears on refresh. The two
-        bounds are equal by intent; this states the intent as an assertion.
-        """
-        handlers = (
-            Path(__file__).resolve().parents[2] / "control" / "event_handlers.py"
-        ).read_text(encoding="utf-8")
-
-        assert f"[:{MAX_PERMISSION_DESCRIPTION_CHARS}]" in handlers, (
-            "control/event_handlers.py no longer truncates the permission "
-            f"description at {MAX_PERMISSION_DESCRIPTION_CHARS}; the streamed "
-            "cap and the durable cap have drifted apart"
-        )

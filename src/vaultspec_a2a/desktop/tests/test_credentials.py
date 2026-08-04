@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import os
-import subprocess
 from typing import TYPE_CHECKING
 
 import pytest
@@ -26,6 +25,7 @@ from ...desktop.credentials import (
     load_attach_credential,
     load_ownership_capability,
 )
+from ...testing.links import plant_link_to_file
 
 _VALID_TOKEN = "a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6"
 
@@ -125,27 +125,6 @@ def test_directory_in_place_of_file_rejected(tmp_path: Path) -> None:
         load_attach_credential(tmp_path)
 
 
-def _make_windows_junction(link: Path, target: Path) -> None:
-    """Create a directory junction at *link* pointing to *target*.
-
-    A junction is the reparse point every Windows host can create without holding
-    ``SeCreateSymbolicLinkPrivilege`` or Developer Mode, so it is the privilege-free
-    stand-in for a symlink when certifying reparse rejection. ``mklink`` is a
-    ``cmd.exe`` built-in rather than a standalone executable, so it is invoked
-    through the command interpreter.
-    """
-    interpreter = os.environ.get("COMSPEC", "cmd.exe")
-    completed = subprocess.run(
-        [interpreter, "/c", "mklink", "/J", str(link), str(target)],
-        capture_output=True,
-        text=True,
-        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
-    )
-    if completed.returncode != 0 or not link.is_junction():
-        detail = completed.stderr.strip()
-        raise OSError(f"could not create a directory junction: {detail}")
-
-
 def test_non_owner_restricted_file_rejected(tmp_path: Path) -> None:
     """A file whose permissions are not owner-restricted is rejected on every host.
 
@@ -167,22 +146,25 @@ def test_non_owner_restricted_file_rejected(tmp_path: Path) -> None:
 def test_reparse_credential_rejected(tmp_path: Path) -> None:
     """A reparse point standing in for the credential file is rejected on every host.
 
-    On POSIX a real symbolic link points at a hardened secret; on Windows a directory
-    junction - the privilege-free reparse point - stands in its place. Both branches
-    confirm the owner-restriction predicate rejects the reparse point and that the
-    loader fails closed rather than following it.
+    The link is planted at the credential's own name, pointing at a secret that
+    is itself valid and hardened - so a loader that followed it would return a
+    usable token rather than failing for some incidental reason. That is the
+    case worth certifying, and it is only reachable where the host grants a real
+    symbolic link to a file. Where it does not, a directory junction stands in:
+    it still proves the reparse point is refused, but nothing readable sits
+    behind it, so the pass is weaker. Both assertions name which kind was
+    planted so a weaker host's pass cannot be read as the stronger one.
     """
     link = tmp_path / ATTACH_CREDENTIAL_NAME
-    if os.name == "posix":
-        real = tmp_path / "real_secret"
-        real.write_text(_VALID_TOKEN, encoding="utf-8")
-        harden_credential_path(real)
-        os.symlink(real, link)
-    else:
-        target = tmp_path / "reparse_target"
-        target.mkdir()
-        _make_windows_junction(link, target)
-    assert not credential_file_is_owner_restricted(link)
+    real = tmp_path / "real_secret"
+    real.write_text(_VALID_TOKEN, encoding="utf-8")
+    harden_credential_path(real)
+
+    kind = plant_link_to_file(link, real)
+
+    assert not credential_file_is_owner_restricted(link), (
+        f"the owner-restriction predicate accepted a {kind} at the credential name"
+    )
     with pytest.raises(CredentialError):
         load_attach_credential(tmp_path)
 

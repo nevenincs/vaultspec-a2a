@@ -31,6 +31,7 @@ from .leases import (
     hold_lease,
     lease_home,
 )
+from .links import plant_link_to_file
 from .ports import (
     SCRATCH_ROLE,
     PortAllocationError,
@@ -99,6 +100,7 @@ __all__ = [
     "lease_home",
     "live_peer_sessions",
     "machine_cpu_budget",
+    "plant_link_to_file",
     "register_session",
     "registry_watch",
     "reserve_scratch_ports",

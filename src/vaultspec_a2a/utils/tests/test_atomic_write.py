@@ -14,11 +14,11 @@ failures are produced by genuinely unwritable or contended filesystem state.
 from __future__ import annotations
 
 import os
-import subprocess
 from typing import TYPE_CHECKING
 
 import pytest
 
+from ...testing.links import plant_link_to_file
 from ..atomic_write import atomic_write_text
 
 if TYPE_CHECKING:
@@ -28,35 +28,6 @@ if TYPE_CHECKING:
 def _temporaries(directory: Path) -> list[Path]:
     """Return every temporary-file residue in *directory*."""
     return sorted(directory.glob("*.tmp"))
-
-
-def _plant_link(link: Path, file_target: Path) -> str:
-    """Plant the strongest link this host can create at *link*; name its kind.
-
-    A symbolic link to a FILE is the case worth proving, because a write that
-    follows one lands on that file's bytes and destroys them.  Creating one on
-    Windows needs a privilege not every host grants, so a host that refuses gets
-    a directory junction instead - the privilege-free reparse point - which
-    still proves the refusal but cannot demonstrate the destruction.
-    """
-    try:
-        os.symlink(file_target, link)
-    except OSError:
-        junction_target = link.parent / "junction-target"
-        junction_target.mkdir(exist_ok=True)
-        interpreter = os.environ.get("COMSPEC", "cmd.exe")
-        completed = subprocess.run(
-            [interpreter, "/c", "mklink", "/J", str(link), str(junction_target)],
-            capture_output=True,
-            text=True,
-            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
-        )
-        if completed.returncode != 0 or not link.is_junction():
-            raise OSError(
-                f"could not plant a link: {completed.stderr.strip()}"
-            ) from None
-        return "junction"
-    return "symlink"
 
 
 def test_content_is_published_and_no_temporary_survives(tmp_path: Path) -> None:
@@ -226,7 +197,7 @@ def test_neither_write_path_follows_a_link_planted_at_the_temporary(
     outside = tmp_path / "outside.secret"
     outside.write_text("must-survive", encoding="utf-8")
     target = tmp_path / "record.json"
-    kind = _plant_link(tmp_path / f"record.json.{os.getpid()}.tmp", outside)
+    kind = plant_link_to_file(tmp_path / f"record.json.{os.getpid()}.tmp", outside)
 
     with pytest.raises(OSError, match="refusing to write through a link"):
         atomic_write_text(target, "must-not-land-outside", mode=mode)

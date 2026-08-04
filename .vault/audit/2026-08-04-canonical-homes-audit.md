@@ -5,7 +5,7 @@ tags:
 date: '2026-08-04'
 modified: '2026-08-04'
 body_schema: 'body-v1'
-body_hash: 'sha256:c383a1931879d08d0a02da02c46bd279eec1f54d82ea7de8b74324df03cfb67f'
+body_hash: 'sha256:e97c8c68bfff5a6858b24b2d854d279400db85431727f0d086628b84522094a8'
 related: []
 ---
 
@@ -5238,3 +5238,51 @@ Recorded as the strongest single argument for this campaign's method finding tha
 reading every candidate beats counting matches. A count treats these as two more
 occurrences of one fact. Reading them shows they are unrelated facts that a
 converter would have merged without any check firing.
+
+### a-primitive-that-accepts-the-weaker-type-silently | medium | latent, same shape as the inert flag
+
+Measured while verifying that the consolidated bearer comparison had not inherited
+an inert protection: the constant-time comparison primitive **accepts `str` as
+well as `bytes`**, and the string path is the weaker one.
+
+So a future refactor that dropped an `.encode()` on either operand would keep
+working, keep type-checking, and silently move the comparison onto that weaker
+path. Nothing in lint or the type system distinguishes the two, and no test would
+fail - the comparison still returns the right answers.
+
+Not currently live: both operands are explicitly encoded and the expected value is
+narrowed before formatting. Recorded because it is the same SHAPE as the inert
+platform flag - a protection that appears intact while a small, plausible,
+type-safe edit removes it - and because that shape is now the third instance in
+this campaign. What the three share is that the DEGRADED state is
+indistinguishable from the protected one at every checkpoint the project runs.
+
+### the-verified-negative-on-the-comparison-primitive | medium | reference, closes a doubt the campaign raised
+
+Recorded so the doubt is not re-opened. After the inert-flag finding, every
+platform-dependent protection in this campaign became suspect, including the
+constant-time comparison the consolidated bearer gate rests on. Measured on the
+shipping platform rather than reasoned from the module name:
+
+    compare_digest -> _hashlib.compare_digest, a C builtin
+    hmac has a pure-Python fallback: NO
+    secrets.compare_digest IS hmac.compare_digest: True
+
+There is no Python fallback for it to degrade to, so the protection is real here
+rather than inert diligence. The two spellings are confirmed as one function
+object for the second time, by a second lane.
+
+Deliberately NOT claimed: a measured constant-time property. A microbenchmark on
+this platform's scheduler cannot honestly establish data-independent timing, and
+asserting it from a noisy measurement would be exactly the false diligence this
+campaign keeps finding. The claim is bounded to what was verified - the real
+implementation is present, and consolidating the rule to one site did not weaken
+it. The primitive's own documented caveat, that timing can reveal LENGTH rather
+than content, is inherent and pre-existing.
+
+That bounding is why the surviving docstring stands. It asserts that the
+comparison does not leak its BYTES through data-dependent timing - which is what
+the primitive guarantees and what was confirmed present. This is not the
+docstring-asserting-an-absent-guarantee class recorded above: there the code
+lacked the protection the prose claimed; here the protection is verified and the
+prose is accurate about WHICH property it names.

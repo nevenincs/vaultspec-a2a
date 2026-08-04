@@ -162,7 +162,7 @@ def authoring_capability(topology_type: TopologyType) -> str:
     for the coder topologies. This is diagnostic truth for the Rust backend, not
     product curation text.
     """
-    if topology_type == TopologyType.RESEARCH_ADR:
+    if is_document_authoring_topology(topology_type):
         return "document_authoring"
     return "coding"
 
@@ -176,8 +176,15 @@ def supported_capabilities(topology_type: TopologyType) -> list[str]:
     this mission surface. Diagnostic truth for the Rust backend, not product
     curation text: the declaration is the served truth the dashboard renders, so it
     extends in lockstep with the topology rather than trailing it.
+
+    Extending in lockstep is why this asks the authoring contract rather than
+    comparing against one topology by name. The two are indistinguishable while
+    the contract names a single document-authoring topology, and they diverge
+    the moment it names a second: the predicate admits it, a name comparison
+    keeps answering "coding" with no capabilities, and the dashboard renders a
+    document-authoring preset as a plain coding one.
     """
-    if topology_type == TopologyType.RESEARCH_ADR:
+    if is_document_authoring_topology(topology_type):
         return ["research_document", "architecture_decision", "plan_document"]
     return []
 

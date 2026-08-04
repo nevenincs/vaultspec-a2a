@@ -28,7 +28,7 @@ from typing import Annotated, Literal
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from ...context.metadata import ThreadMetadata
-from ...thread.actor_tokens import ActorTokenBundle
+from ...thread.actor_tokens import MAX_ROLES_PER_RUN, ActorTokenBundle
 from ...thread.clarification import (
     MAX_QUESTIONS_PER_REQUEST,
     MAX_RUN_MESSAGE_CHARS,
@@ -338,7 +338,9 @@ class FrozenTeamAssignmentSummary(BaseModel):
         max_length=71,
         pattern=r"^(?:sha256:)?[a-f0-9]{64}$",
     )
-    assignments: list[FrozenRoleAssignmentSummary] = Field(min_length=1, max_length=64)
+    assignments: list[FrozenRoleAssignmentSummary] = Field(
+        min_length=1, max_length=MAX_ROLES_PER_RUN
+    )
 
 
 class RunStartResponse(BaseModel):
@@ -381,7 +383,9 @@ class RunPrepareResponse(BaseModel):
     reservation_id: ReservationId
     lease_id: LeaseId
     # The roles commit's actor-token bundle must cover, one per required role.
-    required_roles: list[str] = Field(default_factory=list, max_length=64)
+    required_roles: list[str] = Field(
+        default_factory=list, max_length=MAX_ROLES_PER_RUN
+    )
     # ISO-8601 hard expiry; the slot is released automatically at this instant.
     expires_at: str
     worker_state: WorkerLifecycleState

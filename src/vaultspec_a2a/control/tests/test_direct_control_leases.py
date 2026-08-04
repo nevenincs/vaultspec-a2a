@@ -522,7 +522,14 @@ async def test_restart_redrives_expired_permission_message_and_cancel_actions(
     tmp_path: Path,
     session_factory: async_sessionmaker[AsyncSession],
 ) -> None:
-    """A new gateway reconstructs all three direct control dispatches."""
+    """A new gateway reconstructs all three direct control dispatches.
+
+    Each thread names a real active project, as a run created through the API
+    always does: a redriven follow-up or permission resume re-enters graph
+    execution and is refused without one. The subject here is lease expiry and
+    reconstruction; the project gate itself is proved in
+    ``test_direct_control_recovery.py``.
+    """
     expired_now = datetime.now(UTC) - timedelta(minutes=5)
     async with session_factory() as db:
         for thread_id, status in (
@@ -530,7 +537,12 @@ async def test_restart_redrives_expired_permission_message_and_cancel_actions(
             ("recover-cancel", ThreadStatus.CANCELLING),
             ("recover-permission", ThreadStatus.INPUT_REQUIRED),
         ):
-            await create_thread(db, thread_id=thread_id, status=status)
+            await create_thread(
+                db,
+                thread_id=thread_id,
+                status=status,
+                metadata=_active_project_metadata(),
+            )
         request_id = "recover-permission:permission-1"
         await record_permission_request(
             db,

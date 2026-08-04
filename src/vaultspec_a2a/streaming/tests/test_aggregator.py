@@ -1705,13 +1705,20 @@ _PROVIDER_REFUSAL = "Your credit balance is too low to access the Anthropic API.
 _PROVIDER_ERROR_CODE = -32000
 
 
-def _failing_provider_graph(lane: str, *, error_kind: str | None = None) -> object:
+def _failing_provider_graph(
+    lane: str, *, workspace_root: str, error_kind: str | None = None
+) -> object:
     """Compile a real one-worker graph whose provider refuses the prompt.
 
     ``error_kind`` attaches the adapter's categorical discriminator to the
     refusal, which is how a lane names anything other than the credential
     failure a bare refusal defaults to. It rides the internal-error code because
     that is the code the real adapter's kind-bearing frames carry.
+
+    ``workspace_root`` is the run's active project. The lane refuses to invent
+    one, so omitting it fails the turn during environment resolution - before a
+    prompt is ever sent, and therefore before the provider refusal these tests
+    exist to observe.
     """
     from langgraph.checkpoint.memory import InMemorySaver
     from langgraph.graph import END, StateGraph
@@ -1732,6 +1739,7 @@ def _failing_provider_graph(lane: str, *, error_kind: str | None = None) -> obje
         command=command,
         env_vars={},
         provider=lane,
+        workspace_root=workspace_root,
     )
     builder = StateGraph(cast("Any", TeamState))
     builder.add_node("coder", create_worker_node(model, "You are a coder.", "coder"))
@@ -1751,7 +1759,7 @@ class TestProviderFailureReachesTheReason:
 
     @pytest.mark.asyncio
     async def test_a_provider_refusal_names_itself_in_the_failure_reason(
-        self, aggregator: EventAggregator
+        self, aggregator: EventAggregator, tmp_path: Path
     ) -> None:
         """The reason names the provider's type, code, message and lane."""
         queue = aggregator.add_subscriber("client-1")
@@ -1761,7 +1769,10 @@ class TestProviderFailureReachesTheReason:
         outcome = await aggregator.ingest(
             thread_id="thread-provider-fail",
             agent_id="supervisor",
-            graph=cast("StreamableGraph", _failing_provider_graph("zai")),
+            graph=cast(
+                "StreamableGraph",
+                _failing_provider_graph("zai", workspace_root=str(tmp_path)),
+            ),
             graph_input={"messages": [], "thread_id": "thread-provider-fail"},
             config=config,
         )
@@ -1797,7 +1808,7 @@ class TestProviderFailureReachesTheReason:
 
     @pytest.mark.asyncio
     async def test_the_same_reason_is_offered_for_the_durable_column(
-        self, aggregator: EventAggregator
+        self, aggregator: EventAggregator, tmp_path: Path
     ) -> None:
         """A reloading client gets the same answer the live stream got.
 
@@ -1811,7 +1822,10 @@ class TestProviderFailureReachesTheReason:
         await aggregator.ingest(
             thread_id="thread-provider-durable",
             agent_id="supervisor",
-            graph=cast("StreamableGraph", _failing_provider_graph("claude")),
+            graph=cast(
+                "StreamableGraph",
+                _failing_provider_graph("claude", workspace_root=str(tmp_path)),
+            ),
             graph_input={"messages": [], "thread_id": "thread-provider-durable"},
             config=config,
         )
@@ -1865,6 +1879,7 @@ class TestRecoverabilityFollowsTheCondition:
         thread_id: str,
         client_id: str,
         error_kind: str | None,
+        workspace_root: str,
     ) -> ErrorOccurred:
         """Drive one real provider refusal and return the error frame it emitted."""
         queue = aggregator.add_subscriber(client_id)
@@ -1875,7 +1890,9 @@ class TestRecoverabilityFollowsTheCondition:
             agent_id="supervisor",
             graph=cast(
                 "StreamableGraph",
-                _failing_provider_graph("claude", error_kind=error_kind),
+                _failing_provider_graph(
+                    "claude", workspace_root=workspace_root, error_kind=error_kind
+                ),
             ),
             graph_input={"messages": [], "thread_id": thread_id},
             config={"configurable": {"thread_id": thread_id}},
@@ -1892,7 +1909,7 @@ class TestRecoverabilityFollowsTheCondition:
 
     @pytest.mark.asyncio
     async def test_a_transient_refusal_is_served_as_recoverable(
-        self, aggregator: EventAggregator
+        self, aggregator: EventAggregator, tmp_path: Path
     ) -> None:
         """A rate refusal reaches the client as recoverable, because it is.
 
@@ -1904,6 +1921,7 @@ class TestRecoverabilityFollowsTheCondition:
             thread_id="thread-recoverable-throttled",
             client_id="client-throttled",
             error_kind="rate_limit",
+            workspace_root=str(tmp_path),
         )
 
         assert err.code == ProviderCondition.THROTTLED.value
@@ -1911,7 +1929,7 @@ class TestRecoverabilityFollowsTheCondition:
 
     @pytest.mark.asyncio
     async def test_a_credential_refusal_is_served_as_unrecoverable(
-        self, aggregator: EventAggregator
+        self, aggregator: EventAggregator, tmp_path: Path
     ) -> None:
         """A credential failure stays unrecoverable, and for a stated reason.
 
@@ -1923,6 +1941,7 @@ class TestRecoverabilityFollowsTheCondition:
             thread_id="thread-recoverable-unauth",
             client_id="client-unauth",
             error_kind="authentication_failed",
+            workspace_root=str(tmp_path),
         )
 
         assert err.code == ProviderCondition.UNAUTHENTICATED.value
@@ -1930,7 +1949,7 @@ class TestRecoverabilityFollowsTheCondition:
 
     @pytest.mark.asyncio
     async def test_the_graph_and_the_client_read_one_retryability_judgement(
-        self, aggregator: EventAggregator
+        self, aggregator: EventAggregator, tmp_path: Path
     ) -> None:
         """What the client is told matches what the retry policy would do.
 
@@ -1952,6 +1971,7 @@ class TestRecoverabilityFollowsTheCondition:
                 thread_id=thread_id,
                 client_id=client_id,
                 error_kind=kind,
+                workspace_root=str(tmp_path),
             )
 
             # The same condition, presented to the retry policy in the shape a

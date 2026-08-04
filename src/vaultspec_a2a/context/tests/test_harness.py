@@ -25,16 +25,17 @@ def _provision(
     templates: tuple[str, ...] = DEFAULT_REQUIRED_TEMPLATES,
     skills: tuple[str, ...] = (),
     agents: bool = True,
-    mcps: bool = True,
     empty_agents: bool = False,
-    empty_mcps: bool = False,
+    mcps: bool = False,
 ) -> None:
     """Write a minimal but real ``.vaultspec/`` corpus into *root*.
 
-    ``agents``/``mcps`` lay the corpora a real ``vaultspec-core install``
-    produces; ``empty_*`` creates the directory without content, which is what a
-    partial install leaves and what mere existence checks cannot tell apart from
-    a complete one.
+    ``agents`` lays the agent-definition corpus a real ``vaultspec-core install``
+    produces; ``empty_agents`` creates the directory without content, which is
+    what a partial install leaves and what mere existence checks cannot tell
+    apart from a complete one. ``mcps`` lays the server corpus an install also
+    produces - off by default, because the verifier deliberately does not check
+    it and the tests below prove its presence changes no verdict either way.
     """
     if rules:
         rules_dir = root / ".vaultspec" / "rules"
@@ -55,11 +56,10 @@ def _provision(
             (agents_dir / "vaultspec-adr-author.md").write_text(
                 "# adr author\n", encoding="utf-8"
             )
-    if mcps or empty_mcps:
+    if mcps:
         mcps_dir = root / ".vaultspec" / "mcps"
         mcps_dir.mkdir(parents=True, exist_ok=True)
-        if not empty_mcps:
-            (mcps_dir / "vaultspec-core.json").write_text("{}\n", encoding="utf-8")
+        (mcps_dir / "vaultspec-core.json").write_text("{}\n", encoding="utf-8")
 
 
 def test_fully_provisioned_workspace_is_ready(tmp_path: Path) -> None:
@@ -85,14 +85,31 @@ def test_missing_agents_corpus_is_a_reason(tmp_path: Path) -> None:
     assert any("agents" in reason for reason in verdict.reasons)
 
 
-def test_missing_mcps_corpus_is_a_reason(tmp_path: Path) -> None:
-    """Same for the MCP servers core installs: declared, expected, unverified."""
-    _provision(tmp_path, mcps=False)
+def test_workspace_mcps_corpus_changes_no_verdict(tmp_path: Path) -> None:
+    """The workspace server corpus is not a harness surface, present or absent.
 
-    verdict = verify_harness(tmp_path)
+    A run's MCP surface is resolved from the closed, in-package registry keyed by
+    the names a team's ``[team.harness]`` declares; there is no discovery path
+    from ``.vaultspec/mcps`` into composition. Verifying it therefore asserted a
+    relationship the runtime does not have - failing runs on a corpus they never
+    read, and passing ones while implying the project's declarations reached the
+    agent. Both workspaces below are ready, and neither verdict mentions it.
+    """
+    without = tmp_path / "without-mcps"
+    with_mcps = tmp_path / "with-mcps"
+    without.mkdir()
+    with_mcps.mkdir()
+    _provision(without, mcps=False)
+    _provision(with_mcps, mcps=True)
 
-    assert verdict.ready is False
-    assert any("mcps" in reason for reason in verdict.reasons)
+    absent = verify_harness(without)
+    present = verify_harness(with_mcps)
+
+    assert not (without / ".vaultspec" / "mcps").exists()
+    assert (with_mcps / ".vaultspec" / "mcps" / "vaultspec-core.json").is_file()
+    assert absent.ready is True
+    assert present.ready is True
+    assert absent.reasons == present.reasons == []
 
 
 def test_an_empty_corpus_directory_is_not_provisioned(tmp_path: Path) -> None:
@@ -102,13 +119,12 @@ def test_an_empty_corpus_directory_is_not_provisioned(tmp_path: Path) -> None:
     as provisioned to anything that only asks whether the path exists - which is
     exactly how a surface degrades silently.
     """
-    _provision(tmp_path, agents=False, mcps=False, empty_agents=True, empty_mcps=True)
+    _provision(tmp_path, agents=False, empty_agents=True)
 
     verdict = verify_harness(tmp_path)
 
     assert verdict.ready is False
     assert any("agents" in reason for reason in verdict.reasons)
-    assert any("mcps" in reason for reason in verdict.reasons)
 
 
 def test_workspace_without_rules_corpus_is_satisfied_by_bundled_defaults(

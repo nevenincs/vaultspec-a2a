@@ -228,6 +228,11 @@ async def test_reconciliation_lookups_do_not_scale_with_the_backlog(
     for log in (small_log, large_log):
         assert log.against("permission_requests", "select") == 1
         assert log.against("control_actions", "select") == 1
+        # The repair-journal cap ranks per thread inside one statement rather
+        # than sweeping thread by thread; a per-thread prune would read here as
+        # 4 and 16. It costs no extra SELECT either - the ranking is a subquery
+        # of the delete, not a survivor lookup.
+        assert log.against("control_actions", "delete") == 1
 
     # Unchanged and honest: two journal rows written per thread.
     assert small_log.against("control_actions", "insert") == 8

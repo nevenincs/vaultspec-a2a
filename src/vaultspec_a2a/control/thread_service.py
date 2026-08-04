@@ -35,7 +35,7 @@ from ..database import (
     update_thread_status,
 )
 from ..domain_config import domain_config
-from ..graph.compiler import build_initial_vault_index
+from ..graph.nodes.vault_reader import build_initial_vault_index
 from ..ipc.schemas import DispatchRequest, canonical_project_root, to_dispatch_action
 from ..team.team_config import load_team_config
 from ..thread.creation import requires_dispatch, resolve_autonomous

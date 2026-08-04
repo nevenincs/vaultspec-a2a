@@ -46,10 +46,10 @@ from typing import Final, TypeGuard
 
 # The frame-kind vocabulary and the semantic-phase vocabulary are both owned by
 # graph.enums - one source of truth per vocabulary, not a per-layer copy. The
-# phase mapping is what run-status also reads, and it is re-exported under this
-# module's public name so callers and tests keep importing it from here.
-from ..graph.enums import ServerEventType
-from ..graph.enums import research_adr_semantic_phase as semantic_phase_for_node
+# phase mapping is what run-status also reads, and it keeps the owner's spelling
+# here: the qualifier names the ONE topology it maps, and a shorter local name
+# would read as though it applied to any node.
+from ..graph.enums import ServerEventType, research_adr_semantic_phase
 
 # The wire event-type key pair is owned by ``thread.snapshots`` - the one layer
 # every producer and consumer of a relayed payload can import. Reading the frame
@@ -64,7 +64,6 @@ __all__ = [
     "catalog_worst_case_frame_bytes",
     "encode_sse_frame",
     "enforce_progress_allowlist",
-    "semantic_phase_for_node",
 ]
 
 SSE_FRAME_VERSION = "v1"
@@ -484,7 +483,7 @@ def _stamp_semantic_phase(payload: Mapping[str, object]) -> Mapping[str, object]
     node_name = payload.get("node_name") or payload.get("agent_id")
     if not isinstance(node_name, str) or not node_name:
         return payload
-    phase = semantic_phase_for_node(node_name)
+    phase = research_adr_semantic_phase(node_name)
     if phase is None:
         return payload
     return {**payload, "semantic_phase": phase}

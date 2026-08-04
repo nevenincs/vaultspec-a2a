@@ -51,10 +51,10 @@ if TYPE_CHECKING:
     from ...thread.state import TeamState
     from .worker import RoutingNode
 
+# The verdict vocabulary is imported to ROUTE ON, not to offer a second way in:
+# thread.enums holds it precisely because this module and the authoring lifecycle
+# cannot import each other, and a consumer taking it from either would undo that.
 __all__ = [
-    "VERDICT_APPROVED",
-    "VERDICT_REJECTED",
-    "VERDICT_REQUEST_CHANGES",
     "DocumentProposalSubmitter",
     "ProposalRevisionRequiredError",
     "create_phase_gate_node",

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from ...graph.events import PermissionRequest
 from ...ipc.serializers import _event_type, sequenced_to_dict
-from ...streaming.aggregator import SequencedEvent
+from ...streaming.types import SequencedEvent
 
 
 def test_sequenced_to_dict_includes_permission_event_type_fields() -> None:

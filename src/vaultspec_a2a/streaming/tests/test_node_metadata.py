@@ -10,18 +10,21 @@ mocks) and pin that agreement.
 
 from __future__ import annotations
 
-from typing import Any, ClassVar, cast
+from typing import TYPE_CHECKING, Any, ClassVar, cast
 
 import pytest
 
 from ...graph.enums import AgentLifecycleState
 from ...graph.events import TeamStatus
-from ..aggregator import EventAggregator, StreamableGraph
+from ..aggregator import EventAggregator
 from ..node_metadata import (
     NODE_METADATA_FIELDS,
     node_metadata_fields,
     node_metadata_from_graph,
 )
+
+if TYPE_CHECKING:
+    from ..types import StreamableGraph
 
 
 class _Node:

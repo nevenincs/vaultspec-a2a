@@ -22,7 +22,7 @@ from ..graph.events import (
 from ..thread.snapshots import normalize_wire_event_type
 
 if TYPE_CHECKING:
-    from ..streaming.aggregator import SequencedEvent
+    from ..streaming.types import SequencedEvent
 
 __all__ = ["sequenced_to_dict"]
 

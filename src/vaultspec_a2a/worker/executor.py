@@ -19,7 +19,7 @@ from ..domain_config import domain_config
 from ..ipc.schemas import DispatchApplicationReceiptPayload
 from ..ipc.serializers import sequenced_to_dict
 from ..providers import ProviderCondition
-from ..streaming.aggregator import EventAggregator, SequencedEvent, StreamableGraph
+from ..streaming.aggregator import EventAggregator
 from ..team.team_config import load_team_config
 from ..telemetry import ws_span
 from ..thread.constants import DEFAULT_SUPERVISOR_ID
@@ -40,9 +40,12 @@ if TYPE_CHECKING:
 
     from ..database.checkpoints import Checkpointer
     from ..ipc.schemas import DispatchRequest
+    from ..streaming.types import SequencedEvent, StreamableGraph
     from .ipc import WorkerBridge
 
-__all__ = ["ConcurrentCapError", "Executor", "GraphCompilationError"]
+# ``GraphCompilationError`` is imported to be CAUGHT here, not re-published:
+# ``graph_lifecycle`` raises it and is where every handler imports it from.
+__all__ = ["ConcurrentCapError", "Executor"]
 
 # The document-authoring role whose actor token closes the run's engine session.
 # It is the session's owner: the submitter's constant create_session key opens the

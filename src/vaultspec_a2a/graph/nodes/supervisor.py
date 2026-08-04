@@ -17,8 +17,8 @@ from ...context.stage import infer_phase_from_vault_index
 from ...context.token_budget import compact_context, should_compact
 from ...domain_config import domain_config
 from ...graph.enums import PipelinePhase
-from ...thread.enums import ApprovalStatus
-from .phase_gate import VERDICT_APPROVED, parse_verdict
+from ...thread.enums import VERDICT_APPROVED, ApprovalStatus
+from .phase_gate import parse_verdict
 
 if TYPE_CHECKING:
     # Annotation-only: langchain_core.language_models is seconds-expensive at

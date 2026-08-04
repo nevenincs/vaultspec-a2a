@@ -70,17 +70,14 @@ from .nodes.phase_gate import (
     create_phase_submit_node,
 )
 from .nodes.supervisor import create_plan_approval_node, create_supervisor_node
-from .nodes.vault_reader import build_initial_vault_index, create_mount_node
+from .nodes.vault_reader import create_mount_node
 from .nodes.worker import WorkerNode, create_worker_node
 from .web_locators import extract_web_locators
 
 logger = logging.getLogger(__name__)
 
 
-# ``build_initial_vault_index`` is defined in ``nodes.vault_reader`` (the mount
-# node reuses it to refresh the index each pass) and re-exported here to preserve
-# the historical ``graph.compiler.build_initial_vault_index`` import surface.
-__all__ = ["CompiledTeamGraph", "build_initial_vault_index", "compile_team_graph"]
+__all__ = ["CompiledTeamGraph", "compile_team_graph"]
 
 
 class CompiledTeamGraph(Protocol):

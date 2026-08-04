@@ -26,7 +26,7 @@ if TYPE_CHECKING:
     from collections.abc import Iterable
 
     from ..database.checkpoints import Checkpointer
-    from ..streaming.aggregator import StreamableGraph
+    from ..streaming.types import StreamableGraph
     from .ipc import WorkerBridge
 
 __all__ = ["StateProjector"]

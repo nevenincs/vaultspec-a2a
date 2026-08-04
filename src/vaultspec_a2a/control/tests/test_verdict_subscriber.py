@@ -564,7 +564,7 @@ async def test_reconcile_recovery_terminal_verdict_dispatches_without_crash(
 
 
 def test_gate_resume_verdict_maps_applied_as_approved() -> None:
-    from ...authoring import VERDICT_APPROVED, VERDICT_REJECTED
+    from ...thread.enums import VERDICT_APPROVED, VERDICT_REJECTED
 
     # An AUTO gate resolves-and-applies in one step, so a still-parked run's own
     # proposal reads `applied`; it (and the transient `approved`) resume approved.
@@ -587,7 +587,7 @@ def test_proposal_reconcile_verdict_recovers_missed_request_changes() -> None:
     than stalling forever. The prior code (changeset status only) returned ``None``
     here, which was the defect.
     """
-    from ...authoring import (
+    from ...thread.enums import (
         VERDICT_APPROVED,
         VERDICT_REJECTED,
         VERDICT_REQUEST_CHANGES,

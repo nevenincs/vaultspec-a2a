@@ -6,7 +6,8 @@ import signal
 
 from fastapi import APIRouter, Depends, Request
 
-from ..dependencies import require_attach, require_lifecycle_capability
+from ..auth import authenticate_request
+from ..dependencies import require_lifecycle_capability
 from .gateway import admission_gate
 
 router = APIRouter()
@@ -25,7 +26,7 @@ def _stop_this_process() -> None:
     "/admin/shutdown",
     status_code=202,
     dependencies=[
-        Depends(require_attach),
+        Depends(authenticate_request),
         Depends(require_lifecycle_capability),
     ],
 )

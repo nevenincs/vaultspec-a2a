@@ -33,10 +33,10 @@ from ..thread.enums import (
 )
 from ..utils.coercion import coerce_int
 
+# The verdict vocabulary is imported to MAP ONTO, not to offer a second way in:
+# thread.enums holds it precisely because this module and the graph's phase gate
+# cannot import each other, and a consumer taking it from either would undo that.
 __all__ = [
-    "VERDICT_APPROVED",
-    "VERDICT_REJECTED",
-    "VERDICT_REQUEST_CHANGES",
     "GapSignal",
     "LifecycleEvent",
     "SseFrame",

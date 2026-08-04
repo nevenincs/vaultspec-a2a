@@ -29,8 +29,6 @@ import time
 from typing import TYPE_CHECKING, TypedDict
 
 from ..authoring import (
-    VERDICT_APPROVED,
-    VERDICT_REJECTED,
     AuthoringClient,
     GapSignal,
     LifecycleEvent,
@@ -52,7 +50,12 @@ from ..database import (
 )
 from ..ipc.schemas import DispatchRequest, to_dispatch_action
 from ..thread.dispatch_policy import evaluate_dispatch_failure
-from ..thread.enums import ControlActionType, ThreadStatus
+from ..thread.enums import (
+    VERDICT_APPROVED,
+    VERDICT_REJECTED,
+    ControlActionType,
+    ThreadStatus,
+)
 from ..utils.coercion import coerce_object_list, coerce_object_mapping
 from ._thread_metadata import dispatchable_workspace_root
 from .action_lease import claim_control_action, release_definite_non_delivery

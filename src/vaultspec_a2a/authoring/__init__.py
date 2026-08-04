@@ -39,9 +39,6 @@ from .discovery import resolve_engine as resolve_engine
 from .discovery import resolve_engine_with_retry as resolve_engine_with_retry
 from .feedback_reader import FeedbackContextReader as FeedbackContextReader
 from .feedback_reader import render_feedback_batch as render_feedback_batch
-from .lifecycle import VERDICT_APPROVED as VERDICT_APPROVED
-from .lifecycle import VERDICT_REJECTED as VERDICT_REJECTED
-from .lifecycle import VERDICT_REQUEST_CHANGES as VERDICT_REQUEST_CHANGES
 from .lifecycle import GapSignal as GapSignal
 from .lifecycle import LifecycleEvent as LifecycleEvent
 from .lifecycle import SseFrame as SseFrame
@@ -121,9 +118,6 @@ __all__ = [
     "CATALOG_SCHEMA_VERSION",
     "MAX_ID_BYTES",
     "SERVICE_JSON_ENV",
-    "VERDICT_APPROVED",
-    "VERDICT_REJECTED",
-    "VERDICT_REQUEST_CHANGES",
     "AgentTool",
     "AuthoringClient",
     "AuthoringError",

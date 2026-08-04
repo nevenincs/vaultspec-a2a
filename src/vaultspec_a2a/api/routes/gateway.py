@@ -122,6 +122,7 @@ from ...thread.enums import (
 from ...thread.errors import NicknameConflictError
 from ...utils.coercion import coerce_object_mapping
 from .._utils import trace_headers
+from ..auth import authenticate_request
 from ..dependencies import (
     get_aggregator,
     get_checkpointer,
@@ -129,7 +130,6 @@ from ..dependencies import (
     get_services,
     get_worker_client,
     get_worker_spawner,
-    require_attach,
 )
 from ..run_admission import (
     commit_singleflight,
@@ -181,7 +181,7 @@ from ..thread_stream import build_thread_stream_response
 
 router = APIRouter(
     prefix="/v1",
-    dependencies=[Depends(require_attach)],
+    dependencies=[Depends(authenticate_request)],
 )
 logger = logging.getLogger(__name__)
 

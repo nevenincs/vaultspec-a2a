@@ -2,8 +2,8 @@
 
 The mount node also owns the canonical ``build_initial_vault_index`` scan so the
 same glob logic seeds the index at compile time and refreshes it on every mount
-pass. ``compiler`` re-exports the function to
-preserve the historical ``graph.compiler.build_initial_vault_index`` surface.
+pass. Callers seeding an index import it from here; the ``graph`` package's lazy
+entry point resolves to this module for the same reason.
 """
 
 from __future__ import annotations

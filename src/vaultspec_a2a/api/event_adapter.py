@@ -31,7 +31,7 @@ from ..thread.models import PlanEntry
 from ..thread.snapshots import coerce_model, coerce_provider
 
 if TYPE_CHECKING:
-    from ..streaming.aggregator import SequencedEvent
+    from ..streaming.types import SequencedEvent
 from .schemas.enums import (
     PlanEntryPriority,
     PlanEntryStatus,

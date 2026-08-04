@@ -13,8 +13,8 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
+from ....thread.clarification import MAX_RUN_MESSAGE_CHARS
 from ..gateway import (
-    MAX_RUN_MESSAGE_CHARS,
     ProviderCatalogSelection,
     RunClarificationRespondRequest,
     RunStartRequest,

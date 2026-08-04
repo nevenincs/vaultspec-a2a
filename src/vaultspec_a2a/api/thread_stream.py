@@ -22,8 +22,8 @@ from ..control.config import settings
 from ..database import get_thread
 from ..graph.enums import ServerEventType
 from ..providers.conditions import ProviderCondition
-from ..streaming.aggregator import EventAggregator, SequencedEvent
 from ..streaming.sse_frames import encode_sse_frame
+from ..streaming.types import SequencedEvent
 from ..thread.enums import TERMINAL_STATUSES, ThreadStatus
 from ..thread.errors import EventAggregatorError
 from ..thread.snapshots import normalize_wire_event_type
@@ -34,6 +34,8 @@ if TYPE_CHECKING:
     from collections.abc import AsyncIterator
 
     from sqlalchemy.ext.asyncio import AsyncSession
+
+    from ..streaming.aggregator import EventAggregator
 
 logger = logging.getLogger(__name__)
 

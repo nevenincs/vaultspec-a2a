@@ -41,8 +41,10 @@ from ...thread.constants import MAX_FEATURE_TAG_LENGTH
 from ...thread.enums import CleanupKind, ThreadStatus, TranscriptAvailability
 from .snapshots import ThreadStateSnapshot
 
+# ``MAX_RUN_MESSAGE_CHARS`` is imported to BOUND a field, not to be republished:
+# the bound belongs to ``thread.clarification`` beside the continuation prompt it
+# also bounds, and being carried on the wire does not make this a second home.
 __all__ = [
-    "MAX_RUN_MESSAGE_CHARS",
     "ActiveRunRecord",
     "ActiveRunsResponse",
     "DesktopReadiness",

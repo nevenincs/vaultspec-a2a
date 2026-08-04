@@ -32,8 +32,9 @@ from ...providers import AcpPromptError, ProviderCondition
 from ...thread.errors import EventAggregatorError
 from .. import EventAggregator as CoreAggregator
 from .. import aggregator as agg_module
-from ..aggregator import EventAggregator, SequencedEvent, StreamableGraph
+from ..aggregator import EventAggregator
 from ..ingest import _summarize_ingest_exception
+from ..types import SequencedEvent, StreamableGraph
 
 # ---------------------------------------------------------------------------
 # Fixtures

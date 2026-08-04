@@ -58,11 +58,14 @@ if TYPE_CHECKING:
     from collections.abc import Iterator
     from pathlib import Path
 
+# ``GatewayBootError`` is raised here but declared by ``tests.gateway_boot``, which
+# holds it as ONE class for every tier - two same-named copies once diverged, so an
+# ``except`` written against one silently missed the other. Republishing it here
+# would hand the next tier a second place to import it from and start that again.
 __all__ = [
     "DEFAULT_REQUIRED_ROLE",
     "DEFAULT_TEAM_PRESET",
     "CertifiedGateway",
-    "GatewayBootError",
     "certified_gateway",
 ]
 

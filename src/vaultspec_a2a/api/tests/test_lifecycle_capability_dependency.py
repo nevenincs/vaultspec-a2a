@@ -5,14 +5,15 @@ from __future__ import annotations
 import httpx
 import pytest
 from fastapi import Depends, FastAPI
+from fastapi.routing import APIRoute
 from httpx import ASGITransport
 
-from ...api import auth
+from ...api import auth, dependencies
 from ...api.dependencies import (
     LIFECYCLE_CAPABILITY_HEADER,
-    require_attach,
     require_lifecycle_capability,
 )
+from ...api.routes import admin, gateway
 
 _CAPABILITY = "ownership-capability-token-abcdef0123456789"
 
@@ -38,9 +39,51 @@ async def _post(app: FastAPI, headers: dict[str, str] | None = None) -> httpx.Re
         return await client.post("/lifecycle", headers=headers or {})
 
 
-def test_require_attach_is_the_shared_attach_gate() -> None:
-    """The re-export is the one attach gate, not a second implementation."""
-    assert require_attach is auth.authenticate_request
+def test_routes_mount_the_attach_gate_from_its_own_module() -> None:
+    """Both gated surfaces mount the gate ``auth`` declares, not a copy of it.
+
+    Read off the MOUNTED routers rather than off an import, because what protects
+    a request is the callable FastAPI holds; a module could import the right
+    function and still mount a different one. Compared by function identity, since
+    a second implementation would carry the same name and the same signature.
+    """
+    versioned = [depends.dependency for depends in gateway.router.dependencies]
+    assert auth.authenticate_request in versioned
+
+    shutdown = next(
+        route
+        for route in admin.router.routes
+        if isinstance(route, APIRoute) and route.path.endswith("/admin/shutdown")
+    )
+    mounted = [depends.dependency for depends in shutdown.dependencies]
+    # The capability gate is layered ON TOP OF attach, never instead of it.
+    assert auth.authenticate_request in mounted
+    assert require_lifecycle_capability in mounted
+
+
+def test_dependencies_offers_no_second_spelling_of_the_attach_gate() -> None:
+    """``dependencies`` provides the capability gate; ``auth`` provides attach.
+
+    The attach gate was once re-exported here as ``require_attach`` so routes had
+    one import surface, which left the gate with two declared homes under two
+    names - a reader searching either spelling found only half the story. Nothing
+    here overrode or adapted it, so the alias bought a spelling and no behaviour.
+
+    Checked by IDENTITY across the whole module, so re-introducing the alias under
+    any other name fails too. An emptied module would satisfy that on its own, so
+    the surface this module genuinely owns is pinned beside it.
+    """
+    aliases = [
+        name
+        for name in dir(dependencies)
+        if getattr(dependencies, name) is auth.authenticate_request
+    ]
+    assert aliases == []
+    assert "require_attach" not in dependencies.__all__
+
+    assert "require_lifecycle_capability" in dependencies.__all__
+    assert "LIFECYCLE_CAPABILITY_HEADER" in dependencies.__all__
+    assert "get_aggregator" in dependencies.__all__
 
 
 @pytest.mark.asyncio

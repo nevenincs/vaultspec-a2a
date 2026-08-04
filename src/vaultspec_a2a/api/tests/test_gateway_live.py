@@ -29,10 +29,8 @@ import uvicorn
 
 from ...database import list_threads
 from ...graph.enums import Provider
-from ...providers.lane_admission import is_lane_admissible, lane_admission_reason
 from ...providers.model_profiles import probe_provider_readiness
 from ...streaming.aggregator import EventAggregator
-from ...team.team_config import load_team_config
 from ..routes.gateway import admission_gate
 from .conftest import make_app
 
@@ -799,133 +797,24 @@ async def test_presets_list_is_truthful_and_resilient(
         ]
         assert authoring["default_profile_id"] == "team-defaults"
         profiles = {p["id"]: p for p in authoring["profiles"]}
-        assert set(profiles) == {
-            "team-defaults",
-            "fast",
-            "codex",
-            "codex-all",
-            "zai",
-            "kimi",
-            "kimi-all",
-        }
+        # Only the implicit team-defaults profile survives. Product model
+        # profiles were retired from new-run policy: a profile named a provider
+        # and a capability tier per role, which is exactly the repository-side
+        # model policy the served catalog replaced. What used to be asserted here
+        # - fast/codex/zai/kimi overlays and their per-role assignments - was
+        # describing a picker that no longer decides anything.
+        assert set(profiles) == {"team-defaults"}
         assert profiles["team-defaults"]["is_default"] is True
 
-        # team-defaults effective assignments: safe operational fields only. All
-        # five document personas resolve to the Claude subscription tier (the
-        # doc-reviewer was repinned off the non-resolving zhipu fallback);
-        # provider heterogeneity is instead disclosed by the codex/zai
-        # provider-axis profiles asserted below.
+        # team-defaults still resolves a role set, and still names no model: the
+        # concrete model is chosen from the served catalog at run start and
+        # disclosed as the run's frozen assignment.
         td_by_agent = {
             a["agent_id"]: a for a in profiles["team-defaults"]["assignments"]
         }
-        researcher = td_by_agent["vaultspec-researcher"]
-        assert researcher["provider_id"] == "claude"
-        # No model NAME here, and that is the contract rather than a gap. A preset
-        # listing resolves which provider and capability tier a role runs at; the
-        # concrete model is named by the catalog that provider serves, chosen at
-        # run start, and disclosed as the run's frozen assignment. This surface
-        # advertising a repository-authored name would be advertising a guess, so
-        # the listing carries the provider and the tier and stops there.
-        assert not researcher["model_name"]
-        assert researcher["role_id"] == "researcher"
-        assert "capability" in researcher
-        assert td_by_agent["vaultspec-doc-reviewer"]["provider_id"] == "claude"
-
-        # team-defaults overlays nothing, so every assignment is attributed to the
-        # agent's own configuration. This is the fall-through branch of `source`,
-        # and it is asserted HERE because `fast` no longer exhibits it: the
-        # assertion moved rather than being dropped when that profile went total.
-        assert all(a["source"] == "agent" for a in td_by_agent.values())
-
-        # fast is a cost CEILING, so it overlays every role and attributes all of
-        # them to the profile. It once covered only the two high-volume roles,
-        # which let the authoring roles fall through to their own higher
-        # capability - a floor the served surface advertised but did not apply.
-        # Asserting the whole set is what makes a later partial overlay fail here.
-        fast_by_agent = {a["agent_id"]: a for a in profiles["fast"]["assignments"]}
-        assert set(fast_by_agent) == set(td_by_agent), (
-            "fast must assign every role team-defaults does, or a role escapes "
-            "the ceiling by omission"
-        )
-        assert all(a["capability"] == "low" for a in fast_by_agent.values())
-        assert all(a["source"] == "profile" for a in fast_by_agent.values())
-
-        # Provider axis: the discovery response
-        # surfaces the new providers per role. `codex` overlays codex on the three
-        # research/authoring roles; `zai` overlays zai. The overlay attribution
-        # (source == "profile") is disclosed and the un-overlaid doc-reviewer falls
-        # through to a different provider - a genuinely mixed profile.
-        # Derived from the preset, not listed here: a mixed lane overlays every
-        # authoring worker and leaves the reviewer behind, so "the roles a mixed
-        # lane covers" IS "this preset's workers minus the reviewer". The hardcoded
-        # copy this replaces fell silently behind when the preset gained a
-        # plan-author role, turning a profile-coverage assertion into a stale-list
-        # assertion.
-        all_roles = tuple(
-            worker.agent_id
-            for worker in load_team_config("vaultspec-adr-research").workers
-        )
-        authoring_roles = tuple(
-            role for role in all_roles if role != "vaultspec-doc-reviewer"
-        )
-        codex_by_agent = {a["agent_id"]: a for a in profiles["codex"]["assignments"]}
-        for agent_id in authoring_roles:
-            assert codex_by_agent[agent_id]["provider_id"] == "codex"
-            assert codex_by_agent[agent_id]["source"] == "profile"
-        assert codex_by_agent["vaultspec-doc-reviewer"]["provider_id"] != "codex"
-
-        # The single-provider lanes are the inverse of the mixed ones: every
-        # worker, doc-reviewer included, is overlaid, so a run on them consumes
-        # exactly one provider's credential. Asserting the doc-reviewer here is
-        # the load-bearing part - it is the role the mixed lanes leave behind,
-        # and the reason a provider-only proof cannot be expressed on them.
-        for profile_id, provider_id in (("codex-all", "codex"), ("kimi-all", "kimi")):
-            by_agent = {a["agent_id"]: a for a in profiles[profile_id]["assignments"]}
-            assert set(by_agent) == set(all_roles)
-            for agent_id in all_roles:
-                assert by_agent[agent_id]["provider_id"] == provider_id
-                assert by_agent[agent_id]["source"] == "profile"
-
-        zai_by_agent = {a["agent_id"]: a for a in profiles["zai"]["assignments"]}
-        zai_readiness = probe_provider_readiness(Provider.ZAI)
-        for agent_id in authoring_roles:
-            assert zai_by_agent[agent_id]["provider_id"] == "zai"
-            assert zai_by_agent[agent_id]["source"] == "profile"
-            assert zai_by_agent[agent_id]["provider_ready"] is zai_readiness.ready
-        # Readiness reflects the real host. When Z.ai is unavailable, discovery
-        # must carry the same safe production-probe reason without exposing a
-        # credential value.
-        if not zai_readiness.ready:
-            assert zai_readiness.reason
-            # The reason must be carried, but the serving layer is free to nest it
-            # inside a composed role-eligibility entry: on a host whose agent
-            # harness is incomplete the provider reason arrives folded into that
-            # larger entry rather than standing alone.
-            assert any(
-                zai_readiness.reason in entry
-                for entry in profiles["zai"]["unavailable_reasons"]
-            )
-
-        # kimi is the other mixed lane, and the one that proves readiness is
-        # NECESSARY BUT NOT SUFFICIENT. It overlays its roles exactly as zai does
-        # and discloses its raw provider readiness the same way, but it has no
-        # completed-turn proof, so admission refuses it ahead of any credential
-        # question. Asserting the ADMISSION reason rather than the readiness
-        # reason is the load-bearing part: a host that later grows a Kimi
-        # credential must still see this lane refused, which a readiness-only
-        # assertion would stop detecting the moment the key appeared.
-        kimi_by_agent = {a["agent_id"]: a for a in profiles["kimi"]["assignments"]}
-        kimi_readiness = probe_provider_readiness(Provider.KIMI)
-        for agent_id in authoring_roles:
-            assert kimi_by_agent[agent_id]["provider_id"] == "kimi"
-            assert kimi_by_agent[agent_id]["source"] == "profile"
-            assert kimi_by_agent[agent_id]["provider_ready"] is kimi_readiness.ready
-        assert not is_lane_admissible(Provider.KIMI)
-        kimi_admission = lane_admission_reason(Provider.KIMI)
-        assert kimi_admission
-        assert any(
-            kimi_admission in entry for entry in profiles["kimi"]["unavailable_reasons"]
-        )
+        assert set(td_by_agent) == set(authoring["required_roles"])
+        for assignment in td_by_agent.values():
+            assert not assignment["model_name"]
 
         # Eligibility is reported honestly: the production acceptance gate is open,
         # so every profile is unavailable with a safe reason (no secrets anywhere).

@@ -2974,7 +2974,7 @@
           "provider_id"
         ],
         "title": "RoleAssignmentSummary",
-        "description": "Effective per-role model assignment under a profile.\n\nOnly safe operational metadata: role id, agent id, provider id, capability,\nthe stable concrete model name, ordered fallbacks, current provider readiness,\nand which precedence layer the assignment came from. Never a credential, env\nvalue, token, or private path."
+        "description": "Effective per-role model assignment under a profile.\n\nOnly safe operational metadata: role id, agent id, provider id, capability,\nthe stable concrete model name, ordered fallbacks, current provider readiness,\nand which precedence layer the assignment came from. Never a credential, env\nvalue, token, or private path.\n\n``provider_id`` is EMPTY when no preset layer declares a provider for the\nrole, which is the ordinary state now that product presets carry no\nprovider policy: a run chooses its lane at run start from the served catalog.\nEmpty rather than absent so the field keeps one type, and never a substituted\nprovider name - naming a lane no preset asked for would be indistinguishable\nfrom a real declaration. ``resolution_error`` carries the reason and ``source``\nreads ``undeclared``; the role is reported ineligible."
       },
       "RoleState": {
         "properties": {

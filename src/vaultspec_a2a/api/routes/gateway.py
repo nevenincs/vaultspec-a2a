@@ -2453,15 +2453,21 @@ def _summarize_profiles(
             acceptance_gate_passed=False,
             harness=harness,
         )
+        # A role with no declared provider serves an EMPTY provider_id and is not
+        # probed for readiness: there is no lane to probe, and substituting one
+        # would advertise a provider no preset declared. The reason travels in
+        # resolution_error, which the eligibility verdict above already reflects.
         assignments = [
             RoleAssignmentSummary(
                 role_id=role.role_id,
                 agent_id=role.agent_id,
-                provider_id=role.provider.value,
+                provider_id=role.provider.value if role.provider is not None else "",
                 capability=role.capability.value if role.capability else None,
                 model_name=role.model_name or None,
                 fallback_providers=[p.value for p in role.fallback_providers],
-                provider_ready=_ready(role.provider).ready,
+                provider_ready=(
+                    _ready(role.provider).ready if role.provider is not None else False
+                ),
                 source=role.source.value,
                 resolution_error=role.resolution_error,
             )

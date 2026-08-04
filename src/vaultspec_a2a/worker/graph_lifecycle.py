@@ -18,6 +18,7 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from ..domain_config import domain_config
 from ..graph.compiler import _resolve_model_for_worker, compile_team_graph
 from ..ipc.schemas import canonical_project_root
+from ..providers.warmup import warm_model_imports
 from ..streaming import StreamableGraph, node_metadata_from_graph
 from ..team.team_config import AgentConfig, load_agent_config, load_team_config
 from ..telemetry import ws_span
@@ -368,10 +369,14 @@ class GraphLifecycleManager:
         """Load team/agent configs and compile a LangGraph ``StateGraph``.
 
         Uses the same two-level config discovery order as the monolith:
-        workspace override then bundled preset. ``async`` only because it may
-        await ``_build_proposal_submitter``/``_build_authoring_binding_provider``
-        below, which offload the engine-discovery retry loop off this event
-        loop; everything else here is synchronous config/compile work.
+        workspace override then bundled preset. The awaits below are all
+        offloads, not I/O of this coroutine's own:
+        ``_build_proposal_submitter``/``_build_authoring_binding_provider`` move
+        the engine-discovery retry loop off this event loop, and
+        ``warm_model_imports`` moves the model stack's multi-second first import
+        off it. Everything else here is synchronous config/compile work, and it
+        runs on the loop by design - it is fast, but only once the imports it
+        triggers have already been paid for elsewhere.
         """
         # No re-resolution here: the project was minted when the dispatch was
         # validated, and re-deriving it is what let compilation disagree with
@@ -419,6 +424,14 @@ class GraphLifecycleManager:
                         "action": "supervisor_config_defaulted",
                     },
                 )
+
+        # Everything below reaches ``ProviderFactory.create``, which loads the
+        # LangChain and ACP model stack on first use - seconds of pure import
+        # work with no await in it, on this event loop. Paying it on a thread
+        # first is what keeps the worker answering /health and a second dispatch
+        # while a run boots; once warm the call is a dict lookup, so a later
+        # compile pays nothing for it.
+        await asyncio.to_thread(warm_model_imports)
 
         # Document-phase topologies author through the engine; build the
         # production submitter here, the single construction site, and fail closed

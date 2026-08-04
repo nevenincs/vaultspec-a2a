@@ -61,6 +61,39 @@ def _team(defaults: dict[str, object] | None = None) -> TeamConfig:
     )
 
 
+def _legacy_team() -> TeamConfig:
+    """A team that still declares provider policy, as a pre-contract one did.
+
+    The freeze/digest/replay contract below is a LEGACY read path: it exists so a
+    run frozen before the catalog contract stays restartable. Bundled product
+    presets no longer declare a provider, so driving these cases from one would
+    prove nothing about freezing and would only re-assert the absence that
+    ``TestResolution`` already covers. This supplies the shape those older runs
+    actually had - real config through ``model_validate``, not a stand-in.
+    """
+    return TeamConfig.model_validate(
+        {
+            "id": "legacy",
+            "display_name": "Legacy",
+            "defaults": {"provider": "claude", "capability": "mid"},
+            "topology": {"type": "star"},
+            "workers": [
+                {"agent_id": "vaultspec-researcher"},
+                {"agent_id": "vaultspec-synthesist"},
+            ],
+            "profiles": {
+                "fast": {
+                    "display_name": "Fast",
+                    "roles": {
+                        "vaultspec-researcher": {"capability": "low"},
+                        "vaultspec-synthesist": {"capability": "low"},
+                    },
+                }
+            },
+        }
+    )
+
+
 class TestResolution:
     def test_no_overlay_matches_historical_chain(self) -> None:
         """profile_overlay=None: worker > agent > team-default, identical order."""
@@ -116,15 +149,48 @@ class TestResolution:
         assert r.capability == Model.LOW  # profile
         assert r.capability_source == AssignmentSource.PROFILE
 
-    def test_hardcoded_default_provider_when_nothing_set(self) -> None:
-        team = _team({})
+    def test_nothing_declared_resolves_to_no_provider(self) -> None:
+        """No layer declares a provider, so the role resolves to an ABSENCE.
+
+        This replaces a test that asserted a hardcoded ``Provider.CLAUDE``
+        fallback. Two things were wrong with it. The fallback itself is an
+        implicit provider default, which the catalog contract retires: a
+        repository-authored lane chosen because nothing declared one is
+        indistinguishable, downstream, from a lane someone actually chose.
+
+        And it never exercised that fallback anyway - it passed ``_team({})``,
+        and the helper's ``defaults or {...}`` treats an empty dict as falsy, so
+        the team came back with claude defaults and the test asserted the
+        team-default branch under a name claiming otherwise. The explicit
+        ``{"provider": None}`` below is what "nothing set" actually looks like.
+        """
+        team = _team({"provider": None, "capability": None})
         agent = _agent("writer")
         worker = WorkerRef(agent_id="vaultspec-writer")
         r = resolve_role_assignment(worker, agent, team, None)
-        assert r.provider == Provider.CLAUDE
-        assert r.provider_source == AssignmentSource.TEAM_DEFAULT
+        assert r.provider is None
+        assert r.provider_source == AssignmentSource.UNDECLARED
+        assert r.capability is None
+        assert r.capability_source == AssignmentSource.UNDECLARED
+        assert r.model_name == ""
+        # The absence travels as the one signal every consumer already reads.
+        assert r.resolution_error is not None
+        assert "no provider is declared" in r.resolution_error
 
-    def test_bundled_adr_research_team_defaults(self) -> None:
+    def test_bundled_adr_research_declares_no_provider_for_any_role(self) -> None:
+        """The shipped authoring preset resolves every role to no lane.
+
+        Three tests stood here: one asserting the team default put every role on
+        claude, and two asserting the shape of the ``fast`` and provider-axis
+        profiles. All three encoded provider/model policy living in a product
+        preset, which the catalog contract removes; the profiles they read no
+        longer exist.
+
+        What replaces them is the same sweep inverted. Every declared worker is
+        still enumerated - so a role vanishing from the preset still fails here -
+        but each must now resolve to an absence carrying an honest reason rather
+        than to a lane the preset picked.
+        """
         team = load_team_config("vaultspec-adr-research")
         assignment = resolve_effective_assignment(team, "team-defaults")
         by_agent = {r.agent_id: r for r in assignment.roles}
@@ -135,36 +201,17 @@ class TestResolution:
             "vaultspec-plan-author",
             "vaultspec-doc-reviewer",
         }
-        # Heterogeneous team: doc-reviewer is a different provider than the rest.
-        assert by_agent["vaultspec-doc-reviewer"].provider == Provider.CLAUDE
-        assert by_agent["vaultspec-researcher"].provider == Provider.CLAUDE
+        for agent_id, role in by_agent.items():
+            assert role.provider is None, f"{agent_id} still names {role.provider}"
+            assert role.capability is None, agent_id
+            assert role.provider_source == AssignmentSource.UNDECLARED, agent_id
+            assert role.model_name == "", agent_id
+            assert role.resolution_error is not None, agent_id
 
-    def test_bundled_fast_profile_lowers_every_role(self) -> None:
+    def test_the_bundled_preset_serves_only_the_implicit_profile(self) -> None:
+        """No provider-axis profile survives on the shipped preset."""
         team = load_team_config("vaultspec-adr-research")
-        assignment = resolve_effective_assignment(team, "fast")
-        by_agent = {r.agent_id: r for r in assignment.roles}
-        assert set(by_agent) == {
-            "vaultspec-researcher",
-            "vaultspec-synthesist",
-            "vaultspec-adr-author",
-            "vaultspec-plan-author",
-            "vaultspec-doc-reviewer",
-        }
-        assert all(role.capability == Model.LOW for role in by_agent.values())
-        assert all(
-            role.capability_source == AssignmentSource.PROFILE
-            for role in by_agent.values()
-        )
-
-    def test_live_provider_profiles_set_every_role_to_low(self) -> None:
-        """Every served provider-axis profile is safe for a live certification run."""
-        team = load_team_config("vaultspec-adr-research")
-        for profile_id in ("fast", "codex", "codex-all", "zai", "kimi", "kimi-all"):
-            assignment = resolve_effective_assignment(team, profile_id)
-            assert assignment.roles, profile_id
-            assert all(role.capability == Model.LOW for role in assignment.roles), (
-                profile_id
-            )
+        assert set(team.effective_profiles()) == {"team-defaults"}
 
     def test_unknown_profile_raises_config_error(self) -> None:
         team = load_team_config("vaultspec-adr-research")
@@ -403,7 +450,7 @@ class TestEligibility:
 
 class TestFreeze:
     def test_freeze_produces_compiler_map_and_stable_digest(self) -> None:
-        team = load_team_config("vaultspec-adr-research")
+        team = _legacy_team()
         assignment = resolve_effective_assignment(team, "fast")
         frozen = freeze_assignment(assignment)
         assert frozen.profile_id == "fast"
@@ -423,7 +470,7 @@ class TestFreeze:
         assert frozen.roles["vaultspec-researcher"]["source"] == "profile"
 
     def test_digest_is_deterministic_and_profile_sensitive(self) -> None:
-        team = load_team_config("vaultspec-adr-research")
+        team = _legacy_team()
         d_default = freeze_assignment(
             resolve_effective_assignment(team, "team-defaults")
         ).digest
@@ -435,7 +482,7 @@ class TestFreeze:
         assert d_default != d_fast  # a different profile changes the digest
 
     def test_frozen_round_trips_through_record(self) -> None:
-        team = load_team_config("vaultspec-adr-research")
+        team = _legacy_team()
         frozen = freeze_assignment(resolve_effective_assignment(team, "fast"))
         record = frozen.to_record()
         restored = frozen_from_record(record)

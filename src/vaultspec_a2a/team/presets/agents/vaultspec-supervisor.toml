@@ -75,10 +75,6 @@ are assigning. Include any prior reviewer findings that the next agent
 needs to act on.
 """
 
-[agent.model]
-provider   = "claude"
-capability = "max"
-
 [agent.capabilities]
 filesystem_read  = true
 filesystem_write = false

@@ -134,12 +134,26 @@ def test_the_claim_vocabulary_this_guard_scans_for_is_not_empty() -> None:
     )
 
 
-def test_at_least_one_shipped_preset_exercises_the_proven_branch() -> None:
-    """Some served description actually claims the capability.
+def test_no_shipped_preset_claims_online_research_at_all() -> None:
+    """The rule in its strengthened form: a preset may not make the claim.
 
-    Without this, the guard above stays green forever by the trivial route of no
-    description ever claiming anything - which would make it a test of nothing on
-    the day the claim was finally added.
+    This replaces an anti-vacuity guard that REQUIRED some shipped description to
+    claim online research, on the reasoning that a guard nothing exercises proves
+    nothing. That reasoning was sound while a preset could name its own lane: the
+    only claim in the tree was a provider-axis profile description, and the claim
+    was legal because that profile pinned research to a lane carrying a
+    completed-retrieval proof.
+
+    Product presets now carry no provider policy, so no preset knows which lane
+    its researcher will run on - the user selects it at run start from the served
+    catalog. A description that promised online research would therefore be
+    promising something the preset cannot know, whichever lane is later chosen.
+    The admissible number of such claims is zero, and that is what is asserted.
+
+    This is not a relaxation. The old guard permitted a claim on a proven lane;
+    this permits none, so every state it rejected is still rejected. The
+    capability claim itself has not been abandoned - it moved to where the lane
+    actually lives, and ``PROVEN_WEB_LANES`` still gates it there.
     """
     claiming = [
         f"{preset_id} {label}"
@@ -147,8 +161,29 @@ def test_at_least_one_shipped_preset_exercises_the_proven_branch() -> None:
         for label, text, _ in _profile_surfaces(load_team_config(preset_id))
         if _claims_online_research(text)
     ]
-    assert claiming, (
-        "no shipped preset description claims online research, so the guard above "
-        "is passing vacuously. A lane is proven; the profile that runs research on "
-        "it should say so."
+    assert claiming == [], (
+        f"shipped preset description(s) {claiming} claim online research. A preset "
+        "carries no provider policy, so it cannot know which lane its researcher "
+        "runs on and cannot back the claim. Make the claim where the lane is "
+        "chosen, not where the topology is declared."
+    )
+
+
+def test_the_preset_surface_sweep_actually_reaches_the_shipped_presets() -> None:
+    """The zero above is a real zero, not an empty sweep.
+
+    An assertion that a derived list is empty passes trivially when the
+    derivation collects nothing, which would make the guard above meaningless the
+    day a claim was re-added. So the sweep's reach is pinned independently: it
+    must load the real presets and actually read description text from them.
+    """
+    surfaces = [
+        (preset_id, label, text)
+        for preset_id in discover_team_preset_ids()
+        for label, text, _ in _profile_surfaces(load_team_config(preset_id))
+    ]
+    assert len(surfaces) >= 10, surfaces
+    assert any(preset_id == "vaultspec-adr-research" for preset_id, _, _ in surfaces)
+    assert any(text.strip() for _, _, text in surfaces), (
+        "every scanned surface is empty, so the claim scan reads nothing"
     )

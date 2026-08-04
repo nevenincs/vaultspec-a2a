@@ -95,10 +95,6 @@ commentary on what you changed.
 - You do not add scope beyond what the ADR decided.
 """
 
-[agent.model]
-provider   = "claude"
-capability = "high"
-
 [agent.capabilities]
 filesystem_read  = true
 filesystem_write = false

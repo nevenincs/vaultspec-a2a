@@ -44,6 +44,7 @@ from ..control.worker_management import (
 from ..database.checkpoints import open_checkpointer
 from ..ipc.schemas import DispatchRequest, DispatchResponse
 from ..lifecycle.registration import deregister_serve, register_serve
+from ..providers.warmup import warm_model_imports
 from ..telemetry import TelemetryMiddleware, configure_telemetry
 from ..utils import (
     BearerVerdict,
@@ -64,6 +65,31 @@ logger = logging.getLogger(__name__)
 # Re-export so the facade ``vaultspec_a2a.worker`` can expose ``WorkerApp``
 # as the public type alias (matches the placeholder's API contract).
 WorkerApp = FastAPI
+
+
+async def _warm_model_imports() -> None:
+    """Load the model stack in the background while the worker serves.
+
+    The compile path offloads this import too, so correctness never depends on
+    this task: it only decides whether the FIRST run of a worker's life pays the
+    several seconds up front or overlaps them with the idle window before a
+    dispatch arrives. Started after the app is serving rather than before,
+    because blocking readiness on it would trade a slow first run for a slow
+    spawn, and the gateway waits on readiness.
+
+    A failure is logged and dropped HERE only. The compile path performs the same
+    import and will raise there, where the run it belongs to can be failed
+    truthfully, so nothing is hidden by declining to take the worker down over a
+    warm-up.
+    """
+    try:
+        await run_sync(warm_model_imports)
+    except Exception:
+        logger.warning(
+            "Model stack warm-up failed; the first run will load it inline",
+            exc_info=True,
+            extra={"action": "model_warmup_failed"},
+        )
 
 
 async def _verify_dispatch_token(
@@ -99,6 +125,8 @@ async def _lifespan(app: FastAPI) -> AsyncGenerator[None]:
     2. Create the ``WorkerBridge`` HTTP client.
     3. Instantiate the ``Executor`` with checkpointer + bridge.
     4. Launch the heartbeat loop as a background task.
+    5. Launch the model-stack warm-up as a background task, so the first run
+       does not pay its import cost inline.
 
     On shutdown the heartbeat is cancelled and the bridge client closed.
     """
@@ -179,6 +207,7 @@ async def _lifespan(app: FastAPI) -> AsyncGenerator[None]:
 
             # Start the periodic heartbeat loop as a background task.
             tg.start_soon(bridge.heartbeat_loop, 10.0)
+            tg.start_soon(_warm_model_imports)
 
             logger.info("Worker %s ready on port %d", worker_id, settings.worker_port)
 

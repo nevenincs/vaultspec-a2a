@@ -456,6 +456,17 @@ def _resolve_worker_model_preferences(
     assignment = resolve_role_assignment(
         worker_ref, agent_config, team_config, profile_overlay=None
     )
+    if assignment.provider is None:
+        # Nothing declared a provider and nothing froze one. Refusing is the whole
+        # point: omission may not silently choose what produces the artifact, so
+        # this fails the compile loudly instead of falling back to a
+        # repository-authored lane the caller never selected. A product preset
+        # reaches this only when its run started without freezing a selection,
+        # which is itself the defect to surface.
+        raise ValueError(
+            f"Worker {worker_ref.agent_id!r} has no provider: "
+            f"{assignment.resolution_error}"
+        )
     return (
         assignment.provider,
         assignment.capability,

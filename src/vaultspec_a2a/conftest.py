@@ -26,14 +26,22 @@ if TYPE_CHECKING:
 
     from .authoring.discovery import EngineEndpoint
 
-# Suppress OTel metric exporter noise during tests.  The trace SDK stays
-# active so span-creation tests work.  The metric reader's periodic export
-# would otherwise hit localhost:4317 and log UNAVAILABLE errors.
-# OTEL_METRICS_EXPORTER=none disables the metric export pipeline entirely.
+# Build no OTel exporter during tests. The trace SDK stays ACTIVE so
+# span-creation tests keep working; only the export side is off, so nothing
+# starts an export thread and no run competes with a collector that is not
+# there. A suite that needs real export - the Jaeger round-trip - overrides
+# both of these for its own subprocesses.
+#
+# These replace an earlier arrangement that left both exporters built and aimed
+# them at a non-routable TEST-NET address, on the theory that spans would then
+# be dropped silently. They are not: the gRPC exporter cannot distinguish an
+# unreachable collector from a slow one, so it retried on ten-second deadlines
+# and logged every failure for the life of the process. Worse, the metric half
+# was never off at all - OTEL_METRICS_EXPORTER is an SDK auto-configuration
+# variable, and this project builds its providers by hand, so until the
+# telemetry module began reading it the value changed nothing.
+os.environ.setdefault("OTEL_TRACES_EXPORTER", "none")
 os.environ.setdefault("OTEL_METRICS_EXPORTER", "none")
-# Point the trace exporter at a non-routable address so BatchSpanProcessor
-# silently drops spans instead of retrying against localhost:4317.
-os.environ.setdefault("OTEL_EXPORTER_OTLP_ENDPOINT", "http://198.51.100.1:4317")
 
 
 # ---------------------------------------------------------------------------

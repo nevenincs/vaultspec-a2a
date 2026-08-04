@@ -127,10 +127,6 @@ When you do write or update tests, the following are **STRICTLY FORBIDDEN**:
   the specification.
 """
 
-[agent.model]
-provider   = "claude"
-capability = "high"
-
 [agent.capabilities]
 filesystem_read  = true
 filesystem_write = true

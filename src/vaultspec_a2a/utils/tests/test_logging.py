@@ -235,3 +235,76 @@ def test_otel_correlation_filter_leaves_record_clean_without_active_span() -> No
     assert "span_id" not in record.__dict__
     assert "trace_sampled" not in record.__dict__
     assert "service_name" not in record.__dict__
+
+
+def test_json_formatter_survives_a_computed_false_exc_info() -> None:
+    """A falsy ``exc_info`` flag must not cost the record.
+
+    ``Logger._log`` normalises only truthy ``exc_info`` values, so a caller
+    passing a computed flag lands ``False`` on the record verbatim. The OTLP
+    gRPC exporter does exactly this on every transport error it does not
+    classify as unknown, and the formatter used to raise ``TypeError`` on it -
+    which discards the record, silencing the very failures the lane exists to
+    report.
+    """
+    logger = logging.getLogger("test.exc_info.false")
+    logger.setLevel(logging.WARNING)
+    stream = io.StringIO()
+    handler = logging.StreamHandler(stream)
+    handler.setFormatter(JSONFormatter())
+    logger.handlers = [handler]
+    logger.propagate = False
+
+    try:
+        logger.warning("transport unavailable", exc_info=bool(0))
+    finally:
+        logger.handlers.clear()
+
+    emitted = stream.getvalue()
+    assert "--- Logging error ---" not in emitted, emitted
+    payload = json.loads(emitted.strip())
+    assert payload["message"] == "transport unavailable"
+    assert "exception" not in payload
+
+
+def test_json_formatter_renders_every_exc_info_shape() -> None:
+    """Instance, populated tuple, and an unresolved raw flag all render a traceback."""
+    formatter = JSONFormatter()
+
+    def render(exc_info: object) -> dict[str, object]:
+        record = logging.LogRecord(
+            name="test.exc_info.shapes",
+            level=logging.ERROR,
+            pathname=__file__,
+            lineno=1,
+            msg="boom",
+            args=(),
+            exc_info=exc_info,  # ty: ignore[invalid-argument-type]
+        )
+        return json.loads(formatter.format(record))
+
+    try:
+        raise ValueError("the real cause")
+    except ValueError as exc:
+        from_instance = render(exc)
+        from_tuple = render(sys.exc_info())
+        # A record built outside Logger._log keeps the raw flag; the live
+        # exception is what Logger._log would have resolved it to.
+        from_flag = render(True)
+
+    for payload in (from_instance, from_tuple, from_flag):
+        assert "ValueError: the real cause" in str(payload["exception"])
+
+
+def test_json_formatter_omits_exception_for_an_empty_exc_info_tuple() -> None:
+    """``exc_info=True`` raised with no live exception must not invent one."""
+    record = logging.LogRecord(
+        name="test.exc_info.empty",
+        level=logging.ERROR,
+        pathname=__file__,
+        lineno=1,
+        msg="boom",
+        args=(),
+        exc_info=(None, None, None),
+    )
+    assert "exception" not in json.loads(JSONFormatter().format(record))

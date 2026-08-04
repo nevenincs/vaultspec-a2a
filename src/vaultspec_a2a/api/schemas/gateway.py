@@ -856,6 +856,14 @@ class RoleAssignmentSummary(BaseModel):
     the stable concrete model name, ordered fallbacks, current provider readiness,
     and which precedence layer the assignment came from. Never a credential, env
     value, token, or private path.
+
+    ``provider_id`` is EMPTY when no preset layer declares a provider for the
+    role, which is the ordinary state now that product presets carry no
+    provider policy: a run chooses its lane at run start from the served catalog.
+    Empty rather than absent so the field keeps one type, and never a substituted
+    provider name - naming a lane no preset asked for would be indistinguishable
+    from a real declaration. ``resolution_error`` carries the reason and ``source``
+    reads ``undeclared``; the role is reported ineligible.
     """
 
     role_id: str

@@ -398,6 +398,11 @@ class ServiceStack:
                     f"http://127.0.0.1:{self.ports['jaeger_otlp']}"
                 ),
                 "OTEL_EXPORTER_OTLP_INSECURE": "true",
+                # This tier boots a real Jaeger and wants spans in it, so it
+                # opts back IN: the root conftest switches trace export off for
+                # ordinary suites, and this environment starts from a copy of
+                # the pytest process's own.
+                "OTEL_TRACES_EXPORTER": "otlp",
                 "OTEL_METRICS_EXPORTER": "none",
                 "OTEL_SDK_DISABLED": "false",
             }

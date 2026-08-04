@@ -89,10 +89,6 @@ it signals to the phase machine that synthesis is complete and the document is r
 for human review. Emit it only when the document above it is complete.
 """
 
-[agent.model]
-provider   = "claude"
-capability = "high"
-
 [agent.capabilities]
 filesystem_read  = true
 filesystem_write = false

@@ -23,7 +23,8 @@ import json
 import logging
 import sys
 from logging.handlers import RotatingFileHandler
-from typing import TYPE_CHECKING, Any, Literal, Protocol
+from types import TracebackType
+from typing import TYPE_CHECKING, Any, Literal, Protocol, cast
 
 from opentelemetry import trace
 from opentelemetry.trace.span import format_span_id, format_trace_id
@@ -32,6 +33,10 @@ from ..artifacts import ArtifactDeclaration, RetentionDisposition
 
 if TYPE_CHECKING:
     from pathlib import Path
+
+#: The populated shape of ``LogRecord.exc_info``; see ``JSONFormatter``, which
+#: exists partly because the attribute is not always this.
+type _ExcInfo = tuple[type[BaseException], BaseException, TracebackType | None]
 
 __all__ = [
     "ARTIFACT_DECLARATIONS",
@@ -174,10 +179,42 @@ class JSONFormatter(logging.Formatter):
             if key not in _STANDARD_LOG_ATTRS and not key.startswith("_"):
                 log_data[key] = value
 
-        if record.exc_info is not None:
-            log_data["exception"] = self.formatException(record.exc_info)
+        exception = self._exception_text(record.exc_info)
+        if exception is not None:
+            log_data["exception"] = exception
 
         return json.dumps(log_data)
+
+    def _exception_text(self, exc_info: object) -> str | None:
+        """Render whatever ``record.exc_info`` holds, or ``None`` if it holds nothing.
+
+        ``exc_info`` is not the three-tuple its name promises. ``Logger._log``
+        normalises only TRUTHY values, so a caller passing ``exc_info=False`` -
+        which is what a computed flag evaluates to, and what the OTLP gRPC
+        exporter passes on every transport error it does not classify as unknown
+        - reaches the record as the bare ``False``. Handing that to
+        ``formatException`` raised ``TypeError: 'bool' object is not
+        subscriptable``, and because a formatter that raises loses the record
+        entirely, every such export failure went unreported by the lane meant to
+        report it.
+
+        Each shape the attribute can legally carry is answered here: absent or
+        switched off, an exception instance, a populated three-tuple, an empty
+        one, and the raw flag on a record built outside ``Logger._log``.
+        """
+        if not exc_info:
+            return None
+        if isinstance(exc_info, BaseException):
+            return self.formatException(
+                (type(exc_info), exc_info, exc_info.__traceback__)
+            )
+        if not isinstance(exc_info, tuple):
+            # A record assembled directly rather than through ``Logger._log``
+            # never had its flag resolved; resolve it the way that would have.
+            exc_info = sys.exc_info()
+        if len(exc_info) != 3 or exc_info[0] is None:
+            return None
+        return self.formatException(cast("_ExcInfo", exc_info))
 
 
 def reconfigure_console_utf8() -> None:

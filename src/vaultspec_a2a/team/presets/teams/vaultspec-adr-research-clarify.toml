@@ -87,32 +87,3 @@ model    = { provider = "deterministic" }
 [[team.workers]]
 agent_id = "vaultspec-doc-reviewer"
 model    = { provider = "deterministic" }
-
-# Live clarification certification needs the same one-provider, all-low lane as
-# the production research preset.  The profile sits above the deterministic
-# worker overrides in the resolver's precedence chain, so selecting it freezes
-# every active role onto Codex LOW while the default remains deterministic for
-# the broad cost-free stitched proof.
-[team.profiles.codex-all]
-display_name = "Codex (all roles)"
-description  = "All clarification-team roles on the lowest Codex capability."
-
-[team.profiles.codex-all.roles.vaultspec-researcher]
-provider   = "codex"
-capability = "low"
-
-[team.profiles.codex-all.roles.vaultspec-synthesist]
-provider   = "codex"
-capability = "low"
-
-[team.profiles.codex-all.roles.vaultspec-adr-author]
-provider   = "codex"
-capability = "low"
-
-[team.profiles.codex-all.roles.vaultspec-plan-author]
-provider   = "codex"
-capability = "low"
-
-[team.profiles.codex-all.roles.vaultspec-doc-reviewer]
-provider   = "codex"
-capability = "low"

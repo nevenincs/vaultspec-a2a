@@ -4779,3 +4779,64 @@ SHAPE occurring at five legitimately-distinct sites, and now a row pinned to a
 literal's TEXT. Guards that assert an invariant are the campaign's best evidence;
 guards that assert a spelling are debt wearing a guard's clothes, and this one had
 become an obstacle to its own subject.
+
+### idempotency-default-was-three-sites-not-four | high | Reported as one concept answered four ways; the fourth is a different concept, and converging it would have silently disabled restart recovery
+
+A sweep reported that the default idempotency key for a run control action is
+derived four times - twice through `thread/idempotency.py`, whose docstring
+states it exists to stop exactly this, and twice inlined - and noted that one
+inline copy is not even hashed, asking whether that was deliberate. The question
+was the right one and the answer inverts half the finding.
+
+`control/permission_service.py` inlining its own `sha256` was genuine drift and
+is now consumed from the home as `default_permission_response_key`, keyed on
+request AND option so a repeated identical answer deduplicates while a changed
+answer does not collide with the first.
+
+`control/clarification_service.py` must NOT converge. Its key is a readable
+prefix rather than a digest because the restart-recovery sweep in that same
+module selects unapplied actions with
+`idempotency_key.like(f"{_IDEMPOTENCY_PREFIX}%")`. A digest has no queryable
+prefix, so hashing the key would make that query match NOTHING: clarification
+actions parked across a restart would never be redriven, and nothing would
+raise. The difference is a requirement of the query, not drift from its
+siblings.
+
+What made it look like drift is that no comment said otherwise. A reader
+comparing four key-derivations sees three digests and one concatenation, and the
+only available inference is oversight. The correction is therefore not "leave it
+alone" - it is to write the constraint down at both ends: the home now names the
+exception, and the function states why it cannot move. An invisible constraint
+is indistinguishable from a defect, and this campaign has now nearly removed one
+twice.
+
+Notable that this sits directly beside the already-recorded
+`idempotent-permission-response-accepts-a-replay` defect. Idempotency in this
+neighbourhood has cost the project once already, which is the argument for
+stating the rules rather than leaving them inferable.
+
+### role-count-bound-restated-as-a-bare-number-in-the-schemas | medium | The canonical bound is imported and cross-repo tested in one consumer and hardcoded in another, where nothing would move it
+
+`thread/actor_tokens.py` declares and exports `MAX_ROLES_PER_RUN = 64`.
+`control/admission.py` imports it, and a dedicated agreement test checks it
+against the engine's own copy across repositories. `api/schemas/gateway.py`
+hardcodes the same quantity twice instead:
+`RunPrepareResponse.required_roles` and
+`FrozenTeamAssignmentSummary.assignments`, both `Field(max_length=64)`.
+
+`actor_tokens.py`'s docstring already anticipates this failure by name - it
+warns that the prepare stage's role-list bound and the admission bound describe
+ONE quantity, and that a run clearing one but not another is refused at whichever
+boundary disagrees, after the caller was told its request was fine. The docstring
+was written knowing about the admission and engine copies. It does not know a
+third bare copy exists in the response schema.
+
+Care is required in the fix and is the reason it is recorded rather than done:
+`max_length=64` appears at nine sites in that module and seven are unrelated
+STRING length bounds - `team_preset`, `option_id`, `repair_status`. Only the two
+LIST bounds are the role count. A mechanical replace-all would silently retype
+seven unrelated fields to a role limit.
+
+Held rather than dispatched: another lane currently owns that file for the
+identity-validation fix, and two writers in one schema module is the shape of an
+earlier incident in this project.

@@ -5,7 +5,7 @@ tags:
 date: '2026-08-04'
 modified: '2026-08-04'
 body_schema: 'body-v1'
-body_hash: 'sha256:d2b4e5950a11251e0d14f0bafe18e250c317e0717640ff9222d9dd061c5d6443'
+body_hash: 'sha256:392e48cf25f57fe48128b88cda94c323cb39f4895d8106b7908fc99fa92d01d7'
 related: []
 ---
 
@@ -6464,3 +6464,68 @@ every consuming field name is what keeps unit drift loud.
 The lane surfaced the cycle and the available workaround and asked rather than
 applying it, which is why this is a decision on the record instead of machinery
 nobody would have questioned later.
+
+### correction-the-closure-is-name-keyed-not-spec-keyed | high | my own prose asserting more than the code enforces
+
+The preceding entry states that a credential cannot reach an argument vector
+"by construction", because the server registry is closed. **I checked the claim
+after a lane refused to take it on trust, and it overstates what the code
+enforces.**
+
+The declared-surface check validates the entry's NAME against the registry and
+applies the trust-root requirement to that name. **It never compares the entry's
+command or arguments against the registry's.** The launch reader then takes the
+arguments off the PASSED mapping rather than off the registry entry. So an entry
+that merely BORROWS a known name carries its own argument vector into the probe
+and into the client-visible refusal.
+
+The code says so itself, in the refusal it raises: *the declared-surface allowlist
+is keyed by name.* I read the registry's closure and stopped, without checking
+whether the verifier binds a spec to the entry whose name it carries.
+
+**What actually closes the boundary today is one step further out**, and the lane
+traced it rather than asserting it: every production path that builds a
+registry-known entry derives it FROM the registry - the name-taking resolver and
+the codex spec builder - and both production callers of the verifier pass one of
+those. The public setter accepts arbitrary specs, but its production callers
+attach only the authoring bridge, which the verifier skips as not registry-known.
+**The conclusion stands. Its reason does not.**
+
+**The corrected trigger is strictly wider, and it is the one a future author is
+more likely to cross.** Not "if the registry admits a user-supplied spec" - which
+requires changing a structure explicitly designed to be closed - but **if any path
+constructs a spec under a registry-known name without deriving its command and
+arguments from the registry.** No registry change required, and the field carrying
+those specs is settable through a public setter, so nothing in the type system
+prevents it.
+
+**This is the seventh instance in this campaign of prose asserting a guarantee its
+subject does not enforce, and the first one is mine.** The previous six were a
+docstring, a comment, a build-configuration comment, a name, class prose and a
+test marker. This is an audit entry - the record whose entire purpose is to be
+trusted by someone who cannot re-derive it. A finding written more strongly than
+the code supports is the same defect as the ones it catalogues, with a longer
+reach.
+
+### the-closure-is-a-convention-and-this-adr-argues-conventions-get-bypassed | medium | boarded
+
+The enforcement gap above is cheap to close: compare a registry-known entry's
+command and arguments against the registry's inside the declared-surface check,
+turning a caller convention into an enforced invariant.
+
+Boarded, and boarded on this campaign's own reasoning rather than on speculation.
+The governing decision record's knockout argument is that a canonical home for
+checkpoint posture already existed, said in its own docstring that it existed so
+two writers could not drift, and was bypassed anyway by a third path - concluding
+that **a convention nothing enforces is bypassed by the next author who does not
+read it.**
+
+That is precisely the shape here. The convention is "always derive a
+registry-known spec from the registry", it is honoured by every current caller,
+nothing checks it, and the failure mode when it is broken is a credential in a
+client-visible message rather than an exception.
+
+Recorded at medium rather than high because no live path crosses it today and the
+lane traced every production caller to establish that. The lane declined to
+propose it as work; it is boarded anyway, because the argument that it should be
+enforced is the same argument this campaign was opened on.

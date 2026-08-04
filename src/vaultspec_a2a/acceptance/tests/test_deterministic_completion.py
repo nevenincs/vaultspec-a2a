@@ -32,6 +32,7 @@ from ...authoring.discovery import (
 )
 from ...control.run_start_policy import required_role_ids
 from ...team.team_config import load_team_config
+from ...thread.enums import TERMINAL_STATUS_VALUES
 from .. import certified_gateway
 from .conftest import wait_for_run_status
 
@@ -302,9 +303,7 @@ async def test_deterministic_completion_emits_a_run_bound_review_bundle(
                 wait_for_run_status,
                 gateway,
                 run_id,
-                lambda body: (
-                    body.get("status") in {"completed", "failed", "cancelled", "error"}
-                ),
+                lambda body: body.get("status") in TERMINAL_STATUS_VALUES,
                 timeout=180.0,
             )
             assert terminal["status"] == "completed", terminal

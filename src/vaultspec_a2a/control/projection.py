@@ -24,7 +24,11 @@ if TYPE_CHECKING:
 from ..graph.enums import PermissionOptionKind, PermissionType
 from ..ipc.schemas import ExecutionTaskProjectionPayload
 from ..streaming.types import classify_tool_kind
-from ..thread.enums import TERMINAL_STATUSES, ApprovalStatus, RepairStatus
+from ..thread.enums import (
+    TERMINAL_STATUS_VALUES,
+    ApprovalStatus,
+    RepairStatus,
+)
 from ..thread.snapshots import (
     PLAN_APPROVAL_PAUSE_CAUSES,
     CheckpointProjection,
@@ -464,7 +468,7 @@ async def enrich_snapshot_from_durable_state(
     snapshot.execution_readiness = thread.execution_readiness
     snapshot.approval_status = thread.approval_status
     snapshot.approval_request_id = thread.approval_request_id
-    is_terminal_thread = thread.status in {status.value for status in TERMINAL_STATUSES}
+    is_terminal_thread = thread.status in TERMINAL_STATUS_VALUES
 
     durable_permissions = await get_pending_permission_requests(
         session,
@@ -556,7 +560,7 @@ async def enrich_snapshot_from_execution_state(
 
     # Terminal threads should not merge execution state —
     # out-of-order terminal events can leave stale metadata on the row.
-    is_terminal = thread.status in {s.value for s in TERMINAL_STATUSES}
+    is_terminal = thread.status in TERMINAL_STATUS_VALUES
     if is_terminal:
         return snapshot
 

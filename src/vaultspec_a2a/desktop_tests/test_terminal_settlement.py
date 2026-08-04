@@ -47,6 +47,7 @@ from ..tests.gateway_boot import (
     spawn_gateway,
     spawn_until_ready,
 )
+from ..thread.enums import TERMINAL_STATUS_VALUES
 from ._catalog import catalog_selection
 
 if TYPE_CHECKING:
@@ -267,7 +268,7 @@ def test_terminal_settlement_authenticates_with_attach_retries_and_revokes_once(
         }, settlement
         assert settlement["run_id"] == run_id
         assert settlement["lease_id"] == lease_id
-        assert settlement["terminal_status"] in {"completed", "cancelled", "failed"}
+        assert settlement["terminal_status"] in TERMINAL_STATUS_VALUES
         for _a, raw in settle_attempts:
             assert _ACTOR_TOKEN not in raw, "settlement must not leak an actor token"
 

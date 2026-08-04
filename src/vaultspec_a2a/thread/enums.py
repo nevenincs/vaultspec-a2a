@@ -10,6 +10,7 @@ __all__ = [
     "ACTIVE_STATUSES",
     "NON_ACTIVE_STATUSES",
     "TERMINAL_STATUSES",
+    "TERMINAL_STATUS_VALUES",
     "ApprovalStatus",
     "CleanupKind",
     "ControlActionResultStatus",
@@ -171,6 +172,19 @@ TERMINAL_STATUSES: frozenset[ThreadStatus] = frozenset(
         ThreadStatus.FAILED,
         ThreadStatus.CANCELLED,
     }
+)
+
+#: The same set as the wire and column strings it is stored and served as.
+#:
+#: Every consumer that compares a DECODED value - a database column, a JSON
+#: body, a relay frame - needs the strings rather than the members, and each was
+#: rebuilding them inline. That is not merely repetition: an inline rebuild is a
+#: set comprehension re-evaluated on every call in per-thread projection code,
+#: and the hand-written variants had already drifted, one of them naming an
+#: "error" status this vocabulary has never had. Derived from the authority
+#: directly above, so a member added there arrives here in the same edit.
+TERMINAL_STATUS_VALUES: frozenset[str] = frozenset(
+    status.value for status in TERMINAL_STATUSES
 )
 
 NON_ACTIVE_STATUSES: frozenset[ThreadStatus] = TERMINAL_STATUSES | frozenset(

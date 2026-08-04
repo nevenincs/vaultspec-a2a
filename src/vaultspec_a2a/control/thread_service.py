@@ -41,7 +41,7 @@ from ..team.team_config import load_team_config
 from ..thread.creation import requires_dispatch, resolve_autonomous
 from ..thread.dispatch_policy import FailureType, evaluate_dispatch_failure
 from ..thread.enums import (
-    TERMINAL_STATUSES,
+    TERMINAL_STATUS_VALUES,
     ApprovalStatus,
     CleanupKind,
     ControlActionType,
@@ -273,7 +273,7 @@ async def list_threads_service(
         execution_readiness = t.execution_readiness
         approval_status = t.approval_status
         approval_request_id = t.approval_request_id
-        is_terminal_thread = t.status in {status.value for status in TERMINAL_STATUSES}
+        is_terminal_thread = t.status in TERMINAL_STATUS_VALUES
         execution_state = await get_thread_execution_state(db, t.id)
         checkpoint_id: str | None = None
         checkpoint_present = False

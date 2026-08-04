@@ -31,7 +31,11 @@ from typing import TYPE_CHECKING
 import httpx
 import pytest
 
-from ...thread.enums import TERMINAL_STATUSES, ThreadStatus
+from ...thread.enums import (
+    TERMINAL_STATUS_VALUES,
+    TERMINAL_STATUSES,
+    ThreadStatus,
+)
 from .. import DEFAULT_REQUIRED_ROLE, DEFAULT_TEAM_PRESET
 from ._sse import read_frame
 from .conftest import wait_for_terminal
@@ -229,7 +233,7 @@ async def test_authenticated_progress_stream_relays_bounded_lifecycle_frame(
 
     # Permitted identity present...
     assert frame["thread_id"] == run_id
-    assert frame["status"] in {status.value for status in TERMINAL_STATUSES}
+    assert frame["status"] in TERMINAL_STATUS_VALUES
     # ...forbidden bodies absent from the encoded frame.
     for forbidden in ("content", "prompt", "document", "diff", "old_text", "new_text"):
         assert forbidden not in raw, f"forbidden field {forbidden!r} crossed the edge"

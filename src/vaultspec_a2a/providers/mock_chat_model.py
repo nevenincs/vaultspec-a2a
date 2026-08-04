@@ -25,7 +25,7 @@ from pydantic import Field, TypeAdapter, ValidationError
 
 from ..control.config import DEFAULT_MOCK_API_BASE, settings
 from ..team.team_config import AgentConfig
-from ._json_contract import JsonObject, JsonValue
+from ._json_contract import JsonObject, JsonValue, lenient_json_object
 
 logger = logging.getLogger(__name__)
 
@@ -102,7 +102,7 @@ def _extract_choice_payload(chunk: JsonObject) -> JsonObject:
     if isinstance(payload, dict):
         return payload
     payload = choice.get("message")
-    return payload if isinstance(payload, dict) else {}
+    return lenient_json_object(payload)
 
 
 def _tool_calls(value: JsonValue) -> list[JsonObject]:

@@ -404,7 +404,7 @@ async def initialize_session(
     capabilities = result.get("agentCapabilities")
     auth_methods = result.get("authMethods")
     return InitializeResult(
-        agent_capabilities=capabilities if isinstance(capabilities, dict) else {},
+        agent_capabilities=lenient_json_object(capabilities),
         auth_methods=[method for method in auth_methods if isinstance(method, dict)]
         if isinstance(auth_methods, list)
         else [],

@@ -19,7 +19,7 @@ from ._acp_types import (
     AcpResponseFutures,
     AcpSessionContext,
 )
-from ._json_contract import JsonObject, JsonValue
+from ._json_contract import JsonObject, JsonValue, lenient_json_object
 from .acp_exceptions import AcpAuthError, AcpErrorCode
 
 __all__: list[str] = []
@@ -311,7 +311,7 @@ async def authenticate_rpc(
         )
     if "error" in resp:
         raw_err = resp["error"]
-        err: JsonObject = raw_err if isinstance(raw_err, dict) else {}
+        err: JsonObject = lenient_json_object(raw_err)
         err_msg = str(err.get("message", "")) if err else str(raw_err)
         raw_code = err.get("code")
         err_code = (
@@ -343,7 +343,7 @@ async def authenticate_rpc(
             last_auth_url=last_auth_url,
         )
     result = resp.get("result")
-    return result if isinstance(result, dict) else {}
+    return lenient_json_object(result)
 
 
 async def wait_for_authenticate_response(

@@ -28,7 +28,7 @@ from ._catalog_fields import (
     optional_text,
 )
 from ._cleanup import CleanupStep, run_independent_cleanups
-from ._json_contract import JsonObject, JsonValue
+from ._json_contract import JsonObject, JsonValue, lenient_json_object
 from ._stdio_rpc import OutputBudget, cancel_task, drain_stderr, read_response
 from ._subprocess import kill_process_tree, spawn_acp_process
 from .acp_exceptions import AcpErrorCode, AcpSessionError
@@ -84,7 +84,7 @@ def _protocol_error(message: str) -> AcpCatalogProtocolError:
 
 def _rpc_error(method: str, error: JsonValue) -> AcpSessionError:
     """Classify an ACP failure without retaining provider-controlled text."""
-    detail = error if isinstance(error, dict) else {}
+    detail = lenient_json_object(error)
     code = detail.get("code")
     safe_code = (
         code
@@ -293,7 +293,7 @@ def _normalized_payload(
                     )
 
     legacy = result.get("models")
-    legacy_models = legacy if isinstance(legacy, dict) else {}
+    legacy_models = lenient_json_object(legacy)
     if not models and legacy_models:
         models = _models_from_options(
             _objects(

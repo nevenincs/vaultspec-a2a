@@ -59,7 +59,7 @@ from ._codex_config_home import (
     cleanup_codex_config_home,
     resolve_codex_web_search_mode,
 )
-from ._json_contract import JsonObject, JsonValue
+from ._json_contract import JsonObject, JsonValue, lenient_json_object
 from ._mcp_contract import verify_harness_mcp_contract
 from ._subprocess import kill_process_tree, spawn_acp_process
 from .conditions import ProviderCondition, condition_from_codex_turn_error
@@ -944,7 +944,7 @@ class CodexChatModel(BaseChatModel):
                 raise
             method = message.get("method")
             raw_params = message.get("params")
-            params = raw_params if isinstance(raw_params, dict) else {}
+            params = lenient_json_object(raw_params)
 
             if method == "item/agentMessage/delta":
                 if params.get("threadId") not in (None, thread_id):

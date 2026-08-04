@@ -5,7 +5,7 @@ tags:
 date: '2026-08-04'
 modified: '2026-08-04'
 body_schema: 'body-v1'
-body_hash: 'sha256:45d68f77deec9b5826201ed0816e16fcc7c119ab321f2e3914c88ee0b205d63f'
+body_hash: 'sha256:190ddeb85fec03989c7f1d4c6a7a481272c4764e1c0ee5ad4a33482be4ef938a'
 related: []
 ---
 
@@ -7552,3 +7552,45 @@ Recorded because it is the right disclosure in a live multi-writer tree: a stash
 touches SHARED git state, and this campaign has already lost work once to an
 operation that looked scoped. **A technique that worked is still worth flagging if
 it would not survive being repeated by four lanes at once.**
+
+### the-stat-cache-finding-reproduced-in-the-live-tree | medium | confirmed in the wild, hours after it was recorded
+
+A lane recorded that a status line reports a stat-cache difference rather than a
+content difference, after rewriting a file with identical bytes and finding it
+listed as modified. **It reproduced in this tree at close-out.**
+
+One module appeared in the status list and was **absent from the diff**. Checked the
+way that finding prescribed - hashing the working blob against the committed object
+rather than reading the status line:
+
+    worktree 3ded9091...   HEAD 3ded9091...   -> IDENTICAL, stat-cache only
+    worktree 43ffb914...   HEAD f7b355af...   -> REAL content change
+
+**Two files, indistinguishable in the status output, opposite in fact.** Had the
+status line been trusted for ownership or contention - which this orchestrator did
+throughout the campaign - an untouched authority module would have been treated as
+another lane's live work.
+
+Recorded because the finding was theoretical when written and is now demonstrated on
+the same tree that produced it, in the ordinary course of closing down.
+
+### orphaned-uncommitted-work-preserved-rather-than-tidied | medium | close-out
+
+At close-out the tree carried real uncommitted content in five files - a test
+module, a control service, a repository, a package facade and an execution record -
+with **no active lane claiming them.**
+
+**Nothing was staged, committed or reverted.** Committing another lane's work is the
+incident that broke this repository's HEAD earlier in the campaign, and reverting is
+how uncommitted work was destroyed in a prior session. Both destructive options were
+available and neither was taken.
+
+**What was done instead is read-only: the diff was captured to a patch stamped with
+the commit it applies to**, so the work is recoverable if its author does not return,
+and untouched if they do.
+
+That is the same reasoning as the rule adopted from a lane hours earlier - **leave
+the duplicate and flag it; tidying destroys provenance** - applied to a working tree
+rather than a task board. The instinct to clean up an ownerless change is the
+instinct of a careful contributor, and it is exactly wrong when the change is
+someone else's only copy.

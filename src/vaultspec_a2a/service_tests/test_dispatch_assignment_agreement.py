@@ -222,11 +222,16 @@ def test_advertised_assignment_is_the_assignment_the_worker_executes(
                 f"{promise['provider_id']!r} "
                 f"but the worker executed on {actual['provider']!r}"
             )
-        if actual["model"] != promise["model_name"]:
+        # model_name, not model: the freeze names a concrete catalog identifier
+        # and `model` carries a four-value capability tier, so comparing them
+        # asserted that two different vocabularies were equal and could never
+        # hold. A frozen run resolves no tier at all, which is why `model` reads
+        # back empty here and why this field had to exist to compare at all.
+        if actual["model_name"] != promise["model_name"]:
             disagreements.append(
                 f"{role}: the freeze named model "
                 f"{promise['model_name']!r} but the worker executed "
-                f"{actual['model']!r}"
+                f"{actual['model_name']!r}"
             )
 
     assert not disagreements, (

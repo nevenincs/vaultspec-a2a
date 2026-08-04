@@ -283,8 +283,17 @@ def _resolve_model_for_worker(
     *,
     provider_factory: ProviderFactoryProtocol,
     frozen_assignment: dict[str, dict[str, Any]] | None = None,
-) -> tuple[BaseChatModel, Provider, Model | None]:
-    """Resolve provider + capability following the standard precedence.
+) -> tuple[BaseChatModel, Provider, Model | None, str | None]:
+    """Resolve provider + capability + concrete model following the precedence.
+
+    The fourth value is the CONCRETE catalog model identifier when a frozen
+    assignment supplied one, and ``None`` on the unfrozen path where no catalog
+    entry was named. It is returned separately from the capability rather than
+    folded into it because the two speak different vocabularies: capability is a
+    four-value tier, while a catalog identifier is a provider-issued string such
+    as ``mock-high``. Both are needed downstream - the tier is what an unfrozen
+    run requests, the identifier is what a frozen run actually ran - and the
+    only way to disclose the second was to stop discarding it here.
 
     When a ``frozen_assignment`` names this worker, its provider/capability/
     fallback are used verbatim (model-profiles: restart reproduces the exact
@@ -319,7 +328,7 @@ def _resolve_model_for_worker(
                         provider.value,
                         execution_mode,
                     )
-                    return model, provider, None
+                    return model, provider, None, model_name
                 except (ConfigError, ValueError) as exc:
                     logger.warning(
                         "Frozen provider lane %s/%s unavailable for worker %s: %s",
@@ -363,7 +372,7 @@ def _resolve_model_for_worker(
             # provider the run is actually using.  Reporting the configured
             # primary would be worse than reporting nothing — a null reads as
             # unknown, a confidently wrong provider reads as fact.
-            return model, p, capability
+            return model, p, capability, None
         except ValueError as exc:
             logger.warning(
                 "Provider %s unavailable for worker %s: %s",
@@ -544,6 +553,7 @@ def _resolve_supervisor_model(
 def _model_assignment_metadata(
     provider: Provider,
     capability: Model | None,
+    model_name: str | None = None,
 ) -> dict[str, str]:
     """Render a resolved model assignment as node metadata.
 
@@ -552,24 +562,40 @@ def _model_assignment_metadata(
     becomes observable.  An unset capability is rendered as the empty string —
     the metadata map is flat strings, and consumers read empty as "unknown"
     rather than inventing a default.
+
+    ``model_name`` is the CONCRETE catalog identifier a frozen run executed, and
+    it is carried beside the capability rather than in place of it because the
+    two are different vocabularies: ``model`` holds a four-value tier, so a
+    provider-issued string like ``mock-high`` cannot be expressed there at all.
+    Without this key the frozen path disclosed nothing about which model ran —
+    it resolves the capability to ``None`` by design, so ``model`` is empty on
+    every frozen run, and a run could promise a catalog entry, execute it, and
+    leave no observable evidence that it had.
     """
-    return {
+    assignment = {
         "provider": provider.value,
         "model": capability.value if capability is not None else "",
     }
+    # Absent rather than empty: an empty string here would be indistinguishable
+    # from a frozen run that named no model, and the unfrozen path genuinely has
+    # no catalog identifier to report.
+    if model_name is not None:
+        assignment["model_name"] = model_name
+    return assignment
 
 
 def _agent_node_metadata(
     agent_config: Any,
     provider: Provider,
     capability: Model | None,
+    model_name: str | None = None,
 ) -> dict[str, str]:
     """Build the full node metadata for a compiled worker node."""
     return {
         "display_name": agent_config.display_name,
         "role": agent_config.role,
         "description": agent_config.description.strip(),
-        **_model_assignment_metadata(provider, capability),
+        **_model_assignment_metadata(provider, capability, model_name),
     }
 
 
@@ -1077,7 +1103,7 @@ def _compile_star(
                 f"Ensure the agent TOML exists and is loaded."
             )
         agent_cfg = agent_configs[worker_ref.agent_id]
-        model, used_provider, capability = _resolve_model_for_worker(
+        model, used_provider, capability, frozen_model = _resolve_model_for_worker(
             worker_ref,
             agent_cfg,
             team_config,
@@ -1100,7 +1126,9 @@ def _compile_star(
         builder.add_node(
             agent_cfg.id,
             worker_node,
-            metadata=_agent_node_metadata(agent_cfg, used_provider, capability),
+            metadata=_agent_node_metadata(
+                agent_cfg, used_provider, capability, frozen_model
+            ),
             retry_policy=_NODE_RETRY_POLICY,
         )
         builder.add_edge(agent_cfg.id, "supervisor")
@@ -1213,7 +1241,7 @@ def _compile_pipeline(
                 f"Pipeline node {agent_id!r} has no matching WorkerRef in "
                 f"team {team_config.id!r}."
             )
-        model, used_provider, capability = _resolve_model_for_worker(
+        model, used_provider, capability, frozen_model = _resolve_model_for_worker(
             worker_ref,
             agent_cfg,
             team_config,
@@ -1240,7 +1268,9 @@ def _compile_pipeline(
         builder.add_node(
             agent_cfg.id,
             worker_node,
-            metadata=_agent_node_metadata(agent_cfg, used_provider, capability),
+            metadata=_agent_node_metadata(
+                agent_cfg, used_provider, capability, frozen_model
+            ),
             retry_policy=_NODE_RETRY_POLICY,
         )
         builder.add_edge(mount_id, agent_cfg.id)
@@ -1399,7 +1429,7 @@ def _compile_pipeline_loop(
                 f"Pipeline-loop node {agent_id!r} has no matching WorkerRef in "
                 f"team {team_config.id!r}."
             )
-        model, used_provider, capability = _resolve_model_for_worker(
+        model, used_provider, capability, frozen_model = _resolve_model_for_worker(
             worker_ref,
             agent_cfg,
             team_config,
@@ -1429,7 +1459,9 @@ def _compile_pipeline_loop(
         builder.add_node(
             agent_cfg.id,
             worker_node,
-            metadata=_agent_node_metadata(agent_cfg, used_provider, capability),
+            metadata=_agent_node_metadata(
+                agent_cfg, used_provider, capability, frozen_model
+            ),
             retry_policy=_NODE_RETRY_POLICY,
         )
         builder.add_edge(mount_id, agent_cfg.id)
@@ -1559,7 +1591,7 @@ def _resolve_research_adr_models(
 
     models: dict[str, BaseChatModel] = {}
     for role in RESEARCH_ADR_ROLES:
-        models[role], _provider, _capability = _resolve_model_for_worker(
+        models[role], _provider, _capability, _frozen = _resolve_model_for_worker(
             ref_by_role[role],
             cfg_by_role[role],
             team_config,

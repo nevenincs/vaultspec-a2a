@@ -248,6 +248,7 @@ def domain_to_wire(event: DomainEvent, sequence: int) -> ServerEvent:
                     state=AgentLifecycleState(a.get("state", "idle")),
                     provider=coerce_provider(a.get("provider")),
                     model=coerce_model(a.get("model")),
+                    model_name=a.get("model_name") or None,
                     role=a.get("role", ""),
                     display_name=a.get("display_name", ""),
                     description=a.get("description", ""),

@@ -417,6 +417,13 @@ class AgentData:
     project from this type rather than redeclaring the field set. ``state``,
     ``provider``, and ``model`` carry the real enums so an unknown value cannot
     survive as an arbitrary string all the way to the wire.
+
+    ``model_name`` is deliberately a plain string, and is the one field here
+    that cannot be an enum: it holds the provider-issued catalog identifier a
+    frozen run actually executed (``mock-high``, and so on), whereas ``model``
+    holds a four-value capability tier. They are not two spellings of one fact.
+    A frozen run resolves no capability at all, so ``model`` is ``None`` on
+    those runs and this field is the only disclosure of what ran.
     """
 
     agent_id: str
@@ -424,6 +431,7 @@ class AgentData:
     state: AgentLifecycleState
     provider: Provider | None = None
     model: Model | None = None
+    model_name: str | None = None
     role: str = ""
     display_name: str = ""
     description: str = ""
@@ -546,6 +554,7 @@ def build_agent_descriptor(
         state=state,
         provider=coerce_provider(summary.get("provider")),
         model=coerce_model(summary.get("model")),
+        model_name=summary.get("model_name") or None,
         role=summary.get("role", ""),
         display_name=summary.get("display_name", ""),
         description=summary.get("description", ""),

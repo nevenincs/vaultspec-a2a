@@ -1,6 +1,6 @@
 """The single definition of a graph node's team-status metadata fields.
 
-Four sites read the same five fields off a compiled graph node's ``metadata``
+Four sites read the same six fields off a compiled graph node's ``metadata``
 mapping and flatten them to strings: the worker's ``graph_registered`` payload
 builder, this package's subscriber cache, the relayed-payload sync that
 rebuilds that cache on the control surface, and the team-status emitter that
@@ -33,6 +33,7 @@ NODE_METADATA_FIELDS = (
     "description",
     "provider",
     "model",
+    "model_name",
 )
 """The team-status fields carried per graph node, in wire order.
 

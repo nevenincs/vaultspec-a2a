@@ -110,6 +110,7 @@ class _AgentSnapshot(BaseModel):
     state: AgentLifecycleState
     provider: Provider | None = None
     model: Model | None = None
+    model_name: str | None = None
     role: str = ""
     display_name: str = ""
     description: str = ""

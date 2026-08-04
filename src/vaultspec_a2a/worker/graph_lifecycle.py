@@ -152,13 +152,15 @@ def assert_armed_authoring_attachable(
         if agent_config is None:
             continue
         try:
-            model, _resolved_provider, _capability = _resolve_model_for_worker(
-                worker_ref,
-                agent_config,
-                team_config,
-                ws_root,
-                provider_factory=provider_factory,
-                frozen_assignment=frozen_assignment,
+            model, _resolved_provider, _capability, _frozen_model = (
+                _resolve_model_for_worker(
+                    worker_ref,
+                    agent_config,
+                    team_config,
+                    ws_root,
+                    provider_factory=provider_factory,
+                    frozen_assignment=frozen_assignment,
+                )
             )
         except ValueError:
             # Provider exhaustion is a distinct failure surfaced by compile.

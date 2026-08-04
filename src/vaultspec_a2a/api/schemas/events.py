@@ -156,6 +156,11 @@ class AgentSummary(BaseModel):
     Mirrors ``thread.snapshots.AgentData``, which is the one place the field set
     is decided; provider/model stay optional because an agent can be observed
     before its model assignment resolves.
+
+    ``model`` additionally stays ``None`` for the whole life of a FROZEN run:
+    that path resolves a concrete catalog entry instead of a capability tier, so
+    there is no tier to report. ``model_name`` carries what such a run actually
+    executed and is the field to read when asking which model ran.
     """
 
     agent_id: str
@@ -163,6 +168,7 @@ class AgentSummary(BaseModel):
     state: AgentLifecycleState
     provider: Provider | None = None
     model: Model | None = None
+    model_name: str | None = None
     role: str = ""
     display_name: str = ""
     description: str = ""

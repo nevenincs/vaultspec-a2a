@@ -165,7 +165,7 @@ def test_bundled_preset_workers_resolve_only_on_an_in_process_lane(
         assignment = resolve_role_assignment(worker_ref, agent_config, team, None)
 
         if assignment.provider in IN_PROCESS_LANES:
-            model, _provider, _capability = _resolve_model_for_worker(
+            model, _provider, _capability, _frozen_model = _resolve_model_for_worker(
                 worker_ref, agent_config, team, provider_factory=factory
             )
             assert isinstance(model, BaseChatModel), (

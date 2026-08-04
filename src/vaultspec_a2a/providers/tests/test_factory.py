@@ -578,7 +578,7 @@ def test_compiler_uses_the_next_exact_frozen_lane_when_primary_is_unavailable() 
         }
     }
 
-    model, provider, capability = _resolve_model_for_worker(
+    model, provider, capability, _frozen_model = _resolve_model_for_worker(
         worker_ref,
         agent,
         team,

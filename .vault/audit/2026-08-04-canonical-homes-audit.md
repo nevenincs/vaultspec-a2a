@@ -3224,3 +3224,62 @@ reconstructed from the diff and its probe re-executed independently. The
 self-contradictory guard was found during that re-verification, not by the lane
 that wrote it. Work handed back without a report is not finished work, and
 re-deriving the evidence is the only way to accept it.
+
+### test-selection-helper-diverges-from-the-harness-it-copies | critical | A fourth copy of the served-lane selection drops the preset's pinned provider, so a mock-preset test is answered by the deterministic lane and asserts against the wrong tape
+
+`service_tests/harness.py` resolves a served in-process selection by passing
+`prefer_provider_id=_preset_in_process_provider(team_preset)` - it reads which
+lane the preset PINS, and the docstring states why that pin is authoritative.
+`test_dispatch_assignment_agreement.py` carries its own
+`_served_in_process_selection` that calls `in_process_selection(response.json())`
+with no preference at all, and `test_real_worker_run_completion.py` reaches the
+same outcome. A third variant lives in `test_clarification_loop_stitched.py`.
+
+The consequence is not a cosmetic difference. A test whose preset pins the MOCK
+lane is answered by the DETERMINISTIC lane, then asserts content equality
+against the mock tape. Today that surfaces as a failure. The dangerous case is
+the inverse: an assertion loose enough to pass would report a mock-lane test as
+green while a different provider answered it - the substitution pattern this
+audit already names, now found live rather than hypothesised.
+
+This is the campaign's signature shape at its sharpest. The canonical answer
+exists, is documented, and explains itself; the copies did not adopt it, and
+one of them silently dropped the argument that carries the whole meaning.
+Rehoming here means consuming the harness's resolution, not re-deriving it.
+
+### idempotent-permission-response-accepts-a-replay | high | A second permission response under the same idempotency key returns 200 where the contract says 409
+
+`test_stale_second_permission_response_is_rejected_after_resume` expects a
+replayed idempotency-keyed permission response to be refused with 409 and
+observes 200. Reproducible in isolation, not a flake, and independent of the
+test-scaffolding consolidation landed alongside it - every changed line in that
+file is a mechanical call-site rename.
+
+An idempotency key that does not refuse a replay is not an idempotency key. The
+failing assertion is the contract, so the defect is in the responding path, not
+the expectation.
+
+### test-scaffolding-clusters-queued-with-verdicts | medium | Five duplicate clusters investigated and deliberately not actioned, each with a stated reason rather than silence
+
+Recorded so they stay visible rather than becoming debt nobody named:
+
+- The env-var set-and-restore mechanism is duplicated across three
+  `control/tests/` modules, `lifecycle/tests/test_engine_serve.py`, and
+  `cli/tests/test_desktop_serve.py` - a fifth site the original scan ranking
+  missed. Mechanism-only, no policy divergence, no existing home. A
+  `testing/environment.py` is the answer; deferred because it spans three
+  packages with other lanes active in them mid-sweep.
+- `_settings_override` in `cli/tests` and `api/tests` is byte-identical but a
+  DIFFERENT mechanism from the env-var one: it mutates settings attributes
+  rather than the process environment. Folding the two together would be the
+  error; they are two concepts that look alike.
+- `_install_receipt_graph` in the verdict-subscriber live/offline pair was
+  checked specifically for a live dependency leaking into the offline path. It
+  does not: both build against an unreachable bridge and an in-memory
+  checkpointer, so the live file's live-ness is elsewhere. Safe, deferred.
+- `_reply` across three `authoring/tests/` modules is a METHOD on an inline
+  request-handler subclass, so extraction needs a shared mixin rather than a
+  move - a different and larger change than the others.
+- The `desktop_tests/test_runtime_singleton.py` group was truncated in the scan
+  output and its partner could not be re-derived by search. It needs a fresh
+  structural pass rather than a guess; the standing guard will surface it.

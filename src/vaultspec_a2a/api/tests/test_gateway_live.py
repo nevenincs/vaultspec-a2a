@@ -820,7 +820,13 @@ async def test_presets_list_is_truthful_and_resilient(
         }
         researcher = td_by_agent["vaultspec-researcher"]
         assert researcher["provider_id"] == "claude"
-        assert researcher["model_name"]  # a concrete, stable name
+        # No model NAME here, and that is the contract rather than a gap. A preset
+        # listing resolves which provider and capability tier a role runs at; the
+        # concrete model is named by the catalog that provider serves, chosen at
+        # run start, and disclosed as the run's frozen assignment. This surface
+        # advertising a repository-authored name would be advertising a guess, so
+        # the listing carries the provider and the tier and stops there.
+        assert not researcher["model_name"]
         assert researcher["role_id"] == "researcher"
         assert "capability" in researcher
         assert td_by_agent["vaultspec-doc-reviewer"]["provider_id"] == "claude"

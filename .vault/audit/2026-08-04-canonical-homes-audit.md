@@ -5,7 +5,7 @@ tags:
 date: '2026-08-04'
 modified: '2026-08-04'
 body_schema: 'body-v1'
-body_hash: 'sha256:affab4b49dc9097235940a7c60f95655e2dd344442907b04b707df435d341ca2'
+body_hash: 'sha256:74eefbc69b82caa99386f116e167acaa2cc646191aee784d36e59b2973d58e8b'
 related: []
 ---
 
@@ -4018,3 +4018,37 @@ Verified the assertion can still fail: substituting the published identifier
 turns the test red on all three roles, and reverting restores green. The test
 was rewritten from one that could never pass, so proving it can now fail was
 the only way to know it asserts anything at all.
+
+## Domains swept and found HEALTHY
+
+Recorded so later sweeps do not re-walk them, and because a campaign that only
+records defects gives no sense of what fraction of the codebase is sound. Each was
+reached by semantic search and confirmed by reading the candidate sites, not
+assumed.
+
+- **Untrusted-mapping coercion.** One home, twelve consumers, no rivals found.
+- **Identifier validation and idempotency-key derivation.** One home, eleven
+  consumers, including consumers in other packages. Notably it derives its grammar
+  from the ENGINE's own validation macro and says so, rather than hand-copying the
+  rule - the pattern this campaign wants for every cross-repo constraint. The
+  nearest-looking neighbour, thread-nickname generation, is DISTINCT: it MINTS a
+  friendly name, it does not validate an id.
+- **Text capping policy.** The differing policies are documented contract
+  differences, not drift: refuse at the producer so an elision is deliberate,
+  refuse inbound where rejecting a malformed request is the safe answer, truncate
+  outbound where raising would kill the frame it was bounding. Each states its
+  reason. Only the two BOUND VALUES recorded above are defective, not the policies
+  that apply them.
+- **ISO-timestamp handling.** Looked like five duplicate sites and is not:
+  serializing library timestamp variants, parsing to an epoch, and validating a
+  producer's string WITHOUT normalising it are three different jobs. The semantic
+  query matched loosely; reading the sites settled it.
+- **Server-sent-event framing.** Two modules that read as duplicates are an
+  ENCODER and a DECODER. The encoder additionally reads the frame-type key through
+  its owner rather than inlining it, which is the behaviour the decoder is being
+  corrected to match.
+
+The negative results are worth as much as the findings here: three of these five
+were candidate clusters that a count-based sweep would have opened as work. What
+retired them was reading the sites and asking what each writer was actually FOR -
+the same question that found the real defects.

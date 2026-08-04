@@ -5,7 +5,7 @@ tags:
 date: '2026-08-04'
 modified: '2026-08-04'
 body_schema: 'body-v1'
-body_hash: 'sha256:0795930f1b373c38e050968e6409172ef0af05986ca800e9057f3af060bf4bda'
+body_hash: 'sha256:c990cf4f4c246163205620480e49b7834512cedfa73628ed18910cbb35e5fd23'
 related: []
 ---
 
@@ -5552,3 +5552,67 @@ invocation and nothing else.
 
 Recorded because the surface similarity is high - the same command, the same
 argument - and a sweep by that command would have merged them.
+
+### a-replayed-value-can-only-be-caught-on-the-admitted-side | critical | changes what a bound's test must assert
+
+The two outbound records that closed the feature-tag cluster **replay a stored
+value** rather than accept a supplied one. That single fact decides what a test
+can detect, and it is not obvious:
+
+**A bound below the store cannot refuse the caller who set the value, because
+there is no such caller.** The value arrives from the column. So a refusal-only
+test - "one character past the cap raises" - passes cleanly against a bound that
+is wrong in the direction that matters, and walks straight past the defect.
+
+Only the ADMITTED side can see it: *every value the store can hold survives onto
+the record*. Confirmed by probe rather than argument - dropping one outbound
+record to an independent literal fails **on the admitted case** while the refusal
+case stays green.
+
+This generalises past this cluster. For an inbound bound the refusal is the
+interesting half and the admitted case is a sanity check. **For an outbound bound
+over a store, those roles invert.** An audit that files both as "a bound restated
+in N places" gets the same fix and the wrong test, and this campaign filed them
+that way for most of its life.
+
+The refusal case is still asserted, and asserted ON THE FIELD - both records carry
+other constrained fields, so an unattributed refusal proves nothing about the one
+under test.
+
+### a-docstring-that-described-a-failure-the-class-never-tested | high | the lying-docstring class, test tier
+
+The class carrying these records documented the truncation reading of its own
+bound - and the class had NO wire-record test at all. It described a failure mode
+it never checked, and described it wrongly.
+
+That is worse than an untested class, because the prose does not read as absent
+coverage; it reads as understood behaviour. **The next author writing the missing
+test would have taken the assertion from the docstring** - a returned value's
+length - and that assertion passes against a broken bound, since a refusing bound
+never returns a value to measure. The comment would have produced the test that
+could not fail.
+
+Fourth instance of one class in this campaign: a docstring asserting the
+guarantee its code lacked; a comment asserting a cross-site invariant nothing
+enforced; a build-configuration comment asserting an import boundary nothing
+checked; and now prose asserting a failure mode nothing tested. **The common shape
+is that prose is the only artifact in a repository that cannot fail.**
+
+### the-probe-that-could-not-attribute-its-own-refusal | high | self-corrected, and it is the standard's own trap
+
+A lane reported a measurement, then withdrew and re-ran it: its first probe
+constructed a model without other required fields, so the refusal it observed
+could have come from those rather than from the bound under test. The conclusion
+survived re-measurement; the evidence had not supported it when reported.
+
+The correction matters more than the datum. **This is exactly the trap the
+campaign's own testing standard names** - a refusal for an unrelated reason must
+not be able to pass as the one under test - and the lane walked into it *while
+applying that standard to someone else's work*. The fix was to attribute the
+refusal to the specific field through the error's own location data rather than
+infer it from the fact of a refusal.
+
+Recorded because the failure is symmetrical and cheap to repeat: a probe that
+demonstrates a refusal proves nothing unless it can show WHICH constraint refused.
+A green probe and a red probe are equally capable of being right for the wrong
+reason.

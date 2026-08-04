@@ -5,7 +5,7 @@ tags:
 date: '2026-08-04'
 modified: '2026-08-04'
 body_schema: 'body-v1'
-body_hash: 'sha256:9dfedc4a64e807940cb7fb6e9708fcc862bbb5c246cd0d42ec929928f0e8d212'
+body_hash: 'sha256:789b77d0afb3f7ab3a303bc47cb5430615cd984ef8c0c280ac5af1e160a7729a'
 related: []
 ---
 
@@ -1155,6 +1155,44 @@ consumers onto the closed-JSON contract module before the ten-site production
 cluster commits to it, which turns a proposed canonical home into a load-bearing
 one, and it needs an object-list reader added there that the production cluster
 will want anyway.
+
+### a-green-type-check-is-not-a-green-import | high | the gate that caught what types could not
+
+During the payload-reader convergence a blanket annotation replacement rewrote
+one file's own local alias into a self-referential definition - the name bound to
+itself. The whole-tree type check passed clean over it. Collection failed
+immediately with a name error. Recorded as a standing lesson for every
+annotation-heavy move in this campaign: type checking and import are different
+gates, a type checker will happily accept a binding it can resolve statically,
+and only actually importing the module proves it loads. Both gates are
+load-bearing here, and a move verified by types alone is not verified.
+
+The same convergence also sized the invariance risk that had made it worth
+pausing for: the fallout stayed ENTIRELY inside the nine files being edited,
+peaking at sixty-one diagnostics mid-repair with none escaping into other
+packages. The pause was still right - the size was unknowable in advance, and the
+condition for stopping was never triggered because it did not need to be.
+
+### payload-readers-converged | high | seven deleted, two kept, five self-tests unchanged
+
+Closed. The narrowing pair now has one declaration in the test-support package,
+validating and raising the assertion vocabulary, with seven files' local copies
+deleted rather than wrapped. Two variants survive by design and are visible as
+such: one PARSES raw bytes rather than narrowing a decoded value, and one maps an
+absent field to an empty list. Neither is a flag on the shared reader.
+
+The confirming signal is the one named in advance: the five self-tests that pin
+the dialect pass UNCHANGED, and were run directly through the marker override
+rather than left deselected. Converging toward the real contract required no test
+to be rewritten, which is what distinguishes a move toward a home from a move
+away from one.
+
+Two behaviour changes were declared in the commit rather than discovered
+afterwards - five suites move error vocabulary, seven tighten their return type -
+and the mis-attribution that nearly prevented all of this is recorded with them:
+the type-error assertions elsewhere in that package target the PRODUCTION
+readers, not the test-tier family, which both the implementing lane and this
+audit had misread.
 
 ## Recommendations
 
@@ -2686,3 +2724,96 @@ harness's own owner needs to weigh against whatever the harness's teardown or
 signal-propagation path currently assumes, not something to inherit silently
 from an import swap. Recorded and handed to the harness-tier agent rather than
 edited, since this domain does not own that file.
+
+### desktop-catalog-derivation-repeated-the-just-fixed-billable-footgun | high | one sibling had already been fixed; this one had not
+
+`src/vaultspec_a2a/desktop_tests/_catalog.py`'s `catalog_selection` took the
+FIRST served lane satisfying `health.selectable and catalog.models`, with no
+restriction to the in-process lanes. It was created during this campaign
+(`1ab774b2`, "carry the catalog selection through every desktop run start") as
+a sixth hand-rolled derivation, duplicating the already-landed canonical
+mechanism (`src/vaultspec_a2a/testing/catalog_selection.py`, landed the day
+before in `642f3333`) instead of consuming it. The most recent commit on this
+file's own history, `a8904d12`, deleted the byte-identical failure mode from
+its sibling `src/vaultspec_a2a/acceptance/_harness.py` - "carried its own lane
+search, its own copy of the in-process id set, and a 'prefer in-process, else
+take the first selectable' fallback" - and that commit's own reasoning applies
+here unchanged: every desktop suite runs the `mock-success-single` preset,
+pinned in its `.toml` to `provider = "mock"`, so a derivation that can return
+ANY selectable lane is not a stylistic gap but a silent-substitution and
+billable-lane risk on any developer box holding a live session for a real
+provider - the exact hazard `first-selectable-lane-is-a-billable-footgun`
+names. None of the six desktop suites armed `VAULTSPEC_SERVE_IN_PROCESS_LANES`
+at their gateway spawn sites either, so the derivation had no in-process lane
+to prefer even had it tried.
+
+Verdict DUPLICATE on the mechanism, ACTIONED. `_catalog.py` now builds its
+selection through `in_process_selection(payload, prefer_provider_id="mock")`,
+keeping only what is genuinely local to this test tier - the httpx client and
+the per-(base, workspace) cache, matching the guidance already recorded on
+this cluster that the transport and the cache stay with the caller. The six
+gateway-spawn call sites whose gateway is actually queried through
+`catalog_selection` (`test_run_admission.py`, `test_lazy_worker.py`,
+`test_owned_process_tree.py`, `test_terminal_settlement.py`, the primary spawn
+in `test_ownership_prerequisites.py`, and both spawns in
+`test_worker_provenance.py`) now arm `VAULTSPEC_SERVE_IN_PROCESS_LANES=true`
+in the same change; two further `armed_gateway_env` calls in
+`test_ownership_prerequisites.py` that never reach a catalog query (the
+singleton-refusal contender and the stray-worker pairing probe) were
+deliberately left unarmed. Verified by running all 21 tests across the six
+affected files against real spawned gateways (all passed) and a whole-tree
+`ty check src/vaultspec_a2a`. Not committed: this sweep's git access is
+read-only status checks plus the audit-file commit described in its brief: the
+code change is left in the working tree for the owning session to review and
+commit.
+
+### sse-frame-reader-duplicated-across-a-domain-boundary | medium | one mechanism, two owners, cannot be actioned from this domain alone
+
+`src/vaultspec_a2a/acceptance/tests/_sse.py`'s `read_frame` and
+`src/vaultspec_a2a/api/tests/test_progress_allowlist.py`'s `_read_frame` are
+the same mechanism written twice: buffer `data:` lines, flush and JSON-decode
+on a blank line, wrap the scan in `asyncio.wait_for` for a timeout, raise a
+named `AssertionError` if the stream closes first. Found by four
+differently-phrased `vaultspec-rag` searches - a behaviour-plus-nouns query, a
+different-verb query, the failure-mode query, and the consumer's-view query -
+of which only the second and fourth surfaced api/tests's copy; no third site
+was found. The two differ only in caller-facing policy: the acceptance
+version accepts `wanted=None` to match any non-heartbeat frame and skips
+heartbeats explicitly, defaulting to a 30s timeout for a certification stack
+that boots a real process tree; the api version requires an exact `wanted`
+match with no heartbeat handling, defaulting to 5s against an in-process ASGI
+app. Verdict DUPLICATE on the mechanism, POLICY correctly staying an argument.
+Not actioned: a canonical home would need to sit above both `acceptance` and
+`api`, and `api/tests` belongs to a different agent's domain in this
+campaign - this sweep only reads outside `acceptance/`, `service_tests/`,
+`desktop_tests/`, and `tests/`. Recorded for whichever domain ends up owning
+the move; the acceptance-side call site and both timeout/heartbeat policies
+are named above so a mover does not have to re-derive them.
+
+### test-harness-tier-swept-and-found-clean | low | breadth covered without a new finding
+
+Recorded for the negative space, since prior sweeps of this domain (the
+selection cluster, the gateway-boot cluster, the JSON-assertion-helper
+family, the terminal-status-in-service-tests duplicate, and the
+detached-spawn-flags note handed off above) already cover most of this
+tier's surface. Confirmed additionally clean by direct read rather than
+inference: `service_tests/harness.py`'s docker-compose-orchestrated stack
+(vidaimock, jaeger, worker and gateway as independently spawned uvicorn
+processes under Docker) and `acceptance/_harness.py`'s direct armed-desktop
+spawn (through the shared `tests/gateway_boot.py` primitives) are DISTINCT
+lifecycles, not a duplicate wearing two names - one is Docker-owned
+multi-service orchestration, the other a single production gateway process
+that owns and spawns its own worker; their only real overlap, the
+wait-until-healthy loop shape, is already recorded as DISTINCT probe content
+under `correction-gateway-boot-is-three-probes`.
+`service_tests/_provider_catalog_live.py`'s operator-authorized live-lane
+selector is DISTINCT from the in-process mechanism by design, not an
+uncounted twin of it: it validates against typed Pydantic catalog models
+rather than raw dicts and additionally proves authentication and
+completed-turn admission state, which is exactly the standard this
+project's own served-profile admission rule requires and the in-process
+mechanism explicitly does not check. `src/vaultspec_a2a/tests/` (the
+package-root peer tier) holds only `gateway_boot.py`, already the
+established canonical home, and `test_prerequisite_rule.py`, a real-subprocess
+proof of the root conftest's external-prerequisite rule with no
+duplicate-shaped logic found anywhere else in the four target directories.

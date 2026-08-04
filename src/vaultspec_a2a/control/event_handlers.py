@@ -73,13 +73,38 @@ _OPTION_MAPPINGS = TypeAdapter(list[dict[str, object]])
 
 def _session_factory(
     configured: async_sessionmaker[AsyncSession] | None,
-) -> async_sessionmaker[AsyncSession]:
-    """Select the injected session factory or the application factory."""
+) -> async_sessionmaker[AsyncSession] | None:
+    """Select the injected session factory, or the application one if it exists.
+
+    ``None`` means this process has no database, and the caller must skip its
+    durable write rather than perform it somewhere else. The gateway does not
+    seat a factory on ``app.state``, so the application singleton IS the normal
+    production path here; what is not is CREATING one. ``get_session_factory``
+    builds an engine from ambient settings when none was initialized, so a
+    process that owns no database silently acquired a connection to a
+    settings-derived path and failed at its first query, with nothing in the
+    error naming the absent database as the cause.
+    """
     if configured is not None:
         return configured
-    from ..database import get_session_factory
+    from ..database import application_session_factory
 
-    return get_session_factory()
+    return application_session_factory()
+
+
+def _skip_without_database(what: str, thread_id: str) -> None:
+    """Record a durable write skipped because this process has no database.
+
+    Silence here would be the same defect as the ambient engine it replaces: a
+    projection that never happened must be readable as an absence, not inferred
+    from a missing row much later.
+    """
+    logger.warning(
+        "Skipping %s for %s: this process has no database",
+        what,
+        thread_id,
+        extra={"thread_id": thread_id, "action": "durable_write_skipped_no_database"},
+    )
 
 
 def _json_object(encoded: str) -> dict[str, object] | None:
@@ -247,6 +272,9 @@ async def _handle_terminal_event(
         from ..thread.enums import ControlActionType
 
         factory = _session_factory(session_factory)
+        if factory is None:
+            _skip_without_database("the terminal status write", thread_id)
+            return
         # error_detail rides the same thread_terminal payload the SSE relay
         # already surfaces it through (012840a4); threading it into the
         # durable status write here is the only additional step needed for a
@@ -531,6 +559,9 @@ async def _handle_permission_event(
     event_value = payload.get("type")
     event_type = event_value if isinstance(event_value, str) else ""
     factory = _session_factory(session_factory)
+    if factory is None:
+        _skip_without_database("the durable permission journal", thread_id)
+        return
     async with factory() as db:
         if event_type in _PERMISSION_REQUEST_EVENT_TYPES:
             await _persist_permission_request(
@@ -559,6 +590,9 @@ async def _handle_progress_event(
     from .repair_transitions import mark_message_followup_applied
 
     factory = _session_factory(session_factory)
+    if factory is None:
+        _skip_without_database("the control-action settlement", thread_id)
+        return
     async with factory() as db:
         dispatch_value = payload.get("dispatch_id")
         dispatch_id = dispatch_value if isinstance(dispatch_value, str) else ""
@@ -615,6 +649,9 @@ async def _handle_execution_state_event(
             snapshot_created_at = None
 
     factory = _session_factory(session_factory)
+    if factory is None:
+        _skip_without_database("the execution-state projection", thread_id)
+        return
     async with factory() as db:
         await record_thread_execution_state(
             db,

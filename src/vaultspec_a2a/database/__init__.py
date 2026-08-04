@@ -111,6 +111,7 @@ from .permission_repository import (
 from .permission_repository import (
     supersede_permission_requests as supersede_permission_requests,
 )
+from .session import application_session_factory as application_session_factory
 from .session import close_db as close_db
 from .session import get_db as get_db
 from .session import get_engine as get_engine
@@ -170,6 +171,7 @@ __all__ = [
     "acquire_control_action_lease",
     "append_cost_record",
     "append_permission_log",
+    "application_session_factory",
     "backfill_teamstate_sdd_fields",
     "build_migration_config",
     "close_db",

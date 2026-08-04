@@ -32,6 +32,7 @@ __all__ = [
     "APPLICATION_DATABASE_DECLARATION",
     "ARTIFACT_DECLARATIONS",
     "WalCheckpointResult",
+    "application_session_factory",
     "checkpoint_wal",
     "close_db",
     "get_db",
@@ -295,6 +296,23 @@ def get_session_factory(
     return factory
 
 
+def application_session_factory() -> async_sessionmaker[AsyncSession] | None:
+    """Return the process session factory, or ``None`` if none was initialized.
+
+    The read-only companion to :func:`get_session_factory`, which CREATES an
+    engine from ambient settings when none exists. That lazy creation is right
+    for a process that owns a database and has simply not opened it yet, and
+    wrong for one that owns none at all: it manufactures a connection to a
+    settings-derived path and fails at the first query, with nothing naming the
+    absent database as the cause.
+
+    Callers that can proceed without durability - an event projection whose
+    store is optional - ask this instead, so "this process has no database" stays
+    a fact they can read rather than an exception they have to interpret.
+    """
+    return _session_factory
+
+
 async def init_db(
     database: Path | str | None = None,
     *,
@@ -321,9 +339,17 @@ async def init_db(
     Returns:
         The initialised ``AsyncEngine``.
     """
+    global _session_factory
+
     url = _resolve_database_url(database)
     engine = get_engine(url, echo=echo)
-    get_session_factory(engine)
+    # Seat the APPLICATION factory, not merely a factory for this engine.
+    # ``get_session_factory`` deliberately leaves the singleton alone when handed
+    # an explicit engine - an explicit engine means "one bound to this", not
+    # "adopt this process-wide" - so passing one here built a factory and left
+    # the process still reporting no database. This IS the initialisation entry
+    # point, so establishing that fact is exactly its job.
+    _session_factory = get_session_factory(engine)
 
     if url == "sqlite+aiosqlite:///:memory:":
         async with engine.begin() as conn:

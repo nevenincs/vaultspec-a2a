@@ -738,3 +738,28 @@ Still stated as an inference, because the one thing not yet observed is
 `broker.commit`'s own outcome for a bogus id. Logging that outcome answers it
 outright, and is the single remaining step.
 
+**LOCATED (same session).** Instrumenting `broker.commit`'s own verdict settled
+it, and disproved the inference immediately above as well. The run logs exactly
+ONE verdict - `committed=True` for the real reservation - and none for the bogus
+one. So `broker.commit` is NOT wrongly admitting an unknown reservation; it is
+never reached.
+
+The refusal therefore precedes stage dispatch entirely. It is raised in the
+shared part of `run_start_endpoint`, before the commit stage is selected, which
+is why an exhaustive read of the commit path found no 503 to blame: the gate was
+never in that path. The reason string the gateway logs - "run-admission
+reservation capacity is exhausted" - belongs to the run-admission bound applied
+to every stage alike.
+
+That makes the defect a scoping question rather than an ordering or broker one:
+a commit references capacity that was already reserved, so applying the
+new-run admission bound to it double-counts, and the second reservation in a
+capacity-two test makes any subsequent commit look like a third run. The test's
+409 expectation stands; the bound is being applied to a stage that is not
+requesting new capacity.
+
+Three inferences were drawn from reading this path today and all three were
+wrong - eligibility ordering, catalog scope capacity, and a permissive broker.
+Each was corrected by one instrument, and the instruments cost three lines each.
+The disclosures are retained in the code for that reason.
+

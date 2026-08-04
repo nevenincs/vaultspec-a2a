@@ -780,6 +780,12 @@ async def _run_commit_locked(
         binding_digest=request_digest(canonical_body, prepared=True),
         presented_roles=presented_roles,
     )
+    logger.info(
+        "commit broker verdict: reservation=%s committed=%s reason=%s",
+        reservation_id,
+        outcome.committed,
+        outcome.reason or "none",
+    )
     if not outcome.committed or outcome.lease_id is None:
         raise HTTPException(status_code=409, detail=outcome.reason)
     binding = _RunLeaseBinding(

@@ -255,7 +255,10 @@ def admission_broker(app: FastAPI) -> AdmissionBroker:
 
 
 def _admission_readiness(
-    app_state: Any, *, worker_probe_ready: bool | None = None
+    app_state: Any,
+    *,
+    worker_probe_ready: bool | None = None,
+    worker_adoptable: bool | None = None,
 ) -> AdmissionReadiness:
     """Project the seated desktop readiness facts into an admission-readiness view.
 
@@ -265,7 +268,9 @@ def _admission_readiness(
     model and service-state verb serve, never a second computation.
     """
     readiness = assemble_desktop_readiness(
-        app_state=app_state, worker_probe_ready=worker_probe_ready
+        app_state=app_state,
+        worker_probe_ready=worker_probe_ready,
+        worker_adoptable=worker_adoptable,
     )
     return AdmissionReadiness(
         worker_state=readiness.worker_state,
@@ -279,12 +284,43 @@ def _admission_readiness(
 async def _probe_admission_readiness(
     app_state: Any, worker_client: httpx.AsyncClient
 ) -> AdmissionReadiness:
-    from ...control.worker_management import probe_worker_health
+    from ...control.worker_management import (
+        probe_worker_health,
+        worker_ready_and_ours,
+    )
 
-    reachable = (
-        await probe_worker_health(settings.worker_url, client=worker_client)
-    ).healthy
-    return _admission_readiness(app_state, worker_probe_ready=reachable)
+    probe = await probe_worker_health(settings.worker_url, client=worker_client)
+    reachable = probe.healthy
+    # An indeterminate probe (the worker did not answer inside the budget) is not
+    # an observation of absence, so it must not be reported as one: pass no live
+    # verdict and let the readiness authority fall back to the watchdog's seated
+    # worker state. A worker compiling a graph for an already-admitted run is
+    # unresponsive for seconds, and refusing an unrelated admission on that basis
+    # made every concurrent run-start fail while the first one booted.
+    probe_verdict: bool | None = None if probe.indeterminate else reachable
+    # Reachability and provenance are different questions, and admission needs
+    # both: "some process holds this port" is exactly what a squatting orphan
+    # satisfies. Only asked when the port answered at all, so the refusal path
+    # costs nothing extra.
+    #
+    # The generation must come from the spawner that issued it. It is the highest
+    # generation this gateway has minted, and a worker reporting a HIGHER one
+    # classifies as unidentified - so defaulting it to zero here would disown our
+    # own restarted worker on its own admission path.
+    spawner = getattr(app_state, "worker_spawner", None)
+    generation = getattr(spawner, "generation", 0)
+    adoptable: bool | None
+    if probe.indeterminate:
+        # Provenance is unknown for the same reason health is; the promotion this
+        # feeds requires an affirmative True, so None neither promotes nor demotes.
+        adoptable = None
+    else:
+        adoptable = reachable and await worker_ready_and_ours(
+            settings.worker_url, current_generation=generation
+        )
+    return _admission_readiness(
+        app_state, worker_probe_ready=probe_verdict, worker_adoptable=adoptable
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -679,9 +715,7 @@ async def _run_commit(
     if body.reservation_id is None:  # pragma: no cover - guarded by the schema
         raise HTTPException(status_code=422, detail="commit requires a reservation id")
     run_id = body.run_id
-    logger.info(
-        "commit entered: run_id=%s reservation=%s", run_id, body.reservation_id
-    )
+    logger.info("commit entered: run_id=%s reservation=%s", run_id, body.reservation_id)
     async with commit_singleflight(request.app).hold(run_id):
         return await _run_commit_locked(
             request,
@@ -756,10 +790,15 @@ async def _run_commit_locked(
     from ...control.worker_management import probe_worker_health
 
     logger.info("commit step: probe_worker")
-    worker_reachable = (
-        await probe_worker_health(settings.worker_url, client=worker_client)
-    ).healthy
-    readiness = _admission_readiness(request.app.state)
+    probe = await probe_worker_health(settings.worker_url, client=worker_client)
+    # Same tri-state as prepare: only a probe that OBSERVED absence may report it.
+    # An indeterminate one defers to the watchdog's seated state, so a worker busy
+    # with an in-flight run stays execution-ready for the next commit.
+    readiness = _admission_readiness(
+        request.app.state,
+        worker_probe_ready=None if probe.indeterminate else probe.healthy,
+    )
+    worker_reachable = readiness.worker_state is WorkerLifecycleState.READY
     execution = evaluate_execution_eligibility(
         worker_reachable=worker_reachable,
         provider_eligibility=readiness.provider_eligibility,

@@ -486,6 +486,7 @@ def assemble_desktop_readiness(
     app_state: object,
     database_ready: bool | None = None,
     worker_probe_ready: bool | None = None,
+    worker_adoptable: bool | None = None,
 ) -> DesktopReadiness:
     """Assemble the five separate desktop readiness facts from one authority.
 
@@ -540,7 +541,7 @@ def assemble_desktop_readiness(
     # --- Worker lifecycle: the cold-to-execution ladder. ---
     worker_spawned = bool(shared["worker_spawned"])
     worker_status = shared["worker_status"]
-    if not worker_spawned and worker_probe_ready is True:
+    if not worker_spawned and worker_probe_ready is True and worker_adoptable is True:
         # The spawn flag has not been set yet, but the worker just answered its
         # real authenticated probe. This is the SAME window the ``pending``
         # branch below documents - a demand-side caller completing the live
@@ -550,6 +551,16 @@ def assemble_desktop_readiness(
         # flag has not caught up: prepare then refused a worker that was already
         # answering, so first demand failed on a cold-start race rather than on
         # anything about the run.
+        #
+        # ``worker_adoptable`` is required here and NOT in the ``pending`` branch
+        # below, and the asymmetry is the whole point. There, ``worker_spawned``
+        # is set: we started that worker, and only its cached label lags. Here
+        # nothing has been spawned, so a bare ``/health`` 200 proves only that
+        # SOME process holds the port - which a foreign orphan squatting a shared
+        # band port satisfies exactly as well as our own worker does. Promoting
+        # on reachability alone let an armed gateway mint a reservation against a
+        # squatter it must refuse, so the promotion additionally demands the
+        # provenance verdict every other adoption decision already turns on.
         worker_state = WorkerLifecycleState.READY
     elif not worker_spawned:
         # No worker exists yet; one starts on first execution demand.
@@ -619,6 +630,7 @@ async def probe_desktop_readiness(
     app_state: object,
     db: AsyncSession,
     worker_probe_ready: bool | None = None,
+    worker_adoptable: bool | None = None,
 ) -> DesktopReadiness:
     """Assemble desktop readiness over a LIVE database probe.
 
@@ -634,6 +646,7 @@ async def probe_desktop_readiness(
         app_state=app_state,
         database_ready=database_ready,
         worker_probe_ready=worker_probe_ready,
+        worker_adoptable=worker_adoptable,
     )
 
 

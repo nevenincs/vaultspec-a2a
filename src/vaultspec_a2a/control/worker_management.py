@@ -49,6 +49,7 @@ __all__ = [
     "WorkerWatchdog",
     "probe_worker_health",
     "sweep_orphan_worker_logs",
+    "worker_ready_and_ours",
 ]
 
 logger = logging.getLogger(__name__)
@@ -93,10 +94,19 @@ class WorkerHealthProbe:
     optional decoded object: it carries pairing evidence when readable, while
     ``None`` deliberately distinguishes unreadable evidence from a healthy
     occupant's absence only through ``healthy``.
+
+    ``indeterminate`` separates the two ways ``healthy`` can be False. A refused
+    connection PROVES no worker holds the port. A read that outran its budget
+    proves only that this observation did not finish in time - a worker busy
+    compiling a graph for an already-admitted run is unresponsive for seconds and
+    then answers normally. Callers that must not act on absence they did not
+    observe (run admission) read this and fall back to the watchdog's seated
+    state; callers that restart on a hung worker keep reading ``healthy`` alone.
     """
 
     healthy: bool
     body: Mapping[str, object] | None
+    indeterminate: bool = False
 
 
 # ---------------------------------------------------------------------------
@@ -326,8 +336,38 @@ async def probe_worker_health(
             return await _probe(client)
         async with httpx.AsyncClient(headers=_internal_auth_headers()) as owned:
             return await _probe(owned)
-    except Exception:
-        return WorkerHealthProbe(healthy=False, body=None)
+    except Exception as exc:
+        # An unreachable verdict decides run admission, so a silent swallow here
+        # makes an operator-visible 503 unexplainable: a refused worker, a timed
+        # out one, and a crashed one all present identically. Name the cause.
+        indeterminate = _is_indeterminate_probe_failure(exc)
+        logger.info(
+            "Worker health probe failed for %s: %s: %s (indeterminate=%s)",
+            url,
+            type(exc).__name__,
+            exc,
+            indeterminate,
+        )
+        return WorkerHealthProbe(
+            healthy=False, body=None, indeterminate=indeterminate
+        )
+
+
+def _is_indeterminate_probe_failure(exc: BaseException) -> bool:
+    """Whether *exc* leaves the worker's health genuinely unknown.
+
+    A connect failure is decisive evidence of absence: the transport reached the
+    port and nothing accepted. Every other transport failure - a read that outran
+    its budget, an exhausted client pool, a connection dropped mid-response - says
+    something about THIS observation, not about whether a worker exists. Timeouts
+    are classified before connect errors because ``ConnectTimeout`` is both, and
+    a connect that timed out is an absence observation, not an unknown one.
+    """
+    import httpx
+
+    if isinstance(exc, httpx.ConnectTimeout | httpx.ConnectError):
+        return False
+    return isinstance(exc, httpx.TransportError)
 
 
 def _same_gateway(worker_target: object, our_gateway: str) -> bool:
@@ -364,7 +404,7 @@ def _classify_worker_body(
     )
 
 
-async def _worker_ready_and_ours(
+async def worker_ready_and_ours(
     worker_url: str, *, current_generation: int = 0
 ) -> bool:
     """Whether a healthy worker at *worker_url* is provably THIS gateway's.
@@ -766,7 +806,7 @@ async def _await_worker_ready_inner(
         # requires the responding worker to declare THIS gateway as its target.
         if await _tcp_port_ready(
             "127.0.0.1", worker_port
-        ) and await _worker_ready_and_ours(worker_url, current_generation=generation):
+        ) and await worker_ready_and_ours(worker_url, current_generation=generation):
             elapsed = asyncio.get_event_loop().time() - started
             logger.info(
                 "Worker ready at %s (PID %d) in %.1fs",
@@ -1001,7 +1041,7 @@ class LazyWorkerSpawner:
                 # this attach requires the OWNED pairing verdict, which an
                 # externally-managed worker can never present - armed without
                 # auto-spawn is a misconfiguration and fails closed.
-                self._spawned = await _worker_ready_and_ours(
+                self._spawned = await worker_ready_and_ours(
                     self._worker_url, current_generation=self._generation
                 )
                 if not self._spawned:
@@ -1032,7 +1072,7 @@ class LazyWorkerSpawner:
             # check here would let a refused-eviction foreign orphan (spawn returned
             # None) be adopted as this gateway's worker.
             self._spawned = self._process is not None or (
-                await _worker_ready_and_ours(
+                await worker_ready_and_ours(
                     self._worker_url, current_generation=self._generation
                 )
             )
@@ -1419,7 +1459,7 @@ class WorkerWatchdog:
             # verdict, elsewhere the declared-gateway_url signal - a bare
             # health 200 from a stranger on the port is not an adoptable
             # worker.
-            if await _worker_ready_and_ours(
+            if await worker_ready_and_ours(
                 self._spawner.worker_url,
                 current_generation=self._spawner.generation,
             ):

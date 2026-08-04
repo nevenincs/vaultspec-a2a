@@ -51,24 +51,31 @@ def _declaring_modules(pattern: str) -> list[str]:
     [
         (
             "reviewer verdict vocabulary",
-            r'VERDICT_APPROVED = "approved"',
+            r'VERDICT_APPROVED[^=\n]*= "approved"',
             1,
             "thread/enums.py",
             "It was declared identically in the authoring lifecycle and the "
             "graph's phase gate, agreeing only by upkeep. Neither could import "
             "the other, so it lives in a module that imports nothing but StrEnum "
-            "and is therefore reachable from both without a cycle.",
+            "and is therefore reachable from both without a cycle. The binding is "
+            "matched loosely between the name and the value so that a restatement "
+            "carrying an annotation - the prevailing style in this package - "
+            "cannot slip past a pattern pinned to one spelling of the assignment.",
         ),
         (
             "vault stage glob patterns",
-            r"\.vault/research/\*\{tag\}\*\.md",
+            r"\.vault/\w+/\*\{tag\}",
             0,
             "context/stage.py",
             "The six stages were declared three times - once as an order and "
             "twice as byte-identical pattern maps - and the two scans run for "
             "the SAME run. The patterns are now DERIVED from the order, so no "
             "literal should appear anywhere; a literal reappearing means someone "
-            "restated the vocabulary instead of deriving it.",
+            "restated the vocabulary instead of deriving it. Matched on ANY "
+            "stage segment rather than one of the six: a restatement beginning "
+            "at a different stage is the same defect, and pinning one stage name "
+            "guarded a sixth of the concept. The derived form spells the segment "
+            "as a substitution, so the home cannot match its own prohibition.",
         ),
         (
             "ACP option-id kind heuristic",

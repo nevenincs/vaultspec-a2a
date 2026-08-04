@@ -5,7 +5,7 @@ tags:
 date: '2026-08-04'
 modified: '2026-08-04'
 body_schema: 'body-v1'
-body_hash: 'sha256:41df8a35dc67da336a09b7a5ee42d1f949155debb21d29b22b9608a3ffb66157'
+body_hash: 'sha256:d690b90438f96c0b15954e523bf72c9499f5288bf288e1108f0814120bc14250'
 related: []
 ---
 
@@ -352,6 +352,80 @@ handling is three correctly separated concepts with no duplicate copies: a
 pattern-scanning redactor for free-text diagnostics, a two-field mask in a
 representation method, and the environment scrub that removes credentials before
 a subprocess spawn. All DISTINCT or already single-homed.
+
+### process-tree-kill-declared-twice | high | two independent implementations of one escalation
+
+Killing a process and its whole tree is implemented twice, independently, with
+the same algorithm: force-kill the tree on Windows, and on POSIX snapshot the
+descendants before signalling - because killing the root first severs the parent
+links the walk needs - then escalate through terminate and kill across the root
+and that snapshot. One is asynchronous in `src/vaultspec_a2a/utils/process.py`
+and its own docstring calls itself the single such escalation. The other is a
+synchronous twin in `src/vaultspec_a2a/lifecycle/manager.py`. Roughly seventy
+lines are duplicated, and each has a substantial independent consumer set -
+worker management, provider subprocesses and the desktop suites on one side, the
+service CLI, the service harness and the lifecycle suites on the other. Verdict
+DUPLICATE, highest burden in this domain. There is no structural obstacle to
+collapsing the synchronous twin onto the asynchronous one: the gateway boot
+helper already calls the asynchronous version from synchronous code, which is
+live proof the wrapper works rather than a proposal that it might.
+
+### detached-spawn-flags-triplicated | medium | one flag decision, three hand-rolled copies
+
+Choosing the platform flags that detach a spawned child - a new process group on
+Windows, a new session on POSIX - has a canonical home on the containment type
+in `src/vaultspec_a2a/utils/process.py`, correctly used by the provider
+subprocess path and partly by worker management. Two further sites hand-roll the
+identical branch instead: the lifecycle manager's spawn, and the service test
+harness. Milder than the finding above because neither of those two wires
+containment teardown, killing by pid instead, so only the flag selection is
+duplicated. Verdict MISPLACED for the two copies; a narrow exported accessor for
+the flags is enough.
+
+### correction-gateway-boot-is-three-probes | medium | an earlier count in this audit was wrong
+
+An earlier entry listed gateway boot with wait-until-healthy as declared in at
+least four places. That count is wrong and is corrected here. There are three
+declaring probes and one consumer, and the three ask genuinely different
+questions of different callers: a bare health endpoint returning exactly two
+hundred, death-aware through the child handle; a discovery-record freshness
+check used by the service CLI because a Windows launcher stub makes the spawned
+pid untrustworthy; and an aggregate multi-subsystem readiness contract in the
+service harness covering worker connection, database, checkpoint and circuit
+breaker together. The fourth site is not a declaration at all - the acceptance
+harness imports the first one and its module docstring says the lifecycle
+primitives live one tier down and are shared by every real-process tier. Verdict
+DISTINCT on probe content. Only the loop SHAPE these three sit inside is
+duplicated, and that is already recorded as the wall-clock poll cluster.
+
+### correction-credential-seeding-count | low | three sites, and one is distinct by design
+
+An earlier entry put credential seeding into an application home at five or more
+sites. Three declaring sites are confirmed. The canonical one writes both
+credentials and hardens the file, and has twelve consumers across the
+acceptance, service and desktop suites. One reimplementation writes only the
+attach credential and bundles a discovery-record write, a partial duplicate at a
+single site and low value to rehome. The third deliberately writes an UNHARDENED
+file, because the tests it serves exist to prove the loader fails closed on a
+file whose permissions are wrong - merging it would destroy the property it was
+written to demonstrate. Verdict DUPLICATE for the second, DISTINCT for the
+third. The remaining count beyond these three is unconfirmed and should not be
+asserted without a sweep that owns the credential domain.
+
+### a-brief-that-carries-an-error-returns-it | medium | method finding, not a code finding
+
+Recorded because it affects how much any entry here can be trusted. This
+audit's original port-acquisition entry mischaracterised the moved declaration.
+That wrong claim was then included in a discovery brief as context, and the
+sweep returned it as an independent confirmation of the same mischaracterisation
+- while the lane that actually READ the implementation and moved it reported the
+opposite, correctly. Two sources agreed and the majority was wrong, because one
+of them was quoting the audit rather than the code. The practice this fixes:
+briefs carry the QUESTION and the protected distinctions, never a provisional
+verdict; and a confirmation that arrives without a citation into the source is
+not corroboration. The corrected reading was settled by reading the declaration
+at HEAD, which states plainly that the reservation is the primary path and the
+unclaimed probe only a fallback.
 
 ## Recommendations
 

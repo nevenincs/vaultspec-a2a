@@ -5,7 +5,7 @@ tags:
 date: '2026-08-04'
 modified: '2026-08-04'
 body_schema: 'body-v1'
-body_hash: 'sha256:1625ac3216f627ba6787dde2873cf8fd94a0c7d93cdb40a99c1625578107c36e'
+body_hash: 'sha256:9c8208959dabfb94315a0676c1c3877deae19e6cc5b451bd28e516fbdba83454'
 related: []
 ---
 
@@ -4652,3 +4652,38 @@ that lanes find them unprompted.
 Worth noting the direction of the correction: the lane gave credit AWAY. Every
 other attribution dispute in this campaign has run the same direction, which is a
 reason to trust the record rather than to police it.
+
+### a-negative-control-must-fail-by-a-different-mechanism | high | corrects the rule recorded above
+
+The allowlist entry records "run the negative control FIRST" as discipline. The
+lane that wrote that test has identified what actually makes it work, and the
+ordering turns out to be downstream of the real rule:
+
+> The control only works because it asserts a DIFFERENT frame kind. A negative
+> control on the same kind would have been satisfied by the same broken lookup it
+> was meant to detect.
+
+**A negative control has to fail through a different mechanism than the one under
+test, or the defect satisfies both.** A same-kind control would have passed under
+exactly the stranded-key state it existed to catch: the lookup misses, the field
+is dropped, and "the field was dropped" is what the control asserts. It would have
+gone green for the wrong reason, at the moment it was most needed.
+
+That makes a compromised control WORSE than no control, because it manufactures
+confidence rather than merely failing to provide it. An absent check is visibly
+absent; a check that is a hostage to the bug it guards reads as coverage.
+
+The general form, since it reaches past allowlists: any "prove the guard is live"
+step that exercises the SAME lookup, the SAME branch, or the SAME key as the
+assertion it guards is testing that the machinery is CONSISTENT, not that it
+WORKS. Consistency is exactly what a single shared defect preserves.
+
+This applies to every non-vacuity proof this campaign has demanded, including
+those already accepted. They are not re-opened here - most ran the deleted body
+against the new case, which is a genuinely independent mechanism - but the
+criterion is now explicit rather than incidental, and the ordering rule recorded
+earlier should be read as a consequence of it rather than as the rule itself.
+
+Recorded high because it revises a method claim this audit had already stated as
+settled, and because the failure it describes is invisible: a compromised control
+produces a green suite and a satisfied reviewer.

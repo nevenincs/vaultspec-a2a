@@ -41,6 +41,7 @@ from ._json_contract import (
     freeze_json,
     thaw_json,
 )
+from ._subprocess import redact_secrets
 from .lane_admission import is_web_lane_proven
 
 if TYPE_CHECKING:
@@ -72,6 +73,7 @@ __all__ = [
     "harness_spawn_env",
     "is_known_harness_server",
     "pin_harness_mcp_servers",
+    "registry_launch_divergence",
     "reject_duplicate_identities",
     "reject_duplicate_names",
     "require_declared_surface",
@@ -491,6 +493,76 @@ def _launch_spec(name: str, entry: FrozenJsonObject) -> JsonObject:
     return {key: thaw_json(entry[key]) for key in _LAUNCH_SPEC_KEYS if key in entry}
 
 
+# The launch fields a spec riding a registry-known name must carry unchanged from
+# its entry. ``name`` is absent because it is the lookup key rather than a
+# compared field, and ``env`` is absent because it legitimately VARIES PER RUN:
+# no registry entry declares one (the registry may hold only literals, and a
+# run's project is not knowable at construction time), the per-run pin appends
+# the run's project through :func:`pin_harness_mcp_servers`, and the strict claude
+# surface then rewrites every env value into a ``${NAME}`` placeholder. Comparing
+# it would refuse every pinned run - which is why this is a comparison of LAUNCH
+# IDENTITY rather than of the whole spec.
+#
+# Stated as a partition of ``_LAUNCH_SPEC_KEYS`` rather than as its own list, and
+# asserted as one: a launch field added there but not classified here would be
+# rendered into every spec while nothing compared it, which is the same silent
+# widening this guard exists to close.
+_LAUNCH_IDENTITY_KEYS = ("command", "args")
+_LAUNCH_VARIANT_KEYS = ("name", "env")
+
+
+def registry_launch_divergence(
+    spec: Mapping[str, JsonValue], *, name: str
+) -> str | None:
+    """Return how *spec*'s launch differs from *name*'s registry entry, or ``None``.
+
+    The single comparison of a spec's launch identity against the entry it claims
+    to be, so the registry is the trust root rather than the STRING that keys it.
+    Membership in the closed registry is a review claim about a command, but every
+    surfacing seam keys that claim by name and then reads command and arguments off
+    the spec in hand - so a spec that merely BORROWS a reviewed name carries its own
+    launch into a probe, into an agent's mounted tool surface, and into a
+    client-visible refusal. Nothing in the type system stops one being built:
+    ``mcp_servers`` is a settable field with a public setter.
+
+    Command and arguments are BOTH compared. A reviewed name pointing at a
+    different command is the same bypass as one pointing at different arguments -
+    and for the entries whose safety case IS a restricting argument
+    (``exact_surface``), the argument half is the safety case itself. The
+    served-tool contract cannot substitute for either: a server that serves the
+    declared names satisfies it whatever else it is.
+
+    Equality is strict on both compared fields, and they are the only two
+    compared; see :data:`_LAUNCH_IDENTITY_KEYS` for why ``env`` is excluded rather
+    than forgotten.
+
+    The comparison runs against :func:`_launch_spec` - the same renderer that
+    produces every resolved spec - rather than against a second reading of the
+    entry. A hand-rolled reading here would be a second opinion about what the
+    registry declares, and this whole guard exists because a second opinion about
+    a launch is what a borrowed name is.
+
+    The returned description is redacted HERE rather than at the callers, for the
+    reason the stderr tail is: it quotes a spec this project did not author, both
+    raise sites put it in front of a client, and masking at the single point the
+    text is produced is a property no later caller can forget to apply.
+
+    Raises:
+        ConfigError: If *name* is not a known harness server, or the entry it
+            names cannot be rendered into a launch spec.
+    """
+    declared = _launch_spec(name, _registry_entry(name))
+    for key in _LAUNCH_IDENTITY_KEYS:
+        expected = declared.get(key)
+        actual = spec.get(key)
+        if actual != expected:
+            return redact_secrets(
+                f"declares the {key} {actual!r} where its registry entry declares "
+                f"{expected!r}"
+            )
+    return None
+
+
 def is_known_harness_server(name: str) -> bool:
     """Return whether *name* is an entry of the closed harness registry.
 
@@ -688,9 +760,17 @@ def require_declared_surface(
     are refused first, so a reviewed name can never be silently redeclared with
     a different command.
 
+    Membership is checked by name, so the name alone is not allowed to BE the
+    claim: every registry-known spec must also carry its entry's launch identity
+    (:func:`registry_launch_divergence`). Without that, an entry borrowing a
+    reviewed name rides its own command and arguments into the mounted surface
+    while passing every check here - the trust root reduced to a string, which is
+    what the refusal text below has always said this allowlist is keyed by.
+
     Raises:
         ConfigError: On a duplicate identity, a nameless spec, an unknown server
-            name, or a registry entry that fails either trust axis.
+            name, a registry entry that fails any trust axis, or a spec whose
+            launch diverges from the entry whose name it claims.
     """
     reject_duplicate_identities(mcp_servers)
     unknown: list[str] = []
@@ -708,6 +788,16 @@ def require_declared_surface(
             unknown.append(name)
             continue
         _require_trust_root(name)
+        divergence = registry_launch_divergence(spec, name=name)
+        if divergence is not None:
+            raise ConfigError(
+                f"refusing to advertise harness MCP server {name!r}, which "
+                f"{divergence}. The registry entry is what was reviewed, not the "
+                "name that keys it, so a spec carrying its own launch under a "
+                "reviewed name would mount an unreviewed command as a live tool "
+                "surface - resolve the spec from the registry rather than "
+                "assembling one beside it"
+            )
     if unknown:
         raise ConfigError(
             f"refusing to advertise undeclared MCP server(s) "

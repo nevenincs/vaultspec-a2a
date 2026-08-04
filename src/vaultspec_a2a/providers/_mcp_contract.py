@@ -48,6 +48,7 @@ from ._acp_mcp import (
     declared_harness_tools,
     harness_server_exact_surface,
     is_known_harness_server,
+    registry_launch_divergence,
 )
 from ._subprocess import redact_secrets
 
@@ -323,6 +324,21 @@ async def verify_harness_mcp_contract(
         if not isinstance(command, str) or not command:
             raise HarnessToolContractError(
                 f"harness MCP server {name!r} has no launch command to verify"
+            )
+        # Refused BEFORE the probe, which is what makes this the second half of
+        # the same closure rather than a restatement of it. The arguments below
+        # are read off the spec in hand, so a spec borrowing a reviewed name would
+        # otherwise have its own command SPAWNED here - and then admitted, because
+        # the served-tool contract is satisfied by any server that serves the
+        # declared names. This seam runs on every lane; the session allowlist that
+        # holds the same line runs only on the strict claude one.
+        divergence = registry_launch_divergence(spec, name=name)
+        if divergence is not None:
+            raise HarnessToolContractError(
+                f"harness MCP server {name!r} {divergence}; refusing to probe a "
+                "launch the registry did not declare. Verifying the served tools "
+                "of an unreviewed command would certify the name rather than the "
+                "server behind it."
             )
         await verify_declared_tool_contract(
             name=name,

@@ -67,6 +67,17 @@ RUNTIME_ROOT = settings.a2a_home / "runtime" / "service-tests"
 # worker. It is the single source: injected into the worker env and presented on
 # the harness's own worker probes, which the gated worker surface now requires.
 _INTERNAL_TOKEN = "vaultspec-integration-token"
+# The engine-facing /v1 bearer this harness gives its gateway. The whole /v1
+# router sits behind the attach gate, so without presenting this every call the
+# harness makes - create, list, state, cancel - is a 401 and no service test can
+# reach the surface it exists to certify.
+#
+# Deliberately NOT _INTERNAL_TOKEN: that is the worker IPC secret, and the two
+# planes must never alias ("never shared with worker IPC or embedded in
+# discovery"). Configuring it explicitly is also what makes it knowable here at
+# all - left unset the gateway mints a per-process credential the harness has no
+# way to learn.
+_GATEWAY_SERVICE_TOKEN = "vaultspec-integration-gateway-token"
 
 
 def _compose_env(ports: dict[str, int], project_name: str) -> dict[str, str]:
@@ -327,7 +338,14 @@ class ServiceStack:
         self.artifacts[name] = payload
 
     def _client(self, *, timeout: float | None = 10.0) -> httpx.Client:
-        return httpx.Client(base_url=self.gateway_url, timeout=timeout)
+        # Every /v1 route is behind the attach gate, so the bearer belongs on the
+        # shared client rather than on individual calls - one call built without
+        # it is a 401 that reads like a broken route.
+        return httpx.Client(
+            base_url=self.gateway_url,
+            timeout=timeout,
+            headers={"Authorization": f"Bearer {_GATEWAY_SERVICE_TOKEN}"},
+        )
 
     def gateway_client(self, *, timeout: float | None = 10.0) -> httpx.Client:
         """Return a gateway-scoped HTTP client for public API calls."""
@@ -427,6 +445,7 @@ class ServiceStack:
                 "VAULTSPEC_WORKER_PORT": str(self.ports["worker"]),
                 "VAULTSPEC_PORT": str(self.ports["gateway"]),
                 "VAULTSPEC_INTERNAL_TOKEN": _INTERNAL_TOKEN,
+                "VAULTSPEC_A2A_GATEWAY_TOKEN": _GATEWAY_SERVICE_TOKEN,
                 "VAULTSPEC_AUTO_SPAWN_WORKER": "false",
                 "VAULTSPEC_PROJECT_ROOT": str(REPO_ROOT),
                 "MOCK_API_BASE": self.vidaimock_url,

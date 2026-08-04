@@ -2351,6 +2351,66 @@ Recorded rather than actioned: `desktop/` is a different package outside this
 sweep's scope, and a shared helper would need a home neither module obviously
 owns without crossing that boundary - a call for whoever holds both sides.
 
+### attach-bearer-verification-reimplemented-for-health | medium | the same comparison, raising and non-raising
+
+`src/vaultspec_a2a/api/auth.py::authenticate_request` and
+`src/vaultspec_a2a/api/app.py::_http_attach_authorized` both verify the same
+credential - `app.state.v1_service_token`, the attach-control bearer - against
+an incoming request's `Authorization` header, and both open with the identical
+test-bypass check (`app.state.allow_unauthenticated_v1_for_testing`). Beyond
+that they diverge only in shape, not in what they check: `authenticate_request`
+is the `Depends()` gate on every `/v1` route and raises `HTTPException` (503
+when the token is unconfigured, 401 on a mismatch) using
+`secrets.compare_digest`; `_http_attach_authorized` backs the `/health`
+endpoint's authenticated-vs-liveness branch, returns a bare `bool` (treating a
+missing or malformed token as `False` rather than raising, because `/health`
+must keep answering when the process is unwell), and reaches for
+`hmac.compare_digest` - the identical function, re-exported by `secrets`, so
+this is not even a real implementation difference. Verdict DUPLICATE on the
+comparison, not on the two call shapes: `/health` genuinely needs a
+non-raising check (an external prober must get liveness even when
+unauthenticated, never a 500), while every `/v1` route genuinely needs a
+raising gate, so collapsing the two functions into one would force a shape
+mismatch onto one of the two callers. What should collapse is the shared core
+- build the expected `Bearer <token>` bytes, constant-time compare against the
+presented header, return the token-missing and match verdicts as data - with
+`authenticate_request` raising on top of that result and
+`_http_attach_authorized` simply returning it. Today a change to the bearer
+format, the header name, or the constant-time comparison itself has to be made
+twice to stay correct, and nothing enforces that it was.
+
+### plan-entry-defaults-bypass-the-typed-enum-event_adapter-already-imports | low | one file, two match arms, one style
+
+`src/vaultspec_a2a/api/event_adapter.py::domain_to_wire` imports
+`PlanEntryPriority` and `PlanEntryStatus` from `.schemas.enums` and uses them
+correctly as validating constructors, but not as default sources: the
+`PlanUpdate` case writes `PlanEntryStatus(e.get("status", "pending"))` and
+`PlanEntryPriority(e.get("priority", "medium"))`, spelling the enum's own
+default members out as bare strings rather than as `PlanEntryStatus.PENDING`
+and `PlanEntryPriority.MEDIUM`. The same file's `PermissionRequest` case, code
+earlier in the same match statement, gets this right for the sibling enum:
+`PermissionOptionKind(opt.get("kind", PermissionOptionKind.ALLOW_ONCE))` reaches
+for the named member rather than the bare string `"allow_once"`. Verdict
+low-severity DUPLICATE-on-the-literal, scoped to one file: the fix is a
+two-line edit swapping the bare strings for the members already in scope, and
+it removes the only place in this module where a vocabulary's own default is
+spelled out rather than named.
+
+Separately, and NOT a defect, checked because it looked like the same pattern
+at first read: `src/vaultspec_a2a/thread/models.py::PlanEntry`'s own dataclass
+defaults (`status: str = "pending"`, `priority: str = "medium"`) and
+`src/vaultspec_a2a/thread/snapshots.py::normalize_plan_entries`'s matching
+`.get()` fallbacks restate the identical two literals, but `PlanEntry`'s own
+docstring states this is deliberate: the domain layer is kept free of
+"wire-protocol enum imports," and the plain-string values "correspond to
+`PlanEntryStatus`/`PlanEntryPriority` members defined in `api.schemas.enums`."
+That is a real architectural boundary - a domain module refusing to import a
+wire-layer type - not an oversight, and merging it would cross the boundary the
+comment exists to hold. Recorded alongside the actionable half so the two are
+not conflated: the domain-layer restatement is DISTINCT by design, the
+`event_adapter.py` restatement is not, because that module already pays the
+enum-import cost the domain layer is explicitly avoiding.
+
 ### anchor-path-cap-contradicts-its-own-description | high | a third instance of the vault-index-cap defect class
 
 Asked to check whether any OTHER `domain_config.py` setting's description
@@ -2415,3 +2475,57 @@ deliberate, stated in `artifacts/__init__.py`'s own docstring
 ("cannot drift away from the call site it describes"), not a gap to close.
 Eighteen modules across the tree already consume the vocabulary; this sweep
 added none and removed none.
+
+### process-tree-kill-caller-inventory-and-consolidation-shape | high | full caller set established, decision escalated rather than implemented
+
+Follow-up to `process-tree-kill-declared-twice`, done on instruction to
+establish the shape of a fix without applying one. The full production caller
+set of both declarations: `kill_pid_tree_async`
+(`src/vaultspec_a2a/utils/process.py`) is called from
+`src/vaultspec_a2a/control/worker_management.py` (two sites) and
+`src/vaultspec_a2a/providers/_subprocess.py` (one site), all three already
+inside `async def`, awaited. `tree_kill`
+(`src/vaultspec_a2a/lifecycle/manager.py`) is called from seven sites internal
+to that module across at least five different verb functions (`kill`,
+`rebuild`/`rerun`, `reap`, and two arms of `serve_up`'s failure teardown),
+plus `src/vaultspec_a2a/cli/service.py` (two leaf sites) and
+`src/vaultspec_a2a/service_tests/harness.py` (one leaf site, a sync pytest
+teardown method). Every sync call site traces to a Click CLI command or a
+pytest sync fixture, never a running event loop, so a sync wrapper via
+`asyncio.run()` is safe wherever it would be used.
+
+Async-conversion of the sync side is NOT narrow: `tree_kill` is woven through
+most of `lifecycle/manager.py`'s verb surface rather than confined to one
+function, so making its callers async would ripple to most of the CLI
+commands in `cli/main.py` that call into that module - moving the
+`asyncio.run()` boundary outward rather than eliminating it, while touching
+far more call sites than a sync wrapper would. A sync-wrapper direction
+already has WORKING PRECEDENT in the tree, not a hypothetical:
+`src/vaultspec_a2a/tests/gateway_boot.py`'s `reap_gateway()` is a plain sync
+function that already calls
+`asyncio.run(kill_pid_tree_async(proc.pid, term_timeout=10.0,
+kill_timeout=5.0))`.
+
+The one real obstacle a consolidation must resolve explicitly, not silently:
+`tree_kill(pid, *, timeout: float = 10.0)` bounds the WHOLE kill (POSIX
+poll-then-escalation combined, per its own docstring) with one caller-supplied
+number, while `kill_pid_tree_async(pid, *, term_timeout=10.0,
+kill_timeout=5.0)` takes two independently caller-supplied bounds, one per
+escalation phase. Every current sync caller passes a single number, so
+collapsing the signatures is a behaviour decision (map one number onto both
+phases by some fraction, or grow `tree_kill`'s signature to match, breaking
+its ten in-repo call sites) rather than a mechanical rename. Escalated to the
+orchestrating agent for a ruling rather than actioned, per this campaign's
+distinction between an unambiguous dedup and a design decision a sweep should
+not make on its own momentum.
+
+A related, narrower thread from the same follow-up:
+`service_tests/harness.py`'s copy of the `detached-spawn-flags-triplicated`
+finding (`_spawn_process`, only setting `creationflags` and never
+`start_new_session`) is not a pure dedup either. Consuming the now-exported
+`detached_spawn_kwargs()` there would newly detach that spawned child into its
+own POSIX session, which it does not do today - a behaviour change the
+harness's own owner needs to weigh against whatever the harness's teardown or
+signal-propagation path currently assumes, not something to inherit silently
+from an import swap. Recorded and handed to the harness-tier agent rather than
+edited, since this domain does not own that file.

@@ -5,7 +5,7 @@ tags:
 date: '2026-08-04'
 modified: '2026-08-04'
 body_schema: 'body-v1'
-body_hash: 'sha256:018d6401b6b8bf9118dbbb5f8abf10001141046b77553077df68556f16afd204'
+body_hash: 'sha256:d460e11344d377a87caade4e3473b681f43eb58769ac2b4d1bc8337b858924ca'
 related: []
 ---
 
@@ -6025,3 +6025,72 @@ a name the owning module no longer exports, or exports one it never did, is a
 second declaration of the public surface - the shim class this campaign refuses,
 sitting in the one place nobody thought to sweep because it is where imports are
 supposed to come from.
+
+### the-dead-wired-harness-closed-and-the-lane-gate-localised | critical | first move of the comprehensive drive
+
+The campaign's highest-severity finding is fixed: a declared harness now reaches
+every topology rather than one of four. Verified independently after landing - the
+shared worker-node helper forwards it where it previously did not.
+
+**The implementation is better than the brief specified.** The brief said to
+forward the value; the lane resolved it INSIDE the shared helper instead, off the
+team configuration all three topologies already hand over. One resolution site
+rather than three that must agree - which is the same argument that helper's own
+docstring makes for model resolution, and the reason a previous disclosure fix had
+to touch three call sites identically.
+
+**The option choice was argued, not defaulted.** The brief offered forwarding or
+compile-time refusal and said doing neither was the only unacceptable outcome.
+Refusal would have made a SHIPPED preset fail to compile - trading a silent no-op
+for a broken product surface - and the declaration costs nothing to honour because
+the node builder already accepted the parameter. Forwarding was right.
+
+**No widening, checked rather than asserted.** Every server name resolves against
+the read-only registry with its trust axes, an unknown name raises, and the spawn
+seam re-checks the advertised set. One honest behaviour change is recorded rather
+than buried: a preset declaring an UNKNOWN server on the three affected topologies
+now raises at compile where it previously no-oped. That is the refusal working.
+
+**The certification is the standard this campaign has been converging on.** It
+compiles the shipped preset through the real compile path, drives it over real
+subprocesses, and asserts on the parameters the spawned process actually received -
+not on configuration. Removing the forward fails exactly the three admission cases
+while the emptied-declaration contrast still passes, **which is the shape a wiring
+defect leaves and not the shape a broken test leaves.** That contrast case is
+load-bearing: it fails a fix that composed the server unconditionally.
+
+### the-lane-gate-is-blind-at-exactly-one-site | high | localises a known campaign concern
+
+Fixing the forward surfaced a divergence between the two harness-composition
+blocks, and it narrows a concern this project has carried at large to one line.
+
+Both blocks resolve a lane, build an allowlist and compose. **They are not
+equivalent: the worker path passes the lane to BOTH the allowlist builder and the
+composer; the research producer passes it to NEITHER.** Confirmed by reading both
+call sites.
+
+So the researcher's harness composition consults no lane gate while every worker's
+does - and the researcher is the primary consumer of the grounding feature this
+whole cluster exists to deliver. The project has recorded, at large, that the
+harness path is lane-blind; this is that concern with an address.
+
+Recorded as its own finding rather than folded into the fix, because closing it
+changes what a served preset may light up on a lane and that is a gating decision,
+not a cleanup.
+
+### a-test-marked-pure-that-drives-real-subprocesses | medium | a marker that lies
+
+A test file carries the marker reserved for tests with no input/output, no
+database and no network, while driving real provider subprocesses and a live
+checkpointer.
+
+The lane found it by adding its OWN new file to the impure list for exactly that
+reason, then noticing a neighbour that had not been. It left the neighbour alone
+as out of scope, correctly.
+
+Recorded because a marker is a machine-readable claim about a test, and a false one
+is worse than an unmarked test: a selection that excludes impure tests silently
+includes this one, so a run believed to be hermetic is not - and the failure shows
+up as flakiness attributed to whatever else was running. Sixth instance in this
+campaign of a claim that cannot fail: docstring, comment, build configuration,
+name, class prose, and now a test marker.

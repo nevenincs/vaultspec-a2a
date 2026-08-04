@@ -1054,3 +1054,35 @@ another lane and was not touched.
 
 The `workspace_root` migration in the same file remains that lane's: its
 `_WORKSPACE` edits are uncommitted and passing.
+
+## Closed (2026-08-04): the ambient database, both halves
+
+The remaining edge recorded above is closed, and without the `api/app.py` edit it
+was thought to need - that framing was wrong about where the fact belongs.
+
+Which database a relayed event goes into is a property of the APPLICATION relaying
+it, and the app boundary is the only place that knows. Resolving it in the
+handlers meant resolving it twice, and the second resolution destroyed the
+first's answer: an app that had declared it owns no database arrived as a bare
+`None`, indistinguishable from an app that simply never mentioned one.
+
+`api.internal` now resolves once (`c97f8eb1`). Setting `db_session_factory`,
+INCLUDING to `None`, is a declaration; never setting it is the gateway's own case
+and resolves to the process database `init_db` opened. The handlers use what they
+are given.
+
+That also explains the two symptoms as one defect. Run alone, the bare test app's
+write had nowhere to go and raised `no such table: threads`. Run in a full
+session, it wrote into an unrelated test's database and passed - which is the
+worse of the two and the one nobody would have investigated.
+
+Verified in the session that exposed it: the full `api/tests` run is clean of it,
+and the desktop terminal-settlement lane - real gateway, real worker, real run -
+still persists, proving production survives the single resolution point.
+
+- **LOW, unchanged and pre-existing.** `api/tests/test_thread_metadata.py` fails
+  one case per full session on a Windows temp-directory pin (`os.rmdir` refused on
+  an already-empty directory), and a DIFFERENT case each time; two consecutive
+  module runs gave one failure then 11 passed. Present before today's changes.
+  Likely a provider-discovery subprocess still holding the workspace as its
+  current directory when the test deletes it.

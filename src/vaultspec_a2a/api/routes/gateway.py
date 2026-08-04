@@ -676,6 +676,9 @@ async def _run_commit(
     if body.reservation_id is None:  # pragma: no cover - guarded by the schema
         raise HTTPException(status_code=422, detail="commit requires a reservation id")
     run_id = body.run_id
+    logger.info(
+        "commit entered: run_id=%s reservation=%s", run_id, body.reservation_id
+    )
     async with commit_singleflight(request.app).hold(run_id):
         return await _run_commit_locked(
             request,

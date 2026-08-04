@@ -787,3 +787,25 @@ Four inferences about this path today, four wrong, every one corrected by an
 instrument. The next person should not read further code: instrument
 `_run_commit`'s entry and exit and let the run say it.
 
+**Observed boundary (no inference).** Instrumenting `_run_commit`'s entry
+alongside the broker verdict gives the tightest true statement available:
+
+    commit entered: run_id=run-capacity-1        reservation=resv-457e3ff4...
+    commit entered: run_id=run-capacity-1        reservation=resv-457e3ff4...
+    commit entered: run_id=run-bogus-reservation reservation=resv-deadbeef...
+    commit broker verdict: reservation=resv-457e3ff4... committed=True
+
+The bogus commit ENTERS `_run_commit` and never produces a broker verdict. So
+the 503 is raised strictly between commit entry and `broker.commit`. Both 503
+sources known to exist in that window are instrumented and provably silent for
+this request, and the remaining calls there raise only 422.
+
+That is a contradiction between four observations and the code as read, and it
+is where this hands over. The observations are trustworthy - each came from a
+run - so the reading is what is wrong. The cheapest next move is to instrument
+the window exhaustively rather than narrow it further by argument: log at each
+call boundary inside `_run_commit_locked` and let one run name the line.
+
+Everything above this point that named a cause was withdrawn. This entry names
+no cause deliberately.
+

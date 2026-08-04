@@ -5,7 +5,7 @@ tags:
 date: '2026-08-04'
 modified: '2026-08-04'
 body_schema: 'body-v1'
-body_hash: 'sha256:216b33029f343c77d718393fafe611ff1ae5435544a7519ad2957a87f0aeec8e'
+body_hash: 'sha256:a50a5006f69c9590e7d15183cc801a9b0e14dc9def54177c740a1c03d60e9bb8'
 related: []
 ---
 
@@ -200,6 +200,79 @@ environment trust so proxy variables cannot redirect a provider call, which is a
 security property rather than drift. All DISTINCT or already consolidated. One
 sub-cluster inside the service harness does repeat five near-identical client
 constructions and is worth a local factoring, test-only and low.
+
+### thread-metadata-decode-reimplemented | high | five decoders, five different validations, one live bug
+
+Decoding the thread metadata JSON column and pulling well-known keys out of it
+is written five times in production, and each site validates differently.
+`src/vaultspec_a2a/database/thread_repository.py` bounds the workspace value and
+requires it absolute; `src/vaultspec_a2a/control/message_service.py` requires a
+non-empty string; `src/vaultspec_a2a/control/thread_service.py` and
+`src/vaultspec_a2a/control/dispatch.py` each catch a different set of decode
+errors. `src/vaultspec_a2a/control/permission_service.py` assigns the extracted
+value straight to a variable annotated as an optional string with no type check
+at all, so a stored value of any other type flows through it unexamined. That is
+not cosmetic drift: the sibling that does check carries a comment explaining
+that degrading this value used to dispatch the turn anyway and let the provider
+layer site the agent, and its filesystem sandbox, in whatever directory the
+worker happened to start in. Verdict DUPLICATE, and the convergence target is
+the strictest existing behaviour, which makes the fix a bug fix at one site
+rather than a behaviour change at the others. This is a hot area - two recent
+commits already corrected adjacent handling of an absent workspace - which is
+exactly why five decoders is expensive.
+
+### checkpoint-pragma-drift-recurred | high | the helper built to stop this has a third path ignoring it
+
+`src/vaultspec_a2a/database/checkpoint_schema.py` returns the connection posture
+every writable checkpoint path must apply, and its docstring states it is kept
+in one place so the two checkpoint writers cannot drift from each other the way
+they already had once. Both writers call it. A third path does not:
+`src/vaultspec_a2a/desktop/migration.py` hand-rolls two pragma statements, hard
+codes the busy timeout instead of reading the configured value, and omits the
+foreign-key pragma entirely - which the helper documents as per-connection and
+therefore required on every connection. So the dashboard-spawned fresh-install
+path leaves foreign keys unenforced on the checkpoint store. Verdict DUPLICATE
+with nothing to lose on convergence: the helper returns a tuple of statements
+and the missing pragma is a fix. This is the strongest single argument in the
+audit for the campaign itself - a canonical home already existed, was documented
+as existing precisely to prevent recurrence, and a later path still bypassed it,
+because nothing enforced the rule.
+
+### test-schema-materialization-not-adopted | medium | a helper built for this suite, used by one package
+
+The root test configuration deliberately provides a schema template and a
+materialize step because replaying the schema definition cost the single largest
+fixture slice in the suite; the API test package adopted it. Fifteen or more
+test files still construct an engine and replay the full schema inline, several
+carrying two or three copies within one file, and the database test package -
+whose own domain this is - has no shared fixture at all. Verdict DUPLICATE for
+every file-backed case, where adoption is a drop-in. One genuine carve-out: the
+materialize step copies a file, so in-memory databases cannot use it unchanged
+and stay hand-rolled or require the template to grow an in-memory path. Recorded
+so the carve-out is not mistaken later for an oversight.
+
+### migration-upgrade-lock-omitted | low | same Alembic call, one path unguarded
+
+The migration module wraps its upgrade-to-head in a process lock and declares
+itself the project's one migration-configuration authority; the admin verb
+resolves its configuration through that same authority but issues the upgrade
+call directly, without the lock. Benign while the admin verb runs standalone,
+which is the current assumption rather than an enforced property. Verdict
+borderline DUPLICATE, recorded at low confidence and low severity for awareness
+rather than as a must-fix.
+
+### persistence-swept-and-found-clean | low | repository and migration homes are single
+
+Reported so the sweep's negative space is visible. Repository create, read and
+update functions each have exactly one definition, and the package facade is a
+re-export rather than a second declaration. Migration configuration and script
+resolution have one home that both the desktop and admin paths call into. The
+transaction-commit responsibility is concentrated, with at least one repository
+function documenting itself as the only one that commits for its lease. And the
+asynchronous engine connect listener and the synchronous admin listener are
+deliberately restated because an admin verb needs a synchronous engine that
+cannot reuse a pool event - a documented boundary, correctly not unified. All
+DISTINCT or already single-homed.
 
 ## Recommendations
 

@@ -5,7 +5,7 @@ tags:
 date: '2026-08-04'
 modified: '2026-08-04'
 body_schema: 'body-v1'
-body_hash: 'sha256:38050b539a68d0b25c44ae149ace8bfce06f4473dd33c59d460a774ca9434709'
+body_hash: 'sha256:a2ca72ab75b72c86a7dcac46224bf5761dbec640da84ca622aed7ec18ea57be6'
 related: []
 ---
 
@@ -7197,3 +7197,48 @@ name the first kind honestly rather than let it be read as the second.
 Its reach was also not assumed: the comparison is asserted over **every** registry
 entry rather than the one a preset happens to declare, because an entry reachable on
 only one transport is exactly where a second rendering survives unnoticed.
+
+### which-of-my-assertions-changed-verdict | high | the drift-guard rule, made askable in advance
+
+The distinction recorded above - a test passing before AND after proves
+PRESERVATION, only one that FAILED before proves a FIX - has an operational form
+that is more useful than the distinction itself, supplied by the lane that first
+drew it:
+
+> **Which of my assertions changed verdict?**
+
+Asked before writing, that question sorts the evidence without hindsight. If the
+answer is **none**, the work may still be entirely right - but the evidence is a
+drift guard, and it must be labelled as one rather than presented where a defect
+proof belongs.
+
+**A reader cannot tell the two apart from the test alone.** Both are green after,
+and a green test beside a fix reads as its proof. Only the author knows whether it
+was ever red, and this campaign has now had one lane volunteer that its tests were
+not proof and another discover its own probe was measuring a different guard
+entirely.
+
+Recorded as the campaign's standing check on its own non-vacuity demand: every
+demand made here was aimed at the fix-proving kind, and the preservation kind was
+never named - so lanes had no vocabulary for producing it honestly.
+
+### two-cards-for-one-fix-is-a-live-hazard | medium | board hygiene, and the mechanism that caused it
+
+Two lanes briefly held three cards for two findings, because a lane boarded its own
+message-only findings a moment before the orchestrator boarded the same content.
+
+**The lane deleted its own two rather than the orchestrator's**, on the ground that
+the surviving card was better in both halves - it cited two prose assertions where
+the lane's cited one. That is the right tie-break: keep the card carrying more
+evidence, regardless of who wrote it.
+
+The hazard is concrete rather than aesthetic: **two lanes could have picked up two
+cards for the same eight-line fix**, and in a shared worktree that is two writers
+in one file - the shape that broke HEAD earlier in this campaign.
+
+**And the mechanism is worth recording, because it failed in the direction nobody
+checks.** The lane boarded those findings precisely to stop them living only in a
+message - and the cards landed in a scope the shared board does not read. **The
+failure it was correcting reproduced itself one level up**, silently, and was only
+caught because the orchestrator enumerated the board rather than trusting the
+report that cards existed.

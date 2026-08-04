@@ -101,6 +101,20 @@ def _declaring_modules(pattern: str) -> list[str]:
             "have two answers. Matched on the QUOTED argument so that prose "
             "describing the escalation does not count as implementing it.",
         ),
+        (
+            "POSIX descendant snapshot",
+            r"def posix_descendant_pids\(",
+            1,
+            "utils/process.py",
+            "The row above pins the escalation by its WINDOWS argv, so a second "
+            "copy written for POSIX alone would carry no taskkill literal and "
+            "pass it. This pins the other half. The snapshot is the load-bearing "
+            "step rather than the signalling: POSIX has no whole-tree signal, so "
+            "the descendants must be walked BEFORE the root is signalled, "
+            "because killing the root first severs the parent links the walk "
+            "reads. A re-derivation that signals first still terminates the "
+            "root, which is why it would look like it worked.",
+        ),
     ],
 )
 def test_a_rehomed_concept_still_has_one_declaration(

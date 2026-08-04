@@ -5,7 +5,7 @@ tags:
 date: '2026-08-04'
 modified: '2026-08-04'
 body_schema: 'body-v1'
-body_hash: 'sha256:190ddeb85fec03989c7f1d4c6a7a481272c4764e1c0ee5ad4a33482be4ef938a'
+body_hash: 'sha256:09cc2d78367ccc0a0d520202fc044ab8d1950ff2a84430e77839c792dbadeb2f'
 related: []
 ---
 
@@ -7594,3 +7594,89 @@ the duplicate and flag it; tidying destroys provenance** - applied to a working 
 rather than a task board. The instinct to clean up an ownerless change is the
 instinct of a careful contributor, and it is exactly wrong when the change is
 someone else's only copy.
+
+### the-seam-i-warned-about-was-not-a-seam | critical | proved rather than deferred
+
+The re-declaration class closed at **fourteen name-hops across nine modules, all
+RETIRED — zero seams kept, zero DISTINCT.** The brief warned that several looked
+load-bearing and named a dependency-injection boundary as the likeliest to be real.
+
+**The lane went looking for that seam and established it does not exist.** No
+override mechanism anywhere in the tree; the module's own test asserted the alias
+**is** the function rather than a substitute for it; and the stated reason was that
+route modules should have one import surface - a convenience, not an indirection
+anyone used.
+
+**The decisive evidence is one I would not have thought to gather: the owner's own
+name had ZERO direct consumers tree-wide.** Every consumer used the rename. So a
+reader grepping the real name across the routes found **nothing** - which is the
+obscuring form of a rename, not a seam's vocabulary.
+
+The second rename fails a different way: it **drops the qualifier naming the one
+topology its mapping covers**, so the short name reads as though it applied to any
+node.
+
+**Recorded because the warning was right to issue and wrong in this instance, and
+the lane resolved that by investigation rather than by deferring to the warning.**
+A brief that says "several of these are probably legitimate" is an invitation to
+keep all of them; the correct response is the one taken - go find the seam, and
+report its absence as a finding.
+
+### a-one-hop-consumer-map-lies | critical | method, found by a suite that would not import
+
+The lane's own through-consumer scan measured **one hop** and missed a production
+consumer at **two**: a control module reached the retired names through a facade
+that reached them through another module.
+
+**It was caught only because a test suite failed to import** - not by the scan. The
+lane then re-resolved every import in the tree against the removed name pairs and
+found five stale sites.
+
+**Standing rule for anyone retiring an export: resolve TRANSITIVELY.** A one-hop
+consumer map answers "who names this module" when the question is "who reaches this
+name", and those diverge exactly when a chain of re-exports exists - which is the
+situation that makes retirement necessary in the first place. **The defect being
+removed is what makes the naive measurement wrong.**
+
+### the-guard-reads-its-own-coverage-before-asserting | high | floors applied to a guard, not a scan
+
+Floors were recorded in this campaign as the answer to a scan that dies partway and
+reports a clean tree. This lane applied them to a **guard**: an empty root, a blind
+export reader, and a truncated name list each fail the guard **on its floors** rather
+than passing vacuously.
+
+That closes the gap between a guard that finds nothing because there is nothing and
+one that finds nothing because it looked nowhere - **for the guard itself, in the
+same run that asserts on the tree.**
+
+Its certification also included the campaign's newest technique used properly:
+restoring one retired re-export makes the guard name it, restoring one **under its
+rename** makes it name that too and report it AS a rename, and neutering the verdict
+left the admitted-case and wiring assertions passing while the refusals failed.
+Mutated files restored **byte-identically by hash**, not by eye.
+
+### a-module-can-import-the-right-callable-and-mount-a-different-one | high | the assertion moved to the seam that matters
+
+One test changed shape rather than merely moving: the attach gate is now asserted
+off the **mounted routers, by function identity**, because **a module can import the
+correct callable and mount a different one** - and an assertion on the import proves
+only what was imported.
+
+That is the same class as asserting type identity against a class object rather than
+a name, one layer out: the difference between checking that the right thing is
+AVAILABLE and checking that it is the thing actually IN USE.
+
+### the-campaign-tripped-its-own-guard | high | live failure at HEAD, from our own work
+
+A structural-duplication guard **fails at HEAD**, verified independently. The cause
+is a commit from this campaign: the purity fix added a collection hook to one test
+package that structurally duplicates the hook in another.
+
+**The guard is working exactly as intended** - it caught a duplicate introduced by
+the consolidation campaign, within hours, in the campaign's own output. That is the
+strongest available evidence for guards over review, arriving at our own expense.
+
+Recorded rather than fixed here because it belongs to the lane that introduced it
+and needs a decision: either the two hooks fold into one home, or the duplicate is
+reviewed and recorded as accepted. **Both are legitimate; leaving a guard red is
+not.**

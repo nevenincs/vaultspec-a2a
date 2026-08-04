@@ -76,6 +76,7 @@ from ..acceptance import certified_gateway
 from ..authoring.discovery import SERVICE_JSON_ENV, resolve_engine_with_retry
 from ..team.team_config import load_team_config
 from ..testing.catalog_selection import NoSelectableLaneError, in_process_selection
+from ..testing.payloads import required_bool, required_text
 from ._provider_catalog_live import (
     LIVE_PROVIDER_CATALOG_SELECTION_ENVIRON,
     live_provider_catalog_selector_is_configured,
@@ -157,22 +158,6 @@ def _required_object(
     if field not in body:
         raise AssertionError(f"{at} did not contain required field {field!r}")
     return _json_object(body[field], at=f"{at}.{field}")
-
-
-def _required_text(body: dict[str, object], field: str, *, at: str) -> str:
-    """Read a required text field from a certified wire response."""
-    value = body.get(field)
-    if not isinstance(value, str):
-        raise AssertionError(f"{at}.{field} was not text: {value!r}")
-    return value
-
-
-def _required_bool(body: dict[str, object], field: str, *, at: str) -> bool:
-    """Read a required boolean field from a certified wire response."""
-    value = body.get(field)
-    if not isinstance(value, bool):
-        raise AssertionError(f"{at}.{field} was not boolean: {value!r}")
-    return value
 
 
 def _optional_text_list(body: dict[str, object], field: str, *, at: str) -> list[str]:
@@ -535,12 +520,12 @@ def test_clarification_loop_parks_discloses_answers_and_resumes(
             pending = _required_object(
                 parked, "pending_clarification", at="parked run-status"
             )
-            request_id = _required_text(
+            request_id = required_text(
                 pending, "request_id", at="parked pending clarification"
             )
 
             assert (
-                _required_text(pending, "type", at="parked pending clarification")
+                required_text(pending, "type", at="parked pending clarification")
                 == "clarification_request"
             )
             assert (
@@ -552,7 +537,7 @@ def test_clarification_loop_parks_discloses_answers_and_resumes(
             )
             topology = _required_object(parked, "topology", at="parked run-status")
             assert (
-                _required_text(topology, "pause_cause", at="parked topology")
+                required_text(topology, "pause_cause", at="parked topology")
                 == "clarification_request"
             )
 
@@ -573,7 +558,7 @@ def test_clarification_loop_parks_discloses_answers_and_resumes(
         raw_frame = json.dumps(frame)
         for question in expected_questions:
             assert (
-                _required_text(question, "prompt", at="declared question")
+                required_text(question, "prompt", at="declared question")
                 not in raw_frame
             )
             for option in _optional_text_list(
@@ -584,9 +569,9 @@ def test_clarification_loop_parks_discloses_answers_and_resumes(
         # (4) Answer over real loopback HTTP, keyed by question id.
         answers: dict[str, str] = {}
         for question in expected_questions:
-            question_id = _required_text(question, "id", at="declared question")
-            kind = _required_text(question, "kind", at="declared question")
-            required = _required_bool(question, "required", at="declared question")
+            question_id = required_text(question, "id", at="declared question")
+            kind = required_text(question, "kind", at="declared question")
+            required = required_bool(question, "required", at="declared question")
             options = _optional_text_list(question, "options", at="declared question")
             if kind == "choice":
                 answers[question_id] = options[0] if options else ""
@@ -645,7 +630,7 @@ def test_answering_a_question_the_run_is_not_parked_on_is_refused(
         pending = _required_object(
             parked, "pending_clarification", at="parked run-status"
         )
-        real_request_id = _required_text(
+        real_request_id = required_text(
             pending, "request_id", at="parked pending clarification"
         )
 
@@ -664,7 +649,7 @@ def test_answering_a_question_the_run_is_not_parked_on_is_refused(
         still_parked, "pending_clarification", at="run-status after refused answer"
     )
     assert (
-        _required_text(
+        required_text(
             still_pending, "request_id", at="still-parked pending clarification"
         )
         == real_request_id
@@ -734,7 +719,7 @@ def test_concurrent_continuations_elect_one_all_low_codex_winner(
         pending = _required_object(
             parked, "pending_clarification", at="Codex load parked run-status"
         )
-        request_id = _required_text(
+        request_id = required_text(
             pending, "request_id", at="Codex load pending clarification"
         )
 
@@ -748,7 +733,7 @@ def test_concurrent_continuations_elect_one_all_low_codex_winner(
             frozen.get("assignments"), at="Codex load frozen assignments"
         )
         by_role = {
-            _required_text(item, "role_id", at="frozen role assignment"): item
+            required_text(item, "role_id", at="frozen role assignment"): item
             for item in assignments
         }
         assert set(by_role) == set(_required_roles())

@@ -7,6 +7,8 @@ from typing import TYPE_CHECKING
 
 from pydantic import TypeAdapter, ValidationError
 
+from ..testing.payloads import required_bool, required_text
+
 if TYPE_CHECKING:
     from collections.abc import Callable
 
@@ -31,22 +33,6 @@ def _json_object_list(value: object, *, at: str) -> list[dict[str, object]]:
         return _JSON_OBJECT_LIST.validate_python(value)
     except ValidationError as exc:
         raise TypeError(f"expected an object list at {at}: {exc}") from exc
-
-
-def _required_text(body: dict[str, object], field: str, *, at: str) -> str:
-    """Read a required text field from a validated service response."""
-    value = body.get(field)
-    if not isinstance(value, str):
-        raise AssertionError(f"{at}.{field} was not text: {value!r}")
-    return value
-
-
-def _required_bool(body: dict[str, object], field: str, *, at: str) -> bool:
-    """Read a required boolean field from a validated service response."""
-    value = body.get(field)
-    if not isinstance(value, bool):
-        raise AssertionError(f"{at}.{field} was not boolean: {value!r}")
-    return value
 
 
 def _thread_state(stack: ServiceStack, thread_id: str) -> dict[str, object]:
@@ -88,7 +74,7 @@ def _pending_permission_matching(
 def _option_ids(permission: dict[str, object]) -> set[str]:
     """Read the offered permission option identifiers from the real projection."""
     return {
-        _required_text(option, "option_id", at="permission option")
+        required_text(option, "option_id", at="permission option")
         for option in _json_object_list(
             permission.get("options"), at="permission options"
         )
@@ -201,7 +187,7 @@ def test_permission_request_can_be_resumed_via_public_api(
         team_preset="mock-human-in-loop",
         title="service permission resume",
     )
-    thread_id = _required_text(
+    thread_id = required_text(
         _json_object(created, at="created thread"), "run_id", at="created thread"
     )
 
@@ -211,18 +197,18 @@ def test_permission_request_can_be_resumed_via_public_api(
     request = _first_pending_permission(paused)
     response = _json_object(
         service_stack.respond_permission(
-            _required_text(request, "request_id", at="pending permission"),
+            required_text(request, "request_id", at="pending permission"),
             thread_id=thread_id,
             option_id=_select_option_id(request, label="approve"),
         ),
         at="permission response",
     )
-    assert _required_bool(response, "accepted", at="permission response") is True
+    assert required_bool(response, "accepted", at="permission response") is True
     assert (
-        _required_text(response, "action_status", at="permission response")
+        required_text(response, "action_status", at="permission response")
         == "accepted_not_applied"
     )
-    assert _required_bool(response, "applied", at="permission response") is False
+    assert required_bool(response, "applied", at="permission response") is False
 
     completed = _wait_for_state(
         service_stack,
@@ -239,9 +225,7 @@ def test_permission_request_can_be_resumed_via_public_api(
         if message.get("role") == "assistant"
     ]
     assert assistant_messages, "resume flow should emit a deterministic assistant reply"
-    assert _required_text(
-        assistant_messages[-1], "content", at="assistant message"
-    ) == (
+    assert required_text(assistant_messages[-1], "content", at="assistant message") == (
         "Permission approved. The privileged command completed successfully "
         "and the task is now finished."
     )
@@ -256,7 +240,7 @@ def test_invalid_permission_option_is_rejected_without_resuming(
         team_preset="mock-human-in-loop",
         title="service permission invalid option",
     )
-    thread_id = _required_text(
+    thread_id = required_text(
         _json_object(created, at="created thread"), "run_id", at="created thread"
     )
 
@@ -265,7 +249,7 @@ def test_invalid_permission_option_is_rejected_without_resuming(
 
     rejected = _json_object(
         service_stack.respond_permission(
-            _required_text(request, "request_id", at="pending permission"),
+            required_text(request, "request_id", at="pending permission"),
             thread_id=thread_id,
             option_id="hostile-option",
             expected_status=409,
@@ -273,21 +257,21 @@ def test_invalid_permission_option_is_rejected_without_resuming(
         at="rejected permission response",
     )
     assert (
-        _required_text(rejected, "detail", at="rejected permission response")
+        required_text(rejected, "detail", at="rejected permission response")
         == "Unknown permission option for this request"
     )
 
     still_paused = _wait_for_pending_permission(
         service_stack,
         thread_id,
-        request_id=_required_text(request, "request_id", at="pending permission"),
+        request_id=required_text(request, "request_id", at="pending permission"),
     )
     assert still_paused["status"] == paused["status"]
-    assert _required_text(
+    assert required_text(
         _first_pending_permission(still_paused),
         "request_id",
         at="still-paused permission",
-    ) == _required_text(request, "request_id", at="pending permission")
+    ) == required_text(request, "request_id", at="pending permission")
 
 
 def test_stale_second_permission_response_is_rejected_after_resume(
@@ -299,7 +283,7 @@ def test_stale_second_permission_response_is_rejected_after_resume(
         team_preset="mock-human-in-loop",
         title="service permission stale response",
     )
-    thread_id = _required_text(
+    thread_id = required_text(
         _json_object(created, at="created thread"), "run_id", at="created thread"
     )
 
@@ -309,19 +293,19 @@ def test_stale_second_permission_response_is_rejected_after_resume(
     approved_option_id = _select_option_id(request, label="approve")
     accepted = _json_object(
         service_stack.respond_permission(
-            _required_text(request, "request_id", at="pending permission"),
+            required_text(request, "request_id", at="pending permission"),
             thread_id=thread_id,
             option_id=approved_option_id,
         ),
         at="accepted permission response",
     )
     assert (
-        _required_bool(accepted, "accepted", at="accepted permission response") is True
+        required_bool(accepted, "accepted", at="accepted permission response") is True
     )
 
     stale = _json_object(
         service_stack.respond_permission(
-            _required_text(request, "request_id", at="pending permission"),
+            required_text(request, "request_id", at="pending permission"),
             thread_id=thread_id,
             option_id=approved_option_id,
             idempotency_key="stale-second-response",
@@ -330,7 +314,7 @@ def test_stale_second_permission_response_is_rejected_after_resume(
         at="stale permission response",
     )
     assert (
-        _required_text(stale, "detail", at="stale permission response")
+        required_text(stale, "detail", at="stale permission response")
         == "Permission request is no longer pending"
     )
 
@@ -344,9 +328,7 @@ def test_stale_second_permission_response_is_rejected_after_resume(
         for message in _messages(completed)
         if message.get("role") == "assistant"
     ]
-    assert _required_text(
-        assistant_messages[-1], "content", at="assistant message"
-    ) == (
+    assert required_text(assistant_messages[-1], "content", at="assistant message") == (
         "Permission approved. The privileged command completed successfully "
         "and the task is now finished."
     )
@@ -361,13 +343,13 @@ def test_invalid_permission_option_keeps_thread_paused_and_recoverable(
         team_preset="mock-human-in-loop",
         title="service invalid permission option",
     )
-    thread_id = _required_text(
+    thread_id = required_text(
         _json_object(created, at="created thread"), "run_id", at="created thread"
     )
 
     paused = _wait_for_pending_permission(service_stack, thread_id)
     request = _first_pending_permission(paused)
-    request_id = _required_text(request, "request_id", at="pending permission")
+    request_id = required_text(request, "request_id", at="pending permission")
 
     with service_stack.gateway_client(timeout=30.0) as client:
         invalid = client.post(
@@ -376,7 +358,7 @@ def test_invalid_permission_option_keeps_thread_paused_and_recoverable(
         )
     assert invalid.status_code == 409
     assert (
-        _required_text(
+        required_text(
             _json_object(invalid.json(), at="invalid permission response"),
             "detail",
             at="invalid permission response",
@@ -392,15 +374,15 @@ def test_invalid_permission_option_keeps_thread_paused_and_recoverable(
 
     resumed = _json_object(
         service_stack.respond_permission(
-            _required_text(request, "request_id", at="pending permission"),
+            required_text(request, "request_id", at="pending permission"),
             thread_id=thread_id,
             option_id=_select_option_id(request, label="approve"),
         ),
         at="resumed permission response",
     )
-    assert _required_bool(resumed, "accepted", at="resumed permission response") is True
+    assert required_bool(resumed, "accepted", at="resumed permission response") is True
     assert (
-        _required_text(resumed, "action_status", at="resumed permission response")
+        required_text(resumed, "action_status", at="resumed permission response")
         == "accepted_not_applied"
     )
 
@@ -414,9 +396,7 @@ def test_invalid_permission_option_keeps_thread_paused_and_recoverable(
         for message in _messages(completed)
         if message.get("role") == "assistant"
     ]
-    assert _required_text(
-        assistant_messages[-1], "content", at="assistant message"
-    ) == (
+    assert required_text(assistant_messages[-1], "content", at="assistant message") == (
         "Permission approved. The privileged command completed successfully "
         "and the task is now finished."
     )
@@ -431,7 +411,7 @@ def test_permission_denial_completes_with_denied_outcome(
         team_preset="mock-human-in-loop",
         title="service permission deny",
     )
-    thread_id = _required_text(
+    thread_id = required_text(
         _json_object(created, at="created thread"), "run_id", at="created thread"
     )
 
@@ -440,15 +420,15 @@ def test_permission_denial_completes_with_denied_outcome(
 
     denied = _json_object(
         service_stack.respond_permission(
-            _required_text(request, "request_id", at="pending permission"),
+            required_text(request, "request_id", at="pending permission"),
             thread_id=thread_id,
             option_id=_select_option_id(request, label="deny"),
         ),
         at="denied permission response",
     )
-    assert _required_bool(denied, "accepted", at="denied permission response") is True
+    assert required_bool(denied, "accepted", at="denied permission response") is True
     assert (
-        _required_text(denied, "action_status", at="denied permission response")
+        required_text(denied, "action_status", at="denied permission response")
         == "accepted_not_applied"
     )
 
@@ -462,9 +442,9 @@ def test_permission_denial_completes_with_denied_outcome(
         for message in _messages(completed)
         if message.get("role") == "assistant"
     ]
-    assert _required_text(
-        assistant_messages[-1], "content", at="assistant message"
-    ) == ("Permission denied. The privileged command was not executed.")
+    assert required_text(assistant_messages[-1], "content", at="assistant message") == (
+        "Permission denied. The privileged command was not executed."
+    )
 
 
 def test_supervisor_plan_approval_pause_can_resume_through_real_stack(
@@ -488,7 +468,7 @@ def test_supervisor_plan_approval_pause_can_resume_through_real_stack(
             "feature_tag": "audit-five",
         },
     )
-    thread_id = _required_text(
+    thread_id = required_text(
         _json_object(created, at="created thread"), "run_id", at="created thread"
     )
 
@@ -503,7 +483,7 @@ def test_supervisor_plan_approval_pause_can_resume_through_real_stack(
     assert plan_paused["status"] == "input_required"
     assert plan_paused["pause_cause"] == "plan_approval_request"
     assert plan_paused["approval_status"] == "pending"
-    assert plan_paused["approval_request_id"] == _required_text(
+    assert plan_paused["approval_request_id"] == required_text(
         plan_request, "request_id", at="plan permission"
     )
     assert plan_request["tool_call"] == "plan_approval"
@@ -513,21 +493,19 @@ def test_supervisor_plan_approval_pause_can_resume_through_real_stack(
     }
     plan_response = _json_object(
         service_stack.respond_permission(
-            _required_text(plan_request, "request_id", at="plan permission"),
+            required_text(plan_request, "request_id", at="plan permission"),
             thread_id=thread_id,
             option_id=_select_option_id(plan_request, label="approve"),
         ),
         at="plan approval response",
     )
+    assert required_bool(plan_response, "accepted", at="plan approval response") is True
     assert (
-        _required_bool(plan_response, "accepted", at="plan approval response") is True
-    )
-    assert (
-        _required_text(plan_response, "action_status", at="plan approval response")
+        required_text(plan_response, "action_status", at="plan approval response")
         == "accepted_not_applied"
     )
     assert (
-        _required_text(plan_response, "approval_status", at="plan approval response")
+        required_text(plan_response, "approval_status", at="plan approval response")
         == "approved"
     )
 
@@ -541,9 +519,9 @@ def test_supervisor_plan_approval_pause_can_resume_through_real_stack(
     worker_request = _pending_permission_matching(worker_paused, "Permission required")
     assert worker_paused["status"] == "input_required"
     assert worker_paused["pause_cause"] == "session_request_permission"
-    assert _required_text(
+    assert required_text(
         worker_request, "request_id", at="worker permission"
-    ) != _required_text(plan_request, "request_id", at="plan permission")
+    ) != required_text(plan_request, "request_id", at="plan permission")
     assert worker_request["tool_call"] == "session_request_permission"
     assert _option_ids(worker_request) == {
         "approve",
@@ -551,18 +529,18 @@ def test_supervisor_plan_approval_pause_can_resume_through_real_stack(
     }
     worker_response = _json_object(
         service_stack.respond_permission(
-            _required_text(worker_request, "request_id", at="worker permission"),
+            required_text(worker_request, "request_id", at="worker permission"),
             thread_id=thread_id,
             option_id=_select_option_id(worker_request, label="approve"),
         ),
         at="worker approval response",
     )
     assert (
-        _required_bool(worker_response, "accepted", at="worker approval response")
+        required_bool(worker_response, "accepted", at="worker approval response")
         is True
     )
     assert (
-        _required_text(worker_response, "action_status", at="worker approval response")
+        required_text(worker_response, "action_status", at="worker approval response")
         == "accepted_not_applied"
     )
 
@@ -579,9 +557,7 @@ def test_supervisor_plan_approval_pause_can_resume_through_real_stack(
         for message in _messages(completed)
         if message.get("role") == "assistant"
     ]
-    assert _required_text(
-        assistant_messages[-1], "content", at="assistant message"
-    ) == (
+    assert required_text(assistant_messages[-1], "content", at="assistant message") == (
         "Permission approved. The privileged command completed successfully "
         "and the task is now finished."
     )
@@ -609,7 +585,7 @@ def test_supervisor_plan_rejection_requires_revision_before_reapproval(
             "feature_tag": feature_tag,
         },
     )
-    thread_id = _required_text(
+    thread_id = required_text(
         _json_object(created, at="created thread"), "run_id", at="created thread"
     )
 
@@ -623,19 +599,19 @@ def test_supervisor_plan_rejection_requires_revision_before_reapproval(
     )
     rejected = _json_object(
         service_stack.respond_permission(
-            _required_text(first_request, "request_id", at="first plan permission"),
+            required_text(first_request, "request_id", at="first plan permission"),
             thread_id=thread_id,
             option_id=_select_option_id(first_request, label="reject"),
         ),
         at="plan rejection response",
     )
-    assert _required_bool(rejected, "accepted", at="plan rejection response") is True
+    assert required_bool(rejected, "accepted", at="plan rejection response") is True
     assert (
-        _required_text(rejected, "action_status", at="plan rejection response")
+        required_text(rejected, "action_status", at="plan rejection response")
         == "accepted_not_applied"
     )
     assert (
-        _required_text(rejected, "approval_status", at="plan rejection response")
+        required_text(rejected, "approval_status", at="plan rejection response")
         == "rejected"
     )
 
@@ -651,12 +627,12 @@ def test_supervisor_plan_rejection_requires_revision_before_reapproval(
     second_request = _pending_permission_matching(
         second_plan_pause, "Approve plan for feature"
     )
-    assert _required_text(
+    assert required_text(
         second_request, "request_id", at="second plan permission"
-    ) != _required_text(first_request, "request_id", at="first plan permission")
+    ) != required_text(first_request, "request_id", at="first plan permission")
     assert second_plan_pause["pause_cause"] == "plan_approval_request"
     assert second_plan_pause["approval_status"] == "pending"
-    assert second_plan_pause["approval_request_id"] == _required_text(
+    assert second_plan_pause["approval_request_id"] == required_text(
         second_request, "request_id", at="second plan permission"
     )
     assert second_request["tool_call"] == "plan_approval"

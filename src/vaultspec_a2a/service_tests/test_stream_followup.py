@@ -9,6 +9,8 @@ from typing import TYPE_CHECKING
 
 from pydantic import TypeAdapter, ValidationError
 
+from ..testing.payloads import required_bool, required_text
+
 if TYPE_CHECKING:
     from collections.abc import Callable
 
@@ -35,22 +37,6 @@ def _json_object_list(value: object, *, at: str) -> list[dict[str, object]]:
         return _JSON_OBJECT_LIST.validate_python(value)
     except ValidationError as exc:
         raise TypeError(f"expected an object list at {at}: {exc}") from exc
-
-
-def _required_text(body: dict[str, object], field: str, *, at: str) -> str:
-    """Read one required text field from a validated service payload."""
-    value = body.get(field)
-    if not isinstance(value, str):
-        raise AssertionError(f"{at}.{field} was not text: {value!r}")
-    return value
-
-
-def _required_bool(body: dict[str, object], field: str, *, at: str) -> bool:
-    """Read one required boolean field from a validated service payload."""
-    value = body.get(field)
-    if not isinstance(value, bool):
-        raise AssertionError(f"{at}.{field} was not boolean: {value!r}")
-    return value
 
 
 def _thread_state(stack: ServiceStack, thread_id: str) -> dict[str, object]:
@@ -199,7 +185,7 @@ def test_sse_stream_and_followup_message(service_stack: ServiceStack) -> None:
         title="service stream follow-up",
     )
     created_body = _json_object(created, at="created thread")
-    thread_id = _required_text(created_body, "run_id", at="created thread")
+    thread_id = required_text(created_body, "run_id", at="created thread")
 
     paused = _wait_for_pending_permission(service_stack, thread_id)
     service_stack.record(f"sse-paused:{thread_id}", paused)
@@ -216,7 +202,7 @@ def test_sse_stream_and_followup_message(service_stack: ServiceStack) -> None:
         try:
             initial_result["response"] = _json_object(
                 service_stack.respond_permission(
-                    _required_text(request, "request_id", at="pending permission"),
+                    required_text(request, "request_id", at="pending permission"),
                     thread_id=thread_id,
                     option_id=_select_option_id(request, label="approve"),
                 ),
@@ -241,12 +227,12 @@ def test_sse_stream_and_followup_message(service_stack: ServiceStack) -> None:
     assert approved is not None, (
         "permission approval callback did not return a response"
     )
-    assert _required_bool(approved, "accepted", at="permission response") is True
+    assert required_bool(approved, "accepted", at="permission response") is True
     assert (
-        _required_text(approved, "action_status", at="permission response")
+        required_text(approved, "action_status", at="permission response")
         == "accepted_not_applied"
     )
-    assert _required_bool(approved, "applied", at="permission response") is False
+    assert required_bool(approved, "applied", at="permission response") is False
     assert any(event.get("type") == "thread_terminal" for event in initial_events)
     assert any(event.get("status") == "completed" for event in initial_events)
     service_stack.record(f"sse-initial:{thread_id}", initial_events)
@@ -265,9 +251,7 @@ def test_sse_stream_and_followup_message(service_stack: ServiceStack) -> None:
         if message.get("role") == "assistant"
     ]
     assert assistant_messages, "resume flow should emit a deterministic assistant reply"
-    assert _required_text(
-        assistant_messages[-1], "content", at="assistant message"
-    ) == (
+    assert required_text(assistant_messages[-1], "content", at="assistant message") == (
         "Permission approved. The privileged command completed successfully "
         "and the task is now finished."
     )
@@ -284,7 +268,7 @@ def test_sse_stream_and_followup_message(service_stack: ServiceStack) -> None:
     assert any(event.get("type") == "thread_terminal" for event in follow_up_events)
     assert follow_up_events[-1].get("status") == "completed"
     assert (
-        _required_bool(follow_up_events[-1], "replay", at="terminal replay frame")
+        required_bool(follow_up_events[-1], "replay", at="terminal replay frame")
         is True
     )
 
@@ -294,7 +278,7 @@ def test_sse_stream_and_followup_message(service_stack: ServiceStack) -> None:
         for message in _json_object_list(
             final_state.get("messages"), at="final messages"
         )
-        if _required_text(message, "role", at="final message") == "user"
+        if required_text(message, "role", at="final message") == "user"
     ]
     assert len(user_messages) == 1
 

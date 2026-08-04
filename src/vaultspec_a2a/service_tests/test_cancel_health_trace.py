@@ -7,6 +7,8 @@ from typing import TYPE_CHECKING
 
 from pydantic import TypeAdapter, ValidationError
 
+from ..testing.payloads import required_bool, required_text
+
 if TYPE_CHECKING:
     from collections.abc import Callable
 
@@ -40,22 +42,6 @@ def _text_list(value: object, *, at: str) -> list[str]:
         return _TEXT_LIST.validate_python(value, strict=True)
     except ValidationError as exc:
         raise TypeError(f"expected a text list at {at}: {exc}") from exc
-
-
-def _required_text(body: dict[str, object], field: str, *, at: str) -> str:
-    """Read one required text field from a validated service payload."""
-    value = body.get(field)
-    if not isinstance(value, str):
-        raise AssertionError(f"{at}.{field} was not text: {value!r}")
-    return value
-
-
-def _required_bool(body: dict[str, object], field: str, *, at: str) -> bool:
-    """Read one required boolean field from a validated service payload."""
-    value = body.get(field)
-    if not isinstance(value, bool):
-        raise AssertionError(f"{at}.{field} was not boolean: {value!r}")
-    return value
 
 
 def _thread_state(stack: ServiceStack, thread_id: str) -> dict[str, object]:
@@ -106,7 +92,7 @@ def test_cancel_transitions_to_terminal_cancelled(service_stack: ServiceStack) -
         team_preset="mock-looping",
         title="service cancel",
     )
-    thread_id = _required_text(
+    thread_id = required_text(
         _json_object(created, at="created thread"), "run_id", at="created thread"
     )
 
@@ -121,8 +107,8 @@ def test_cancel_transitions_to_terminal_cancelled(service_stack: ServiceStack) -
     cancelling = _json_object(
         service_stack.cancel_thread(thread_id), at="cancel response"
     )
-    assert _required_bool(cancelling, "cancelled", at="cancel response") is True
-    assert _required_text(cancelling, "status", at="cancel response") == "cancelling"
+    assert required_bool(cancelling, "cancelled", at="cancel response") is True
+    assert required_text(cancelling, "status", at="cancel response") == "cancelling"
 
     cancelled = _wait_for_state(
         service_stack,
@@ -131,7 +117,7 @@ def test_cancel_transitions_to_terminal_cancelled(service_stack: ServiceStack) -
     )
     service_stack.record(f"cancelled-state:{thread_id}", cancelled)
 
-    assert _required_text(cancelled, "status", at="cancelled thread") == "cancelled"
+    assert required_text(cancelled, "status", at="cancelled thread") == "cancelled"
 
 
 def test_health_and_trace_surface_are_observable(
@@ -142,14 +128,14 @@ def test_health_and_trace_surface_are_observable(
     health = _json_object(service_stack.health(), at="health response")
     service_stack.record("health-final", health)
 
-    assert _required_text(health, "status", at="health response") == "ok"
+    assert required_text(health, "status", at="health response") == "ok"
     checks = _json_object(health.get("checks"), at="health checks")
     for check_name in ("database", "checkpoint", "worker"):
         check = _json_object(checks.get(check_name), at=f"health checks.{check_name}")
-        assert _required_text(check, "status", at=f"health checks.{check_name}") == "ok"
-    assert _required_bool(health, "worker_connected", at="health response") is True
+        assert required_text(check, "status", at=f"health checks.{check_name}") == "ok"
+    assert required_bool(health, "worker_connected", at="health response") is True
     sqlite_fallback = _json_object(health.get("sqlite_fallback"), at="sqlite fallback")
-    assert _required_bool(sqlite_fallback, "active", at="sqlite fallback") is True
+    assert required_bool(sqlite_fallback, "active", at="sqlite fallback") is True
 
     services = _json_object(service_stack.jaeger_services(), at="Jaeger services")
     service_names = set(_text_list(services.get("data"), at="Jaeger services.data"))
@@ -160,7 +146,7 @@ def test_health_and_trace_surface_are_observable(
         team_preset="mock-success-single",
         title="service trace probe",
     )
-    thread_id = _required_text(
+    thread_id = required_text(
         _json_object(created, at="created thread"), "run_id", at="created thread"
     )
     traced_thread = _wait_for_state(

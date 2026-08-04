@@ -5,7 +5,7 @@ tags:
 date: '2026-08-04'
 modified: '2026-08-04'
 body_schema: 'body-v1'
-body_hash: 'sha256:fc54081c70fd7881951bb49a22f6f2fbd9116fa44c97f7d842f785846fa29a48'
+body_hash: 'sha256:90564b7aa1acad110f1e82b3e60822af2f7ca4868dfa4e01d43c0a77396b4664'
 related: []
 ---
 
@@ -1759,6 +1759,45 @@ actual wire path is still literal-driven end to end. The `case` dispatch is the
 sharp edge: change the enum value and the serializer follows it while the
 dispatch silently stops matching, dropping worker heartbeats into the fall-through
 and starving the liveness signal the previous finding describes.
+
+### the-attach-bearer-check-is-declared-twice | critical | DUPLICATE
+
+The gateway's attach-credential bearer check is implemented twice in the API
+layer, against the SAME credential in application state. One is the FastAPI
+dependency guarding engine-facing routes; the other is the predicate the liveness
+surface consults before disclosing the readiness projection. Both read the same
+state attribute, both apply the test-only bypass, both build the same expected
+`Bearer <token>` byte string, and both compare it in constant time.
+
+Security-critical and therefore recorded at critical severity: this is the rule
+that decides whether a caller may talk to the gateway at all, and a change to it
+- tightening the header parse, admitting a second credential plane, correcting
+the bypass - has to be made in two places that nothing forces to agree. A
+divergence would not fail loudly; it would leave one surface enforcing the old
+rule, and the weaker of the two becomes the real one.
+
+Their independent authorship is visible in the code. One spells the comparison
+`secrets.compare_digest` and the other `hmac.compare_digest` - the same function
+object, verified in this session - reached through two different imports, which
+is what two people solving the same problem separately produces rather than what
+one shared rule produces.
+
+Their differing behaviour on an unconfigured token is NOT a contract difference
+that justifies two implementations: refusing with a 503 on a hard gate and
+disclosing nothing on a disclosure gate are two error MAPPINGS of one verdict.
+
+The correct pattern already exists in this repository and was simply not adopted
+here: the internal-IPC bearer module is deliberately framework-free and returns a
+verdict precisely so each caller can map it onto its own transport's failure. Its
+docstring calls itself "the single home for the bearer rule", which is true only
+for the plane it serves - the attach plane duplicates the same rule two files
+away. Canonical home: one exact-match predicate consumed by both API sites, each
+keeping its own error mapping.
+
+Checked and ruled DISTINCT rather than folded in: the lifecycle ownership
+capability check. It compares a bare value from a custom capability header with
+no `Bearer` prefix, on a different credential plane, and its resemblance is the
+constant-time compare alone.
 
 ## Recommendations
 

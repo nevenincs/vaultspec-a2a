@@ -5,7 +5,7 @@ tags:
 date: '2026-08-04'
 modified: '2026-08-04'
 body_schema: 'body-v1'
-body_hash: 'sha256:00692ea865dc1d8512a7bc369aca9abb345c38405701b793de833c7b64197785'
+body_hash: 'sha256:67043a311a382212329a0c58c328525dff4fb028253687f566ec5b0031d1fbf1'
 related: []
 ---
 
@@ -1594,6 +1594,54 @@ function half-speaking two vocabularies, which is less coherent, not more.
 Recorded because the campaign's standing question - one concept in many places,
 or several sharing a shape - resolved into BOTH answers within one grep, and only
 reading bodies separated them.
+
+### converge-on-the-boundarys-precondition-not-the-strictest-site | critical | corrects a rule this audit issued
+
+This audit told a lane to converge divergent validations on "the strictest
+existing behaviour". That is wrong as a general rule and is corrected here. The
+right target is **the precondition the boundary actually enforces**.
+
+The difference is not academic. Executed against the real dispatch model rather
+than reasoned about: an empty, relative or whitespace workspace value fails
+validation at that field, and an absolute one is accepted and minted. So
+converging the divergent readers on string-non-empty-absolute rejects exactly the
+values that crash today and nothing else - a bug fix, not a tightening. "Strictest
+wins" would additionally have imported a length bound from a site that produces
+database index selectors, newly rejecting a very long absolute path that
+currently dispatches fine, in service of a concern the converging sites do not
+have.
+
+### the-same-defect-in-two-sites-and-the-code-already-knew | critical | a stuck run, not a crash
+
+Two readers return a stored workspace value that is non-empty but relative or
+whitespace and hand it to the dispatch boundary, which raises - and in both, that
+construction happens AFTER the control action has been claimed. The result is a
+claimed action with no dispatch: the run neither proceeds nor cleanly refuses.
+That is worse than an exception, because the claim is durable and the failure is
+not. One of the two also admits the empty string.
+
+The knowledge already existed in the codebase and had not reached them. A third
+site defends against exactly this, with a comment stating that constructing the
+dispatch without a project raises inside the ingest validator and aborts the
+whole pass, so one unrecoverable thread would strand every healthy one behind it.
+Three sites, one hazard, one of them guarding against it and two never told. That
+is this campaign's thesis in a single cluster.
+
+### strictness-differed-by-three-unrelated-contracts | high | the lens question answered fully
+
+The standing lens asks whether divergent strictness is accidental or contractual.
+In this cluster it was BOTH, and the contractual half divided three ways inside
+one apparent concept: one site differs by OUTPUT, returning a minted value
+because it keys a compiled graph and a second entry for one directory would
+compile twice; one by PURPOSE, producing hashed discovery selectors for a
+database index, which is where its length bound belongs; and one by FAILURE
+POLICY, marking a thread failed with a reason rather than returning nothing,
+because it is a sweep that must not strand healthy threads behind one bad one.
+
+So the shared reader takes the precondition and leaves output, purpose and
+failure policy to the caller. Flattening any one would have destroyed something
+load-bearing. Recorded because "several concepts sharing a shape" has until now
+meant two; here it meant four, and only comparing bodies separated them.
 
 ## Recommendations
 

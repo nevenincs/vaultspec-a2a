@@ -20,7 +20,14 @@ __all__ = ["BearerVerdict", "verify_internal_bearer"]
 
 
 class BearerVerdict(StrEnum):
-    """The outcome of verifying an internal-IPC ``Authorization`` header."""
+    """The outcome of verifying an ``Authorization`` header against a credential.
+
+    Shared by the gateway's bearer planes — the internal IPC below and the attach
+    gate in :mod:`vaultspec_a2a.api.auth` — because the three outcomes are the
+    same three whatever credential is being proven, and only the mapping onto a
+    transport's error differs. A second enum with these members would be the
+    duplication this vocabulary exists to prevent.
+    """
 
     OK = "ok"  # authorized, or auth disabled in dev mode
     MISCONFIGURED = "misconfigured"  # token unset outside DEVELOPMENT

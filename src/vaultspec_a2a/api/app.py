@@ -11,7 +11,6 @@ worker process via HTTP POST to ``/dispatch`` (service separation).
 """
 
 import asyncio  # Gateway uses asyncio directly — no structured concurrency needed.
-import hmac
 import logging
 import os
 import secrets
@@ -75,7 +74,9 @@ from ..telemetry import TelemetryMiddleware, configure_telemetry
 from ..telemetry.aggregator_hook import OTelAggregatorHook
 from ..utils import configure_logging, package_version, reconfigure_console_utf8
 from ..utils.asyncio_compat import configure_asyncio_runtime
+from ..utils.ipc_auth import BearerVerdict
 from ._utils import trace_headers
+from .auth import verify_attach_bearer
 from .body_limit import BoundedV1WriteBodyMiddleware
 from .internal import internal_router
 from .routes import register_routes
@@ -244,18 +245,22 @@ def _http_attach_authorized(request: Request, app: FastAPI) -> bool:
     """Return whether an HTTP request presents a valid attach credential.
 
     The liveness surface answers every caller, but only a caller that proves the
-    attach credential in constant time is disclosed the readiness projection, so
-    the liveness boundary cannot weaken the attach gate: the explicit test-only
-    bypass short-circuits for route-behaviour tests, and corrupted runtime state
-    with no token discloses nothing.
+    attach credential is disclosed the readiness projection, so the liveness
+    boundary cannot weaken the attach gate. It cannot drift from it either: the
+    rule is the one the refusing gate applies, asked here and mapped onto this
+    surface's own answer, which is a silent ``False`` rather than a status code
+    because this endpoint discloses less instead of refusing. Corrupted runtime
+    state and a bad credential therefore collapse to the same non-disclosure,
+    which is the whole difference between the two callers.
     """
-    if bool(getattr(app.state, "allow_unauthenticated_v1_for_testing", False)):
-        return True
-    expected = getattr(app.state, "v1_service_token", None)
-    if not isinstance(expected, str) or not expected:
-        return False
-    supplied = request.headers.get("authorization", "").encode("utf-8")
-    return hmac.compare_digest(supplied, f"Bearer {expected}".encode())
+    verdict = verify_attach_bearer(
+        request.headers.get("authorization"),
+        expected=getattr(app.state, "v1_service_token", None),
+        test_bypass=bool(
+            getattr(app.state, "allow_unauthenticated_v1_for_testing", False)
+        ),
+    )
+    return verdict is BearerVerdict.OK
 
 
 # ---------------------------------------------------------------------------

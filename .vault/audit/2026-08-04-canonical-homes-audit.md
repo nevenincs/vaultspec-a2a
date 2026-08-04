@@ -554,3 +554,33 @@ test-support code onto a production import path is not a call this inventory
 makes. The second is whether the canonical-home rule is promoted to a
 team-shared rule source, which would make it enforceable rather than
 conventional.
+
+### frozen-assignment-map-rebuilt-in-test-support | medium | a parallel producer for a consumer its canonical producer names
+
+Building the per-role frozen assignment the compiler consumes is now declared
+twice. `src/vaultspec_a2a/providers/model_profiles.py` carries the canonical
+producer, whose docstring states outright that it returns the complete frozen
+execution assignment consumed by the compiler, and which emits agent-id-keyed
+entries of provider, capability, model name and fallback.
+`src/vaultspec_a2a/graph/tests/conftest.py` hand-rolls the same shape and keying
+for seventeen graph tests. Verdict is DUPLICATE. Self-reported: this session
+created the second declaration in `dcf4f3e5` while completing the preset
+provider-policy retirement, and did so without searching for an existing home -
+the canonical producer is returned by a single semantic search for a frozen
+per-role assignment, and its docstring names the exact consumer being served.
+
+The consolidation is smaller than most in this inventory and carries one real
+constraint. The canonical producer takes a resolved profile assignment, while
+the test helper takes a team config and pins every role to the in-process
+deterministic lane so a structural assertion never depends on a credential, a
+network, or a served catalog. That pinning is a POLICY and must stay explicit at
+the call site for the same reason the catalog-selection cluster records: a
+structural test that silently acquired a served lane would spend money to assert
+a node set. Consolidate by having the test helper build its assignment through
+the canonical producer and keep the deterministic pinning as its argument.
+
+A second-order note for the sequencing above: this duplication was introduced
+DURING the campaign, by a caller who needed the concept and reached for the
+nearest shape rather than the canonical home. That is the same mechanism the
+inventory attributes to the older clusters, which suggests the rule is not yet
+enforceable enough to bind a writer working at speed.

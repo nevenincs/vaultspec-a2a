@@ -21,6 +21,12 @@ if TYPE_CHECKING:
     from collections.abc import Mapping
 
 from ._acp_auth import is_auth_required_error
+from ._catalog_fields import (
+    display_text,
+    local_id,
+    optional_description,
+    optional_text,
+)
 from ._cleanup import CleanupStep, run_independent_cleanups
 from ._json_contract import JsonObject, JsonValue
 from ._stdio_rpc import OutputBudget, cancel_task, drain_stderr, read_response
@@ -115,27 +121,6 @@ def _unauthenticated_discovery(key: ProviderCatalogKey) -> AcpCatalogDiscovery:
     )
 
 
-def _text(value: JsonValue | None) -> str | None:
-    return (
-        value if isinstance(value, str) and value and value == value.strip() else None
-    )
-
-
-def _display(value: JsonValue | None, fallback: str) -> str:
-    text = _text(value) or fallback
-    return text[:256]
-
-
-def _description(value: JsonValue | None) -> str | None:
-    text = _text(value)
-    return None if text is None else text[:1024]
-
-
-def _local_id(namespace: str, provider_value: str) -> str:
-    body = f"{namespace}\0{provider_value}".encode()
-    return hashlib.sha256(body).hexdigest()[:32]
-
-
 def _objects(
     value: JsonValue | None, *, field: str, limit: int
 ) -> tuple[JsonObject, ...]:
@@ -165,7 +150,7 @@ def _flatten_options(
     flattened: list[JsonObject] = []
     for option in _objects(value, field=field, limit=limit):
         nested = option.get("options")
-        if isinstance(nested, list) and _text(option.get("value")) is None:
+        if isinstance(nested, list) and optional_text(option.get("value")) is None:
             flattened.extend(_objects(nested, field=f"{field}.options", limit=limit))
         else:
             flattened.append(option)
@@ -179,7 +164,7 @@ def _flatten_options(
 
 def _option_value(option: JsonObject) -> str | None:
     for field in ("value", "modelId", "id"):
-        if value := _text(option.get(field)):
+        if value := optional_text(option.get(field)):
             return value
     return None
 
@@ -204,12 +189,12 @@ def _models_from_options(
         seen.add(value)
         models.append(
             ModelCatalogEntry(
-                entry_id=_local_id(namespace, value),
+                entry_id=local_id(namespace, value),
                 provider_value=value,
-                display_name=_display(
+                display_name=display_text(
                     option.get("name") or option.get("displayName"), value
                 ),
-                description=_description(option.get("description")),
+                description=optional_description(option.get("description")),
             )
         )
     return tuple(models)
@@ -220,7 +205,7 @@ def _control_from_option(
 ) -> NativeControl | None:
     if option.get("type") != "select":
         return None
-    config_id = _text(option.get("configId")) or _text(option.get("id"))
+    config_id = optional_text(option.get("configId")) or optional_text(option.get("id"))
     if config_id is None:
         raise AcpCatalogProtocolError(
             f"ACP {category} option has no config identifier",
@@ -238,18 +223,18 @@ def _control_from_option(
             )
         choices.append(
             NativeControlOption(
-                option_id=_local_id(f"{namespace}:{config_id}", value),
+                option_id=local_id(f"{namespace}:{config_id}", value),
                 provider_value=value,
-                display_name=_display(
+                display_name=display_text(
                     choice.get("name") or choice.get("displayName"), value
                 ),
-                description=_description(choice.get("description")),
+                description=optional_description(choice.get("description")),
             )
         )
     current = option.get("currentValue")
     current_value = current if isinstance(current, str) else None
     default_option_id = (
-        _local_id(f"{namespace}:{config_id}", current_value)
+        local_id(f"{namespace}:{config_id}", current_value)
         if current_value is not None
         and any(choice.provider_value == current_value for choice in choices)
         else None
@@ -262,10 +247,10 @@ def _control_from_option(
     return NativeControl(
         control_id=config_id,
         kind=kind,
-        display_name=_display(option.get("name"), config_id),
+        display_name=display_text(option.get("name"), config_id),
         options=tuple(choices),
         default_option_id=default_option_id,
-        description=_description(option.get("description")),
+        description=optional_description(option.get("description")),
     )
 
 
@@ -280,7 +265,7 @@ def _normalized_payload(
         limit=_MAX_CONTROLS + 1,
     )
     for option in config_options:
-        category = _text(option.get("category"))
+        category = optional_text(option.get("category"))
         if category == "model":
             if models:
                 raise AcpCatalogProtocolError(

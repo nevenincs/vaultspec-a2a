@@ -20,6 +20,7 @@ from pydantic import TypeAdapter, ValidationError
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
+from ._catalog_fields import CatalogFieldReader, display_text, local_id
 from ._cleanup import CleanupStep, run_independent_cleanups
 from ._json_contract import JsonObject, JsonValue
 from ._stdio_rpc import OutputBudget, cancel_task
@@ -67,27 +68,7 @@ def _protocol_error(message: str) -> KimiCatalogProtocolError:
     return KimiCatalogProtocolError(f"Kimi {message}")
 
 
-def _text(value: JsonValue | None, *, field: str) -> str:
-    if not isinstance(value, str) or not value or value != value.strip():
-        raise KimiCatalogProtocolError(
-            f"Kimi catalog field {field!r} must be a normalized non-blank string"
-        )
-    if len(value) > 1_024:
-        raise KimiCatalogProtocolError(
-            f"Kimi catalog field {field!r} exceeds 1024 characters"
-        )
-    return value
-
-
-def _display(value: JsonValue | None, fallback: str) -> str:
-    if isinstance(value, str) and value and value == value.strip():
-        return value[:256]
-    return fallback[:256]
-
-
-def _local_id(namespace: str, provider_value: str) -> str:
-    encoded = f"{namespace}\0{provider_value}".encode()
-    return hashlib.sha256(encoded).hexdigest()[:32]
+_FIELDS: Final = CatalogFieldReader(_protocol_error)
 
 
 def _object_table(value: JsonValue | None, *, field: str) -> JsonObject:
@@ -113,7 +94,8 @@ def _string_list(
             f"Kimi catalog field {field!r} exceeds {limit} items"
         )
     values = tuple(
-        _text(item, field=f"{field}[{index}]") for index, item in enumerate(value)
+        _FIELDS.required_text(item, field=f"{field}[{index}]")
+        for index, item in enumerate(value)
     )
     if len(values) != len(set(values)):
         raise KimiCatalogProtocolError(
@@ -140,7 +122,7 @@ def _thinking_control(
     namespace = f"{key.provider_id}:{key.execution_mode}:{control_id}"
     options = tuple(
         NativeControlOption(
-            option_id=_local_id(namespace, effort),
+            option_id=local_id(namespace, effort),
             provider_value=effort,
             display_name=effort,
         )
@@ -149,7 +131,7 @@ def _thinking_control(
     raw_default = model.get("defaultEffort")
     default_effort = raw_default if isinstance(raw_default, str) else None
     default_option_id = (
-        _local_id(namespace, default_effort)
+        local_id(namespace, default_effort)
         if default_effort is not None and default_effort in efforts
         else None
     )
@@ -201,12 +183,14 @@ def catalog_from_provider_list(
     controls: list[NativeControl] = []
     revision_rows: list[JsonObject] = []
     for alias_value, raw_model in model_table.items():
-        alias = _text(alias_value, field="model alias")
+        alias = _FIELDS.required_text(alias_value, field="model alias")
         if not isinstance(raw_model, dict):
             raise KimiCatalogProtocolError(
                 f"Kimi catalog model {alias!r} must be an object"
             )
-        provider_ref = _text(raw_model.get("provider"), field=f"{alias}.provider")
+        provider_ref = _FIELDS.required_text(
+            raw_model.get("provider"), field=f"{alias}.provider"
+        )
         if provider_ref not in providers:
             raise KimiCatalogProtocolError(
                 f"Kimi catalog model {alias!r} names an unknown provider"
@@ -215,14 +199,16 @@ def catalog_from_provider_list(
             raise KimiCatalogProtocolError(
                 f"Kimi catalog provider {provider_ref!r} must be an object"
             )
-        wire_model = _text(raw_model.get("model"), field=f"{alias}.model")
+        wire_model = _FIELDS.required_text(
+            raw_model.get("model"), field=f"{alias}.model"
+        )
         capabilities = _string_list(
             raw_model.get("capabilities"),
             field=f"{alias}.capabilities",
             limit=64,
         )
-        entry_id = _local_id(f"{key.provider_id}:{key.execution_mode}:model", alias)
-        display_name = _display(raw_model.get("displayName"), alias)
+        entry_id = local_id(f"{key.provider_id}:{key.execution_mode}:model", alias)
+        display_name = display_text(raw_model.get("displayName"), alias)
         control = _thinking_control(
             raw_model,
             key=key,

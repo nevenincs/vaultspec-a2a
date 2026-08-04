@@ -20,6 +20,12 @@ if TYPE_CHECKING:
     from collections.abc import Mapping
 
 from ..utils import package_version
+from ._catalog_fields import (
+    CatalogFieldReader,
+    display_text,
+    local_id,
+    optional_description,
+)
 from ._cleanup import CleanupStep, run_independent_cleanups
 from ._json_contract import JsonObject, JsonValue
 from ._stdio_rpc import OutputBudget, cancel_task, drain_stderr, read_response
@@ -76,33 +82,7 @@ def _protocol_error(message: str) -> CodexCatalogProtocolError:
     return CodexCatalogProtocolError(f"Codex {message}")
 
 
-def _text(value: JsonValue | None, *, field: str) -> str:
-    if not isinstance(value, str) or not value or value != value.strip():
-        raise CodexCatalogProtocolError(
-            f"Codex catalog field {field!r} must be a normalized non-blank string"
-        )
-    if len(value) > 1_024:
-        raise CodexCatalogProtocolError(
-            f"Codex catalog field {field!r} exceeds 1024 characters"
-        )
-    return value
-
-
-def _optional_description(value: JsonValue | None) -> str | None:
-    if not isinstance(value, str) or not value or value != value.strip():
-        return None
-    return value[:1_024]
-
-
-def _display(value: JsonValue | None, fallback: str) -> str:
-    if isinstance(value, str) and value and value == value.strip():
-        return value[:256]
-    return fallback[:256]
-
-
-def _local_id(namespace: str, provider_value: str) -> str:
-    encoded = f"{namespace}\0{provider_value}".encode()
-    return hashlib.sha256(encoded).hexdigest()[:32]
+_FIELDS: Final = CatalogFieldReader(_protocol_error)
 
 
 def _objects(
@@ -164,7 +144,7 @@ def _control(
         seen.add(provider_value)
         options.append(
             NativeControlOption(
-                option_id=_local_id(namespace, provider_value),
+                option_id=local_id(namespace, provider_value),
                 provider_value=provider_value,
                 display_name=option_name,
                 description=description,
@@ -175,7 +155,7 @@ def _control(
             f"Codex model {field!r} options exceed {_MAX_OPTIONS} items"
         )
     default_option_id = (
-        _local_id(namespace, default_value)
+        local_id(namespace, default_value)
         if default_value is not None and default_value in seen
         else None
     )
@@ -197,11 +177,11 @@ def _reasoning_values(model: JsonObject) -> tuple[tuple[str, str, str | None], .
             limit=_MAX_OPTIONS,
         )
     ):
-        value = _text(
+        value = _FIELDS.required_text(
             option.get("reasoningEffort"),
             field=f"supportedReasoningEfforts[{index}].reasoningEffort",
         )
-        values.append((value, value, _optional_description(option.get("description"))))
+        values.append((value, value, optional_description(option.get("description"))))
     return tuple(values)
 
 
@@ -214,12 +194,14 @@ def _service_tier_values(
         for index, option in enumerate(
             _objects(service_tiers, field="serviceTiers", limit=_MAX_OPTIONS)
         ):
-            value = _text(option.get("id"), field=f"serviceTiers[{index}].id")
+            value = _FIELDS.required_text(
+                option.get("id"), field=f"serviceTiers[{index}].id"
+            )
             values.append(
                 (
                     value,
-                    _display(option.get("name"), value),
-                    _optional_description(option.get("description")),
+                    display_text(option.get("name"), value),
+                    optional_description(option.get("description")),
                 )
             )
         return tuple(values)
@@ -232,8 +214,8 @@ def _service_tier_values(
         )
     return tuple(
         (
-            _text(value, field=f"additionalSpeedTiers[{index}]"),
-            _text(value, field=f"additionalSpeedTiers[{index}]"),
+            _FIELDS.required_text(value, field=f"additionalSpeedTiers[{index}]"),
+            _FIELDS.required_text(value, field=f"additionalSpeedTiers[{index}]"),
             None,
         )
         for index, value in enumerate(speed_tiers)
@@ -291,7 +273,7 @@ def catalog_from_app_server(
                 f"Codex catalog exceeds {_MAX_MODELS} models"
             )
         for model_index, model in enumerate(page_models):
-            value = _text(
+            value = _FIELDS.required_text(
                 model.get("model"),
                 field=f"pages[{page_index}].data[{model_index}].model",
             )
@@ -300,8 +282,8 @@ def catalog_from_app_server(
                     "Codex catalog contains duplicate model values"
                 )
             seen_models.add(value)
-            entry_id = _local_id(f"{key.provider_id}:{key.execution_mode}:model", value)
-            model_name = _display(model.get("displayName"), value)
+            entry_id = local_id(f"{key.provider_id}:{key.execution_mode}:model", value)
+            model_name = display_text(model.get("displayName"), value)
             raw_default_effort = model.get("defaultReasoningEffort")
             default_effort = (
                 raw_default_effort if isinstance(raw_default_effort, str) else None
@@ -338,7 +320,7 @@ def catalog_from_app_server(
                     entry_id=entry_id,
                     provider_value=value,
                     display_name=model_name,
-                    description=_optional_description(model.get("description")),
+                    description=optional_description(model.get("description")),
                     capabilities=capabilities,
                     native_control_ids=tuple(
                         control.control_id

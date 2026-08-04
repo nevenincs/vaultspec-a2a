@@ -20,7 +20,8 @@ from typing import Final
 import httpx
 from pydantic import TypeAdapter, ValidationError
 
-from ._json_contract import JsonObject, JsonValue
+from ._catalog_fields import CatalogFieldReader, local_id
+from ._json_contract import JsonObject
 from .provider_catalog import (
     AuthenticationState,
     CatalogState,
@@ -61,17 +62,12 @@ class OpenAICompatibleCatalogDiscovery:
     authentication: AuthenticationState
 
 
-def _text(value: JsonValue | None, *, field: str) -> str:
-    if not isinstance(value, str) or not value or value != value.strip():
-        raise OpenAICompatibleCatalogError(
-            f"OpenAI-compatible catalog field {field!r} must be a normalized "
-            "non-blank string"
-        )
-    if len(value) > 1_024:
-        raise OpenAICompatibleCatalogError(
-            f"OpenAI-compatible catalog field {field!r} exceeds 1024 characters"
-        )
-    return value
+def _protocol_error(message: str) -> OpenAICompatibleCatalogError:
+    """Raise this lane's own dialect of a catalog contract refusal."""
+    return OpenAICompatibleCatalogError(f"OpenAI-compatible {message}")
+
+
+_FIELDS: Final = CatalogFieldReader(_protocol_error)
 
 
 def _models_url(base_url: str) -> str:
@@ -107,9 +103,7 @@ def _api_key(value: str) -> str:
 
 
 def _entry_id(key: ProviderCatalogKey, provider_value: str) -> str:
-    namespace = f"{key.provider_id}:{key.execution_mode}:model"
-    encoded = f"{namespace}\0{provider_value}".encode()
-    return hashlib.sha256(encoded).hexdigest()[:32]
+    return local_id(f"{key.provider_id}:{key.execution_mode}:model", provider_value)
 
 
 def _revision(key: ProviderCatalogKey, models: tuple[ModelCatalogEntry, ...]) -> str:
@@ -197,8 +191,12 @@ def catalog_from_model_list(
                 f"OpenAI-compatible model-list data[{index}].created must be "
                 "a non-negative integer"
             )
-        _text(raw_model.get("owned_by"), field=f"data[{index}].owned_by")
-        model_value = _text(raw_model.get("id"), field=f"data[{index}].id")
+        _FIELDS.required_text(
+            raw_model.get("owned_by"), field=f"data[{index}].owned_by"
+        )
+        model_value = _FIELDS.required_text(
+            raw_model.get("id"), field=f"data[{index}].id"
+        )
         if model_value in model_values:
             raise OpenAICompatibleCatalogError(
                 "OpenAI-compatible model-list contains duplicate identifiers"

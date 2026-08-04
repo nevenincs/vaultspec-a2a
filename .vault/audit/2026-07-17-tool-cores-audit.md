@@ -809,3 +809,24 @@ call boundary inside `_run_commit_locked` and let one run name the line.
 Everything above this point that named a cause was withdrawn. This entry names
 no cause deliberately.
 
+**LOCATED, from the trace (2026-08-04).** Boundary tracing named the line in one
+run. The bogus commit's sequence ends at `probe_worker`:
+
+    commit entered: run_id=run-bogus-reservation
+    commit step: probe_worker            <- last record for this request
+
+No eligibility-refusal record, no broker verdict. So the 503 is raised INSIDE
+`_admission_readiness(...)` or `evaluate_execution_eligibility(...)` and never
+returns to the `if not execution.eligible` gate at `:760` - which is exactly why
+instrumenting that gate showed nothing, and why four readings of the surrounding
+code were wrong. The refusal is not at the branch that looks like the refusal.
+
+The remaining step is a single read of those two helpers for a raise, now that
+the trace says which two lines to open. Every earlier attempt read the whole path
+and inferred; this one narrowed by observation to two calls.
+
+Method note worth keeping beyond this defect: five diagnoses were attempted here,
+four by reading and one by tracing. The four were wrong and each cost a
+withdrawal; the trace was right first time and cost four log lines. Where a
+refusal is silent, instrument before reasoning.
+

@@ -75,6 +75,7 @@ from pydantic import TypeAdapter, ValidationError
 from ..acceptance import certified_gateway
 from ..authoring.discovery import SERVICE_JSON_ENV, resolve_engine_with_retry
 from ..team.team_config import load_team_config
+from ..testing.catalog_selection import NoSelectableLaneError, in_process_selection
 from ._provider_catalog_live import (
     LIVE_PROVIDER_CATALOG_SELECTION_ENVIRON,
     live_provider_catalog_selector_is_configured,
@@ -443,40 +444,17 @@ def _served_in_process_selection(gateway: CertifiedGateway) -> dict[str, object]
     contract the substitution is expressed as a selection naming the served
     in-process lane - the freeze wins outright at compilation, so a selection
     naming any other served lane would hand every document role to a real
-    external provider. Until the served catalog advertises the in-process lane,
-    that selection cannot be expressed and this loop cannot run honestly.
+    external provider. Refusing a billable lane is the shared mechanism's own
+    guarantee; what is local here is the skip, because a loop that cannot express
+    its substitution has nothing honest left to assert.
     """
-    catalog = _served_catalog(gateway)
-    lanes = [
-        record
-        for record in _json_object_list(
-            catalog.get("providers"), at="served catalog providers"
-        )
-        if record.get("provider_id") in {"mock", "deterministic"}
-        and _required_object(record, "health", at="served lane")["selectable"]
-        and _required_object(record, "catalog", at="served lane")["models"]
-    ]
-    if not lanes:
+    try:
+        return in_process_selection(_served_catalog(gateway))
+    except NoSelectableLaneError as exc:
         pytest.skip(
-            "the served provider catalog advertises no selectable in-process "
-            "lane, so the loop's deterministic model substitution cannot be "
-            "selected without freezing a real external provider; supply the "
-            "in-process lane serving for the deterministic backend"
+            f"the loop's deterministic model substitution cannot be selected "
+            f"without freezing a real external provider: {exc}"
         )
-    lane = lanes[0]
-    lane_catalog = _required_object(lane, "catalog", at="served in-process lane")
-    state = _required_object(lane_catalog, "state", at="served in-process lane")
-    models = _json_object_list(
-        lane_catalog.get("models"), at="served in-process lane models"
-    )
-    return {
-        "schema_version": 1,
-        "provider_id": lane["provider_id"],
-        "execution_mode": lane["execution_mode"],
-        "catalog_revision": state["revision"],
-        "entry_id": models[0]["entry_id"],
-        "controls": {},
-    }
 
 
 def _start_document_run(

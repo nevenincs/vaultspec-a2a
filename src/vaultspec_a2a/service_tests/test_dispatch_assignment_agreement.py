@@ -55,6 +55,7 @@ from urllib.parse import urlparse
 import pytest
 
 from ..acceptance import certified_gateway
+from ..testing.catalog_selection import NoSelectableLaneError, in_process_selection
 
 if TYPE_CHECKING:
     from ..acceptance import CertifiedGateway
@@ -109,40 +110,22 @@ def _served_in_process_selection(
 
     A deterministic certification run must freeze the in-process lane: the
     freeze wins outright at compilation, so a selection naming any other served
-    lane would hand every role to a real external provider. Until the served
-    catalog advertises the in-process lane for a configured deterministic
-    backend, that selection cannot be expressed, and this scenario cannot run
-    honestly - a loud skip naming the missing serving, never a run that quietly
-    spends on whichever external lane the host happens to have installed.
+    lane would hand every role to a real external provider. Keeping a billable
+    lane out is the shared mechanism's own guarantee - it will not hand one back
+    even when it is the only selectable thing this stack serves - so what remains
+    local is the shape of the refusal: a loud skip naming the missing serving,
+    never a run that quietly spends on whichever external lane the host happens
+    to have installed.
     """
     with gateway.client(timeout=120.0) as client:
         response = client.get(
             "/v1/provider-catalog", params={"workspace_root": workspace_root}
         )
     assert response.status_code == 200, response.text
-    lanes = [
-        record
-        for record in response.json()["providers"]
-        if record["provider_id"] in {"mock", "deterministic"}
-        and record["health"]["selectable"]
-        and record["catalog"]["models"]
-    ]
-    if not lanes:
-        pytest.skip(
-            "the served provider catalog advertises no selectable in-process "
-            "lane, so a deterministic run cannot be selected without freezing "
-            "a real external provider; supply the in-process lane serving for "
-            "the configured deterministic backend"
-        )
-    lane = lanes[0]
-    return {
-        "schema_version": 1,
-        "provider_id": lane["provider_id"],
-        "execution_mode": lane["execution_mode"],
-        "catalog_revision": lane["catalog"]["state"]["revision"],
-        "entry_id": lane["catalog"]["models"][0]["entry_id"],
-        "controls": {},
-    }
+    try:
+        return in_process_selection(response.json())
+    except NoSelectableLaneError as exc:
+        pytest.skip(f"a deterministic certification run cannot be selected here: {exc}")
 
 
 def _await_terminal(

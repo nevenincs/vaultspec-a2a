@@ -1364,6 +1364,115 @@ entitled to its own settings, it is recorded as DISTINCT rather than folded
 into the wall-clock-poll or retry findings above. No new duplicate declaration
 was found in this domain.
 
+### vault-stage-discovery-declared-three-times | high | one scan mechanism, one vocabulary, three independent sites
+
+The `.vault/` stage-glob-and-collect mechanism is declared independently
+twice, and the six-stage vocabulary it walks is restated a third time.
+`src/vaultspec_a2a/context/metadata.py`'s `discover_context_refs` and
+`src/vaultspec_a2a/graph/nodes/vault_reader.py`'s `build_initial_vault_index`
+(backed by its module constant `_VAULT_STAGE_PATTERNS`) both walk the
+identical six patterns - `.vault/research/*{tag}*.md`,
+`.vault/reference/*{tag}*.md`, `.vault/adr/*{tag}*.md`, `.vault/plan/*{tag}*.md`,
+`.vault/exec/*{tag}*/**/*.md`, `.vault/audit/*{tag}*.md` - each with its own
+`glob.escape(feature_tag)` call, its own sorted glob, and its own
+`relative_to(workspace_root)` conversion, to build what is structurally the
+same per-stage path index under two different return shapes (a flat
+`list[ContextRef]` versus a `dict[str, list[str]]`). Both are exercised
+together, for the same run, in `src/vaultspec_a2a/control/thread_service.py`:
+`discover_context_refs` seeds the one-time `ThreadMetadata.context_refs` at
+thread creation, `build_initial_vault_index` seeds the per-turn `vault_index`
+state at dispatch. The two declarations have ALREADY diverged in cap
+semantics while sharing the same default value: `domain_config.max_context_refs`
+(50) bounds the TOTAL across all six stages combined in
+`discover_context_refs`, while `domain_config.vault_index_cap` (50) bounds
+EACH stage independently in `build_initial_vault_index` - a reader changing
+one constant expecting to change "the vault-scan cap" changes only half of
+it, silently. Third, the six-stage ORDER itself - `research`, `reference`,
+`adr`, `plan`, `exec`, `audit` - is restated a third time as
+`src/vaultspec_a2a/context/stage.py`'s `PHASE_ORDER`, used by
+`infer_phase_from_vault_index` to walk phases in reverse; it is hand-typed
+rather than derived from either glob-pattern dict, and it is a DIFFERENT
+vocabulary from `src/vaultspec_a2a/graph/enums.py`'s `PipelinePhase` StrEnum
+(five members - no `reference` - the routing-purpose closed set), so a reader
+cannot assume the two "phase" lists agree. Verdict DUPLICATE on the scan
+mechanism and on the six-stage vocabulary, not on the two return shapes (a
+`ContextRef` list and a mount-ready path index are genuinely different
+consumer contracts and should stay two functions). Two of the three
+declaring sites - `context/metadata.py` and `context/stage.py` - are in this
+sweep's domain and could derive their stage list from one shared ordered
+tuple; the third, `graph/nodes/vault_reader.py`, is outside it. Recorded
+rather than actioned because a real fix needs to reach into `graph/`, and a
+partial, context-only consolidation would leave the cap-semantics
+divergence exactly as dangerous as it is today.
+
+### token-estimation-two-heuristics-one-concept | low | not folded in, breadth not fully established
+
+`src/vaultspec_a2a/context/token_budget.py`'s `estimate_tokens` (a
+configurable `domain_config.chars_per_token` heuristic, default 4, used to
+decide when `should_compact` trims `TeamState.messages`) and
+`src/vaultspec_a2a/graph/nodes/vault_reader.py`'s use of LangChain's own
+`count_tokens_approximately` (to bound mounted-document blocks against
+`domain_config.mount_token_ceiling`) answer the same question - roughly how
+many tokens will this text cost - with two different heuristics, in sibling
+context-assembly code, for two different budgets. Not called DUPLICATE: one
+counts a `Sequence[BaseMessage]` for a whole-state compaction decision, the
+other counts individual text blocks against a per-turn mount ceiling, and
+using the LangChain-provided counter for LangChain message objects is a
+defensible independent choice rather than an accidental restatement. Recorded
+because two mechanisms answering the same question with different heuristics
+is exactly the shape a real drift would take, and because only two sites were
+found this sweep - breadth was not established across the rest of the tree
+for a third token-estimation site.
+
+### context-and-team-swept-and-found-clean | low | persona composition, harness verification, and rule shadowing confirmed single-homed
+
+Recorded for the negative space in this sweep's domain.
+`graph/compiler.py`'s `_compose_persona_prompt` (the function the campaign
+flagged as reachable from two compilers) was checked from the consumer side
+with four differently-phrased searches for a second, independent prompt-
+assembly site in `context/` or `team/`; every hit for persona/system-prompt
+composition landed inside `graph/` (`compiler.py`, `worker.py`,
+`supervisor.py`). This sweep's domain supplies INGREDIENTS - rules text via
+`context/rules.py`'s `RuleManager.compile()`, anchoring text via
+`context/anchoring.py`'s `build_anchoring_context`, the preamble via
+`context/preamble.py`'s `build_context_preamble` - but composes none of them
+into a final system message itself, so the composition site stays
+single-homed even though its callers are many, confirming the lead rather
+than contradicting it. `context/harness.py`'s `verify_harness` is the sole
+consumer of `RuleManager` for readiness probing and the sole site checking
+`vaultspec-core` CLI resolution via `shutil.which`. `context/rules.py`'s
+workspace-shadows-bundled-by-name resolution documents itself as mirroring
+`team_config`'s workspace-over-bundled principle, and it does - but the two
+are DISTINCT mechanisms, not one restated: `RuleManager` unions a directory
+of many markdown files with per-name override, while `team_config`'s
+(now-consolidated, see the entry below) config loader picks the first of
+exactly two file candidates per id. The recent `feat(presets): retire
+provider policy from presets` change (540d7aef) removed
+`[team.defaults]`/`[team.profiles.*]` blocks from every shipped preset TOML
+without introducing any new duplicate declaration inside `team/` itself; the
+model-resolution logic it moved lives in `providers/`, outside this sweep's
+domain. The most valuable finding from the "recently changed code" lead was
+inside `team/team_config.py` itself, unrelated to that commit: see the entry
+below.
+
+### two-tier-preset-discovery-rehomed | medium | REHOMED - one candidate-path builder now serves both loaders
+
+`src/vaultspec_a2a/team/team_config.py`'s `load_agent_config` and
+`load_team_config` independently hand-rolled the identical two-candidate
+discovery order (`{workspace_root}/.vaultspec/{subdir}/{id}.toml` first,
+then the bundled preset directory, first existing file wins), differing only
+in the subdirectory name, the preset directory constant, the Pydantic
+loader classmethod, and the not-found exception type. Verdict DUPLICATE on
+the path-resolution mechanism, DISTINCT correctly kept apart on the
+exception type (an `AgentConfigNotFoundError` and a `TeamConfigNotFoundError`
+serve different callers and must not merge into one). Actioned: extracted
+into a private `_resolve_preset_path(filename_id, workspace_root, *, subdir,
+preset_dir) -> Path | None`, called by both loaders, which still raise their
+own typed error when it returns `None`. Both discovery test classes
+(`TestLoadAgentConfigDiscovery`, `TestLoadTeamConfigDiscovery`) and the full
+`team/` suite (208 tests) pass unchanged; whole-tree `ty check` shows no new
+diagnostic in `team/` or `context/`.
+
 ### service-json-candidate-list-now-exported | medium | closes the prior finding, verified and fixed
 
 Re-verified the `service-json-candidate-list-reimplemented-in-control` finding

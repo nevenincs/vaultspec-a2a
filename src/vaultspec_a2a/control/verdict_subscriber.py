@@ -24,7 +24,6 @@ propagates cleanly and closes the active stream.
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
 import time
 from typing import TYPE_CHECKING, TypedDict
@@ -55,6 +54,7 @@ from ..ipc.schemas import DispatchRequest, to_dispatch_action
 from ..thread.dispatch_policy import evaluate_dispatch_failure
 from ..thread.enums import ControlActionType, ThreadStatus
 from ..utils.coercion import coerce_object_list, coerce_object_mapping
+from ._thread_metadata import dispatchable_workspace_root
 from .action_lease import claim_control_action, release_definite_non_delivery
 from .dispatch import safe_dispatch
 
@@ -94,12 +94,6 @@ class _RecoveryProposal(TypedDict):
     status: str
     ids: set[str]
     approval: Mapping[str, object] | None
-
-
-def _json_object_mapping(value: str) -> Mapping[str, object] | None:
-    """Decode JSON metadata only when it is a string-keyed object."""
-    loaded: object = json.loads(value)
-    return coerce_object_mapping(loaded)
 
 
 def _verdict_resume_idempotency_key(proposal_id: str) -> str:
@@ -618,7 +612,7 @@ class VerdictSubscriber:
                 return
             team_preset = thread.team_preset
             thread_metadata = thread.thread_metadata
-            workspace_root = _workspace_root(thread_metadata)
+            workspace_root = dispatchable_workspace_root(thread_metadata)
 
         # Gate-precision: the verdict must answer the gate the run is CURRENTLY
         # parked at, not a superseded earlier gate matched by accumulated ids.
@@ -715,20 +709,6 @@ class VerdictSubscriber:
 
 class _StreamInterruptedError(Exception):
     """Internal signal that a store-side ``error`` frame ended the page."""
-
-
-def _workspace_root(thread_metadata: str | None) -> str | None:
-    """Extract ``workspace_root`` from a thread's JSON metadata blob."""
-    if not thread_metadata:
-        return None
-    try:
-        meta = _json_object_mapping(thread_metadata)
-    except (json.JSONDecodeError, TypeError):
-        return None
-    if meta is not None:
-        root = meta.get("workspace_root")
-        return root if isinstance(root, str) else None
-    return None
 
 
 def _iter_recovery_proposals(data: object) -> list[_RecoveryProposal]:

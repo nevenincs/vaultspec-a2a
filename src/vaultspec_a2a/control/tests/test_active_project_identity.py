@@ -24,6 +24,7 @@ from pydantic import ValidationError
 
 from ...api.tests.clarification_harness import new_state_graph
 from ...context.metadata import ThreadMetadata
+from ...control._thread_metadata import dispatchable_workspace_root
 from ...database.thread_repository import normalize_workspace_identity
 from ...ipc.schemas import DispatchRequest, canonical_project_root
 from ...streaming.aggregator import EventAggregator
@@ -60,6 +61,71 @@ def workspace(tmp_path: Path) -> Path:
     root.mkdir()
     (tmp_path / "sibling").mkdir()
     return root
+
+
+class TestStoredMetadataOnlyYieldsADispatchableProject:
+    """The two resume paths refuse a stored root the dispatch boundary rejects.
+
+    A verdict resume and a clarification answer both read the stored project out
+    of thread metadata and hand it to a dispatch. Both construct that dispatch
+    AFTER claiming a control action, so a value the request constructor refuses
+    does not fail cleanly - it leaves the run holding a claim with no dispatch.
+    The reader therefore answers with what the boundary would accept, and the
+    unusable cases all become "resume without re-siting".
+    """
+
+    @staticmethod
+    def _metadata(root: object) -> str:
+        return json.dumps({"workspace_root": root})
+
+    @pytest.mark.parametrize(
+        ("label", "stored"),
+        [
+            ("relative", "workspaces/project"),
+            ("blank", ""),
+            ("whitespace", "   "),
+            ("wrong type", 17),
+            ("absent", None),
+        ],
+    )
+    def test_a_root_the_dispatch_would_refuse_reads_as_no_project(
+        self, label: str, stored: object
+    ) -> None:
+        """Each of these once flowed through and raised at the request."""
+        assert dispatchable_workspace_root(self._metadata(stored)) is None, label
+
+    @pytest.mark.parametrize(
+        "metadata", [None, "", "not json at all", "[]", '"a string"', "null"]
+    )
+    def test_unusable_metadata_reads_as_no_project(self, metadata: str | None) -> None:
+        """Undecodable and non-object metadata are the same answer, never a raise."""
+        assert dispatchable_workspace_root(metadata) is None
+
+    def test_a_real_root_survives_and_arrives_minted(self, workspace: Path) -> None:
+        """The usable case still works, and lands in the one canonical spelling."""
+        stored = _uncanonical_spelling(workspace)
+        assert stored != str(workspace)
+
+        resolved = dispatchable_workspace_root(self._metadata(stored))
+
+        assert resolved == canonical_project_root(stored)
+        assert resolved == str(workspace)
+
+    def test_every_refused_value_would_have_raised_at_the_dispatch(self) -> None:
+        """The reason the reader refuses, asserted rather than described.
+
+        Without this, the parametrised refusals above would be consistent with a
+        reader that is merely fussy. These are the values that actually break the
+        request the caller goes on to build.
+        """
+        for stored in ("workspaces/project", "", "   "):
+            with pytest.raises(ValidationError):
+                DispatchRequest(
+                    action="resume",
+                    thread_id="run-1",
+                    workspace_root=stored,
+                    recursion_limit=25,
+                )
 
 
 class TestAdmissionMintsOnce:

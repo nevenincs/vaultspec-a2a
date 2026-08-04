@@ -37,6 +37,7 @@ from ..thread.enums import (
     ControlActionResultStatus,
     ControlActionType,
 )
+from ._thread_metadata import dispatchable_workspace_root
 from .action_lease import claim_control_action, release_definite_non_delivery
 from .dispatch import safe_dispatch
 from .repair_transitions import record_undelivered_dispatch
@@ -92,19 +93,6 @@ class ClarificationRecoverySummary:
 
 def _idempotency_key(request_id: str) -> str:
     return f"{_IDEMPOTENCY_PREFIX}{request_id}"
-
-
-def _workspace_root(metadata_json: str | None) -> str | None:
-    if not metadata_json:
-        return None
-    try:
-        decoded: object = json.loads(metadata_json)
-    except json.JSONDecodeError:
-        return None
-    if not isinstance(decoded, dict):
-        return None
-    root = cast("dict[str, object]", decoded).get("workspace_root")
-    return root if isinstance(root, str) and root else None
 
 
 def _checkpoint_receipt(checkpoint_tuple: object | None, request_id: str) -> str | None:
@@ -292,7 +280,7 @@ async def respond_to_clarification(
     thread_status = thread.status
     worker_generation = thread.repair_generation
     team_preset = thread.team_preset
-    workspace_root = _workspace_root(thread.thread_metadata)
+    workspace_root = dispatchable_workspace_root(thread.thread_metadata)
 
     claim = await claim_control_action(
         db,

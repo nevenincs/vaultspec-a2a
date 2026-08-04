@@ -5,7 +5,7 @@ tags:
 date: '2026-08-04'
 modified: '2026-08-04'
 body_schema: 'body-v1'
-body_hash: 'sha256:4775bee0ab56e1efcd69a2166cf77e22534c66a5213911f1910d87f3f8a61e42'
+body_hash: 'sha256:064989501f78bff371a0e9f7b0a7c87b9d3cf3e8189280c650c34121d1b914b6'
 related: []
 ---
 
@@ -759,6 +759,60 @@ were found only by searching for what code DOES with the served payload. Recorde
 as a finding about the discriminator, not the sites: a list that has missed
 members three times should be treated as incomplete by default, and any further
 site found is evidence of that rather than a surprise.
+
+### a-bare-commit-takes-another-lanes-index | high | method finding, and it broke the repository
+
+An audit commit captured another lane's staged rename and published a state where
+a module had moved but its three importers had not, so importing that package
+failed at HEAD while every working tree was fine. The mechanism is narrower than
+it looks and worth stating exactly: no broad add was used. One explicit path was
+staged, and then a bare commit was run - which commits the ENTIRE INDEX rather
+than what was just added. An explicit-pathspec discipline that covers the add and
+not the commit is not a discipline at all, and in a shared index every commit
+carries the exposure, not only the careless ones. The practice adopted: verify
+the staged set matches intent immediately before committing, or pass the pathspec
+to the commit itself. Recorded beside the two earlier method findings because
+this one reached the repository rather than only a report, and because it is the
+mirror image of the earlier trap - there HEAD was correct and the tree was wrong,
+here the tree was correct and HEAD was wrong.
+
+### a-home-nothing-can-reach-is-not-a-home | high | a documented exception, measured away
+
+The most useful category this campaign has produced is not a duplicate but a
+documented exception whose stated reason could be measured away. The atomic
+writer declared itself the only copy of its pattern and named two writers keeping
+their own loop, each with a recorded justification. One of them - a provider
+leaf's credential refresh - said importing the audited writer would drag the
+process registry, service discovery and control configuration into a leaf whose
+import latency sits on an interactive window. That was true and the cost was
+real, but small when measured cold, and the decisive fact was not the size: the
+utility package was ALREADY fully loaded at that leaf, because a leaf cannot be
+imported without executing its package. So the canonical implementation costs
+nothing where it was needed, and the reason for the exception was an artefact of
+WHERE the implementation lived rather than of what it did. A home nothing can
+reach is not a canonical home. The duplicate is deleted rather than wrapped, and
+the writer now lives where its consumers already are.
+
+One genuine difference was preserved rather than flattened, and the method is the
+model for every remaining rehoming: the shared writer suppresses newline
+translation while the local copy took it, so a co-owned credential file is
+currently written with platform line endings. The delta was proved empirically on
+an identical payload rather than argued, exposed as a seam the one co-owned
+caller declares, and pinned by a test so a later collapse fails there instead of
+silently rewriting a third party's file. Changing the bytes of a file this
+project co-owns with an external tool is a decision to take deliberately, and it
+was left open rather than taken in passing.
+
+### path-containment-checks-are-not-one-concept | medium | six sites, high flattening risk, left alone
+
+Containment checks appear at six production sites and read as one concept. They
+differ in resolve strictness, in the error type raised, and in whether the root is
+resolved as well as the candidate, and one asks a different question entirely -
+mutual nesting in either direction rather than containment in one. Verdict
+DISTINCT. Recorded because this is security-relevant code where a flattening
+error is a boundary failure rather than an inconvenience, and because reporting it
+rather than churning it is the behaviour the campaign wants from a sweep that
+finds a plausible cluster with no safe merge.
 
 ## Recommendations
 

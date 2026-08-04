@@ -26,6 +26,7 @@ from sqlalchemy.engine.interfaces import Dialect
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 from sqlalchemy.types import TypeEngine
 
+from ..thread.constants import MAX_FEATURE_TAG_LENGTH, MAX_WORKSPACE_ROOT_LENGTH
 from ..thread.enums import (
     ControlActionResultStatus,
     PermissionRequestStatus,
@@ -35,7 +36,6 @@ from ..thread.enums import (
 )
 
 __all__ = [
-    "MAX_WORKSPACE_ROOT_LENGTH",
     "MONEY_PRECISION",
     "MONEY_SCALE",
     "ArtifactModel",
@@ -52,26 +52,6 @@ __all__ = [
     "ThreadModel",
     "utcnow",
 ]
-
-#: Width of the stored workspace-root selector, and therefore the bound every
-#: reader of one enforces.
-#:
-#: Declared here because the column is the only site that can refuse a value: a
-#: root longer than this is a WRITE FAILURE deep in a transaction, not a
-#: validation refusal a caller can be told about. Every check upstream — the
-#: query parameters, the containment checks, the metadata write seam — exists to
-#: turn that failure into a 422 before the row is attempted, which means each one
-#: is enforcing this column and none of them is entitled to its own number.
-#:
-#: The asymmetry is why one declaration rather than agreement: lower the column
-#: without lowering a check and an accepted request dies at the write; raise a
-#: check without raising the column and the same. Only lockstep change is safe,
-#: and sharing the name is what makes change lockstep.
-#:
-#: The ``0008`` migration carries its own frozen copy on purpose, as
-#: ``normalize_workspace_identity`` does — a migration records the width as it
-#: ran, and routing it here would rewrite history the next time this moves.
-MAX_WORKSPACE_ROOT_LENGTH = 4096
 
 #: Total significant digits stored for a monetary amount.
 #:
@@ -367,7 +347,9 @@ class ThreadModel(Base):
         String(MAX_WORKSPACE_ROOT_LENGTH), default=None
     )
     workspace_key: Mapped[str | None] = mapped_column(String(64), default=None)
-    feature_tag: Mapped[str | None] = mapped_column(String(128), default=None)
+    feature_tag: Mapped[str | None] = mapped_column(
+        String(MAX_FEATURE_TAG_LENGTH), default=None
+    )
     nickname: Mapped[str | None] = mapped_column(default=None)
     team_preset: Mapped[str | None] = mapped_column(default=None)
 

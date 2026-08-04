@@ -8,10 +8,10 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from ..database import (
-    MAX_WORKSPACE_ROOT_LENGTH,
     list_active_thread_page,
     normalize_workspace_identity,
 )
+from ..thread.constants import MAX_FEATURE_TAG_LENGTH, MAX_WORKSPACE_ROOT_LENGTH
 from ..thread.enums import ThreadStatus
 
 if TYPE_CHECKING:
@@ -26,7 +26,11 @@ __all__ = [
 ]
 
 _MAX_DISCOVERY_RESULTS = 100
-_MAX_FEATURE_TAG_LENGTH = 128
+
+# Shares the value of the feature-tag bound and nothing else. A persisted run id
+# is governed by the grammar the repository matches rows against
+# (``[A-Za-z0-9_-]{0,127}`` after a leading character), so this is that grammar's
+# length expressed as a count, not the width of any column.
 _MAX_RUN_ID_LENGTH = 128
 
 
@@ -61,9 +65,9 @@ async def discover_active_runs(
     """
     if not 1 <= limit <= _MAX_DISCOVERY_RESULTS:
         raise ValueError(f"limit must be between 1 and {_MAX_DISCOVERY_RESULTS}")
-    if feature_tag is not None and not 1 <= len(feature_tag) <= _MAX_FEATURE_TAG_LENGTH:
+    if feature_tag is not None and not 1 <= len(feature_tag) <= MAX_FEATURE_TAG_LENGTH:
         raise ValueError(
-            f"feature_tag must be between 1 and {_MAX_FEATURE_TAG_LENGTH} characters"
+            f"feature_tag must be between 1 and {MAX_FEATURE_TAG_LENGTH} characters"
         )
 
     expected_workspace_source = (

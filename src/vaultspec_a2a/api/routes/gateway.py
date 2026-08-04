@@ -75,7 +75,6 @@ from ...control.thread_state_service import (
 )
 from ...control.worker_management import worker_liveness
 from ...database import (
-    MAX_WORKSPACE_ROOT_LENGTH,
     get_db,
     get_permission_logs_by_thread,
     get_permission_request,
@@ -108,7 +107,11 @@ from ...thread.clarification import (
     ClarificationResolution,
     pending_clarification,
 )
-from ...thread.constants import DEFAULT_SUPERVISOR_ID
+from ...thread.constants import (
+    DEFAULT_SUPERVISOR_ID,
+    MAX_FEATURE_TAG_LENGTH,
+    MAX_WORKSPACE_ROOT_LENGTH,
+)
 from ...thread.dispatch_policy import FailureType
 from ...thread.enums import (
     TERMINAL_STATUSES,
@@ -1501,7 +1504,9 @@ async def active_runs_endpoint(
     workspace_root: str | None = Query(
         default=None, min_length=1, max_length=MAX_WORKSPACE_ROOT_LENGTH
     ),
-    feature_tag: str | None = Query(default=None, min_length=1, max_length=128),
+    feature_tag: str | None = Query(
+        default=None, min_length=1, max_length=MAX_FEATURE_TAG_LENGTH
+    ),
     status: ThreadStatus | None = Query(default=None),
     limit: int = Query(default=50, ge=1, le=100),
     offset: int = Query(default=0, ge=0),

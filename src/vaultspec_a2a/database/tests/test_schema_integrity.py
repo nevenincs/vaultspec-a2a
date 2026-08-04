@@ -462,3 +462,104 @@ class TestWorkspaceRootBoundIsTheColumn:
             await discover_active_runs(
                 session, workspace_root=Path(self._root_of_length(width + 1))
             )
+
+
+class TestFeatureTagBoundIsTheColumn:
+    """The feature-tag selector's readers enforce ``threads.feature_tag``.
+
+    The sibling of :class:`TestWorkspaceRootBoundIsTheColumn`, and asserted the
+    same way for the same reason: the column is the authority, exceeding it is a
+    write failure rather than a refusal, and every upstream check exists to turn
+    that into a refusal a caller can be told about.
+
+    The tag differs from the workspace root in one way worth its own assertion.
+    It is also carried OUTBOUND, on the discovery and history records that
+    replay it from the column, so a wire bound below the column would truncate a
+    stored tag on the way out - which a caller reads as a tag that changed
+    rather than one that was refused.
+    """
+
+    @staticmethod
+    def _column_width() -> int:
+        """Return the declared width of ``threads.feature_tag``."""
+        width = ThreadModel.__table__.c.feature_tag.type.length  # ty: ignore
+        assert isinstance(width, int), (
+            "threads.feature_tag no longer declares a width; the bound every "
+            "upstream check enforces has nothing left to be derived from"
+        )
+        return width
+
+    @pytest.mark.asyncio
+    async def test_a_tag_at_the_column_width_survives_a_real_write(
+        self, session: AsyncSession
+    ) -> None:
+        """The widest admissible tag round-trips through the real write seam."""
+        width = self._column_width()
+        tag = "f" * width
+
+        thread = await create_thread(
+            session,
+            metadata=json.dumps(
+                {"workspace_root": f"C:{os.sep}workspace", "feature_tag": tag}
+            ),
+        )
+        await session.commit()
+        session.expunge_all()
+        stored = await session.get(ThreadModel, thread.id)
+
+        assert stored is not None
+        assert stored.feature_tag == tag
+
+    @pytest.mark.asyncio
+    async def test_the_write_seam_drops_a_tag_the_column_cannot_hold(
+        self, session: AsyncSession
+    ) -> None:
+        """One character past the column is refused before the row is built.
+
+        The selector projection drops an inadmissible tag rather than storing a
+        shortened one, so a run is discoverable by the tag it declared or by no
+        tag at all - never by a silently different tag.
+        """
+        width = self._column_width()
+
+        thread = await create_thread(
+            session,
+            metadata=json.dumps(
+                {
+                    "workspace_root": f"C:{os.sep}workspace",
+                    "feature_tag": "f" * (width + 1),
+                }
+            ),
+        )
+        await session.commit()
+        session.expunge_all()
+        stored = await session.get(ThreadModel, thread.id)
+
+        assert stored is not None
+        assert stored.feature_tag is None
+
+    @pytest.mark.asyncio
+    async def test_the_repository_edge_admits_the_width_and_refuses_past_it(
+        self, session: AsyncSession
+    ) -> None:
+        """The paged read refuses one character past the column, not at it."""
+        width = self._column_width()
+
+        await list_active_thread_page(session, limit=1, feature_tag="f" * width)
+
+        with pytest.raises(ValueError, match="feature selector"):
+            await list_active_thread_page(
+                session, limit=1, feature_tag="f" * (width + 1)
+            )
+
+    @pytest.mark.asyncio
+    async def test_the_discovery_edge_admits_the_width_and_refuses_past_it(
+        self, session: AsyncSession
+    ) -> None:
+        """Discovery refuses at the edge rather than deep in a transaction."""
+        width = self._column_width()
+
+        await discover_active_runs(session, feature_tag="f" * width)
+
+        with pytest.raises(ValueError, match="feature_tag must be between"):
+            await discover_active_runs(session, feature_tag="f" * (width + 1))

@@ -5,7 +5,7 @@ tags:
 date: '2026-08-04'
 modified: '2026-08-04'
 body_schema: 'body-v1'
-body_hash: 'sha256:4d549d37a9f8d2d7bd226c1d60ff153cf3c0481a586ed7685d9182bb7ee0b1ed'
+body_hash: 'sha256:d2b4e5950a11251e0d14f0bafe18e250c317e0717640ff9222d9dd061c5d6443'
 related: []
 ---
 
@@ -6370,3 +6370,65 @@ leave all three alone - and that is a larger decision than this entry.
 
 Recorded rather than actioned, and closed either way: the finding is reproduced,
 its two halves have verdicts, and it is no longer an open unknown.
+
+### the-argv-echo-closed-and-a-regex-correctly-not-widened | high | third move, and a boundary resolved by design rather than guard
+
+The launch-description echo is masked at the **binding**, not at the three
+interpolations and not inside the description helper. So a fourth raise added to
+that function is covered by construction, while the helper stays a plain
+description for any future caller whose output does not leave the process. That is
+the "unless every present and future caller needs it" test applied correctly - the
+alternative, masking each interpolation, is the forgettable version.
+
+**Ordering was checked and does not apply here.** Unlike the stderr tail, no bound
+is applied to this string - it is only interpolated, never sliced - so there is no
+cut for the mask to precede. Recorded in the code so the next reader does not
+re-derive it.
+
+**The mirror confound was designed OUT rather than found and removed.** The
+payload under test IS the launch command, so the credential is planted only in the
+arguments and the child deliberately ignores its own arguments - had it echoed
+them, the masker landed in the previous move would have masked them on the stderr
+half and the before-case would have looked already fixed. The probe prints a
+confound check proving the credential is absent from the stderr half in **both**
+runs. The previous move caught its confound after the fact; this one proved its
+absence.
+
+**The admitted case is asserted in the strong form**, which is the sharper version
+of a rule this campaign has been repeating: not "the credential went" but
+**"nothing else went"**. The test asserts the mask token is ABSENT from a
+credential-free description, plus the script name and both ordinary arguments
+present. A masking-only assertion cannot separate masking the credential from
+masking everything.
+
+### a-coverage-boundary-resolved-by-the-registrys-closure | high | ruled: do not widen, and do not board a fix
+
+The shared masker matches on the introducing NAME, so on an argument vector it
+covers assignment and colon forms but not the space-separated form - a common
+command-line shape. Measured rather than assumed, by the lane that found it.
+
+**Ruled: do not widen the pattern**, and the lane's reasoning is adopted. Treating
+whitespace as a separator would mask the word following any credential-named token
+in ordinary prose, and that masker is now SHARED with the stderr drain - so the
+false positives would land on every diagnostic in two lanes. This audit has
+already recorded that a check producing confident output about the wrong thing
+trains its reader to skim the true positives; a redactor that eats ordinary words
+is that failure applied to security output, where the skimming is worst.
+
+**And the structural fix it argued for is not boarded either, because the design
+already prevents the case.** The server registry is explicit and closed by
+construction: one declared construction seam that validates and freezes over
+immutable values, so the registry cannot be extended or re-pointed at runtime, and
+both registered entries carry static literal arguments. **A credential cannot
+reach an argument vector today - not because none happens to be there, but because
+there is no path by which one could arrive.**
+
+So the boundary is safe by design rather than by luck, which is the outcome that
+does not need a guard. Recorded with its dependency stated: **if the registry ever
+admits a user-supplied or runtime-composed specification, this boundary becomes
+live and the structural fix is then the right one** - refusing or structurally
+masking credential-bearing arguments at composition, never a looser regex.
+
+That dependency is the finding. A safety property that rests on a closure
+invariant elsewhere is only as durable as that invariant, and nothing currently
+connects the two.

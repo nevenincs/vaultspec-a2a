@@ -10,6 +10,7 @@ exercised against the same real server the passing one uses.
 from __future__ import annotations
 
 import os
+import sys
 from typing import TYPE_CHECKING
 
 import pytest
@@ -26,6 +27,8 @@ from .._mcp_contract import (
 )
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     from .._json_contract import JsonObject
 
 
@@ -169,6 +172,65 @@ async def test_probe_deadline_is_refused_rather_than_hanging_the_run() -> None:
             timeout=0.01,
         )
     assert "could not be verified" in str(excinfo.value)
+
+
+_PLANTED_TOKEN = "sk-ant-PLANTEDPROBE0001deadbeefcafe"
+_PLANTED_BEARER = "sk-live-PLANTEDPROBE0002"
+_ORDINARY_DIAGNOSTIC = "server exited before completing the handshake"
+
+
+def _leaky_server(tmp_path: Path) -> Path:
+    """Write a real server that reports its configuration to stderr, then dies.
+
+    Delivered as a FILE rather than ``python -c``, because the refusal also
+    echoes the launch command it probed: a credential passed on the command line
+    would reach the message by a route this test is not about, and would make it
+    pass or fail for the wrong reason.
+    """
+    script = tmp_path / "leaky_server.py"
+    script.write_text(
+        "import sys\n"
+        f'sys.stderr.write("ANTHROPIC_AUTH_TOKEN={_PLANTED_TOKEN}\\n")\n'
+        f'sys.stderr.write("Authorization: Bearer {_PLANTED_BEARER}\\n")\n'
+        f'sys.stderr.write("{_ORDINARY_DIAGNOSTIC}\\n")\n'
+        "sys.stderr.flush()\n"
+        "raise SystemExit(3)\n",
+        encoding="utf-8",
+    )
+    return script
+
+
+@pytest.mark.asyncio
+async def test_a_failing_servers_credentials_never_reach_the_refusal(
+    tmp_path: Path,
+) -> None:
+    """The refusal message is client-visible, so the child's secrets are masked.
+
+    A real subprocess on the real failure path: the server writes credential-
+    shaped configuration to its own stderr and exits without ever speaking MCP,
+    so the probe fails and the retained tail is embedded into the refusal. That
+    message becomes a run's failure reason, and the servers reached here include
+    runtime-acquired ones whose output this project does not control.
+    """
+    with pytest.raises(HarnessToolContractError) as excinfo:
+        await verify_declared_tool_contract(
+            name="vaultspec-rag",
+            command=sys.executable,
+            args=[str(_leaky_server(tmp_path))],
+            declared=("search_vault",),
+            env=dict(os.environ),
+            timeout=30.0,
+        )
+    message = str(excinfo.value)
+
+    assert _PLANTED_TOKEN not in message
+    assert _PLANTED_BEARER not in message
+    assert "<redacted>" in message
+    # The admitted case, asserted in the same breath: masking that swallowed the
+    # diagnostic would defeat the only reason the tail is retained, and a
+    # refusal-only assertion cannot tell that apart from an empty tail.
+    assert _ORDINARY_DIAGNOSTIC in message
+    assert "ANTHROPIC_AUTH_TOKEN" in message
 
 
 @pytest.mark.asyncio

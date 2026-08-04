@@ -19,50 +19,8 @@ import pytest
 from ..codex_chat_model import (
     CLEANUP_TIMEOUT_SECONDS,
     STDERR_TAIL_LINES,
-    _redact,
     drain_stderr_into,
 )
-
-
-@pytest.mark.parametrize(
-    ("line", "must_not_contain"),
-    [
-        ("ANTHROPIC_AUTH_TOKEN=sk-ant-secret", "sk-ant-secret"),
-        ("Authorization: Bearer sk-live-9f8e7d", "sk-live-9f8e7d"),
-        ("OPENAI_API_KEY: sk-proj-zzz", "sk-proj-zzz"),
-        ("my_password = hunter2", "hunter2"),
-        ("VAULTSPEC_A2A_GATEWAY_TOKEN=abc123", "abc123"),
-    ],
-)
-def test_credential_shaped_values_are_masked(line: str, must_not_contain: str) -> None:
-    """The value goes; the name stays, so the line is still diagnostic."""
-    redacted = _redact(line)
-
-    assert must_not_contain not in redacted
-    assert "<redacted>" in redacted
-
-
-@pytest.mark.parametrize(
-    "line",
-    [
-        "connecting to 127.0.0.1:8766",
-        "error: failed to start app-server",
-        "plain diagnostic line with no secret",
-    ],
-)
-def test_ordinary_diagnostics_survive_untouched(line: str) -> None:
-    """Over-redaction would destroy the value the buffer exists to provide."""
-    assert _redact(line) == line
-
-
-def test_the_redactor_is_not_inert() -> None:
-    """A guard against the pattern silently matching nothing.
-
-    This exact failure occurred during development: a stray control byte in the
-    expression made it match nothing, so every line passed through unchanged
-    while the code read as if it redacted.
-    """
-    assert _redact("API_KEY=value") != "API_KEY=value"
 
 
 async def _drain_lines(lines: list[bytes]) -> list[str]:
@@ -96,6 +54,44 @@ def test_drained_lines_are_retained_redacted() -> None:
     assert kept[0] == "starting"
     assert "supersecret" not in kept[1]
     assert kept[2] == "ready"
+
+
+@pytest.mark.parametrize(
+    ("line", "must_not_contain"),
+    [
+        ("ANTHROPIC_AUTH_TOKEN=sk-ant-secret", "sk-ant-secret"),
+        ("Authorization: Bearer sk-live-9f8e7d", "sk-live-9f8e7d"),
+        ("OPENAI_API_KEY: sk-proj-zzz", "sk-proj-zzz"),
+        ("my_password = hunter2", "hunter2"),
+        ("VAULTSPEC_A2A_GATEWAY_TOKEN=abc123", "abc123"),
+    ],
+)
+def test_credential_shapes_are_masked_on_the_way_into_the_tail(
+    line: str, must_not_contain: str
+) -> None:
+    """Every shape is masked BY THE DRAIN, not merely by a helper it could drop.
+
+    Asserted through the retained tail rather than against the redactor itself:
+    the redactor now lives in a shared home with its own tests, so a check there
+    would keep passing if this lane stopped calling it.
+    """
+    (kept,) = asyncio.run(_drain_lines([line.encode() + b"\n"]))
+
+    assert must_not_contain not in kept
+    assert "<redacted>" in kept
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        "connecting to 127.0.0.1:8766",
+        "error: failed to start app-server",
+        "plain diagnostic line with no secret",
+    ],
+)
+def test_ordinary_diagnostics_survive_the_drain_untouched(line: str) -> None:
+    """Over-redaction would destroy the value the buffer exists to provide."""
+    assert asyncio.run(_drain_lines([line.encode() + b"\n"])) == [line]
 
 
 def test_the_retained_tail_is_bounded() -> None:

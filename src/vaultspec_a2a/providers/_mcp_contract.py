@@ -49,6 +49,7 @@ from ._acp_mcp import (
     harness_server_exact_surface,
     is_known_harness_server,
 )
+from ._subprocess import redact_secrets
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
@@ -101,11 +102,18 @@ def _drop_orphaned_combining_marks(text: str) -> str:
 
 
 def _stderr_tail(captured: TextIO) -> str:
-    """Return a trimmed, prefixed tail of the probed server's stderr, or ``""``.
+    """Return a trimmed, prefixed, redacted tail of the server's stderr, or ``""``.
 
     The capture is a real on-disk temporary file rather than an in-memory buffer
     because the stdio client hands the handle straight to the OS as the child's
     stderr, which needs a true file descriptor.
+
+    Redaction happens HERE rather than at the raise sites, because this return
+    value is embedded verbatim into a refusal whose message reaches a run's
+    client-visible failure reason: masking at the single point the text escapes
+    is a property no future caller of the tail can forget to apply. The servers
+    reached by this probe include runtime-acquired ones, so what a failing child
+    writes about its own configuration is not text this project controls.
     """
     try:
         captured.flush()
@@ -115,6 +123,12 @@ def _stderr_tail(captured: TextIO) -> str:
         return ""
     if not text:
         return ""
+    # Redact BEFORE the cut, in both directions. A cut through a credential
+    # discards the name that introduces it and leaves the tail opening on a bare
+    # fragment of the value, which nothing downstream can still recognise as one;
+    # and the mask is not the same width as what it replaces, so applying it
+    # afterwards would move the result off the ceiling enforced just below.
+    text = redact_secrets(text)
     if len(text) > _STDERR_TAIL_CHARS:
         kept = text[-(_STDERR_TAIL_CHARS - len(_STDERR_ELISION)) :]
         text = _STDERR_ELISION + _drop_orphaned_combining_marks(kept)

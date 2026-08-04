@@ -18,7 +18,6 @@ the ChatGPT-session auth mode.
 import asyncio
 import json
 import logging
-import re
 from collections import deque
 from collections.abc import AsyncIterator, Mapping, Sequence
 from contextlib import suppress
@@ -61,29 +60,11 @@ from ._codex_config_home import (
 )
 from ._json_contract import JsonObject, JsonValue, lenient_json_object
 from ._mcp_contract import verify_harness_mcp_contract
-from ._subprocess import kill_process_tree, spawn_acp_process
+from ._subprocess import kill_process_tree, redact_secrets, spawn_acp_process
 from .conditions import ProviderCondition, condition_from_codex_turn_error
 from .lane_admission import is_web_lane_proven
 
 logger = logging.getLogger(__name__)
-
-_SECRET_PATTERN = re.compile(
-    r"(?i)((?:[A-Z0-9_]*(?:TOKEN|SECRET|KEY|PASSWORD|CREDENTIAL)[A-Z0-9_]*)\s*[=:]\s*"
-    r"|bearer\s+)(\S+)"
-)
-
-
-def _redact(line: str) -> str:
-    """Mask credential-shaped values in a diagnostic line.
-
-    Provider subprocesses report their configuration when they fail, and
-    configuration is where credentials live, so a retained diagnostic tail is a
-    plausible place for a token to surface. Matches on the NAME rather than the
-    value shape: a token has no reliable shape, but the thing introducing it -
-    an assignment to something called a token, secret, key, password or
-    credential, or a bearer prefix - does.
-    """
-    return _SECRET_PATTERN.sub(lambda m: f"{m.group(1)}<redacted>", line)
 
 
 async def drain_stderr_into(
@@ -107,7 +88,7 @@ async def drain_stderr_into(
                 break
             text = line.decode("utf-8", errors="replace").rstrip()
             if text:
-                tail.append(_redact(text))
+                tail.append(redact_secrets(text))
     except (OSError, ValueError, asyncio.CancelledError):
         return
 

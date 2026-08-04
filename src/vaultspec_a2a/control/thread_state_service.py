@@ -13,7 +13,6 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from langgraph.checkpoint.base import CheckpointTuple
-from pydantic import TypeAdapter, ValidationError
 
 from ..control.projection import (
     apply_checkpoint_projection,
@@ -36,6 +35,7 @@ from ..thread.snapshots import (
     finalize_snapshot_replay_status,
     project_checkpoint_tuple,
 )
+from ..utils.coercion import coerce_object_mapping, coerce_string_list
 
 if TYPE_CHECKING:
     from langchain_core.runnables import RunnableConfig
@@ -59,9 +59,6 @@ PROPOSAL_ID_FIELD = "authoring_proposal_ids"
 CHANGESET_ID_FIELD = "authoring_changeset_ids"
 ACTIVE_FEATURE_FIELD = "active_feature"
 AUTHORING_SESSION_FIELD = "authoring_session_id"
-
-_STRING_KEYED_MAPPING = TypeAdapter(dict[str, object])
-_STRING_LIST = TypeAdapter(list[str])
 
 # --- Semantic authoring-phase projection -------
 
@@ -122,22 +119,10 @@ def project_semantic_phase(
     return "running"
 
 
-def _string_list(value: object) -> list[str]:
-    """Return the non-empty string items of *value* when it is a list."""
-    try:
-        string_values = _STRING_LIST.validate_python(value, strict=True)
-    except ValidationError:
-        return []
-    return [item for item in string_values if item]
-
-
 def _channel_values(checkpoint_tuple: CheckpointTuple) -> dict[str, object]:
     """Return the channel values of a checkpoint tuple, or an empty mapping."""
     channel_values: object = checkpoint_tuple.checkpoint.get("channel_values")
-    try:
-        return _STRING_KEYED_MAPPING.validate_python(channel_values, strict=True)
-    except ValidationError:
-        return {}
+    return coerce_object_mapping(channel_values) or {}
 
 
 async def read_run_snapshot(
@@ -181,8 +166,8 @@ def derive_run_authoring_ids(
         return [], []
     values = _channel_values(checkpoint_tuple)
     return (
-        _string_list(values.get(PROPOSAL_ID_FIELD)),
-        _string_list(values.get(CHANGESET_ID_FIELD)),
+        coerce_string_list(values.get(PROPOSAL_ID_FIELD), drop_empty=True) or [],
+        coerce_string_list(values.get(CHANGESET_ID_FIELD), drop_empty=True) or [],
     )
 
 

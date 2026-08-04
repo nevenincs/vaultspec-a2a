@@ -18,7 +18,6 @@ from http import HTTPStatus
 from typing import TYPE_CHECKING
 
 import httpx
-from pydantic import TypeAdapter, ValidationError
 
 from ..database import get_session_factory, list_threads, update_thread_status
 from ..domain_config import domain_config
@@ -33,7 +32,7 @@ from ..providers.team_selection import (
     frozen_team_selection_from_record,
 )
 from ..thread.enums import ControlActionType, ThreadStatus
-from ..utils.coercion import coerce_object_mapping
+from ..utils.coercion import coerce_object_mapping, coerce_string_list
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -59,15 +58,6 @@ logger = logging.getLogger(__name__)
 # first occurrence logs in full, every Nth repeat thereafter logs in full, the
 # rest only advance the counter a batch-end summary reports.
 _REDISPATCH_LOG_EVERY_N = 5
-_STRING_LIST = TypeAdapter(list[str])
-
-
-def _string_list(value: object) -> list[str] | None:
-    """Validate an untrusted JSON value as a list of strings."""
-    try:
-        return _STRING_LIST.validate_python(value, strict=True)
-    except ValidationError:
-        return None
 
 
 def _frozen_model_assignment(
@@ -97,7 +87,7 @@ def _frozen_model_assignment(
             continue
         provider = role_mapping.get("provider")
         capability = role_mapping.get("capability")
-        fallback = _string_list(role_mapping.get("fallback", []))
+        fallback = coerce_string_list(role_mapping.get("fallback", []))
         if (
             not isinstance(provider, str)
             or not (isinstance(capability, str) or capability is None)

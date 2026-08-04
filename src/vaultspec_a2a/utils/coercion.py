@@ -16,10 +16,16 @@ from __future__ import annotations
 
 from pydantic import TypeAdapter, ValidationError
 
-__all__ = ["coerce_int", "coerce_object_list", "coerce_object_mapping"]
+__all__ = [
+    "coerce_int",
+    "coerce_object_list",
+    "coerce_object_mapping",
+    "coerce_string_list",
+]
 
 _OBJECT_MAPPING: TypeAdapter[dict[str, object]] = TypeAdapter(dict[str, object])
 _OBJECT_LIST: TypeAdapter[list[object]] = TypeAdapter(list[object])
+_STRING_LIST: TypeAdapter[list[str]] = TypeAdapter(list[str])
 
 
 def coerce_int(value: object) -> int | None:
@@ -89,3 +95,37 @@ def coerce_object_list(value: object) -> list[object] | None:
         return _OBJECT_LIST.validate_python(value, strict=True)
     except ValidationError:
         return None
+
+
+def coerce_string_list(value: object, *, drop_empty: bool = False) -> list[str] | None:
+    """Return *value* as a list of strings, or ``None`` when it is not one.
+
+    Strict in the same direction as its siblings, and the distinction is worth
+    stating because the opposite posture also exists in this project: a list
+    holding one non-string member is refused WHOLE, never filtered down to the
+    string members it happens to contain. A caller that asked for a list of
+    strings and got a mixed one is reading a record its writer did not produce,
+    and quietly keeping the readable half would hand it a value no writer wrote.
+
+    Args:
+        value: A parsed JSON scalar or unstructured runtime value of unknown type.
+        drop_empty: Whether to drop empty strings from an otherwise valid list.
+            Every field read through here names identifiers, and the empty name
+            is not one; admitting it lets a blank travel on as though it were an
+            id. It is an argument rather than a second function because it is
+            the only axis on which the callers ever differed.
+
+    Returns:
+        A ``list`` of the validated strings, or ``None`` when *value* is not a
+        list of strings. ``None`` and not an empty list even under *drop_empty*:
+        an empty list is a legitimate answer a writer can produce, so returning
+        it for a malformed field would fuse "named nothing" with "was not a
+        string list" and destroy a distinction no caller could then recover. A
+        caller that genuinely does not need the distinction spells that ``or []``
+        at its own site, which is a policy it owns rather than one imposed here.
+    """
+    try:
+        strings = _STRING_LIST.validate_python(value, strict=True)
+    except ValidationError:
+        return None
+    return [item for item in strings if item] if drop_empty else strings

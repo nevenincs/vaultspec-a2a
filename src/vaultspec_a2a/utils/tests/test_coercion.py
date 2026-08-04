@@ -21,7 +21,12 @@ from types import MappingProxyType
 
 import pytest
 
-from ..coercion import coerce_int, coerce_object_list, coerce_object_mapping
+from ..coercion import (
+    coerce_int,
+    coerce_object_list,
+    coerce_object_mapping,
+    coerce_string_list,
+)
 
 
 @pytest.mark.parametrize("value", [0, 1, -7, 2**40])
@@ -131,3 +136,78 @@ def test_a_plain_list_passes_through_as_a_copy() -> None:
 def test_a_non_list_value_is_refused(value: object) -> None:
     """A tuple or set is Sequence-shaped but not a ``list``, and is refused too."""
     assert coerce_object_list(value) is None
+
+
+def test_a_list_of_strings_passes_through_as_a_copy() -> None:
+    """The admitted case: an honest string list survives intact, as a copy."""
+    original = ["alpha", "beta"]
+
+    result = coerce_string_list(original)
+
+    assert result == ["alpha", "beta"]
+    assert result is not original
+
+
+def test_an_empty_list_is_admitted_and_is_not_the_refusal() -> None:
+    """A writer may legitimately name nothing, and that is not a malformed field.
+
+    This is the whole reason the refusal sentinel is ``None`` rather than ``[]``.
+    Were it ``[]``, this assertion and the refusal assertions below would agree,
+    and no caller could ever tell the two apart.
+    """
+    assert coerce_string_list([]) == []
+
+
+@pytest.mark.parametrize(
+    ("label", "value"),
+    [
+        ("one non-string member", ["ok", 3]),
+        ("a bool member", ["ok", True]),
+        ("a nested list", ["ok", ["inner"]]),
+        ("a null member", ["ok", None]),
+    ],
+)
+def test_a_mixed_list_is_refused_whole_rather_than_filtered(
+    label: str, value: object
+) -> None:
+    """The strict posture, asserted as the thing it is NOT.
+
+    A lenient reader elsewhere in this project keeps the string members of a
+    mixed list. This one refuses the value entirely, so the two must never be
+    exchanged for one another: ``["ok"]`` would be the lenient answer, and
+    getting it here would mean a caller had silently started admitting records
+    it was written to reject.
+    """
+    result = coerce_string_list(value)
+
+    assert result is None, label
+    assert result != ["ok"], label
+
+
+@pytest.mark.parametrize(
+    "value", [None, "abc", ("a", "b"), {"a": "b"}, 7, [{"a": 1}], object()]
+)
+def test_a_value_that_is_not_a_string_list_is_refused(value: object) -> None:
+    """A bare string is iterable and Sequence-shaped, and is still not a list."""
+    assert coerce_string_list(value) is None
+
+
+def test_empty_strings_survive_by_default() -> None:
+    """Filtering is opt-in, so a caller that did not ask keeps what was stored."""
+    assert coerce_string_list(["a", "", "b"]) == ["a", "", "b"]
+
+
+def test_drop_empty_removes_the_blank_names_only() -> None:
+    """The one axis on which the folded callers differed, pinned in both settings."""
+    assert coerce_string_list(["a", "", "b", ""], drop_empty=True) == ["a", "b"]
+
+
+def test_drop_empty_still_refuses_rather_than_returning_an_empty_list() -> None:
+    """Filtering never becomes repair: a malformed value stays distinguishable.
+
+    ``["", ""]`` and ``"not a list"`` both reduce to nothing under *drop_empty*,
+    and they must not reduce to the SAME nothing - one named only blanks, the
+    other was never a string list at all.
+    """
+    assert coerce_string_list(["", ""], drop_empty=True) == []
+    assert coerce_string_list("not a list", drop_empty=True) is None

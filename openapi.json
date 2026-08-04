@@ -548,7 +548,7 @@
     "/v1/runs/{run_id}/history": {
       "get": {
         "summary": "Run History Endpoint",
-        "description": "Read one run whole, including a terminal or archived one.\n\nDistinct from run-status by design. Run-status is the BOUNDED recovery\nsnapshot an engine reconciles authority from, and widening it would have\nmade every reconciliation pay for a transcript it does not read. This is the\nwide read for a consumer that wants the record: transcript, agents, plan,\npending answers, and the run's metadata.\n\nThe state snapshot is embedded rather than restated, so this response cannot\ndrift from the snapshot it reports.",
+        "description": "Read one run whole, including a terminal or archived one.\n\nDistinct from run-status by design. Run-status is the BOUNDED recovery\nsnapshot an engine reconciles authority from, and widening it would have\nmade every reconciliation pay for a transcript it does not read. This is the\nwide read for a consumer that wants the record: transcript, agents, plan,\npending answers, and the run's metadata.\n\n\"Whole\" is a promise about honesty, not about always having everything. The\ntranscript lives only in the checkpoint, and a checkpoint can be gone or\nunreachable; when it is, this answers 200 with the durable half of the\nrecord it CAN read - status, agents, plan, permissions, metadata - and says\nplainly that the transcript is not part of it. Refusing the whole read over\nan absent transcript would cost the caller the half that survived, and\nanswering an unqualified empty message list would be worse still: silent\nloss dressed as a run that never spoke.\n\nThe state snapshot is embedded rather than restated, so this response cannot\ndrift from the snapshot it reports.",
         "operationId": "run_history_endpoint_v1_runs__run_id__history_get",
         "parameters": [
           {
@@ -3259,24 +3259,6 @@
             ],
             "title": "Nickname"
           },
-          "profile_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Profile Id"
-          },
-          "assignments": {
-            "items": {
-              "$ref": "#/components/schemas/RoleAssignmentSummary"
-            },
-            "type": "array",
-            "title": "Assignments"
-          },
           "frozen_assignment": {
             "anyOf": [
               {
@@ -3362,15 +3344,24 @@
                 "type": "null"
               }
             ]
+          },
+          "transcript_available": {
+            "type": "boolean",
+            "title": "Transcript Available"
+          },
+          "transcript_status": {
+            "$ref": "#/components/schemas/TranscriptAvailability"
           }
         },
         "type": "object",
         "required": [
           "run_id",
-          "state"
+          "state",
+          "transcript_available",
+          "transcript_status"
         ],
         "title": "RunHistoryResponse",
-        "description": "The full read of one run, including terminal and archived ones.\n\nDeliberately distinct from run-status, which is the BOUNDED recovery\nsnapshot an engine reconciles from. This is the wide read - transcript,\nagents, plan, pending answers, and the run's metadata - for a consumer that\nwants the whole record rather than the authority fields.\n\nThe state snapshot is embedded by reference rather than restated field by\nfield, so the two cannot drift apart as the snapshot evolves."
+        "description": "The full read of one run, including terminal and archived ones.\n\nDeliberately distinct from run-status, which is the BOUNDED recovery\nsnapshot an engine reconciles from. This is the wide read - transcript,\nagents, plan, pending answers, and the run's metadata - for a consumer that\nwants the whole record rather than the authority fields.\n\nThe state snapshot is embedded by reference rather than restated field by\nfield, so the two cannot drift apart as the snapshot evolves.\n\nThe transcript is the one part of the record this verb cannot always\ndeliver, because it lives only in the checkpoint. ``transcript_available``\nand ``transcript_status`` say so outright, so ``state.messages`` is never\nread as \"this run had no conversation\" when the truth is that its\nconversation could not be read. They are the transcript's counterpart to the\nsnapshot's own ``snapshot_complete`` / ``degraded_reasons`` pairing."
       },
       "RunMessageRequest": {
         "properties": {
@@ -3873,24 +3864,6 @@
             "type": "boolean",
             "title": "Eligible",
             "default": true
-          },
-          "profile_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Profile Id"
-          },
-          "assignments": {
-            "items": {
-              "$ref": "#/components/schemas/RoleAssignmentSummary"
-            },
-            "type": "array",
-            "title": "Assignments"
           },
           "frozen_assignment": {
             "anyOf": [
@@ -5177,6 +5150,17 @@
         "type": "object",
         "title": "TopologyPosition",
         "description": "Where a run sits in its team topology (recovery snapshot).\n\nProduct-facing status speaks role vocabulary only: ``active_agent`` is\nthe role currently working, never an internal LangGraph node name. The raw\nnext-node projection lives in the internal recovery snapshot\n(``thread/snapshots.py``), not this contract; ``next_nodes`` was dropped\nfrom the v1 surface."
+      },
+      "TranscriptAvailability": {
+        "type": "string",
+        "enum": [
+          "available",
+          "not_yet_recorded",
+          "missing",
+          "unreadable"
+        ],
+        "title": "TranscriptAvailability",
+        "description": "Why a run's conversation is, or is not, readable from its checkpoint.\n\nA run's transcript lives only in the checkpoint, so an unread checkpoint\nyields an empty message list that is indistinguishable from a run that\ngenuinely said nothing. This classification is what tells the two apart, and\nit exists so no reader has to infer loss from an empty list.\n\n``NOT_YET_RECORDED`` is the only non-fault absence: the run has not been\ndispatched, so there is nothing to have lost. ``MISSING`` and ``UNREADABLE``\nare both faults and differ in whether the checkpoint is gone or merely\nunreachable right now.\n\nA run whose transcript was deliberately released under a retention policy\nwould be a fourth, non-fault member. It is deliberately absent: no\nproduction seam prunes a checkpoint today, so every absence really is a\nfault, and a member with no producer would let a genuine loss be dismissed\nas intended."
       },
       "ValidationError": {
         "properties": {

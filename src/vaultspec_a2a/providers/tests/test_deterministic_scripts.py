@@ -11,7 +11,7 @@ import asyncio
 from typing import TYPE_CHECKING, Any, cast
 
 import pytest
-from langchain_core.messages import HumanMessage
+from langchain_core.messages import AIMessageChunk, HumanMessage
 from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.graph import END, StateGraph
 from langgraph.types import Command
@@ -28,6 +28,7 @@ from ..deterministic_chat_model import DeterministicResearchAdrChatModel
 from ..factory import ProviderFactory
 
 if TYPE_CHECKING:
+    from collections.abc import AsyncGenerator
     from pathlib import Path
 
     from langchain_core.runnables import RunnableConfig
@@ -159,8 +160,10 @@ async def test_deterministic_permission_pause_resumes_generic_callback() -> None
 
 
 @pytest.mark.asyncio
-async def test_deterministic_cancel_window_propagates_async_cancellation() -> None:
-    """Cancelling an in-flight factory model generation remains cancellation."""
+async def test_deterministic_cancel_window_propagates_non_streaming_cancellation() -> (
+    None
+):
+    """Cancelling an in-flight non-streaming generation remains cancellation."""
     model, _agent = _scenario_model("deterministic-cancel-window")
     task = asyncio.create_task(model.ainvoke([HumanMessage(content="wait")]))
     await asyncio.wait_for(model.wait_for_cancel_window(), timeout=1.0)
@@ -169,3 +172,45 @@ async def test_deterministic_cancel_window_propagates_async_cancellation() -> No
 
     with pytest.raises(asyncio.CancelledError):
         await task
+
+
+@pytest.mark.asyncio
+async def test_deterministic_cancel_window_propagates_streaming_cancellation() -> None:
+    """The factory model's streaming turn stays in flight until cancellation."""
+    model, _agent = _scenario_model("deterministic-cancel-window")
+    stream = model.astream([HumanMessage(content="wait")])
+
+    async def _first_chunk() -> AIMessageChunk:
+        # `anext` is an Awaitable, not a Coroutine, and create_task takes the
+        # latter. Wrapping is the honest bridge between the two.
+        return await anext(stream)
+
+    task = asyncio.create_task(_first_chunk())
+    await asyncio.wait_for(model.wait_for_cancel_window(), timeout=1.0)
+
+    assert not task.done()
+    task.cancel()
+
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+
+@pytest.mark.asyncio
+async def test_deterministic_relay_burst_crosses_replay_window() -> None:
+    """The factory scenario emits real chunks beyond the engine relay ring cap."""
+    model, _agent = _scenario_model("deterministic-relay-burst")
+
+    stream = model.astream([HumanMessage(content="burst")])
+    content_chunks = []
+    async for chunk in stream:
+        if str(chunk.content):
+            content_chunks.append(chunk)
+        if len(content_chunks) == 1100:
+            break
+    # `astream` is typed as an AsyncIterator but is an async generator at
+    # runtime, and this loop breaks early, so the generator is closed explicitly
+    # rather than left for the collector.
+    await cast("AsyncGenerator[AIMessageChunk]", stream).aclose()
+
+    assert len(content_chunks) == 1100
+    assert all(len(str(chunk.content)) == 4096 for chunk in content_chunks)

@@ -50,6 +50,7 @@ class _DeterministicScript(StrEnum):
     PERMISSION_PAUSE = "permission_pause"
     FAILURE = "failure"
     CANCEL_WINDOW = "cancel_window"
+    RELAY_BURST = "relay_burst"
 
 
 # These agents deliberately select a scenario through the same ``AgentConfig``
@@ -61,6 +62,7 @@ _SCRIPT_BY_AGENT_ID: dict[str, _DeterministicScript] = {
     "deterministic-permission-pause": _DeterministicScript.PERMISSION_PAUSE,
     "deterministic-failure": _DeterministicScript.FAILURE,
     "deterministic-cancel-window": _DeterministicScript.CANCEL_WINDOW,
+    "deterministic-relay-burst": _DeterministicScript.RELAY_BURST,
 }
 
 _SCRIPTED_TOOL_CALL_ID = "deterministic-mark-task-complete"
@@ -68,6 +70,8 @@ _SCRIPTED_PERMISSION_OPTIONS: tuple[tuple[str, str], ...] = (
     ("allow_once", "Allow once"),
     ("deny_once", "Deny once"),
 )
+_RELAY_BURST_CHUNKS = 1100
+_RELAY_BURST_CHUNK_BYTES = 4096
 
 # Canonical research_adr worker roles (the authoring contract's
 # RESEARCH_ADR_ROLES), matched as a suffix of the AgentConfig id so both bare
@@ -339,5 +343,25 @@ class DeterministicResearchAdrChatModel(BaseChatModel):
     ) -> AsyncIterator[ChatGenerationChunk]:
         """Yield the resolved role content as a single streaming chunk."""
         del messages, stop, run_manager, kwargs  # interface-required, unused
+        script = _script_of(self.agent_config.id if self.agent_config else None)
+        if script is _DeterministicScript.CANCEL_WINDOW:
+            self._cancel_window_entered.set()
+            await asyncio.Event().wait()
+            raise AssertionError(
+                "deterministic streaming cancellation window unexpectedly closed"
+            )
+        if script is _DeterministicScript.RELAY_BURST:
+            for index in range(_RELAY_BURST_CHUNKS):
+                # One 4 KiB chunk reaches the production aggregator's immediate
+                # flush threshold, so every yield becomes one real progress frame.
+                # Yield control as well so the bounded subscriber queue can drain.
+                prefix = f"{index:04d}:"
+                content = prefix + "r" * (_RELAY_BURST_CHUNK_BYTES - len(prefix))
+                yield ChatGenerationChunk(message=AIMessageChunk(content=content))
+                await asyncio.sleep(0)
+            # Keep the real run open after the burst so a second relay subscriber
+            # can ask for a cursor the resident ring has already evicted.
+            await asyncio.Event().wait()
+            raise AssertionError("deterministic relay burst window unexpectedly closed")
         content = self._content_for_role()
         yield ChatGenerationChunk(message=AIMessageChunk(content=content))

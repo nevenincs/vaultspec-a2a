@@ -1,0 +1,12 @@
+[agent]
+id           = "deterministic-relay-burst"
+display_name = "Deterministic Relay Burst"
+role         = "coder"
+description  = "In-process ProviderFactory scenario that crosses the bounded relay replay window."
+
+[agent.persona]
+system_prompt = "Emit the programmed deterministic relay burst."
+
+[agent.model]
+provider   = "deterministic"
+capability = "mid"

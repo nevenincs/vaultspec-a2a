@@ -29,7 +29,12 @@ from ._acp_types import (
     AcpSessionContext,
     require_workspace_root,
 )
-from ._json_contract import JsonObject, JsonValue
+from ._json_contract import (
+    JsonObject,
+    JsonValue,
+    lenient_json_object,
+    lenient_json_object_list,
+)
 from ._subprocess import attach_process_containment
 from ._subprocess import kill_process_tree as _kill_process_tree
 from .acp_exceptions import AcpErrorCode
@@ -110,20 +115,6 @@ _MAX_TERMINAL_TIMEOUT: float = 300.0
 
 # Valid POSIX environment variable name pattern.
 _ENV_NAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
-
-
-def _json_object(value: JsonValue | None) -> JsonObject:
-    """Return one JSON object or the empty object for malformed input."""
-    return value if isinstance(value, dict) else {}
-
-
-def _json_object_list(value: JsonValue | None) -> list[JsonObject]:
-    """Return only object entries from one untrusted JSON array."""
-    return (
-        [entry for entry in value if isinstance(entry, dict)]
-        if isinstance(value, list)
-        else []
-    )
 
 
 def _required_string(params: JsonObject, field: str) -> str:
@@ -474,11 +465,11 @@ async def on_request_permission(
     config: AcpModelConfig,
 ) -> JsonObject:
     """Handle session/request_permission RPC."""
-    options = _json_object_list(params.get("options"))
-    tool_call = _json_object(params.get("toolCall"))
+    options = lenient_json_object_list(params.get("options"))
+    tool_call = lenient_json_object(params.get("toolCall"))
     name_value = tool_call.get("title")
     name = name_value if isinstance(name_value, str) else "unknown"
-    args = _json_object(tool_call.get("rawInput"))
+    args = lenient_json_object(tool_call.get("rawInput"))
 
     # Diagnostic (R7: tool name + option ids only, never rawInput/payloads):
     # this handler firing means the SDK's canUseTool rung was reached — i.e. no
@@ -743,7 +734,7 @@ async def on_terminal_create(
             if isinstance(extra_env, list):
                 # ACP protocol: env is list[EnvVariable] with name/value keys
                 # Validate env variable names before applying
-                env_entries = _json_object_list(extra_env)
+                env_entries = lenient_json_object_list(extra_env)
                 if len(env_entries) != len(extra_env):
                     raise ValueError("ACP terminal env entries must be objects")
                 validated_env: dict[str, str] = {}

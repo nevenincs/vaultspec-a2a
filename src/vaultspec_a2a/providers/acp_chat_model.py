@@ -75,7 +75,11 @@ from ._acp_types import (
     require_workspace_root,
 )
 from ._cleanup import CleanupStep, run_independent_cleanups
-from ._json_contract import JsonObject, JsonValue
+from ._json_contract import (
+    JsonObject,
+    lenient_json_object,
+    lenient_json_object_list,
+)
 from ._mcp_contract import verify_harness_mcp_contract
 from ._subprocess import kill_process_tree as _kill_process_tree
 from ._subprocess import spawn_acp_process as _spawn_acp_process
@@ -90,20 +94,6 @@ from .gemini_auth import refresh_gemini_token
 __all__ = ["AcpChatModel"]
 
 logger = logging.getLogger(__name__)
-
-
-def _json_object(value: JsonValue | None) -> JsonObject:
-    """Return an object payload or the empty object for malformed fields."""
-    return value if isinstance(value, dict) else {}
-
-
-def _json_object_list(value: JsonValue | None) -> list[JsonObject]:
-    """Return object entries from one protocol array."""
-    return (
-        [entry for entry in value if isinstance(entry, dict)]
-        if isinstance(value, list)
-        else []
-    )
 
 
 def _required_session_id(result: JsonObject, *, operation: str) -> str:
@@ -127,7 +117,7 @@ def _raise_prompt_error(response: JsonObject) -> Never:
     each of them re-deriving it from prose that has already been flattened.
     """
     raw_error = response.get("error")
-    error = _json_object(raw_error)
+    error = lenient_json_object(raw_error)
     code_value = error.get("code")
     code = (
         code_value
@@ -808,7 +798,9 @@ class AcpChatModel(BaseChatModel):
         resp = await asyncio.wait_for(
             futures[rpc_id], timeout=settings.acp_startup_timeout_seconds
         )
-        return _required_session_id(_json_object(resp.get("result")), operation="fork")
+        return _required_session_id(
+            lenient_json_object(resp.get("result")), operation="fork"
+        )
 
     async def list_sessions(self) -> list[JsonObject]:
         """List all sessions."""
@@ -829,7 +821,9 @@ class AcpChatModel(BaseChatModel):
         resp = await asyncio.wait_for(
             futures[rpc_id], timeout=settings.acp_rpc_timeout_seconds
         )
-        return _json_object_list(_json_object(resp.get("result")).get("sessions"))
+        return lenient_json_object_list(
+            lenient_json_object(resp.get("result")).get("sessions")
+        )
 
     async def set_mode(self, mode_id: str) -> JsonObject:
         """Set agent mode."""
@@ -850,7 +844,7 @@ class AcpChatModel(BaseChatModel):
         resp = await asyncio.wait_for(
             futures[rpc_id], timeout=settings.acp_rpc_timeout_seconds
         )
-        return _json_object(resp.get("result"))
+        return lenient_json_object(resp.get("result"))
 
     async def authenticate(self, token: str) -> JsonObject:
         """Authenticate session.

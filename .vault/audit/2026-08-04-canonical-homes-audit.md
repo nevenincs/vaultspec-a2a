@@ -5,7 +5,7 @@ tags:
 date: '2026-08-04'
 modified: '2026-08-04'
 body_schema: 'body-v1'
-body_hash: 'sha256:a10d1043e938818ea8b79b5567eae8946c842645ecfd9974e4b3a48c7501fdba'
+body_hash: 'sha256:71af0585333f087054ed3627e3ff0ba6d492cb10b8117d650bec75ba0ad7b9f0'
 related: []
 ---
 
@@ -3801,3 +3801,83 @@ field. Additive because the broadcast is consumed by a separate repository, so a
 new field is safe where a retyped one is not. The agreement test then compares
 `model_name` against `model_name` - one vocabulary, and an assertion that can
 finally fail for the right reason.
+
+## Method: what actually found these findings
+
+Recorded because it is the campaign's most transferable output. Both lanes that
+worked the hardest clusters reached the same conclusion independently, and it
+contradicts how this campaign was originally framed.
+
+### Counting sites found almost nothing
+
+The question that produced every sharp finding was **"what else could a writer
+have chosen?"** - not "how many sites are there?". Counting is what a converter
+does, and a converter finds only the sites that already look alike. It found none
+of: the guard rows pinned to one member of a set, the names promising narrower
+contracts than their callers relied on, or the docstring asserting a guarantee its
+code lacked.
+
+Corroborating this from the other direction: **every site count handed to a lane
+in this campaign was wrong on first issue.** Seven inventories were materially
+wrong, one by being stale rather than incomplete. A count in a task title is a
+hypothesis, and every brief now says so and requires re-derivation.
+
+### The site left behind is the hardest one, by construction
+
+The pattern hit three times - the vocabulary cluster, the atomic-writer cluster,
+and the earlier hardening helper - and the first framing of it here ("a cluster
+closed one file early") was too generous to the converter. The sharper statement:
+
+> The site left behind was not overlooked. It was the site the home could not yet
+> serve.
+
+A converter working site-by-site converts everything that FITS and leaves exactly
+the case that required the home to GROW. So the residue is not the leftover easy
+work; it is the hardest case in the cluster, and it is guaranteed to be what
+remains. The credential mint is the clean example: it could not pass a Windows
+DACL through a parameter typed as an integer mode, so it kept its own
+implementation, and no amount of care applied site-by-site would have converted
+it.
+
+**The cheap tell, available before any grep:** if the unconverted sites each carry
+a LOCAL WORKAROUND, the home is too narrow - not the callers lazy. Workarounds
+clustered around a canonical home are the shape of a home that does not cover its
+subject. That is the same reading as the lying-name finding, seen from the caller
+side.
+
+### Searching for the domain word instead of the value
+
+A lane sweeping for a wire literal searched the DOMAIN WORD and got back a config
+setting and a route handler - both containing the word, neither being the wire
+literal - and nearly reported a confirmed premise as unconfirmed. The token on the
+wire was the enum's VALUE, and the two are adjacent enough to be indistinguishable
+in a result list.
+
+Recorded as a standing instruction: when checking whether a vocabulary is
+hand-copied, **search the value the enum holds, not the concept it names.** The
+same caution applies to this repository's observed identifier masking in search
+output - a structurally surprising result is verified by reading the lines, not by
+trusting the match.
+
+### Two structural guards were considered and REJECTED, with reasons
+
+Neither rejection is a concession that the rule is unenforceable; both are cases
+where the available guard would have asserted something false.
+
+- **A row pinning the lenient-narrower helper.** It could pin the helper's NAME,
+  which a renamed copy passes - the original weakness that let the duplicate
+  exist - or the SHAPE, which now legitimately occurs at five correctly-DISTINCT
+  sites. Its count would therefore be either meaningless or actively misleading,
+  implying five settled decisions were pending work. A guard that mislabels
+  settled decisions as debt is worse than no guard.
+- **Restating a precondition inside a consolidated reader.** Rejected in favour of
+  ASKING the boundary function that owns the rule. A re-derived predicate is a
+  second declaration that stops agreeing the moment its owner changes, and writing
+  one reads as defensive rigour while being exactly the defect under repair.
+
+### One layering question, settled
+
+Where a vocabulary was shared across layers that must not import upward, the
+resolution was to move the declaration DOWN to the layer where its subject is
+defined, not to import upward from the lower layer. Recorded so the direction is
+not relitigated per cluster.

@@ -5,7 +5,7 @@ tags:
 date: '2026-08-04'
 modified: '2026-08-04'
 body_schema: 'body-v1'
-body_hash: 'sha256:ffe57ac3398ff4d0225451b8d7eca15e25e883cf298a06faf18080dfcbb19f96'
+body_hash: 'sha256:89541cfceac4ac9670f8610a34c809ef451d86e28f67e1b38acfbc1efb4eb1e0'
 related: []
 ---
 
@@ -1227,6 +1227,35 @@ order with evidence is doing the same job as one that reports a false lead
 instead of manufacturing a move, and this campaign has now had both from the same
 source. The orchestrator's instructions have been wrong or stale often enough
 that treating them as provisional is the correct default, not insubordination.
+
+### output-budget-triplicated-with-its-home-already-built | medium | designed, handed over, not started
+
+An output-size budget for discovery subprocesses is declared three times across
+the per-provider catalog modules, identical apart from the error type raised and
+carrying the same limit. The canonical home already exists and already declares
+BOTH seams the shared form needs - the protocol it satisfies and the error
+factory that keeps each lane's message prefix - because the lane that extracted
+the neighbouring single-frame read established that convention. Only the concrete
+class is missing. The stderr drain is duplicated in two of the three on the same
+axis, and with the budget raising whatever the caller's factory produced, the
+shared form catches broadly and re-raises after killing the process tree.
+
+Verified before handover: all three files clean, the triplication present at the
+stated locations, both seams present in the home, and no import cycle blocking
+the shared drain from reaching the tree-kill.
+
+The carve-out is the valuable part. A same-shaped reader in the third module is
+NOT a third copy: it accumulates and returns its bytes because that lane parses
+its own standard output, while the other two DISCARD - which is the entire point
+of a drain, since a noisy child's output must be charged against the budget
+without a megabyte of it being retained. Making the shared form accumulate would
+defeat the purpose it exists for. Sibling, not survivor.
+
+Recorded as designed-not-started because the analysing lane reached the end of
+its context and handed over a complete design rather than beginning a three-file
+production refactor it could not finish. That is the behaviour this campaign
+wants at a context boundary, and it is the third time today a handover has cost
+nothing while a half-landing would have cost a great deal.
 
 ## Recommendations
 

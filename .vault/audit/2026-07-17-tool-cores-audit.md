@@ -851,3 +851,37 @@ Left here with the boundary observed and the candidate named rather than
 asserted. The trace lines are committed, so re-running the test reproduces this
 in 40 seconds.
 
+**RESOLVED (2026-08-04). The eligibility gate WAS the cause; every "it is not"
+above was a reading error of my own logs.**
+
+The refusal record exists. `run commit refused as ineligible` appears exactly
+once in the gateway log for this test. Each earlier check that reported it
+absent was grepping a DIFFERENT pytest temp directory - the suite creates a new
+one per run and I repeatedly read a stale one - so "the gate never fires" was
+never an observation at all. It was a failed lookup reported as a negative
+result, which is worse than an inference, and it invalidated three subsequent
+entries built on it.
+
+The actual chain, all observed in one log:
+
+    commit entered: run_id=run-bogus-reservation
+    commit step: probe_worker
+    run commit refused as ineligible
+
+`probe_worker_health` returns `healthy=False` (it raises nothing - it reports),
+so `evaluate_execution_eligibility` is not satisfied, the gate at
+`api/routes/gateway.py:760` answers 503, and `broker.commit` is never reached -
+which is why no broker verdict was logged and why an unknown reservation never
+gets its 409.
+
+So the ORIGINAL finding was right: eligibility is evaluated before the
+reservation is consulted, and while the worker is unreachable every commit
+refusal is 503 regardless of whether its reservation existed. Whether the
+ADR's "eligibility first" should apply to a stage that consumes no new capacity
+remains the open decision, exactly as first recorded.
+
+The lesson is not "instrument before reasoning" - the instruments were right
+throughout. It is that a grep returning nothing is not evidence of absence until
+you have proven you searched the right file. Five withdrawals here trace to one
+unverified lookup.
+

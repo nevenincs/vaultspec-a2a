@@ -50,7 +50,21 @@ def build_initial_vault_index(
     index: dict[str, list[str]] = {}
     for stage, pattern in VAULT_STAGE_PATTERNS.items():
         resolved = pattern.replace("{tag}", _glob.escape(feature_tag))
-        matches = sorted(workspace_root.glob(resolved))[: domain_config.vault_index_cap]
+        # The TAIL, not the head. Identifiers sort ascending (W01-P01-S01 first),
+        # so truncating from the front kept a feature's OLDEST records and
+        # discarded everything recent - which inverts what a resuming run needs,
+        # and does it silently. Two features in this repository's own vault hold
+        # 130 and 97 execution records against a cap of 50, so this bound is not
+        # hypothetical: those runs were grounding on their first fifty steps.
+        #
+        # The ordering is lexicographic, so recency here is APPROXIMATE: it is
+        # exact across waves and phases, and degrades within a phase once step
+        # numbers pass two digits (S144 sorts before S87). Approximate recency is
+        # strictly better than guaranteed staleness, and a true ordering needs a
+        # numeric key over the canonical identifier segments rather than a
+        # filesystem timestamp, which a checkout rewrites.
+        cap = domain_config.vault_index_cap
+        matches = sorted(workspace_root.glob(resolved))[-cap:]
         if matches:
             index[stage] = [str(m.relative_to(workspace_root)) for m in matches]
     return index

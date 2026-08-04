@@ -51,6 +51,20 @@ _SOURCE_ROOT = Path(__file__).resolve().parents[1]
 # floods the report with functions that merely rhyme.
 _NODE_FLOOR: Final = 40
 
+# Test scaffolding gets a HIGHER floor rather than exemption. This suite covered
+# production only at first, on the theory that a repeated fixture is cheap. That
+# was wrong in the specific way that matters: the largest duplicate group in the
+# whole tree was a pair of ~138-node test fixtures, and more duplicate groups
+# lived under tests/ than under production. Exempting the tier hid the majority
+# of what this project actually had.
+#
+# The floor is higher because test code legitimately repeats more - arrange
+# blocks rhyme, and two tests asserting the same refusal against different routes
+# SHOULD look alike. What this catches is the other thing: a fixture that stands
+# up a server, seats an environment, or drives a state machine, copied wholesale
+# because finding the shared one was harder than retyping it.
+_TEST_NODE_FLOOR: Final = 60
+
 # Groups already understood. Membership is the key rather than the body hash so
 # that editing an accepted duplicate does not spuriously fail this suite; what
 # fails is a NEW function joining one of these shapes, or a new shape entirely.
@@ -101,6 +115,40 @@ _ACCEPTED: Final[tuple[frozenset[str], ...]] = (
     ),
 )
 
+# Reviewed groups in the TEST tier, held separately so the two floors stay
+# legible. The bar for accepting one here is the same: a reason, not a recording.
+_ACCEPTED_TESTS: Final[tuple[frozenset[str], ...]] = (
+    # QUEUED, not endorsed. Investigated during the sweep and found safe to
+    # share - both build against an unreachable bridge and an in-memory
+    # checkpointer, so the live file's live-ness is not in this helper - but it
+    # spans two packages and was deferred rather than done.
+    frozenset(
+        {
+            "control/tests/test_verdict_subscriber.py::_install_receipt_graph",
+            "control/tests/test_verdict_subscriber_live.py::_install_receipt_graph",
+        }
+    ),
+    # Two tests of ONE endpoint differing in whether the aggregator is the only
+    # thing wired. The bodies rhyme because the arrangement does; collapsing
+    # them into one parametrized case would hide which configuration failed.
+    frozenset(
+        {
+            "api/tests/test_internal.py::test_event_with_aggregator_only_returns_ok",
+            "api/tests/test_internal.py::test_valid_event_returns_ok",
+        }
+    ),
+    # The same refusal asserted against two different route families. This is
+    # the shape test code is SUPPOSED to repeat: each names the surface it
+    # guards, and sharing them would leave one route's protection asserted
+    # somewhere that does not mention that route.
+    frozenset(
+        {
+            "api/tests/test_product_api_auth.py::test_product_routes_reject_unauthenticated",
+            "api/tests/test_v1_attach_whitelist.py::test_whitelist_rejects_unauthenticated",
+        }
+    ),
+)
+
 
 class _EraseIdentifiers(ast.NodeTransformer):
     """Rewrite every name, argument, and attribute to one placeholder.
@@ -126,8 +174,10 @@ class _EraseIdentifiers(ast.NodeTransformer):
         )
 
 
-def _structure_hash(function: ast.FunctionDef | ast.AsyncFunctionDef) -> str | None:
-    """Hash *function*'s body shape, or None when it is below the size floor."""
+def _structure_hash(
+    function: ast.FunctionDef | ast.AsyncFunctionDef, floor: int
+) -> str | None:
+    """Hash *function*'s body shape, or None when it is below *floor*."""
     body = [
         statement
         for statement in function.body
@@ -140,7 +190,7 @@ def _structure_hash(function: ast.FunctionDef | ast.AsyncFunctionDef) -> str | N
     if not body:
         return None
     module = ast.Module(body=body, type_ignores=[])
-    if sum(1 for _ in ast.walk(module)) < _NODE_FLOOR:
+    if sum(1 for _ in ast.walk(module)) < floor:
         return None
     erased = _EraseIdentifiers().visit(module)
     ast.fix_missing_locations(erased)
@@ -153,12 +203,12 @@ def _is_test_module(path: Path) -> bool:
     return "tests" in parts or "testing" in parts or path.name.startswith("test_")
 
 
-def _structural_groups() -> list[set[str]]:
-    """Return every set of production functions sharing one body shape."""
+def _structural_groups(*, tests: bool, floor: int) -> list[set[str]]:
+    """Return every set of same-tier functions sharing one body shape."""
     by_shape: dict[str, set[str]] = defaultdict(set)
     for path in sorted(_SOURCE_ROOT.rglob("*.py")):
         relative = path.relative_to(_SOURCE_ROOT)
-        if _is_test_module(relative):
+        if _is_test_module(relative) is not tests:
             continue
         try:
             tree = ast.parse(path.read_text(encoding="utf-8", errors="ignore"))
@@ -166,18 +216,18 @@ def _structural_groups() -> list[set[str]]:
             continue
         for node in ast.walk(tree):
             if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
-                shape = _structure_hash(node)
+                shape = _structure_hash(node, floor)
                 if shape is not None:
                     by_shape[shape].add(f"{relative.as_posix()}::{node.name}")
     return [members for members in by_shape.values() if len(members) > 1]
 
 
-def test_no_unreviewed_structural_duplicate() -> None:
-    """Every set of identically-shaped functions must be a reviewed one."""
+def _assert_reviewed(
+    groups: list[set[str]], accepted: tuple[frozenset[str], ...], allowlist: str
+) -> None:
+    """Fail naming any group that is not a subset of a reviewed one."""
     unreviewed = [
-        group
-        for group in _structural_groups()
-        if not any(group <= accepted for accepted in _ACCEPTED)
+        group for group in groups if not any(group <= entry for entry in accepted)
     ]
     assert not unreviewed, (
         "These functions have identical bodies once every identifier is erased, "
@@ -188,7 +238,28 @@ def test_no_unreviewed_structural_duplicate() -> None:
         )
         + "\n\nConsume the existing one instead of keeping the copy. If they are "
         "genuinely distinct - the same shape applied to different tables, "
-        "columns, or event kinds is a real case - add the group to _ACCEPTED "
+        f"columns, or event kinds is a real case - add the group to {allowlist} "
         "with a sentence saying why, so the judgement is visible to whoever "
         "reads this next."
+    )
+
+
+def test_no_unreviewed_structural_duplicate() -> None:
+    """Every set of identically-shaped production functions must be reviewed."""
+    _assert_reviewed(
+        _structural_groups(tests=False, floor=_NODE_FLOOR), _ACCEPTED, "_ACCEPTED"
+    )
+
+
+def test_no_unreviewed_structural_duplicate_in_tests() -> None:
+    """Substantial test scaffolding must not be copied either.
+
+    Separate from the production case because the floor differs and because a
+    failure here has a different remedy: shared test mechanism belongs in
+    ``testing/``, not in whichever test module happened to need it first.
+    """
+    _assert_reviewed(
+        _structural_groups(tests=True, floor=_TEST_NODE_FLOOR),
+        _ACCEPTED_TESTS,
+        "_ACCEPTED_TESTS",
     )

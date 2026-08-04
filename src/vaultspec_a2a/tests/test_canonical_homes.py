@@ -98,6 +98,17 @@ def _declaring_modules(pattern: str) -> list[str]:
             "silence where an invariant should have shouted.",
         ),
         (
+            "settings-attribute override for tests",
+            r"def _settings_override\(|class _SettingsOverride",
+            0,
+            "testing/environment.py, as settings_override",
+            "Nine modules declared this, six as a function and three as a class. "
+            "It is deliberately SEPARATE from the environment swap even though "
+            "the two look alike: one mutates os.environ, the other mutates the "
+            "already-constructed settings singleton, and a test reaching for the "
+            "wrong one silently no-ops instead of failing.",
+        ),
+        (
             "process-tree kill escalation",
             r'"taskkill",',
             1,

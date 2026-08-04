@@ -16,7 +16,7 @@ from typing import TYPE_CHECKING, Any
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
 from ..graph.enums import AgentLifecycleState, Model, PermissionType, Provider
-from .enums import RepairStatus, ThreadStatus, TranscriptAvailability
+from .enums import TERMINAL_STATUSES, RepairStatus, ThreadStatus, TranscriptAvailability
 from .models import PlanEntry
 
 if TYPE_CHECKING:
@@ -95,11 +95,11 @@ LOCALLY_RESPONDABLE_PAUSE_CAUSES: frozenset[str] = PLAN_APPROVAL_PAUSE_CAUSES - 
     "document_approval_request"
 }
 
-# Map aggregator outcome strings to ThreadStatus enum values.
+# Map aggregator outcome strings to ThreadStatus enum values. Derived from the
+# TERMINAL_STATUSES authority (thread/enums.py) rather than restated, so a
+# status added there cannot silently miss this map.
 TERMINAL_STATUS_MAP: dict[str, str] = {
-    ThreadStatus.COMPLETED: ThreadStatus.COMPLETED,
-    ThreadStatus.FAILED: ThreadStatus.FAILED,
-    ThreadStatus.CANCELLED: ThreadStatus.CANCELLED,
+    status.value: status.value for status in TERMINAL_STATUSES
 }
 
 # Checkpoint error → repair status mapping.  Used by snapshot replay

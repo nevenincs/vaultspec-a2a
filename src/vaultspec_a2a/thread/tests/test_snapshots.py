@@ -8,7 +8,7 @@ from datetime import UTC, datetime
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
 from ...graph.enums import AgentLifecycleState, Model, Provider
-from ..enums import RepairStatus
+from ..enums import TERMINAL_STATUSES, RepairStatus
 from ..models import PlanEntry
 from ..snapshots import (
     CHECKPOINT_ERROR_REPAIR_MAP,
@@ -417,7 +417,7 @@ def test_plan_approval_pause_causes_contains_both_variants() -> None:
 
 
 def test_terminal_status_map_keys() -> None:
-    assert set(TERMINAL_STATUS_MAP) == {"completed", "failed", "cancelled"}
+    assert set(TERMINAL_STATUS_MAP) == {status.value for status in TERMINAL_STATUSES}
 
 
 # ---------------------------------------------------------------------------

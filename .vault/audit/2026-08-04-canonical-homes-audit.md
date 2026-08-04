@@ -2279,3 +2279,22 @@ policy correctly separated, matching this campaign's standing rule.
 selection mechanism the `correction-selection-cluster-is-eleven-sites` finding
 covers in depth; nothing new to add there. No new duplicate declaration was
 found in this pass beyond the two re-verified findings above.
+
+### alembic-version-reader-restated-across-a-package-boundary | low | mechanical only, recorded not actioned
+
+`_read_alembic_version` in `src/vaultspec_a2a/database/compatibility.py` and
+`_read_revision` in `src/vaultspec_a2a/desktop/migration.py` both open the
+target SQLite file directly with the stdlib driver, query `SELECT version_num
+FROM alembic_version`, and treat an `OperationalError` whose message contains
+"no such table" as "no revision" rather than a fault - the same three-part
+idiom typed out twice. The two differ only in what the caller needs: the
+desktop module opens for read-write (staged migration inspects state before
+mutating) and takes the first `fetchone()` row, while the compatibility module
+opens strictly read-only via a `?mode=ro` URI (ordinary desktop boot must never
+even attempt a write) and reads via `fetchall()`. Verdict DUPLICATE on the
+mechanism only - the connection-mode difference is a real, load-bearing
+distinction, not accidental drift, matching the same read-only-versus-writable
+split this audit already protects for `checkpoint_pragmas()`'s callers.
+Recorded rather than actioned: `desktop/` is a different package outside this
+sweep's scope, and a shared helper would need a home neither module obviously
+owns without crossing that boundary - a call for whoever holds both sides.

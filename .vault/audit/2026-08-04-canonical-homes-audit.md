@@ -3615,3 +3615,42 @@ Recommendation is the first, on the grounding that a disclosure surface should
 report what happened rather than the tier it was requested at - but it is the
 owner's call, and it needs the frozen-assignment disclosure contract rather than
 this campaign.
+
+### correction-the-tier-field-is-vestigial-not-merely-mismatched | critical | Supersedes the recommendation above: the capability field cannot hold a catalog name, and on the frozen path it is hardcoded to None for every run
+
+The preceding entry's diagnosis stands but its RECOMMENDATION was wrong and is
+withdrawn. It proposed publishing the concrete model name in the existing
+`model` field. That is not a contract change, it is a type violation:
+`graph/enums.py::Model` is a four-value `StrEnum` (`low`, `mid`, `high`, `max`)
+and `api/schemas/events.py::AgentSummary` types the wire field as
+`Model | None`. A compound catalog identifier such as `mock-high` cannot be
+carried there at all.
+
+Two facts sharpen the diagnosis beyond "the name is not passed":
+
+- **Capability is hardcoded, not merely absent.** `_resolve_model_for_worker`'s
+  frozen branch ends `return model, provider, None` - an explicit `None`, not
+  missing data and not an artefact of the in-process lane. Since explicit
+  selection is now required at every run start, that branch is taken for EVERY
+  worker, so the capability the node metadata publishes is `None` on every
+  production run.
+- **The tier field is therefore vestigial on the wire, not just mismatched.**
+  `AgentSummary.model` is now permanently `None` for frozen runs, and its own
+  docstring states the field is optional only because "an agent can be observed
+  before its model assignment resolves" - an invariant that is now false
+  forever rather than transiently. A field documented as resolving has stopped
+  resolving.
+
+That also separates the two fixes cleanly, which the withdrawn recommendation
+blurred. Populating a capability tier for frozen runs would still never make
+`"mock-high" == "high"` true, so closing the disclosure gap and making the
+agreement assertion pass are genuinely different changes, not one change viewed
+two ways.
+
+The corrected fix is ADDITIVE: carry the concrete `model_name` that
+`_parse_catalog_preferences` already extracts through the resolver's return,
+into `_agent_node_metadata`, and onto `AgentData` and `AgentSummary` as its own
+field. Additive because the broadcast is consumed by a separate repository, so a
+new field is safe where a retyped one is not. The agreement test then compares
+`model_name` against `model_name` - one vocabulary, and an assertion that can
+finally fail for the right reason.

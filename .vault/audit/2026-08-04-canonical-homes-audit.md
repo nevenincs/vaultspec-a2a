@@ -5,7 +5,7 @@ tags:
 date: '2026-08-04'
 modified: '2026-08-04'
 body_schema: 'body-v1'
-body_hash: 'sha256:61a028098766a2e9b4ee11969bbafe2804f8c3e564a12f5318391b92b8dc3703'
+body_hash: 'sha256:ade2602ce1edc59c8d08e654451bfa2ca003ff05bf849cc404a8728ca6b38403'
 related: []
 ---
 
@@ -5695,3 +5695,69 @@ Recorded also for a smaller reason worth stating: retiring the option cap while
 leaving these makes three files visibly inconsistent - one imported public bound
 sitting beside two private shadows. That inconsistency is an improvement over
 hidden agreement, because it is now discoverable by reading a single file.
+
+## Comprehensive sweep: the structural axis
+
+The campaign so far worked a pre-inventoried backlog. This section opens the
+comprehensive drive: six read-only semantic sweeps partitioned across all
+twenty-one production packages (240 modules, ~78k lines), plus a structural scan
+that finds what semantic search cannot.
+
+### the-structural-axis-finds-what-meaning-search-cannot | high | method, and its first result
+
+Semantic search finds similar MEANING. It does not reliably find identical SHAPE
+under different names, because a renamed clone reads as a different concept to an
+embedding just as it does to a grep.
+
+The complementary scan: parse every production module, erase every identifier,
+attribute and literal spelling from each function body, hash the remaining
+skeleton, and group the collisions. Two functions with the same skeleton did the
+same things in the same order regardless of what anything was called.
+
+Run over 240 modules and 1766 functions: **47 clone groups**, of which several
+cross package boundaries. It obeys the campaign's own scan rules - reads bytes so
+each file's encoding declaration is honoured, and asserts visited-file and
+function-count floors so a scan that died partway cannot report a clean tree.
+
+Its first result is one no semantic query had surfaced in a full day of sweeping,
+below.
+
+### the-string-list-coercion-the-home-does-not-cover | high | DUPLICATE, plus two DISTINCT
+
+The untrusted-JSON coercion home exports a mapping coercer, a list coercer and an
+integer coercer. It does **not** cover a list of strings. Four sites supply that
+gap independently, and reading them separates one duplicate from two contract
+differences that a count would have fused.
+
+**The duplicate.** Two sibling modules in the SAME package each declare a private
+adapter under the IDENTICAL constant name, with the same strict-validate body.
+One returns `None` on failure; the other returns an empty list and additionally
+drops empty strings. That difference is real but small, and neither is entitled to
+its own declaration of the mechanism.
+
+The tell is decisive: **one of those modules already imports the coercion home and
+calls it four times** before declaring its own sibling. This is the third instance
+in this campaign of knowledge present and not reached for - the same shape as a
+provider module that called a shared narrower four times and then inlined the
+identical check on the next field.
+
+So the home is TOO NARROW, not the callers lazy - the exact tell already recorded.
+It should grow a string-list coercer, with the empty-filtering as an explicit
+argument rather than a second function.
+
+**Two sites that must NOT be folded in.**
+
+- A provider catalog variant RAISES in its own protocol dialect, takes an item
+  limit, and returns a tuple. That is the ruling already settled elsewhere in this
+  campaign: a lane keeps its error MAPPING, only the threshold is shared. Folding
+  it in would replace a dialect refusal with a silent empty result.
+- A schema-normalisation variant is LENIENT where the others are STRICT: it
+  accepts a mixed list and keeps the string members, filtered against an exclusion
+  set, where the adapters reject the whole value. Strict-reject and lenient-filter
+  are opposite postures toward malformed input, and merging them would silently
+  admit data one caller deliberately refuses.
+
+Recorded together because the group is the campaign's thesis in miniature: four
+sites, one number of "occurrences", and three different right answers. A count
+returns four. Reading returns one duplicate, one dialect boundary and one posture
+boundary.

@@ -5,7 +5,7 @@ tags:
 date: '2026-08-04'
 modified: '2026-08-04'
 body_schema: 'body-v1'
-body_hash: 'sha256:9c8208959dabfb94315a0676c1c3877deae19e6cc5b451bd28e516fbdba83454'
+body_hash: 'sha256:23e2db5a4914a7b80d3c3b6e7f7c8693ab36afc3acb38c3645cb56ec3e5cb163'
 related: []
 ---
 
@@ -4687,3 +4687,95 @@ earlier should be read as a consequence of it rather than as the rule itself.
 Recorded high because it revises a method claim this audit had already stated as
 settled, and because the failure it describes is invisible: a compromised control
 produces a green suite and a satisfied reviewer.
+
+### the-sensitivity-probe-preserved-with-its-caveats | critical | reproduction for the allowlist finding
+
+The allowlist finding was recorded on the strength of its output, and its
+reproduction lived in a session scratchpad that would not survive. Preserved here
+verbatim, with the author's own caveats, because a result nobody can re-run is the
+same "proof nobody executed" problem this audit recorded when a closure grep
+turned out not to reproduce.
+
+```python
+"""Sensitivity: does the committed content test FAIL when the catalog key strands?"""
+
+from vaultspec_a2a.graph.enums import ServerEventType
+from vaultspec_a2a.streaming import sse_frames
+
+CATALOG = sse_frames._PROGRESS_CATALOG
+entry = CATALOG.pop(ServerEventType.HEARTBEAT)
+
+# The stranding: entry still present, keyed by the member NAME rather than its
+# value -- what inheriting Enum.__hash__ (or a hand-typo) would produce.
+CATALOG["HEARTBEAT"] = entry
+
+projected = sse_frames.enforce_progress_allowlist(
+    {"type": ServerEventType.HEARTBEAT.value, "server_uptime_seconds": 99.5}
+)
+print("stranded-key projection :", dict(projected))
+
+raw = sse_frames.encode_sse_frame(
+    {"type": ServerEventType.HEARTBEAT.value, "server_uptime_seconds": 42.5},
+    event=ServerEventType.HEARTBEAT,
+    thread_id="t-probe",
+)
+print("stranded-key frame      :", raw.decode().strip().replace("\n", " | "))
+
+type_still_right = b'"type":"heartbeat"' in raw
+content_lost = "server_uptime_seconds" not in projected
+print(f"frame still emitted, type still correct : {type_still_right}")
+print(f"payload field SILENTLY dropped          : {content_lost}")
+```
+
+Run from the repository root with the project environment active. It imports the
+package and nothing else - no fixture, no conftest, no path dependency.
+
+**Author's caveats, none edited out:**
+
+1. It mutates module global state and never restores it, so it would corrupt every
+   subsequent test in a shared session. That is why it is a probe and not a test.
+2. It reaches into a private catalog name deliberately - the point is to break the
+   lookup from the inside - and will break if that module is refactored.
+3. The two printed measurements read DIFFERENT objects: the type check reads the
+   encoded frame, the content check reads the direct projection. They agree here,
+   but the pairing is loose; the honest reading is that the encoded frame
+   independently shows the same loss in its own output line.
+
+### correction-the-sensitivity-result-is-an-inference | high | downgrades a claim recorded above
+
+The allowlist entry states that "the PREVIOUS assertion passes against that broken
+case, and the replacement fails". The probe's author flags that this is an
+INFERENCE, not a direct observation, and the correction is accepted.
+
+What the probe demonstrates is the MECHANISM: with the key stranded, the frame is
+emitted, its type is correct, and the payload field is silently dropped. It does
+not itself execute the committed test under that state.
+
+The inference is sound - the committed test asserts the uptime value on the
+decoded frame, which is exactly what vanishes - but sound inference and direct
+observation are different evidentiary grades, and this audit has spent the session
+insisting on that distinction from other people's work. The finding stands at
+critical on the mechanism, which IS directly observed. The claim about the two
+assertions' relative sensitivity is downgraded to a reasoned consequence.
+
+Recorded because the author volunteered a weakening of their own result that
+nobody had asked for and nobody would have detected - the same direction every
+correction in this campaign has run.
+
+### a-guard-that-pinned-a-literal-in-place | medium | guard rejected for the right reason
+
+The permission-cap cluster carried a guard that asserted the literal `[:4096]`
+appeared in the durable writer's SOURCE TEXT. It was replaced rather than
+retargeted.
+
+It could only observe SPELLING, never behaviour: it passed for a writer that
+truncated at the right width by coincidence and for one that truncated correctly
+while spelling it differently, and it actively OBSTRUCTED the fix - the guard's
+own success condition was the literal whose removal was the entire point.
+
+This is the third guard this campaign has examined and the third to fail the same
+test: a row pinned to a helper's NAME that a rename defeats, a row pinned to a
+SHAPE occurring at five legitimately-distinct sites, and now a row pinned to a
+literal's TEXT. Guards that assert an invariant are the campaign's best evidence;
+guards that assert a spelling are debt wearing a guard's clothes, and this one had
+become an obstacle to its own subject.

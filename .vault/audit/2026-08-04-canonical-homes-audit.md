@@ -1784,3 +1784,38 @@ call sites pick it up by importing the function and this one does not, silently,
 because it was never wired to notice. The fix is small: `_clear_checkpoint_store`
 resolving its engine's connect listener from `checkpoint_pragmas()` instead of
 `_apply_sqlite_pragmas`, the same way the three canonical writers already do.
+
+### correction-stdio-json-rpc-count-is-four-not-two | medium | the same mechanism recurs a second time, narrower
+
+Extends `stdio-json-rpc-client-reimplemented-for-codex` rather than replacing
+it; that entry's verdict and recommended shape both stand. A second, narrower
+pair of the identical mechanism was found in the catalog-discovery lane, sitting
+beside the already-recorded stderr-metering triplication
+(`catalog-discovery-output-budget-triplicated`) in the same files.
+`src/vaultspec_a2a/providers/acp_catalog.py`'s `_request`/`_read_response` and
+`src/vaultspec_a2a/providers/codex_catalog.py`'s `_request`/`_read_response` are
+near byte-identical: write a JSON-RPC frame plus newline to stdin and drain,
+read stdout lines up to a bounded frame count matching the request id, raise a
+module-local protocol error on an `error` field or a non-object `result`, and
+budget every line's bytes through the same `_OutputBudget`. `_cancel` in both
+files is the identical two-line cancel-and-suppress helper, word for word. This
+is a ONE-SHOT variant of the mechanism (single in-flight request per call, no
+pending-id map, no notification stream) rather than the long-lived multiplexed
+session variant the parent entry describes, which is why it was not folded into
+that entry directly - but it is the same primitive at smaller scope, and the
+same ACP/Codex axis. The count across the package is therefore four
+independent hand-rollings of one mechanism, two long-lived (the turn-driving
+session in `_acp_protocol.py`/`_acp_session.py` and `codex_chat_model.py`'s
+`_CodexAppServerClient`) and two one-shot (`acp_catalog.py` and
+`codex_catalog.py`'s discovery probes), not two. A consolidated low-level
+client should offer both call shapes - fire a request and await one matching
+frame, or multiplex many in flight against a pending map - since the discovery
+probes have no use for session bookkeeping they would otherwise have to carry
+and ignore.
+
+Not established: whether `kimi_catalog.py` and `openai_catalog.py`, the other
+two catalog modules, carry a fifth and sixth variant. `kimi_catalog.py` reads
+`catalog_from_provider_list`/`_read_bounded` rather than `_request`/
+`_read_response`, and `openai_catalog.py` calls out to an HTTP models endpoint
+rather than a subprocess at all, so neither was assumed to match on name alone
+- confirming or ruling out either needs a closer read this sweep did not reach.

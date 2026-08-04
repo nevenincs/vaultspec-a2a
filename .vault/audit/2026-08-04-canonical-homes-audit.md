@@ -3461,3 +3461,61 @@ Recorded so they stay visible rather than becoming debt nobody named:
 - The `desktop_tests/test_runtime_singleton.py` group was truncated in the scan
   output and its partner could not be re-derived by search. It needs a fresh
   structural pass rather than a guess; the standing guard will surface it.
+
+### served-lane-selection-fixed-and-the-inventory-that-was-wrong | critical | The lane substitution is closed, and the site that caused it was not among the three the triage named
+
+Closes the selection-helper finding above, with two corrections to that entry
+worth more than the fix itself.
+
+**The named inventory was wrong in both directions.** The triage listed
+`test_real_worker_run_completion.py` as a third copy; grep for the exact symbol
+shows it has none. Its failure came from a FOURTH site nobody had listed -
+`acceptance/_harness.py::CertifiedGateway._resolved_run_fields` - which every
+`acceptance/tests` test and both certified service tests reach through the
+shared gateway fixture. A triage list assembled from a structural scan and a
+reading of three files missed the site with the widest blast radius, because
+that site is not a copy of the named helper at all: it is the same MISTAKE made
+independently. Deduplication finds copies; it does not find a shared error
+reached by different routes.
+
+**One copy was already correct by coincidence.** `test_clarification_loop_stitched.py`
+pins the deterministic lane, which is also what registry order returns first
+when both in-process lanes are served, so its missing preference produced the
+right answer every time. It agreed by upkeep, not by declaration - the same
+pattern this audit flagged for the reviewer verdict constants - and a change to
+registry order or to that preset would have broken it silently.
+
+**Layer verdict, settled from source rather than assumed.** The defect is in
+the callers. `testing/catalog_selection.py` declares in its own docstring that
+it owns the MECHANISM and that WHICH lane is the caller's decision;
+`in_process_selection` documents its fallback as intentional; and
+`providers/in_process_catalog.py`, the code that actually serves, has no concept
+of team presets, so it cannot enforce a binding it cannot see. The single
+caller that was already passing a preference demonstrates the intended pattern.
+Fixing the eligibility layer would have moved policy into a module that
+deliberately refuses to hold it.
+
+`_preset_in_process_provider` is promoted from one test harness into
+`testing/catalog_selection.py` as `preset_in_process_provider`, now that four
+callers across three tiers need it.
+
+### frozen-and-executed-model-disagree-independently-of-lane | high | The dispatch agreement test fails on model, not provider, and always did - a separate defect the lane fix does not touch
+
+`test_dispatch_assignment_agreement.py` still fails after the lane fix, and
+re-reading the evidence shows it was never the lane bug: `provider` agreed
+between the frozen assignment and the executed agent in every run, before
+(deterministic/deterministic) and after (mock/mock). The only field that ever
+disagreed is `model` - the executed agent reads back `None` where the frozen
+assignment names a concrete value such as `mock-high`.
+
+Traced one level and stopped deliberately: `graph/compiler.py::_model_assignment_metadata`
+renders `model` as a bare CAPABILITY tier (e.g. `mid`) or an empty string, and
+`thread/snapshots.py::build_agent_descriptor` then passes it through
+`coerce_model()`. Two readings remain open and they have opposite fixes -
+either capability is genuinely unset for in-process pipeline nodes at compile
+time, which is a real gap in the frozen-assignment contract, or the test is
+comparing a compound catalog `model_name` against a bare capability tier, which
+means two vocabularies were never meant to match and the assertion is wrong.
+
+Recorded rather than guessed. Deciding it needs the frozen-assignment
+disclosure contract, not this campaign.

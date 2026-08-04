@@ -4271,3 +4271,40 @@ remove: a single canonical home whose guarantee depends on which branch you land
 in, discoverable only by reading the implementation. A caller reasoning from the
 function's name and docstring cannot know which posture it gets.
 
+
+### structural-duplication-is-exhausted-and-that-bounds-what-is-left | medium | A scan at less than half the standing floor over the never-swept packages returned seven groups, every one of them correct design
+
+The standing guard runs at a forty-node floor, which it documents as
+deliberately hiding small copies. That leaves an obvious question the campaign
+had not answered: what is under the floor in the packages the sweep never
+targeted directly?
+
+Scanned `api/routes`, `api/schemas`, `graph`, `streaming`, `thread`, `team`,
+`ipc`, `context`, `mcp`, and `tools` at a floor of EIGHTEEN. Seven groups, and
+none is a defect:
+
+- Two are already allowlisted with reasons (the lazy-import shim, the debounced
+  broadcast pair).
+- `coerce_model`/`coerce_provider` and `_bool_field`/`_string_field` are the
+  same shape applied to different enums and different types in one module - the
+  parametrize-or-name-it trade-off the allowlist already documents, resolved in
+  favour of naming.
+- The remaining three are `streaming/aggregator.py` delegators. That module is a
+  FACADE: every method forwards one line to a sub-manager. The repeated shape is
+  the architecture this project mandates for sub-modules, correctly implemented.
+  A structural scan cannot distinguish a facade from a copy, because at the AST
+  level they are the same thing.
+
+The useful conclusion is a BOUND, not a clean bill of health. Structural
+duplication above eighteen nodes is now exhausted tree-wide: every surviving
+group is either reviewed or is a pattern the project deliberately requires.
+Whatever fragmentation remains is therefore NOT copy-shaped, and no amount of
+further scanning will surface it.
+
+That is consistent with what this campaign's most consequential findings looked
+like. The lane-substitution defect was four sites making one mistake by
+different routes with no shared shape; the disclosure gap was a value discarded
+rather than duplicated. Neither would have appeared in any structural scan at
+any floor. Remaining effort belongs on semantic search for concepts answered
+independently, and on divergence between sites that already agree in shape -
+not on finding more copies.

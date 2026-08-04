@@ -764,3 +764,119 @@ DURING the campaign, by a caller who needed the concept and reached for the
 nearest shape rather than the canonical home. That is the same mechanism the
 inventory attributes to the older clusters, which suggests the rule is not yet
 enforceable enough to bind a writer working at speed.
+
+### compile-one-worker-node-restated-per-topology | medium | one compile step, four independent copies inside one file
+
+`src/vaultspec_a2a/graph/compiler.py` already extracts the diverge/fan-out
+mechanism into a shared `_wire_diverge_stage` helper and says so in its own
+docstring - proof the file knows how to factor a repeated compile step when it
+does. No equivalent exists for the much more frequently repeated step: resolve
+a worker's model via `_resolve_model_for_worker`, compose its persona via
+`_composed_worker_prompt`, build the node via `create_worker_node` with an
+identical nine-keyword argument list, then register it on the builder with
+`_agent_node_metadata` and `_NODE_RETRY_POLICY`. `_compile_star`,
+`_compile_pipeline`, and `_compile_pipeline_loop` each write that block out in
+full, and each also repeats the adjoining mount-node insertion verbatim -
+`create_mount_node(workspace_root, task_queue_port)` bound to
+`f"mount_{agent_cfg.id}"`, registered, and edged to the worker - differing only
+in whether the mount id is computed before or after `add_node` and in
+`_compile_pipeline_loop`'s one extra line wrapping the loop node via
+`_wrap_loop_node`. `_compile_research_adr` restates the worker half of the same
+step a fourth way, six more times over (synthesis, research_review, adr_author,
+adr_review, plan_author, plan_review), each a hand-written
+`builder.add_node(_RA_X, create_worker_node(...), retry_policy=_NODE_RETRY_POLICY)`
+with no mount node and `harness_mcp_servers` composed in instead.
+
+Verdict DUPLICATE on the mechanism, confirmed by grep: no private helper named
+anything like `_compile_worker_node` exists anywhere in the file, and the
+argument list to `create_worker_node` was checked call site by call site rather
+than assumed. The policy that must stay explicit per call site is real and
+three-way: whether a mount node is inserted (star and pipeline/pipeline_loop
+yes, research_adr no, composing harness servers instead), how the compiled node
+is edged onward (back to the supervisor, into the next pipeline stage, into the
+loop's conditional edge, or into a fixed document-phase successor), and whether
+the node is loop-wrapped. None of those three axes is reason to keep the
+resolve-compose-build-register step itself typed out four times: a shared
+helper returning the built node (or the node plus its mount id) and leaving
+insertion/edging to the caller would cut roughly eighty lines of near-identical
+code from the file's already-largest module and remove the risk this audit
+keeps finding elsewhere under different names - that `create_worker_node`'s
+argument list, `_agent_node_metadata`, and `_NODE_RETRY_POLICY` are currently
+kept in agreement across four call sites by upkeep, not by construction.
+
+### domain-event-vocabulary-restated-across-two-catalogs | high | the closed event set is authored twice, with different failure postures on drift
+
+`src/vaultspec_a2a/ipc/serializers.py` enumerates the eleven `DomainEvent`
+subclasses declared in `graph/events.py` (`AgentStatus`, `ArtifactUpdate`,
+`ClarificationPending`, `ErrorOccurred`, `MessageChunk`, `PermissionRequest`,
+`PlanUpdate`, `TeamStatus`, `ThoughtChunk`, `ToolCallStart`, `ToolCallUpdate`)
+in a `match` statement that tags each with its stable wire-type string for the
+worker-to-gateway IPC relay. `src/vaultspec_a2a/api/event_adapter.py`
+enumerates the identical eleven-member set in its own independent `match`
+statement, `domain_to_wire`, which projects each event onto a distinct
+Pydantic wire model for in-process API streaming. Neither Python's structural
+pattern matching nor the project's type checker enforces exhaustiveness across
+a dataclass union, so nothing statically ties the two enumerations together;
+they agree today purely because both were kept in sync by hand. The drift
+postures differ and one is dangerous: `event_adapter.py`'s catch-all raises
+`TypeError` for an event neither match handles, a loud failure a test will
+catch; `ipc/serializers.py`'s catch-all returns `None`, which the module's own
+docstring names as the exact mechanism that shipped `ClarificationPending`'s
+wire tag undeliverable once already - a relayed event crosses the IPC boundary
+with no `type` at all, is stripped to the always-safe identity keys on the far
+side, and nothing raises, because the loss happens after the in-process
+emitter has already returned. Verdict DUPLICATE on the vocabulary: a third
+domain event added to `graph/events.py` and threaded into only one of the two
+match statements silently loses either its API wire shape or its IPC-relayed
+type, and the silent side has already burned the project once. The fix is not
+to merge the two match statements - they produce genuinely different outputs,
+a type tag versus a full wire model - but to derive both from one
+authoritative enumeration of the union's members, or add an exhaustiveness
+assertion to each catch-all, so a missed case fails a type check rather than a
+production relay.
+
+### per-run-store-mechanism-duplicated | medium | two worker-scoped stores share one shape, declared twice
+
+`src/vaultspec_a2a/worker/token_store.py`'s `RunTokenStore` and
+`src/vaultspec_a2a/worker/catalog_store.py`'s `RunCatalogStore` are two
+independent declarations of the identical mechanism: an in-memory
+`dict[str, T]` keyed by thread id, with `register` (a no-op on `None`), a
+read accessor, `has`, `active_run_count`, an idempotent `drop`, and a
+`__repr__` that reports only the active-run count so neither store ever
+widens a log line. Both docstrings say so explicitly - `RunCatalogStore`'s
+states it mirrors `RunTokenStore`'s lifecycle, and its own test class carries
+the same description. The only real variance is the value type and its
+accessors: `RunTokenStore` adds a role-scoped `actor_token` reader and an
+`engine_bearer` reader, both reading fields off the held actor-token bundle;
+`RunCatalogStore` adds a bare `get`. Verdict DUPLICATE on the mechanism, and
+safely so: nothing here is a policy divergence, both stores are dropped at the
+identical terminal boundary in `Executor._mark_ingest_done` and constructed
+together in `Executor.__init__`. A generic per-thread holder - register, has,
+drop, active_run_count, redacting repr, parameterised on the held type - would
+collapse both to a thin subclass or a direct instantiation, and the accessor
+asymmetry, role-scoped reads for the token bundle against a bare read for the
+catalog snapshot, stays exactly where it is now as the one piece that is not
+shared.
+
+### worker-ipc-domain-swept-and-found-clean | low | dispatch identity, project-root minting, and duplicate suppression are single-homed
+
+Recorded for the negative space in the worker execution and inter-process
+dispatch domain. `DispatchIdAdmission` in `src/vaultspec_a2a/worker/dispatch_ids.py`
+and the durable control-action journal lease consumed by
+`src/vaultspec_a2a/control/direct_control_recovery.py` and
+`verdict_subscriber.py` are DISTINCT by design and documented as such: the
+worker's admission is a process-local, restart-cleared FIFO suppression window
+that exists solely to keep a duplicate HTTP POST from crossing into the task
+group twice, while the journal lease is the durable, cross-restart recovery
+authority - the worker's own docstring states plainly that the journal
+"retains recovery authority" and the admission window does not attempt to.
+`canonical_project_root` in `src/vaultspec_a2a/ipc/schemas.py` is confirmed the
+single site that mints a run's active-project spelling for the dispatch wire;
+the admission-time mint in `src/vaultspec_a2a/control/thread_service.py`
+writes that same canonical form into the durable record so every later
+dispatch reads it back rather than re-deriving one, and the separate reduction
+function in `src/vaultspec_a2a/providers/_acp_types.py` is a documented
+DISTINCT concept serving scope-enforcement comparison rather than wire
+transport. Worker interprocess bearer verification and worker health probing
+were already confirmed single-homed by an earlier sweep and are not
+re-litigated here.

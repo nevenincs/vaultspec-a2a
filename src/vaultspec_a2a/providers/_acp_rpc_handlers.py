@@ -17,6 +17,7 @@ from uuid import uuid4
 
 from langgraph.errors import GraphBubbleUp
 
+from ..artifacts import ArtifactDeclaration, RetentionDisposition
 from ..control.config import settings
 from ..graph.acp_options import option_id_of, valid_option_ids
 from ..utils.process import ProcessContainment, ProcessContainmentError
@@ -33,9 +34,43 @@ from ._subprocess import attach_process_containment
 from ._subprocess import kill_process_tree as _kill_process_tree
 from .acp_exceptions import AcpErrorCode
 
-__all__: list[str] = []
+__all__: list[str] = [
+    "AGENT_WORKSPACE_FILE_DECLARATION",
+    "ARTIFACT_DECLARATIONS",
+]
 
 logger = logging.getLogger(__name__)
+
+# The largest durable surface in this system, and the one furthest from this
+# project's authority: files an agent writes through ``fs/write_text_file`` land
+# in the operator's own project tree at paths the model chooses. Permanence is
+# not a shrug here - it is the only defensible answer, and the ADR's ordering
+# constraint (disarm the destructive workspace-delete path before anything
+# persists artifact rows) exists precisely because this seam feeds it.
+AGENT_WORKSPACE_FILE_DECLARATION = ArtifactDeclaration(
+    name="agent-workspace-file",
+    root="<run workspace_root>/<agent-chosen relative path>",
+    owner="providers._acp_rpc_handlers",
+    disposition=RetentionDisposition.PERMANENT,
+    reason=(
+        "these files are the run's product, written into the operator's own "
+        "project at the agent's direction and indistinguishable afterwards from "
+        "anything a human wrote there; reclaiming an agent's work on a clock "
+        "would destroy the reason the run was started"
+    ),
+    mechanism=(
+        "NOTHING bounds them. The write is confined - sandbox_path holds it under "
+        "the run's workspace root and a .vault/ target is refused outright - but "
+        "confinement is not retention. The run-delete cleanup manifest can unlink "
+        "only artifact rows explicitly recorded against the run AND resolving "
+        "inside its workspace root; a file the agent wrote without a recorded row "
+        "is never a cleanup target and is left to the operator"
+    ),
+)
+
+ARTIFACT_DECLARATIONS: tuple[ArtifactDeclaration, ...] = (
+    AGENT_WORKSPACE_FILE_DECLARATION,
+)
 
 # Allowlist of permitted executable names for terminal/create.
 # Only the base name (no path component) is checked so that full paths like

@@ -44,8 +44,13 @@ from contextlib import suppress
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from ..artifacts import ArtifactDeclaration, RetentionDisposition
 from ..utils.enums import CodexWebSearchMode
-from ._config_home_roots import sweep_orphan_homes, temp_home_root
+from ._config_home_roots import (
+    ORPHAN_HOME_MIN_AGE_SECONDS,
+    sweep_orphan_homes,
+    temp_home_root,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -53,6 +58,8 @@ if TYPE_CHECKING:
     from ._json_contract import JsonObject
 
 __all__ = [
+    "ARTIFACT_DECLARATIONS",
+    "CODEX_CONFIG_HOME_DECLARATION",
     "SERVED_WEB_SEARCH_MODE",
     "build_codex_config_home",
     "cleanup_codex_config_home",
@@ -63,6 +70,30 @@ __all__ = [
 
 _OVERRIDE_PROVIDER = "vaultspec-override"
 _HOME_PREFIX = "vaultspec-codex-home-"
+
+# This home holds a copied credential, so its lifetime is a security property as
+# much as a disk one. Both bounds are real, and both need a caller: teardown runs
+# when the run unwinds, and the age-gated sweep runs only when some LATER Codex
+# home is built. An install that stops using this lane keeps whatever its last
+# crash left behind.
+CODEX_CONFIG_HOME_DECLARATION = ArtifactDeclaration(
+    name="codex-per-run-config-home",
+    root=f"<desktop_temp_homes_dir or system temp>/{_HOME_PREFIX}<random>/",
+    owner="providers._codex_config_home",
+    disposition=RetentionDisposition.SESSION_SCOPED,
+    mechanism=(
+        "cleanup_codex_config_home removes the tree when the run unwinds, and "
+        "build_codex_config_home itself removes a partially built home on any "
+        "failure path; a home orphaned by a crashed worker is removed by "
+        "sweep_orphan_codex_homes once untouched for "
+        f"{ORPHAN_HOME_MIN_AGE_SECONDS} seconds, which only runs when another "
+        "Codex home is built - no timer drives it"
+    ),
+)
+
+ARTIFACT_DECLARATIONS: tuple[ArtifactDeclaration, ...] = (
+    CODEX_CONFIG_HOME_DECLARATION,
+)
 
 logger = logging.getLogger(__name__)
 

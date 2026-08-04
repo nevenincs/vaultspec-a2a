@@ -26,6 +26,7 @@ import sys
 
 from mcp.server.stdio import stdio_server
 
+from ...artifacts import ArtifactDeclaration, RetentionDisposition
 from ...authoring import AuthoringClient
 from ...authoring.catalog import (
     fetch_catalog,
@@ -35,6 +36,8 @@ from ...authoring.catalog import (
 from .tools.authoring_bridge import build_authoring_mcp_server
 
 __all__ = [
+    "ARTIFACT_DECLARATIONS",
+    "DEBUG_STARTUP_MARKER_DECLARATION",
     "ENV_ACTOR_TOKEN",
     "ENV_BASE_URL",
     "ENV_BEARER",
@@ -62,6 +65,35 @@ ENV_CATALOG_JSON = "VAULTSPEC_AUTHORING_CATALOG_JSON"
 ENV_DEBUG_MARKER = "VAULTSPEC_AUTHORING_DEBUG_MARKER"
 
 _DEFAULT_SERVER_NAME = "vaultspec-authoring"
+
+# The only durable artifact this process creates, and only when an operator opts
+# in by naming a path. Small, but genuinely unbounded once enabled: every spawn
+# appends and nothing ever truncates, rotates, or removes the file, so a marker
+# left switched on across a long debugging session grows one line per bridge
+# spawn - and a run spawns one bridge per agent turn.
+#
+# Declared SESSION_SCOPED in intent rather than bounded, because the file is
+# meant to answer "did the CLI actually spawn this?" for one debugging session
+# and has no value afterwards. The mechanism says plainly that intent is all
+# there is: the operator who enabled it is the only thing that ends its life.
+DEBUG_STARTUP_MARKER_DECLARATION = ArtifactDeclaration(
+    name="authoring-bridge-debug-marker",
+    root=f"<path named by {ENV_DEBUG_MARKER}>",
+    owner="protocols.mcp.authoring_stdio",
+    disposition=RetentionDisposition.SESSION_SCOPED,
+    mechanism=(
+        "NOTHING enforces this. The file is opened in append mode on every spawn "
+        "and is never truncated, rotated, or removed; it survives the run, the "
+        "gateway, and the debugging session that wanted it. The only bound is that "
+        f"the seam is inert unless {ENV_DEBUG_MARKER} is set, and the operator who "
+        "set it chooses the path, so the artifact never lands anywhere this "
+        "project would know to look for it"
+    ),
+)
+
+ARTIFACT_DECLARATIONS: tuple[ArtifactDeclaration, ...] = (
+    DEBUG_STARTUP_MARKER_DECLARATION,
+)
 
 
 def _write_startup_marker(stage: str) -> None:

@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING, Any, cast
 
 import httpx
 
+from ..artifacts import ArtifactDeclaration, RetentionDisposition
 from ..control.config import settings
 from ..lifecycle.manager import tree_kill
 from ..tests.gateway_boot import GatewayBootError, free_port
@@ -183,6 +184,25 @@ summary the harness writes precisely so a failed run can be diagnosed after the
 fact. Bounding the count keeps recent post-mortems available while stopping the
 unbounded accumulation in the operator's machine-global home.
 """
+
+# The bound here is on the COUNT of directories, not on any one directory's size,
+# and it is applied by the harness itself at the moment it first writes. That
+# ordering is the enforcement: a stack constructed but never started leaves
+# nothing behind, because the sweep and the mkdir share one call site.
+RUNTIME_DIR_DECLARATION = ArtifactDeclaration(
+    name="service-test-runtime-dir",
+    root="<a2a_home>/runtime/service-tests/<compose_project_name>/",
+    owner="service_tests.harness",
+    disposition=RetentionDisposition.BOUNDED_BY_SIZE,
+    mechanism=(
+        f"sweep_stale_runtime_dirs keeps the {RETAINED_RUNTIME_DIRS} most recently "
+        "modified directories and removes the rest, run from _ensure_runtime_dir "
+        "at the point something first writes; no bound applies to any single "
+        "directory's contents, so one run's compose logs can be arbitrarily large"
+    ),
+)
+
+ARTIFACT_DECLARATIONS: tuple[ArtifactDeclaration, ...] = (RUNTIME_DIR_DECLARATION,)
 
 
 def sweep_stale_runtime_dirs(

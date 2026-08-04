@@ -1075,3 +1075,40 @@ same-tree duplicate) and is already regression-locked by
 established beyond the modules read: `authoring/tests/` and
 `protocols/mcp/tests/` internals were not swept for their own duplication
 against each other.
+
+### worker-node-id-convention-declared-in-two-domains | low | a naming convention, not three lines
+
+Recovering the agent id from a compiled node name is declared twice, in two
+domains, each stripping the `mount_` prefix and treating an empty name or
+`__end__` as no node before doing a genuinely different lookup.
+`src/vaultspec_a2a/graph/enums.py` resolves the node to its semantic phase;
+`src/vaultspec_a2a/api/routes/gateway.py` resolves it to the active role.
+Verdict is DUPLICATE, and the entry is worth making despite its size because
+what is duplicated is not the three lines - it is the CONVENTION. The `mount_`
+prefix and the `__end__` sentinel together define what a worker node id is, and
+that definition currently has no home: it is knowledge the compiler creates and
+two unrelated readers each re-derive. Renaming the prefix would require finding
+both, and nothing points either at the other.
+
+Surfaced by the graph sweep, which correctly declined to act on it because the
+second site lies outside that domain. Recorded here rather than actioned in the
+same breath for the same reason the campaign records everything else: the
+consolidation is small, but it decides where a compile-time convention is
+allowed to live, and that is a placement question rather than a mechanical one.
+The cheap resolution is a single normalizer beside the compiler that mints the
+prefix, exported for both readers, so the convention is declared exactly where
+it is created.
+
+### compiler-worker-node-extraction-is-deferred-deliberately | medium | a recorded non-action, so it is not re-litigated
+
+The graph sweep recorded that resolving a worker's model, composing its persona,
+building the node with an identical nine-argument call and registering it with
+shared metadata and retry policy is written out in full by three topology
+compilers and a fourth way, six more times, by the research-adr compiler. It
+declined to extract it. That decision is endorsed and recorded here so a later
+sweep does not read the absence of action as an oversight: the extraction spans
+four call sites in the tree's largest module, and the three edge-wiring policies
+around it - mount-node versus harness insertion, how the node edges onward,
+whether it is loop-wrapped - are exactly the kind of per-site policy this
+campaign has repeatedly found flattened by well-meant consolidation. It wants
+dedicated per-site test scrutiny, not a fold-in at the end of a sweep.

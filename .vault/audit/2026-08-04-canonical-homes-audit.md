@@ -5,7 +5,7 @@ tags:
 date: '2026-08-04'
 modified: '2026-08-04'
 body_schema: 'body-v1'
-body_hash: 'sha256:7834a503cde54892de7e84c9ce4794105cf8842045c3ead84a8b2deafc32f25a'
+body_hash: 'sha256:c44b2894f78c08d03a044fd3da8476d22b8509a420d77c0baf94e9fca91a4f58'
 related: []
 ---
 
@@ -5031,3 +5031,49 @@ the code rather than checked against it, and the lane checked it.
 Worth keeping from the new module: registration happens BEFORE the write, so a
 response arriving ahead of `drain()` returning always finds a future waiting.
 That ordering was implicit at nine call sites and is now stated once.
+
+### the-idiom-sweep-two-identical-spellings-opposite-behaviour | high | swept, measured, one clean negative
+
+A lane warned at handover that the guarded-flag idiom LOOKS platform-defensive
+while silently evaluating to zero, and that nothing in lint, type checking, or a
+passing test can see it. Swept the whole tree for it: thirteen occurrences across
+six modules.
+
+**The sharpest result is that two typographically identical idioms behave
+OPPOSITELY, and both appear in this codebase, sometimes on the same line.**
+Measured on this host rather than reasoned:
+
+    O_NOFOLLOW present: False      <- guarded lookup yields 0; inert exactly where the risk is
+    O_BINARY   present: True       <- guarded lookup yields the real flag; needed exactly here
+
+The link-refusal flag is absent on Windows, so its guarded form is inert on the
+platform that ships. The byte-mode flag is PRESENT on Windows and absent on POSIX,
+where it is unnecessary - so its guarded form is correct usage. Same spelling,
+same shape, opposite consequence. A reader who has learned "this idiom is a
+portability smell" will now misread the correct one, and a reader who has learned
+"this idiom is fine" misread the dangerous one for as long as it survived here.
+
+**Clean negative on the two other sites holding the inert flag - neither is a
+defect, and both are better than the canonical writer was.**
+
+- The discovery read gates the flag behind BOTH a POSIX check and a capability
+  check, and its non-POSIX branch performs an explicit link inspection plus a
+  no-follow stat. It never relied on the flag.
+- The credential READ path does not rely on it either. Measured directly: an open
+  using ONLY those flags succeeded and read the planted secret straight through a
+  real symlink, while the path's own `lstat` + regular-file check refuses it
+  before any open happens, and a device/inode comparison against the pre-open stat
+  closes the race afterwards.
+
+**Which sharpens the withdrawn finding further.** The correct belt-and-braces
+pattern - atomic flag where it exists, explicit inspection everywhere - ALREADY
+EXISTED at two sites in this codebase. The canonical writer carried only the inert
+half. So the fold that propagated an unproven protection into the home was not
+importing a novel idea badly; it was importing a WEAKER version of a pattern the
+tree had already got right twice.
+
+That is the strongest available support for reading the canonical home as the copy
+that drifted, and it means a fold's both-directions audit should ask not only
+"what does this caller know that the home does not" but "does a THIRD site already
+do this correctly" - because the best implementation is often in neither of the
+two modules being merged.

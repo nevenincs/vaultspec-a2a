@@ -421,6 +421,25 @@ async def test_active_run_discovery_rejects_unbounded_selectors(
         oversized_limit = await client.get("/v1/runs", params={"limit": 101})
         assert oversized_limit.status_code == 422
 
+        # The workspace bound belongs to the column that stores the selector, so
+        # it is measured off the mapped column rather than restated. Both sides
+        # of the edge are asserted against the same absolute path: a root the
+        # column can hold is answered, and the same root one character wider is
+        # refused HERE rather than at the write, where the caller could only be
+        # told about it as a failed transaction.
+        column_width = ThreadModel.__table__.c.workspace_root.type.length  # ty: ignore
+        assert isinstance(column_width, int)
+        prefix = f"C:{os.sep}"
+        widest = prefix + "w" * (column_width - len(prefix))
+
+        admitted = await client.get("/v1/runs", params={"workspace_root": widest})
+        assert admitted.status_code == 200, admitted.text
+
+        oversized_workspace = await client.get(
+            "/v1/runs", params={"workspace_root": widest + "w"}
+        )
+        assert oversized_workspace.status_code == 422, oversized_workspace.text
+
 
 @pytest.mark.asyncio(loop_scope="function")
 async def test_the_two_readings_answer_with_different_records(tmp_path) -> None:

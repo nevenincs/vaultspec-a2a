@@ -75,6 +75,7 @@ from ...control.thread_state_service import (
 )
 from ...control.worker_management import worker_liveness
 from ...database import (
+    MAX_WORKSPACE_ROOT_LENGTH,
     get_db,
     get_permission_logs_by_thread,
     get_permission_request,
@@ -1101,7 +1102,7 @@ async def _validate_and_freeze_selection_or_refuse(
             detail="explicit provider selection requires an existing workspace_root",
         )
     canonical = normalize_workspace_identity(str(workspace_root))
-    if len(canonical) > 4096 or not Path(canonical).is_dir():
+    if len(canonical) > MAX_WORKSPACE_ROOT_LENGTH or not Path(canonical).is_dir():
         raise HTTPException(
             status_code=422,
             detail="workspace_root must identify an existing directory",
@@ -1497,7 +1498,9 @@ def _raise_for_dispatch_failure(
 async def active_runs_endpoint(
     request: Request,
     state: Literal["active", "all"] = Query(default="active"),
-    workspace_root: str | None = Query(default=None, min_length=1, max_length=4096),
+    workspace_root: str | None = Query(
+        default=None, min_length=1, max_length=MAX_WORKSPACE_ROOT_LENGTH
+    ),
     feature_tag: str | None = Query(default=None, min_length=1, max_length=128),
     status: ThreadStatus | None = Query(default=None),
     limit: int = Query(default=50, ge=1, le=100),
@@ -2269,7 +2272,7 @@ async def run_clarification_respond_endpoint(
 @router.get("/provider-catalog", response_model=ProviderCatalogResponse)
 async def provider_catalog_endpoint(
     request: Request,
-    workspace_root: str = Query(min_length=1, max_length=4096),
+    workspace_root: str = Query(min_length=1, max_length=MAX_WORKSPACE_ROOT_LENGTH),
 ) -> ProviderCatalogResponse:
     """Serve prompt-free, execution-lane-specific catalogs for one workspace."""
     supplied_keys = set(request.query_params.keys())
@@ -2287,7 +2290,7 @@ async def provider_catalog_endpoint(
             status_code=422, detail="workspace_root must be an absolute directory"
         )
     canonical = normalize_workspace_identity(workspace_root)
-    if len(canonical) > 4096 or not Path(canonical).is_dir():
+    if len(canonical) > MAX_WORKSPACE_ROOT_LENGTH or not Path(canonical).is_dir():
         raise HTTPException(
             status_code=422,
             detail="workspace_root must identify an existing directory",
@@ -2309,7 +2312,9 @@ async def provider_catalog_endpoint(
 
 @router.get("/presets", response_model=PresetsListResponse)
 async def presets_list_endpoint(
-    workspace_root: str | None = Query(default=None, max_length=4096),
+    workspace_root: str | None = Query(
+        default=None, max_length=MAX_WORKSPACE_ROOT_LENGTH
+    ),
 ) -> PresetsListResponse:
     """List team presets truthfully, marking each loadable or unloadable.
 

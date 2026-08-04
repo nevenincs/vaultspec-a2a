@@ -7,6 +7,7 @@ from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints
 
+from ...providers.catalog_recommendation import recommended_entry_id
 from ...providers.provider_catalog import (
     AdmissionState,
     AuthenticationState,
@@ -90,6 +91,12 @@ class ProviderNativeControlResponse(_StrictModel):
 class ProviderLaneCatalogResponse(_StrictModel):
     schema_version: Literal[1] = 1
     state: ProviderCatalogStateResponse
+    # A2A's opinionated default for this lane, and the only field here that is
+    # A2A's opinion rather than the provider's report. It always names one of the
+    # entries below, so a client can pre-select it without a second lookup, and
+    # it constrains nothing: every served entry stays equally selectable. ``None``
+    # means the lane advertises nothing to have an opinion about.
+    recommended_entry_id: PublicId | None = None
     models: list[ProviderCatalogEntryResponse] = Field(
         default_factory=list, max_length=256
     )
@@ -142,6 +149,7 @@ class ProviderCatalogResponse(_StrictModel):
                             expires_at=record.catalog.state.expires_at,
                             reason=record.catalog.state.reason,
                         ),
+                        recommended_entry_id=recommended_entry_id(record.catalog),
                         models=[
                             ProviderCatalogEntryResponse(
                                 entry_id=model.entry_id,

@@ -2764,6 +2764,20 @@
           "state": {
             "$ref": "#/components/schemas/ProviderCatalogStateResponse"
           },
+          "recommended_entry_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 512,
+                "minLength": 1,
+                "pattern": "^[^\\x00-\\x1f\\x7f]+$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Recommended Entry Id"
+          },
           "models": {
             "items": {
               "$ref": "#/components/schemas/ProviderCatalogEntryResponse"

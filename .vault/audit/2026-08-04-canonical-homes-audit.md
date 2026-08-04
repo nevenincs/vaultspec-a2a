@@ -2983,3 +2983,57 @@ recorded as such rather than overstated. Whole-tree `ty check src/vaultspec_a2a`
 and `ruff check`/`format --check` on the touched file are clean. Left
 uncommitted alongside the desktop-catalog fix above, for the owning session to
 review and commit.
+
+### structural-scan-finds-what-name-search-cannot | high | An AST scan normalizing away identifiers found duplicates the name-based guard was blind to, including a renamed clone of a concept that guard explicitly pins
+
+Semantic search and grep both key on NAMES. A clone written under a different
+name is invisible to both, and to the canonical-homes guard, which asserts a
+declaration count for a spelling. Parsing every function, erasing every
+identifier, and hashing the remaining structure keys on SHAPE instead, so it
+sees a copy regardless of what its author called it. Run across `src/` it
+reported 65 production groups of structurally identical function bodies.
+
+Three were real and are now closed in `providers/`: two private `_json_object`
+narrowers byte-identical to `lenient_json_object` in the same package (the
+canonical-homes guard pins that exact concept to one declaration and did not
+see them, because the clones were RENAMED); `kimi_catalog`'s own cancel helper,
+written because the canonical `cancel_task` was over-constrained to
+`Task[None]`; and a per-lane stderr drain.
+
+Two limits of the method, both load-bearing when reading its output:
+
+- It flags THIN BINDING SHIMS as duplicates. The `_read_response` wrappers in
+  the ACP and Codex catalogs are structurally identical and CORRECT - each
+  binds its lane's constants and error dialect to the shared reader. Consolidated
+  code does not stop looking duplicated to a structural scan.
+- It is blind to a clone that DIVERGED. See the next finding: an eighth site of
+  a fragmented narrower differs by one argument and therefore hashes differently,
+  so only semantic search surfaced it. Structure finds renamed copies; meaning
+  finds drifted ones. Neither alone is sufficient.
+
+### object-narrower-fragmented-across-control-worker-api | critical | One concept declared eight times across three packages, and the eighth silently accepts less than the other seven
+
+Narrowing an untrusted value to a string-keyed object mapping - `TypeAdapter`
+validate, return `None` on `ValidationError` - is declared independently in
+`control/event_handlers.py`, `control/health.py`, `control/projection.py`,
+`control/verdict_subscriber.py`, `worker/state_projection.py`, and
+`api/routes/gateway.py`. No canonical home exists; semantic search for the
+concept returns only the copies.
+
+The critical part is not the count. `control/dispatch.py` declares the same
+narrower with `strict=True`, so it REJECTS values the other seven accept - a
+non-strict adapter coerces where a strict one refuses. Two competing answers to
+one question are being consumed on different paths, and the divergence is
+invisible at every call site because each reads a private helper with an
+ordinary name.
+
+A second, genuinely DISTINCT concept sits inside the same cluster and must not
+be folded in: the `_json_object(encoded: str)` variants decode a JSON STRING
+via `validate_json`, where the narrowers validate an already-parsed value.
+Same posture, different input. `providers/team_selection.py` holds a third
+posture - it RAISES a domain refusal instead of returning `None` - and is
+correctly separate.
+
+Rehoming requires deciding which acceptance is correct before choosing a home,
+because consolidating onto the wrong one silently widens or narrows what six
+call sites will accept. That decision is the work, not the move.

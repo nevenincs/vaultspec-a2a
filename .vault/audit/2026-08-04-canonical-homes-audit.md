@@ -4992,3 +4992,42 @@ Two lanes reached this separation independently, including the same defence of w
 an identically-valued run-id bound is a DIFFERENT subject: it is a grammar's length
 expressed as a count, not the width of any column. Independent convergence on a
 subject boundary is stronger evidence than either derivation alone.
+
+### acp-rpc-ceremony-consolidated-seven-of-nine | medium | The two exclusions carry more information than the seven inclusions, and a hazard asserted in the brief turned out not to exist
+
+The fixed-id RPC ceremony inside the ACP lane now has one home,
+`providers/_acp_request.py`, consumed by the session module and the chat model.
+Seven sites take both halves, one takes only the issue half, one is excluded
+entirely.
+
+`setup_prompt` never awaits its own future: it registers, writes, and hands the
+bare future to a different consumer whose resolution IS the turn-completion
+signal. Folding its wait in would have buried the mechanism that signals a turn
+ended. It takes `issue_request` only.
+
+`authenticate_rpc` is excluded on both halves. Its frame conditionally carries a
+top-level `_meta` field no other site sends, so even the issue half does not fit;
+and its wait races the response against process exit through a three-way
+exception taxonomy mapped to distinct auth outcomes. Seven-plus-one-plus-one with
+both exceptions stated beats nine forced together.
+
+Two differences survived as ARGUMENTS rather than being flattened. The timeouts
+come from three sources - a startup timeout, a distinct RPC timeout confirmed as
+its own settings field rather than an alias, and a hardcoded teardown value - and
+each stayed a literal at its call site. Only two of the seven log a structured
+event before re-raising on timeout, so the shared helper takes an optional
+`on_timeout` hook that is `None` for the other five: the divergence is expressed
+in the signature instead of being normalised away.
+
+**A correction to this campaign's own record.** The dispatching brief asserted
+that a leaked pending entry under a reused fixed id would be a hang on the next
+call of that operation, and called it the worst failure available here. That is
+wrong. Every site assigns `futures[rpc_id] = create_future()` unconditionally at
+call start, so a stale entry is overwritten wholesale and a late response merely
+resolves a future nobody reads. The shared helper does no cleanup either, which
+matches the existing behaviour exactly. The hazard was reasoned from the shape of
+the code rather than checked against it, and the lane checked it.
+
+Worth keeping from the new module: registration happens BEFORE the write, so a
+response arriving ahead of `drain()` returning always finds a future waiting.
+That ordering was implicit at nine call sites and is now stated once.

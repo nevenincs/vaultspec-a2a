@@ -4483,3 +4483,38 @@ confirmed reason from being right by luck, and this campaign has already recorde
 one case where reasoning about a platform detail was wrong in the same file - the
 canonical writer's permission path was translating line endings while its docstring
 claimed it wrote bytes directly.
+
+### run-identity-validated-on-input-and-forgotten-on-output | high | The path-safe identity types are consumed at 6 of 23 declarations, and two adjacent lines of one response model get opposite treatment
+
+`api/schemas/gateway.py` declares `PathSafeRunId`, `ReservationId`, and `LeaseId`
+- annotated types pinning a bounded, path-safe identity shape - and exports
+them. An AST enumeration of every `run_id` / `reservation_id` / `lease_id`
+annotation in that module finds 23 declarations. Six use the canonical types.
+Seventeen do not: fourteen are bare `str`, three carry length bounds but no
+pattern, so they still admit `/`, `..`, and control characters.
+
+The INPUT side is safe and that is what makes this a real finding rather than a
+theoretical one. `RunStartRequest` uses the validated types, and every REST
+route handler types its path parameter as `PathSafeRunId`. The gap is entirely
+on the RESPONSE side, where the same identity is redeclared per model.
+
+The decisive evidence that this is oversight rather than policy is two ADJACENT
+lines in one class: `RunPrepareResponse.reservation_id: str` at 389 and
+`RunPrepareResponse.lease_id: LeaseId` at 390. The same admission flow then
+inverts the asymmetry - `reservation_id` is validated on release OUTPUT but bare
+on prepare output, `lease_id` is validated on prepare output but bare on commit
+output. No docstring in the module mentions an intentional exemption.
+
+Consequence is disclosure integrity, not an injection path. FastAPI validates a
+response body against its `response_model` before serializing, so a validated
+declaration fails LOUD when a builder produces a malformed identity - a stray
+concatenation, a durable row predating an identity-format change, an upstream
+join bug - while a bare one ships it silently to the client.
+`RunStatusResponse.run_id` is the worst of them: that model is the authoritative
+recovery snapshot callers reconcile all state from, and it is bare.
+
+This is the same shape as the object-narrower finding already closed here - a
+canonical answer exists, is exported, and most consumers never adopted it - but
+found by a different method. No structural scan could have seen it: these are
+FIELD DECLARATIONS, not function bodies, so there is no body to hash. It took
+reading a module for a concept and noticing which sites answered it.

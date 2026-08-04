@@ -408,6 +408,7 @@ async def _create_run_core(
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
+    logger.info("commit step: load_preset")
     team_config = _load_preset_or_refuse(body.team_preset, ws_root)
     effective_feature = body.feature_tag or (
         metadata.feature_tag if metadata is not None else None
@@ -421,6 +422,7 @@ async def _create_run_core(
     if not eligibility.eligible:
         raise HTTPException(status_code=422, detail=eligibility.reason)
 
+    logger.info("commit step: validate_selection")
     frozen = await _validate_and_freeze_selection_or_refuse(
         request.app, body, team_config, ws_root
     )
@@ -603,6 +605,7 @@ async def _run_prepare(
     is created. A capacity-exhausted or role-invalid prepare is refused with a
     503 carrying the safe reason.
     """
+    logger.info("commit step: workspace_root")
     ws_root = _prepare_workspace_root(body)
     team_config = _load_preset_or_refuse(body.team_preset, ws_root)
     frozen = await _validate_and_freeze_selection_or_refuse(
@@ -752,6 +755,7 @@ async def _run_commit_locked(
     # refusal releases the reservation so a failed commit leaks nothing.
     from ...control.worker_management import probe_worker_health
 
+    logger.info("commit step: probe_worker")
     worker_reachable = (
         await probe_worker_health(settings.worker_url, client=worker_client)
     ).healthy

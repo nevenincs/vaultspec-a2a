@@ -54,8 +54,13 @@ def _make_test_app(
     # Pre-populate app.state with the attributes the endpoints expect
     app.state.worker_last_heartbeat_ts = 0.0
     app.state.worker_active_threads = []
-    if session_factory is not None:
-        app.state.db_session_factory = session_factory
+    # Seated UNCONDITIONALLY, including as None. These apps genuinely have no
+    # database, and leaving the attribute off says only that they did not mention
+    # one - which the relay resolves by reaching for the process database. In a
+    # single-test run there is none and the write failed; in a full session some
+    # unrelated test has already opened one, and these apps wrote into it. The
+    # durable write must be skipped, so the absence has to be DECLARED.
+    app.state.db_session_factory = session_factory
 
     app.state.aggregator = None
 

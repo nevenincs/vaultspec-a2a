@@ -74,22 +74,22 @@ _OPTION_MAPPINGS = TypeAdapter(list[dict[str, object]])
 def _session_factory(
     configured: async_sessionmaker[AsyncSession] | None,
 ) -> async_sessionmaker[AsyncSession] | None:
-    """Select the injected session factory, or the application one if it exists.
+    """Return the caller's session factory; ``None`` means skip the durable write.
 
-    ``None`` means this process has no database, and the caller must skip its
-    durable write rather than perform it somewhere else. The gateway does not
-    seat a factory on ``app.state``, so the application singleton IS the normal
-    production path here; what is not is CREATING one. ``get_session_factory``
-    builds an engine from ambient settings when none was initialized, so a
-    process that owns no database silently acquired a connection to a
-    settings-derived path and failed at its first query, with nothing in the
-    error naming the absent database as the cause.
+    Deliberately NOT a resolver. Which database an event belongs in is a property
+    of the application relaying it, and the app boundary is the only place that
+    knows - so it resolves once, in ``api.internal``, and these handlers use what
+    they are given.
+
+    Resolving again here defeated that. An app that had DECLARED it owns no
+    database arrived as ``None``, this reached for the process database anyway,
+    and the write landed in whichever store some unrelated component had opened
+    in the same process. The earlier form was worse still: it called
+    ``get_session_factory``, which CREATES an engine from ambient settings when
+    none was initialized, so a process owning no database acquired a connection
+    to a settings-derived path and failed at its first query.
     """
-    if configured is not None:
-        return configured
-    from ..database import application_session_factory
-
-    return application_session_factory()
+    return configured
 
 
 def _skip_without_database(what: str, thread_id: str) -> None:

@@ -40,6 +40,33 @@ __all__ = ["internal_router"]
 
 logger = logging.getLogger(__name__)
 
+# Distinguishes "this app declared no database" from "this app declared nothing".
+# Both used to arrive as ``None``, and the durable event handlers cannot tell them
+# apart from a bare value: the first must skip the write, the second must use the
+# process database the gateway opened at boot.
+_UNDECLARED = object()
+
+
+def _app_session_factory(app: Any) -> Any:
+    """Resolve the database an app relays durable events into.
+
+    An app that SETS ``db_session_factory`` has declared what it has, including
+    ``None`` for "nothing" - a host embedding this router without a store, and the
+    reading that makes a skipped projection correct rather than accidental. An app
+    that never sets it has declared nothing, which is the gateway's own case: it
+    seats no attribute and relays into the process database ``init_db`` opened.
+
+    Reading a bare ``None`` for both is what let an app with no database write into
+    whichever database some unrelated component had initialized in the same
+    process.
+    """
+    from ..database import application_session_factory
+
+    declared = getattr(app.state, "db_session_factory", _UNDECLARED)
+    if declared is _UNDECLARED:
+        return application_session_factory()
+    return declared
+
 
 def _validate_event_envelope(
     thread_id: str,
@@ -158,7 +185,7 @@ async def _relay_worker_event(websocket: WebSocket, msg: dict, raw: str) -> None
             },
         )
         return
-    session_factory = getattr(websocket.app.state, "db_session_factory", None)
+    session_factory = _app_session_factory(websocket.app)
     agg = getattr(websocket.app.state, "aggregator", None)
     # Read the seated gate rather than get-or-creating it: a gate that has never
     # been seated has admitted nothing, so there is nothing to release.
@@ -292,7 +319,7 @@ async def receive_worker_event(request: Request) -> dict[str, str]:
         thread_id,
         payload,
         agg=agg,
-        session_factory=getattr(request.app.state, "db_session_factory", None),
+        session_factory=_app_session_factory(request.app),
         drain_gate=getattr(request.app.state, "drain_gate", None),
     )
     return {"status": "ok"}
@@ -338,7 +365,7 @@ async def receive_worker_event_batch(request: Request) -> dict[str, str]:
             detail="No relay target available -- gateway not ready",
         )
 
-    session_factory = getattr(request.app.state, "db_session_factory", None)
+    session_factory = _app_session_factory(request.app)
     drain_gate = getattr(request.app.state, "drain_gate", None)
 
     for idx, evt in enumerate(events):

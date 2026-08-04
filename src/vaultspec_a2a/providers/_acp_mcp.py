@@ -41,6 +41,7 @@ from ._json_contract import (
     freeze_json,
     thaw_json,
 )
+from .lane_admission import is_web_lane_proven
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
@@ -90,7 +91,7 @@ class HarnessMcpRuntimeProfile(StrEnum):
 class HarnessMcpCapabilityUnavailable:
     """Stable, path-free explanation of an unavailable harness capability."""
 
-    code: Literal["capability_unavailable"]
+    code: Literal["capability_unavailable", "lane_unproven_egress"]
     capability: str
     reason: str
     action: str
@@ -324,6 +325,14 @@ _KNOWN_MCP_SERVERS: FrozenJsonObject = _declare_registry(
 )
 
 _DESKTOP_ACQUISITION_REASON = "runtime acquisition is disabled for the desktop profile"
+
+# Path-free and provider-agnostic, like every other unavailable reason here: it
+# is projected outward, so it names the axis and the missing proof rather than
+# the server, the lane, or anything about the machine.
+_UNPROVEN_EGRESS_REASON = (
+    "the declared server reaches the network, and this lane carries no recorded "
+    "live-retrieval proof"
+)
 _DESKTOP_CAPABILITY_ACTIONS = {
     "vaultspec-rag": (
         "Install the separately packaged vaultspec-rag desktop capability, then retry."
@@ -533,8 +542,20 @@ def resolve_harness_mcp_capabilities(
     names: Sequence[str],
     *,
     profile: object,
+    lane: str | None = None,
 ) -> HarnessMcpResolution:
     """Resolve declared names under one explicit runtime profile.
+
+    ``lane`` is the provider the composed session will run on, and it gates the
+    NETWORK-EGRESS axis: a server declaring ``network_egress`` resolves only on a
+    lane carrying recorded live-retrieval proof. The gate lives here rather than
+    at any one call site because this is the stage every composition passes
+    through, so outward reach cannot be granted by a caller that simply forgot to
+    ask. It keys on the DECLARED axis and never on server identity, so a
+    read-only local server keeps working on every lane and a server added
+    tomorrow is covered by its own declaration rather than by a list somebody has
+    to remember to update. ``None`` - a caller that stated no lane, and a model
+    that declared none - is refused: absence of a lane is not permission.
 
     The desktop profile admits only a registry entry explicitly marked desktop
     available. An omitted marker fails closed, and a runtime-acquired entry becomes
@@ -576,6 +597,19 @@ def resolve_harness_mcp_capabilities(
                 )
             )
             continue
+        if harness_server_egresses(name) and not is_web_lane_proven(lane):
+            unavailable.append(
+                HarnessMcpCapabilityUnavailable(
+                    code="lane_unproven_egress",
+                    capability=name,
+                    reason=_UNPROVEN_EGRESS_REASON,
+                    action=(
+                        "Run this role on a lane with recorded live-retrieval "
+                        "proof, or declare a server that does not egress."
+                    ),
+                )
+            )
+            continue
         available.append(name)
     if unknown:
         raise ConfigError(
@@ -593,6 +627,7 @@ def resolve_harness_mcp_servers(
     names: Sequence[str],
     *,
     profile: HarnessMcpRuntimeProfile = HarnessMcpRuntimeProfile.NON_DESKTOP,
+    lane: str | None = None,
 ) -> list[JsonObject]:
     """Resolve declared harness MCP server names to their launch specs.
 
@@ -602,7 +637,7 @@ def resolve_harness_mcp_servers(
     that require runtime acquisition are omitted; callers needing the actionable
     result use :func:`resolve_harness_mcp_capabilities` first.
     """
-    resolution = resolve_harness_mcp_capabilities(names, profile=profile)
+    resolution = resolve_harness_mcp_capabilities(names, profile=profile, lane=lane)
     return [
         _launch_spec(name, _registry_entry(name))
         for name in resolution.available_servers
@@ -613,6 +648,7 @@ def harness_allowed_tool_names(
     names: Sequence[str],
     *,
     profile: HarnessMcpRuntimeProfile = HarnessMcpRuntimeProfile.NON_DESKTOP,
+    lane: str | None = None,
 ) -> list[str]:
     """Return the autonomous-allowlist names for the declared servers' read tools.
 
@@ -625,7 +661,7 @@ def harness_allowed_tool_names(
     """
     tool_names: list[str] = []
     seen: set[str] = set()
-    resolution = resolve_harness_mcp_capabilities(names, profile=profile)
+    resolution = resolve_harness_mcp_capabilities(names, profile=profile, lane=lane)
     for name in resolution.available_servers:
         for tool in _frozen_strings(_registry_entry(name), "tools"):
             qualified = f"mcp__{name}__{tool}"
@@ -985,6 +1021,7 @@ def codex_mcp_server_specs(
     *,
     profile: HarnessMcpRuntimeProfile = HarnessMcpRuntimeProfile.NON_DESKTOP,
     project_root: str | None = None,
+    lane: str | None = None,
 ) -> list[JsonObject]:
     """Resolve declared harness names to full read-only registry specs for Codex.
 
@@ -1006,7 +1043,7 @@ def codex_mcp_server_specs(
     project to state.
     """
     reject_duplicate_names(names)
-    resolution = resolve_harness_mcp_capabilities(names, profile=profile)
+    resolution = resolve_harness_mcp_capabilities(names, profile=profile, lane=lane)
     pin = None if project_root is None else _pin_value(project_root)
     specs: list[JsonObject] = []
     for name in resolution.available_servers:
@@ -1040,6 +1077,7 @@ def _resolve_harness_composition(
     *,
     profile: HarnessMcpRuntimeProfile,
     project_root: str | None = None,
+    lane: str | None = None,
 ) -> tuple[HarnessMcpResolution, set[str], list[JsonObject]]:
     """Resolve and validate the declared names into specs and an unavailable set.
 
@@ -1058,7 +1096,7 @@ def _resolve_harness_composition(
     Raises:
         ConfigError: On an unknown declared name or an unusable pin value.
     """
-    resolution = resolve_harness_mcp_capabilities(names, profile=profile)
+    resolution = resolve_harness_mcp_capabilities(names, profile=profile, lane=lane)
     unavailable_names = {
         unavailable.capability for unavailable in resolution.unavailable
     }
@@ -1098,6 +1136,7 @@ def compose_harness_mcp_servers(
     allowed_tools: Sequence[str] | None = None,
     profile: HarnessMcpRuntimeProfile = HarnessMcpRuntimeProfile.NON_DESKTOP,
     project_root: str | None = None,
+    lane: str | None = None,
 ) -> BaseChatModel:
     """Return a model advertising the declared harness MCP servers, or *model*.
 
@@ -1145,7 +1184,7 @@ def compose_harness_mcp_servers(
     if not names and profile is HarnessMcpRuntimeProfile.NON_DESKTOP:
         return model
     resolution, unavailable_names, resolved = _resolve_harness_composition(
-        model, names, profile=profile, project_root=project_root
+        model, names, profile=profile, project_root=project_root, lane=lane
     )
     if not resolved and not unavailable_names:
         return model

@@ -776,8 +776,16 @@ def create_worker_node(
             # (in compose) with the authoring names the attach step already set;
             # supervised runs keep their prompts. Parallel to the authoring-attach
             # allowlist above.
+            # The lane is passed on BOTH calls, not just the composition: the
+            # allowlist is what auto-permits the composed servers' tools in an
+            # autonomous run, so naming a tool here that composition then refuses
+            # would leave the two halves disagreeing about what this role may
+            # reach.
+            harness_lane = getattr(effective_model, "provider", None)
             harness_allowed = (
-                harness_allowed_tool_names(harness_mcp_servers) if autonomous else None
+                harness_allowed_tool_names(harness_mcp_servers, lane=harness_lane)
+                if autonomous
+                else None
             )
             # The run's project pins every harness server it surfaces. Without
             # it a composed grounding server resolves its own project from the
@@ -790,6 +798,7 @@ def create_worker_node(
                 harness_mcp_servers,
                 allowed_tools=harness_allowed,
                 project_root=str(workspace_root) if workspace_root else None,
+                lane=harness_lane,
             )
         from ...providers._acp_mcp import compose_native_read_tools
         from ...providers.lane_admission import web_tool_names_for

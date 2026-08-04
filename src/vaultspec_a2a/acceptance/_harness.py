@@ -37,6 +37,7 @@ from typing import TYPE_CHECKING, Any
 import httpx
 import pytest
 
+from ..testing.catalog_selection import NoSelectableLaneError, in_process_selection
 from ..tests.gateway_boot import (
     GatewayBootError,
     armed_gateway_env,
@@ -52,12 +53,6 @@ if TYPE_CHECKING:
     import subprocess
     from collections.abc import Iterator
     from pathlib import Path
-
-# The provider ids of the in-process lanes: the only lanes an EXECUTING
-# certification run may freeze, because the frozen selection wins outright at
-# compilation and any other served lane would hand every role to a real
-# external provider. Mirrors the execution-side in-process declaration.
-_IN_PROCESS_PROVIDER_IDS = frozenset({"mock", "deterministic"})
 
 __all__ = [
     "DEFAULT_REQUIRED_ROLE",
@@ -103,29 +98,19 @@ class CertifiedGateway:
 
     # -- explicit catalog selection -------------------------------------------
 
-    def run_fields(self, *, executes: bool) -> dict[str, Any]:
+    def run_fields(self) -> dict[str, Any]:
         """The selection and metadata fields every run verb now requires.
 
-        ``executes`` states whether the verb ultimately dispatches work. A
-        non-executing verb (prepare, release) may freeze any served selectable
-        lane - nothing runs, so nothing spends. An executing verb (start,
-        commit) must freeze an in-process lane: the frozen selection wins
-        outright at compilation, so any other served lane would hand every
-        role to a real external provider, and deterministic certification must
-        never spend. Until the served catalog advertises an in-process lane,
-        executing scenarios skip, naming the missing serving - never a run
-        that quietly bills whichever provider the host has installed.
+        Every verb this stack drives - prepare and release as much as start -
+        presents an in-process selection. The frozen selection wins outright at
+        compilation, so any other served lane would hand every role to a real
+        external provider, and deterministic certification must never spend.
+        This stack arms the in-process serving itself, so a catalog without one
+        means the arming failed; the scenario then skips naming the missing
+        serving rather than freezing whichever provider the host has installed.
         """
-        fields = self._resolved_run_fields()
-        if executes and fields["provider_id"] not in _IN_PROCESS_PROVIDER_IDS:
-            pytest.skip(
-                "the served provider catalog advertises no selectable "
-                "in-process lane, so an executing certification run cannot be "
-                "selected without freezing a real external provider; supply "
-                "the in-process lane serving for the deterministic backend"
-            )
         return {
-            "selection": fields["selection"],
+            "selection": self._resolved_run_fields()["selection"],
             "metadata": {"workspace_root": str(self.workspace_root)},
         }
 
@@ -140,7 +125,7 @@ class CertifiedGateway:
         return str(self._resolved_run_fields()["provider_id"])
 
     def _resolved_run_fields(self) -> dict[str, Any]:
-        """Resolve and cache one served selection, in-process lane first."""
+        """Resolve and cache this stack's one in-process selection."""
         if self._run_fields is not None:
             return self._run_fields
         # The first catalog read for a workspace builds it cold, probing every
@@ -156,36 +141,13 @@ class CertifiedGateway:
                 f"the certification stack could not serve its provider "
                 f"catalog: {response.status_code} {response.text}"
             )
-        lanes = [
-            record
-            for record in response.json()["providers"]
-            if record["health"]["selectable"] and record["catalog"]["models"]
-        ]
-        if not lanes:
-            pytest.skip(
-                "the served provider catalog advertises no selectable lane at "
-                "all on this host, so no run verb can present a valid "
-                "selection; supply the in-process lane serving for the "
-                "deterministic backend"
-            )
-        lane = next(
-            (
-                record
-                for record in lanes
-                if record["provider_id"] in _IN_PROCESS_PROVIDER_IDS
-            ),
-            lanes[0],
-        )
+        try:
+            selection = in_process_selection(response.json())
+        except NoSelectableLaneError as exc:
+            pytest.skip(f"this certification stack cannot present a selection: {exc}")
         self._run_fields = {
-            "provider_id": lane["provider_id"],
-            "selection": {
-                "schema_version": 1,
-                "provider_id": lane["provider_id"],
-                "execution_mode": lane["execution_mode"],
-                "catalog_revision": lane["catalog"]["state"]["revision"],
-                "entry_id": lane["catalog"]["models"][0]["entry_id"],
-                "controls": {},
-            },
+            "provider_id": selection["provider_id"],
+            "selection": selection,
         }
         return self._run_fields
 
@@ -219,7 +181,7 @@ class CertifiedGateway:
                     "stage": "prepare",
                     "run_id": run_id,
                     "autonomous": True,
-                    **self.run_fields(executes=False),
+                    **self.run_fields(),
                 },
             )
 
@@ -240,7 +202,7 @@ class CertifiedGateway:
                     "reservation_id": reservation_id,
                     "run_id": run_id,
                     "autonomous": True,
-                    **self.run_fields(executes=False),
+                    **self.run_fields(),
                 },
             )
 
@@ -266,7 +228,7 @@ class CertifiedGateway:
                         "tokens": {role: "tok-certification"},
                         "engine_bearer": "bearer",
                     },
-                    **self.run_fields(executes=True),
+                    **self.run_fields(),
                 },
             )
 

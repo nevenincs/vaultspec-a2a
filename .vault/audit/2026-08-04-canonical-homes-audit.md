@@ -5,7 +5,7 @@ tags:
 date: '2026-08-04'
 modified: '2026-08-04'
 body_schema: 'body-v1'
-body_hash: 'sha256:45ad7949b436840905d3a6d8a60eadee16347eb478ac34da5171b9c3dec3a49a'
+body_hash: 'sha256:d5fa3d3fe487410aa68c19878fb5431b5ccde800443979ed4b501ffc910c1b1b'
 related: []
 ---
 
@@ -930,6 +930,54 @@ overload. Either a precisely typed mapping return, splatted as such, or a
 returned pair with the flags still passed by keyword, restores it. Worth
 recording as the campaign working rather than failing: the rehoming is one this
 inventory asked for, and the type checker caught a genuine edge in it.
+
+### correction-the-harness-wait-is-distinct | high | the deadline cluster had no duplicate at all
+
+The deadline entry recorded three policies as one duplicate and two distinct,
+naming the service harness's generic wait as the one real move. That is wrong and
+is corrected here. All three are DISTINCT, and the reason is not the one that
+entry anticipated.
+
+The anticipated blocker turned out not to apply: with no fingerprint to touch,
+the progress module's idle window bounds the whole wait, so it expresses the
+harness's budgets exactly. The real reasons are three, and the last is decisive.
+The stated premises are opposites - the progress module exists because a fixed
+clock is wrong for a live model turn, while the harness waits on a stack boot
+where a bounded wait is correct and a stack that has not booted is broken rather
+than slow. The exception TYPE is control flow rather than a label: the boot retry
+path keys on the boot-specific error, so a live-but-unready gateway fails loudly
+instead of being retried, and a contract test already pins that a
+container-managed wait must not escalate to it because there is no exit status to
+report. And decisively, the harness swallows probe exceptions into a last-error
+while the progress helper propagates whatever its poll raises - so routing the
+harness probes through it would end the wait on the first connection refusal,
+which occurs on essentially every boot before the gateway has bound. The
+rehoming would not have degraded; it would have failed on its first poll, every
+time.
+
+Collapsing them would require parameterising the progress module with an error
+vocabulary and an exception-tolerance policy, at which point it stops being the
+narrow honest thing its docstring describes. A partial extraction was also
+declined for the right reason: the harness needs its log tail in both the death
+and the timeout message, so sharing half would put one coherent thing in two
+modules - this campaign's failure mode arriving from the other direction.
+
+Two facts from the same investigation. The harness wait is not duplicated at all:
+one definition, one consuming package, and what made it look otherwise was
+resemblance to a neighbour rather than a second copy. And the broader inventory
+of roughly twenty wall-clock poll loops is not one concept either - they wait on
+a pid to die, a file to appear, a port to answer.
+
+### progress-semantics-for-certification-budgets | medium | offered, deferred, not dropped
+
+Raised while investigating the above and correctly not taken. The service
+harness's readiness budgets are fixed wall clocks of the exact kind the progress
+module was built to replace, and on a loaded machine or a cold image pull they
+can fail a stack that was merely slow. Adopting progress semantics there may well
+be right. It is recorded as a candidate for its own decision rather than folded
+into this campaign, because it is a behaviour change to certification timing
+wearing a rehoming's clothes - the same trap as converting the gateway readiness
+budget, which was declined earlier for the same reason.
 
 ## Recommendations
 

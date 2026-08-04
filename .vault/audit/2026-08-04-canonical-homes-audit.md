@@ -700,6 +700,37 @@ the service harness does genuinely re-implement what the progress module owns an
 is the one real move. Recorded as one DUPLICATE and two DISTINCT rather than as a
 single cluster, so a later sweep does not collapse all three.
 
+### affirmative-health-listener-declared-three-times | medium | the real move was a level below the brief
+
+The gateway-boot cluster contained no duplication, as the correction above
+established. One level down it did: three test packages each declared their own
+bare loopback server answering an affirmative health response - silenced access
+log, daemon thread, ephemeral port, clean shutdown - in the control watchdog
+tests and in two authoring discovery test modules. Now one declaration in the
+testing package, with all three local ones deleted rather than wrapped. Recorded
+because the lesson generalises: a lead aimed at the WAITER was wrong, and the
+duplication was in what the waiters were POINTED AT. A sweep that only asks who
+performs an action will miss the fixtures that action is performed against.
+
+One deliberate widening, flagged rather than slipped in: the consolidated handler
+answers a not-found status off the health path, where two of the three answered
+affirmatively to any request at all. Every caller was checked to probe only the
+health path, so the stricter peer is a superset of what each relied on - and a
+listener that answers everything is a worse stand-in for a service that does not.
+The new module also records why it binds an ephemeral port rather than taking a
+registry reservation, since the port cluster had just established the opposite
+default: a listener that binds immediately and holds the socket IS its own
+allocation, whereas the registry claim exists for a port handed to a child that
+binds later. Without that note the next reader would file it as an
+inconsistency.
+
+The protected negatives here are the sharpest in the campaign so far, because
+their behaviour IS the subject under test rather than shared scaffolding: a peer
+that accepts and never responds, one that answers affirmatively with undecodable
+bytes, one that stalls past a retry window, and stateful stubs that record what
+was asked of them. Folding those together would produce a helper whose options
+are a catalogue of unrelated defects.
+
 ## Recommendations
 
 <!-- Actionable recommendations, each tied to a finding above. An
@@ -1112,3 +1143,51 @@ around it - mount-node versus harness insertion, how the node edges onward,
 whether it is loop-wrapped - are exactly the kind of per-site policy this
 campaign has repeatedly found flattened by well-meant consolidation. It wants
 dedicated per-site test scrutiny, not a fold-in at the end of a sweep.
+
+### agent-descriptor-wire-model-declared-a-third-time-untested | high | the exact incident the parity guard exists to prevent, recurring outside its reach
+
+`src/vaultspec_a2a/thread/snapshots.py` declares `AgentData` a canonical
+dataclass and says so explicitly: "Single declaration behind every
+agent-shaped surface: the REST team-status entry, the `team_status` broadcast
+summary, and the thread snapshot all project from this type rather than
+redeclaring the field set." `src/vaultspec_a2a/api/schemas/tests/test_snapshot_parity.py`
+enforces exactly that for one of the three named surfaces: it pairs
+`domain.AgentData` with `wire._AgentSnapshot` (`src/vaultspec_a2a/api/schemas/snapshots.py`)
+in its `_MIRRORS` table and fails the suite the moment either declares a field
+the other does not, citing the concrete past incident that motivated it -
+`provider`/`model` reaching clients as unconditional `null` from the
+team-status route until an implicit splat was replaced with explicit field
+names.
+
+The second named surface, the `team_status` broadcast, is carried by
+`AgentSummary` in `src/vaultspec_a2a/api/schemas/events.py` - a THIRD
+independent Pydantic declaration of the identical eight-field set
+(`agent_id`, `node_name`, `state`, `provider`, `model`, `role`, `display_name`,
+`description`), docstringed the same way ("Mirrors `thread.snapshots.AgentData`")
+but absent from `_MIRRORS` and therefore unguarded. `src/vaultspec_a2a/api/event_adapter.py`
+builds it field-by-field from a plain `dict` (the domain `TeamStatus` event
+carries `agents: list[dict[str, str]]`, not typed `AgentData`), so the
+guard's `model_validate(asdict(data))` seam does not even run over this path -
+nothing anywhere compares `AgentSummary`'s fields against `AgentData`'s.
+`PermissionOption` (same file) repeats the shape exactly: a third declaration
+of `PermissionOptionData`'s field set, alongside the tested `_PermissionOptionSnapshot`
+in `snapshots.py`, built field-by-field from a `dict` in the same adapter and
+equally absent from `_MIRRORS`.
+
+Verdict DUPLICATE, high severity precisely because the parity guard's own
+docstring names the failure mode this reproduces: a field added to `AgentData`
+(or `PermissionOptionData`) and forgotten on the snapshot mirror is caught by
+`test_domain_and_wire_declare_the_same_fields`; the identical omission on
+`AgentSummary` or `PermissionOption` is caught by nothing, and the broadcast
+surface silently ships the field as absent - the exact `provider`/`model` null
+incident, on the surface the guard was written to also cover but does not
+reach. Recorded rather than actioned: the clean consolidation - `snapshots.py`
+importing `AgentSummary`/`PermissionOption` from `events.py` in place of
+declaring `_AgentSnapshot`/`_PermissionOptionSnapshot` (the file already
+imports `PlanEntry`, `ToolCallContent`, and `ToolCallLocation` from `.events`,
+so the direction is established) - touches `_MIRRORS` in
+`api/schemas/tests/test_snapshot_parity.py` (in scope) but also
+`src/vaultspec_a2a/thread/tests/test_snapshots.py`, which imports
+`_AgentSnapshot`/`_PermissionSnapshot` by name directly from
+`api.schemas.snapshots` (`thread/`, out of scope for this sweep). Whoever owns
+`thread/` should coordinate the rename in the same change, not a follow-up.

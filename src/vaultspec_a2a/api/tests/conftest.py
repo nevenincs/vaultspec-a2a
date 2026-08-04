@@ -397,12 +397,20 @@ async def async_catalog_run_fields(
         # process also probes every provider lane and legitimately outlasts that.
         # Borrowing the caller's budget made a cold probe look like an
         # unresponsive gateway. Later reads come from the cache above.
-        async with httpx.AsyncClient(
-            base_url=client.base_url, timeout=180.0
-        ) as probe:
-            response = await probe.get(
-                "/v1/provider-catalog", params={"workspace_root": root}
-            )
+        #
+        # The budget is widened PER REQUEST rather than by building a second
+        # client. A second client keeps only the caller's base_url and silently
+        # drops its TRANSPORT, so every in-process caller - anything on
+        # ``httpx.ASGITransport``, whose base_url is an unroutable name like
+        # ``http://test`` - resolved that name against real DNS and died with
+        # ``getaddrinfo failed``. Those callers only ever passed when an earlier
+        # real-socket test had already warmed the cache above, so the failure
+        # moved with test order. Reusing the caller's client keeps its transport.
+        response = await client.get(
+            "/v1/provider-catalog",
+            params={"workspace_root": root},
+            timeout=180.0,
+        )
         assert response.status_code == 200, response.text
         record = next(
             item

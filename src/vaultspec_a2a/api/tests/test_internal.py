@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import pathlib
 
 import pytest
 from fastapi import FastAPI
@@ -27,6 +28,10 @@ from ...database.models import ThreadExecutionStateModel
 from ...streaming.aggregator import EventAggregator
 from ...worker.ipc import WorkerBridge
 from ..internal import internal_router
+
+# Every dispatch names an active project, as a real one does. This package's own
+# directory is real, absolute, and present on either platform.
+_WORKSPACE = str(pathlib.Path(__file__).resolve().parent)
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -1401,6 +1406,7 @@ class TestNoFailedRunPersistsWithoutACondition:
         await executor.handle_dispatch(
             DispatchRequest(
                 action="ingest",
+                workspace_root=_WORKSPACE,
                 thread_id="t-worker-rejection",
                 content="do the thing",
                 recursion_limit=25,

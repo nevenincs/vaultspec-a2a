@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import itertools
 import json
 from typing import TYPE_CHECKING, Any, cast
 
@@ -37,7 +38,7 @@ from ...thread.clarification import (
     ClarificationRequest,
 )
 from ...thread.state import TeamState
-from .conftest import make_app
+from .conftest import async_catalog_run_fields, make_app
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
@@ -45,6 +46,7 @@ if TYPE_CHECKING:
     from ...streaming.types import StreamableGraph
 
 _PRESET = "mock-success-single"
+_RUN_SEQ = itertools.count(1)
 _PROMPT = "Which side should the monitor panel dock to?"
 _OPTIONS = ["dock-right", "dock-left"]
 _REQUEST_ID = "clarify-sse"
@@ -178,7 +180,13 @@ async def test_the_nudge_arrives_on_the_sse_stream_carrying_no_questions(
     ):
         start = await client.post(
             "/v1/runs",
-            json={"team_preset": _PRESET, "message": "plan it", "autonomous": True},
+            json={
+                "team_preset": _PRESET,
+                "message": "plan it",
+                "autonomous": True,
+                "run_id": f"clarify-sse-{next(_RUN_SEQ):02d}",
+                **await async_catalog_run_fields(client),
+            },
         )
         assert start.status_code == 201, start.text
         run_id = str(start.json()["run_id"])
@@ -222,7 +230,13 @@ async def test_the_questions_live_on_run_status_not_on_the_relay(
     ):
         start = await client.post(
             "/v1/runs",
-            json={"team_preset": _PRESET, "message": "plan it", "autonomous": True},
+            json={
+                "team_preset": _PRESET,
+                "message": "plan it",
+                "autonomous": True,
+                "run_id": f"clarify-sse-{next(_RUN_SEQ):02d}",
+                **await async_catalog_run_fields(client),
+            },
         )
         assert start.status_code == 201, start.text
         run_id = str(start.json()["run_id"])

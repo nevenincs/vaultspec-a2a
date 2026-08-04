@@ -25,22 +25,33 @@ idempotent verb must not fail a request purely for being the second one.
 
 from __future__ import annotations
 
+import itertools
+
 import httpx
 import pytest
 
 from ...thread.enums import ThreadStatus
-from .conftest import make_app
+from .conftest import async_catalog_run_fields, make_app
 from .test_gateway_live import _live_server
 
 _PRESET = "mock-success-single"
+_RUN_SEQ = itertools.count(1)
 
 
-def _run_body() -> dict:
+async def _run_body(client: httpx.AsyncClient) -> dict:
+    """A complete run-start body, including the now-required identity and selection.
+
+    The selection is derived from the catalog this gateway actually serves rather
+    than written out here, so these tests keep asserting about CANCEL rather than
+    quietly becoming a second copy of the selection-admission tests.
+    """
     return {
         "team_preset": _PRESET,
         "message": "build it",
         "autonomous": True,
         "actor_tokens": {"tokens": {"coder": "tok-coder"}, "engine_bearer": "bearer"},
+        "run_id": f"cancel-settled-{next(_RUN_SEQ):02d}",
+        **await async_catalog_run_fields(client),
     }
 
 
@@ -59,7 +70,7 @@ def _terminal_envelope(run_id: str, status: str) -> dict:
 
 
 async def _start_run(client: httpx.AsyncClient) -> str:
-    resp = await client.post("/v1/runs", json=_run_body())
+    resp = await client.post("/v1/runs", json=await _run_body(client))
     assert resp.status_code == 201, resp.text
     return resp.json()["run_id"]
 

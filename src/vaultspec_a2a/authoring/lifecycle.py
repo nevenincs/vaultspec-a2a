@@ -26,6 +26,11 @@ import json
 from dataclasses import dataclass
 from typing import Any
 
+from ..thread.enums import (
+    VERDICT_APPROVED,
+    VERDICT_REJECTED,
+    VERDICT_REQUEST_CHANGES,
+)
 from ..utils.coercion import coerce_int
 
 __all__ = [
@@ -42,9 +47,6 @@ __all__ = [
     "verdict_from_event",
 ]
 
-VERDICT_APPROVED = "approved"
-VERDICT_REJECTED = "rejected"
-VERDICT_REQUEST_CHANGES = "request_changes"
 
 # Engine review-decision strings (`ApprovalDecision`, snake_case) mapped onto the
 # pinned a2a verdict vocabulary shared across executors.

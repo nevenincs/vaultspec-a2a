@@ -23,6 +23,20 @@ __all__ = [
 ]
 
 
+#: The reviewer verdict vocabulary, shared by the authoring lifecycle and the
+#: graph's phase gate. It lives here rather than in either consumer because
+#: neither can import the other: `authoring.submitter` already imports the
+#: phase-gate seam signal, so the reverse direction would cycle. This module
+#: imports nothing but ``StrEnum``, which is what makes it reachable from both.
+#:
+#: Left as plain strings rather than a StrEnum deliberately: these values cross
+#: the engine boundary as raw JSON in both directions, and both consumers
+#: compare them against decoded wire values.
+VERDICT_APPROVED = "approved"
+VERDICT_REJECTED = "rejected"
+VERDICT_REQUEST_CHANGES = "request_changes"
+
+
 class ThreadStatus(StrEnum):
     """Durable lifecycle states for orchestration threads."""
 

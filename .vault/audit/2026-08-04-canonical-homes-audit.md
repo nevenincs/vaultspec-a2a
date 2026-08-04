@@ -5,7 +5,7 @@ tags:
 date: '2026-08-04'
 modified: '2026-08-04'
 body_schema: 'body-v1'
-body_hash: 'sha256:378b3ebe19a442716c9e52fd3ab26833f0703bc7bd794ffe04f10eda735cd049'
+body_hash: 'sha256:4beeaf998a7c0e4b4a57d692460f0bfe4bf0b6538e6dde0ed3f5939f5d737bc1'
 related: []
 ---
 
@@ -4518,3 +4518,46 @@ canonical answer exists, is exported, and most consumers never adopted it - but
 found by a different method. No structural scan could have seen it: these are
 FIELD DECLARATIONS, not function bodies, so there is no body to hash. It took
 reading a module for a concept and noticing which sites answered it.
+
+### the-allowlist-hazard-measured-not-argued | critical | upgrades an abstract warning to a demonstration
+
+The registration-list hazard recorded above was reasoned, not shown. A lane has
+now MEASURED it, by stranding a catalog entry - present, but keyed so the lookup
+misses - and re-running the real encoder:
+
+    stranded-key projection : {'type': 'heartbeat'}
+    stranded-key frame      : event: heartbeat | data: {"api_version":"v1","type":"heartbeat"}
+    frame still emitted, type still correct : True
+    payload field SILENTLY dropped          : True
+
+Every abstract claim in the earlier entry holds literally. The frame is emitted.
+Its type is correct. Its payload is gone. Nothing raises, and no type check can
+see it.
+
+**The decisive part is the sensitivity result: the PREVIOUS assertion passes
+against that broken case, and the replacement fails.** That is the difference
+between a test that proves a refactor happened and one that proves it works, shown
+rather than asserted - and it means the committed test would have certified a
+silently-empty wire indefinitely.
+
+The negative control was also ordered correctly: an uncatalogued kind must lose
+its field, and that check runs FIRST, so the allowlist is proven live before the
+positive case leans on it. Same discipline as asserting a trap is live before
+exercising it.
+
+One detail worth keeping: the real heartbeat's `metadata` field is dropped too, by
+omission, as designed. So the projection is lossy on the correct path as well -
+which is why "the frame arrived and looked plausible" was never evidence of
+anything.
+
+Recorded at critical because it converts the campaign's most dangerous class from
+a caution into a demonstrated failure mode with reproducible output, and because
+it was found by a lane auditing its OWN committed proof after the gap was pointed
+out, rather than defending it.
+
+**Independent confirmation of the platform fact.** The same lane measured the
+StrEnum hash behaviour separately from the measurement recorded above, on the same
+box, and reached the identical result - including the sharper form
+`hash(MEMBER) != hash("MEMBER_NAME")`, which shows exactly which inherited
+behaviour the catalog depends on and does not control. Two independent
+measurements, one conclusion; it is now asserted in the test rather than assumed.

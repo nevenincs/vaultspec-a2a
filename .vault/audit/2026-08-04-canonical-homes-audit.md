@@ -5,7 +5,7 @@ tags:
 date: '2026-08-04'
 modified: '2026-08-04'
 body_schema: 'body-v1'
-body_hash: 'sha256:789b77d0afb3f7ab3a303bc47cb5430615cd984ef8c0c280ac5af1e160a7729a'
+body_hash: 'sha256:ffe57ac3398ff4d0225451b8d7eca15e25e883cf298a06faf18080dfcbb19f96'
 related: []
 ---
 
@@ -1193,6 +1193,40 @@ and the mis-attribution that nearly prevented all of this is recorded with them:
 the type-error assertions elsewhere in that package target the PRODUCTION
 readers, not the test-tier family, which both the implementing lane and this
 audit had misread.
+
+### correction-the-seven-were-tightened-not-deleted | high | the audit described a plan, not the landing
+
+The narrowing entry recorded seven sites as "a pure deletion with no behavioural
+change". That was true of the plan under discussion - converging onto the
+production narrowing, which accepts a dict whose values are not JSON. It is not
+what landed. The convergence went to a test-support canonical that DEEP-VALIDATES,
+so those seven were TIGHTENED from an untyped object value to the precise
+recursive type, and the two already-precise sites came along unchanged.
+
+The landed result is better than either position argued for: one home, one
+dialect, and every site validating at the strict depth rather than seven keeping
+a check that only ever proved "a dict with string keys". Recorded because the
+better answer came from neither of the two positions being defended, and because
+the implementing commit declared the tightening while this audit did not - which
+makes it the audit's defect rather than the move's.
+
+### an-instruction-declined-with-evidence | medium | the rule applied against the person holding it
+
+An instruction to add a list reader to the production contract module was
+refused, correctly, on the grounds that issued it. The rationale had been
+"consumers first" - a reader with proven consumers is how a canonical home is
+established. By the time the instruction was read, the consumers had landed
+somewhere else, so the reader would have arrived with none, which is precisely
+the "canonical home with nothing converged onto it" failure this inventory
+condemns elsewhere. A second fact had also moved: another lane had begun
+implementing in that module, adding a near-named reader, so a seventh would have
+been both speculative and a collision.
+
+Recorded as a working practice rather than an incident. A lane that refuses an
+order with evidence is doing the same job as one that reports a false lead
+instead of manufacturing a move, and this campaign has now had both from the same
+source. The orchestrator's instructions have been wrong or stale often enough
+that treating them as provisional is the correct default, not insubordination.
 
 ## Recommendations
 

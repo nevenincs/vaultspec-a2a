@@ -34,7 +34,6 @@ References:
 """
 
 import asyncio
-import contextlib
 import errno
 import json
 import logging
@@ -51,6 +50,7 @@ from pydantic import TypeAdapter, ValidationError
 
 from ..control.config import settings
 from ..desktop._platform_acl import harden_credential_file
+from ..utils.atomic_write import atomic_write_text
 
 __all__ = ["gemini_uses_env_auth", "refresh_gemini_token"]
 
@@ -70,12 +70,6 @@ _CREDS_FILE_NAME = "oauth_creds.json"
 
 # HTTP status code for success.
 _HTTP_OK = 200
-
-# How long to ride out a transient Windows sharing violation when renaming the
-# refreshed credentials over the live file: the Gemini command-line interface
-# may hold it open while this publishes.
-_REPLACE_RETRY_SECONDS = 2.0
-_REPLACE_RETRY_INTERVAL = 0.01
 
 # A refresh can take a network round-trip, but it must not wait forever behind a
 # dead or wedged peer process.  The operating-system releases advisory locks
@@ -292,57 +286,16 @@ def _publish_credentials(path: Path, payload: str) -> None:
 
     Blocking: the caller offloads this to a worker thread.
 
-    Three properties this needs and the plain write-then-rename it replaced did
-    not have. The temporary carries the writing process id, so two processes
-    refreshing the same credentials home cannot collide on the temporary itself
-    and rename each other's half-written bytes over the target. The fsync is
-    taken on the descriptor the bytes were written through rather than on a
-    second one opened by path, so nothing can be substituted underneath it
-    between the write and the flush. And the temporary is removed whenever the
-    publication does not complete, so a failed refresh leaves the credentials
-    directory as it found it instead of accumulating residue beside the file the
-    Gemini command-line interface reads.
-
-    This deliberately does not call the lifecycle package's audited writer:
-    importing it here would execute ``vaultspec_a2a.lifecycle``, dragging the
-    process registry, service discovery, and control configuration into a
-    provider leaf whose import latency sits on the coding-agent command-line
-    interface's tool-discovery window. The permission bits are left to the
-    process umask, matching what this wrote before - tightening them is a
-    decision about a file the Gemini command-line interface also owns, not a
-    consequence of fixing the failure path.
+    ``newline=None`` takes the platform's line-ending translation, which is what
+    this wrote before and therefore what the file on disk already contains. The
+    Gemini command-line interface owns and reads this file too, so matching what
+    is already there outranks this service's own preference for untranslated
+    newlines - and changing the bytes of a co-owned credential file is a decision
+    to take deliberately, not a side effect of removing a duplicate writer.
+    Permission bits are likewise left to the process umask, matching what this
+    wrote before.
     """
-    tmp = path.with_name(f"{path.name}.{os.getpid()}.tmp")
-    try:
-        with open(tmp, "w", encoding="utf-8") as handle:
-            handle.write(payload)
-            handle.flush()
-            os.fsync(handle.fileno())
-        _replace_with_retry(tmp, path)
-    except BaseException:
-        # Includes KeyboardInterrupt and SystemExit: an interrupted refresh must
-        # not be the one case that leaves a temporary credential file behind.
-        with contextlib.suppress(OSError):
-            tmp.unlink(missing_ok=True)
-        raise
-
-
-def _replace_with_retry(tmp: Path, path: Path) -> None:
-    """Rename *tmp* over *path*, riding out a transient sharing violation.
-
-    ``os.replace`` is atomic, but on Windows a concurrent reader holding the
-    target open can briefly deny it; retrying over a short bounded window turns a
-    spurious failure into a successful publication.
-    """
-    deadline = time.monotonic() + _REPLACE_RETRY_SECONDS
-    while True:
-        try:
-            os.replace(tmp, path)
-            return
-        except PermissionError:
-            if time.monotonic() >= deadline:
-                raise
-            time.sleep(_REPLACE_RETRY_INTERVAL)
+    atomic_write_text(path, payload, newline=None)
 
 
 async def refresh_gemini_token(

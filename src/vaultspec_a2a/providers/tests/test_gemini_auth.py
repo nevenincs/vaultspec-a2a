@@ -14,6 +14,7 @@ from pathlib import Path
 import pytest
 
 from ...control.config import settings
+from ...utils.atomic_write import atomic_write_text
 from ..gemini_auth import (
     JsonValue,
     _default_creds_path,
@@ -458,6 +459,30 @@ class TestPublishCredentials:
 
         assert json.loads(target.read_text(encoding="utf-8"))["access_token"] == "fresh"
         assert sorted(tmp_path.glob("*.tmp")) == []
+
+    def test_the_credentials_file_keeps_platform_line_endings(
+        self, tmp_path: Path
+    ) -> None:
+        """This file is CO-OWNED, so it keeps the endings it has always had.
+
+        The shared writer defaults to writing newlines through untranslated,
+        which is right for a record this service both writes and reads. These
+        credentials are not that: the Gemini command-line interface writes and
+        reads the same file, so publication takes the platform translation
+        instead. Compared against the shared writer's default on the identical
+        payload, so this fails if the two are ever collapsed into one behaviour
+        rather than silently changing a third party's file.
+        """
+        payload = json.dumps({"access_token": "fresh", "scope": "a b"}, indent=2)
+        co_owned = tmp_path / "oauth_creds.json"
+        ours = tmp_path / "service-owned.json"
+
+        _publish_credentials(co_owned, payload)
+        atomic_write_text(ours, payload)
+
+        assert json.loads(co_owned.read_text(encoding="utf-8")) == json.loads(payload)
+        assert co_owned.read_bytes() == payload.replace("\n", os.linesep).encode()
+        assert ours.read_bytes() == payload.encode()
 
     def test_a_denied_rename_leaves_no_temporary_behind(self, tmp_path: Path) -> None:
         """A rename that stays denied past the retry window must not leak residue.

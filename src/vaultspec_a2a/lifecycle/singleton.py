@@ -40,7 +40,7 @@ from enum import StrEnum
 from pathlib import Path
 
 from ..artifacts import ArtifactDeclaration, RetentionDisposition
-from .atomic_write import atomic_write_text
+from ..utils.atomic_write import atomic_write_text
 from .discovery import is_pid_alive
 
 __all__ = [

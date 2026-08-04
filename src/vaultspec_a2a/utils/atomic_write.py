@@ -9,23 +9,31 @@ survives, and nothing ever collects it.  This service accumulated exactly that:
 an orphaned temporary sitting beside a discovery record for six days, left by a
 publication that never completed.
 
-This module is the audited version and the only copy of the pattern in this
-package: it always fsyncs before the rename so the bytes are durable, always
-retries the rename over a bounded contention window, and always removes the
-temporary file when the publication does not complete - including when the
-interruption is a ``KeyboardInterrupt`` or a ``SystemExit`` rather than an error.
-Service discovery, the process registry, and the runtime singleton all publish
-through it.
+This module is the audited version and the only copy of the pattern: it always
+fsyncs before the rename so the bytes are durable, always retries the rename over
+a bounded contention window, and always removes the temporary file when the
+publication does not complete - including when the interruption is a
+``KeyboardInterrupt`` or a ``SystemExit`` rather than an error.  Service
+discovery, the process registry, the runtime singleton, and the Gemini OAuth
+refresh all publish through it.
 
-Two credential-plane writers elsewhere in the tree keep their own copy of the
-loop rather than calling this, each for a reason recorded at the site: the
-desktop worker interprocess-communication mint has to apply an owner-restricting
-access-control list to the temporary file *between* the fsync and the rename,
-which this deliberately offers no seam for, and the Gemini OAuth refresh cannot
-import this package without dragging the process registry and control
-configuration into a latency-sensitive provider leaf.  Both close the same
-failure path this does.  They are the documented exceptions, not drift - and any
-third copy without a reason of its own belongs here instead.
+It lives under ``utils`` rather than beside its first callers in ``lifecycle``
+for a reason worth stating, because it used to live there and the move removed a
+documented exception.  Python has no way to import a leaf without executing its
+package, so importing this from ``lifecycle`` executed the whole lifecycle
+package - the process registry, service discovery, and the configuration they
+pull - and the Gemini OAuth refresh, whose import latency sits on a coding
+agent's tool-discovery window, kept its own copy of the loop rather than pay
+that.  Measured, the cost was +27 modules and ~62ms; from ``utils``, which that
+provider leaf already loads in full, it is +1 module and unmeasurable.  A home
+nothing can reach is not a canonical home.
+
+ONE writer elsewhere still keeps its own copy, for a reason this cannot solve by
+moving: the desktop worker interprocess-communication mint has to apply an
+owner-restricting access-control list to the temporary file *between* the fsync
+and the rename, and this deliberately offers no seam there.  That is the
+documented exception, not drift - and any second copy without a reason of its own
+belongs here instead.
 """
 
 from __future__ import annotations
@@ -56,37 +64,46 @@ def atomic_write_text(
     encoding: str = "utf-8",
     retry_seconds: float = REPLACE_RETRY_SECONDS,
     mode: int | None = None,
+    newline: str | None = "",
 ) -> None:
     """Publish *text* at *path* atomically, leaving no temporary file behind.
 
-    Writes a sibling temporary file, flushes it to disk, then renames it over
-    *path*.  The temporary file is removed if any stage fails, so an interrupted
-    publication leaves the filesystem as it found it rather than accumulating
-    residue nothing collects.
+        Writes a sibling temporary file, flushes it to disk, then renames it over
+        *path*.  The temporary file is removed if any stage fails, so an interrupted
+        publication leaves the filesystem as it found it rather than accumulating
+        residue nothing collects.
 
-    The temporary name carries the writing process id so two processes
-    publishing to the same target cannot collide on the temporary itself.
+        The temporary name carries the writing process id so two processes
+        publishing to the same target cannot collide on the temporary itself.
 
-    Args:
-        path: Destination to publish atomically.
-        text: Content to write.
-        encoding: Text encoding for the temporary file.
-        retry_seconds: How long to ride out a transient rename denial.  Zero
-            attempts the rename exactly once.
-        mode: POSIX permission bits to create the temporary file with.  Pass
-            this for a credential-bearing record so the bytes are never briefly
-            world-readable between creation and rename; omitting it takes the
-            process umask.  Ignored on Windows, where access is governed by the
-            parent directory's access-control list rather than mode bits.
+        Args:
+            path: Destination to publish atomically.
+            text: Content to write.
+            encoding: Text encoding for the temporary file.
+            retry_seconds: How long to ride out a transient rename denial.  Zero
+                attempts the rename exactly once.
+            mode: POSIX permission bits to create the temporary file with.  Pass
+                this for a credential-bearing record so the bytes are never briefly
+                world-readable between creation and rename; omitting it takes the
+                process umask.  Ignored on Windows, where access is governed by the
+                parent directory's access-control list rather than mode bits.
+            newline: Line-ending translation for the temporary file, as ``open``
+                takes it.  The default writes ``
+    `` through untranslated, which is
+                what a record this service both writes and reads wants.  Pass
+                ``None`` to take the platform translation instead - only meaningful
+                for a file CO-OWNED by another program, where matching what that
+                program expects to find outranks this service's own preference.
+                Ignored when *mode* is set, since that path writes bytes directly.
 
-    Raises:
-        OSError: If the write or the rename fails; the temporary file is removed
-            before the error propagates.
+        Raises:
+            OSError: If the write or the rename fails; the temporary file is removed
+                before the error propagates.
     """
     tmp = path.with_name(f"{path.name}.{os.getpid()}.tmp")
     try:
         if mode is None:
-            with open(tmp, "w", encoding=encoding, newline="") as handle:
+            with open(tmp, "w", encoding=encoding, newline=newline) as handle:
                 handle.write(text)
                 handle.flush()
                 os.fsync(handle.fileno())

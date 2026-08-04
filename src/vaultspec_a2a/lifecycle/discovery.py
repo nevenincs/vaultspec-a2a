@@ -56,8 +56,8 @@ from ..desktop._platform_acl import (
 from ..desktop._platform_acl import (
     windows_file_is_restricted as _windows_file_is_restricted,
 )
+from ..utils.atomic_write import atomic_write_text
 from ..utils.coercion import coerce_int
-from .atomic_write import atomic_write_text
 
 __all__ = [
     "ARTIFACT_DECLARATIONS",

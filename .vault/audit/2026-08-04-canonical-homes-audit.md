@@ -5,7 +5,7 @@ tags:
 date: '2026-08-04'
 modified: '2026-08-04'
 body_schema: 'body-v1'
-body_hash: 'sha256:89541cfceac4ac9670f8610a34c809ef451d86e28f67e1b38acfbc1efb4eb1e0'
+body_hash: 'sha256:819b2100e4cdf5c425281ef8aefca4b39e7077284314baec0eb5ff30354dbaa1'
 related: []
 ---
 
@@ -1256,6 +1256,64 @@ its context and handed over a complete design rather than beginning a three-file
 production refactor it could not finish. That is the behaviour this campaign
 wants at a context boundary, and it is the third time today a handover has cost
 nothing while a half-landing would have cost a great deal.
+
+### wire-event-vocabulary-declared-twice | critical | the duplication has already shipped a bug, and the code says so
+
+The strongest finding of the campaign, and the only one where the codebase
+already documents the defect the duplication caused.
+
+The progress-stream frame vocabulary is a closed enumeration of eleven kinds in
+the API schema package. The worker-to-gateway serializer restates all eleven as
+string literals in a dispatch statement, with no import between them - verified,
+eleven literal returns against eleven enumeration members. The class-to-kind
+dispatch is genuine per-event knowledge and must stay; only the STRINGS are
+duplicated.
+
+Three things raise this above every other open cluster:
+
+The enumeration's own module states the rule being broken. Its header says the
+neighbouring vocabularies are "imported (not duplicated) where needed" - so the
+duplication is against a written instruction sitting in the file being
+duplicated.
+
+The defect class has already shipped here, and the serializer's own docstring
+records it: adding an event kind without adding it to the dispatch is "silent,
+and is exactly how the clarification nudge shipped undeliverable". An event with
+no case relays with no kind, the gateway's closed catalog projects an untyped
+frame onto identity keys, and subscribers receive it stripped of meaning - while
+the worker-side emission still looks healthy, so an in-process test of the
+emitter passes. Silent by construction, and on the far side of a process
+boundary where nothing compares the two lists.
+
+It is the same shape as the terminal-status vocabulary already fixed in this
+campaign: a closed vocabulary copied by hand, which then gains or loses members
+with nothing to say so.
+
+What makes it non-trivial and why it was reported rather than taken: the IPC
+package imports nothing from the API package today, and importing upward would
+invert the layering. There is no cycle in practice - the enumeration module
+imports only the standard library - but absence of a cycle is not correctness of
+layer. The likely honest fix is to move the enumeration DOWN to where the events
+it names are defined, then have both the schema package and the serializer import
+it. That is a layering decision touching the served API schema surface, and the
+destination must be confirmed before anything moves.
+
+### wire-event-type-keys-is-not-the-same-concept | medium | do not merge on the word "wire"
+
+Recorded beside the finding above because the names invite exactly the wrong
+merge. A pair of key names in the snapshot module lists the two KEYS a frame's
+kind may arrive under. The enumeration lists what that kind may BE. One answers
+where to read the discriminator, the other what values it admits. DISTINCT.
+
+### ipc-swept-and-found-clean | low | the bridge is already shaped as this campaign wants
+
+Complete rather than partial, on a small surface. The dispatch and response
+models and the worker bridge showed no duplication: event buffering, flush with
+retry, and heartbeat-failure escalation each exist once, and a single
+serialisation seam is used by both sides of the boundary. Recorded as coverage
+and as a second example, after the graph and compiler sweep, that the discipline
+this campaign installs is already present in parts of the codebase rather than
+being imposed on all of it.
 
 ## Recommendations
 

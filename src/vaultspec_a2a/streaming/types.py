@@ -149,7 +149,14 @@ def classify_tool_kind(tool_name: str) -> ToolKind:
     return ToolKind.OTHER
 
 
-def map_acp_option_kind(option_id: str) -> PermissionOptionKind:
+def _map_acp_option_kind(option_id: str) -> PermissionOptionKind:
+    # PRIVATE on purpose. This id-substring heuristic is the resolver's LAST
+    # RESORT, not a peer it can be chosen instead of. It was public once, and a
+    # second consumer picked it over the resolver and classified a declared
+    # denial as an approval - the same failure the resolver had already been
+    # written to end. Reaching it now means going through
+    # `resolve_acp_option_kind`, which is the only caller that knows when the
+    # declaration is unusable.
     """Derive a ``PermissionOptionKind`` from an ACP option ID string.
 
     Heuristic matching: looks for ``always`` + ``deny``/``reject`` keywords to
@@ -197,7 +204,7 @@ def resolve_acp_option_kind(
 
     The declaration is validated rather than trusted: a value outside
     :class:`PermissionOptionKind` is not written through to the durable column but
-    routed to :func:`map_acp_option_kind`, so a malformed or unknown kind degrades
+    routed to :func:`_map_acp_option_kind`, so a malformed or unknown kind degrades
     to the id heuristic instead of poisoning the record with an unreadable status.
 
     Args:
@@ -214,7 +221,7 @@ def resolve_acp_option_kind(
             return PermissionOptionKind(declared_kind)
         except ValueError:
             pass
-    return map_acp_option_kind(option_id)
+    return _map_acp_option_kind(option_id)
 
 
 def evict_oldest(d: dict, max_entries: int) -> None:

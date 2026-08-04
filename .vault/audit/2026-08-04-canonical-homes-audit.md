@@ -3978,3 +3978,43 @@ the baseline, and in a shared worktree with concurrent writers it must be run
 before any claim that a capability "already exists". Recorded as a standing rule,
 not an anecdote: this campaign runs several lanes in one tree by design, so the
 hazard is structural rather than incidental.
+
+### disclosure-gap-closed-and-the-two-seams-that-found-themselves | critical | The executed model is now disclosed; two of the three seams that had to admit the field were found by existing tests, not by reading the code
+
+Closes the disclosure gap. `model_name` is threaded from the compiler's frozen
+branch through node metadata onto `AgentData`, `AgentSummary`, and
+`_AgentSnapshot`, and the agreement test now compares like with like and passes
+for the first time.
+
+The implementation lesson is where the field had to be REGISTERED, because
+reading the code found only one of the three places:
+
+- `api/schemas/snapshots.py::_AgentSnapshot` was surfaced by an existing
+  parity test, which also explained the stakes better than the code did: its
+  seam is `model_validate(asdict(...))`, which ignores unknown keys, so a field
+  added on one side is dropped silently rather than loudly.
+- `streaming/node_metadata.py::NODE_METADATA_FIELDS` is an explicit allowlist
+  whose docstring states that adding a field there reaches every reader at
+  once. Until the field was registered there the value stopped one layer short
+  of the wire - and every type check passed, because nothing about the type
+  system knows that an allowlist exists. The live test still returned `None`.
+
+Both are canonical homes behaving exactly as designed, which is the useful part:
+a correct-looking change threaded through five files was still incomplete, and
+what caught it was a guard someone had written earlier for precisely this. The
+same shape as the campaign's own structural guard, and evidence that the guards
+this project already carries are worth more than a careful reading.
+
+Two decisions worth keeping:
+
+- The identifier is carried BESIDE the capability rather than replacing it. The
+  capability field remains vestigial on frozen runs, which is recorded above and
+  is a separate decision; overloading it was impossible anyway, since the wire
+  types it as a four-value enum.
+- The value is ABSENT rather than empty at the source, so a caller can tell an
+  unfrozen run (no catalog identifier exists) from a frozen run that named none.
+
+Verified the assertion can still fail: substituting the published identifier
+turns the test red on all three roles, and reverting restores green. The test
+was rewritten from one that could never pass, so proving it can now fail was
+the only way to know it asserts anything at all.

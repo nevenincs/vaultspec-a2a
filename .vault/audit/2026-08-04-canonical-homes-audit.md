@@ -5,7 +5,7 @@ tags:
 date: '2026-08-04'
 modified: '2026-08-04'
 body_schema: 'body-v1'
-body_hash: 'sha256:ed3cf6135b3600dc1a994b2bff82442a260734ae539610e991c48937f51efe32'
+body_hash: 'sha256:216b33029f343c77d718393fafe611ff1ae5435544a7519ad2957a87f0aeec8e'
 related: []
 ---
 
@@ -139,6 +139,67 @@ Two clusters already surfaced by hand and not yet triaged are gateway boot with
 wait-until-healthy, declared in at least four places, and credential seeding
 into an application home, declared in at least five. This entry is a placeholder
 for that breadth and will be replaced by specific findings, not amended.
+
+### bounded-wall-clock-poll-loop | high | one loop shape, seven production declarations
+
+No shared helper for "poll a predicate every N seconds until it returns truthy
+or a deadline expires" exists anywhere in the tree - verified, there is no
+`wait_until`, `poll_until` or `await_until` to import. Seven production sites
+therefore hand-roll it, each declaring its own poll interval as a private
+constant at a different value: `src/vaultspec_a2a/utils/process.py` waiting for
+pids to disappear at 0.1s; `src/vaultspec_a2a/lifecycle/manager.py` three
+separate times, for terminate confirmation at 0.05s, for a kill-tree wait at
+0.1s and for port readiness at a 0.1s literal;
+`src/vaultspec_a2a/lifecycle/singleton.py` acquiring a lock at 0.05s without
+jitter; `src/vaultspec_a2a/cli/service.py` waiting for a pid at 0.2s; and
+`src/vaultspec_a2a/testing/leases.py` acquiring a lease with jitter. Verdict
+DUPLICATE. Changing how this project waits - adding jitter, changing backoff,
+adding a diagnostic on expiry - currently means finding and editing seven
+loops, which is precisely the burden this audit exists to remove. Two members
+must remain separate call sites layered ON the shared primitive rather than
+being folded into it: the Windows kill-tree wait bounds a subprocess wait rather
+than polling a boolean, and the service harness variant is deliberately
+death-aware, watching a child process and raising with its exit code and log
+tail.
+
+### progress-deadline-is-not-a-wall-clock-deadline | medium | the one wait that must never be merged
+
+`src/vaultspec_a2a/testing/progress.py` declares a deadline that fails for two
+reasons only - the watched resource died, or the observed state stopped changing
+for longer than an idle window - and states that elapsed total time is
+deliberately NOT a failure reason. It exists because a fixed wall clock is wrong
+in both directions for a live model turn: it kills a legitimately slow one and
+lets a hung one burn the whole budget. Verdict DISTINCT, recorded here with the
+same weight as a defect because the finding above creates the exact pressure
+that would destroy it. A consolidation sweep that sees "another waiting helper"
+and merges this into the wall-clock primitive removes the only property it was
+built for.
+
+### bearer-header-string-template | low | eight sites format the same header inline
+
+Eight production sites build an authorization header by inline string formatting
+rather than through a shared one-liner, spanning six genuinely different
+credential planes - gateway service token, worker interprocess token, attach
+credential, actor token, machine bearer and an external provider key. The
+credentials are correctly DISTINCT and must not be unified. Only the mechanical
+formatting is duplicated, carrying no decision logic, so the finding is narrow:
+a single formatter removes header-casing and format drift and nothing else.
+Verdict DUPLICATE on the template alone, lowest priority in this audit.
+
+### swept-and-found-clean | low | four candidate clusters that are not defects
+
+Recorded because an audit that lists only defects cannot be trusted to have
+looked. Worker interprocess bearer verification already has one home and states
+so; worker health probing already has one primitive, proven by a test asserting
+both callers agree on an identical verdict; production retry and backoff sites
+are genuinely different failure domains - restart cooldown, subscriber
+reconnect, event-flush retry and provider-retry classification - each with its
+own settings-driven constants; and HTTP client construction differs for
+load-bearing reasons, including one external-provider client that disables
+environment trust so proxy variables cannot redirect a provider call, which is a
+security property rather than drift. All DISTINCT or already consolidated. One
+sub-cluster inside the service harness does repeat five near-identical client
+constructions and is worth a local factoring, test-only and low.
 
 ## Recommendations
 

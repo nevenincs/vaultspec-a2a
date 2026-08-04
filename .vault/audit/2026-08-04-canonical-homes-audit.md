@@ -3519,3 +3519,55 @@ means two vocabularies were never meant to match and the assertion is wrong.
 
 Recorded rather than guessed. Deciding it needs the frozen-assignment
 disclosure contract, not this campaign.
+
+### executed-side-cannot-disclose-which-model-ran | critical | The compiler holds the frozen model name, runs it, and publishes only a capability tier - so the one test checking frozen-versus-executed agreement compares two vocabularies and cannot pass
+
+Resolves the open question recorded above. It is the first reading - a real gap -
+but the gap is not "capability is unset at compile time". The frozen model name
+is IN SCOPE at the publishing call site and simply is not passed.
+
+The chain, read end to end:
+
+- `_resolve_worker_model_preferences` returns four values, the fourth being
+  `frozen_model_name` - the concrete catalog identifier such as `mock-high`.
+- The factory is then called with `model=frozen_model_name` for the primary
+  provider, so the worker GENUINELY RUNS the frozen model. The freeze is
+  honoured in execution.
+- But the node metadata is built by `_agent_node_metadata(agent_cfg,
+  used_provider, capability)`, whose signature admits only the CAPABILITY tier.
+  `_model_assignment_metadata` renders `model` as `capability.value`, or the
+  empty string when capability is `None`.
+- Node metadata is the only executed-side surface: `build_agent_descriptor`
+  reads `summary.get("model")` and every agent-listing surface - the REST route,
+  the thread snapshot, the broadcast - projects from it.
+
+So the executed side reports a capability tier, or nothing, where the frozen
+assignment promised a catalog model name. `test_dispatch_assignment_agreement`
+compares `actual["model"]` against `promise["model_name"]`, which are two
+different vocabularies, and it therefore cannot pass regardless of what runs.
+The test's INTENT is correct and is the only check of this contract; its failure
+is a TRUE POSITIVE reporting that the disclosure surface has lost the fact it
+exists to disclose.
+
+Why this is worth more than a failing test: the frozen assignment is the
+authoritative start-and-commit disclosure for a run. A run can promise
+`mock-high`, actually execute `mock-high`, and leave no observable evidence that
+it did. Provider agreement works only because provider IS published; model is
+the field with no witness. The same shape would hide a genuine substitution.
+
+The fix is a contract decision and is NOT taken here, because node metadata's
+`model` field is consumed by `/team/status`, the `team_status` broadcast, the
+thread snapshot, and the REST agent route, all of which currently receive a
+capability tier:
+
+- Publish the concrete model name in `model`, making the field mean "what ran".
+  Truthful, and the vocabulary the freeze speaks - but it changes what four
+  existing consumers receive.
+- Add a separate field carrying the concrete name and leave `model` as the
+  capability tier. Non-breaking, but perpetuates two similarly-named fields in
+  two vocabularies, which is the confusion that produced this finding.
+
+Recommendation is the first, on the grounding that a disclosure surface should
+report what happened rather than the tier it was requested at - but it is the
+owner's call, and it needs the frozen-assignment disclosure contract rather than
+this campaign.

@@ -348,9 +348,7 @@ async def probe_worker_health(
             exc,
             indeterminate,
         )
-        return WorkerHealthProbe(
-            healthy=False, body=None, indeterminate=indeterminate
-        )
+        return WorkerHealthProbe(healthy=False, body=None, indeterminate=indeterminate)
 
 
 def _is_indeterminate_probe_failure(exc: BaseException) -> bool:

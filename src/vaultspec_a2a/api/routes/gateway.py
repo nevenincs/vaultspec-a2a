@@ -82,7 +82,11 @@ from ...database import (
 )
 from ...database.checkpoints import Checkpointer
 from ...domain_config import domain_config
-from ...providers.provider_catalog import ControlSelection, SelectionReference
+from ...providers.provider_catalog import (
+    ControlSelection,
+    ProviderRecord,
+    SelectionReference,
+)
 from ...providers.provider_catalog_service import (
     ProviderCatalogScopeCapacityError,
     ProviderCatalogService,
@@ -161,6 +165,7 @@ from ..schemas.gateway import (
     ServiceStateResponse,
     TeamStatusV1Response,
     TopologyPosition,
+    WorkerLifecycleState,
 )
 from ..schemas.provider_catalog import ProviderCatalogResponse
 from ..schemas.snapshots import ThreadStateSnapshot
@@ -808,10 +813,13 @@ async def _run_commit_locked(
         # says only that something was ineligible, which cannot be told apart
         # from a refusal about the reservation itself.
         logger.warning(
-            "run commit refused as ineligible: reason=%s worker_reachable=%s "
-            "provider_eligibility=%s reservation=%s",
+            "run commit refused as ineligible: reason=%s worker_state=%s "
+            "worker_probe=%s provider_eligibility=%s reservation=%s",
             execution.reason,
-            worker_reachable,
+            readiness.worker_state.value,
+            "indeterminate"
+            if probe.indeterminate
+            else ("healthy" if probe.healthy else "absent"),
             readiness.provider_eligibility.value,
             reservation_id,
         )
@@ -1033,6 +1041,58 @@ def _canonical_replay_body(
     )
 
 
+async def _catalog_records_within_budget(
+    app: FastAPI, canonical: str
+) -> tuple[ProviderRecord, ...]:
+    """Read *canonical*'s catalog records under a bounded wall-clock budget.
+
+    A WARM catalog answers from the per-lane cache immediately, which is the
+    normal case: a client cannot produce a valid selection without having read
+    the catalog first. The cold case is real anyway - a gateway restart, or the
+    workspace scope evicted under capacity, between that read and this start -
+    and building cold probes every registered lane over subprocesses and the
+    network. A run start absorbing that is indistinguishable to the caller from
+    a hung gateway.
+
+    The build is SHIELDED rather than cancelled on expiry. Cancelling it would
+    make every retry pay the same cold cost and never converge; letting it finish
+    populates the per-lane single-flight cache, so the caller's retry is warm.
+    The refusal is therefore a genuine "not yet", not a failure.
+    """
+    service = provider_catalog_service(app)
+    build = asyncio.ensure_future(service.records(canonical))
+    try:
+        return await asyncio.wait_for(
+            asyncio.shield(build), domain_config.run_start_catalog_budget_seconds
+        )
+    except TimeoutError:
+        # The shielded build outlives this request. Consume its outcome so a
+        # later failure is neither an unretrieved-exception warning nor silent.
+        build.add_done_callback(_log_detached_catalog_build)
+        logger.warning(
+            "run refused: provider catalog for workspace=%s did not build within "
+            "%.1fs; the build continues and a retry will be served warm",
+            canonical,
+            domain_config.run_start_catalog_budget_seconds,
+        )
+        raise HTTPException(
+            status_code=503,
+            detail="the provider catalog for this workspace is still being built",
+        ) from None
+
+
+def _log_detached_catalog_build(task: asyncio.Future[Any]) -> None:
+    """Record how a catalog build that outlived its request finished."""
+    if task.cancelled():
+        logger.warning("detached provider catalog build was cancelled")
+        return
+    error = task.exception()
+    if error is not None:
+        logger.warning(
+            "detached provider catalog build failed: %s", type(error).__name__
+        )
+
+
 async def _validate_and_freeze_selection_or_refuse(
     app: FastAPI,
     body: RunStartRequest,
@@ -1052,7 +1112,7 @@ async def _validate_and_freeze_selection_or_refuse(
             detail="workspace_root must identify an existing directory",
         )
     try:
-        records = await provider_catalog_service(app).records(canonical)
+        records = await _catalog_records_within_budget(app, canonical)
     except ProviderCatalogScopeCapacityError:
         # Disclosed for the same reason the admission refusals are: a bare 503
         # here is indistinguishable from an admission or eligibility refusal,

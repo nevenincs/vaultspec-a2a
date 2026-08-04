@@ -44,6 +44,7 @@ from ..tests.gateway_boot import (
     spawn_gateway,
     spawn_until_ready,
 )
+from ._catalog import catalog_selection
 
 if TYPE_CHECKING:
     import subprocess
@@ -96,46 +97,6 @@ def _running_gateway(
         log_handle.close()
 
 
-_CATALOG_CACHE: dict[str, dict[str, Any]] = {}
-
-
-def _catalog_selection(base: str, auth: str, workspace_root: str) -> dict[str, Any]:
-    """One served selection for *workspace_root*, read from this gateway.
-
-    Run start refuses a body without a selection and revalidates the one it gets
-    against the catalog served FOR THAT WORKSPACE, so the reference cannot be
-    written by hand - it has to name a lane this gateway actually reports as
-    selectable. Cached per gateway and workspace because the first read probes
-    every provider lane and these tests start several gateways.
-    """
-    key = f"{base}|{workspace_root}"
-    cached = _CATALOG_CACHE.get(key)
-    if cached is None:
-        with httpx.Client(base_url=base, timeout=180.0) as client:
-            response = client.get(
-                "/v1/provider-catalog",
-                headers={"Authorization": auth},
-                params={"workspace_root": workspace_root},
-            )
-        assert response.status_code == 200, response.text
-        record = next(
-            item
-            for item in response.json()["providers"]
-            if item["health"]["selectable"] and item["catalog"]["models"]
-        )
-        catalog = record["catalog"]
-        cached = {
-            "schema_version": 1,
-            "provider_id": record["provider_id"],
-            "execution_mode": record["execution_mode"],
-            "catalog_revision": catalog["state"]["revision"],
-            "entry_id": catalog["models"][0]["entry_id"],
-            "controls": {},
-        }
-        _CATALOG_CACHE[key] = cached
-    return dict(cached)
-
-
 @contextmanager
 def _armed_gateway(tmp_path: Path, **extra_env: str) -> Iterator[tuple[str, str]]:
     """Seat and boot a real armed desktop gateway over a migrated app home."""
@@ -151,7 +112,7 @@ def _armed_gateway(tmp_path: Path, **extra_env: str) -> Iterator[tuple[str, str]
         # Warming at arm time is also what the product should do - a run start
         # is not the place to discover the catalog for the first time.
         base, auth = gateway
-        _catalog_selection(base, auth, str(Path.cwd()))
+        catalog_selection(base, auth, str(Path.cwd()))
         yield gateway
 
 
@@ -180,7 +141,7 @@ def _prepare(
                 # The workspace anchors the selection, so it rides even when the
                 # caller declared no metadata of its own.
                 "metadata": {"workspace_root": workspace, **(metadata or {})},
-                "selection": _catalog_selection(base, auth, workspace),
+                "selection": catalog_selection(base, auth, workspace),
             },
         )
     try:
@@ -223,9 +184,8 @@ def _commit(
                 # catalog - a replayed commit must be byte-identical to be
                 # recognised as a replay rather than a changed body.
                 "metadata": {"workspace_root": workspace, **(metadata or {})},
-                "selection": _catalog_selection(base, auth, workspace),
+                "selection": catalog_selection(base, auth, workspace),
                 **({"run_id": run_id} if run_id is not None else {}),
-                **({"metadata": metadata} if metadata is not None else {}),
             },
         )
     try:
@@ -243,7 +203,15 @@ def _release(
     run_id: str | None = None,
     metadata: dict[str, Any] | None = None,
 ) -> tuple[int, dict[str, Any]]:
-    """Explicitly release one uncommitted prepared reservation."""
+    """Explicitly release one uncommitted prepared reservation.
+
+    The release binding is the digest of the PREPARED request, so this body must
+    mirror the prepare that opened the reservation field for field - including
+    the selection and the workspace metadata. A release that omits either is not
+    a weaker request, it is a DIFFERENT one, and the broker refuses to release a
+    reservation it cannot recognise.
+    """
+    workspace = str((metadata or {}).get("workspace_root") or Path.cwd())
     with httpx.Client(base_url=base, timeout=60.0) as client:
         resp = client.post(
             "/v1/runs",
@@ -254,7 +222,8 @@ def _release(
                 "reservation_id": reservation_id,
                 "autonomous": True,
                 **({"run_id": run_id} if run_id is not None else {}),
-                **({"metadata": metadata} if metadata is not None else {}),
+                "metadata": {"workspace_root": workspace, **(metadata or {})},
+                "selection": catalog_selection(base, auth, workspace),
             },
         )
     return resp.status_code, resp.json()

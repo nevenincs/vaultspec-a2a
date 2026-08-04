@@ -572,11 +572,20 @@ def assemble_desktop_readiness(
         # window the live probe is the stronger fact: refusing admission as
         # ``starting`` after an exact authenticated 200 would make first demand
         # fail even though ``ensure_worker`` has already completed successfully.
-        worker_state = (
-            WorkerLifecycleState.READY
-            if worker_probe_ready is True
-            else WorkerLifecycleState.STARTING
-        )
+        #
+        # ``None`` is the third case and is NOT a negative: the caller probed and
+        # the observation did not finish (a worker busy compiling a graph for an
+        # already-admitted run stops answering for seconds). With no live verdict
+        # the worker's OWN heartbeat is the remaining live evidence, and it is a
+        # positive liveness assertion by the worker rather than a label this
+        # gateway has not got round to advancing. Reading ``starting`` there made
+        # every second run-start fail while the first one was still booting.
+        if worker_probe_ready is True or (
+            worker_probe_ready is None and bool(shared["worker_connected"])
+        ):
+            worker_state = WorkerLifecycleState.READY
+        else:
+            worker_state = WorkerLifecycleState.STARTING
     elif worker_status in {"down", "restarting"}:
         worker_state = WorkerLifecycleState.UNAVAILABLE
         reasons.append(f"worker is {worker_status}")

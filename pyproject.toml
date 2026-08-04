@@ -254,6 +254,8 @@ exclude = [
   "src/vaultspec_a2a/team/presets/agents/deterministic-cancel-window.toml",
   "src/vaultspec_a2a/team/presets/agents/deterministic-permission-pause.toml",
   "src/vaultspec_a2a/team/presets/agents/deterministic-tool-call.toml",
+  "src/vaultspec_a2a/team/presets/teams/deterministic-relay-burst.toml",
+  "src/vaultspec_a2a/team/presets/agents/deterministic-relay-burst.toml",
 ]
 
 [tool.hatch.build.targets.wheel.force-include]

@@ -558,4 +558,3 @@ def materialize_schema(db_path: Path) -> Path:
     db_path.parent.mkdir(parents=True, exist_ok=True)
     shutil.copyfile(schema_template(), db_path)
     return db_path
-

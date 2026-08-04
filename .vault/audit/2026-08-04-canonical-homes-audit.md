@@ -2851,3 +2851,48 @@ package-root peer tier) holds only `gateway_boot.py`, already the
 established canonical home, and `test_prerequisite_rule.py`, a real-subprocess
 proof of the root conftest's external-prerequisite rule with no
 duplicate-shaped logic found anywhere else in the four target directories.
+
+### detached-spawn-flags-convergence-closed-in-service-harness | medium | closes the note handed to this domain, verified and fixed
+
+Closes the `detached-spawn-flags-triplicated` copy this campaign's lifecycle
+sweep explicitly handed to this domain rather than editing itself, because
+consuming the canonical `detached_spawn_kwargs()` was flagged as a possible
+POSIX behaviour change rather than a pure dedup. Established before touching
+anything: `service_tests/harness.py`'s `_stop_process` tears every spawned
+child down exclusively through `tree_kill` -> `kill_pid_tree_async`, which
+discovers descendants by walking OS parent-child relationships
+(`posix_descendant_pids`) and signals each pid directly - never through
+`killpg` against a shared process group, which is the ONLY mechanism in this
+codebase (`ProcessContainment`, layered separately in the provider RPC
+handlers) that actually depends on the child sharing or owning a particular
+POSIX session. Grepped `service_tests/harness.py` and its `conftest.py` for
+any signal-propagation reliance (`SIGINT`, `signal.signal`,
+`KeyboardInterrupt`, `atexit`) and found none. Direct precedent already exists
+in this same tier for detaching a gateway-class child into its own POSIX
+session while tearing it down through the identical pid-tree-walk primitive:
+`tests/gateway_boot.py`'s `spawn_gateway(new_session=True)`, consumed by
+`acceptance/_harness.py`. Verdict: the POSIX detachment is a deliberate,
+correct convergence, not an accident being inherited silently - the site
+previously read as written Windows-first with the POSIX half simply never
+considered, and detaching it removes a real (if never yet observed) exposure
+where a stray SIGINT delivered to the harness's own foreground process group
+could kill the gateway or worker mid-`stop()`, out from under the diagnostics
+capture that follows an unexpected teardown.
+
+ACTIONED: `_spawn_process` now builds its flags through the canonical
+`detached_spawn_kwargs()` instead of a bare
+`getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)`, passing both
+`creationflags` and `start_new_session` explicitly. On this Windows
+development host the change is behaviour-identical (the canonical builder
+also returns `start_new_session=False` there), which a fresh real-process
+smoke test confirmed directly through the changed function - not merely
+through the already-tested `tree_kill` primitive - spawning a process that
+itself spawns a grandchild, then proving `_stop_process` fells both. The
+existing `test_harness_process_stop.py::test_stop_process_tree_kills_grandchildren`
+(marked `service`, needs no compose stack) was also re-run and passed
+unchanged. The POSIX branch could not be exercised on this host; the verdict
+above rests on the code-read evidence stated rather than on a live run, and is
+recorded as such rather than overstated. Whole-tree `ty check src/vaultspec_a2a`
+and `ruff check`/`format --check` on the touched file are clean. Left
+uncommitted alongside the desktop-catalog fix above, for the owning session to
+review and commit.

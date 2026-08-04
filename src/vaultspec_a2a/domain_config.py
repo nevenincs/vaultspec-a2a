@@ -116,7 +116,12 @@ class DomainConfig(BaseModel):
 
     anchor_path_cap: int = Field(
         default=10,
-        description="Maximum anchor paths returned by the workspace anchoring module.",
+        description=(
+            "Maximum anchor paths per DOC TYPE surfaced by the workspace "
+            "anchoring module. Applied per type rather than as a total, so a "
+            "run carrying every vault stage can surface this many times the "
+            "number of stages present."
+        ),
     )
     max_context_refs: int = Field(
         default=50,
@@ -124,7 +129,12 @@ class DomainConfig(BaseModel):
     )
     vault_index_cap: int = Field(
         default=50,
-        description="Maximum vault index entries surfaced to the agent per turn.",
+        description=(
+            "Maximum vault index entries per STAGE surfaced to the agent. "
+            "Applied per stage rather than as a per-turn total, so a run "
+            "carrying every stage can surface this many times the number of "
+            "stages present. Contrast max_context_refs, which is a true total."
+        ),
     )
     mount_token_ceiling: int = Field(
         default=20_000,

@@ -14,6 +14,7 @@ failures are produced by genuinely unwritable or contended filesystem state.
 from __future__ import annotations
 
 import os
+import subprocess
 from typing import TYPE_CHECKING
 
 import pytest
@@ -27,6 +28,35 @@ if TYPE_CHECKING:
 def _temporaries(directory: Path) -> list[Path]:
     """Return every temporary-file residue in *directory*."""
     return sorted(directory.glob("*.tmp"))
+
+
+def _plant_link(link: Path, file_target: Path) -> str:
+    """Plant the strongest link this host can create at *link*; name its kind.
+
+    A symbolic link to a FILE is the case worth proving, because a write that
+    follows one lands on that file's bytes and destroys them.  Creating one on
+    Windows needs a privilege not every host grants, so a host that refuses gets
+    a directory junction instead - the privilege-free reparse point - which
+    still proves the refusal but cannot demonstrate the destruction.
+    """
+    try:
+        os.symlink(file_target, link)
+    except OSError:
+        junction_target = link.parent / "junction-target"
+        junction_target.mkdir(exist_ok=True)
+        interpreter = os.environ.get("COMSPEC", "cmd.exe")
+        completed = subprocess.run(
+            [interpreter, "/c", "mklink", "/J", str(link), str(junction_target)],
+            capture_output=True,
+            text=True,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+        if completed.returncode != 0 or not link.is_junction():
+            raise OSError(
+                f"could not plant a link: {completed.stderr.strip()}"
+            ) from None
+        return "junction"
+    return "symlink"
 
 
 def test_content_is_published_and_no_temporary_survives(tmp_path: Path) -> None:
@@ -174,6 +204,37 @@ def test_the_permission_bearing_path_writes_its_bytes_untranslated(
 
     assert restricted.read_bytes() == b"first\nsecond\n"
     assert restricted.read_bytes() == plain.read_bytes()
+
+
+@pytest.mark.parametrize("mode", [None, 0o600])
+def test_neither_write_path_follows_a_link_planted_at_the_temporary(
+    tmp_path: Path, mode: int | None
+) -> None:
+    """The temporary name is predictable, so a link planted there must be refused.
+
+    Both write paths are exercised, because they used to disagree: the path with
+    permission bits asked for ``O_NOFOLLOW`` and the path without went through
+    builtin ``open``, which follows.  One function, one name, one docstring, two
+    postures - selected by whether an unrelated argument was passed.
+
+    The refusal has to hold on Windows too, and ``O_NOFOLLOW`` does not exist
+    there, so this is what proves the guarantee is real rather than nominal on
+    the platform this product ships to.  Where the host can create a symbolic
+    link to a file, the assertion has teeth: following it would overwrite that
+    file's bytes, and the write under test carries a secret.
+    """
+    outside = tmp_path / "outside.secret"
+    outside.write_text("must-survive", encoding="utf-8")
+    target = tmp_path / "record.json"
+    kind = _plant_link(tmp_path / f"record.json.{os.getpid()}.tmp", outside)
+
+    with pytest.raises(OSError, match="refusing to write through a link"):
+        atomic_write_text(target, "must-not-land-outside", mode=mode)
+
+    assert outside.read_text(encoding="utf-8") == "must-survive", (
+        f"a {kind} planted at the temporary name redirected the write"
+    )
+    assert not target.exists()
 
 
 def test_the_temporary_is_named_for_the_writing_process(tmp_path: Path) -> None:

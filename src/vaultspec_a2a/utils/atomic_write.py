@@ -13,9 +13,11 @@ This module is the audited version and the only copy of the pattern: it always
 fsyncs before the rename so the bytes are durable, always retries the rename over
 a bounded contention window, and always removes the temporary file when the
 publication does not complete - including when the interruption is a
-``KeyboardInterrupt`` or a ``SystemExit`` rather than an error.  Service
-discovery, the process registry, the runtime singleton, and the Gemini OAuth
-refresh all publish through it.
+``KeyboardInterrupt`` or a ``SystemExit`` rather than an error.  And it never
+opens a temporary that is a link, on either of its two write paths, so the
+predictable temporary name cannot be used to redirect a write elsewhere.
+Service discovery, the process registry, the runtime singleton, and the Gemini
+OAuth refresh all publish through it.
 
 It lives under ``utils`` rather than beside its first callers in ``lifecycle``
 for a reason worth stating, because it used to live there and the move removed a
@@ -58,24 +60,40 @@ briefly deny it.  Retrying over a short window turns a spurious failure into a
 successful publication; the operation stays all-or-nothing either way.
 """
 
-_RESTRICTED_WRITE_FLAGS = (
-    os.O_WRONLY
-    | os.O_CREAT
-    | os.O_TRUNC
-    | getattr(os, "O_NOFOLLOW", 0)
-    | getattr(os, "O_BINARY", 0)
-)
+_BYTE_WRITE_FLAGS = os.O_WRONLY | os.O_CREAT | os.O_TRUNC | getattr(os, "O_BINARY", 0)
 """Descriptor flags for the write path that carries explicit permission bits.
 
-``O_NOFOLLOW`` refuses a temporary that is already a symlink, so nothing planted
-at the predictable temporary name can redirect a write the caller asked to keep
-private; Windows has no such flag, so a caller that must also refuse a link at
-the *target* checks for one itself.  ``O_BINARY`` is not redundant despite the
-write going
-through a descriptor: Windows opens a descriptor in text mode by default and
-would expand every newline, so without it this path would not write the bytes it
-was given.
+``O_BINARY`` is not redundant despite the write going through a descriptor:
+Windows opens a descriptor in text mode by default and would expand every
+newline, so without it this path would not write the bytes it was given.  The
+refusal to follow a link is deliberately NOT here - it belongs to the opener
+both write paths share, so the two cannot drift into different postures again.
 """
+
+
+def _open_refusing_a_link(
+    path: str | os.PathLike[str], flags: int, mode: int = 0o666
+) -> int:
+    """Open *path* for writing, refusing it if it is a link.
+
+    The temporary name is predictable - the target's name plus the writing
+    process id - so anything able to create a file beside the target can plant a
+    link there first and have the write land on that link's target instead.  A
+    credential written through such a link is disclosed to whoever chose it, and
+    a record written through one silently destroys an unrelated file.
+
+    Two mechanisms, because neither platform is covered by one.  ``O_NOFOLLOW``
+    refuses atomically inside the open itself and DOES NOT EXIST ON WINDOWS, so
+    the path is inspected first as well: that inspection is what every Windows
+    host actually has, and a racer could still swap the path between the
+    inspection and the open, which is the gap ``O_NOFOLLOW`` closes where it
+    exists.  Both are applied and neither is sufficient alone.
+
+    This is the only place either write path opens its temporary file.
+    """
+    if os.path.islink(path) or os.path.isjunction(path):
+        raise OSError(f"refusing to write through a link planted at {path}")
+    return os.open(path, flags | getattr(os, "O_NOFOLLOW", 0), mode)
 
 
 def atomic_write_text(
@@ -90,57 +108,69 @@ def atomic_write_text(
 ) -> None:
     """Publish *text* at *path* atomically, leaving no temporary file behind.
 
-        Writes a sibling temporary file, flushes it to disk, then renames it over
-        *path*.  The temporary file is removed if any stage fails, so an interrupted
-        publication leaves the filesystem as it found it rather than accumulating
-        residue nothing collects.
+    Writes a sibling temporary file, flushes it to disk, then renames it over
+    *path*.  The temporary file is removed if any stage fails, so an interrupted
+    publication leaves the filesystem as it found it rather than accumulating
+    residue nothing collects.
 
-        The temporary name carries the writing process id so two processes
-        publishing to the same target cannot collide on the temporary itself.
+    The temporary name carries the writing process id so two processes
+    publishing to the same target cannot collide on the temporary itself.
 
-        Args:
-            path: Destination to publish atomically.
-            text: Content to write.
-            encoding: Text encoding for the temporary file.
-            retry_seconds: How long to ride out a transient rename denial.  Zero
-                attempts the rename exactly once.
-            mode: POSIX permission bits to create the temporary file with.  Pass
-                this for a credential-bearing record so the bytes are never briefly
-                world-readable between creation and rename; omitting it takes the
-                process umask.  Ignored on Windows, where access is governed by the
-                parent directory's access-control list rather than mode bits.  This
-                path opens the temporary refusing to follow a link and without
-                line-ending translation, so a planted symlink cannot redirect a
-                privileged write and the bytes land exactly as given.
-            harden: Applied to the temporary file once its bytes are durable and
-                before the rename, so the published file is already restricted at
-                the instant it becomes reachable under its real name.  It exists
-                because owner-restriction is not always an integer: on Windows it
-                is a discretionary access-control list, which *mode* cannot carry.
-                Raising from here fails the publication and removes the temporary,
-                so a file that could not be protected is never published.
-            newline: Line-ending translation for the temporary file, as ``open``
-                takes it.  The default writes ``
-    `` through untranslated, which is
-                what a record this service both writes and reads wants.  Pass
-                ``None`` to take the platform translation instead - only meaningful
-                for a file CO-OWNED by another program, where matching what that
-                program expects to find outranks this service's own preference.
-                Ignored when *mode* is set, since that path writes bytes directly.
+    That name is therefore predictable, so NEITHER write path will open a
+    temporary that is a link: one planted there would redirect the write -
+    of a credential, or over an unrelated file - to a place the writer never
+    chose.  The refusal is atomic where the platform offers it and a
+    pre-open inspection where it does not, and it does not depend on which
+    arguments were passed.
 
-        Raises:
-            OSError: If the write or the rename fails; the temporary file is removed
-                before the error propagates.
+    Args:
+        path: Destination to publish atomically.
+        text: Content to write.
+        encoding: Text encoding for the temporary file.
+        retry_seconds: How long to ride out a transient rename denial.  Zero
+            attempts the rename exactly once.
+        mode: POSIX permission bits to create the temporary file with.  Pass
+            this for a credential-bearing record so the bytes are never briefly
+            world-readable between creation and rename; omitting it takes the
+            process umask.  Ignored on Windows, where access is governed by the
+            parent directory's access-control list rather than mode bits.  This
+            path writes without line-ending translation, so the bytes land
+            exactly as given.
+        harden: Applied to the temporary file once its bytes are durable and
+            before the rename, so the published file is already restricted at
+            the instant it becomes reachable under its real name.  It exists
+            because owner-restriction is not always an integer: on Windows it
+            is a discretionary access-control list, which *mode* cannot carry.
+            Raising from here fails the publication and removes the temporary,
+            so a file that could not be protected is never published.
+        newline: Line-ending translation for the temporary file, as ``open``
+            takes it.  The default writes a line feed through untranslated,
+            which is what a record this service both writes and reads wants.
+            Pass ``None`` to take the platform translation instead - only
+            meaningful for a file CO-OWNED by another program, where matching
+            what that program expects to find outranks this service's own
+            preference.  Ignored when *mode* is set, since that path writes
+            bytes directly.
+
+    Raises:
+        OSError: If the temporary path is a link, or the write or the rename
+            fails; the temporary file is removed before the error propagates.
     """
     tmp = path.with_name(f"{path.name}.{os.getpid()}.tmp")
     try:
         if mode is None:
-            with open(tmp, "w", encoding=encoding, newline=newline) as handle:
+            with open(
+                tmp,
+                "w",
+                encoding=encoding,
+                newline=newline,
+                opener=_open_refusing_a_link,
+            ) as handle:
                 handle.write(text)
                 handle.flush()
                 os.fsync(handle.fileno())
         else:
-            descriptor = os.open(tmp, _RESTRICTED_WRITE_FLAGS, mode)
+            descriptor = _open_refusing_a_link(tmp, _BYTE_WRITE_FLAGS, mode)
             try:
                 os.write(descriptor, text.encode(encoding))
                 os.fsync(descriptor)

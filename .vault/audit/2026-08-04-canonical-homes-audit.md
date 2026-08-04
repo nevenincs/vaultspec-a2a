@@ -1191,3 +1191,50 @@ so the direction is established) - touches `_MIRRORS` in
 `_AgentSnapshot`/`_PermissionSnapshot` by name directly from
 `api.schemas.snapshots` (`thread/`, out of scope for this sweep). Whoever owns
 `thread/` should coordinate the rename in the same change, not a follow-up.
+
+### team-status-rest-route-narrower-than-its-own-canonical-docstring | medium | an absent projection, not a duplicate - recorded as its own verdict
+
+`src/vaultspec_a2a/thread/snapshots.py`'s `AgentData` docstring names three
+surfaces it is the single declaration behind: "the REST team-status entry, the
+`team_status` broadcast summary, and the thread snapshot." Two of the three
+carry the full eight-field set (`agent_id`, `node_name`, `state`, `provider`,
+`model`, `role`, `display_name`, `description`) - the broadcast's `AgentSummary`
+and the snapshot's `_AgentSnapshot` (both `api/schemas/`, the latter parity-
+tested against `AgentData` per the finding above). The REST entry does not:
+`RunAgentSummary` (`api/schemas/gateway.py`), served by `GET /team/status` in
+`api/routes/gateway.py`, declares only `agent_id`, `display_name`, `state` -
+dropping `node_name`, `provider`, `model`, `role`, and `description`.
+`RunStatusResponse.roles` on the sibling per-run read (`GET /runs/{run_id}`)
+uses `RoleState` (`agent_id`, `role`, `state`, `display_name`), which restores
+`role` but still omits `provider`/`model`. Neither narrowing is accidental:
+both wire models are hand-declared with exactly those fields, and
+`control/team_service.py`'s `build_team_status` resolves the FULL `AgentData` -
+including `provider`/`model` - via the shared `build_agent_descriptor` seam
+before the route discards the difference at construction. This is confirmed
+deliberate by `api/tests/test_team_status_descriptor.py`'s own docstring:
+"They stop at the SERVICE rather than a route. The versioned team-status verb
+is a deliberately narrow operational projection - agent id, display name,
+state - and carries neither field, so the route can no longer express what
+these cases are about while the service still resolves it." That module exists
+specifically to guard the provider/model resolution chain, and states outright
+that it cannot assert its own subject at the REST layer because the REST
+contract was narrowed underneath it.
+
+Verdict is neither DUPLICATE nor MISPLACED - it is the third class the domain
+lead named going into this sweep: an absent projection. `AgentData` is a
+canonical, single, correctly-consumed declaration; nothing here restates its
+field set incorrectly. The gap is that its own docstring's claim - that the
+REST team-status entry projects from it - is not true today, and has not been
+true since whatever narrowed `RunAgentSummary`/`RoleState` to their current
+field sets (no `git blame` was pulled to date that change; not asserted). The
+practical consequence: a client polling either REST status route cannot learn
+which provider or model an agent is running - only a WebSocket subscriber
+catching the `team_status` broadcast, or a client reading the reconnect
+snapshot, can. Whether that is the intended product boundary (REST is a
+lighter poll, the socket carries the full picture) or a regression from a
+narrower verb that was never widened back is a product decision this inventory
+does not make; recorded so whoever owns that decision is choosing it rather
+than discovering it. If the answer is "REST should carry it too," the fix is
+additive - two more fields on each of `RunAgentSummary` and `RoleState`,
+sourced from the same `AgentData` the service already resolves - not a new
+mechanism.

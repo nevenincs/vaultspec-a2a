@@ -5,7 +5,7 @@ tags:
 date: '2026-08-04'
 modified: '2026-08-04'
 body_schema: 'body-v1'
-body_hash: 'sha256:5ec0d684b3a2137d4c87d5664ef600cd9199d4f945d076dd0fe84f75f3a58df9'
+body_hash: 'sha256:9dfedc4a64e807940cb7fb6e9708fcc862bbb5c246cd0d42ec929928f0e8d212'
 related: []
 ---
 
@@ -1120,6 +1120,41 @@ deriver rather than repeating the numbers. That area already applies the practic
 this campaign is installing elsewhere, which is worth recording both as coverage
 and as evidence the practice is achievable in this codebase rather than
 aspirational.
+
+### narrowing-cluster-settled-by-running-it | critical | seven converge, two must not
+
+The reversal above was over-broad and is narrowed here. It claimed converging the
+nine test-tier narrowing sites would drop validation. Two would; seven would not,
+and the line between them was found by EXECUTING the three candidates against one
+probe value rather than by reading any of them:
+
+- a validator parameterised on an untyped object value ACCEPTS a dict whose value
+  is not JSON
+- one parameterised on the recursive JSON object type REJECTS it
+- the production isinstance narrowing ACCEPTS it
+
+So seven sites were never validating anything the production narrowing does not.
+An untyped object value accepts everything, and the validator was only ever
+proving "a dict with string keys" - which is precisely what the isinstance check
+proves. Converging those seven is a pure deletion with no behavioural change.
+The two that genuinely deep-validate the recursive shape are exactly the two that
+annotate the precise return type, so the return type and the validation depth are
+the same distinction seen twice - which is why the cluster read as a dialect
+split and was not one. Those two stay, because converging them would silently
+drop a real assertion from two live-provider suites.
+
+Three claims in this one cluster were each wrong in a different direction - the
+original ruling, its reversal, and the implementing lane's dialect reading - and a
+single executable probe settled all three. Recorded as the strongest argument in
+this campaign for running a candidate rather than reading it: every reader
+involved was experienced, careful, and looking at the same source, and none of
+them got it right from inspection.
+
+The consequence for the production home is favourable. The convergence puts seven
+consumers onto the closed-JSON contract module before the ten-site production
+cluster commits to it, which turns a proposed canonical home into a load-bearing
+one, and it needs an object-list reader added there that the production cluster
+will want anyway.
 
 ## Recommendations
 

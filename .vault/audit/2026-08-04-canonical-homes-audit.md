@@ -5,7 +5,7 @@ tags:
 date: '2026-08-04'
 modified: '2026-08-04'
 body_schema: 'body-v1'
-body_hash: 'sha256:1bed9f7228871489feaad33bef112f7655b66a3018112287d6efb19d7dfbb514'
+body_hash: 'sha256:4d549d37a9f8d2d7bd226c1d60ff153cf3c0481a586ed7685d9182bb7ee0b1ed'
 related: []
 ---
 
@@ -6278,3 +6278,64 @@ cap alongside the extra admitted item, so the arithmetic fails without it; and a
 accumulation across pages was pinned by placing the overflowing item on a SECOND
 page, where only the accumulation can catch it. Neither was preserved on the
 strength of a comment.
+
+### correction-the-ruling-was-written-on-a-stale-premise | high | the ruling above, corrected
+
+The entry above rules that the lane pass-through should be folded into whichever
+step admits the first egressing server, on the grounds that a change justified by
+costing nothing measurable is a change nobody reviewed.
+
+**The change had already landed when that ruling was written, and its premise is
+false for this diff.** The orchestrator had offered the branch explicitly - land it
+if you judge it correct and state plainly why its effect is undemonstrable - and
+the lane judged, landed, and met the condition. **It was reviewed, in writing, by
+the message that offered the branch.** The demonstrable-effect test exists so a
+change cannot slip past a reviewer; nothing slipped past anyone.
+
+**The pre-authorisation objection also does not survive inspection of the diff.**
+The change states a lane the producer already holds. It grants nothing: the gate
+still runs at the resolver, and the admission step retains its entire decision -
+whether a server may egress, and on which lanes. What the change removes is a
+wrong ANSWER to a question nobody has asked yet. So the ruling's substance stands
+and only its application to this diff was mistaken.
+
+**Ruled: leave it.** Reverting would make a later ruling retroactively true of the
+tree, which is process theatre rather than review, and would leave a trail in
+which a reader finds a fix, a revert and a re-landing without being able to tell
+which was the error.
+
+**The lane's symmetry argument was rejected on its merits, not waved away.** It
+argued that a change worth nothing to land is worth nothing to revert. The two are
+not mirror images: reverting costs a commit on a shared branch and a confused
+record, while leaving costs nothing, because the tree is correct and the reasoning
+is written down in the code.
+
+**That written reasoning is the durable half of the whole exchange.** The landed
+comment records that an unstated lane is REFUSED rather than defaulted - correct
+as a fail-closed default, wrong as a silent one at that site - so the next reader
+cannot re-derive the inverted framing that produced the board item and the
+orchestrator's own escalation.
+
+**Landing with no test, and saying so in full, was correct.** With nothing
+registered that egresses, a test could only assert that nothing changed - equally
+true of the unfixed code - so it would document nothing while reading as proof to
+anyone skimming. The lane declined to register an egressing server to manufacture
+a demonstration; the held-dark candidate stays held.
+
+### crossed-instructions-are-an-orchestrator-defect | medium | method
+
+This item crossed twice in a row: a correction and a report, then a ruling and a
+landing. Neither party acted unreasonably on what it held, and the second crossing
+produced a committed change that a later ruling appeared to forbid.
+
+**The failure is the orchestrator's, in a specific and fixable way: a ruling was
+issued without first checking whether the thing being ruled on had already
+happened.** The tree is authoritative and was one command away. A ruling written
+against a remembered state rather than an observed one is the same class as every
+prose defect this audit has recorded - a claim that cannot fail, because nothing
+checks it.
+
+Recorded because the lane raised the conflict rather than letting the ruling stand
+unmentioned over a tree that contradicted it. That is the expensive direction to
+report in - it invites having your own landed work reverted - and it is the only
+reason the record and the tree now agree.

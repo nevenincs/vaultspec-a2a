@@ -5,7 +5,7 @@ tags:
 date: '2026-08-04'
 modified: '2026-08-04'
 body_schema: 'body-v1'
-body_hash: 'sha256:d460e11344d377a87caade4e3473b681f43eb58769ac2b4d1bc8337b858924ca'
+body_hash: 'sha256:23a591b5664dd8472de5ec630468bab54fe97690ef913382d286214b9f6cc186'
 related: []
 ---
 
@@ -6094,3 +6094,83 @@ includes this one, so a run believed to be hermetic is not - and the failure sho
 up as flakiness attributed to whatever else was running. Sixth instance in this
 campaign of a claim that cannot fail: docstring, comment, build configuration,
 name, class prose, and now a test marker.
+
+### the-credential-surface-closed-and-two-techniques-worth-keeping | critical | second move of the drive
+
+The unredacted stderr path is closed: the masking pattern now lives in the shared
+subprocess module and is applied at the single point the text escapes, so all
+three raise sites are covered and no future caller of the tail can bypass it.
+Verified independently - the old private definition is gone tree-wide, and the
+masking call sits above the length cut.
+
+**A correction to the brief, made before acting on it.** The brief asserted that
+both callers already imported the proposed home. They did not - only one does. The
+lane chose that home anyway on merits it stated (the only providers-level
+subprocess-scoped shared module, already imported by several siblings, new edge
+creates no cycle) and flagged the false premise rather than quietly relying on it.
+A brief's stated justification being wrong while its conclusion is right is the
+easiest thing in the world to leave uncorrected.
+
+**Ordering turned out to be load-bearing, and it is not what a naive fix does.**
+Masking runs BEFORE the length cut, in both directions. A cut through a credential
+discards the NAME that introduces it and leaves the tail opening on a bare
+fragment nothing downstream can still recognise as one; and the replacement is not
+the width of what it replaces, so masking after the cut would move the result off
+the ceiling enforced on the next line. Neither consequence is visible from the
+call site.
+
+**Two techniques worth adopting generally.**
+
+The closure grep was run **with HEAD as a positive control** - the same pattern
+against the committed tree returns eight matches, against the working tree zero.
+That is the direct answer to this audit's own finding that a closure grep nobody
+ran is an assertion: a grep returning nothing is indistinguishable from a grep
+that cannot match, unless you show it matching something.
+
+And the non-vacuity probe had a **confound found and removed by its author**. The
+first run planted the credential where the refusal ALSO echoes the launch command,
+so the demonstration would have passed for the wrong reason. Delivering the
+credential through a file instead isolated the path under test. That is the same
+class of error this campaign has recorded twice - a refusal that cannot attribute
+itself proves nothing - caught this time before it was reported rather than after.
+
+### the-fork-was-more-general-and-the-generality-was-kept | high | the both-directions audit paying off
+
+Asked what the copy knew that the home would not, the answer was not a protection
+but a SCOPE. The retiring copy was line-oriented, applied per line inside a drain;
+the new consumer hands over a whole captured block. The pattern's separator spans
+newlines, so a value written on the line AFTER its name is masked too.
+
+**Tightening that to same-line would have been a quiet weakening** performed in
+the name of faithfulness to the original. It was kept, and pinned with a
+multi-line test. The original behaviour is bit-identical where it applied, since a
+single line contains no newlines.
+
+This is the both-directions audit rule producing something other than a defect for
+once: not "the fork carried a protection the home lacked", but "the fork's
+behaviour was broader than its call site revealed, and the broader reading is the
+correct one for the shared home".
+
+**The retiring caller's coverage was also strengthened rather than preserved.** Its
+five credential shapes now assert through the drain itself rather than against the
+helper directly - so a caller that stops invoking the shared redactor FAILS there,
+instead of passing on the helper's own tests. That closes the seam this campaign
+has repeatedly found open: a test that exercises a unit cannot see a caller that
+stopped using it.
+
+### the-same-defect-one-field-over | high | latent, reported not fixed
+
+The same client-visible refusal embeds the probed launch command verbatim. Verified:
+the description joins the command and its arguments with no masking, and is
+embedded into the same error whose message reaches a run's failure reason.
+
+Latent rather than live - the environment is correctly excluded, and the two
+registry-known servers have static, credential-free arguments today. But it is the
+same defect class, one field over, in the same message, reached by the same
+disclosure path. A server whose arguments ever carry a token puts it in front of a
+client.
+
+Recorded as its own item rather than folded into the fix that found it. One call
+to the now-shared masker closes it, which is exactly why it should be a decision
+rather than a drive-by: the fix is cheap enough to be tempting inside an unrelated
+commit.

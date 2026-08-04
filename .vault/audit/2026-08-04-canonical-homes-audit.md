@@ -5,7 +5,7 @@ tags:
 date: '2026-08-04'
 modified: '2026-08-04'
 body_schema: 'body-v1'
-body_hash: 'sha256:e1edcb0c62ef09e0444ce6698184ba345367ed64ef8a97437bfb6b94b78e2050'
+body_hash: 'sha256:45ad7949b436840905d3a6d8a60eadee16347eb478ac34da5171b9c3dec3a49a'
 related: []
 ---
 
@@ -897,6 +897,39 @@ result is true only for the commit it immediately precedes, so gates belong
 LAST, immediately before staging, not first. Recorded beside the other method
 findings because it is the same class as the bare-commit failure: a discipline
 that is correct in a single-writer tree and insufficient in a shared one.
+
+### inference-stated-as-fact-three-times | high | standing method finding, not three incidents
+
+Three attributions in this campaign were asserted from inference and were wrong:
+a port-probe verdict placed into a discovery brief as context, which the sweep
+returned as independent confirmation; an accusation that a lane had written to
+the vault against instruction, when the documents predated it by a day; and an
+attribution of a type-check break to the lane that happened to be working
+nearby. Each was corrected by the accused answering with evidence rather than by
+the claim being checked before it was made, which is the part that has to
+change.
+
+The specific artefact that caused the third is worth naming because it will
+recur: this project uses ONE shared worktree, so every lane sees every other
+lane's uncommitted edits. A file showing as modified proves that someone is
+working, never who. The reliable tests are reading the diff for intent, or
+checking the suspect's own commits for the path. Recorded as a standing finding
+rather than three incidents, because three in one campaign is a practice rather
+than a run of bad luck.
+
+### overload-resolution-cannot-see-through-a-splat | medium | a real edge in a correct rehoming
+
+Preserved so the owning lane need not re-derive it. An in-flight rehoming
+replaced an inline platform branch selecting detached-spawn flags with a call to
+a shared helper, splatted into the subprocess constructor. That constructor's
+signature is heavily overloaded, and overload resolution cannot see through a
+keyword splat of a plain mapping - so a call that resolved while the two flags
+were passed by keyword became unresolvable the moment they arrived as a splat.
+Runtime behaviour is unchanged; the checker simply lost the ability to select an
+overload. Either a precisely typed mapping return, splatted as such, or a
+returned pair with the flags still passed by keyword, restores it. Worth
+recording as the campaign working rather than failing: the rehoming is one this
+inventory asked for, and the type checker caught a genuine edge in it.
 
 ## Recommendations
 

@@ -26,6 +26,7 @@ from ..testing.catalog_selection import (
 )
 from ..testing.ports import free_port
 from ..tests.gateway_boot import GatewayBootError
+from ..utils.process import detached_spawn_kwargs
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
@@ -142,6 +143,16 @@ def _spawn_process(
     log_path: Path,
 ) -> tuple[subprocess.Popen[str], Any]:
     log_file = log_path.open("w", encoding="utf-8", buffering=1)
+    # The canonical detach flags, not a local Windows-only flag: teardown here
+    # goes exclusively through tree_kill's pid-tree walk (see _stop_process),
+    # which discovers descendants by OS process relationship rather than by
+    # process-group membership, so detaching into a POSIX session on the way in
+    # costs nothing on the way out. It is a deliberate convergence with the
+    # gateway/worker children spawned elsewhere in this test tier (e.g.
+    # ``tests.gateway_boot.spawn_gateway(new_session=True)``), not an accident:
+    # this site previously left POSIX unconsidered, isolating the child from a
+    # stray SIGINT delivered to the harness's own foreground process group.
+    flags = detached_spawn_kwargs()
     proc = subprocess.Popen(
         args,
         cwd=REPO_ROOT,
@@ -149,7 +160,8 @@ def _spawn_process(
         stdout=log_file,
         stderr=subprocess.STDOUT,
         text=True,
-        creationflags=getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0),
+        creationflags=flags.creationflags,
+        start_new_session=flags.start_new_session,
     )
     return proc, log_file
 

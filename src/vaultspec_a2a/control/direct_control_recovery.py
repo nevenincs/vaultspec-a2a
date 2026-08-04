@@ -15,10 +15,11 @@ from ..database import (
     get_thread,
     update_thread_status,
 )
-from ..ipc.schemas import DispatchRequest, canonical_project_root, to_dispatch_action
+from ..ipc.schemas import DispatchRequest, to_dispatch_action
 from ..thread.constants import DEFAULT_SUPERVISOR_ID
 from ..thread.dispatch_policy import FailureType, evaluate_dispatch_failure
 from ..thread.enums import ControlActionType, ThreadStatus
+from ._thread_metadata import dispatchable_workspace_root
 from .action_lease import claim_control_action, release_definite_non_delivery
 from .dispatch import safe_dispatch
 from .permission_dispatch import permission_resume_value
@@ -96,33 +97,6 @@ def _decode_payload(encoded: str | None) -> dict[str, object] | None:
         return None
 
 
-def _active_project(metadata_json: str | None) -> str | None:
-    """Return the run's canonical active project from its stored thread metadata.
-
-    ``None`` when the metadata is unreadable, names no ``workspace_root``, or
-    names one that cannot be minted into the run's canonical spelling. All three
-    are the same thing - the stored run names no active project - and none of
-    them is a project that may be degraded to "wherever the worker started".
-
-    Minting through the shared canonical form rather than returning the stored
-    string is what makes a recovered dispatch key the same compiled graph the
-    original run compiled, instead of a second entry for one directory.
-    """
-    if metadata_json is None:
-        return None
-    try:
-        metadata = _JSON_OBJECT.validate_json(metadata_json)
-    except ValidationError:
-        return None
-    value = metadata.get("workspace_root")
-    if not isinstance(value, str) or not value:
-        return None
-    try:
-        return canonical_project_root(value)
-    except ValueError:
-        return None
-
-
 async def _reconstruct_dispatch(
     db: AsyncSession,
     action: _StoredAction,
@@ -153,7 +127,7 @@ async def _reconstruct_dispatch(
     # does. Refuse here, typed, the way the follow-up path refuses - rather than
     # dispatching with nothing and letting the provider seam site the agent and
     # its sandbox roots in whatever directory the worker was started in.
-    workspace_root = _active_project(thread.thread_metadata)
+    workspace_root = dispatchable_workspace_root(thread.thread_metadata)
     if workspace_root is None:
         return _Refusal(
             FailureType.NO_ACTIVE_PROJECT,

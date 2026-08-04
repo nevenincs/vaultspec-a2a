@@ -24,7 +24,6 @@ from ..domain_config import domain_config
 from ..ipc.schemas import (
     DispatchRequest,
     DispatchResponse,
-    canonical_project_root,
     to_dispatch_action,
 )
 from ..providers.team_selection import (
@@ -33,6 +32,7 @@ from ..providers.team_selection import (
 )
 from ..thread.enums import ControlActionType, ThreadStatus
 from ..utils.coercion import coerce_object_mapping, coerce_string_list
+from ._thread_metadata import workspace_root_from_metadata
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -369,13 +369,8 @@ async def redispatch_reconciling_threads(
                 # a project raises inside the ingest validator, and that exception
                 # aborts the whole pass, so one unrecoverable thread would strand
                 # every healthy one behind it.
-                workspace_root_value = meta.get("workspace_root")
-                try:
-                    if not isinstance(workspace_root_value, str):
-                        msg = "stored metadata names no active project"
-                        raise ValueError(msg)
-                    workspace_root = canonical_project_root(workspace_root_value)
-                except ValueError:
+                workspace_root = workspace_root_from_metadata(meta)
+                if workspace_root is None:
                     await update_thread_status(
                         db,
                         thread.id,

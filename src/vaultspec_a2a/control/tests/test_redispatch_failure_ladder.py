@@ -195,6 +195,73 @@ async def test_a_thread_with_no_active_project_fails_alone_and_the_sweep_continu
 
 
 @pytest.mark.asyncio
+async def test_a_relative_stored_project_fails_its_thread_rather_than_the_sweep(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A root that is PRESENT but unusable must refuse here too, not at the request.
+
+    The sibling test above stores no ``workspace_root`` at all, which a bare type
+    check already refuses. This one stores a relative path: a string, present,
+    and still not a project a dispatch can be sited on, because resolving it
+    would anchor the run to whatever directory this process was started in. It
+    is the case that reaches the minting rather than the type check, and the one
+    that used to raise inside the request constructor and abort the whole pass.
+    """
+    db_file = tmp_path / "redispatch-relative-project.db"
+    await close_db()
+    await init_db(str(db_file))
+    try:
+        session_factory = get_session_factory()
+        async with session_factory() as session:
+            await create_thread(
+                session,
+                thread_id="healthy-after-relative",
+                status=ThreadStatus.RECONCILING,
+                team_preset="mock-success-single",
+                metadata=json.dumps({"workspace_root": str(tmp_path)}),
+            )
+            await create_thread(
+                session,
+                thread_id="relative-project",
+                status=ThreadStatus.RECONCILING,
+                team_preset="mock-success-single",
+                metadata=json.dumps({"workspace_root": "workspaces/project"}),
+            )
+            await session.commit()
+
+        spawner = LazyWorkerSpawner(
+            worker_url="http://127.0.0.1:9", worker_port=9, auto_spawn=False
+        )
+        spawner.replace_process(None)
+        circuit_breaker = WorkerCircuitBreaker(
+            failure_threshold=1, recovery_timeout=999.0
+        )
+        circuit_breaker.force_open()
+
+        async with httpx.AsyncClient(
+            base_url="http://127.0.0.1:9", timeout=0.2
+        ) as client:
+            with caplog.at_level(logging.INFO, logger=_LOGGER_NAME):
+                await redispatch_reconciling_threads(
+                    client,
+                    circuit_breaker,
+                    spawner,
+                    record_worker_contact=lambda _when: None,
+                )
+
+        async with session_factory() as session:
+            relative = await get_thread(session, "relative-project")
+            healthy = await get_thread(session, "healthy-after-relative")
+        assert relative is not None
+        assert relative.status == ThreadStatus.FAILED.value
+        assert "no active project" in (relative.failure_reason or "")
+        assert healthy is not None
+        assert healthy.status == ThreadStatus.RECONCILING.value
+    finally:
+        await close_db()
+
+
+@pytest.mark.asyncio
 async def test_redispatch_dedups_repeated_circuit_open_failures(
     tmp_path: Path, caplog: pytest.LogCaptureFixture
 ) -> None:

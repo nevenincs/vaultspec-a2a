@@ -19,22 +19,37 @@ dispatch boundary validates with, so the two cannot drift: re-deriving the rule
 as an is-absolute check would be a second declaration of a contract that already
 has an owner, and it would silently stop agreeing the moment that owner changed.
 
-Deliberately narrow. Reading the same column for a different purpose is a
-different operation and stays where it is: minting a dispatch key needs the
-canonical value before this boundary, building a durable discovery selector
-bounds the value and hashes it into an index key, and a recovery sweep marks an
-unusable thread FAILED rather than degrading, because it must not strand healthy
-threads behind one bad one.
+What varies between readers is what each does with a refusal, and that is not
+part of the extraction. A resume degrades to "resume without re-siting", a
+recovery sweep turns the refusal into a typed per-thread failure so one bad
+thread cannot strand the healthy ones behind it, and a cleanup pass treats it as
+"this thread owns no artifacts". All three ask the same question of the same
+bytes and answer it for themselves; folding those answers in here is what would
+make this module too narrow to share, so it declares only the reading.
+
+Two shapes of the same read exist because callers hold the metadata at
+different stages: one has the stored column, another has already decoded it to
+feed other fields, and re-encoding to call the string form would be pure
+ceremony. The string form is the decode plus the mapping form, never a second
+copy of the rule.
+
+Genuinely different operations still stay where they are: minting a dispatch key
+needs the canonical value before this boundary, and building a durable discovery
+selector bounds the value and hashes it into an index key.
 """
 
 from __future__ import annotations
 
 import json
+from typing import TYPE_CHECKING
 
 from ..ipc.schemas import canonical_project_root
 from ..utils.coercion import coerce_object_mapping
 
-__all__ = ["dispatchable_workspace_root"]
+if TYPE_CHECKING:
+    from collections.abc import Mapping
+
+__all__ = ["dispatchable_workspace_root", "workspace_root_from_metadata"]
 
 
 def dispatchable_workspace_root(thread_metadata: str | None) -> str | None:
@@ -58,7 +73,20 @@ def dispatchable_workspace_root(thread_metadata: str | None) -> str | None:
         return None
     if meta is None:
         return None
-    root = meta.get("workspace_root")
+    return workspace_root_from_metadata(meta)
+
+
+def workspace_root_from_metadata(metadata: Mapping[str, object]) -> str | None:
+    """Return the run's active project from its ALREADY-DECODED thread metadata.
+
+    The same answer as :func:`dispatchable_workspace_root` for the same stored
+    bytes, for a caller that decoded the column itself because it also reads
+    other fields out of it.
+
+    Absent, wrong-typed, and unmintable roots are one outcome - the stored run
+    names no usable project - and the caller decides what that means for it.
+    """
+    root = metadata.get("workspace_root")
     if not isinstance(root, str):
         return None
     try:

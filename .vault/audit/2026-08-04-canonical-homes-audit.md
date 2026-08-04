@@ -5,7 +5,7 @@ tags:
 date: '2026-08-04'
 modified: '2026-08-04'
 body_schema: 'body-v1'
-body_hash: 'sha256:b7329853107d1ea1e45749479dea6023ba897a09e5d46af9fae4246c1b100c30'
+body_hash: 'sha256:75e2d6b6662f5c998815915842b6b2397eca382ec927c30b7cbdb31b85b8d00f'
 related: []
 ---
 
@@ -5356,3 +5356,79 @@ and returned a PARTIAL one. On a check whose whole purpose is "nothing else
 breaks", partial and wrong are the same result: both say nothing broke, and only
 one of them looked at every file. A scan answering an exhaustiveness question must
 assert it visited what it expected to visit, not merely that it did not crash.
+
+### a-cross-repo-guarantee-that-named-the-wrong-constant | critical | live defect, not a tidiness cluster
+
+The clarification cluster was filed here as duplication. It was covering a live
+cross-repo defect.
+
+An agreement test asserts the ENGINE accepts at least what this service "mints up
+to" a named wire cap. The actual minting site was bounded by a DIFFERENT constant
+that merely happened to hold the same value. So the cross-repo guarantee named a
+number that did not govern the thing it described, and the comment above that
+constant already claimed the derivation - "bounded to the request-id cap the wire
+enforces" - which is precisely what the code did not do.
+
+**Either drift breaks the guarantee silently, and the agreement test stays green
+through both**, because every other check in that family compares one copy of the
+number against another copy of the same number. Raise the wire cap and the engine
+is checked against a ceiling this service never mints to. Raise the minting
+constant and this service issues handles the engine was never asserted to accept -
+leaving a run parked on a questionnaire that cannot be answered through the edge.
+
+Recorded at critical, and recorded as a correction to how this cluster was
+triaged: it was queued as "the same number in several places", which is what an
+inventory sees. What it actually was is a guarantee pointing at the wrong
+declaration - invisible to any count, because the two numbers agreed.
+
+**The contract check gated the home, exactly as intended.** The declaration is
+imported by the engine agreement test itself, so relocating it would have been the
+one change capable of breaking the check this closes. It stayed, and both readers
+now derive from it. Import cost was measured rather than assumed - the second
+reader came in at zero additional modules because it already had that module in
+its graph.
+
+**The allowlist direction is the nastier one and needs no producer bug.** It
+TRUNCATES rather than refuses, so the relay nudge still arrives, still well-formed,
+pointing at a request handle that was never issued - and that frame carries the id
+and nothing else by design, so correlation is all it has. Raising the minting cap
+alone is sufficient to cause it.
+
+### the-third-site-rule-paid-off-immediately | high | method, confirmed in the field
+
+The rule recorded a few hours earlier - **before adopting either module's approach
+in a fold, ask whether a third site already does it correctly** - applied on the
+next cluster and changed its shape.
+
+One of the sites in the inventory was not a defect at all: it already derives its
+three caps from the wire models at import time, and its docstring records the bug
+that taught it to - restated constants that drifted one character from the models
+and silently coerced away every question landing on the bound. That site is the
+correct pattern, and the reason the others are wrong.
+
+An inventory listing it as a fifth occurrence would have converted the exemplar to
+match the copies. Reading it revealed the direction of the fix.
+
+The same pass corrected the inventory from five sites in three modules to three in
+two, on four independent grounds - a site that was already correct, a site on a
+different plane that merely shares the number, a declaration with one consumer
+that is not a duplicate of anything, and a stale line number. **Seven of eight
+counts issued in this campaign have been wrong, and this is the first to be wrong
+by being too LARGE** - which is the more dangerous direction, because acting on it
+fuses unrelated bounds rather than merely missing one.
+
+### a-positive-control-proves-the-test-is-not-pinned-to-the-value | high | strengthens the non-vacuity standard
+
+The strongest non-vacuity evidence produced in this campaign, and worth adopting
+as the standard for any consolidation onto a shared declaration.
+
+Alongside the usual break-the-link probes, the lane MOVED the canonical value
+(128 to 192) and showed both readers followed in lockstep and every test still
+passed. Then it made the identical move against the pre-change code, with both
+readers on their old literals, and the tests FAILED.
+
+That pair proves something the negative probes cannot: the tests are not pinned to
+the number, they are pinned to the DECLARATION - and the old code could not
+survive its own declaration moving. A break-the-link probe shows a defect is
+detectable; this shows the consolidation actually achieved the property it claims,
+which is that one edit now reaches every consumer.

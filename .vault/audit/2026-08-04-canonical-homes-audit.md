@@ -5,7 +5,7 @@ tags:
 date: '2026-08-04'
 modified: '2026-08-04'
 body_schema: 'body-v1'
-body_hash: 'sha256:23a591b5664dd8472de5ec630468bab54fe97690ef913382d286214b9f6cc186'
+body_hash: 'sha256:1bed9f7228871489feaad33bef112f7655b66a3018112287d6efb19d7dfbb514'
 related: []
 ---
 
@@ -6174,3 +6174,107 @@ Recorded as its own item rather than folded into the fix that found it. One call
 to the now-shared masker closes it, which is exactly why it should be a decision
 rather than a drive-by: the fix is cheap enough to be tempting inside an unrelated
 commit.
+
+### a-severity-i-asserted-and-a-lane-disproved | critical | correction, and the general rule it yields
+
+I escalated a finding as a permissiveness hole. It is the opposite, and the lane
+I briefed proved it rather than accepting the framing.
+
+**The gate is at the RESOLVER, not the call site.** Every harness composition
+funnels through one resolution stage, whose docstring states the design: it sits
+there so outward reach cannot be granted by a caller that simply forgot to ask. A
+caller cannot skip it. The lane argument does not decide WHETHER the gate runs -
+only what it sees.
+
+**And the omitted value is the most restrictive one, by explicit design.** The
+proven-lane predicate returns False for an absent lane, documented as absence of a
+lane not being permission. The branch refuses when a server egresses AND the lane
+is not proven, so an omitted lane always refuses. The allowlist derives from the
+resolution's available servers, so fewer servers can only mean fewer names.
+**Both monotonic in the lane: omitting it is never more permissive at any call
+site.**
+
+**The general rule, which is the durable output:** a finding shaped "caller X
+omitted the gate argument, therefore X is ungated" is unsound wherever the gate
+lives below the call site and the omitted value is the restrictive one. **Check
+the direction before escalating.** I did not.
+
+**Unconstructible twice over.** A probe against the real registry returned
+resolution byte-identical for an absent lane, three real lanes, and a garbage
+lane - because every registered server declares no network egress, so the branch
+never executes. The change could not be demonstrated.
+
+**What remains is a capability TRAP, not a hole.** The day an egressing server
+registers, the primary grounding consumer is DENIED it even on a proven lane, and
+the served reason then blames the lane for carrying no retrieval proof - a false
+statement, whose real fault is an omitted argument. Same class as the docstring
+corrected in the fix that found this: a diagnostic asserting what the code has not
+established.
+
+**Ruled: fold it into whichever step admits the first egressing server**, where it
+has a real subject and a test that can fail.
+
+### a-change-justified-by-costing-nothing-is-a-change-nobody-reviewed | high | method
+
+The lane recommended landing the one-keyword fix as future-proofing, then argued
+against its own recommendation: doing so would be a new decision with a different
+justification than the task carried, smuggled in under the claim of no
+demonstrable effect.
+
+**That objection is why the answer is no.** I would have taken the fix without it.
+A change whose justification is that it costs nothing measurable is a change with
+nothing to review - the demonstrable-effect test is what makes review possible,
+and waiving it because the change looks harmless is precisely how an unreviewed
+gating decision lands.
+
+Recorded because the pressure runs the other way at every step: the fix is one
+keyword, provably inert today, and removes a trap someone will otherwise hit while
+debugging. All true, and none of it is a review.
+
+### a-value-sweep-would-have-merged-two-different-dimensions | high | the trap, caught in the field
+
+The count-shadow consolidation surfaced the dimension collision this audit
+predicted, in the sharpest possible form: a display-length constant holds **the
+same value** as the model-count constant, and in one lane a bare truncation to
+that number sits **three lines below** where the private model-count constant used
+to be declared.
+
+One bounds ITEMS in a collection; the other bounds CHARACTERS of a name. The lane
+separated them by reading every use site rather than matching the value - and
+recorded that a value sweep would have merged them.
+
+That is the campaign's strongest field confirmation that reading beats counting.
+The two sites are adjacent, identically valued, and unrelated; no grep, no
+inventory and no embedding distinguishes them. Only asking what each number
+BOUNDS does.
+
+### the-closure-grep-proved-itself-by-substring | medium | a second answer to the inert-proof problem
+
+This audit records that a closure grep returning nothing is indistinguishable from
+one that cannot match. One lane answered that by running the same pattern against
+the committed tree as a positive control. Another answered it differently and just
+as well: it matched the private names as SUBSTRINGS of the surviving public ones,
+so the pattern demonstrably matches something in the same run that shows the
+private forms are gone.
+
+Both are valid. The requirement is not a particular technique - it is that a
+nothing-result must arrive with evidence the pattern was live.
+
+### the-admitted-case-has-now-caught-four | high | the cheapest guard in this campaign
+
+A fourth vacuous test fell to the admitted case: a catalog row was being refused
+for being MALFORMED, so the refusal half passed while asserting nothing about the
+count under test. The lane fixed the PAYLOAD rather than the assertion, which is
+the correct direction.
+
+Four instances now - a bound round-trip, a frame-content assertion, a session
+advertising nothing to bound, and a malformed row. **The pattern is settled: a
+refusal-only test cannot distinguish the bound refusing from there having been
+nothing to bind.** One extra assertion, four defects caught.
+
+The same commit also shows the guard applied to arithmetic rather than to a value:
+an overflow allowance of the bound plus one was pinned by advertising exactly the
+cap alongside the extra admitted item, so the arithmetic fails without it; and an
+accumulation across pages was pinned by placing the overflowing item on a SECOND
+page, where only the accumulation can catch it. Neither was preserved on the
+strength of a comment.

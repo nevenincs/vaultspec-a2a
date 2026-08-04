@@ -2131,3 +2131,29 @@ audit's convention for a naming hazard rather than a merge candidate; recorded
 so a future sweep does not import the wrong one by IDE autocomplete, or
 discover the collision by way of a cross-layer comparison that silently
 disagrees on case-folding.
+
+### outstanding-permission-status-set-declared-four-times | medium | actioned within one file
+
+`src/vaultspec_a2a/database/permission_repository.py` asked "which permission
+requests are still unsettled" four times, each restating the same two-member
+set - `PermissionRequestStatus.PENDING` and `.ANSWERED_PENDING_APPLY` - rather
+than reading it from one place. `get_pending_permission_requests` and
+`get_threads_with_pending_permission_requests` built it with byte-identical
+conditional logic (`[PENDING]`, appending `ANSWERED_PENDING_APPLY` when
+`include_answered_pending_apply` is true); `supersede_permission_requests` and
+`expire_pending_permission_requests` hardcoded the same two-item list
+unconditionally, also byte-identical to each other. No canonical constant for
+this set existed anywhere in the tree to import instead - unlike the
+`NON_ACTIVE_STATUSES` case above, this was four inline declarations of a
+concept with no home at all, not one hand-rolled site ignoring an existing
+authority.
+
+Verdict DUPLICATE, actioned: added a private module-level
+`_OUTSTANDING_PERMISSION_STATUSES` tuple and pointed all four functions at it,
+keeping the `include_answered_pending_apply` toggle explicit at the two call
+sites that vary by it rather than folding the policy into the constant. Scoped
+to `permission_repository.py` alone - no canonical export was added to
+`thread.enums`, since that module belongs to a different sweep and the fix
+needed nothing outside this file to be complete. 91 tests across the
+reconciliation, repair-journal, permission-audit-log, and control-action-lease
+suites pass unchanged; whole-tree `ty check` is clean.

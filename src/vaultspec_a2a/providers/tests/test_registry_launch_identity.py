@@ -18,10 +18,13 @@ import pytest
 from ...thread.errors import ConfigError, HarnessToolContractError
 from .._acp_authoring import AUTHORING_MCP_SERVER_NAME
 from .._acp_mcp import (
+    _KNOWN_MCP_SERVERS,
     _LAUNCH_IDENTITY_KEYS,
     _LAUNCH_SPEC_KEYS,
     _LAUNCH_VARIANT_KEYS,
+    codex_mcp_server_specs,
     declared_harness_tools,
+    harness_allowed_tool_names,
     pin_harness_mcp_servers,
     registry_launch_divergence,
     require_declared_surface,
@@ -153,6 +156,61 @@ def test_every_rendered_launch_field_is_classified_by_the_comparison() -> None:
     assert set(_LAUNCH_IDENTITY_KEYS) | set(_LAUNCH_VARIANT_KEYS) == set(
         _LAUNCH_SPEC_KEYS
     )
+
+
+def test_both_transports_render_one_launch() -> None:
+    """The enforcement is bound to one renderer, so there must BE only one.
+
+    Walked over every registry entry rather than the one a preset happens to
+    declare: an entry reachable on only the Codex transport is exactly where a
+    second rendering would survive unnoticed. The divergence guard compares
+    against the ACP renderer, so a Codex spec assembled independently would be
+    enforced against nothing.
+    """
+    for name in _KNOWN_MCP_SERVERS:
+        acp = resolve_harness_mcp_servers([name])[0]
+        codex = codex_mcp_server_specs([name])[0]
+        for key in (*_LAUNCH_IDENTITY_KEYS, "name"):
+            assert codex[key] == acp[key], f"{name} diverges on {key}"
+        # Stated through the guard as well as by equality: this is the property
+        # the guard would have to catch if the renderers ever came apart.
+        assert registry_launch_divergence(codex, name=name) is None
+
+
+def test_the_codex_transport_adds_exactly_its_own_projection() -> None:
+    """A field added to either renderer must be classified, not silently carried.
+
+    The Codex spec is the shared launch plus this transport's own projection.
+    Asserted as an equality rather than a subset, so a field appearing on one
+    side and not the other fails here instead of riding into a config file.
+    """
+    for name in _KNOWN_MCP_SERVERS:
+        codex = codex_mcp_server_specs([name])[0]
+        assert set(codex) == set(_LAUNCH_SPEC_KEYS) | {"tools"}
+
+
+def test_the_advertised_permitted_and_verified_tools_are_one_declaration() -> None:
+    """Three consumers of the tool declaration, asserted to agree.
+
+    The read tools are written into the Codex ``enabled_tools`` allowlist from
+    the SPEC, expanded into the ACP autonomous allowlist, and checked against the
+    server's own ``tools/list`` from the registry. A consumer that reads the
+    registry field directly instead of through the declared reader is how those
+    three come apart - and on the Codex side the divergence would be an
+    auto-approved allowlist nothing verified.
+    """
+    for name in _KNOWN_MCP_SERVERS:
+        declared = declared_harness_tools(name)
+        codex_tools = codex_mcp_server_specs([name])[0]["tools"]
+        allowlisted = [
+            entry.removeprefix(f"mcp__{name}__")
+            for entry in harness_allowed_tool_names([name])
+        ]
+        assert list(declared) == codex_tools
+        assert list(declared) == allowlisted
+        # The read-only composition boundary the registry commentary claims: the
+        # write verbs the rag server also exposes reach none of the three.
+        assert not any(tool.startswith("reindex") for tool in declared)
 
 
 def test_the_authoring_bridge_still_rides_its_own_launch() -> None:

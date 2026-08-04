@@ -45,7 +45,7 @@ from ._subprocess import redact_secrets
 from .lane_admission import is_web_lane_proven
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping, Sequence
+    from collections.abc import Iterable, Mapping, Sequence
     from typing import Literal
 
     from langchain_core.language_models import BaseChatModel
@@ -483,14 +483,40 @@ def harness_server_exact_surface(name: str) -> bool:
 
 
 def _launch_spec(name: str, entry: FrozenJsonObject) -> JsonObject:
-    """Return the ACP-shape launch spec, stripped of registry-only metadata.
+    """Return the launch spec for one registry entry, free of registry metadata.
 
-    The single renderer of a registry entry into an ACP launch spec, so the
-    root-pin refusal applies to every spec the ACP transport can produce rather
-    than only to the ones that reach the spawn seam's trust-root check.
+    The single renderer of a registry entry's LAUNCH, so the root-pin refusal
+    applies to every spec either transport can produce rather than only to the
+    ones that reach the spawn seam's trust-root check. Both transports render
+    through it - the Codex path layers its own ``env`` shape and ``tools``
+    allowlist on top - so the launch a run advertises cannot depend on which
+    serialization asked for it, and the divergence guard
+    (:func:`registry_launch_divergence`) can be bound to one rendering rather
+    than to one of two.
+
+    The name is taken from the registry KEY rather than from the entry body: the
+    key is what every seam looks the entry up by, and an entry that omitted the
+    field would otherwise render a nameless spec - refused later, far from the
+    cause.
+
+    Command and arguments are read through the typed registry readers rather than
+    thawed blindly. :func:`_declare_registry` validates the trust axes and NOT the
+    launch, so a malformed command or a non-string argument is a constructible
+    entry; this is the only place that refusal exists for either transport.
+
+    Raises:
+        ConfigError: If the entry declares itself unpinnable, or declares a
+            malformed command or argument vector.
     """
     _require_root_pin(name, entry)
-    return {key: thaw_json(entry[key]) for key in _LAUNCH_SPEC_KEYS if key in entry}
+    spec: JsonObject = {
+        "name": name,
+        "command": _frozen_string(entry, "command"),
+        "args": list(_frozen_strings(entry, "args")),
+    }
+    if "env" in entry:
+        spec["env"] = thaw_json(entry["env"])
+    return spec
 
 
 # The launch fields a spec riding a registry-known name must carry unchanged from
@@ -730,12 +756,16 @@ def harness_allowed_tool_names(
     the composed read tools and nothing else. Order-preserving and de-duplicated.
     Raises :class:`ConfigError` on an unknown declared name, matching
     :func:`resolve_harness_mcp_servers`.
+
+    Reads through :func:`declared_harness_tools` rather than the registry field:
+    this IS the auto-permit path that reader's contract names, so reading around
+    it is how the advertised, permitted, and verified sets come apart.
     """
     tool_names: list[str] = []
     seen: set[str] = set()
     resolution = resolve_harness_mcp_capabilities(names, profile=profile, lane=lane)
     for name in resolution.available_servers:
-        for tool in _frozen_strings(_registry_entry(name), "tools"):
+        for tool in declared_harness_tools(name):
             qualified = f"mcp__{name}__{tool}"
             if qualified not in seen:
                 seen.add(qualified)
@@ -808,6 +838,28 @@ def require_declared_surface(
         )
 
 
+def _repeated_names(names: Iterable[object]) -> list[str]:
+    """Return every non-blank name appearing more than once, sorted.
+
+    The shared body of the two duplicate guards, which answer the same question
+    on two transports: one holds declared names, the other holds specs to read a
+    name off. What a duplicate IS - a non-blank string seen twice, every one of
+    them named rather than whichever the loop reached first - must be one answer,
+    or the two transports could come to disagree about which configurations are
+    admissible while both look guarded.
+
+    Their REFUSALS stay their own: each names the artifact it was about to emit
+    and the consequence there, which is error mapping rather than duplicated
+    logic. A blank or non-string name is not an identity and so cannot duplicate
+    one; it is skipped here rather than at each caller.
+    """
+    seen: dict[str, int] = {}
+    for name in names:
+        if isinstance(name, str) and name:
+            seen[name] = seen.get(name, 0) + 1
+    return sorted(name for name, count in seen.items() if count > 1)
+
+
 def reject_duplicate_names(names: Sequence[str]) -> None:
     """Fail loud when a declared server name is repeated.
 
@@ -820,11 +872,7 @@ def reject_duplicate_names(names: Sequence[str]) -> None:
     Raises:
         ConfigError: If any name appears more than once.
     """
-    seen: dict[str, int] = {}
-    for name in names:
-        if name:
-            seen[name] = seen.get(name, 0) + 1
-    duplicates = sorted(name for name, count in seen.items() if count > 1)
+    duplicates = _repeated_names(names)
     if duplicates:
         raise ConfigError(
             "refusing to emit a Codex configuration with duplicate MCP server "
@@ -848,13 +896,7 @@ def reject_duplicate_identities(mcp_servers: Sequence[JsonObject]) -> None:
     Raises:
         ConfigError: If any name appears more than once.
     """
-    seen: dict[str, int] = {}
-    for spec in mcp_servers:
-        name = spec.get("name")
-        if not isinstance(name, str) or not name:
-            continue
-        seen[name] = seen.get(name, 0) + 1
-    duplicates = sorted(name for name, count in seen.items() if count > 1)
+    duplicates = _repeated_names(spec.get("name") for spec in mcp_servers)
     if duplicates:
         raise ConfigError(
             "refusing to compose a surfacing config with duplicate MCP server "
@@ -1124,6 +1166,14 @@ def codex_mcp_server_specs(
     declares itself unpinnable all raise :class:`ConfigError`, so one registry
     stays the single trust root across both transports.
 
+    A second SERIALIZATION, not a second RENDERING: the launch comes from
+    :func:`_launch_spec` and the read tools from :func:`declared_harness_tools`,
+    the same two readers the ACP path and the contract check use. Reassembling
+    them here would make this a second opinion about one declaration, which the
+    divergence guard could not see - it is bound to the shared renderer, so a
+    launch this function built by hand would be enforced against nothing. What
+    stays local is only what the transport genuinely shapes differently.
+
     *project_root* carries the run's project pin, the Codex rendering of what
     :func:`pin_harness_mcp_servers` applies on the ACP transport: the same
     registry-declared variable, written into this transport's flat ``env``
@@ -1151,11 +1201,14 @@ def codex_mcp_server_specs(
             env[variable] = pin
         specs.append(
             {
-                "name": name,
-                "command": _frozen_string(entry, "command"),
-                "args": list(_frozen_strings(entry, "args")),
+                **_launch_spec(name, entry),
+                # The two fields this transport renders DIFFERENTLY, and the only
+                # two: Codex models env as a flat table where ACP models it as a
+                # list of name/value pairs, and Codex needs the read tools on the
+                # spec because its ``enabled_tools`` allowlist is written from it.
+                # Everything above is the shared launch, rendered once.
                 "env": env,
-                "tools": list(_frozen_strings(entry, "tools")),
+                "tools": list(declared_harness_tools(name)),
             }
         )
     return specs

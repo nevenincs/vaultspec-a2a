@@ -5,7 +5,7 @@ tags:
 date: '2026-08-04'
 modified: '2026-08-04'
 body_schema: 'body-v1'
-body_hash: 'sha256:8400eff50b6f422ed48101f2770d70ec1503fd76d064732c825f16e5d0bbf0c0'
+body_hash: 'sha256:c383a1931879d08d0a02da02c46bd279eec1f54d82ea7de8b74324df03cfb67f'
 related: []
 ---
 
@@ -5169,3 +5169,72 @@ LIE rather than a wrong answer.
 
 The correct pattern was already two modules away, composing the sentence from the
 constant by interpolation, and was not copied either time.
+
+### an-outbound-bound-over-an-unbounded-column-destroys-the-page | critical | the mirror of the truncation finding
+
+The outbound-truncation finding above has a mirror, and it is worse. Where a wire
+bound sits BELOW a column, an outbound projection silently truncates an
+identifier. Where a wire bound sits over a column with **no width at all**, the
+outbound projection **refuses** - and a refusal in a list element is not scoped to
+that element.
+
+The run title is bounded nowhere on the write side: not in the repository, not in
+the thread service, not in the metadata layer. It is bounded only on the wire,
+inbound AND outbound. The write entry point accepts an arbitrary string. So a
+title longer than the wire cap, set by any writer that does not pass the inbound
+gateway, lands in the store and then raises at serialization - **failing the whole
+history page for every caller, not merely the row that carries it.**
+
+This is not a speculative failure mode nobody in the codebase recognises. The
+listing function's own docstring already reasons in exactly these terms about
+non-conforming run identifiers - one bad row reaching serialization fails the page
+for everyone - and makes its exclusion unconditional for that reason. The
+identical hazard exists on the title with no such protection, in the same
+function.
+
+Recorded at critical as a hazard of KNOWN SHAPE rather than as a demonstrated
+live bug: whether a title over the cap is reachable in practice needs a sweep of
+every write-path caller, which is a task rather than a check. The lane flagged it
+that way rather than claiming more than it had verified.
+
+**Both this and the truncation finding come from one question neither inventory
+asked: what does this bound do in the OUTBOUND direction?** Inbound, every bound
+in this campaign refuses and the caller learns. Outbound, the same bound either
+corrupts a value or destroys an entire response. A bound is not one fact; it is
+two behaviours that happen to share a number.
+
+### a-wire-bound-can-be-wrong-rather-than-duplicated | high | corrects a subject assignment
+
+A brief filed the run nickname as a bound to check against "its own column". It
+has no column bound to check against: the column is declared with no width at
+all. Its real authority is a slug grammar elsewhere, which caps at half the value
+the wire declares.
+
+So the wire bound is not a restatement that might drift. **It is a third number,
+twice as permissive as the only authority that exists**, for a value no column
+constrains. Nothing is refused today because the grammar is the tighter of the
+two, which is precisely why it has survived - it is wrong in the direction that
+never fails.
+
+That makes it a grammar-authored subject, not a column-authored one, and it must
+not inherit the column-derived constant for the same reason the run-id length must
+not. Two other wire caps in the same file were checked and are CORRECT as
+independent policy: their columns are unbounded too, so there is no write-failure
+asymmetry and no lockstep requirement. A wire-only policy cap with nothing behind
+it is not a duplicate of anything.
+
+### a-dimension-collision-no-value-sweep-can-separate | high | the strongest case for reading over counting
+
+Two of the sites sharing this cluster's number apply it to a LIST, bounding item
+COUNT rather than string length. Same spelling, same value, same parameter name -
+a different DIMENSION.
+
+No value-based sweep can separate that. No grep, no count, no inventory built by
+matching the literal distinguishes a cap on how many things there are from a cap
+on how long one thing is, and folding the two would produce a constant whose name
+must lie about one of its uses.
+
+Recorded as the strongest single argument for this campaign's method finding that
+reading every candidate beats counting matches. A count treats these as two more
+occurrences of one fact. Reading them shows they are unrelated facts that a
+converter would have merged without any check firing.

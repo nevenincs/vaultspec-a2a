@@ -198,3 +198,51 @@ should refuse to serve the internal surface at all.
 Repair the stale catalog-selection tests. They belong to the lane that made the
 selection fields mandatory, not to this one, and they mask any genuine
 regression in that interface for as long as they stay red.
+
+### provider-sessions-persist-in-the-operator-home | high | every provider family writes session state into the operator's own profile, unreclaimed and undeclared, and this project's own test suite is the largest single contributor
+
+Routed here from the artifact-lifecycle trail, where it was found while
+establishing that a transcript this project was obliged to preserve does not
+exist. The opposite turned out to be true, and it is a boundary finding rather
+than a lifecycle one: provider CLIs write session state into the OPERATOR's real
+profile, where this project can neither enumerate nor reclaim it, and where it
+sits beside the operator's own unrelated work.
+
+Three families, three shapes, measured by directory metadata only - no session
+file was opened, deliberately, since the questions were volume and reachability
+and both are answerable without reading content:
+
+- The ACP family (Claude, Z.ai, Kimi share one chat model) writes full sessions
+  keyed by ABSOLUTE workspace path. 23 of those directories key to run
+  workspaces this project created and then deleted; all 23 are orphaned, 14.5
+  MiB.
+- Gemini writes per-workspace directories keyed by BASENAME with underscores
+  sanitized to hyphens - 959 of them in each of two trees. 305 of those keys
+  decode to this repository's own test function names, and 495 entries are
+  already past the age threshold this project uses for its own reclamation.
+- Kimi writes almost nothing so far - a single session under an OPAQUE HASH key,
+  which is also why orphanhood cannot be established there at all.
+
+Two properties make this a boundary concern rather than a housekeeping one.
+
+The accumulation is UNREACHABLE by design, not by oversight. The orphan sweep is
+scoped to this project's own temporary-home root and further narrowed by the
+caller's directory prefix, specifically so a sweep for one CLI can never collect
+a directory belonging to another product. The operator's profile is outside that
+root. Reaching into it would cross the same boundary the no-auth
+ambient-environment contract chose deliberately when the ACP lane stopped
+carrying an isolated home - so the remedy is not simply "sweep wider", and a
+predicate that got it slightly wrong would delete a human's own sessions
+irrecoverably.
+
+And the largest contributor appears to be this project's own TEST SUITE. The 305
+pytest-shaped Gemini keys are generated per test temporary workspace; the
+workspace is reclaimed upstream when the test ends, and the provider-side copy
+survives it. That inverts where a fix would naturally be sought: the cheapest
+intervention may be in how tests provision workspaces rather than anywhere in
+production code.
+
+Recorded here rather than resolved. Remediation is in flight on the
+artifact-lifecycle trail, and the standing constraint carried with it is that a
+mechanism designed against any one of the three shapes will be wrong for the
+other two.

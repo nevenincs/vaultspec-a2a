@@ -5,7 +5,7 @@ tags:
 date: '2026-08-04'
 modified: '2026-08-04'
 body_schema: 'body-v1'
-body_hash: 'sha256:a50a5006f69c9590e7d15183cc801a9b0e14dc9def54177c740a1c03d60e9bb8'
+body_hash: 'sha256:41df8a35dc67da336a09b7a5ee42d1f949155debb21d29b22b9608a3ffb66157'
 related: []
 ---
 
@@ -273,6 +273,85 @@ asynchronous engine connect listener and the synchronous admin listener are
 deliberately restated because an admin verb needs a synchronous engine that
 cannot reuse a pool event - a documented boundary, correctly not unified. All
 DISTINCT or already single-homed.
+
+### correction-port-probe-was-a-reservation | medium | an earlier entry in this audit was wrong
+
+The port-acquisition entry above described the moved declaration as the
+ephemeral no-listener probe living in the wrong module. That is incorrect and is
+corrected here rather than edited away, because a wrong finding that silently
+disappears teaches nobody. The declaration is reservation-FIRST: it takes an
+exclusive scratch-band claim, holds it for the whole process lifetime, and runs
+a daemon thread heartbeating the marker so the hold outlives the reservation
+expiry. The unclaimed operating-system probe is only its fallback for a missing
+or exhausted band. It therefore sits on the reservation side of the boundary the
+canonical module documents, not the probe side, and the correct outcome is three
+concepts kept apart in one home - a claim scoped to a block, a claim held for
+the process, and an unclaimed probe documented as a fallback rather than a peer.
+The verdict MISPLACED stands; the reason it was misplaced does not. The decisive
+evidence was not the semantic sweep at all: the tests for the concept already
+lived beside the canonical module while the implementation lived a tier away in
+a gateway-boot module, importing two of its privates upward, and sixteen of its
+seventeen consumers have nothing to do with booting a gateway. A test reaching
+up a tier for two private names is the concrete form of nobody being able to
+find where a thing lives.
+
+### untyped-json-narrowing-restated | high | one narrowing, four names, ten production modules
+
+Narrowing an untyped value into a string-keyed object is declared as a fresh
+validator singleton in ten production modules under four different private
+names, across the control, api, worker and authoring layers. The only real
+variance is that two sites validate strictly and the rest do not, which is
+itself the drift: there is no single place to add a size cap, a schema-version
+check, or a consistent strictness policy at the untyped boundary. Verdict
+DUPLICATE. Two adjacent sites in the provider layer use a tighter recursive
+closed-JSON type rather than an arbitrary object and are the direction to
+converge toward, not to flatten into the looser form - collapsing them would
+silently loosen validation at those two call sites. The canonical export must
+offer both a lenient and a strict form rather than picking one silently. Note
+the layering question this raises: the natural home is the module that already
+owns the closed-JSON shape, in the provider layer, and whether control and
+worker modules may import from there is a facade question to settle before the
+home is fixed.
+
+### bounded-text-aliases-restated-inline | high | thirteen fields restate numbers a sibling already exports
+
+The provider-catalog schema module declares four reusable bounded-string
+aliases. Its sibling in the same package imports other symbols from it but not
+these, and instead restates the identical numeric bounds inline at roughly
+thirteen field sites - the same 1024 and 256 caps, field for field, on the
+frozen execution-authority disclosure types. Verdict DUPLICATE, and the drift
+risk is already live rather than introduced by consolidating: a cap changed for
+a provider-catalog reason leaves the thirteen restatements silently at the old
+value. One thing must be checked before any mechanical swap - two of the aliases
+also carry a control-character exclusion pattern that the bare inline
+restatements do not enforce, so adopting them tightens validation. That is
+probably desirable and is certainly a behaviour change, so it belongs in the
+implementing step as an explicit decision rather than a side effect. A separate
+constant in the same file is deliberately restated as a cross-repository
+contract number that a consumer in another repository cannot import, and is
+documented and tested as such; it is DISTINCT and must not be swept up with the
+rest.
+
+### admission-state-name-collision | low | one name, two unrelated vocabularies
+
+A state enumeration name is declared twice with entirely different vocabularies:
+one describing whether a gateway is admitting or draining, the other describing
+whether a provider lane has completed-turn admission evidence. No file imports
+both today, so there is no live shadowing defect. Recorded because both live in
+domains likely to grow a shared consumer, and because a reviewer reading a diff
+that imports the name has even odds of assuming the wrong vocabulary. Verdict
+DISTINCT with a naming hazard; no rename proposed here.
+
+### identity-swept-and-found-clean | low | canonicalization, redaction and id shapes are single-homed
+
+The workspace canonicalizer has one home, and the engine-facing scope token
+builds on top of it for a documented and genuinely different wire spelling
+rather than re-deriving it. Run, reservation and lease identifiers are three
+aliases deliberately sharing one regular expression declared once. Credential
+handling is three correctly separated concepts with no duplicate copies: a
+pattern-scanning redactor for free-text diagnostics, a two-field mask in a
+representation method, and the environment scrub that removes credentials before
+a subprocess spawn. All DISTINCT or already single-homed.
 
 ## Recommendations
 

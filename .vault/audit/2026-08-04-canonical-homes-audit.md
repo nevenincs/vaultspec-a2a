@@ -5,7 +5,7 @@ tags:
 date: '2026-08-04'
 modified: '2026-08-04'
 body_schema: 'body-v1'
-body_hash: 'sha256:2ededc5bfb95fcfc1a2667730fe0f8143c1cdc4713df6d2d511f4c2ebc3ba726'
+body_hash: 'sha256:38050b539a68d0b25c44ae149ace8bfce06f4473dd33c59d460a774ca9434709'
 related: []
 ---
 
@@ -7112,3 +7112,88 @@ markers can be worn together while contradicting each other.
 **The question is whether an explicit claim forfeits the purity claim**, and that
 is a policy decision about what the marker means rather than a list of sites to
 fix. Boarded as a decision.
+
+### the-half-that-was-not-boarded-was-the-read-only-hole | critical | the enforcement covered the wrong field
+
+The two-renderers item split, and **the half nobody boarded is the one that
+mattered.**
+
+**Command and arguments: already caught.** Measured, not assumed - the second
+transport hands its rendered spec to the contract verifier before it builds its
+configuration, so the enforcement landed earlier already sees it. A recorded
+negative, established by probing rather than by reading the call order.
+
+**Tools: not caught - and it is the read-only boundary.** The one field the second
+renderer ADDS beyond the first is the one field the enforcement did not cover. The
+contract check reads the tool list from the **registry**; the generated
+configuration writes its enabled-tool allowlist from the **spec**, under an
+automatic approval mode.
+
+So a divergent tool list is **an auto-approved allowlist that nothing verified** -
+and the registry's own commentary names the write verbs the same server exposes and
+says they are deliberately omitted. The guarantee the omission exists to provide is
+what a divergent spec would silently spend.
+
+No live path today, since both readings reach the same frozen entry. **That is the
+premise holding, not the hole being absent.**
+
+**Recorded as a lesson about enforcement scope:** the fix that closed the launch
+comparison was correct and complete for the fields it named. The gap was that the
+second renderer's DISTINGUISHING field - the reason it is a second renderer at all -
+was outside the comparison. **When two renderings of one declaration are reconciled,
+the field that differs between them is exactly the field most likely to be
+unguarded**, because it is the one the first enforcement had no reason to consider.
+
+### the-single-reader-that-two-callers-bypassed | high | tenth and eleventh instances
+
+The tool reader's own docstring claims it is *the single reader, so the names a run
+advertises, the names it auto-permits, and the names it verifies the server serves
+can never drift apart.*
+
+**Two callers bypassed it - and one of them is the auto-permit path that sentence
+names.** The prose describes a guarantee, names the three consumers it binds, and
+one of the three was reading around it.
+
+A second instance in the same pass: the generated configuration's comment states
+its allowlist is *exactly the registry's read tools*, while nothing compares the
+two. **Tenth and eleventh instances of prose asserting what nothing enforces**, both
+inside one subsystem, both describing the property their absence removes.
+
+### the-fold-would-have-deleted-the-only-check-of-its-kind | high | both-directions audit, third save
+
+The fold audited in both directions and the fork was better - for the third time in
+this campaign, and this time the loss would have been total rather than partial.
+
+The registry's construction seam validates the trust axes and **not** the launch. So
+the second transport's typed reads were **the only refusal of a malformed command or
+a non-string argument anywhere in the tree.** Folding onto the surviving renderer as
+it stood would have **deleted** that check while looking like pure consolidation.
+
+The renderer gained it first; both transports now have it. And the surviving
+renderer now takes the name from the registry KEY rather than the entry body, so an
+entry omitting that field can no longer render a nameless spec that is refused later,
+far from its cause.
+
+**Output-identity was RUN, not reasoned** - the deleted bodies evaluated against the
+same registry, identical including key order, for every entry on both transports.
+**A fold that changes rendering is a behaviour change in a refactor's clothes.**
+
+### a-drift-guard-is-not-a-defect-proof | high | the lane said it about its own tests
+
+The clearest self-assessment in this campaign: **the new agreement tests would have
+passed BEFORE the fold too**, because both renderers read the same entry.
+
+The lane said so unprompted and drew the distinction: **they are drift guards, not
+defect proofs.** The defect proof is the probe that showed a divergent tool list
+admitted. A reader who mistook the tests for the evidence would conclude the hole
+had been demonstrated closed, when what was demonstrated is that it cannot reopen.
+
+Both are worth having and they answer different questions. **A test that passes
+before and after a change proves the change preserved something; only a test that
+FAILED before proves the change fixed something.** Recorded because every non-vacuity
+demand in this campaign has been aimed at the second, and this is the first lane to
+name the first kind honestly rather than let it be read as the second.
+
+Its reach was also not assumed: the comparison is asserted over **every** registry
+entry rather than the one a preset happens to declare, because an entry reachable on
+only one transport is exactly where a second rendering survives unnoticed.

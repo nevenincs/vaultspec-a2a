@@ -11,7 +11,6 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
-from contextlib import suppress
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Final
@@ -23,6 +22,7 @@ if TYPE_CHECKING:
 
 from ._cleanup import CleanupStep, run_independent_cleanups
 from ._json_contract import JsonObject, JsonValue
+from ._stdio_rpc import OutputBudget, cancel_task
 from ._subprocess import kill_process_tree, spawn_acp_process
 from .provider_catalog import (
     AuthenticationState,
@@ -43,7 +43,6 @@ __all__ = [
     "discover_kimi_catalog",
 ]
 
-_MAX_OUTPUT_BYTES: Final = 1_048_576
 _MAX_MODELS: Final = 256
 _MAX_CONTROLS: Final = 32
 _MAX_OPTIONS: Final = 128
@@ -63,14 +62,9 @@ class KimiCatalogDiscovery:
     authentication: AuthenticationState = AuthenticationState.UNKNOWN
 
 
-@dataclass(slots=True)
-class _OutputBudget:
-    consumed: int = 0
-
-    def charge(self, size: int) -> None:
-        self.consumed += size
-        if self.consumed > _MAX_OUTPUT_BYTES:
-            raise KimiCatalogProtocolError("Kimi discovery output exceeds one MiB")
+def _protocol_error(message: str) -> KimiCatalogProtocolError:
+    """Raise Kimi's own dialect of a discovery protocol refusal."""
+    return KimiCatalogProtocolError(f"Kimi {message}")
 
 
 def _text(value: JsonValue | None, *, field: str) -> str:
@@ -291,7 +285,7 @@ async def _read_bounded(
     stream: asyncio.StreamReader | None,
     process: asyncio.subprocess.Process,
     metadata: Mapping[str, object] | None,
-    output_budget: _OutputBudget,
+    output_budget: OutputBudget,
 ) -> bytes:
     if stream is None:
         return b""
@@ -304,12 +298,6 @@ async def _read_bounded(
             raise
         body.extend(chunk)
     return bytes(body)
-
-
-async def _cancel(task: asyncio.Task[bytes]) -> None:
-    task.cancel()
-    with suppress(asyncio.CancelledError):
-        await task
 
 
 async def discover_kimi_catalog(
@@ -328,7 +316,7 @@ async def discover_kimi_catalog(
     process = await spawn_acp_process(
         command, dict(env), cwd, use_exec=False, metadata=metadata
     )
-    output_budget = _OutputBudget()
+    output_budget = OutputBudget(_protocol_error)
     stdout_task = asyncio.create_task(
         _read_bounded(process.stdout, process, metadata, output_budget)
     )
@@ -362,8 +350,8 @@ async def discover_kimi_catalog(
     cleanup_steps.extend(
         [
             ("kimi-catalog-process", lambda: kill_process_tree(process, metadata)),
-            ("kimi-catalog-stdout", lambda: _cancel(stdout_task)),
-            ("kimi-catalog-stderr", lambda: _cancel(stderr_task)),
+            ("kimi-catalog-stdout", lambda: cancel_task(stdout_task)),
+            ("kimi-catalog-stderr", lambda: cancel_task(stderr_task)),
         ]
     )
     cleanup_failures = await run_independent_cleanups(*cleanup_steps)

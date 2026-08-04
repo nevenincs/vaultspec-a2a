@@ -22,7 +22,7 @@ if TYPE_CHECKING:
 from ..utils import package_version
 from ._cleanup import CleanupStep, run_independent_cleanups
 from ._json_contract import JsonObject, JsonValue
-from ._stdio_rpc import cancel_task, read_response
+from ._stdio_rpc import OutputBudget, cancel_task, drain_stderr, read_response
 from ._subprocess import kill_process_tree, spawn_acp_process
 from .provider_catalog import (
     AuthenticationState,
@@ -44,7 +44,6 @@ __all__ = [
 ]
 
 _MAX_FRAME_BYTES: Final = 1_048_576
-_MAX_OUTPUT_BYTES: Final = 1_048_576
 _MAX_FRAMES_PER_RESPONSE: Final = 64
 _MAX_PAGES: Final = 16
 _MAX_MODELS: Final = 256
@@ -72,14 +71,9 @@ class CodexCatalogDiscovery:
     authentication: AuthenticationState
 
 
-@dataclass(slots=True)
-class _OutputBudget:
-    consumed: int = 0
-
-    def charge(self, size: int) -> None:
-        self.consumed += size
-        if self.consumed > _MAX_OUTPUT_BYTES:
-            raise CodexCatalogProtocolError("Codex discovery output exceeds one MiB")
+def _protocol_error(message: str) -> CodexCatalogProtocolError:
+    """Raise Codex's own dialect of a discovery protocol refusal."""
+    return CodexCatalogProtocolError(f"Codex {message}")
 
 
 def _text(value: JsonValue | None, *, field: str) -> str:
@@ -412,7 +406,7 @@ async def _read_response(
     *,
     request_id: int,
     timeout: float,
-    output_budget: _OutputBudget,
+    output_budget: OutputBudget,
 ) -> JsonObject:
     return await read_response(
         stdout,
@@ -421,7 +415,7 @@ async def _read_response(
         output_budget=output_budget,
         max_frames=_MAX_FRAMES_PER_RESPONSE,
         max_frame_bytes=_MAX_FRAME_BYTES,
-        protocol_error=lambda message: CodexCatalogProtocolError(f"Codex {message}"),
+        protocol_error=_protocol_error,
     )
 
 
@@ -432,7 +426,7 @@ async def _request(
     method: str,
     params: JsonObject,
     timeout: float,
-    output_budget: _OutputBudget,
+    output_budget: OutputBudget,
 ) -> JsonObject:
     if process.stdin is None or process.stdout is None:
         raise CodexCatalogProtocolError("Codex discovery stdio is unavailable")
@@ -462,22 +456,6 @@ async def _notify_initialized(process: asyncio.subprocess.Process) -> None:
     await process.stdin.drain()
 
 
-async def _drain_stderr(
-    stderr: asyncio.StreamReader | None,
-    process: asyncio.subprocess.Process,
-    metadata: Mapping[str, object] | None,
-    output_budget: _OutputBudget,
-) -> None:
-    if stderr is None:
-        return
-    while chunk := await stderr.read(65_536):
-        try:
-            output_budget.charge(len(chunk))
-        except CodexCatalogProtocolError:
-            await kill_process_tree(process, metadata)
-            raise
-
-
 async def discover_codex_catalog(
     command: tuple[str, ...],
     *,
@@ -493,9 +471,9 @@ async def discover_codex_catalog(
     process = await spawn_acp_process(
         list(command), dict(env), cwd, use_exec=False, metadata=metadata
     )
-    output_budget = _OutputBudget()
+    output_budget = OutputBudget(_protocol_error)
     stderr_task = asyncio.create_task(
-        _drain_stderr(process.stderr, process, metadata, output_budget)
+        drain_stderr(process.stderr, process, metadata, output_budget)
     )
     outcome: CodexCatalogDiscovery | None = None
     failure: BaseException | None = None

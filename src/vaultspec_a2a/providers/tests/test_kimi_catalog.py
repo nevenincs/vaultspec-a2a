@@ -13,9 +13,10 @@ import psutil
 import pytest
 
 from ...workspace.environment import resolve_env_vars
+from .._stdio_rpc import OutputBudget
 from ..kimi_catalog import (
     KimiCatalogProtocolError,
-    _OutputBudget,
+    _protocol_error,
     catalog_from_provider_list,
     discover_kimi_catalog,
 )
@@ -167,11 +168,12 @@ def test_revision_tracks_wire_target_and_effort_choices() -> None:
 
 
 def test_stdout_and_stderr_share_one_aggregate_output_budget() -> None:
-    budget = _OutputBudget()
+    budget = OutputBudget(_protocol_error)
     budget.charge(700_000)
     budget.charge(348_576)
-    with pytest.raises(KimiCatalogProtocolError, match="exceeds one MiB"):
+    with pytest.raises(KimiCatalogProtocolError) as raised:
         budget.charge(1)
+    assert str(raised.value) == "Kimi discovery output exceeds one MiB"
 
 
 def _installed_kimi() -> str:

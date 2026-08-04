@@ -15,10 +15,11 @@ import pytest
 
 from ...control.config import settings
 from ...workspace.environment import resolve_env_vars
+from .._stdio_rpc import OutputBudget
 from ..codex_catalog import (
     CodexCatalogProtocolError,
     _authentication,
-    _OutputBudget,
+    _protocol_error,
     _rpc_error,
     catalog_from_app_server,
     discover_codex_catalog,
@@ -252,11 +253,12 @@ def test_provider_error_text_is_not_retained() -> None:
 
 
 def test_stdout_and_stderr_share_one_aggregate_output_budget() -> None:
-    budget = _OutputBudget()
+    budget = OutputBudget(_protocol_error)
     budget.charge(700_000)
     budget.charge(348_576)
-    with pytest.raises(CodexCatalogProtocolError, match="exceeds one MiB"):
+    with pytest.raises(CodexCatalogProtocolError) as raised:
         budget.charge(1)
+    assert str(raised.value) == "Codex discovery output exceeds one MiB"
 
 
 def _real_codex_inputs() -> tuple[tuple[str, ...], dict[str, str]]:

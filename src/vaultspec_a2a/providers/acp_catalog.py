@@ -23,7 +23,7 @@ if TYPE_CHECKING:
 from ._acp_auth import is_auth_required_error
 from ._cleanup import CleanupStep, run_independent_cleanups
 from ._json_contract import JsonObject, JsonValue
-from ._stdio_rpc import cancel_task, read_response
+from ._stdio_rpc import OutputBudget, cancel_task, drain_stderr, read_response
 from ._subprocess import kill_process_tree, spawn_acp_process
 from .acp_exceptions import AcpErrorCode, AcpSessionError
 from .provider_catalog import (
@@ -46,7 +46,6 @@ __all__ = [
 ]
 
 _MAX_FRAME_BYTES: Final = 1_048_576
-_MAX_OUTPUT_BYTES: Final = 1_048_576
 _MAX_FRAMES: Final = 64
 _MAX_MODELS: Final = 256
 _MAX_CONTROLS: Final = 32
@@ -72,17 +71,9 @@ class AcpCatalogDiscovery:
     authentication: AuthenticationState
 
 
-@dataclass(slots=True)
-class _OutputBudget:
-    consumed: int = 0
-
-    def charge(self, size: int) -> None:
-        self.consumed += size
-        if self.consumed > _MAX_OUTPUT_BYTES:
-            raise AcpCatalogProtocolError(
-                "ACP discovery output exceeds one MiB",
-                code=AcpErrorCode.INTERNAL_ERROR,
-            )
+def _protocol_error(message: str) -> AcpCatalogProtocolError:
+    """Raise ACP's own dialect of a discovery protocol refusal."""
+    return AcpCatalogProtocolError(f"ACP {message}", code=AcpErrorCode.INTERNAL_ERROR)
 
 
 def _rpc_error(method: str, error: JsonValue) -> AcpSessionError:
@@ -399,7 +390,7 @@ async def _read_response(
     *,
     request_id: int,
     timeout: float,
-    output_budget: _OutputBudget,
+    output_budget: OutputBudget,
 ) -> JsonObject:
     return await read_response(
         stdout,
@@ -408,9 +399,7 @@ async def _read_response(
         output_budget=output_budget,
         max_frames=_MAX_FRAMES,
         max_frame_bytes=_MAX_FRAME_BYTES,
-        protocol_error=lambda message: AcpCatalogProtocolError(
-            f"ACP {message}", code=AcpErrorCode.INTERNAL_ERROR
-        ),
+        protocol_error=_protocol_error,
     )
 
 
@@ -421,7 +410,7 @@ async def _request(
     method: str,
     params: JsonObject,
     timeout: float,
-    output_budget: _OutputBudget,
+    output_budget: OutputBudget,
 ) -> JsonObject:
     if process.stdin is None or process.stdout is None:
         raise AcpCatalogProtocolError("ACP discovery stdio is unavailable")
@@ -448,22 +437,6 @@ async def _request(
     return result
 
 
-async def _drain_stderr(
-    stderr: asyncio.StreamReader | None,
-    process: asyncio.subprocess.Process,
-    metadata: Mapping[str, object] | None,
-    output_budget: _OutputBudget,
-) -> None:
-    if stderr is None:
-        return
-    while chunk := await stderr.read(65_536):
-        try:
-            output_budget.charge(len(chunk))
-        except AcpCatalogProtocolError:
-            await kill_process_tree(process, metadata)
-            raise
-
-
 async def discover_acp_catalog(
     command: tuple[str, ...],
     *,
@@ -480,9 +453,9 @@ async def discover_acp_catalog(
     process = await spawn_acp_process(
         list(command), dict(env), cwd, use_exec=use_exec, metadata=metadata
     )
-    output_budget = _OutputBudget()
+    output_budget = OutputBudget(_protocol_error)
     stderr_task = asyncio.create_task(
-        _drain_stderr(process.stderr, process, metadata, output_budget)
+        drain_stderr(process.stderr, process, metadata, output_budget)
     )
     outcome: AcpCatalogDiscovery | None = None
     failure: BaseException | None = None

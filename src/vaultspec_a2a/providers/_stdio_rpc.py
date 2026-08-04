@@ -25,13 +25,20 @@ from __future__ import annotations
 
 import asyncio
 from contextlib import suppress
-from typing import Protocol
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Final, Protocol
 
 from pydantic import TypeAdapter, ValidationError
 
 from ._json_contract import JsonObject
+from ._subprocess import kill_process_tree
+
+if TYPE_CHECKING:
+    from collections.abc import Mapping
 
 _JSON_OBJECT: TypeAdapter[JsonObject] = TypeAdapter(JsonObject)
+
+MAX_OUTPUT_BYTES: Final = 1_048_576
 
 
 class OutputBudgetLike(Protocol):
@@ -50,11 +57,69 @@ class ProtocolErrorFactory(Protocol):
         ...
 
 
-async def cancel_task(task: asyncio.Task[None]) -> None:
-    """Cancel *task* and absorb the resulting cancellation."""
+@dataclass(slots=True)
+class OutputBudget:
+    """One aggregate byte allowance shared by every reader of a child's streams.
+
+    Discovery reads stdout and stderr concurrently, so the bound has to be a
+    single running total rather than a per-stream cap: a child that stays under
+    the limit on each stream separately can still flood the process by using
+    both. The refusal names the DEFAULT bound, which is why *limit* exists as a
+    field but is not something callers are expected to vary.
+    """
+
+    protocol_error: ProtocolErrorFactory
+    limit: int = MAX_OUTPUT_BYTES
+    consumed: int = 0
+
+    def charge(self, size: int) -> None:
+        """Account for *size* bytes, refusing once the aggregate bound is past."""
+        self.consumed += size
+        if self.consumed > self.limit:
+            raise self.protocol_error("discovery output exceeds one MiB")
+
+
+async def cancel_task[T](task: asyncio.Task[T]) -> None:
+    """Cancel *task* and absorb the resulting cancellation.
+
+    Generic in the task's result because the drain tasks it reaps differ in what
+    they return - one accumulates the child's stderr, another discards it - and
+    that difference is irrelevant to cancelling: the result is never read on this
+    path. Pinning it to one concrete type is what pushed a third caller into
+    writing its own copy.
+    """
     task.cancel()
     with suppress(asyncio.CancelledError):
         await task
+
+
+async def drain_stderr(
+    stderr: asyncio.StreamReader | None,
+    process: asyncio.subprocess.Process,
+    metadata: Mapping[str, object] | None,
+    output_budget: OutputBudgetLike,
+) -> None:
+    """Consume the child's stderr against *output_budget*, reaping it on refusal.
+
+    Draining is not optional bookkeeping: a child that fills its stderr pipe
+    blocks on write, so a discovery that never reads it can deadlock against a
+    process that is merely being chatty.
+
+    The budget refusal is caught broadly rather than per-lane because ``charge``
+    is the only raising call inside the guard - the read sits outside it - so
+    naming each lane's own protocol-error type here would select nothing that
+    ``Exception`` does not. Cancellation is a ``BaseException`` and so still
+    passes through without reaping, which is what teardown depends on: the drain
+    task is cancelled on the ordinary path and must not kill a healthy child.
+    """
+    if stderr is None:
+        return
+    while chunk := await stderr.read(65_536):
+        try:
+            output_budget.charge(len(chunk))
+        except Exception:
+            await kill_process_tree(process, metadata)
+            raise
 
 
 async def read_response(

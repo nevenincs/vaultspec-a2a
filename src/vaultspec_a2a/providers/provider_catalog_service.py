@@ -23,6 +23,7 @@ from .provider_catalog import (
     AuthenticationState,
     CacheFreshness,
     CatalogRefreshCache,
+    CatalogRefreshSuppressedError,
     CatalogState,
     CatalogStatus,
     HealthState,
@@ -158,6 +159,22 @@ class ProviderCatalogService:
         refresh_failed = False
         try:
             snapshot = await scope.cache.get(key, load)
+        except CatalogRefreshSuppressedError as exc:
+            # Not a fresh failure: this lane failed recently and is inside its
+            # retry backoff, so no discovery ran. Logged distinctly from a real
+            # attempt so a reader can tell a lane that is failing from a lane that
+            # is merely being left alone, and at debug because a burst of reads
+            # during one outage would otherwise fill the log with one fact.
+            logger.debug(
+                "provider catalog refresh suppressed for %s/%s after a %s, "
+                "retrying in %.1fs",
+                key.provider_id,
+                key.execution_mode,
+                exc.failure_type,
+                exc.retry_after_seconds,
+            )
+            refresh_failed = True
+            snapshot = scope.cache.peek(key)
         except Exception as exc:
             # Provider exception text may contain credentials, URLs, or local paths.
             # Keep diagnostics to the type locally and serve a fixed safe reason.

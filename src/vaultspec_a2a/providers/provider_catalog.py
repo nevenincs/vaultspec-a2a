@@ -25,6 +25,7 @@ __all__ = [
     "CatalogCacheSnapshot",
     "CatalogRefreshCache",
     "CatalogRefreshInvalidatedError",
+    "CatalogRefreshSuppressedError",
     "CatalogState",
     "CatalogStatus",
     "ControlKind",
@@ -133,6 +134,25 @@ class CatalogRefreshInvalidatedError(RuntimeError):
 
 class CatalogCacheCapacityError(RuntimeError):
     """The bounded cache has no expired inactive lane available for eviction."""
+
+
+class CatalogRefreshSuppressedError(RuntimeError):
+    """A lane's discovery was skipped because its last attempt recently failed.
+
+    Raised INSTEAD of running the loader, so a caller sees the same failure shape
+    it would have seen from the real attempt without paying that attempt's cost
+    again. ``failure_type`` is the class name of the exception the real attempt
+    raised - a type name, never a provider message, which can carry credentials,
+    URLs, or local paths.
+    """
+
+    def __init__(self, failure_type: str, retry_after_seconds: float) -> None:
+        super().__init__(
+            f"provider catalog discovery is suppressed after a {failure_type}; "
+            f"retrying in {retry_after_seconds:.1f}s"
+        )
+        self.failure_type = failure_type
+        self.retry_after_seconds = retry_after_seconds
 
 
 @dataclass(frozen=True, slots=True)
@@ -452,6 +472,12 @@ class _StoredCatalog:
     deadline: float
 
 
+@dataclass(frozen=True, slots=True)
+class _StoredFailure:
+    failure_type: str
+    deadline: float
+
+
 @dataclass(slots=True)
 class _LaneLock:
     lock: asyncio.Lock
@@ -460,18 +486,46 @@ class _LaneLock:
 
 CatalogLoader = Callable[[ProviderCatalogKey], Awaitable[ProviderCatalog]]
 
+# How long a lane whose discovery RAISED is left alone before it is attempted
+# again. Deliberately far shorter than the success TTL: a failing lane is the
+# expensive case (its cost is a subprocess spawn or a network call run to its own
+# timeout), so it is the one that most needs a read to be warm, while a lane that
+# has come back should be noticed in seconds rather than minutes.
+DEFAULT_FAILURE_TTL: Final = timedelta(seconds=30)
+
 
 class CatalogRefreshCache:
-    """Concurrency-safe, per-lane single-flight TTL cache for catalog discovery."""
+    """Concurrency-safe, per-lane single-flight TTL cache for catalog discovery.
 
-    def __init__(self, ttl: timedelta, *, max_lanes: int = 128) -> None:
+    A lane that SUCCEEDS is cached for ``ttl``. A lane whose loader RAISES is
+    cached negatively for ``failure_ttl``: the failure is remembered so the next
+    read re-raises immediately instead of re-running discovery. Without that, a
+    failing lane is never stored at all and every subsequent read pays its full
+    cost - so a "warm" read of a registry containing one failing lane is not warm.
+
+    The two caches are separate on purpose. A negative entry never displaces a
+    lane's last good catalog: :meth:`peek` keeps returning that snapshot, which is
+    what lets a caller serve a stale-but-real catalog through an outage.
+    """
+
+    def __init__(
+        self,
+        ttl: timedelta,
+        *,
+        max_lanes: int = 128,
+        failure_ttl: timedelta = DEFAULT_FAILURE_TTL,
+    ) -> None:
         if ttl <= timedelta(0):
             raise ValueError("ttl must be positive")
         if max_lanes <= 0:
             raise ValueError("max_lanes must be positive")
+        if failure_ttl < timedelta(0):
+            raise ValueError("failure_ttl must not be negative")
         self._ttl = ttl
         self._max_lanes = max_lanes
+        self._failure_ttl = failure_ttl
         self._entries: dict[ProviderCatalogKey, _StoredCatalog] = {}
+        self._failures: dict[ProviderCatalogKey, _StoredFailure] = {}
         self._locks: dict[ProviderCatalogKey, _LaneLock] = {}
         self._generations: dict[ProviderCatalogKey, int] = {}
         self._index_lock = asyncio.Lock()
@@ -506,6 +560,40 @@ class CatalogRefreshCache:
         self._locks.pop(evicted, None)
         self._generations.pop(evicted, None)
 
+    def _suppression(
+        self, key: ProviderCatalogKey, now: float
+    ) -> CatalogRefreshSuppressedError | None:
+        """Return the error to raise for a lane still inside its failure TTL."""
+        failure = self._failures.get(key)
+        if failure is None:
+            return None
+        if now >= failure.deadline:
+            del self._failures[key]
+            return None
+        return CatalogRefreshSuppressedError(
+            failure.failure_type, failure.deadline - now
+        )
+
+    def _record_failure(self, key: ProviderCatalogKey, failure_type: str) -> None:
+        """Remember a failed lane, pruning expired records to stay bounded.
+
+        A zero ``failure_ttl`` disables negative caching entirely (every read
+        retries), which is why nothing is stored in that case rather than storing
+        an entry that is born expired.
+        """
+        ttl = self._failure_ttl.total_seconds()
+        if ttl <= 0:
+            return
+        now = monotonic()
+        for expired in [k for k, v in self._failures.items() if now >= v.deadline]:
+            del self._failures[expired]
+        if key not in self._failures and len(self._failures) >= self._max_lanes:
+            oldest = min(self._failures.items(), key=lambda item: item[1].deadline)[0]
+            del self._failures[oldest]
+        self._failures[key] = _StoredFailure(
+            failure_type=failure_type, deadline=now + ttl
+        )
+
     @staticmethod
     def _snapshot(entry: _StoredCatalog, now: float) -> CatalogCacheSnapshot:
         freshness = (
@@ -536,6 +624,12 @@ class CatalogRefreshCache:
         observed = current
         if not force_refresh and current is not None and now < current.deadline:
             return self._snapshot(current, now)
+        # An explicit refresh is a caller asking to retry now, so it is never
+        # suppressed; an ordinary read of a recently-failed lane is.
+        if not force_refresh:
+            suppressed = self._suppression(key, now)
+            if suppressed is not None:
+                raise suppressed
 
         lane = await self._lock_for(key)
         try:
@@ -546,9 +640,25 @@ class CatalogRefreshCache:
                     return self._snapshot(current, now)
                 if force_refresh and current is not None and current is not observed:
                     return self._snapshot(current, now)
+                # Re-checked under the lane lock: the whole point of negative
+                # caching is that the loser of a single-flight race must not run
+                # the discovery the winner just proved is failing.
+                if not force_refresh:
+                    suppressed = self._suppression(key, now)
+                    if suppressed is not None:
+                        raise suppressed
 
                 generation = self._generations.get(key, 0)
-                catalog = await loader(key)
+                try:
+                    catalog = await loader(key)
+                except Exception as exc:
+                    # Only fence-clean failures are remembered. A lane invalidated
+                    # mid-flight was explicitly asked to refresh, so suppressing
+                    # its next read would answer that request with the very
+                    # attempt it superseded.
+                    if self._generations.get(key, 0) == generation:
+                        self._record_failure(key, type(exc).__name__)
+                    raise
                 if catalog.key != key:
                     raise ValueError(
                         "catalog loader returned a different provider lane"
@@ -573,12 +683,18 @@ class CatalogRefreshCache:
                         )
                     self._make_capacity(key, monotonic())
                     self._entries[key] = stored
+                    self._failures.pop(key, None)
                 return self._snapshot(stored, monotonic())
         finally:
             await self._release_lock(key, lane)
 
     def invalidate(self, key: ProviderCatalogKey) -> None:
-        """Expire one lane without discarding its visible stale snapshot."""
+        """Expire one lane without discarding its visible stale snapshot.
+
+        Also drops any negative entry: invalidation is the explicit request to
+        re-attempt a lane, which a retained failure record would silently refuse.
+        """
+        self._failures.pop(key, None)
         if key not in self._entries and key not in self._locks:
             return
         self._generations[key] = self._generations.get(key, 0) + 1

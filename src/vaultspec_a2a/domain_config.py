@@ -194,9 +194,13 @@ class DomainConfig(BaseModel):
             "the background, so the retry is served warm rather than paying the cold "
             "cost again. This bounds a HUNG build, not a slow one: a cold build "
             "probes every registered lane over subprocess spawns and network calls, "
-            "was measured above a minute on a loaded host, and a lane whose discovery "
-            "fails is not cached - so a later read retries it at full cost. A budget "
-            "under that legitimate worst case refuses work that would have succeeded."
+            "and a lane that FAILS costs the most of all, because it fails by running "
+            "its own timeout out. Measured cold at 18-24s on a developer host with "
+            "every lane answering, and above a minute on a loaded host with lanes "
+            "timing out. A budget under that legitimate worst case refuses work that "
+            "would have succeeded. Only the COLD build costs this: a failing lane is "
+            "now negatively cached, so the retry this budget promises is warm even "
+            "during a provider outage."
         ),
     )
 

@@ -5,7 +5,7 @@ tags:
 date: '2026-08-04'
 modified: '2026-08-04'
 body_schema: 'body-v1'
-body_hash: 'sha256:4beeaf998a7c0e4b4a57d692460f0bfe4bf0b6538e6dde0ed3f5939f5d737bc1'
+body_hash: 'sha256:1625ac3216f627ba6787dde2873cf8fd94a0c7d93cdb40a99c1625578107c36e'
 related: []
 ---
 
@@ -4625,3 +4625,30 @@ No cross-lane reconciliation is involved, so none of the objections above apply:
 one lane, one id contract, one completion model. This is what the ACP side lacks
 and what its absence forced - the missing register/resolve/await API that made
 the cross-lane consolidation impossible to attempt cleanly in the first place.
+
+### attribution-the-warning-and-the-audit-were-different-acts | low | keeps the method record honest
+
+A lane declined credit this audit had given it, stating that the weak test was
+caught by the orchestrator's allowlist warning rather than by its own report. The
+correction is accepted, and the accurate split is recorded because this campaign's
+method record depends on knowing which kind of check found what.
+
+The GENERAL warning was the orchestrator's: registration lists are invisible to
+type checking, so a passing test may prove only that a refactor happened. It named
+a class, not an instance, and it was issued to three lanes at once without knowing
+whether any of them had the defect.
+
+The SPECIFIC finding was the lane's: it went back to its own landed test, found
+that it asserted the key rather than the content, and then MEASURED the failure by
+stranding the entry and showing the old assertion passes where the new one fails.
+Nothing in the warning identified that test or predicted that result.
+
+Both matter and they are different acts. A warning that names a class is worthless
+without someone willing to re-audit their own shipped work against it, and a
+re-audit is unlikely to start without the class being named. Recording only one
+side would teach the wrong lesson - either that broadcast cautions find defects, or
+that lanes find them unprompted.
+
+Worth noting the direction of the correction: the lane gave credit AWAY. Every
+other attribution dispute in this campaign has run the same direction, which is a
+reason to trust the record rather than to police it.

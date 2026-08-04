@@ -49,6 +49,7 @@ from .progress import (
     registry_watch,
     wait_for,
 )
+from .purity import IMPURE_FIXTURES, uses_impure_fixture
 from .resources import (
     MARKER_NAME,
     RESOURCES,
@@ -71,6 +72,7 @@ from .sessions import (
 
 __all__ = [
     "CPU_BUDGET_ENV",
+    "IMPURE_FIXTURES",
     "LEASE_TTL_MS",
     "MARKER_NAME",
     "RESOURCES",
@@ -110,5 +112,6 @@ __all__ = [
     "resolve_spec",
     "resolve_worker_url",
     "settings_override",
+    "uses_impure_fixture",
     "wait_for",
 ]

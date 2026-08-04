@@ -220,7 +220,13 @@ async def verify_declared_tool_contract(
     async with _probe_lock:
         if key in _verified:
             return
-        launch = _launch_description(command, args)
+        # Masked HERE rather than inside the description helper: this binding is
+        # what escapes, embedded into every refusal below and from there into a
+        # run's client-visible failure reason. The helper stays a plain
+        # description for any caller whose output does not leave the process. No
+        # bound is applied to this string anywhere, so unlike the stderr tail
+        # there is no cut for the mask to have to precede.
+        launch = redact_secrets(_launch_description(command, args))
         # A real on-disk temporary file, text-wrapped: the stdio client hands the
         # handle to the OS as the child's stderr, so it needs a true file
         # descriptor - an in-memory buffer cannot serve as one.

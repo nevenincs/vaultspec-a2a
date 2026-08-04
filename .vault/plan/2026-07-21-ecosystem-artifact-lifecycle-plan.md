@@ -4,7 +4,7 @@ tags:
   - '#ecosystem-artifact-lifecycle'
 date: '2026-07-21'
 modified: '2026-08-04'
-body_hash: 'sha256:006876dc14d8267b2af810d562464d1686ebd6e4d71114da45901fff4905687d'
+body_hash: 'sha256:9b7e8760f205abb56ef6170fcfda756acbe070f1fa3cc4224e008d711ec2a1d7'
 tier: L3
 related:
   - '[[2026-07-21-ecosystem-artifact-lifecycle-adr]]'
@@ -125,7 +125,7 @@ The user asked for the provider-based retention observations to be investigated 
 
 - [x] `W04.P08.S25` - Inventory what the ACP family persists in the operator's real config home, and whether a2a can enumerate it; `src/vaultspec_a2a/providers/acp_chat_model.py, src/vaultspec_a2a/providers/_config_home_roots.py`.
 - [x] `W04.P08.S26` - Establish whether the Gemini and Kimi configured homes retain session content nobody has inspected; `src/vaultspec_a2a/providers/factory.py, src/vaultspec_a2a/providers/kimi_catalog.py`.
-- [ ] `W04.P08.S27` - Declare or refuse a retention statement for each lane's persistence, through the existing artifact declaration home; `src/vaultspec_a2a/artifacts/retention.py, src/vaultspec_a2a/providers/_config_home_roots.py`.
+- [x] `W04.P08.S27` - Declare or refuse a retention statement for each lane's persistence, through the existing artifact declaration home; `src/vaultspec_a2a/artifacts/retention.py, src/vaultspec_a2a/providers/_config_home_roots.py`.
 
 ### Phase `W04.P09` - Inventory the action events the trace drops
 

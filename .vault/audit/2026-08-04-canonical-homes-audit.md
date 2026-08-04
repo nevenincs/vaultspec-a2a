@@ -5,7 +5,7 @@ tags:
 date: '2026-08-04'
 modified: '2026-08-04'
 body_schema: 'body-v1'
-body_hash: 'sha256:a4416e103f85529afca69c7ad2476710388b4983d17c91a62401ee01b1cba9a3'
+body_hash: 'sha256:f0d22658ac26dc71fa1f3ddc6a9f7d9d830cfd43358cce374ff78ce652b3a5ce'
 related: []
 ---
 
@@ -6778,3 +6778,87 @@ link matches its source. Same primitives, opposite direction.
 
 **Re-derive along the axis that carries the behaviour, not the axis the finding was
 first spotted on.**
+
+### a-correct-declaration-a-hook-silently-overrode | high | a new shape of the campaign's signature defect
+
+Twenty-eight test files claimed purity they did not have - a machine-readable
+claim, so a selection excluding impure tests silently included all of them and
+every run believed hermetic was not.
+
+**One of them is a shape this campaign has not seen before.** A file's own
+docstring states it carries the impure layer marker, **and it does** - the
+declaration is correct. A directory-level collection hook was adding the purity
+marker **on top of it**, because a file's own declaration cannot stop a hook that
+runs over it.
+
+So this is not prose claiming more than the code does, which is the pattern
+recorded eight times here. It is **code declaring itself correctly and being
+overridden by something above it**. The author did everything right and the
+selection still lied.
+
+It reached the set only through the call-level scan. Both earlier stages caught
+it too, and the lane notes it would have dismissed it at those stages as a file
+already handled by its name - the correct declaration was itself the thing that
+made it look safe.
+
+### ask-the-authority-rather-than-reimplement-the-rule | high | method, and the reason the set was findable at all
+
+The marked set was obtained from **pytest's own collection** rather than by
+re-implementing the fourteen hooks that apply the marker.
+
+That was not a convenience. **The marker is applied by directory-level hooks, so
+no file declares it** - a grep over test bodies would have found zero of the
+twenty-eight, and a scan re-implementing the hooks would have had to reproduce all
+fourteen correctly to be trusted.
+
+Same principle already recorded when a consolidated reader ASKED the boundary's
+own minting function instead of restating its rule: **the authority answers
+questions about itself more reliably than any reconstruction of it.** Here the
+authority was a tool rather than a function, and the lesson transfers unchanged.
+
+### import-is-not-use-and-the-difference-was-five-files | high | a third axis-collision
+
+The funnel ran name-shaped, then import-shaped, then **call**-shaped: thirty-three,
+twenty-seven, twenty-eight. The last stage both added and removed files.
+
+**One file imports an HTTP client and is genuinely pure** - it builds response
+objects in memory and says so in its own comment. Counting imports would have
+marked it impure and quietly shrunk the pure selection for no reason, which is a
+false positive that costs coverage rather than correctness and is therefore the
+kind nobody investigates.
+
+This is the third axis-collision recorded in this campaign, and the three now bound
+the technique from all sides: searching by **value** returns unrelated subjects,
+searching by **use** misses the declaration behind them, and searching by **import**
+confuses availability with use. **Only what the code CALLS answers what it does.**
+
+### the-non-vacuity-proved-the-property-in-both-directions | medium | the standard, applied to a selection
+
+The proof was not that a marker string changed. It was that the SELECTION changed
+by exactly the derived set - the removed files being precisely the twenty-eight and
+no others - **and that the converse held**: selecting by the layer markers still
+returns the same number of tests from those same files.
+
+So the fix is neither under-broad nor over-broad: every file keeps its layer
+marker, only the orthogonal purity claim is withheld, no layer selection changed,
+and no test stopped running. **A selection fix that only demonstrated removal
+could not distinguish a correct narrowing from a silent loss of coverage.**
+
+### a-fixture-inherited-across-a-conftest-boundary-is-invisible | medium | concrete, reported not fixed
+
+The lane named four gaps it did not reach, and one is concrete rather than
+theoretical: a file can inherit an impure fixture from a parent collection
+configuration **without importing or calling anything itself**, which makes it
+invisible to a call-level scan.
+
+The risk is not hypothetical - one package's configuration holds exactly such a
+fixture, spawning a real child process. The lane checked that the files it would
+affect are already in the twenty-eight, but did not prove that exhaustively.
+
+Also unreached: only one of the four markers was swept, and the self-declared layer
+marker carries the same class of claim in the opposite direction - a PURE test
+claiming an impure layer. And module-level input/output performed at import time
+would not appear as a call.
+
+Recorded as gaps rather than as clean, which is the reporting discipline this
+campaign asked for from the start: silence reads as swept.

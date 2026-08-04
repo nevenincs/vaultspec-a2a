@@ -5,7 +5,7 @@ tags:
 date: '2026-08-04'
 modified: '2026-08-04'
 body_schema: 'body-v1'
-body_hash: 'sha256:75e2d6b6662f5c998815915842b6b2397eca382ec927c30b7cbdb31b85b8d00f'
+body_hash: 'sha256:c2de2ecde6340b6bd7946ee942c47ba7088a9fcb18fe9aebc97473661b7c4043'
 related: []
 ---
 
@@ -5432,3 +5432,54 @@ the number, they are pinned to the DECLARATION - and the old code could not
 survive its own declaration moving. A break-the-link probe shows a defect is
 detectable; this shows the consolidation actually achieved the property it claims,
 which is that one edit now reaches every consumer.
+
+### correction-outbound-schema-bounds-raise-they-do-not-truncate | critical | fixes the mechanism in an earlier finding
+
+The outbound-truncation entry states that the feature-tag wire sites "truncate a
+stored identifier on the way out" so a caller reads a tag that silently changed.
+**That is wrong about the mechanism**, and it was measured rather than argued:
+
+    Pydantic Field(max_length) on an OUTBOUND record  -> ValidationError, RAISES
+    the allowlist's text bound, same-looking           -> 200 chars in, 128 out, TRUNCATES
+
+A declarative schema bound is a VALIDATION CONSTRAINT, not a projector. So the
+correct failure for those sites is the one recorded separately - an outbound bound
+over a wider store DESTROYS THE RESPONSE - not a changed identifier. Widen the
+canonical bound while those three stay on a stale literal and the discovery and
+summary endpoints fail outright for any run whose tag exceeds it. Data-dependent:
+both pages keep working until one long-tagged run exists, and then that run
+poisons every page it appears on rather than only its own row.
+
+**The two mechanisms are spelled almost identically and that is how they were
+conflated.** One caps a field on a model; the other caps a field in a projection
+catalog. Both read as "this field is bounded to N". One refuses the whole payload;
+the other silently shortens one value. The truncation finding remains correct for
+the allowlist case that produced it, and is wrong for the schema case it was later
+extended to.
+
+**The consequence that makes this worth a critical correction is the test it would
+have produced.** A truncation framing leads to asserting a returned value's
+length - and that assertion PASSES against a broken bound, because a raising bound
+never returns a value to measure. The correct assertion is that a tag at exactly
+the store's width round-trips through the outbound records WITHOUT raising, with
+the width read off the mapped column rather than restated.
+
+Recorded at critical because the earlier entry would not merely have misdescribed
+a defect; it would have produced a green test over the live one.
+
+### line-numbers-are-not-handles-in-a-live-tree | medium | third occurrence
+
+Site line numbers in this campaign's inventories have gone stale three times, each
+because another lane's insertions shifted the file between derivation and use. The
+last instance moved two sites four lines while both lanes held correct information
+about a file neither could safely edit.
+
+The stable handle is the owning declaration - the class, function, or constant name
+- not the line. Recorded because every inventory here was written with line numbers
+and each one aged badly within hours; a brief that names the class survives the
+tree moving under it, and a brief that names a line number silently points at
+whatever moved into place.
+
+One file flipped clean-dirty-clean-dirty three times in a single session. That
+frequency is itself the argument for assigning a contended file's subjects to
+whoever already holds it, rather than sequencing a second writer in behind them.

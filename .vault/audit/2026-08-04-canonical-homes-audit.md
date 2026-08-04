@@ -5,7 +5,7 @@ tags:
 date: '2026-08-04'
 modified: '2026-08-04'
 body_schema: 'body-v1'
-body_hash: 'sha256:21f5bff2c32ac45a7dfe477bf00b2ee70b22078e7c83318971495adb64fd3e20'
+body_hash: 'sha256:a4416e103f85529afca69c7ad2476710388b4983d17c91a62401ee01b1cba9a3'
 related: []
 ---
 
@@ -6695,3 +6695,86 @@ So the threat is described accurately, in the right file, by the function neares
 to it, and the enforcement covers a narrower case than the description. **Eighth
 instance of prose asserting more than its subject enforces**, and the second one
 found inside this same subsystem within an hour.
+
+### two-steps-are-load-bearing-not-one | high | corrects a claim in the brief, in the safe direction
+
+The brief for the secret-read extraction stated that with the link-refusing flag
+inert on this platform, "the explicit stat-and-refuse steps carry the guarantee
+alone." **Measured, that understates it: TWO steps refuse the planted link
+independently.**
+
+    named  S_ISREG: False   mode=0o120666     <- the regular-file test refuses
+    opened S_ISREG: True
+    named  (dev,ino) != opened (dev,ino)      <- the identity compare ALSO refuses
+
+Windows reports the LINK's own inode from a stat by name, so the
+pre-open-versus-descriptor identity comparison catches the substitution on its own
+- and so does the regular-file test. They are **redundant, not sequential**.
+
+**That redundancy is now pinned by a test per arm, and the reason is the important
+part.** Undocumented redundancy is fragile in a specific way: a future edit removes
+one check because "the other covers it", and the guarantee silently comes to rest
+on a single mechanism with nothing recording that it ever had two. The tests make
+the redundancy a stated property rather than an accident of platform behaviour.
+
+Recorded as a correction in the SAFE direction - the brief claimed less protection
+than exists - which is the rarer kind here. Seven briefs in this campaign have
+overstated; this one understated, and the lane measured rather than accepting
+either way.
+
+### the-admitted-case-broke-a-tie-the-refusal-arm-could-not | high | third distinct mechanism, same rule
+
+The independence probe produced a silence rather than a failure, and the lane read
+the silence correctly.
+
+Blinding the shared confirmation to admit everything failed the lifecycle caller's
+tests but **not** the desktop caller's - because desktop's separate by-name gate
+refuses a planted link independently. Defence in depth working as designed, and
+therefore **the refusal path alone cannot prove desktop reaches the shared
+confirmation at all.** A caller that had never been wired would look identical.
+
+Reach was proven through the ADMITTED case instead: blinding the home to refuse
+everything moved both callers, and re-privatising desktop alone left exactly the
+lifecycle failures behind.
+
+**Third time in this campaign the admitted case has been the deciding mechanism,
+and each time in a different shape** - a test asserting nothing because there was
+nothing to bound, a lane bound above the model invisible to an over-cap assertion,
+and now a caller whose independent guard masks whether it is connected at all.
+**A refusal-only probe cannot distinguish a caller that refuses correctly from one
+that is not wired.**
+
+### a-re-export-kept-alive-for-two-tests | medium | a live instance of the boarded facade sweep
+
+Incidental to the extraction: two tests reached a platform predicate **through a
+re-export** in an unrelated module rather than from its owning home. The lane
+repointed them at the real home rather than preserving the re-export for their
+benefit.
+
+That is the campaign's no-shims rule applied to a case nobody had boarded - and it
+is a **live instance of the facade-drift sweep already on the board**, found by
+accident while doing something else. A re-export whose only remaining consumers
+are tests is exactly the shape that sweep exists to find: the name has moved, the
+alias survives because deleting it would have meant touching callers, and the
+callers are the least visible kind.
+
+Recorded so the sweep starts from a confirmed instance rather than a hypothesis.
+
+### the-count-that-held-and-the-axis-that-made-it-hold | medium | method
+
+The site count in this brief was correct - **the first in this campaign that was**
+- and the lane's method for confirming it is the transferable part.
+
+It did not re-derive along the axis the brief named. Searching for the
+link-refusing flag would have been the wrong axis precisely because that flag is
+inert, so its presence or absence says nothing about which sites perform the
+check. It re-derived along the **identity-comparison** step instead - the part that
+actually carries the behaviour - and triaged every candidate.
+
+Two neighbouring sites were ruled DISTINCT on direction rather than on shape: one
+guards an explicitly non-secret file and hardens after opening rather than
+confirming identity, and one is a WRITE-side confirmation that a freshly published
+link matches its source. Same primitives, opposite direction.
+
+**Re-derive along the axis that carries the behaviour, not the axis the finding was
+first spotted on.**

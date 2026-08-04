@@ -5,7 +5,7 @@ tags:
 date: '2026-08-04'
 modified: '2026-08-04'
 body_schema: 'body-v1'
-body_hash: 'sha256:41959d59d61890e91eab78b9aec66ea111278144330901453ca6d43e4cb88e24'
+body_hash: 'sha256:45d68f77deec9b5826201ed0816e16fcc7c119ab321f2e3914c88ee0b205d63f'
 related: []
 ---
 
@@ -7461,3 +7461,94 @@ Recorded because "do not import, parse" was given to that lane as a rule about H
 and editable installs. It turned out to matter for a second, unrelated reason: a
 lazily-declared surface is invisible to import-time inspection but plainly visible
 in source.
+
+### neuter-the-verdict-keep-the-symbols | critical | the technique the drift-guard rule was missing
+
+The distinction between a drift guard and a defect proof was recorded as a question
+to ask. **This lane supplied the technique that answers it**, and named the wrong
+answer it replaces.
+
+To certify that its refusal tests are bound to the enforcement rather than to the
+module merely existing, it re-ran them against a build with **only the comparison's
+VERDICT neutered and every symbol left in place**. Seven failed; four passed. The
+four survivors are exactly the assertions that SHOULD be verdict-independent - the
+admitted case, the exemption, the partition, and the premise.
+
+**And it named the cheap substitute it did not use:** relying on the test module
+failing to import against the previous commit. **That proves a symbol is new. It does
+not prove an assertion is load-bearing.** Every test in a new file "fails before" in
+that sense, which is why the observation feels like proof and is not.
+
+So the technique is precise: **remove the DECISION, keep the STRUCTURE.** What still
+passes is what never depended on the decision. Recorded as the operational answer to
+*which of my assertions changed verdict* - the question recorded hours earlier with
+no method attached.
+
+### a-partition-asserted-against-its-own-union-agrees-with-itself | critical | the partition technique's own failure mode
+
+The partition technique - state what is compared as a partition of the full field
+set and assert the partition, so a field added later must be classified - was
+recorded as this campaign's best structural move.
+
+**It has a vacuity mode, and the lane caught itself entering it.** It had defined a
+constant as the union of its own three parts and asserted the partition against
+that. **A partition asserted against its own union agrees with itself no matter what
+the producer does** - the assertion is true by construction and can never fail, which
+is precisely the property it was introduced to prevent.
+
+It deleted that and asserted against **the producer's actual key set**, taken from
+calling the renderer. So a field added to the real serialization fails until
+classified.
+
+**Recorded at critical because the failure is invisible in review.** The vacuous
+version and the sound version look nearly identical, both read as rigour, and only
+the sound one is connected to anything. This is the ninth vacuity mechanism this
+campaign has catalogued and the first found inside a technique the campaign itself
+introduced.
+
+### the-exemption-proven-not-to-be-a-blanket | high | asking what else satisfies the assertion, applied to a skip
+
+The enforcement carries a deliberate exemption for one non-registry entry. **A
+comparison that simply skipped everything would satisfy a test asserting that
+exemption works.**
+
+The lane asked what else could satisfy the assertion and answered structurally: it
+asserted the exemption again with the exempt entry rendered **beside a registry
+entry in one configuration**, so a blanket skip fails while a targeted one passes.
+
+Same rule as the indistinguishable-refusal finding, applied to an EXEMPTION rather
+than a refusal - and exemptions are where it bites hardest, because a too-broad skip
+produces exactly the observable behaviour a correct skip produces on the case
+anybody tests.
+
+### the-duplication-deliberately-not-repeated | high | the fix that would have been the defect
+
+The lane declined to re-compare two fields the enforcement one level up already
+checks at a seam every run of that transport passes through - a fact established by
+measurement in the preceding commit rather than assumed.
+
+**Repeating them would have been the same duplication one level down: the defect, not
+the fix.** A second comparison of the same fields against the same authority is a
+second declaration of what that authority says, and it would drift the moment either
+side changed.
+
+Recorded because the pressure runs the other way in a security-shaped task - more
+checks read as more safety, and a reviewer counting comparisons would score the
+duplicated version higher.
+
+Also: **strict equality rather than membership**, so a subset, a reorder and an empty
+list are refused as well as a superset. The superset is the security case; the others
+keep the docstring's claim - *exactly the registry's read tools* - honest rather than
+approximately true.
+
+### a-lane-flagging-its-own-git-state-risk | medium | process, self-reported
+
+For its before-capture the lane used a pathspec-scoped stash round-trip on its own
+single file. It round-tripped cleanly, other lanes' files were untouched throughout,
+and it switched to a file copy for the byte comparison **and reported the earlier
+approach anyway.**
+
+Recorded because it is the right disclosure in a live multi-writer tree: a stash
+touches SHARED git state, and this campaign has already lost work once to an
+operation that looked scoped. **A technique that worked is still worth flagging if
+it would not survive being repeated by four lanes at once.**

@@ -1002,6 +1002,15 @@ async def _validate_and_freeze_selection_or_refuse(
     try:
         records = await provider_catalog_service(app).records(canonical)
     except ProviderCatalogScopeCapacityError:
+        # Disclosed for the same reason the admission refusals are: a bare 503
+        # here is indistinguishable from an admission or eligibility refusal,
+        # and this one is about the catalog's bounded workspace scopes rather
+        # than about the run at all.
+        logger.warning(
+            "run refused: provider catalog workspace scope capacity exhausted "
+            "for workspace=%s",
+            canonical,
+        )
         raise HTTPException(
             status_code=503,
             detail="provider catalog workspace capacity is temporarily busy",

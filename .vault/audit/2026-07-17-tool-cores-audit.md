@@ -687,3 +687,30 @@ than from an observation, and the reading was confident enough to be committed.
 The disclosure that disproved it took three lines. Instrument first, conclude
 second.
 
+### desktop-commit-503-remains-unlocated | medium | open
+
+The bogus-reservation commit in
+`test_concurrent_prepare_bounds_capacity_and_commit_is_reservation_bound`
+answers 503 where 409 is expected. Three candidate sources have now been
+ELIMINATED BY INSTRUMENTATION rather than by reading:
+
+1. The execution-eligibility gate (`api/routes/gateway.py:760`). Instrumented;
+   never fires. Worker state and provider eligibility both report ready once the
+   cold-start race is closed. This was the subject of the withdrawn finding
+   above.
+2. The provider-catalog workspace scope bound in
+   `_validate_and_freeze_selection_or_refuse`. Instrumented; never fires.
+3. The commit wrapper `_run_commit`. Read; it raises only 422.
+
+So the refusal is raised somewhere between entering `_run_commit_locked` and
+reaching `broker.commit`, and it is none of the three places that looked most
+likely. `broker.commit` itself is the call that would answer 409 for an unknown
+reservation, and it is not being reached.
+
+Left open deliberately rather than guessed at a fourth time. The next step is
+mechanical and cheap: the two refusal disclosures added today already log which
+fact refused a prepare and an ineligible commit, so extending the same treatment
+to the remaining raise sites in that window will name this one in a single run.
+Every hypothesis formed by reading this path has been wrong; the instrument has
+been right twice.
+

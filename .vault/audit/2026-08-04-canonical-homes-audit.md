@@ -5,7 +5,7 @@ tags:
 date: '2026-08-04'
 modified: '2026-08-04'
 body_schema: 'body-v1'
-body_hash: 'sha256:c44b2894f78c08d03a044fd3da8476d22b8509a420d77c0baf94e9fca91a4f58'
+body_hash: 'sha256:ff8bb5b591787c115f7b326daa4a1a1321ca2fcc580a9db468b150c7bd6ed4cd'
 related: []
 ---
 
@@ -5077,3 +5077,47 @@ that drifted, and it means a fold's both-directions audit should ask not only
 "what does this caller know that the home does not" but "does a THIRD site already
 do this correctly" - because the best implementation is often in neither of the
 two modules being merged.
+
+### ask-whether-a-third-site-already-does-it-correctly | high | a third question for the both-directions audit
+
+Both folds in the atomic-write cluster asked only what the CALLER knew that the
+home did not. **Neither asked what the TREE already knew.** The fix that closed
+the asymmetry converged onto a pattern that had existed at two other sites in this
+codebase the whole time - derived from platform behaviour rather than found, which
+worked here and is luck rather than method.
+
+So the both-directions audit takes a third question, and it is the one most likely
+to be skipped because neither module being merged contains its answer:
+
+> Before adopting either module's approach in a fold, ask whether a THIRD site
+> already does it correctly.
+
+**This also settles the drift direction more precisely than the correction that
+preceded it.** A home carrying a weaker version of a pattern its own tree had
+already got right twice is not merely a home that went unaudited. It is a home
+that **drifted away from something better while continuing to look canonical** -
+and looking canonical is what stopped anyone checking. The authority that makes a
+home worth consolidating into is the same authority that suppresses the question
+of whether it is still correct.
+
+### a-shape-sweep-that-flags-correct-uses-trains-readers-to-ignore-it | high | how a guard mistrains
+
+Recorded because it nearly happened here, and because it explains the campaign's
+guard rejections better than the rejections themselves did.
+
+The platform-flag idiom was first written down as a hazard. Sweeping for that
+SHAPE mechanically would have flagged every correct use of its typographic twin -
+which is common in this tree, and correct - and a reader working through those
+false positives learns to discount the finding entirely. **That is worse than not
+sweeping at all**, because it spends the reader's trust and leaves the real
+instance unflagged among the noise it taught them to skip.
+
+Which is the same mechanism behind all three guards this campaign rejected. A row
+pinned to a name, a shape, or a literal does not merely fail to catch the defect;
+it produces confident output about the wrong thing, and the reader calibrates on
+that output. A guard's cost is not the false positive - it is the true positive
+the reader has been trained to skim past.
+
+The correction that avoids it here is small and worth copying: the
+do-not-sweep-mechanically warning is placed ABOVE the facts rather than below
+them, so nobody reaches the pattern before reaching its exception.

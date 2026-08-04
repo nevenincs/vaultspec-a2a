@@ -13,6 +13,7 @@ from pathlib import Path
 from pydantic import BaseModel, Field, field_validator
 
 from ..domain_config import domain_config
+from .stage import VAULT_STAGE_PATTERNS
 
 __all__ = [
     "ContextRef",
@@ -102,14 +103,7 @@ def discover_context_refs(
         A list of ``ContextRef`` instances for matching documents.
     """
     refs: list[ContextRef] = []
-    stage_patterns: dict[str, str] = {
-        "research": ".vault/research/*{tag}*.md",
-        "reference": ".vault/reference/*{tag}*.md",
-        "adr": ".vault/adr/*{tag}*.md",
-        "plan": ".vault/plan/*{tag}*.md",
-        "exec": ".vault/exec/*{tag}*/**/*.md",
-        "audit": ".vault/audit/*{tag}*.md",
-    }
+    stage_patterns = VAULT_STAGE_PATTERNS
     # C3: sanitize feature_tag by escaping glob metacharacters before injecting
     # it into the pattern.  glob.escape() quotes *, ?, [, ] so they are treated
     # as literal characters rather than glob wildcards.  This prevents crafted

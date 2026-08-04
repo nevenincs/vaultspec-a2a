@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING, Any
 
 from langchain_core.messages.utils import count_tokens_approximately
 
+from ...context.stage import VAULT_STAGE_PATTERNS
 from ...domain_config import domain_config
 from ...graph.enums import PipelinePhase
 
@@ -35,15 +36,6 @@ _DOC_SEPARATOR = "--- MOUNTED: {path} ---"
 _DOC_FOOTER = "--- END ---"
 _QUEUE_PHASES = frozenset({PipelinePhase.PLAN, PipelinePhase.EXEC})
 
-_VAULT_STAGE_PATTERNS: dict[str, str] = {
-    PipelinePhase.RESEARCH: ".vault/research/*{tag}*.md",
-    "reference": ".vault/reference/*{tag}*.md",
-    PipelinePhase.ADR: ".vault/adr/*{tag}*.md",
-    PipelinePhase.PLAN: ".vault/plan/*{tag}*.md",
-    PipelinePhase.EXEC: ".vault/exec/*{tag}*/**/*.md",
-    PipelinePhase.AUDIT: ".vault/audit/*{tag}*.md",
-}
-
 
 def build_initial_vault_index(
     workspace_root: Path | None,
@@ -56,7 +48,7 @@ def build_initial_vault_index(
     if workspace_root is None:
         return {}
     index: dict[str, list[str]] = {}
-    for stage, pattern in _VAULT_STAGE_PATTERNS.items():
+    for stage, pattern in VAULT_STAGE_PATTERNS.items():
         resolved = pattern.replace("{tag}", _glob.escape(feature_tag))
         matches = sorted(workspace_root.glob(resolved))[: domain_config.vault_index_cap]
         if matches:

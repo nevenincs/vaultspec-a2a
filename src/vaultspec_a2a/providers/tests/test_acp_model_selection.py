@@ -17,7 +17,6 @@ from collections.abc import AsyncIterator
 import pytest
 import pytest_asyncio
 
-from ...graph.enums import MODEL_MAP, Model, Provider
 from ...utils.enums import AcpRequestId
 from .._acp_session import _select_desired_config_options, _select_desired_model
 from .._acp_types import AcpModelConfig, AcpSessionContext
@@ -25,7 +24,12 @@ from .._json_contract import JsonObject
 from ..acp_exceptions import AcpErrorCode, AcpSessionError
 from ._acp_frames import read_acp_frame
 
-_DESIRED = MODEL_MAP[Provider.CLAUDE][Model.LOW]
+# An opaque model identifier standing for the value frozen into a run's role
+# assignment. Deliberately a literal rather than a lookup: an external lane's
+# models are named by the catalog that lane serves, so the selection seam must
+# carry whatever string it is handed. Reading a repository-authored name here
+# would test the adapter against a vocabulary no provider actually speaks.
+_DESIRED = "opaque-catalog-model-id"
 _CONFIG_ID = "model-selection"
 _SESSION_ID = "session-under-test"
 _TIMEOUT = 10.0

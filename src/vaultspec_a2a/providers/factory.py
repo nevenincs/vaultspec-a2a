@@ -895,19 +895,32 @@ def _admit_and_resolve_model_name(provider: Provider, model: Model | str | None)
 
     The admission path, separated from construction: it refuses an unsupported
     provider and turns the optional model selector into a concrete model name.
-    A default or a ``Model`` enum is validated against the model map; a raw
-    string is passed through with a warning, because it bypasses that
-    validation and an operator should see when a non-canonical name is in use.
+
+    Only the internal in-process lanes carry a repository-authored default and
+    capability map. An external lane is selected from its own served catalog and
+    frozen into the run's role assignment, so it admits the exact frozen value
+    alone: asked for a default or a capability tier, this refuses rather than
+    inventing a model identifier the provider never advertised. Being supported
+    and having a repo-authored default are separate facts, so the refusal names
+    the missing selection rather than reporting an unsupported provider.
 
     Raises:
-        ValueError: If the provider is unsupported or the model level is not
-            mapped for it.
+        ValueError: If the provider is unsupported, if an external lane is asked
+            for an implicit default or a capability tier, or if the model level
+            is not mapped for an internal lane.
     """
     if provider not in _SUPPORTED_PROVIDERS:
         logger.error("Failed to instantiate: Unsupported provider %s", provider)
         raise ValueError(f"Unsupported provider: {provider}")
 
     if model is None:
+        if provider not in PROVIDER_DEFAULT_MODELS:
+            raise ValueError(
+                f"Provider {provider.value!r} has no implicit default model. An "
+                "external lane is chosen from the catalog that lane serves, so "
+                "the exact model value frozen into the run's role assignment is "
+                "the only admissible selection."
+            )
         model_level = PROVIDER_DEFAULT_MODELS[provider]
         try:
             return MODEL_MAP[provider][model_level]
@@ -916,21 +929,29 @@ def _admit_and_resolve_model_name(provider: Provider, model: Model | str | None)
                 f"Unsupported model level {model_level!r} for provider {provider!r}"
             ) from None
     if isinstance(model, Model):
+        if provider not in MODEL_MAP:
+            raise ValueError(
+                f"Provider {provider.value!r} does not map capability level "
+                f"{model.value!r}. Capability tiers carry no equivalent meaning "
+                "across providers, so an external lane admits only the exact "
+                "model value frozen from its served catalog."
+            )
         try:
             return MODEL_MAP[provider][model]
         except KeyError:
             raise ValueError(
                 f"Unsupported model level {model!r} for provider {provider!r}"
             ) from None
-    # M21: raw string model_name bypasses the MODEL_MAP validation that would
-    # catch typos or unsupported models. Log a warning so operators can see
-    # when a non-canonical model string is in use.
-    logger.warning(
-        "ProviderFactory received a raw model string %r for provider=%s. "
-        "Prefer passing a Model enum value to ensure the name is valid.",
-        model,
-        provider,
-    )
+    # For an external lane the raw string IS the frozen catalog value, which is
+    # the admissible selection. Only an internal lane, which has a map to
+    # validate against, is worth warning about here.
+    if provider in MODEL_MAP:
+        logger.warning(
+            "ProviderFactory received a raw model string %r for provider=%s. "
+            "Prefer passing a Model enum value to ensure the name is valid.",
+            model,
+            provider,
+        )
     return model
 
 

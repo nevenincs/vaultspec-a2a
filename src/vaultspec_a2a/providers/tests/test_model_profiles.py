@@ -13,7 +13,7 @@ import pytest
 
 from ...context.harness import HarnessReadiness
 from ...control.config import settings
-from ...graph.enums import MODEL_MAP, Model, Provider
+from ...graph.enums import Model, Provider
 from ...team.team_config import (
     AgentConfig,
     TeamConfig,
@@ -73,7 +73,13 @@ class TestResolution:
         assert r.capability == Model.HIGH
         assert r.provider_source == AssignmentSource.AGENT
         assert r.capability_source == AssignmentSource.AGENT
-        assert r.model_name == MODEL_MAP[Provider.ZHIPU][Model.HIGH]
+        # The legacy chain resolves the provider and the capability tier, but it
+        # cannot NAME an external model: those names belong to the catalog that
+        # provider serves and are frozen per role at run start. The empty string
+        # is this surface's established "no name" value, and it cannot leak into
+        # a run - the compiler refuses a blank frozen model_name outright rather
+        # than constructing against it.
+        assert r.model_name == ""
 
     def test_worker_override_beats_agent(self) -> None:
         team = _team()
@@ -407,7 +413,10 @@ class TestFreeze:
         r = cmap["vaultspec-researcher"]
         assert r["provider"] == "claude"
         assert r["capability"] == "low"
-        assert r["model_name"] == MODEL_MAP[Provider.CLAUDE][Model.LOW]
+        # Legacy freeze carries no external model name; see the note in
+        # ``test_no_overlay_matches_historical_chain``. The digest below is the
+        # point of this test and is unaffected.
+        assert r["model_name"] == ""
         assert "fallback" in r
         # The disclosure roles carry role_id + model_name + source too.
         assert frozen.roles["vaultspec-researcher"]["role_id"] == "researcher"

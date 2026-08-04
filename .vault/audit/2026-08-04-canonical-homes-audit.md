@@ -4561,3 +4561,67 @@ box, and reached the identical result - including the sharper form
 `hash(MEMBER) != hash("MEMBER_NAME")`, which shows exactly which inherited
 behaviour the catalog depends on and does not control. Two independent
 measurements, one conclusion; it is now asserted in the test rather than assumed.
+
+### multiplexed-session-convergence-refused-on-evidence | high | The two long-lived JSON-RPC sessions differ in message-class count, completion channel, and id contract - a shared primitive would have to be configured into being either one of them
+
+The largest remaining fragmentation this campaign identified was the long-lived
+multiplexed JSON-RPC session, implemented once in `codex_chat_model.py` as a
+real client class and once across four ACP modules around a bare
+`dict[int, Future]` type alias. `_stdio_rpc.py`'s docstring names it as where
+that consolidation would land. It is REFUSED, and the evidence is specific
+enough that it should not be re-attempted without new information.
+
+**The id contract differs in kind, not dialect.** Codex allocates a monotonic
+`_next_id` per call, so many requests of the same method may be in flight at
+once. ACP uses RESERVED FIXED identifiers per RPC KIND - `AcpRequestId` is an
+`IntEnum` numbering 1000-1009, one constant per operation - which is only sound
+because every call site awaits its own response before reissuing that id. A
+shared pending map cannot hold both: under Codex's contract ACP would gain
+concurrency it never designed for, and under ACP's contract a second concurrent
+Codex request of one method would silently overwrite a still-pending future.
+
+**The completion channel differs.** Codex signals turn completion as a
+NOTIFICATION on the same FIFO queue that carries content deltas, so ordering is
+correct by construction. ACP signals it by RESOLVING the original
+`session/prompt` REQUEST future - inspecting `stopReason` to flip a side-channel
+flag - while content deltas arrive as notifications on a SEPARATE chunk queue. A
+reader with one pending map and one notification queue has no honest home for
+ACP's third channel, nor for "inspect a response body to set a completion flag",
+a concept Codex does not have.
+
+**ACP carries a message class Codex refuses outright.** Server-initiated
+requests - permission prompts, filesystem and terminal operations - are real
+bidirectional RPCs dispatched as background tasks that write their own replies
+under a stdin lock. Codex answers any inbound request with `-32601` inline.
+
+**And the ACP side has no API to converge onto.** Its futures dict is reached
+into directly from four modules, each doing its own create-future and
+wait-for. Consolidating would mean rewriting ACP's session setup, auth, and
+model call sites first - authoring a shared abstraction, not extracting a
+common one. That is the distinction between this and the one-shot reader that
+consolidated cleanly earlier: that one was already the same mechanism written
+twice.
+
+A shared session object reconciling these would need flags selecting which
+lane's id contract, completion channel, and inbound-request policy applied. That
+is worse than two implementations, because it would look shared while behaving
+as neither.
+
+Also ruled out as an adjacent win: the two stderr drains differ substantively -
+ACP's captures interactive auth URLs and resets the turn-deadline liveness clock
+per line, Codex's only redacts into a bounded tail.
+
+### acp-fixed-id-rpc-ceremony-repeats-nine-times | medium | The refused cross-lane convergence surfaced a real intra-lane one: nine ACP call sites each hand-roll allocate-future, write-under-lock, await-with-timeout
+
+Found while establishing the refusal above, and it is the better-scoped work.
+Within the ACP lane alone, the ceremony "allocate a future under this
+operation's fixed id, write the frame under the stdin lock, await it with a
+timeout, raise on expiry" repeats near-verbatim across `initialize_session`,
+`setup_session`'s retry loop, `_select_config_option`, `setup_prompt`,
+`_cancel_session`, `fork_session`, `list_sessions`, `set_mode`, and
+`authenticate_rpc`.
+
+No cross-lane reconciliation is involved, so none of the objections above apply:
+one lane, one id contract, one completion model. This is what the ACP side lacks
+and what its absence forced - the missing register/resolve/await API that made
+the cross-lane consolidation impossible to attempt cleanly in the first place.

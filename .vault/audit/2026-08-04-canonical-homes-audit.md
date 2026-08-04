@@ -5,7 +5,7 @@ tags:
 date: '2026-08-04'
 modified: '2026-08-04'
 body_schema: 'body-v1'
-body_hash: 'sha256:94e305cebe67451b24e33f8a7d0089c64b3565979df9aa17dd32e6f687f6becd'
+body_hash: 'sha256:fae4dfa09db79922cb1fc3c785d26ffaa60c1b45f0024f25da7690d5016f9539'
 related: []
 ---
 
@@ -1464,6 +1464,59 @@ Note also what the guard's existence means for the open question this feature's
 decision record deferred: whether the rule is enforceable rather than
 conventional is being answered in practice, by a structural test that fails when
 a concept regains a second declaration.
+
+### discovery-parents-restricted-by-one-declaration | high | closed, and the security part was kept
+
+Both discovery writers performed "create the parent, then restrict it" and had
+drifted apart: one resolved a directory authority, applied a private
+access-control entry, and refused to publish if it did not read back; the other
+created with a POSIX mode, restricted on POSIX only, and stopped - leaving that
+directory unrestricted on the platform this product targets first. One
+declaration now serves both, verified by a single remaining creation site in the
+tree.
+
+The part worth recording is what was NOT collapsed. The consolidation kept the
+authority resolution rather than reducing to a bare restriction call, because
+that step refuses a link-like path and one whose identity changes mid-resolve -
+and applying a private access-control entry THROUGH a planted junction hands the
+guarantee to whatever the junction points at, which is the one element of this an
+attacker chooses. A merge that kept only the restriction would have read as
+equivalent and silently removed the defence.
+
+The refusal message was deliberately not preserved. It was grepped for first and
+found asserted nowhere, so both writers now share the authority's message, which
+names the offending path - strictly more information, and declared as a behaviour
+change rather than absorbed. POSIX was left byte-identical on purpose: extending
+the authority resolution there would add a refusal path on a platform this change
+cannot exercise, which this campaign has already paid to learn.
+
+### assert-the-consequence-or-the-decision-by-what-the-host-can-run | high | the pair completed
+
+The earlier method finding said: when the environment cannot exercise a
+consequence, assert the DECISION that produces it. Its mirror is now recorded
+from the opposite case. This defect lives on the platform the host CAN run, so
+the consequence itself was asserted directly - and the test was proven
+non-vacuous by reproducing the pre-fix sequence exactly and reading the result
+back, confirming the parent was NOT restricted before the change.
+
+Together they make one rule rather than two preferences: choose the assertion by
+what the host can actually execute. A consequence assertion on a platform that
+skips is coverage theatre; a decision assertion where the consequence is
+reachable is weaker than it needs to be.
+
+### observed-once-not-reproduced | medium | a reporting standard worth keeping
+
+A lane saw four failures in a registry suite, could not reproduce them - the file
+passes alone, the full suite passed on re-run - and recorded them as "observed
+once, not reproduced" rather than as flake. The distinction matters because those
+tests bind real ports and another lane may have had services live, so the
+mechanism is plausible but unproven. Filed so that a second sighting by anyone
+else is the SECOND, not the first. The same lane applied the same standard to a
+single type diagnostic that vanished on re-run.
+
+Recorded as a reporting standard because this campaign has repeatedly been misled
+by results that were true when taken and false minutes later, and because
+"flake" is the word that ends an investigation.
 
 ## Recommendations
 

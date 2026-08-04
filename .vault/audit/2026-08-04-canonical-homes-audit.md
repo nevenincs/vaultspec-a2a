@@ -5,7 +5,7 @@ tags:
 date: '2026-08-04'
 modified: '2026-08-04'
 body_schema: 'body-v1'
-body_hash: 'sha256:ee4365a10f86563a6d762b28af00603f8757c9154fcce7d58eb8de2ffbdaccfa'
+body_hash: 'sha256:b7329853107d1ea1e45749479dea6023ba897a09e5d46af9fae4246c1b100c30'
 related: []
 ---
 
@@ -5327,3 +5327,32 @@ platform's default text encoding, and the naive version of the sweep died on it.
 A sweep that dies partway reports success for every file it never reached. Any
 tree-wide blob scan here must decode byte-safely, and must assert it visited the
 file count it expected.
+
+### the-repair-for-a-broken-head-is-itself-a-removal | high | refines the preceding finding
+
+The entry above records the check that should have preceded the BREAK: before
+removing a declaration from its old home, sweep every blob at HEAD for importers
+of that name from the old location. The lane that repaired HEAD points out the
+half that is easy to miss - **the repair is itself a removal.**
+
+The commit that restored the two missing declarations also DELETED one of them
+from its former home and dropped a re-export. So anything else at HEAD still
+importing from the old locations would have broken the instant the repair landed,
+trading one unbuildable HEAD for another - and the second break would have been
+harder to diagnose, because it would have arrived inside the commit everyone
+believed was the fix.
+
+The sweep found exactly three such importers and all three were inside the repair
+commit. Had there been a fourth, the fix would have shipped a new break.
+
+So the rule is not "sweep before removing a declaration" but **"sweep before any
+commit that changes where a name lives, including the one repairing the last such
+commit."** A repair is a migration; it has the same failure mode as the migration
+that caused the problem.
+
+**And a sharper statement of the decoding hazard than the one recorded above.** The
+naive sweep would not have returned a WRONG answer - it would have raised partway
+and returned a PARTIAL one. On a check whose whole purpose is "nothing else
+breaks", partial and wrong are the same result: both say nothing broke, and only
+one of them looked at every file. A scan answering an exhaustiveness question must
+assert it visited what it expected to visit, not merely that it did not crash.

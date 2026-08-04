@@ -1939,3 +1939,38 @@ that can surface six times its stated number while `mount_token_ceiling` is the
 only thing standing between that and the context window. Either is defensible;
 choosing one silently is not. Whoever owns grounding breadth should rule, and
 the fix is then a one-line change plus a description that matches it.
+
+### command-classification-metadata-shape-restated | medium | an untyped five-key contract, agreed by convention across five classifiers
+
+`src/vaultspec_a2a/providers/factory.py` resolves each subprocess provider's
+launch command through its own classifier -
+`_classify_gemini_command`, `_classify_acp_command` (and its
+`_classify_capsule_acp_command` sibling), `_classify_codex_command`,
+`_classify_kimi_command` - and every one returns
+`tuple[list[str], dict[str, str]]`, where the dict always carries the same five
+keys: `runtime_authority`, `command_origin`, `command_kind`,
+`command_executable`, `command_target`. Nothing declares this shape once; each
+classifier builds it as inline dict literals, roughly a dozen times across the
+file. `classify_provider_command`, the dispatcher, and two of the catalog
+discovery functions (`_discover_gemini_catalog`, `_discover_codex_catalog`
+around lines 710 and 772) all branch on the same magic string sentinel,
+`meta.get("command_origin") == "fallback_cli_name"`, repeated five times with
+no shared constant. `ProviderFactory`'s model-construction branches - one per
+provider, five call sites - then unpack the dict field by field
+(`command_meta["runtime_authority"]`, `command_meta["command_origin"]`, and so
+on) into keyword arguments for `AcpChatModel`/`CodexChatModel`/the other chat
+models, which each declare the same five fields independently rather than
+accepting one typed bundle. No `TypedDict`, dataclass, or `NamedTuple` exists
+for this shape anywhere in the module or its imports - confirmed by search, not
+assumed. Verdict DUPLICATE on the vocabulary, in the same shape this audit has
+already named for a wire-event catalog and a terminal-status set: the contract
+holds today only because every writer and every reader happened to spell the
+same five keys and the one sentinel value identically. A classifier that
+misspells a key, drops one, or a future provider added without matching the
+existing five would fail at the unpacking call site with a bare `KeyError`
+rather than at a type check, and a call site that reads only four of the five
+keys would silently under-populate a model's provenance fields with no error at
+all. The fix is a shared `TypedDict` (or frozen dataclass) for the classified-
+command result, with `FALLBACK_CLI_NAME` as a named constant the dispatcher and
+the two discovery functions import instead of retyping the string, so a missed
+key or a typo'd sentinel fails a type check instead of a runtime lookup.

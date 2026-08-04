@@ -19,7 +19,32 @@ _MIDDLEWARE_FILES = frozenset(
 # Layer-1 tests that still perform real I/O — a live SQLite checkpointer, or real
 # ACP subprocesses driven through a compiled graph. They keep ``core`` but are NOT
 # pure, so the orthogonal ``unit`` marker is withheld.
-_IMPURE_CORE_FILES = frozenset({"test_compiler.py", "test_harness_topology_reach.py"})
+#
+# ``unit`` is a machine-readable claim, so a wrong one is worse than none: a
+# selection that excludes impure tests silently INCLUDES a file listed nowhere
+# here, and a run believed hermetic is not. Membership is decided by what the
+# file actually drives, not by where it sits.
+_IMPURE_CORE_FILES = frozenset(
+    {
+        "test_compiler.py",
+        "test_harness_topology_reach.py",
+        # Live AsyncSqliteSaver against a real database file.
+        "test_diverge.py",
+        "test_persona_web_composition.py",
+        "test_research_adr.py",
+        "test_research_adr_clarification.py",
+        "test_research_web_locators.py",
+        # Real async engine and session maker.
+        "test_task_queue.py",
+        "test_vault_reader.py",
+        "test_vault_write_isolation.py",
+        # Real HTTP against a live engine. This file declares its own ``service``
+        # marker and its docstring says so, but that declaration cannot stop this
+        # hook adding a layer mark - so the purity claim had to be withheld here
+        # rather than left to the file to refuse.
+        "test_feedback_grounding_live.py",
+    }
+)
 
 
 def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:

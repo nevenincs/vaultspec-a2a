@@ -24,6 +24,14 @@ _INFRA_FILES = frozenset(
 )
 
 
+# Core-layer lifecycle tests that really do launch a child process. They stay
+# ``core`` - they are domain tests, not infrastructure ones - but they are not
+# pure, so the orthogonal ``unit`` claim is withheld. A wrong marker is worse
+# than none: a selection excluding impure tests silently includes anything
+# missing here, and the run is then believed hermetic when it is not.
+_IMPURE_CORE_FILES = frozenset({"test_pairing.py", "test_singleton.py"})
+
+
 def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
     """Mark tests from THIS directory by layer according to what they exercise."""
     for item in items:
@@ -33,4 +41,5 @@ def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
             item.add_marker(pytest.mark.middleware)
         else:
             item.add_marker(pytest.mark.core)
-            item.add_marker(pytest.mark.unit)
+            if item.path.name not in _IMPURE_CORE_FILES:
+                item.add_marker(pytest.mark.unit)

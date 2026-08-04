@@ -5,7 +5,7 @@ tags:
 date: '2026-08-04'
 modified: '2026-08-04'
 body_schema: 'body-v1'
-body_hash: 'sha256:5b850c289739fc494929a70808c7e2415975b9c5e678c336c091a20853d39560'
+body_hash: 'sha256:724083f3464dcd9805f59465578372fcbbc2aa1d1b0992905b9d452483e88c69'
 related: []
 ---
 
@@ -4388,3 +4388,66 @@ Re-deriving the inventory at dispatch time would reduce the error but cannot
 eliminate it while lanes commit in parallel, so the durable fix is the
 instruction rather than fresher input. An agent told to execute a list will
 execute a stale one; an agent told to verify first reports the staleness back.
+
+### correction-the-liveness-writers-were-not-a-live-bug | high | withdraws an overstated hazard
+
+The worker-liveness entry above states that the two readers "degrade silently"
+and that such a degradation "presents as worker unreachable". The lane that
+closed the cluster reports, and I accept, that **there was no live bug.** Every
+one of the five writers happened to pick the same attribute name, so the old code
+was functionally correct on every path.
+
+The finding stands, but as a STRUCTURAL one: nothing made the five agree, and the
+defaulted reads were the evidence that no reader could assume they would. What
+does not stand is the implied live failure. I wrote a consequence that the code
+did not have, and a hazard framing is exactly where an audit is most tempted to
+overstate, because the fix looks more justified the worse the status quo sounds.
+
+Recorded prominently because the lane could have delivered the fix under the
+premise I supplied and let the stronger claim stand unchallenged. It declined to
+manufacture a bug narrative and said so in the commit. **A structural finding does
+not need a live bug to justify it**, and dressing one as the other spends
+credibility this audit needs for the findings that ARE live - the byte-translation
+defect and the containment relative-root, both of which were real.
+
+### two-predicates-that-look-like-complements-and-are-not | high | widening done correctly
+
+Consolidating the liveness readers surfaced a case where forcing one predicate on
+both callers would have LOST a distinction, and the lane widened the home instead
+of flattening the callers - the tell this campaign records, applied in the field.
+
+The two readings are not complements. One asks whether contact is fresh (age
+below the timeout); the other asks whether it is stale (age above it). At exactly
+the timeout neither holds, and more importantly **a never-contacted worker is not
+stale** - reporting it stale would hand the watchdog a crash signal for a worker
+that is still starting.
+
+So the home declares both predicates over one shared age computation rather than
+deriving one from the negation of the other. Recorded because "these two booleans
+are inverses" is the single most inviting simplification in a consolidation, and
+here it would have introduced a real defect into code that had none.
+
+### convert-the-whole-keyed-set-or-none-of-it | high | generalises the partial-conversion disease
+
+The event catalog keyed all twelve of its entries by literal. The task named one.
+Converting only the named entry would have left a single enum key among eleven
+literals - which is the precise disease the task existed to remove, since a reader
+checking whether the vocabulary is canonical finds a declaration in use and stops.
+
+The lane converted every enum-covered key and left three literals that the enum
+does not declare, with a comment recording why the mixture is correct rather than
+residual.
+
+The general rule: **a partially converted keyed set is worse than an unconverted
+one.** An unconverted set is honestly uniform and a sweep finds all of it; a
+mostly-converted set looks finished from any single site. This is the same
+mechanism as the vocabulary cluster that was closed one file early, seen before
+the fact rather than after, and it is why conversion scope should be defined by
+the KEYED SET a lookup uses, not by the sites a task listed.
+
+Also recorded from the same commit: the retired post-dispatch mark was deleted
+outright rather than kept as a pass-through, because **its name asserted a state
+it did not establish** - it recorded contact, while connectedness is derived. It
+was also the site whose docstring had already drifted. A name that overclaims is
+not worth preserving for the convenience of its callers.
+

@@ -1867,3 +1867,32 @@ two catalog modules, carry a fifth and sixth variant. `kimi_catalog.py` reads
 `_read_response`, and `openai_catalog.py` calls out to an HTTP models endpoint
 rather than a subprocess at all, so neither was assumed to match on name alone
 - confirming or ruling out either needs a closer read this sweep did not reach.
+
+### vault-index-cap-contradicts-its-own-description | high | one number, two meanings, both live for one run
+
+Split out of `vault-stage-discovery-declared-three-times`, whose PATTERN half is
+now rehomed. This half is a behaviour question and was deliberately left out of
+that change so it could not be hidden inside a mechanical consolidation.
+
+Two caps in `src/vaultspec_a2a/domain_config.py` share the default 50 and
+describe themselves as totals. `max_context_refs` says "Maximum context
+references included in a single graph invocation" and is enforced as one:
+`src/vaultspec_a2a/context/metadata.py` stops accumulating once the running
+total reaches it. `vault_index_cap` says "Maximum vault index entries surfaced
+to the agent per turn" but `src/vaultspec_a2a/graph/nodes/vault_reader.py`
+applies it PER STAGE, slicing each stage's matches independently. With six
+stages that is up to 300 entries surfaced under a setting that claims 50.
+
+The implementation therefore contradicts its own declared contract, and the
+divergence is invisible from either side alone: read the config and both caps
+look equivalent; read either call site and it looks correct locally. Both run
+for the SAME run - context refs at thread creation, vault index at dispatch - so
+one run carries two differently-bounded views of the same vault.
+
+Not actioned, and the reason is the ambiguity rather than the size. Making the
+cap a total would REDUCE what an agent sees, which is a product decision about
+grounding breadth; making the description per-stage would legitimise a bound
+that can surface six times its stated number while `mount_token_ceiling` is the
+only thing standing between that and the context window. Either is defensible;
+choosing one silently is not. Whoever owns grounding breadth should rule, and
+the fix is then a one-line change plus a description that matches it.

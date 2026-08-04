@@ -10,12 +10,11 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
-from contextlib import suppress
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Final
 
-from pydantic import TypeAdapter, ValidationError
+from pydantic import TypeAdapter
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -23,6 +22,7 @@ if TYPE_CHECKING:
 from ..utils import package_version
 from ._cleanup import CleanupStep, run_independent_cleanups
 from ._json_contract import JsonObject, JsonValue
+from ._stdio_rpc import cancel_task, read_response
 from ._subprocess import kill_process_tree, spawn_acp_process
 from .provider_catalog import (
     AuthenticationState,
@@ -414,21 +414,14 @@ async def _read_response(
     timeout: float,
     output_budget: _OutputBudget,
 ) -> JsonObject:
-    for _ in range(_MAX_FRAMES_PER_RESPONSE):
-        raw = await asyncio.wait_for(stdout.readline(), timeout=timeout)
-        if not raw:
-            break
-        if len(raw) > _MAX_FRAME_BYTES:
-            raise CodexCatalogProtocolError("Codex discovery frame exceeds one MiB")
-        output_budget.charge(len(raw))
-        try:
-            value = _JSON_OBJECT.validate_json(raw)
-        except (ValidationError, UnicodeDecodeError):
-            continue
-        if value.get("id") == request_id:
-            return value
-    raise CodexCatalogProtocolError(
-        f"Codex discovery received no response for request {request_id}"
+    return await read_response(
+        stdout,
+        request_id=request_id,
+        timeout=timeout,
+        output_budget=output_budget,
+        max_frames=_MAX_FRAMES_PER_RESPONSE,
+        max_frame_bytes=_MAX_FRAME_BYTES,
+        protocol_error=lambda message: CodexCatalogProtocolError(f"Codex {message}"),
     )
 
 
@@ -483,12 +476,6 @@ async def _drain_stderr(
         except CodexCatalogProtocolError:
             await kill_process_tree(process, metadata)
             raise
-
-
-async def _cancel(task: asyncio.Task[None]) -> None:
-    task.cancel()
-    with suppress(asyncio.CancelledError):
-        await task
 
 
 async def discover_codex_catalog(
@@ -589,7 +576,7 @@ async def discover_codex_catalog(
     cleanup_steps.extend(
         [
             ("codex-catalog-process", lambda: kill_process_tree(process, metadata)),
-            ("codex-catalog-stderr", lambda: _cancel(stderr_task)),
+            ("codex-catalog-stderr", lambda: cancel_task(stderr_task)),
         ]
     )
     cleanup_failures = await run_independent_cleanups(*cleanup_steps)

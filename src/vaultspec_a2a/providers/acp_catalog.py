@@ -11,12 +11,11 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
-from contextlib import suppress
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Final
 
-from pydantic import TypeAdapter, ValidationError
+from pydantic import TypeAdapter
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -24,6 +23,7 @@ if TYPE_CHECKING:
 from ._acp_auth import is_auth_required_error
 from ._cleanup import CleanupStep, run_independent_cleanups
 from ._json_contract import JsonObject, JsonValue
+from ._stdio_rpc import cancel_task, read_response
 from ._subprocess import kill_process_tree, spawn_acp_process
 from .acp_exceptions import AcpErrorCode, AcpSessionError
 from .provider_catalog import (
@@ -401,25 +401,16 @@ async def _read_response(
     timeout: float,
     output_budget: _OutputBudget,
 ) -> JsonObject:
-    for _ in range(_MAX_FRAMES):
-        raw = await asyncio.wait_for(stdout.readline(), timeout=timeout)
-        if not raw:
-            break
-        if len(raw) > _MAX_FRAME_BYTES:
-            raise AcpCatalogProtocolError(
-                "ACP discovery frame exceeds one MiB",
-                code=AcpErrorCode.INTERNAL_ERROR,
-            )
-        output_budget.charge(len(raw))
-        try:
-            value = _JSON_OBJECT.validate_json(raw)
-        except (ValidationError, UnicodeDecodeError):
-            continue
-        if value.get("id") == request_id:
-            return value
-    raise AcpCatalogProtocolError(
-        f"ACP discovery received no response for request {request_id}",
-        code=AcpErrorCode.INTERNAL_ERROR,
+    return await read_response(
+        stdout,
+        request_id=request_id,
+        timeout=timeout,
+        output_budget=output_budget,
+        max_frames=_MAX_FRAMES,
+        max_frame_bytes=_MAX_FRAME_BYTES,
+        protocol_error=lambda message: AcpCatalogProtocolError(
+            f"ACP {message}", code=AcpErrorCode.INTERNAL_ERROR
+        ),
     )
 
 
@@ -471,12 +462,6 @@ async def _drain_stderr(
         except AcpCatalogProtocolError:
             await kill_process_tree(process, metadata)
             raise
-
-
-async def _cancel(task: asyncio.Task[None]) -> None:
-    task.cancel()
-    with suppress(asyncio.CancelledError):
-        await task
 
 
 async def discover_acp_catalog(
@@ -540,7 +525,7 @@ async def discover_acp_catalog(
     cleanup_steps.extend(
         [
             ("acp-catalog-process", lambda: kill_process_tree(process, metadata)),
-            ("acp-catalog-stderr", lambda: _cancel(stderr_task)),
+            ("acp-catalog-stderr", lambda: cancel_task(stderr_task)),
         ]
     )
     cleanup_failures = await run_independent_cleanups(*cleanup_steps)

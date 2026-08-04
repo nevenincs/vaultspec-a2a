@@ -5,7 +5,7 @@ tags:
 date: '2026-08-04'
 modified: '2026-08-04'
 body_schema: 'body-v1'
-body_hash: 'sha256:09cc2d78367ccc0a0d520202fc044ab8d1950ff2a84430e77839c792dbadeb2f'
+body_hash: 'sha256:a0142917b1fa05ade251dabd3db1d35c82656514f21c189ee26d85881836cb67'
 related: []
 ---
 
@@ -7680,3 +7680,29 @@ Recorded rather than fixed here because it belongs to the lane that introduced i
 and needs a decision: either the two hooks fold into one home, or the duplicate is
 reviewed and recorded as accepted. **Both are legitimate; leaving a guard red is
 not.**
+
+### the-owner-rename-declined-and-why | medium | a decision recorded so it is not re-raised
+
+Retiring a re-export left a vocabulary question: the retired alias was the name
+every consumer actually used, and the owner's own name had **zero direct consumers**
+before the retirement. That is real evidence the alias was the better NAME.
+
+**Declined, and recorded as decided rather than left open.**
+
+**The campaign's rule is ONE HOME, not the best name.** The split is already
+resolved - one declaration, every consumer reaching it directly. Renaming the owner
+would change the same number of declarations into the same number of declarations,
+while churning a security-relevant seam another task consolidated hours earlier,
+along with its tests.
+
+**And there is a reason not to do it as part of THIS work specifically.** A rename
+touching an authentication owner is a change reviewers must read as a security
+change, and it would arrive inside a commit whose subject is re-export retirement.
+This audit has recorded that a cheap change inside an unrelated commit is how
+something lands without its own review. **The naming question is worth having; it is
+not worth having here.**
+
+Recorded because the lane raised it and did not act on it - which was correct - and
+because an unrecorded declined question returns as a finding. If the vocabulary is
+ever revisited it starts from a clean position: one home, one name, all consumers
+direct.
